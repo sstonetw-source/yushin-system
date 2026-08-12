@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>又鑫管理系統</title>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <!-- PapaParse 用於讀取 CSV 檔 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; margin: 0; padding: 0; background-color: #f4f4f9; }
+        .nav-tabs { background: #003366; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; }
+        .nav-tab { color: #fff; padding: 10px 20px; cursor: pointer; border-radius: 5px 5px 0 0; margin-right: 5px; background: #002244; }
+        .nav-tab.active { background: #fff; color: #003366; font-weight: bold; }
+        .sub-nav { background: #e0e0e0; padding: 8px 15px; display: flex; gap: 10px; }
+        .sub-tab { padding: 5px 15px; cursor: pointer; background: #ccc; border-radius: 3px; font-size: 14px; }
+        .sub-tab.active { background: #003366; color: white; }
+        .content-section { display: none; padding: 20px; max-width: 1000px; margin: 0 auto; background: #fff; min-height: 80vh; }
+        .content-section.active { display: block; }
+        
+        /* 表單與表格樣式 */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: center; font-size: 13px; }
+        th { background: #f0f0f0; }
+        input, select, textarea { padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background: #003366; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #002244; }
+        
+        /* 估價單抬頭與佈局 */
+        .quote-header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px; }
+        .quote-header h1 { margin: 0; color: #003366; font-size: 24px; }
+        .quote-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 15px; font-size: 13px; }
+        .stamp-box { width: 140px; }
+        .stamp-box img { width: 130px; height: auto; }
+        .alert-card { background: #ffe6e6; border-left: 5px solid #ff4d4d; padding: 10px; margin-bottom: 15px; }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white; }
+            .content-section { padding: 0; box-shadow: none; }
+            input, select { border: none !important; background: transparent !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 主導覽列 -->
+    <div class="nav-tabs no-print">
+        <div class="nav-tab active" onclick="switchMainTab('quote-system')">📄 估價單系統</div>
+        <div class="nav-tab" onclick="switchMainTab('equipment-system')">🔬 儀器管理系統</div>
+        <div class="nav-tab" onclick="switchMainTab('admin-system')">⚙️ 管理員雲端後台</div>
+    </div>
+
+    <!-- 1. 估價單系統 -->
+    <div id="quote-system" class="content-section active">
+        <div class="sub-nav no-print">
+            <div class="sub-tab active" onclick="switchCompany('yushin')">又鑫 (YS)</div>
+            <div class="sub-tab" onclick="switchCompany('morningstar')">辰星 (MS)</div>
+            <div class="sub-tab" onclick="switchCompany('MULTI-LIFE')">鼎新 (DS)</div>
+        </div>
+
+        <!-- 估價單調取區 -->
+        <div class="no-print" style="margin: 15px 0; background: #eef5ff; padding: 10px; border-radius: 5px;">
+            <label>🔍 雲端調取舊估價單：</label>
+            <input type="text" id="searchQuoteNo" placeholder="請輸入完整估價單號 (如: YS20260812-A-01)">
+            <button onclick="loadQuoteFromCloud()">載入估價單</button>
+        </div>
+
+        <div id="printableQuote">
+            <div class="quote-header">
+                <h1 id="compTitle">又鑫生物科技有限公司</h1>
+                <h3 id="compSub" style="margin: 3px 0; color: #666;">YU SHING BIO-TECH CO., LTD.</h3>
+                <p id="compAddr" style="margin: 2px 0; font-size: 12px;">地址：10446臺北市中山區民生東路一段58號9樓-1</p>
+                <p id="compContact" style="margin: 2px 0; font-size: 12px;">Tel: (02)2100-1008 | Fax: (02)2522-1018 | 統編: 12698994</p>
+                <h2 style="text-decoration: underline; margin-top: 5px;">估 價 單</h2>
+            </div>
+
+            <div class="quote-meta">
+                <div style="width: 100%;">
+                    <label>客戶名稱：</label>
+                    <input type="text" id="clientName" style="width: 80%;">
+                </div>
+                <div>
+                    <label>負責業務：</label>
+                    <select id="salesSelect" onchange="onSalesChange()"></select>
+                </div>
+                <div>
+                    <label>估價日期：</label>
+                    <input type="text" id="quoteDate" readonly>
+                </div>
+                <div>
+                    <label>單號：</label>
+                    <input type="text" id="quoteNo" readonly style="font-weight: bold; color: #003366;">
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 5%;">項次</th>
+                        <th style="width: 45%;">品名 / 規格說明</th>
+                        <th style="width: 10%;">數量</th>
+                        <th style="width: 20%;">含稅單價 (NT$)</th>
+                        <th style="width: 20%;">含稅小計 (NT$)</th>
+                        <th class="no-print" style="width: 5%;">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="quoteItems"></tbody>
+            </table>
+
+            <div class="no-print" style="margin: 10px 0;">
+                <button onclick="addQuoteRow()">＋ 新增品項</button>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; margin-top: 20px;">
+                <div class="stamp-box">
+                    <img id="companyStamp" src="stamp_yushin.png" alt="大小章">
+                </div>
+                <div style="text-align: right;">
+                    <p>總計金額 (含稅)：NT$ <span id="grandTotal" style="font-size: 18px; font-weight: bold; color: #003366;">0</span></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="no-print" style="text-align: center; margin-top: 20px;">
+            <button onclick="saveQuoteToCloud()" style="background: #28a745; font-size: 16px;">💾 儲存並同步至雲端</button>
+            <button onclick="window.print()" style="font-size: 16px;">🖨️ 列印 / 存為 PDF</button>
+        </div>
+    </div>
+
+    <!-- 2. 儀器管理系統 -->
+    <div id="equipment-system" class="content-section">
+        <h2>🔬 儀器管理系統</h2>
+        
+        <!-- 保養提醒區域 -->
+        <div id="maintenanceAlertSection" class="alert-card" style="display:none;">
+            <h3 style="margin-0 0 5px 0; color: #cc0000;">⚠️ 即將保養提醒 (30天內)</h3>
+            <ul id="alertList" style="margin: 0; padding-left: 20px;"></ul>
+        </div>
+
+        <h3>新增 / 編輯儀器</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; background: #f9f9f9; padding: 15px; border-radius: 5px;">
+            <div><label>儀器名稱：</label><input type="text" id="eqName" style="width:100%;"></div>
+            <div><label>廠牌：</label><input type="text" id="eqBrand" style="width:100%;"></div>
+            <div><label>序號：</label><input type="text" id="eqSerial" style="width:100%;"></div>
+            <div><label>客戶名稱：</label><input type="text" id="eqClient" style="width:100%;"></div>
+            <div><label>負責業務：</label><select id="eqSalesSelect" style="width:100%;"></select></div>
+            <div><label>放置位置：</label><input type="text" id="eqLocation" style="width:100%;"></div>
+            <div><label>保養週期 (月)：</label><input type="number" id="eqCycle" value="6" style="width:100%;"></div>
+            <div><label>上次保養日期：</label><input type="date" id="eqLastDate" style="width:100%;"></div>
+        </div>
+        <button onclick="saveEquipment()" style="margin-top: 10px;">新增/更新儀器資料</button>
+
+        <h3 style="margin-top: 30px;">儀器清單</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>儀器名稱</th>
+                    <th>廠牌</th>
+                    <th>序號</th>
+                    <th>客戶名稱</th>
+                    <th>負責業務</th>
+                    <th>放置位置</th>
+                    <th>保養週期</th>
+                    <th>上次保養日</th>
+                    <th>下次保養日</th>
+                </tr>
+            </thead>
+            <tbody id="equipmentTableBody"></tbody>
+        </table>
+    </div>
+
+    <!-- 3. 管理員雲端後台 -->
+    <div id="admin-system" class="content-section">
+        <h2>⚙️ 管理員後台設定</h2>
+        
+        <div style="margin-bottom: 30px; background: #f9f9f9; padding: 15px; border-radius: 5px;">
+            <h3>1. 匯入業務名單 (CSV)</h3>
+            <p style="font-size: 12px; color: #666;">CSV 格式包含標題欄位：<code>name,phone,code</code>（例如：code請填寫 A, B, C）</p>
+            <input type="file" id="salesCsvFile" accept=".csv">
+            <button onclick="uploadSalesCSV()">上傳業務名單</button>
+        </div>
+
+        <div style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
+            <h3>2. 匯入價格表 (CSV)</h3>
+            <p style="font-size: 12px; color: #666;">CSV 格式包含標題欄位：<code>model,nameEn,nameCn,brand,spec,price</code></p>
+            <input type="file" id="priceCsvFile" accept=".csv">
+            <button onclick="uploadPriceCSV()">上傳價格表</button>
+        </div>
+    </div>
+
+    <!-- 載入核心邏輯 -->
+    <script src="app.js"></script>
+</body>
+</html>
