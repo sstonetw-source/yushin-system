@@ -4,194 +4,353 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>又鑫管理系統</title>
-    <!-- Firebase SDK -->
+    <!-- Firebase SDK (Compat 模式，支援 Firestore + Auth) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <!-- PapaParse 用於讀取 CSV 檔 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- SheetJS 用於讀取 Excel (.xlsx) 檔 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        body { font-family: "Microsoft JhengHei", sans-serif; margin: 0; padding: 0; background-color: #f4f4f9; }
-        .nav-tabs { background: #003366; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; }
+        body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 0; }
+        .nav-tabs { background: #003366; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; align-items: center; }
         .nav-tab { color: #fff; padding: 10px 20px; cursor: pointer; border-radius: 5px 5px 0 0; margin-right: 5px; background: #002244; }
         .nav-tab.active { background: #fff; color: #003366; font-weight: bold; }
-        .sub-nav { background: #e0e0e0; padding: 8px 15px; display: flex; gap: 10px; }
-        .sub-tab { padding: 5px 15px; cursor: pointer; background: #ccc; border-radius: 3px; font-size: 14px; }
+        .nav-spacer { flex-grow: 1; }
+        .auth-status { color: #fff; font-size: 12px; padding: 8px 10px; }
+        .auth-status button { margin-left: 8px; }
+        .sub-nav { background: #e0e0e0; padding: 8px 15px; display: flex; gap: 10px; flex-wrap: wrap; }
+        .sub-tab { padding: 5px 15px; cursor: pointer; background: #ccc; border-radius: 3px; font-size: 14px; color: #333; }
         .sub-tab.active { background: #003366; color: white; }
-        .content-section { display: none; padding: 20px; max-width: 1000px; margin: 0 auto; background: #fff; min-height: 80vh; }
+        .content-section { display: none; padding: 20px; max-width: 1150px; margin: 0 auto; background: #fff; min-height: 80vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); box-sizing: border-box; }
         .content-section.active { display: block; }
-        
-        /* 表單與表格樣式 */
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ccc; padding: 8px; text-align: center; font-size: 13px; }
-        th { background: #f0f0f0; }
-        input, select, textarea { padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button { background: #003366; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #002244; }
-        
-        /* 估價單抬頭與佈局 */
-        .quote-header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px; }
-        .quote-header h1 { margin: 0; color: #003366; font-size: 24px; }
-        .quote-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 15px; font-size: 13px; }
-        .stamp-box { width: 140px; }
-        .stamp-box img { width: 130px; height: auto; }
-        .alert-card { background: #ffe6e6; border-left: 5px solid #ff4d4d; padding: 10px; margin-bottom: 15px; }
+        .header-container { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #333; padding-bottom: 4px; margin-bottom: 4px; }
+        .header-info { text-align: center; flex-grow: 1; }
+        .header-info h1 { margin: 0 0 1px 0; font-size: 20px; color: #003366; }
+        .header-info h2 { margin: 0 0 1px 0; font-size: 15px; color: #666; }
+        .header-info p { margin: 1px 0; font-size: 12px; color: #444; line-height: 1.1; }
+        .meta-section { margin-bottom: 4px; font-size: 12px; }
+        .meta-row { display: flex; align-items: center; margin: 2px 0; }
+        .meta-row-three { display: flex; justify-content: space-between; gap: 15px; margin: 2px 0; }
+        .meta-row-three > div { flex: 1; display: flex; align-items: center; }
+        .meta-section label { white-space: nowrap; font-weight: bold; width: 75px; flex-shrink: 0; }
+        .meta-section input, .meta-section select { flex-grow: 1; padding: 2px 4px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 12px; background-color: #fff; box-sizing: border-box; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+        th, td { border: 1px solid #333; padding: 3px 5px; font-size: 11px; text-align: center; vertical-align: middle; line-height: 1.15; }
+        th { background-color: #f0f0f0; }
+        td input[type="text"], td input[type="number"], td textarea { width: 100%; padding: 1px 2px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 3px; font-size: 10.5px; line-height: 1.15; }
+        td textarea { resize: vertical; height: 20px; min-height: 16px; }
+        .item-input-group { display: flex; flex-direction: column; gap: 1px; text-align: left; padding: 0; font-size: 10.5px; color: #333; }
+        .field-row { display: flex; align-items: center; gap: 4px; margin-bottom: 0; }
+        .field-row label { font-weight: bold; white-space: nowrap; min-width: 60px; flex-shrink: 0; }
+        .field-row input, .field-row textarea { flex: 1; width: auto; min-width: 0; }
+
+        .item-row-pair { display: flex; gap: 10px; width: 100%; align-items: center; margin-bottom: 0; }
+        .item-row-pair > div { flex: 1; display: flex; align-items: center; gap: 4px; }
+        .item-row-pair label { white-space: nowrap; margin-bottom: 0; min-width: 40px; }
+
+        .footer-note { font-size: 10.5px; color: #333; line-height: 1.1; margin-bottom: 4px; }
+        .bottom-layout { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+        .stamp-section { width: 130px; }
+        .stamp-section img { width: 120px; height: auto; }
+        .total-section { text-align: right; font-size: 13px; font-weight: bold; }
+        .discount-input { width: 50px; padding: 2px 4px; font-size: 12px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
+
+        #printableQuote.theme-yushin { font-family: "Microsoft JhengHei", Arial, sans-serif; }
+        #printableQuote.theme-yushin table th { background-color: #dbe9ff; }
+        #printableQuote.theme-yushin table, #printableQuote.theme-yushin th, #printableQuote.theme-yushin td { border: 1px solid #333; }
+
+        #printableQuote.theme-MULTI-LIFE { font-family: "SimSun", "PMingLiU", "細明體", serif; }
+        #printableQuote.theme-MULTI-LIFE table { border: 3px double #000; background-color: #fff; }
+        #printableQuote.theme-MULTI-LIFE th, #printableQuote.theme-MULTI-LIFE td { border: 1px solid #000; background-color: #fff; }
+        #printableQuote.theme-MULTI-LIFE table th { background-color: #000; color: #fff; }
+        #printableQuote.theme-MULTI-LIFE .header-container, #printableQuote.theme-MULTI-LIFE .header-info h2 { border-color: #000; }
+
+        #printableQuote.theme-morningstar { font-family: "Yuanti SC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+        #printableQuote.theme-morningstar .table-wrap { border-radius: 10px; overflow: hidden; border: 1px solid #1b4d3e; }
+        #printableQuote.theme-morningstar table { border-collapse: separate; border-spacing: 0; border: none; }
+        #printableQuote.theme-morningstar th, #printableQuote.theme-morningstar td { border: none; border-bottom: 1px solid #cfe3d8; border-right: 1px solid #cfe3d8; }
+        #printableQuote.theme-morningstar th:last-child, #printableQuote.theme-morningstar td:last-child { border-right: none; }
+        #printableQuote.theme-morningstar table th { background-color: #1b4d3e; color: #fff; border-bottom: none; }
+        #printableQuote.theme-morningstar table tbody tr:nth-child(even) { background-color: #eef5f0; }
+
+        button { padding: 8px 16px; font-size: 14px; background-color: #003366; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #002244; }
+        .btn-danger { background-color: #cc0000; padding: 2px 6px; font-size: 11px; }
+        .btn-small { padding: 4px 10px; font-size: 12px; }
+        .btn-secondary { background-color: #666; }
+
+        .page-footer { display: none; }
+
+        .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; background: #eef5ff; padding: 10px; border-radius: 5px; }
+        .toolbar input[type="text"], .toolbar input[type="number"], .toolbar input[type="date"], .toolbar select {
+            padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;
+        }
+        .panel { border: 1px solid #ddd; border-radius: 6px; padding: 15px; margin-bottom: 15px; background: #fafbfd; }
+        .panel h3 { margin-top: 0; color: #003366; }
+        .status-badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #fff; display: inline-block; }
+        .status-ok { background: #2e7d32; }
+        .status-soon { background: #e6a400; }
+        .status-overdue { background: #cc0000; }
+        .status-unknown { background: #888; }
+        .clickable-row { cursor: pointer; }
+        .clickable-row:hover { background: #eef5ff; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px; }
+        .form-grid label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 3px; color: #333; }
+        .form-grid input, .form-grid select, .form-grid textarea {
+            width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; box-sizing: border-box; font-family: inherit;
+        }
+        .log-table td, .log-table th { font-size: 12px; }
+        .empty-hint { color: #888; font-size: 13px; padding: 15px; text-align: center; }
+
+        .brand-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 2px solid #003366; padding-bottom: 6px; }
+        .brand-tab { padding: 4px 12px; background: #e0e0e0; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 13px; font-weight: bold; color: #444; }
+        .brand-tab.active { background: #003366; color: #fff; }
 
         @media print {
-            .no-print { display: none !important; }
-            body { background: white; }
-            .content-section { padding: 0; box-shadow: none; }
-            input, select { border: none !important; background: transparent !important; }
+            .no-print, button, .sub-nav, .nav-tabs { display: none !important; }
+            input, textarea { border: none !important; background: transparent !important; }
+            textarea { resize: none !important; overflow: hidden !important; }
+
+            select#salesName {
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                appearance: none;
+                border: none !important;
+                background: transparent !important;
+                padding: 0 !important;
+                font-size: 12px;
+            }
+
+            .field-row:has(input[value=""]),
+            .field-row:has(textarea:placeholder-shown),
+            .item-row-pair > div:has(input[value=""]) {
+                display: none !important;
+            }
+            #discountRow:has(input[value="0"]),
+            #discountRow:has(input[value=""]) { display: none !important; }
+
+            @page { size: A4; margin: 10mm; }
+            body { margin: 0; }
+            .page-footer {
+                display: block; position: fixed; bottom: 0; left: 0; right: 0;
+                text-align: right; font-size: 10px; color: #555;
+            }
+            .page-footer::after {
+                content: "第 " counter(page) " 頁 / 共 " counter(pages) " 頁";
+            }
         }
     </style>
 </head>
 <body>
-
-    <!-- 主導覽列 -->
     <div class="nav-tabs no-print">
-        <div class="nav-tab active" onclick="switchMainTab('quote-system')">📄 估價單系統</div>
-        <div class="nav-tab" onclick="switchMainTab('equipment-system')">🔬 儀器管理系統</div>
-        <div class="nav-tab" onclick="switchMainTab('admin-system')">⚙️ 管理員雲端後台</div>
+        <div class="nav-tab active" onclick="switchMainTab('quote-system', this)">📄 估價單系統</div>
+        <div class="nav-tab" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
+        <div class="nav-tab" onclick="switchMainTab('admin-system', this)">⚙️ 管理員雲端後台</div>
+        <div class="nav-spacer"></div>
+        <div class="auth-status" id="authStatus">尚未登入</div>
     </div>
 
-    <!-- 1. 估價單系統 -->
+    <!-- ============ 估價單系統 ============ -->
     <div id="quote-system" class="content-section active">
         <div class="sub-nav no-print">
-            <div class="sub-tab active" onclick="switchCompany('yushin')">又鑫 (YS)</div>
-            <div class="sub-tab" onclick="switchCompany('morningstar')">辰星 (MS)</div>
-            <div class="sub-tab" onclick="switchCompany('MULTI-LIFE')">鼎新 (DS)</div>
+            <div class="sub-tab active" id="sub-yushin" onclick="switchCompany('yushin', this)">又鑫 (YS)</div>
+            <div class="sub-tab" id="sub-morningstar" onclick="switchCompany('morningstar', this)">辰星 (MS)</div>
+            <div class="sub-tab" id="sub-MULTI-LIFE" onclick="switchCompany('MULTI-LIFE', this)">鼎新 (DS)</div>
         </div>
-
-        <!-- 估價單調取區 -->
         <div class="no-print" style="margin: 15px 0; background: #eef5ff; padding: 10px; border-radius: 5px;">
             <label>🔍 雲端調取舊估價單：</label>
-            <input type="text" id="searchQuoteNo" placeholder="請輸入完整估價單號 (如: YS20260812-A-01)">
+            <input type="text" id="searchQuoteNo" placeholder="請輸入完整估價單號" style="width: 280px;">
             <button onclick="loadQuoteFromCloud()">載入估價單</button>
         </div>
 
         <div id="printableQuote">
-            <div class="quote-header">
-                <h1 id="compTitle">又鑫生物科技有限公司</h1>
-                <h3 id="compSub" style="margin: 3px 0; color: #666;">YU SHING BIO-TECH CO., LTD.</h3>
-                <p id="compAddr" style="margin: 2px 0; font-size: 12px;">地址：10446臺北市中山區民生東路一段58號9樓-1</p>
-                <p id="compContact" style="margin: 2px 0; font-size: 12px;">Tel: (02)2100-1008 | Fax: (02)2522-1018 | 統編: 12698994</p>
-                <h2 style="text-decoration: underline; margin-top: 5px;">估 價 單</h2>
-            </div>
-
-            <div class="quote-meta">
-                <div style="width: 100%;">
-                    <label>客戶名稱：</label>
-                    <input type="text" id="clientName" style="width: 80%;">
-                </div>
-                <div>
-                    <label>負責業務：</label>
-                    <select id="salesSelect" onchange="onSalesChange()"></select>
-                </div>
-                <div>
-                    <label>估價日期：</label>
-                    <input type="text" id="quoteDate" readonly>
-                </div>
-                <div>
-                    <label>單號：</label>
-                    <input type="text" id="quoteNo" readonly style="font-weight: bold; color: #003366;">
+            <div class="header-container">
+                <div class="header-info">
+                    <h1 id="compTitle">又鑫生物科技有限公司</h1>
+                    <h2 id="compSub">YU SHING BIO-TECH CO., LTD.</h2>
+                    <p id="compAddr">地址：</p>
+                    <p id="compContact">聯絡資訊：</p>
+                    <h2 style="margin-top: 3px; text-decoration: underline;">估 價 單</h2>
                 </div>
             </div>
-
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 5%;">項次</th>
-                        <th style="width: 45%;">品名 / 規格說明</th>
-                        <th style="width: 10%;">數量</th>
-                        <th style="width: 20%;">含稅單價 (NT$)</th>
-                        <th style="width: 20%;">含稅小計 (NT$)</th>
-                        <th class="no-print" style="width: 5%;">操作</th>
-                    </tr>
-                </thead>
-                <tbody id="quoteItems"></tbody>
-            </table>
-
-            <div class="no-print" style="margin: 10px 0;">
-                <button onclick="addQuoteRow()">＋ 新增品項</button>
-            </div>
-
-            <div style="display: flex; justify-content: space-between; margin-top: 20px;">
-                <div class="stamp-box">
-                    <img id="companyStamp" src="stamp_yushin.png" alt="大小章">
+            <div class="meta-section">
+                <div class="meta-row"><label>客戶名稱：</label><input type="text" id="clientName" list="clientList"></div>
+                <div class="meta-row-three">
+                    <div><label>負責業務：</label><select id="salesName" onchange="onSalesChange()"></select></div>
+                    <div><label>估價日期：</label><input type="text" id="quoteDate"></div>
+                    <div><label>單號：</label><input type="text" id="quoteNo" style="font-weight:bold;"></div>
                 </div>
-                <div style="text-align: right;">
-                    <p>總計金額 (含稅)：NT$ <span id="grandTotal" style="font-size: 18px; font-weight: bold; color: #003366;">0</span></p>
+            </div>
+            <div class="table-wrap">
+                <table id="itemTable">
+                    <thead><tr><th>項次</th><th>品名 / 規格 / 型號說明</th><th>數量</th><th>含稅單價</th><th>未稅單價</th><th>含稅小計</th><th class="no-print">操作</th></tr></thead>
+                    <tbody id="quoteItems"></tbody>
+                </table>
+            </div>
+            <div class="no-print" style="margin-bottom: 8px;"><button type="button" onclick="addQuoteRow()">＋ 新增品項</button></div>
+            <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
+            <div class="bottom-layout">
+                <div class="stamp-section"><img id="companyStamp" src="stamp_yushin.png"></div>
+                <div class="total-section">
+                    <p>銷售額合計：NT$ <span id="subtotalAmount">0</span></p>
+                    <p>營業稅 (5%)：NT$ <span id="taxAmount">0</span></p>
+                    <p id="discountRow">優惠折扣：<input type="number" id="discountRateInput" class="discount-input" value="0" min="0" max="100" onclick="if(this.value=='0')this.value='';" oninput="calculateTotals()"> %</p>
+                    <p style="font-size: 14px; color: #003366;">總計金額：NT$ <span id="grandTotal">0</span></p>
+                    <p id="chineseTotal">合計新台幣 零元整</p>
                 </div>
             </div>
         </div>
 
-        <div class="no-print" style="text-align: center; margin-top: 20px;">
-            <button onclick="saveQuoteToCloud()" style="background: #28a745; font-size: 16px;">💾 儲存並同步至雲端</button>
-            <button onclick="window.print()" style="font-size: 16px;">🖨️ 列印 / 存為 PDF</button>
+        <div class="page-footer"></div>
+
+        <div class="no-print" style="text-align: center; margin-top: 25px;">
+            <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">🖨️ 列印 / 存為 PDF（自動同步雲端）</button>
         </div>
     </div>
 
-    <!-- 2. 儀器管理系統 -->
+    <!-- ============ 儀器管理系統：客戶儀器維修保養／校正紀錄 ============ -->
     <div id="equipment-system" class="content-section">
-        <h2>🔬 儀器管理系統</h2>
-        
-        <!-- 保養提醒區域 -->
-        <div id="maintenanceAlertSection" class="alert-card" style="display:none;">
-            <h3 style="margin-0 0 5px 0; color: #cc0000;">⚠️ 即將保養提醒 (30天內)</h3>
-            <ul id="alertList" style="margin: 0; padding-left: 20px;"></ul>
+        <div class="toolbar no-print">
+            <input type="text" id="eqSearchInput" placeholder="搜尋客戶 / 廠牌 / 業務 / 儀器 / 序號" style="width:280px;" oninput="renderEquipmentList()">
+            <select id="eqStatusFilter" onchange="renderEquipmentList()">
+                <option value="all">全部狀態</option>
+                <option value="overdue">已逾期</option>
+                <option value="soon">即將到期（30天內）</option>
+                <option value="ok">正常</option>
+            </select>
+            <button onclick="openEquipmentForm()">＋ 新增儀器</button>
+            <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
+            <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
+            <button class="btn-secondary" onclick="loadEquipmentFromCloud()">🔄 重新整理</button>
         </div>
 
-        <h3>新增 / 編輯儀器</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; background: #f9f9f9; padding: 15px; border-radius: 5px;">
-            <div><label>儀器名稱：</label><input type="text" id="eqName" style="width:100%;"></div>
-            <div><label>廠牌：</label><input type="text" id="eqBrand" style="width:100%;"></div>
-            <div><label>序號：</label><input type="text" id="eqSerial" style="width:100%;"></div>
-            <div><label>客戶名稱：</label><input type="text" id="eqClient" style="width:100%;"></div>
-            <div><label>負責業務：</label><select id="eqSalesSelect" style="width:100%;"></select></div>
-            <div><label>放置位置：</label><input type="text" id="eqLocation" style="width:100%;"></div>
-            <div><label>保養週期 (月)：</label><input type="number" id="eqCycle" value="6" style="width:100%;"></div>
-            <div><label>上次保養日期：</label><input type="date" id="eqLastDate" style="width:100%;"></div>
+        <div class="panel" id="eqFormPanel" style="display:none;">
+            <h3 id="eqFormTitle">新增儀器</h3>
+            <div class="form-grid">
+                <div><label>客戶名稱</label><input type="text" id="eqCustomer"></div>
+                <div><label>廠牌</label><input type="text" id="eqBrand"></div>
+                <div><label>儀器名稱</label><input type="text" id="eqName"></div>
+                <div><label>型號</label><input type="text" id="eqModel"></div>
+                <div><label>序號</label><input type="text" id="eqSerial"></div>
+                <div><label>負責業務</label><select id="eqSales"></select></div>
+                <div><label>放置地點</label><input type="text" id="eqLocation"></div>
+                <div><label>安裝日期</label><input type="date" id="eqInstallDate"></div>
+                <div><label>保養／校正週期（月）</label><input type="number" id="eqCycle" value="12" min="1"></div>
+                <div><label>最近保養／校正日期</label><input type="date" id="eqLastService"></div>
+            </div>
+            <label style="font-size:12px;font-weight:bold;">備註</label>
+            <textarea id="eqNotes" style="width:100%;min-height:50px;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:4px;"></textarea>
+            <div style="margin-top:10px;">
+                <button onclick="saveEquipment()">💾 儲存</button>
+                <button class="btn-secondary" onclick="closeEquipmentForm()">取消</button>
+            </div>
         </div>
-        <button onclick="saveEquipment()" style="margin-top: 10px;">新增/更新儀器資料</button>
 
-        <h3 style="margin-top: 30px;">儀器清單</h3>
-        <table>
+        <table id="eqListTable">
             <thead>
                 <tr>
-                    <th>儀器名稱</th>
-                    <th>廠牌</th>
-                    <th>序號</th>
-                    <th>客戶名稱</th>
-                    <th>負責業務</th>
-                    <th>放置位置</th>
-                    <th>保養週期</th>
-                    <th>上次保養日</th>
-                    <th>下次保養日</th>
+                    <th>客戶</th><th>廠牌</th><th>儀器名稱</th><th>型號/序號</th><th>負責業務</th><th>放置地點</th>
+                    <th>最近保養/校正</th><th>下次到期</th><th>狀態</th><th class="no-print">操作</th>
                 </tr>
             </thead>
-            <tbody id="equipmentTableBody"></tbody>
+            <tbody id="eqListBody"></tbody>
         </table>
+        <div class="empty-hint" id="eqEmptyHint" style="display:none;">目前沒有儀器紀錄，點選「＋ 新增儀器」或「批量上傳 Excel」開始建立。</div>
+
+        <div class="panel" id="eqDetailPanel" style="display:none;">
+            <h3 id="eqDetailTitle">儀器詳細資料</h3>
+            <div id="eqDetailInfo" style="font-size:13px;margin-bottom:10px;"></div>
+
+            <h4>維修保養／校正紀錄</h4>
+            <table class="log-table">
+                <thead><tr><th>日期</th><th>類型</th><th>執行人員</th><th>說明</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="eqLogBody"></tbody>
+            </table>
+
+            <div class="form-grid" style="margin-top:10px;">
+                <div><label>日期</label><input type="date" id="eqLogDate"></div>
+                <div>
+                    <label>類型</label>
+                    <select id="eqLogType">
+                        <option value="保養">保養</option>
+                        <option value="校正">校正</option>
+                        <option value="維修">維修</option>
+                    </select>
+                </div>
+                <div><label>執行人員</label><input type="text" id="eqLogTech"></div>
+            </div>
+            <label style="font-size:12px;font-weight:bold;">說明</label>
+            <textarea id="eqLogDesc" style="width:100%;min-height:40px;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:4px;"></textarea>
+            <div style="margin-top:10px;">
+                <button onclick="addEquipmentLog()">＋ 新增紀錄</button>
+                <button class="btn-secondary" onclick="closeEquipmentDetail()">關閉</button>
+            </div>
+        </div>
     </div>
 
-    <!-- 3. 管理員雲端後台 -->
+    <!-- ============ 管理員雲端後台 ============ -->
     <div id="admin-system" class="content-section">
-        <h2>⚙️ 管理員後台設定</h2>
-        
-        <div style="margin-bottom: 30px; background: #f9f9f9; padding: 15px; border-radius: 5px;">
-            <h3>1. 匯入業務名單 (CSV)</h3>
-            <p style="font-size: 12px; color: #666;">CSV 格式包含標題欄位：<code>name,phone,code</code>（例如：code請填寫 A, B, C）</p>
-            <input type="file" id="salesCsvFile" accept=".csv">
-            <button onclick="uploadSalesCSV()">上傳業務名單</button>
+        <div class="sub-nav no-print">
+            <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 業務名單</div>
+            <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
+            <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
         </div>
 
-        <div style="background: #f9f9f9; padding: 15px; border-radius: 5px;">
-            <h3>2. 匯入價格表 (CSV)</h3>
-            <p style="font-size: 12px; color: #666;">CSV 格式包含標題欄位：<code>model,nameEn,nameCn,brand,spec,price</code></p>
-            <input type="file" id="priceCsvFile" accept=".csv">
-            <button onclick="uploadPriceCSV()">上傳價格表</button>
+        <!-- 業務名單管理 -->
+        <div id="admin-sales" class="admin-panel">
+            <div class="toolbar no-print">
+                <button onclick="addSalesRow()">＋ 新增業務</button>
+                <button onclick="saveSalesToCloud()">☁️ 儲存到雲端</button>
+                <button class="btn-secondary" onclick="reimportSalesFromCSV()">📥 從 sales.csv 重新匯入</button>
+                <span style="font-size:12px;color:#666;">（雲端資料會覆蓋 CSV，估價單與儀器頁面之業務選單以此為準）</span>
+            </div>
+            <table>
+                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="adminSalesBody"></tbody>
+            </table>
+        </div>
+
+        <!-- 價格表管理 -->
+        <div id="admin-prices" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print">
+                <button onclick="addPriceRow()">＋ 新增品項</button>
+                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 匯入</button>
+                <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
+                <button onclick="savePricesToCloud()">☁️ 儲存到雲端</button>
+                <span style="font-size:12px;color:#666;">（上傳 Excel 檔將自動讀取各工作表作為廠牌分類）</span>
+            </div>
+
+            <!-- 廠牌動態切換分頁 -->
+            <div id="priceBrandTabs" class="brand-nav no-print"></div>
+
+            <table>
+                <thead><tr><th>中文品名</th><th>英文品名</th><th>貨號</th><th>廠牌</th><th>含稅單價</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="adminPricesBody"></tbody>
+            </table>
+        </div>
+
+        <!-- 估價單記錄管理 -->
+        <div id="admin-quotes" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print">
+                <input type="text" id="adminQuoteSearch" placeholder="搜尋單號 / 客戶名稱" style="width:260px;" oninput="renderAdminQuotesList()">
+                <button class="btn-secondary" onclick="loadAllQuotesFromCloud()">🔄 重新整理</button>
+                <button onclick="exportQuotesCSV()">⬇️ 匯出目前清單為 CSV</button>
+            </div>
+            <table>
+                <thead><tr><th>單號</th><th>公司</th><th>客戶</th><th>業務</th><th>日期</th><th>總計</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="adminQuotesBody"></tbody>
+            </table>
+            <div class="empty-hint" id="adminQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
         </div>
     </div>
 
-    <!-- 載入核心邏輯 -->
+    <datalist id="clientList"></datalist>
+    <datalist id="priceNameCnList"></datalist>
+    <datalist id="priceNameEnList"></datalist>
+    <datalist id="priceModelList"></datalist>
+
     <script src="app.js"></script>
 </body>
 </html>
