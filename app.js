@@ -20,6 +20,7 @@ let salesList = [
     { name: "預設業務", code: "01", phone: "0912345678" }
 ];
 let priceList = [];
+let activeBrandFilter = 'ALL';
 let currentUser = null;
 let pendingTab = null;
 
@@ -81,22 +82,6 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-window.doLogin = function() {
-    return false;
-};
-
-window.cancelLogin = function() {
-    return false;
-};
-
-window.logout = function() {
-    const statusEl = document.getElementById('authStatus');
-    if (statusEl) {
-        statusEl.innerText = '測試模式：不需登入';
-    }
-    switchMainTab('quote-system', document.querySelector('.nav-tab'));
-};
-
 /* =========================================================
    主分頁切換
    ========================================================= */
@@ -118,6 +103,7 @@ function actuallySwitchMainTab(tabId, el) {
     }
 
     if (tabId === 'equipment-system') {
+        populateEquipmentSalesDropdown();
         loadEquipmentFromCloud();
     } else if (tabId === 'admin-system') {
         renderAdminSalesTable();
@@ -127,13 +113,14 @@ function actuallySwitchMainTab(tabId, el) {
 }
 
 /* =========================================================
-   估價單系統（原有邏輯）
+   估價單系統
    ========================================================= */
 function initSalesList() {
     db.collection('settings').doc('sales').get().then(doc => {
         if (doc.exists && doc.data().list && doc.data().list.length > 0) {
             salesList = doc.data().list;
             populateSalesDropdown();
+            populateEquipmentSalesDropdown();
         } else {
             loadSalesCSVFile();
         }
@@ -154,9 +141,11 @@ function loadSalesCSVFile() {
                     .map(s => ({ name: (s.name || '').trim(), code: (s.code || '').trim(), phone: (s.phone || '').trim() }));
             }
             populateSalesDropdown();
+            populateEquipmentSalesDropdown();
         },
         error: function() {
             populateSalesDropdown();
+            populateEquipmentSalesDropdown();
         }
     });
 }
@@ -181,7 +170,6 @@ window.switchCompany = function(compKey, el) {
         document.getElementById('companyStamp').src = info.stamp;
     }
 
-    // 依公司切換估價單視覺風格（字體/表格樣式，見 index.html 的 theme-* CSS）
     const printableEl = document.getElementById('printableQuote');
     printableEl.classList.remove('theme-yushin', 'theme-morningstar', 'theme-MULTI-LIFE');
     printableEl.classList.add(`theme-${compKey}`);
@@ -259,6 +247,21 @@ function populateSalesDropdown() {
         select.value = lastSales;
     }
     generateQuoteNo();
+}
+
+function populateEquipmentSalesDropdown() {
+    const select = document.getElementById('eqSales');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">未指定業務</option>';
+    salesList.forEach(s => {
+        if (s.name) {
+            const option = document.createElement('option');
+            option.value = s.name;
+            option.text = s.name;
+            select.appendChild(option);
+        }
+    });
 }
 
 function loadPriceListFromCloud() {
@@ -368,7 +371,6 @@ window.addQuoteRow = function(itemData = {}) {
     calculateTotals();
 };
 
-// 從價格表挑選中文品名時，自動帶入其餘欄位
 window.onItemCnChange = function(input) {
     const match = priceList.find(p => p.nameCn === input.value);
     if (!match) return;
@@ -382,7 +384,6 @@ window.onItemCnChange = function(input) {
     }
 };
 
-// 輸入貨號時，自動帶出廠牌、中/英文品名、含稅單價
 window.onItemModelChange = function(input) {
     const value = input.value.trim();
     if (!value) return;
@@ -548,10 +549,6 @@ function fetchAndFillQuote(qNo) {
 
 /* =========================================================
    儀器管理系統：客戶儀器維修保養／校正紀錄
-   Firestore collection: equipment
-   文件結構：{ customerName, name, model, serialNo, location,
-               installDate, cycleMonths, lastServiceDate, notes,
-               logs: [{date, type, tech, desc}] }
    ========================================================= */
 window.loadEquipmentFromCloud = function() {
     db.collection('equipment').orderBy('customerName').get().then(snapshot => {
@@ -610,7 +607,7 @@ window.renderEquipmentList = function() {
     let shown = 0;
 
     equipmentList.forEach(eq => {
-        const searchable = `${eq.customerName || ''} ${eq.name || ''} ${eq.serialNo || ''}`.toLowerCase();
+        const searchable = `${eq.customerName || ''} ${eq.brand || ''} ${eq.salesName || ''} ${eq.name || ''} ${eq.serialNo || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
 
         const { status, dueDate } = getEquipmentStatus(eq);
@@ -622,8 +619,10 @@ window.renderEquipmentList = function() {
         tr.onclick = () => openEquipmentDetail(eq.id);
         tr.innerHTML = `
             <td>${escapeHtml(eq.customerName || '')}</td>
+            <td>${escapeHtml(eq.brand || '－')}</td>
             <td>${escapeHtml(eq.name || '')}</td>
             <td>${escapeHtml(eq.model || '')} / ${escapeHtml(eq.serialNo || '')}</td>
+            <td>${escapeHtml(eq.salesName || '未指定')}</td>
             <td>${escapeHtml(eq.location || '')}</td>
             <td>${fmtDate(eq.lastServiceDate)}</td>
             <td>${fmtDate(dueDate)}</td>
@@ -644,6 +643,8 @@ function escapeHtml(str) {
 
 window.openEquipmentForm = function(eqId) {
     closeEquipmentDetail();
+    populateEquipmentSalesDropdown();
+
     const panel = document.getElementById('eqFormPanel');
     panel.style.display = 'block';
     panel.dataset.editId = eqId || '';
@@ -652,9 +653,11 @@ window.openEquipmentForm = function(eqId) {
         const eq = equipmentList.find(e => e.id === eqId);
         document.getElementById('eqFormTitle').innerText = '編輯儀器';
         document.getElementById('eqCustomer').value = eq.customerName || '';
+        document.getElementById('eqBrand').value = eq.brand || '';
         document.getElementById('eqName').value = eq.name || '';
         document.getElementById('eqModel').value = eq.model || '';
         document.getElementById('eqSerial').value = eq.serialNo || '';
+        document.getElementById('eqSales').value = eq.salesName || '';
         document.getElementById('eqLocation').value = eq.location || '';
         document.getElementById('eqInstallDate').value = eq.installDate || '';
         document.getElementById('eqCycle').value = eq.cycleMonths || 12;
@@ -662,7 +665,7 @@ window.openEquipmentForm = function(eqId) {
         document.getElementById('eqNotes').value = eq.notes || '';
     } else {
         document.getElementById('eqFormTitle').innerText = '新增儀器';
-        ['eqCustomer', 'eqName', 'eqModel', 'eqSerial', 'eqLocation', 'eqInstallDate', 'eqLastService', 'eqNotes'].forEach(id => {
+        ['eqCustomer', 'eqBrand', 'eqName', 'eqModel', 'eqSerial', 'eqSales', 'eqLocation', 'eqInstallDate', 'eqLastService', 'eqNotes'].forEach(id => {
             document.getElementById(id).value = '';
         });
         document.getElementById('eqCycle').value = 12;
@@ -678,9 +681,11 @@ window.saveEquipment = function() {
     const editId = document.getElementById('eqFormPanel').dataset.editId;
     const data = {
         customerName: document.getElementById('eqCustomer').value.trim(),
+        brand: document.getElementById('eqBrand').value.trim(),
         name: document.getElementById('eqName').value.trim(),
         model: document.getElementById('eqModel').value.trim(),
         serialNo: document.getElementById('eqSerial').value.trim(),
+        salesName: document.getElementById('eqSales').value.trim(),
         location: document.getElementById('eqLocation').value.trim(),
         installDate: document.getElementById('eqInstallDate').value,
         cycleMonths: parseInt(document.getElementById('eqCycle').value) || 12,
@@ -723,9 +728,9 @@ window.openEquipmentDetail = function(eqId) {
     const { status, dueDate } = getEquipmentStatus(eq);
     document.getElementById('eqDetailTitle').innerText = `${eq.customerName} － ${eq.name}`;
     document.getElementById('eqDetailInfo').innerHTML = `
-        型號：${escapeHtml(eq.model || '－')}　序號：${escapeHtml(eq.serialNo || '－')}　放置地點：${escapeHtml(eq.location || '－')}<br>
-        安裝日期：${fmtDate(eq.installDate) || '－'}　保養週期：每 ${eq.cycleMonths || 12} 個月　
-        下次到期：${fmtDate(dueDate)}　<span class="status-badge ${statusClass[status]}">${statusLabel[status]}</span><br>
+        廠牌：${escapeHtml(eq.brand || '－')} 型號：${escapeHtml(eq.model || '－')} 序號：${escapeHtml(eq.serialNo || '－')} 負責業務：${escapeHtml(eq.salesName || '未指定')}<br>
+        放置地點：${escapeHtml(eq.location || '－')} 安裝日期：${fmtDate(eq.installDate) || '－'} 保養週期：每 ${eq.cycleMonths || 12} 個月<br>
+        下次到期：${fmtDate(dueDate)} <span class="status-badge ${statusClass[status]}">${statusLabel[status]}</span><br>
         備註：${escapeHtml(eq.notes || '無')}
         <div style="margin-top:8px;"><button type="button" class="btn-small" onclick="openEquipmentForm('${eq.id}')">✏️ 編輯基本資料</button></div>
     `;
@@ -736,7 +741,7 @@ window.openEquipmentDetail = function(eqId) {
     if (logs.length === 0) {
         logBody.innerHTML = '<tr><td colspan="5" style="color:#888;">尚無紀錄</td></tr>';
     } else {
-        logs.forEach((log, idx) => {
+        logs.forEach((log) => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${fmtDate(log.date)}</td>
@@ -783,7 +788,6 @@ window.addEquipmentLog = function() {
     const updatedLogs = [...(eq.logs || []), newLog];
 
     const updates = { logs: updatedLogs };
-    // 若這筆是保養或校正，順便更新「最近保養/校正日期」讓到期日自動往後推算
     if ((type === '保養' || type === '校正') && (!eq.lastServiceDate || date >= eq.lastServiceDate)) {
         updates.lastServiceDate = date;
     }
@@ -815,6 +819,81 @@ function loadEquipmentFromCloudThenReopen(eqId) {
         openEquipmentDetail(eqId);
     });
 }
+
+// 儀器管理系統：批量上傳 Excel (包含廠牌與負責業務)
+window.handleEquipmentExcelUpload = function(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[firstSheetName];
+            const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+            if (!rows.length) {
+                alert('Excel 檔案中沒有讀取到任何資料。');
+                input.value = '';
+                return;
+            }
+
+            const getField = (row, keys) => {
+                for (const k of keys) {
+                    if (row[k] !== undefined && row[k] !== '') return row[k];
+                }
+                return '';
+            };
+
+            const batch = db.batch();
+            let count = 0;
+
+            rows.forEach(row => {
+                const customerName = String(getField(row, ['客戶名稱', '客戶'])).trim();
+                const name = String(getField(row, ['儀器名稱', '儀器'])).trim();
+                if (!customerName || !name) return;
+
+                const docRef = db.collection('equipment').doc();
+                batch.set(docRef, {
+                    customerName: customerName,
+                    brand: String(getField(row, ['廠牌', '品牌'])).trim(),
+                    name: name,
+                    model: String(getField(row, ['型號'])).trim(),
+                    serialNo: String(getField(row, ['序號'])).trim(),
+                    salesName: String(getField(row, ['負責業務', '業務'])).trim(),
+                    location: String(getField(row, ['放置地點', '地點'])).trim(),
+                    installDate: String(getField(row, ['安裝日期'])).trim(),
+                    cycleMonths: parseInt(getField(row, ['保養週期', '週期'])) || 12,
+                    lastServiceDate: String(getField(row, ['最近保養日期', '最近保養'])).trim(),
+                    notes: String(getField(row, ['備註'])).trim(),
+                    logs: []
+                });
+                count++;
+            });
+
+            if (count === 0) {
+                alert('無法辨識出有效儀器資料，請確保表頭有「客戶名稱」與「儀器名稱」。');
+                input.value = '';
+                return;
+            }
+
+            batch.commit().then(() => {
+                alert(`成功批量匯入 ${count} 筆儀器資料！`);
+                loadEquipmentFromCloud();
+            }).catch(err => {
+                alert('批量寫入 Firestore 失敗：' + err.message);
+            });
+
+        } catch (err) {
+            alert('讀取 Excel 檔案失敗：' + err.message);
+        } finally {
+            input.value = '';
+        }
+    };
+    reader.readAsArrayBuffer(file);
+};
 
 /* =========================================================
    管理員雲端後台
@@ -869,6 +948,7 @@ window.saveSalesToCloud = function() {
     db.collection('settings').doc('sales').set({ list: cleaned }).then(() => {
         salesList = cleaned;
         populateSalesDropdown();
+        populateEquipmentSalesDropdown();
         alert('業務名單已儲存到雲端！');
     }).catch(err => {
         alert('儲存失敗：' + err.message);
@@ -885,6 +965,7 @@ window.reimportSalesFromCSV = function() {
                 .filter(s => s.name && s.code)
                 .map(s => ({ name: (s.name || '').trim(), code: (s.code || '').trim(), phone: (s.phone || '').trim() }));
             renderAdminSalesTable();
+            populateEquipmentSalesDropdown();
             alert('已從 sales.csv 匯入，記得按「儲存到雲端」才會生效。');
         },
         error: function() {
@@ -895,9 +976,16 @@ window.reimportSalesFromCSV = function() {
 
 /* ---------- 價格表管理 ---------- */
 window.renderAdminPricesTable = function() {
+    renderBrandTabs();
+
     const tbody = document.getElementById('adminPricesBody');
     tbody.innerHTML = '';
+
     priceList.forEach((p, idx) => {
+        if (activeBrandFilter !== 'ALL' && (p.brand || '未分類') !== activeBrandFilter) {
+            return;
+        }
+
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td><input type="text" value="${escapeAttr(p.nameCn)}" oninput="updatePriceField(${idx}, 'nameCn', this.value)"></td>
@@ -911,12 +999,40 @@ window.renderAdminPricesTable = function() {
     });
 };
 
+function renderBrandTabs() {
+    const tabsContainer = document.getElementById('priceBrandTabs');
+    if (!tabsContainer) return;
+
+    const brandsSet = new Set();
+    priceList.forEach(p => {
+        if (p.brand && p.brand.trim()) {
+            brandsSet.add(p.brand.trim());
+        }
+    });
+
+    const brands = Array.from(brandsSet);
+    let html = `<div class="brand-tab ${activeBrandFilter === 'ALL' ? 'active' : ''}" onclick="switchBrandTab('ALL')">全部 (${priceList.length})</div>`;
+
+    brands.forEach(b => {
+        const count = priceList.filter(p => (p.brand || '').trim() === b).length;
+        html += `<div class="brand-tab ${activeBrandFilter === b ? 'active' : ''}" onclick="switchBrandTab('${escapeAttr(b)}')">${escapeHtml(b)} (${count})</div>`;
+    });
+
+    tabsContainer.innerHTML = html;
+}
+
+window.switchBrandTab = function(brandName) {
+    activeBrandFilter = brandName;
+    renderAdminPricesTable();
+};
+
 window.updatePriceField = function(idx, field, value) {
     priceList[idx][field] = field === 'price' ? parseFloat(value) || 0 : value;
 };
 
 window.addPriceRow = function() {
-    priceList.push({ nameCn: '', nameEn: '', model: '', brand: '', price: 0 });
+    const defaultBrand = activeBrandFilter !== 'ALL' ? activeBrandFilter : '';
+    priceList.push({ nameCn: '', nameEn: '', model: '', brand: defaultBrand, price: 0 });
     renderAdminPricesTable();
 };
 
@@ -925,8 +1041,6 @@ window.removePriceRow = function(idx) {
     renderAdminPricesTable();
 };
 
-// 從 Excel (.xlsx) 檔案匯入價格表
-// 預期欄位（第一列為標題列，順序不拘）：中文品名／英文品名／貨號（或型號）／廠牌／含稅單價（或單價）
 window.handlePriceExcelUpload = function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -936,17 +1050,9 @@ window.handlePriceExcelUpload = function(input) {
         try {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const sheet = workbook.Sheets[firstSheetName];
-            const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-            if (!rows.length) {
-                alert('Excel 檔案中沒有讀取到任何資料，請確認第一列是否為標題列。');
-                input.value = '';
-                return;
-            }
+            const imported = [];
 
-            // 標題欄位可能的別名對應
             const getField = (row, keys) => {
                 for (const k of keys) {
                     if (row[k] !== undefined && row[k] !== '') return row[k];
@@ -954,23 +1060,38 @@ window.handlePriceExcelUpload = function(input) {
                 return '';
             };
 
-            const imported = rows.map(row => ({
-                nameCn: String(getField(row, ['中文品名', '品名', '中文名稱'])).trim(),
-                nameEn: String(getField(row, ['英文品名', '英文名稱'])).trim(),
-                model: String(getField(row, ['貨號', '型號'])).trim(),
-                brand: String(getField(row, ['廠牌', '品牌'])).trim(),
-                price: parseFloat(getField(row, ['含稅單價', '單價', '價格'])) || 0
-            })).filter(p => p.nameCn || p.nameEn || p.model);
+            workbook.SheetNames.forEach(sheetName => {
+                const sheet = workbook.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+                rows.forEach(row => {
+                    const nameCn = String(getField(row, ['中文品名', '品名', '中文名稱'])).trim();
+                    const nameEn = String(getField(row, ['英文品名', '英文名稱'])).trim();
+                    const model = String(getField(row, ['貨號', '型號'])).trim();
+                    let brand = String(getField(row, ['廠牌', '品牌'])).trim();
+
+                    if (!brand) {
+                        brand = sheetName.trim();
+                    }
+
+                    const price = parseFloat(getField(row, ['含稅單價', '單價', '價格'])) || 0;
+
+                    if (nameCn || nameEn || model) {
+                        imported.push({ nameCn, nameEn, model, brand, price });
+                    }
+                });
+            });
 
             if (!imported.length) {
-                alert('無法從 Excel 辨識出有效的價格資料，請確認欄位標題是否包含「中文品名／英文品名／貨號／廠牌／含稅單價」。');
+                alert('無法從 Excel 辨識出有效的價格資料。');
                 input.value = '';
                 return;
             }
 
             priceList = imported;
+            activeBrandFilter = 'ALL';
             renderAdminPricesTable();
-            alert(`已從 Excel 匯入 ${imported.length} 筆價格資料，請確認內容無誤後按「☁️ 儲存到雲端」才會生效。`);
+            alert(`已從 Excel 成功讀取 ${workbook.SheetNames.length} 個分頁，共 ${imported.length} 筆價格資料。請確認後點選「☁️ 儲存到雲端」。`);
         } catch (err) {
             alert('讀取 Excel 檔案失敗：' + err.message);
         } finally {
@@ -981,10 +1102,11 @@ window.handlePriceExcelUpload = function(input) {
 };
 
 window.savePricesToCloud = function() {
-    const cleaned = priceList.filter(p => p.nameCn || p.nameEn);
+    const cleaned = priceList.filter(p => p.nameCn || p.nameEn || p.model);
     db.collection('settings').doc('prices').set({ list: cleaned }).then(() => {
         priceList = cleaned;
         refreshPriceDatalists();
+        renderAdminPricesTable();
         alert('價格表已儲存到雲端！');
     }).catch(err => {
         alert('儲存失敗：' + err.message);

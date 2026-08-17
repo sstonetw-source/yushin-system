@@ -23,7 +23,7 @@
         .sub-nav { background: #e0e0e0; padding: 8px 15px; display: flex; gap: 10px; flex-wrap: wrap; }
         .sub-tab { padding: 5px 15px; cursor: pointer; background: #ccc; border-radius: 3px; font-size: 14px; color: #333; }
         .sub-tab.active { background: #003366; color: white; }
-        .content-section { display: none; padding: 20px; max-width: 1100px; margin: 0 auto; background: #fff; min-height: 80vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); box-sizing: border-box; }
+        .content-section { display: none; padding: 20px; max-width: 1150px; margin: 0 auto; background: #fff; min-height: 80vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); box-sizing: border-box; }
         .content-section.active { display: block; }
         .header-container { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #333; padding-bottom: 4px; margin-bottom: 4px; }
         .header-info { text-align: center; flex-grow: 1; }
@@ -37,7 +37,7 @@
         .meta-section label { white-space: nowrap; font-weight: bold; width: 75px; flex-shrink: 0; }
         .meta-section input, .meta-section select { flex-grow: 1; padding: 2px 4px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 12px; background-color: #fff; box-sizing: border-box; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
-        th, td { border: 1px solid #333; padding: 2px 5px; font-size: 10.5px; text-align: center; vertical-align: middle; line-height: 1.15; }
+        th, td { border: 1px solid #333; padding: 3px 5px; font-size: 11px; text-align: center; vertical-align: middle; line-height: 1.15; }
         th { background-color: #f0f0f0; }
         td input[type="text"], td input[type="number"], td textarea { width: 100%; padding: 1px 2px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 3px; font-size: 10.5px; line-height: 1.15; }
         td textarea { resize: vertical; height: 20px; min-height: 16px; }
@@ -46,7 +46,6 @@
         .field-row label { font-weight: bold; white-space: nowrap; min-width: 60px; flex-shrink: 0; }
         .field-row input, .field-row textarea { flex: 1; width: auto; min-width: 0; }
 
-        /* 貨號、廠牌橫排樣式 */
         .item-row-pair { display: flex; gap: 10px; width: 100%; align-items: center; margin-bottom: 0; }
         .item-row-pair > div { flex: 1; display: flex; align-items: center; gap: 4px; }
         .item-row-pair label { white-space: nowrap; margin-bottom: 0; min-width: 40px; }
@@ -58,72 +57,23 @@
         .total-section { text-align: right; font-size: 13px; font-weight: bold; }
         .discount-input { width: 50px; padding: 2px 4px; font-size: 12px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
 
-        /* ===================================================
-           公司估價單風格主題
-           由 switchCompany() 動態加到 #printableQuote 的 class 上
-           =================================================== */
+        #printableQuote.theme-yushin { font-family: "Microsoft JhengHei", Arial, sans-serif; }
+        #printableQuote.theme-yushin table th { background-color: #dbe9ff; }
+        #printableQuote.theme-yushin table, #printableQuote.theme-yushin th, #printableQuote.theme-yushin td { border: 1px solid #333; }
 
-        /* 1. 又鑫 — 現代標準藍色調：微軟正黑體 + 淺藍標題列 + 標準實線 */
-        #printableQuote.theme-yushin {
-            font-family: "Microsoft JhengHei", Arial, sans-serif;
-        }
-        #printableQuote.theme-yushin table th {
-            background-color: #dbe9ff;
-        }
-        #printableQuote.theme-yushin table, #printableQuote.theme-yushin th, #printableQuote.theme-yushin td {
-            border: 1px solid #333;
-        }
+        #printableQuote.theme-MULTI-LIFE { font-family: "SimSun", "PMingLiU", "細明體", serif; }
+        #printableQuote.theme-MULTI-LIFE table { border: 3px double #000; background-color: #fff; }
+        #printableQuote.theme-MULTI-LIFE th, #printableQuote.theme-MULTI-LIFE td { border: 1px solid #000; background-color: #fff; }
+        #printableQuote.theme-MULTI-LIFE table th { background-color: #000; color: #fff; }
+        #printableQuote.theme-MULTI-LIFE .header-container, #printableQuote.theme-MULTI-LIFE .header-info h2 { border-color: #000; }
 
-        /* 2. 鼎新 — 極簡高階黑白：宋體/明體 + 雙線邊框 + 全黑標題列 */
-        #printableQuote.theme-MULTI-LIFE {
-            font-family: "SimSun", "PMingLiU", "細明體", serif;
-        }
-        #printableQuote.theme-MULTI-LIFE table {
-            border: 3px double #000;
-            background-color: #fff;
-        }
-        #printableQuote.theme-MULTI-LIFE th, #printableQuote.theme-MULTI-LIFE td {
-            border: 1px solid #000;
-            background-color: #fff;
-        }
-        #printableQuote.theme-MULTI-LIFE table th {
-            background-color: #000;
-            color: #fff;
-        }
-        #printableQuote.theme-MULTI-LIFE .header-container, #printableQuote.theme-MULTI-LIFE .header-info h2 {
-            border-color: #000;
-        }
-
-        /* 3. 辰星 — 質感綠黑現代圓潤：圓體/蘋方 + 深綠標題列 + 圓角 + 柔和交錯列 */
-        #printableQuote.theme-morningstar {
-            font-family: "Yuanti SC", "PingFang TC", "Microsoft JhengHei", sans-serif;
-        }
-        #printableQuote.theme-morningstar .table-wrap {
-            border-radius: 10px;
-            overflow: hidden;
-            border: 1px solid #1b4d3e;
-        }
-        #printableQuote.theme-morningstar table {
-            border-collapse: separate;
-            border-spacing: 0;
-            border: none;
-        }
-        #printableQuote.theme-morningstar th, #printableQuote.theme-morningstar td {
-            border: none;
-            border-bottom: 1px solid #cfe3d8;
-            border-right: 1px solid #cfe3d8;
-        }
-        #printableQuote.theme-morningstar th:last-child, #printableQuote.theme-morningstar td:last-child {
-            border-right: none;
-        }
-        #printableQuote.theme-morningstar table th {
-            background-color: #1b4d3e;
-            color: #fff;
-            border-bottom: none;
-        }
-        #printableQuote.theme-morningstar table tbody tr:nth-child(even) {
-            background-color: #eef5f0;
-        }
+        #printableQuote.theme-morningstar { font-family: "Yuanti SC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+        #printableQuote.theme-morningstar .table-wrap { border-radius: 10px; overflow: hidden; border: 1px solid #1b4d3e; }
+        #printableQuote.theme-morningstar table { border-collapse: separate; border-spacing: 0; border: none; }
+        #printableQuote.theme-morningstar th, #printableQuote.theme-morningstar td { border: none; border-bottom: 1px solid #cfe3d8; border-right: 1px solid #cfe3d8; }
+        #printableQuote.theme-morningstar th:last-child, #printableQuote.theme-morningstar td:last-child { border-right: none; }
+        #printableQuote.theme-morningstar table th { background-color: #1b4d3e; color: #fff; border-bottom: none; }
+        #printableQuote.theme-morningstar table tbody tr:nth-child(even) { background-color: #eef5f0; }
 
         button { padding: 8px 16px; font-size: 14px; background-color: #003366; color: white; border: none; border-radius: 4px; cursor: pointer; }
         button:hover { background-color: #002244; }
@@ -131,10 +81,8 @@
         .btn-small { padding: 4px 10px; font-size: 12px; }
         .btn-secondary { background-color: #666; }
 
-        /* 頁碼預設在網頁畫面隱藏，列印時自動顯示於每頁底部 */
         .page-footer { display: none; }
 
-        /* ===== 儀器管理 / 管理員後台 通用樣式 ===== */
         .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; background: #eef5ff; padding: 10px; border-radius: 5px; }
         .toolbar input[type="text"], .toolbar input[type="number"], .toolbar input[type="date"], .toolbar select {
             padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;
@@ -155,20 +103,14 @@
         }
         .log-table td, .log-table th { font-size: 12px; }
         .empty-hint { color: #888; font-size: 13px; padding: 15px; text-align: center; }
-        .login-overlay {
-            position: fixed; inset: 0; background: rgba(0,17,34,0.85); display: none;
-            align-items: center; justify-content: center; z-index: 999;
-        }
-        .login-overlay.active { display: flex; }
-        .login-box { background: #fff; padding: 30px; border-radius: 8px; width: 300px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
-        .login-box h3 { margin-top: 0; color: #003366; }
-        .login-box input { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        .login-box .login-error { color: #cc0000; font-size: 12px; min-height: 16px; }
+
+        .brand-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 2px solid #003366; padding-bottom: 6px; }
+        .brand-tab { padding: 4px 12px; background: #e0e0e0; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 13px; font-weight: bold; color: #444; }
+        .brand-tab.active { background: #003366; color: #fff; }
 
         @media print {
             .no-print, button, .sub-nav, .nav-tabs { display: none !important; }
             input, textarea { border: none !important; background: transparent !important; }
-            /* 移除 textarea 右下角的拖曳調整大小符號（雙斜線），列印/PDF時不需要它 */
             textarea { resize: none !important; overflow: hidden !important; }
 
             select#salesName {
@@ -271,7 +213,7 @@
     <!-- ============ 儀器管理系統：客戶儀器維修保養／校正紀錄 ============ -->
     <div id="equipment-system" class="content-section">
         <div class="toolbar no-print">
-            <input type="text" id="eqSearchInput" placeholder="搜尋客戶名稱 / 儀器名稱 / 序號" style="width:260px;" oninput="renderEquipmentList()">
+            <input type="text" id="eqSearchInput" placeholder="搜尋客戶 / 廠牌 / 業務 / 儀器 / 序號" style="width:280px;" oninput="renderEquipmentList()">
             <select id="eqStatusFilter" onchange="renderEquipmentList()">
                 <option value="all">全部狀態</option>
                 <option value="overdue">已逾期</option>
@@ -279,6 +221,8 @@
                 <option value="ok">正常</option>
             </select>
             <button onclick="openEquipmentForm()">＋ 新增儀器</button>
+            <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
+            <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
             <button class="btn-secondary" onclick="loadEquipmentFromCloud()">🔄 重新整理</button>
         </div>
 
@@ -286,9 +230,11 @@
             <h3 id="eqFormTitle">新增儀器</h3>
             <div class="form-grid">
                 <div><label>客戶名稱</label><input type="text" id="eqCustomer"></div>
+                <div><label>廠牌</label><input type="text" id="eqBrand"></div>
                 <div><label>儀器名稱</label><input type="text" id="eqName"></div>
                 <div><label>型號</label><input type="text" id="eqModel"></div>
                 <div><label>序號</label><input type="text" id="eqSerial"></div>
+                <div><label>負責業務</label><select id="eqSales"></select></div>
                 <div><label>放置地點</label><input type="text" id="eqLocation"></div>
                 <div><label>安裝日期</label><input type="date" id="eqInstallDate"></div>
                 <div><label>保養／校正週期（月）</label><input type="number" id="eqCycle" value="12" min="1"></div>
@@ -305,13 +251,13 @@
         <table id="eqListTable">
             <thead>
                 <tr>
-                    <th>客戶</th><th>儀器名稱</th><th>型號/序號</th><th>放置地點</th>
+                    <th>客戶</th><th>廠牌</th><th>儀器名稱</th><th>型號/序號</th><th>負責業務</th><th>放置地點</th>
                     <th>最近保養/校正</th><th>下次到期</th><th>狀態</th><th class="no-print">操作</th>
                 </tr>
             </thead>
             <tbody id="eqListBody"></tbody>
         </table>
-        <div class="empty-hint" id="eqEmptyHint" style="display:none;">目前沒有儀器紀錄，點選「＋ 新增儀器」開始建立。</div>
+        <div class="empty-hint" id="eqEmptyHint" style="display:none;">目前沒有儀器紀錄，點選「＋ 新增儀器」或「批量上傳 Excel」開始建立。</div>
 
         <div class="panel" id="eqDetailPanel" style="display:none;">
             <h3 id="eqDetailTitle">儀器詳細資料</h3>
@@ -358,7 +304,7 @@
                 <button onclick="addSalesRow()">＋ 新增業務</button>
                 <button onclick="saveSalesToCloud()">☁️ 儲存到雲端</button>
                 <button class="btn-secondary" onclick="reimportSalesFromCSV()">📥 從 sales.csv 重新匯入</button>
-                <span style="font-size:12px;color:#666;">（雲端資料會覆蓋 CSV，估價單頁的業務下拉選單以此為準）</span>
+                <span style="font-size:12px;color:#666;">（雲端資料會覆蓋 CSV，估價單與儀器頁面之業務選單以此為準）</span>
             </div>
             <table>
                 <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th class="no-print">操作</th></tr></thead>
@@ -373,8 +319,12 @@
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 匯入</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
                 <button onclick="savePricesToCloud()">☁️ 儲存到雲端</button>
-                <span style="font-size:12px;color:#666;">（Excel 欄位需為：中文品名／英文品名／貨號／廠牌／含稅單價。匯入或編輯後記得按「儲存到雲端」才會生效）</span>
+                <span style="font-size:12px;color:#666;">（上傳 Excel 檔將自動讀取各工作表作為廠牌分類）</span>
             </div>
+
+            <!-- 廠牌動態切換分頁 -->
+            <div id="priceBrandTabs" class="brand-nav no-print"></div>
+
             <table>
                 <thead><tr><th>中文品名</th><th>英文品名</th><th>貨號</th><th>廠牌</th><th>含稅單價</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="adminPricesBody"></tbody>
