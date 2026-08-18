@@ -28,6 +28,9 @@ let pendingTab = null;
 let equipmentList = [];
 let currentEquipmentId = null;
 
+// 管理員後台狀態
+let allQuotesCache = [];
+
 const companyData = {
     yushin: {
         title: "又鑫生物科技有限公司",
@@ -105,6 +108,7 @@ function actuallySwitchMainTab(tabId, el) {
     } else if (tabId === 'admin-system') {
         renderAdminSalesTable();
         renderAdminPricesTable();
+        loadAllQuotesFromCloud();
     }
 }
 
@@ -296,8 +300,9 @@ function refreshPriceDatalists() {
     });
 }
 
+// 客戶名稱自動完成：僅抓「最近 10 筆」估價單取樣，避免隨估價單累積而讀取量無上限增長
 function loadClientHistory() {
-    db.collection('quotes').get().then(snapshot => {
+    db.collection('quotes').orderBy('quoteNo', 'desc').limit(10).get().then(snapshot => {
         const clientListDatalist = document.getElementById('clientList');
         if (!clientListDatalist) return;
 
@@ -968,7 +973,7 @@ window.exportEquipmentExcel = function() {
 };
 
 /* =========================================================
-   管理員雲端後台：業務名單、價格表管理
+   管理員雲端後台：業務名單、價格表、估價單記錄管理
    ========================================================= */
 window.switchAdminTab = function(tab, el) {
     document.querySelectorAll('#admin-system .sub-tab').forEach(t => t.classList.remove('active'));
@@ -978,6 +983,7 @@ window.switchAdminTab = function(tab, el) {
 
     if (tab === 'sales') renderAdminSalesTable();
     if (tab === 'prices') renderAdminPricesTable();
+    if (tab === 'quotes') renderAdminQuotesList();
 };
 
 function escapeAttr(str) {
@@ -1161,4 +1167,91 @@ window.handlePriceExcelUpload = function(input) {
         }
     };
     reader.readAsArrayBuffer(file);
+};
+
+/* ---------- 估價單記錄管理 ---------- */
+window.loadAllQuotesFromCloud = function() {
+    db.collection('quotes').orderBy('quoteNo', 'desc').get().then(snapshot => {
+        allQuotesCache = [];
+        snapshot.forEach(doc => allQuotesCache.push({ id: doc.id, ...doc.data() }));
+        renderAdminQuotesList();
+    }).catch(err => {
+        console.error(err);
+        alert('讀取估價單記錄失敗，請確認 Firestore 權限設定。');
+    });
+};
+
+window.renderAdminQuotesList = function() {
+    const tbody = document.getElementById('adminQuotesBody');
+    const searchInput = document.getElementById('adminQuoteSearch');
+    if (!tbody || !searchInput) return;
+    const keyword = (searchInput.value || '').toLowerCase();
+    tbody.innerHTML = '';
+    let shown = 0;
+
+    allQuotesCache.forEach(q => {
+        const searchable = `${q.quoteNo || ''} ${q.clientName || ''}`.toLowerCase();
+        if (keyword && !searchable.includes(keyword)) return;
+        shown++;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${escapeHtml(q.quoteNo || '')}</td>
+            <td>${escapeHtml((companyData[q.company] || {}).prefix || q.company || '')}</td>
+            <td>${escapeHtml(q.clientName || '')}</td>
+            <td>${escapeHtml(q.salesName || '')}</td>
+            <td>${escapeHtml(q.quoteDate || '')}</td>
+            <td>${escapeHtml(q.grandTotal || '')}</td>
+            <td class="no-print">
+                <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${q.quoteNo}')">載入</button>
+                <button type="button" class="btn-danger" onclick="deleteQuoteFromAdmin('${q.quoteNo}')">刪除</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    document.getElementById('adminQuotesEmptyHint').style.display = shown === 0 ? 'block' : 'none';
+};
+
+window.openQuoteFromAdmin = function(quoteNo) {
+    fetchAndFillQuote(quoteNo);
+};
+
+window.deleteQuoteFromAdmin = function(quoteNo) {
+    if (!confirm(`確定要刪除估價單 ${quoteNo} 嗎？此動作無法復原。`)) return;
+    db.collection('quotes').doc(quoteNo).delete().then(() => {
+        loadAllQuotesFromCloud();
+    }).catch(err => {
+        alert('刪除失敗：' + err.message);
+    });
+};
+
+window.exportQuotesCSV = function() {
+    const keyword = (document.getElementById('adminQuoteSearch').value || '').toLowerCase();
+    const rows = allQuotesCache.filter(q => {
+        const searchable = `${q.quoteNo || ''} ${q.clientName || ''}`.toLowerCase();
+        return !keyword || searchable.includes(keyword);
+    });
+
+    if (rows.length === 0) {
+        alert('沒有資料可以匯出');
+        return;
+    }
+
+    const header = ['單號', '公司', '客戶', '業務', '日期', '總計'];
+    const csvRows = [header.join(',')];
+    rows.forEach(q => {
+        const line = [q.quoteNo, q.company, q.clientName, q.salesName, q.quoteDate, q.grandTotal]
+            .map(v => `"${(v || '').toString().replace(/"/g, '""')}"`)
+            .join(',');
+        csvRows.push(line);
+    });
+
+    const csvContent = '\uFEFF' + csvRows.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `估價單記錄_${getFormattedDateCode()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
 };

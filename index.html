@@ -297,6 +297,7 @@
         <div class="sub-nav no-print">
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 業務名單</div>
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
+            <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
         </div>
 
         <!-- 業務名單管理 -->
@@ -328,6 +329,20 @@
                 <thead><tr><th>中文品名</th><th>英文品名</th><th>貨號</th><th>廠牌</th><th>含稅單價</th></tr></thead>
                 <tbody id="adminPricesBody"></tbody>
             </table>
+        </div>
+
+        <!-- 估價單記錄管理 -->
+        <div id="admin-quotes" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print">
+                <input type="text" id="adminQuoteSearch" placeholder="搜尋單號 / 客戶名稱" style="width:260px;" oninput="renderAdminQuotesList()">
+                <button class="btn-secondary" onclick="loadAllQuotesFromCloud()">🔄 重新整理</button>
+                <button onclick="exportQuotesCSV()">⬇️ 匯出目前清單為 CSV</button>
+            </div>
+            <table>
+                <thead><tr><th>單號</th><th>公司</th><th>客戶</th><th>業務</th><th>日期</th><th>總計</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="adminQuotesBody"></tbody>
+            </table>
+            <div class="empty-hint" id="adminQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
         </div>
     </div>
 
