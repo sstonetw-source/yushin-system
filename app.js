@@ -1,4 +1,4 @@
-// app.js - 估價單系統 / 儀器管理系統 / 管理員雲端後台 核心邏輯
+// app.js - 估價單系統 / 儀器管理系統 核心邏輯
 
 const firebaseConfig = {
     apiKey: "AIzaSyAmGAU2spWI54ujLyIFTWiX-mXyuau7Vps",
@@ -27,9 +27,6 @@ let pendingTab = null;
 // 儀器管理系統狀態
 let equipmentList = [];
 let currentEquipmentId = null;
-
-// 管理員後台狀態
-let allQuotesCache = [];
 
 const companyData = {
     yushin: {
@@ -108,7 +105,6 @@ function actuallySwitchMainTab(tabId, el) {
     } else if (tabId === 'admin-system') {
         renderAdminSalesTable();
         renderAdminPricesTable();
-        loadAllQuotesFromCloud();
     }
 }
 
@@ -820,7 +816,7 @@ function loadEquipmentFromCloudThenReopen(eqId) {
     });
 }
 
-// 儀器管理系統：批量上傳 Excel (包含廠牌與負責業務)
+// 儀器管理系統：批量上傳 Excel（依「客戶名稱＋序號」比對：有既有紀錄則更新，沒有則新增）
 window.handleEquipmentExcelUpload = function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -847,56 +843,132 @@ window.handleEquipmentExcelUpload = function(input) {
                 return '';
             };
 
-            const batch = db.batch();
-            let count = 0;
-
-            rows.forEach(row => {
-                const customerName = String(getField(row, ['客戶名稱', '客戶'])).trim();
-                const name = String(getField(row, ['儀器名稱', '儀器'])).trim();
-                if (!customerName || !name) return;
-
-                const docRef = db.collection('equipment').doc();
-                batch.set(docRef, {
-                    customerName: customerName,
-                    brand: String(getField(row, ['廠牌', '品牌'])).trim(),
-                    name: name,
-                    model: String(getField(row, ['型號'])).trim(),
-                    serialNo: String(getField(row, ['序號'])).trim(),
-                    salesName: String(getField(row, ['負責業務', '業務'])).trim(),
-                    location: String(getField(row, ['放置地點', '地點'])).trim(),
-                    installDate: String(getField(row, ['安裝日期'])).trim(),
-                    cycleMonths: parseInt(getField(row, ['保養週期', '週期'])) || 12,
-                    lastServiceDate: String(getField(row, ['最近保養日期', '最近保養'])).trim(),
-                    notes: String(getField(row, ['備註'])).trim(),
-                    logs: []
+            // 先向雲端取得最新的儀器清單，用「客戶名稱＋序號」建立比對索引，確保比對到的是最新資料
+            db.collection('equipment').get().then(snapshot => {
+                const existingMap = new Map();
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    const customer = (d.customerName || '').trim();
+                    const serial = (d.serialNo || '').trim();
+                    if (customer && serial) {
+                        existingMap.set(`${customer}|${serial}`, doc.id);
+                    }
                 });
-                count++;
-            });
 
-            if (count === 0) {
-                alert('無法辨識出有效儀器資料，請確保表頭有「客戶名稱」與「儀器名稱」。');
-                input.value = '';
-                return;
-            }
+                const batch = db.batch();
+                let addCount = 0;
+                let updateCount = 0;
+                let skipCount = 0;
+                let hasBlankSerial = false;
 
-            batch.commit().then(() => {
-                alert(`成功批量匯入 ${count} 筆儀器資料！`);
-                loadEquipmentFromCloud();
+                rows.forEach(row => {
+                    const customerName = String(getField(row, ['客戶名稱', '客戶'])).trim();
+                    const name = String(getField(row, ['儀器名稱', '儀器'])).trim();
+                    if (!customerName || !name) {
+                        skipCount++;
+                        return;
+                    }
+
+                    const serialNo = String(getField(row, ['序號'])).trim();
+                    if (!serialNo) hasBlankSerial = true;
+
+                    const eqData = {
+                        customerName: customerName,
+                        brand: String(getField(row, ['廠牌', '品牌'])).trim(),
+                        name: name,
+                        model: String(getField(row, ['型號'])).trim(),
+                        serialNo: serialNo,
+                        salesName: String(getField(row, ['負責業務', '業務'])).trim(),
+                        location: String(getField(row, ['放置地點', '地點'])).trim(),
+                        installDate: String(getField(row, ['安裝日期'])).trim(),
+                        cycleMonths: parseInt(getField(row, ['保養週期', '週期'])) || 12,
+                        lastServiceDate: String(getField(row, ['最近保養日期', '最近保養'])).trim(),
+                        notes: String(getField(row, ['備註'])).trim()
+                    };
+
+                    // 序號留白時無法可靠比對（避免同客戶多筆儀器誤判為同一台），一律視為新增
+                    const matchKey = serialNo ? `${customerName}|${serialNo}` : null;
+                    const existingId = matchKey ? existingMap.get(matchKey) : null;
+
+                    if (existingId) {
+                        // 更新既有紀錄：用 merge 寫入，不會動到原本的維修保養／校正 logs
+                        const docRef = db.collection('equipment').doc(existingId);
+                        batch.set(docRef, eqData, { merge: true });
+                        updateCount++;
+                    } else {
+                        const docRef = db.collection('equipment').doc();
+                        batch.set(docRef, { ...eqData, logs: [] });
+                        addCount++;
+                    }
+                });
+
+                if (addCount === 0 && updateCount === 0) {
+                    alert('無法辨識出有效儀器資料，請確保表頭有「客戶名稱」與「儀器名稱」。');
+                    input.value = '';
+                    return;
+                }
+
+                batch.commit().then(() => {
+                    let msg = `批量處理完成：新增 ${addCount} 筆、更新 ${updateCount} 筆`;
+                    if (skipCount > 0) msg += `、略過 ${skipCount} 筆（缺少客戶名稱或儀器名稱）`;
+                    msg += '。';
+                    if (hasBlankSerial) {
+                        msg += '\n提醒：序號留白的項目因無法比對既有紀錄，一律視為新增。';
+                    }
+                    alert(msg);
+                    input.value = '';
+                    loadEquipmentFromCloud();
+                }).catch(err => {
+                    alert('批量寫入 Firestore 失敗：' + err.message);
+                    input.value = '';
+                });
             }).catch(err => {
-                alert('批量寫入 Firestore 失敗：' + err.message);
+                alert('讀取現有儀器資料失敗，無法進行比對更新：' + err.message);
+                input.value = '';
             });
 
         } catch (err) {
             alert('讀取 Excel 檔案失敗：' + err.message);
-        } finally {
             input.value = '';
         }
     };
     reader.readAsArrayBuffer(file);
 };
 
+// 儀器管理系統：批量下載 Excel（欄位與批量上傳格式相同，可編輯後重新上傳）
+window.exportEquipmentExcel = function() {
+    if (!equipmentList.length) {
+        alert('目前沒有儀器資料可以下載。');
+        return;
+    }
+
+    const rows = equipmentList.map(eq => {
+        const { status, dueDate } = getEquipmentStatus(eq);
+        return {
+            '客戶名稱': eq.customerName || '',
+            '廠牌': eq.brand || '',
+            '儀器名稱': eq.name || '',
+            '型號': eq.model || '',
+            '序號': eq.serialNo || '',
+            '負責業務': eq.salesName || '',
+            '放置地點': eq.location || '',
+            '安裝日期': eq.installDate || '',
+            '保養週期': eq.cycleMonths || 12,
+            '最近保養日期': eq.lastServiceDate || '',
+            '下次到期': fmtDate(dueDate),
+            '狀態': statusLabel[status] || '',
+            '備註': eq.notes || ''
+        };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '儀器清單');
+    XLSX.writeFile(wb, `儀器清單_${getFormattedDateCode()}.xlsx`);
+};
+
 /* =========================================================
-   管理員雲端後台
+   管理員雲端後台：業務名單、價格表管理
    ========================================================= */
 window.switchAdminTab = function(tab, el) {
     document.querySelectorAll('#admin-system .sub-tab').forEach(t => t.classList.remove('active'));
@@ -906,8 +978,11 @@ window.switchAdminTab = function(tab, el) {
 
     if (tab === 'sales') renderAdminSalesTable();
     if (tab === 'prices') renderAdminPricesTable();
-    if (tab === 'quotes') renderAdminQuotesList();
 };
+
+function escapeAttr(str) {
+    return (str || '').toString().replace(/"/g, '&quot;');
+}
 
 /* ---------- 業務名單管理 ---------- */
 window.renderAdminSalesTable = function() {
@@ -924,10 +999,6 @@ window.renderAdminSalesTable = function() {
         tbody.appendChild(tr);
     });
 };
-
-function escapeAttr(str) {
-    return (str || '').toString().replace(/"/g, '&quot;');
-}
 
 window.updateSalesField = function(idx, field, value) {
     salesList[idx][field] = value;
@@ -981,19 +1052,18 @@ window.renderAdminPricesTable = function() {
     const tbody = document.getElementById('adminPricesBody');
     tbody.innerHTML = '';
 
-    priceList.forEach((p, idx) => {
+    priceList.forEach((p) => {
         if (activeBrandFilter !== 'ALL' && (p.brand || '未分類') !== activeBrandFilter) {
             return;
         }
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td><input type="text" value="${escapeAttr(p.nameCn)}" oninput="updatePriceField(${idx}, 'nameCn', this.value)"></td>
-            <td><input type="text" value="${escapeAttr(p.nameEn)}" oninput="updatePriceField(${idx}, 'nameEn', this.value)"></td>
-            <td><input type="text" value="${escapeAttr(p.model)}" oninput="updatePriceField(${idx}, 'model', this.value)"></td>
-            <td><input type="text" value="${escapeAttr(p.brand)}" oninput="updatePriceField(${idx}, 'brand', this.value)"></td>
-            <td><input type="number" value="${p.price || 0}" oninput="updatePriceField(${idx}, 'price', this.value)"></td>
-            <td class="no-print"><button type="button" class="btn-danger" onclick="removePriceRow(${idx})">刪除</button></td>
+            <td>${escapeHtml(p.nameCn || '')}</td>
+            <td>${escapeHtml(p.nameEn || '')}</td>
+            <td>${escapeHtml(p.model || '')}</td>
+            <td>${escapeHtml(p.brand || '')}</td>
+            <td>${(p.price || 0).toLocaleString()}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -1026,21 +1096,7 @@ window.switchBrandTab = function(brandName) {
     renderAdminPricesTable();
 };
 
-window.updatePriceField = function(idx, field, value) {
-    priceList[idx][field] = field === 'price' ? parseFloat(value) || 0 : value;
-};
-
-window.addPriceRow = function() {
-    const defaultBrand = activeBrandFilter !== 'ALL' ? activeBrandFilter : '';
-    priceList.push({ nameCn: '', nameEn: '', model: '', brand: defaultBrand, price: 0 });
-    renderAdminPricesTable();
-};
-
-window.removePriceRow = function(idx) {
-    priceList.splice(idx, 1);
-    renderAdminPricesTable();
-};
-
+// 價格表僅能透過上傳 Excel 整批更新，不開放在網頁上逐筆編輯／新增／刪除
 window.handlePriceExcelUpload = function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -1088,10 +1144,16 @@ window.handlePriceExcelUpload = function(input) {
                 return;
             }
 
-            priceList = imported;
-            activeBrandFilter = 'ALL';
-            renderAdminPricesTable();
-            alert(`已從 Excel 成功讀取 ${workbook.SheetNames.length} 個分頁，共 ${imported.length} 筆價格資料。請確認後點選「☁️ 儲存到雲端」。`);
+            // 直接整批覆蓋並儲存到雲端（價格表不開放網頁上逐筆編輯，一律以最新上傳的 Excel 為準）
+            db.collection('settings').doc('prices').set({ list: imported }).then(() => {
+                priceList = imported;
+                activeBrandFilter = 'ALL';
+                refreshPriceDatalists();
+                renderAdminPricesTable();
+                alert(`已從 Excel 成功讀取 ${workbook.SheetNames.length} 個分頁，共 ${imported.length} 筆價格資料，並已儲存到雲端！`);
+            }).catch(err => {
+                alert('儲存到雲端失敗：' + err.message);
+            });
         } catch (err) {
             alert('讀取 Excel 檔案失敗：' + err.message);
         } finally {
@@ -1099,101 +1161,4 @@ window.handlePriceExcelUpload = function(input) {
         }
     };
     reader.readAsArrayBuffer(file);
-};
-
-window.savePricesToCloud = function() {
-    const cleaned = priceList.filter(p => p.nameCn || p.nameEn || p.model);
-    db.collection('settings').doc('prices').set({ list: cleaned }).then(() => {
-        priceList = cleaned;
-        refreshPriceDatalists();
-        renderAdminPricesTable();
-        alert('價格表已儲存到雲端！');
-    }).catch(err => {
-        alert('儲存失敗：' + err.message);
-    });
-};
-
-/* ---------- 估價單記錄管理 ---------- */
-window.loadAllQuotesFromCloud = function() {
-    db.collection('quotes').orderBy('quoteNo', 'desc').get().then(snapshot => {
-        allQuotesCache = [];
-        snapshot.forEach(doc => allQuotesCache.push({ id: doc.id, ...doc.data() }));
-        renderAdminQuotesList();
-    }).catch(err => {
-        console.error(err);
-        alert('讀取估價單記錄失敗，請確認 Firestore 權限設定。');
-    });
-};
-
-window.renderAdminQuotesList = function() {
-    const tbody = document.getElementById('adminQuotesBody');
-    const keyword = (document.getElementById('adminQuoteSearch').value || '').toLowerCase();
-    tbody.innerHTML = '';
-    let shown = 0;
-
-    allQuotesCache.forEach(q => {
-        const searchable = `${q.quoteNo || ''} ${q.clientName || ''}`.toLowerCase();
-        if (keyword && !searchable.includes(keyword)) return;
-        shown++;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${escapeHtml(q.quoteNo || '')}</td>
-            <td>${escapeHtml((companyData[q.company] || {}).prefix || q.company || '')}</td>
-            <td>${escapeHtml(q.clientName || '')}</td>
-            <td>${escapeHtml(q.salesName || '')}</td>
-            <td>${escapeHtml(q.quoteDate || '')}</td>
-            <td>${escapeHtml(q.grandTotal || '')}</td>
-            <td class="no-print">
-                <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${q.quoteNo}')">載入</button>
-                <button type="button" class="btn-danger" onclick="deleteQuoteFromAdmin('${q.quoteNo}')">刪除</button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-
-    document.getElementById('adminQuotesEmptyHint').style.display = shown === 0 ? 'block' : 'none';
-};
-
-window.openQuoteFromAdmin = function(quoteNo) {
-    fetchAndFillQuote(quoteNo);
-};
-
-window.deleteQuoteFromAdmin = function(quoteNo) {
-    if (!confirm(`確定要刪除估價單 ${quoteNo} 嗎？此動作無法復原。`)) return;
-    db.collection('quotes').doc(quoteNo).delete().then(() => {
-        loadAllQuotesFromCloud();
-    }).catch(err => {
-        alert('刪除失敗：' + err.message);
-    });
-};
-
-window.exportQuotesCSV = function() {
-    const keyword = (document.getElementById('adminQuoteSearch').value || '').toLowerCase();
-    const rows = allQuotesCache.filter(q => {
-        const searchable = `${q.quoteNo || ''} ${q.clientName || ''}`.toLowerCase();
-        return !keyword || searchable.includes(keyword);
-    });
-
-    if (rows.length === 0) {
-        alert('沒有資料可以匯出');
-        return;
-    }
-
-    const header = ['單號', '公司', '客戶', '業務', '日期', '總計'];
-    const csvRows = [header.join(',')];
-    rows.forEach(q => {
-        const line = [q.quoteNo, q.company, q.clientName, q.salesName, q.quoteDate, q.grandTotal]
-            .map(v => `"${(v || '').toString().replace(/"/g, '""')}"`)
-            .join(',');
-        csvRows.push(line);
-    });
-
-    const csvContent = '\uFEFF' + csvRows.join('\r\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `估價單記錄_${getFormattedDateCode()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
 };

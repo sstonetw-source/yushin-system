@@ -223,7 +223,9 @@
             <button onclick="openEquipmentForm()">＋ 新增儀器</button>
             <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
             <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
+            <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 批量下載 Excel</button>
             <button class="btn-secondary" onclick="loadEquipmentFromCloud()">🔄 重新整理</button>
+            <span style="font-size:12px;color:#666;">（批量上傳會以「客戶名稱＋序號」比對，有既有紀錄則更新、沒有則新增；序號留白一律視為新增）</span>
         </div>
 
         <div class="panel" id="eqFormPanel" style="display:none;">
@@ -295,7 +297,6 @@
         <div class="sub-nav no-print">
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 業務名單</div>
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
-            <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
         </div>
 
         <!-- 業務名單管理 -->
@@ -312,37 +313,21 @@
             </table>
         </div>
 
-        <!-- 價格表管理 -->
+        <!-- 價格表管理（唯讀顯示，僅能透過 Excel 上傳整批更新，不可在網頁上逐筆編輯） -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
-                <button onclick="addPriceRow()">＋ 新增品項</button>
-                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 匯入</button>
+                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <button onclick="savePricesToCloud()">☁️ 儲存到雲端</button>
-                <span style="font-size:12px;color:#666;">（上傳 Excel 檔將自動讀取各工作表作為廠牌分類）</span>
+                <span style="font-size:12px;color:#666;">（價格表僅能透過上傳 Excel 整批更新，不開放在此逐筆編輯；上傳後會自動讀取各工作表作為廠牌分類並直接儲存到雲端）</span>
             </div>
 
             <!-- 廠牌動態切換分頁 -->
             <div id="priceBrandTabs" class="brand-nav no-print"></div>
 
             <table>
-                <thead><tr><th>中文品名</th><th>英文品名</th><th>貨號</th><th>廠牌</th><th>含稅單價</th><th class="no-print">操作</th></tr></thead>
+                <thead><tr><th>中文品名</th><th>英文品名</th><th>貨號</th><th>廠牌</th><th>含稅單價</th></tr></thead>
                 <tbody id="adminPricesBody"></tbody>
             </table>
-        </div>
-
-        <!-- 估價單記錄管理 -->
-        <div id="admin-quotes" class="admin-panel" style="display:none;">
-            <div class="toolbar no-print">
-                <input type="text" id="adminQuoteSearch" placeholder="搜尋單號 / 客戶名稱" style="width:260px;" oninput="renderAdminQuotesList()">
-                <button class="btn-secondary" onclick="loadAllQuotesFromCloud()">🔄 重新整理</button>
-                <button onclick="exportQuotesCSV()">⬇️ 匯出目前清單為 CSV</button>
-            </div>
-            <table>
-                <thead><tr><th>單號</th><th>公司</th><th>客戶</th><th>業務</th><th>日期</th><th>總計</th><th class="no-print">操作</th></tr></thead>
-                <tbody id="adminQuotesBody"></tbody>
-            </table>
-            <div class="empty-hint" id="adminQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
         </div>
     </div>
 
