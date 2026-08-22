@@ -90,6 +90,7 @@
         }
         .item-input-group { display: flex; flex-direction: column; gap: 1px; text-align: left; padding: 0; font-size: 10.5px; color: #333; }
         .print-text-mirror { display: none; }
+        .sales-name-print-mirror { display: none; }
         .field-row { display: flex; align-items: center; gap: 4px; margin-bottom: 0; }
         .field-row label { font-weight: bold; white-space: nowrap; min-width: 60px; flex-shrink: 0; }
         .field-row input, .field-row textarea { flex: 1; width: auto; min-width: 0; }
@@ -141,6 +142,7 @@
         .status-soon { background: #e6a400; }
         .status-overdue { background: #cc0000; }
         .status-unknown { background: #888; }
+        .status-none { background: #607d8b; }
         .clickable-row { cursor: pointer; }
         .clickable-row:hover { background: #eef5ff; }
         .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px; }
@@ -156,17 +158,25 @@
         .brand-tab.active { background: #003366; color: #fff; }
 
         @media print {
+            html, body { color-scheme: light; }
             .no-print, button, .sub-nav, .nav-tabs { display: none !important; }
             input, textarea { border: none !important; background: transparent !important; }
             textarea { resize: none !important; overflow: hidden !important; }
 
+            /* 手機瀏覽器（尤其 iOS Safari）在深色模式下，輸入框/選單文字列印出來常會是灰色甚至看不清楚，
+               這裡強制列印輸出一律使用黑色文字，避免輸出的估價單看起來字很淡 */
+            input, select, textarea, .print-text-mirror, #salesPhone {
+                color: #000 !important;
+                -webkit-text-fill-color: #000 !important;
+            }
+
             select#salesName {
-                -webkit-appearance: none;
-                -moz-appearance: none;
-                appearance: none;
-                border: none !important;
-                background: transparent !important;
-                padding: 0 !important;
+                display: none !important;
+            }
+            .sales-name-print-mirror {
+                display: inline !important;
+                color: #000 !important;
+                -webkit-text-fill-color: #000 !important;
                 font-size: 12px;
             }
 
@@ -201,6 +211,49 @@
             @page { size: A4; margin: 10mm; }
             body { margin: 0; }
         }
+
+        /* ============ 手機版：建立估價單改成由上到下垂直輸入 ============
+           只在螢幕（screen）套用，列印/存 PDF 一律用上面 @media print 或原本桌面版的表格排版，
+           所以「輸出」出來的估價單格式完全不受這裡影響 */
+        @media screen and (max-width: 640px) {
+            .meta-row-three { flex-direction: column; gap: 8px; }
+            .meta-row-three > div { width: 100%; box-sizing: border-box; }
+
+            .bottom-layout { flex-direction: column; align-items: stretch; gap: 10px; }
+            .stamp-section { width: 100%; text-align: center; }
+            .total-section { text-align: left; }
+
+            /* 品項表格：桌面版是橫向表格，手機版改成每個品項一張直式卡片 */
+            #itemTable thead { display: none; }
+            #itemTable, #itemTable tbody, #itemTable tr, #itemTable td {
+                display: block;
+                width: 100%;
+            }
+            #itemTable tr {
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                padding: 8px;
+                margin-bottom: 10px;
+                background: #fff;
+            }
+            #itemTable td {
+                border: none;
+                padding: 4px 0;
+                text-align: left;
+            }
+            #itemTable td[data-th]::before {
+                content: attr(data-th) "：";
+                display: block;
+                font-size: 11px;
+                font-weight: bold;
+                color: #666;
+                margin-bottom: 2px;
+            }
+            #itemTable input, #itemTable select { width: 100%; box-sizing: border-box; }
+            .item-row-pair { flex-direction: column; align-items: stretch; gap: 6px; }
+            .item-row-pair > div { width: 100%; }
+        }
+
              .btn-small {
             margin: 1px;
             padding: 2px 5px;
@@ -246,8 +299,8 @@
     <div id="appContainer" style="display:none;">
     <div class="nav-tabs no-print">
         <div class="nav-tab active" onclick="switchMainTab('quote-system', this)">📄 估價單系統</div>
-        <div class="nav-tab" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
         <div class="nav-tab" onclick="switchMainTab('order-system', this)">📦 訂單管理系統</div>
+        <div class="nav-tab" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
         <div class="nav-tab" id="navAdminTab" onclick="switchMainTab('admin-system', this)">⚙️ 管理員雲端後台</div>
         <div class="nav-spacer"></div>
         <div class="auth-status" id="authStatus">
@@ -343,6 +396,8 @@
                 <option value="overdue">已逾期</option>
                 <option value="soon">即將到期（30天內）</option>
                 <option value="ok">正常</option>
+                <option value="none">免保養</option>
+                <option value="unknown">尚無紀錄</option>
             </select>
             <button onclick="openEquipmentModal()">＋ 新增儀器</button>
             <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
@@ -371,12 +426,19 @@
             <div class="form-grid">
                 <div><label>客戶名稱</label><input type="text" id="eqCustomer"></div>
                 <div><label>型號</label><input type="text" id="eqModel" list="priceModelList" oninput="onEqModelChange()" onchange="onEqModelChange()"></div>
-                <div><label>廠牌</label><input type="text" id="eqBrand"></div>
+                <div><label>廠牌</label>
+                    <select id="eqBrand" onchange="onEqBrandSelectChange()"></select>
+                    <input type="text" id="eqBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                </div>
                 <div><label>序號</label><input type="text" id="eqSerial"></div>
                 <div><label>負責業務</label><select id="eqSales"></select></div>
                 <div><label>放置地點</label><input type="text" id="eqLocation"></div>
                 <div><label>安裝日期</label><input type="date" id="eqInstallDate"></div>
-                <div><label>保養／校正週期（月）</label><input type="number" id="eqCycle" value="12" min="1"></div>
+                <div>
+                    <label>保養／校正週期（月）</label>
+                    <input type="number" id="eqCycle" value="12" min="1">
+                    <label style="font-weight:normal;margin-top:4px;"><input type="checkbox" id="eqNoMaintenance" onchange="onEqNoMaintenanceChange()"> 免保養（不再提醒）</label>
+                </div>
                 <div><label>最近保養／校正日期</label><input type="date" id="eqLastService"></div>
             </div>
             <label style="font-size:12px;font-weight:bold;">備註</label>
@@ -465,7 +527,10 @@
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer"></div>
                 <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" onchange="onOrderItemCodeChange(this)"></div>
-                <div><label>廠牌</label><select id="orderBrand"><option value="">請選擇廠牌</option></select></div>
+                <div><label>廠牌</label>
+                    <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
+                    <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                </div>
                 <div><label>品名</label><input type="text" id="orderItemName"></div>
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
                 <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
@@ -494,6 +559,7 @@
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 業務名單</div>
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
             <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
+            <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
         </div>
 
         <!-- 業務名單管理（唯讀，與 Firebase 登入帳號綁定：資料來自 users 集合） -->
@@ -538,6 +604,38 @@
             </table>
             <div class="empty-hint" id="adminQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
         </div>
+
+        <!-- 人員異動交接：離職／轉調時，把某位業務名下的估價單、訂單、儀器整批改成掛在新業務名下 -->
+        <div id="admin-transfer" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print" style="display:block;">
+                <span style="font-size:12px;color:#666;">
+                    用於人員離職或職務異動交接：把「原業務」名下的估價單／訂單／儀器紀錄，整批改成掛在「新業務」名下。
+                    執行前請先確認新業務已經是「業務名單」裡的正式帳號（有姓名與代號），否則對方登入後仍看不到轉移過去的資料。
+                    此動作會直接修改雲端資料，執行前請務必先按「查詢筆數」確認範圍。
+                </span>
+            </div>
+            <div class="form-grid" style="max-width:640px;margin-top:10px;">
+                <div>
+                    <label>原業務（資料轉出）</label>
+                    <select id="transferFromSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+                </div>
+                <div>
+                    <label>新業務（資料轉入）</label>
+                    <select id="transferToSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+                </div>
+            </div>
+            <div style="margin:12px 0;">
+                <label style="font-weight:bold;font-size:13px;">要一併轉移的資料範圍：</label><br>
+                <label style="font-weight:normal;font-size:13px;"><input type="checkbox" id="transferQuotes" checked onchange="resetTransferPreview()"> 估價單</label>
+                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferOrders" checked onchange="resetTransferPreview()"> 訂單</label>
+                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferEquipment" checked onchange="resetTransferPreview()"> 儀器</label>
+            </div>
+            <div>
+                <button onclick="previewSalesTransfer()">🔍 查詢筆數</button>
+                <button class="btn-danger" id="transferExecuteBtn" onclick="executeSalesTransfer()" style="display:none;">✅ 確認執行轉移</button>
+            </div>
+            <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
+        </div>
     </div>
 
     <datalist id="clientList"></datalist>
@@ -578,7 +676,8 @@ let salesList = [
 let priceList = [];
 let activeBrandFilter = 'ALL';
 let currentUser = null;      // 目前登入的 Firebase Auth 使用者物件
-let currentUserRole = null;  // 'admin' 或 'sales'
+let currentUserRole = null;  // 'admin' / 'sales' / 'purchaser' / 'engineer'
+const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', engineer: '工程師' };
 let currentUserName = '';    // 目前登入者自己的業務姓名（來自 users 集合）
 let currentUserPhone = '';   // 目前登入者自己的電話
 let currentUserCode = '';    // 目前登入者自己的業務代號
@@ -690,7 +789,7 @@ function showApp() {
 
     const label = document.getElementById('authUserLabel');
     if (label) {
-        label.innerText = `${currentUser.email}（${currentUserRole === 'admin' ? '管理員' : '業務'}）`;
+        label.innerText = `${currentUser.email}（${ROLE_LABELS[currentUserRole] || '業務'}）`;
     }
 
     // 只有管理員才看得到「管理員雲端後台」分頁
@@ -1081,28 +1180,93 @@ function refreshPriceDatalists() {
         }
     });
     populateOrderBrandDropdown();
+    populateEquipmentBrandDropdown();
 }
 
-// 新增訂單彈出視窗的「廠牌」下拉選單，選項來自價格表裡出現過的所有廠牌
-function populateOrderBrandDropdown() {
-    const select = document.getElementById('orderBrand');
-    if (!select) return;
-
+// 廠牌下拉選單共用邏輯：選項來自價格表出現過的所有廠牌，最後固定加一個「其他」讓使用者自行輸入
+function getPriceListBrands() {
     const brandsSet = new Set();
     priceList.forEach(p => {
         if (p.brand && p.brand.trim()) brandsSet.add(p.brand.trim());
     });
-    const brands = Array.from(brandsSet).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    return Array.from(brandsSet).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+}
 
+function populateBrandSelect(select, placeholderText) {
+    if (!select) return;
     const currentValue = select.value;
-    select.innerHTML = '<option value="">請選擇廠牌</option>';
-    brands.forEach(b => {
+    select.innerHTML = `<option value="">${placeholderText}</option>`;
+    getPriceListBrands().forEach(b => {
         const opt = document.createElement('option');
         opt.value = b;
         opt.text = b;
         select.appendChild(opt);
     });
-    if (brands.includes(currentValue)) select.value = currentValue;
+    const otherOpt = document.createElement('option');
+    otherOpt.value = '其他';
+    otherOpt.text = '其他（自行輸入）';
+    select.appendChild(otherOpt);
+    if ([...select.options].some(o => o.value === currentValue)) select.value = currentValue;
+}
+
+// 依價格表比對到的廠牌，補進下拉選單（如果原本不在清單裡）並選取，永遠排在「其他」之前
+function selectBrandInDropdown(select, brandName) {
+    if (!select || !brandName) return;
+    if (![...select.options].some(o => o.value === brandName)) {
+        const opt = document.createElement('option');
+        opt.value = brandName;
+        opt.text = brandName;
+        const otherOption = [...select.options].find(o => o.value === '其他');
+        if (otherOption) select.insertBefore(opt, otherOption);
+        else select.appendChild(opt);
+    }
+    select.value = brandName;
+}
+
+function populateOrderBrandDropdown() {
+    populateBrandSelect(document.getElementById('orderBrand'), '請選擇廠牌');
+    onOrderBrandSelectChange();
+}
+
+function populateEquipmentBrandDropdown() {
+    populateBrandSelect(document.getElementById('eqBrand'), '請選擇廠牌');
+    onEqBrandSelectChange();
+}
+
+// 廠牌選單選到「其他」時，顯示旁邊的文字輸入框讓使用者自行輸入；選別的廠牌就隱藏並清空
+window.onOrderBrandSelectChange = function() {
+    const select = document.getElementById('orderBrand');
+    const otherInput = document.getElementById('orderBrandOther');
+    if (!select || !otherInput) return;
+    if (select.value === '其他') {
+        otherInput.style.display = '';
+    } else {
+        otherInput.style.display = 'none';
+        otherInput.value = '';
+    }
+};
+
+window.onEqBrandSelectChange = function() {
+    const select = document.getElementById('eqBrand');
+    const otherInput = document.getElementById('eqBrandOther');
+    if (!select || !otherInput) return;
+    if (select.value === '其他') {
+        otherInput.style.display = '';
+    } else {
+        otherInput.style.display = 'none';
+        otherInput.value = '';
+    }
+};
+
+// 取得目前廠牌欄位真正的值：選了「其他」就取旁邊文字框的內容，否則直接取下拉選單的值
+function getBrandFieldValue(selectId, otherInputId) {
+    const select = document.getElementById(selectId);
+    if (!select) return '';
+    if (select.value === '其他') {
+        const otherInput = document.getElementById(otherInputId);
+        return otherInput ? otherInput.value.trim() : '';
+    }
+    return select.value.trim();
 }
 
 // 新增訂單時輸入「貨號」，依價格表帶出廠牌與品名
@@ -1112,16 +1276,9 @@ window.onOrderItemCodeChange = function(input) {
     const match = priceList.find(p => p.model && p.model.trim() === value);
     if (!match) return;
 
-    const brandSelect = document.getElementById('orderBrand');
-    if (brandSelect && match.brand) {
-        // 若廠牌不在下拉選單裡（例如價格表剛更新過），先補上這個選項再選取
-        if (![...brandSelect.options].some(o => o.value === match.brand)) {
-            const opt = document.createElement('option');
-            opt.value = match.brand;
-            opt.text = match.brand;
-            brandSelect.appendChild(opt);
-        }
-        brandSelect.value = match.brand;
+    if (match.brand) {
+        selectBrandInDropdown(document.getElementById('orderBrand'), match.brand);
+        onOrderBrandSelectChange();
     }
 
     const itemNameInput = document.getElementById('orderItemName');
@@ -1160,7 +1317,7 @@ window.addQuoteRow = function(itemData = {}) {
     const tr = document.createElement('tr');
 
     tr.innerHTML = `
-        <td>${rowCount}</td>
+        <td data-th="項次">${rowCount}</td>
         <td>
             <div class="item-input-group">
                 <div class="field-row">
@@ -1189,10 +1346,10 @@ window.addQuoteRow = function(itemData = {}) {
                 </div>
             </div>
         </td>
-        <td><input type="number" class="qty" value="${itemData.qty || 1}" min="1" oninput="calculateTotals()"></td>
-        <td><input type="number" class="inc-price" value="${itemData.price || 0}" oninput="onIncPriceChange(this)"></td>
-        <td><input type="number" class="ex-price" value="${itemData.exPrice || ((itemData.price || 0) / 1.05).toFixed(2)}" oninput="onExPriceChange(this)"></td>
-        <td><input type="number" class="subtotal-inc" value="${itemData.subtotal || 0}" readonly style="background-color: #f9f9f9;"></td>
+        <td data-th="數量"><input type="number" class="qty" value="${itemData.qty || 1}" min="1" oninput="calculateTotals()"></td>
+        <td data-th="含稅單價"><input type="number" class="inc-price" value="${itemData.price || 0}" oninput="onIncPriceChange(this)"></td>
+        <td data-th="未稅單價"><input type="number" class="ex-price" value="${itemData.exPrice || ((itemData.price || 0) / 1.05).toFixed(2)}" oninput="onExPriceChange(this)"></td>
+        <td data-th="含稅小計"><input type="number" class="subtotal-inc" value="${itemData.subtotal || 0}" readonly style="background-color: #f9f9f9;"></td>
         <td class="no-print"><button type="button" class="btn-danger" onclick="removeQuoteRow(this)">刪除</button></td>
     `;
 
@@ -1385,6 +1542,19 @@ function prepareQuoteForPrint() {
             mirror.textContent = input.value;
         });
     });
+
+    // 「負責業務」是下拉選單，原生 select 版面寬度不受控，列印時容易跟旁邊的電話號碼中間拉開一大段空白，
+    // 看起來像「隔了很遠」而不是緊接在名字後面；改成插入一份純文字鏡像（名字＋電話會排在同一行、緊接著）
+    const salesSelect = document.getElementById('salesName');
+    if (salesSelect) {
+        let salesMirror = salesSelect.nextElementSibling;
+        if (!salesMirror || !salesMirror.classList.contains('sales-name-print-mirror')) {
+            salesMirror = document.createElement('span');
+            salesMirror.className = 'sales-name-print-mirror';
+            salesSelect.insertAdjacentElement('afterend', salesMirror);
+        }
+        salesMirror.textContent = salesSelect.value || '';
+    }
 }
 
 window.loadQuoteFromCloud = function() {
@@ -1457,7 +1627,8 @@ window.loadMyQuotesFromCloud = function() {
         .get().then(snapshot => {
         myQuotesCache = [];
         snapshot.forEach(doc => myQuotesCache.push({ id: doc.id, ...doc.data() }));
-        myQuotesCache.sort((a, b) => (b.quoteDate || '').localeCompare(a.quoteDate || ''));
+        // 使用 quoteNo 排序，確保同天產生的單據也能按序號正確排列（最新的在最前）
+myQuotesCache.sort((a, b) => (b.quoteNo || '').localeCompare(a.quoteNo || ''));
         renderMyQuotesList();
     }).catch(err => {
         console.error(err);
@@ -1541,7 +1712,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 transactionType: '',
                 invoiceTitle: q.clientName || '',
                 quoteNo: quoteNo,
-                salesName: q.salesName || ''
+                salesName: stripPhoneSuffix(q.salesName)
             });
         });
 
@@ -1581,26 +1752,37 @@ window.unmarkQuoteAsDeal = function(quoteNo) {
    ========================================================= */
 let ordersCache = [];
 
-// 訂單管理系統：一般業務只能看到自己新增的訂單，只有管理員能看到所有人的訂單
+// 訂單管理系統：一般業務只能看到自己新增的訂單，管理員與採購能看到所有人訂單
 window.loadOrdersFromCloud = function() {
     let query = db.collection('orders');
-    if (currentUserRole !== 'admin') {
-        query = query.where('salesName', '==', currentUserName);
+    
+    // 判斷權限：只有當身份「不是」管理員 且 「不是」採購時，才過濾業務姓名
+    // 用「前綴比對」而非完全相等：早期訂單的業務欄位可能存的是「姓名 電話」黏在一起的舊格式，
+    // 前綴比對可以同時抓到新格式（純姓名）跟舊格式（姓名開頭）的訂單，避免舊資料因為格式不同而查不到
+    if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser') {
+        query = query.where('salesName', '>=', currentUserName).where('salesName', '<=', currentUserName + '\uf8ff');
     }
+    
     query.get().then(snapshot => {
         ordersCache = [];
         snapshot.forEach(doc => ordersCache.push({ id: doc.id, ...doc.data() }));
+        
+        // 排序：日期由新到舊 (倒序)
         ordersCache.sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
+        
         renderOrdersList();
     }).catch(err => {
-        console.error(err);
+        console.error("讀取訂單失敗：", err);
         alert('讀取訂單資料失敗，請確認 Firestore 權限設定。');
     });
 };
 
 window.renderOrdersList = function() {
     const tbody = document.getElementById('ordersBody');
-    const keyword = (document.getElementById('orderSearch').value || '').toLowerCase();
+    const searchInput = document.getElementById('orderSearch');
+    if (!tbody || !searchInput) return;
+    
+    const keyword = (searchInput.value || '').toLowerCase();
     tbody.innerHTML = '';
     let shown = 0;
 
@@ -1613,7 +1795,7 @@ window.renderOrdersList = function() {
         tr.innerHTML = `
             <td>${escapeHtml(o.orderDate || '')}</td>
             <td>${escapeHtml(o.customerName || '')}</td>
-            <td>${escapeHtml(o.salesName || '')}</td>
+            <td>${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
             <td>${escapeHtml(o.brand || '')}</td>
             <td>${escapeHtml(o.itemCode || '')}</td>
             <td>${escapeHtml(o.itemName || '')}</td>
@@ -1629,9 +1811,7 @@ window.renderOrdersList = function() {
                 </select>
             </td>
             <td><input type="text" value="${escapeAttr(o.invoiceTitle || '')}" style="width:80px;" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)" ${o.transactionType === '直' ? '' : 'disabled'}></td>
-            
             <td><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" style="width:100px;" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
-            
             <td class="no-print">
                 <button type="button" class="btn-small ${o.isOrdered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isOrdered', ${!o.isOrdered})">已訂貨</button>
                 <button type="button" class="btn-small ${o.isDelivered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isDelivered', ${!o.isDelivered})">已送貨</button>
@@ -1643,25 +1823,35 @@ window.renderOrdersList = function() {
     });
     document.getElementById('ordersEmptyHint').style.display = shown === 0 ? 'block' : 'none';
 };
+
 // 新增：處理狀態切換的函數
+// 先在畫面上立即反應（樂觀更新），不用等雲端回應才變色，感覺上會快很多；
+// 如果雲端寫入失敗，才把狀態復原並提示錯誤
 window.toggleOrderStatus = function(orderId, field, newValue) {
-    db.collection('orders').doc(orderId).update({ [field]: newValue }).then(() => {
-        // 更新本地快取
-        const o = ordersCache.find(x => x.id === orderId);
-        if (o) o[field] = newValue;
+    const o = ordersCache.find(x => x.id === orderId);
+    const previousValue = o ? o[field] : undefined;
+
+    if (o) o[field] = newValue;
+    renderOrdersList();
+
+    db.collection('orders').doc(orderId).update({ [field]: newValue }).catch(err => {
+        if (o) o[field] = previousValue;
         renderOrdersList();
-    }).catch(err => {
-        alert('更新狀態失敗：' + err.message);
+        alert('更新狀態失敗，已還原：' + err.message);
     });
 };
 
 window.updateOrderField = function(orderId, field, value) {
-    db.collection('orders').doc(orderId).update({ [field]: value }).then(() => {
-        const o = ordersCache.find(x => x.id === orderId);
-        if (o) o[field] = value;
+    const o = ordersCache.find(x => x.id === orderId);
+    const previousValue = o ? o[field] : undefined;
+
+    if (o) o[field] = value;
+    if (field === 'transactionType') renderOrdersList();
+
+    db.collection('orders').doc(orderId).update({ [field]: value }).catch(err => {
+        if (o) o[field] = previousValue;
         if (field === 'transactionType') renderOrdersList();
-    }).catch(err => {
-        alert('更新失敗：' + err.message);
+        alert('更新失敗，已還原：' + err.message);
     });
 };
 
@@ -1678,9 +1868,10 @@ window.openOrderModal = function() {
     populateOrderBrandDropdown();
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    ['orderCustomer', 'orderBrand', 'orderItemCode', 'orderItemName', 'orderInvoiceTitle'].forEach(id => {
+    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderInvoiceTitle'].forEach(id => {
         document.getElementById(id).value = '';
     });
+    onOrderBrandSelectChange();
     document.getElementById('orderQty').value = 1;
     document.getElementById('orderUnitPrice').value = 0;
     document.getElementById('orderTotalPrice').value = 0;
@@ -1703,7 +1894,7 @@ window.saveNewOrder = function() {
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
         customerName: document.getElementById('orderCustomer').value.trim(),
-        brand: document.getElementById('orderBrand').value.trim(),
+        brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
         itemCode: document.getElementById('orderItemCode').value.trim(),
         itemName: document.getElementById('orderItemName').value.trim(),
         qty: document.getElementById('orderQty').value,
@@ -1717,6 +1908,10 @@ window.saveNewOrder = function() {
 
     if (!data.orderDate || !data.itemName) {
         alert('請至少填寫訂單日期與品名');
+        return;
+    }
+    if (document.getElementById('orderBrand').value === '其他' && !data.brand) {
+        alert('已選擇「其他」廠牌，請輸入廠牌名稱');
         return;
     }
 
@@ -1737,16 +1932,18 @@ window.exportOrdersByDate = function() {
         return;
     }
 
-    let exportQuery = db.collection('orders')
+    // Firestore 不支援同時對兩個不同欄位做範圍查詢，日期區間已經用掉唯一的範圍條件，
+    // 所以業務姓名這邊改成撈出區間內全部訂單後，在前端依身分過濾（同時比對新舊兩種業務欄位格式）
+    db.collection('orders')
         .where('orderDate', '>=', start)
-        .where('orderDate', '<=', end);
-    if (currentUserRole !== 'admin') {
-        exportQuery = exportQuery.where('salesName', '==', currentUserName);
-    }
-    exportQuery.get().then(snapshot => {
+        .where('orderDate', '<=', end)
+        .get().then(snapshot => {
             const rows = [];
             snapshot.forEach(doc => {
                 const o = doc.data();
+                if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser' && stripPhoneSuffix(o.salesName) !== currentUserName) {
+                    return;
+                }
                 rows.push({
                     '訂單日期': o.orderDate || '',
                     '客戶名稱': o.customerName || '',
@@ -1759,7 +1956,7 @@ window.exportOrdersByDate = function() {
                     '交易方式': o.transactionType || '',
                     '抬頭': o.invoiceTitle || '',
                     '來源估價單': o.quoteNo || '',
-                    '業務': o.salesName || ''
+                    '業務': stripPhoneSuffix(o.salesName)
                 });
             });
 
@@ -1782,17 +1979,30 @@ window.exportOrdersByDate = function() {
 /* =========================================================
    儀器管理系統：客戶儀器維修保養／校正紀錄
    ========================================================= */
+// 儀器管理系統的查看權限：業務只能看到自己名下的儀器，管理員／工程師／採購可看到全部
+function canViewAllEquipment() {
+    return currentUserRole === 'admin' || currentUserRole === 'engineer' || currentUserRole === 'purchaser';
+}
+
 window.loadEquipmentFromCloud = function() {
-    // 移除 currentUserRole 判斷，直接抓取全部儀器
-    db.collection('equipment').orderBy('customerName').get().then(snapshot => {
+    let query = db.collection('equipment');
+    if (canViewAllEquipment()) {
+        query = query.orderBy('customerName');
+    } else {
+        query = query.where('salesName', '==', currentUserName);
+    }
+    query.get().then(snapshot => {
         equipmentList = [];
         snapshot.forEach(doc => {
             equipmentList.push({ id: doc.id, ...doc.data() });
         });
+        if (!canViewAllEquipment()) {
+            equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
+        }
         renderEquipmentList();
     }).catch(err => {
         console.error(err);
-        alert('讀取儀器資料失敗');
+        alert('讀取儀器資料失敗，請確認 Firestore 權限設定。');
     });
 };
 
@@ -1805,6 +2015,8 @@ function addMonths(dateStr, months) {
 }
 
 function getEquipmentStatus(eq) {
+    if (eq.noMaintenance) return { status: 'none', dueDate: null };
+
     const baseDate = eq.lastServiceDate || eq.installDate;
     const cycle = parseInt(eq.cycleMonths) || 12;
     const due = addMonths(baseDate, cycle);
@@ -1828,8 +2040,8 @@ function fmtDate(d) {
     return `${yyyy}/${mm}/${dd}`;
 }
 
-const statusLabel = { ok: '正常', soon: '即將到期', overdue: '已逾期', unknown: '尚無紀錄' };
-const statusClass = { ok: 'status-ok', soon: 'status-soon', overdue: 'status-overdue', unknown: 'status-unknown' };
+const statusLabel = { ok: '正常', soon: '即將到期', overdue: '已逾期', unknown: '尚無紀錄', none: '免保養' };
+const statusClass = { ok: 'status-ok', soon: 'status-soon', overdue: 'status-overdue', unknown: 'status-unknown', none: 'status-none' };
 
 window.renderEquipmentList = function() {
     const tbody = document.getElementById('eqListBody');
@@ -1897,22 +2109,33 @@ function getNextAssetId(salesName) {
 }
 
 // 型號輸入時，若價目表中有對應資料，自動帶入廠牌
+// 保養週期勾選「免保養」時，週期輸入框變成不可用（畫面上直接顯示「免保養」的意思），
+// 狀態計算與到期提醒也會直接略過，不會再出現「即將到期／已逾期」
+window.onEqNoMaintenanceChange = function() {
+    const checkbox = document.getElementById('eqNoMaintenance');
+    const cycleInput = document.getElementById('eqCycle');
+    if (!checkbox || !cycleInput) return;
+    cycleInput.disabled = checkbox.checked;
+};
+
 window.onEqModelChange = function() {
     const modelInput = document.getElementById('eqModel');
-    const brandInput = document.getElementById('eqBrand');
-    if (!modelInput || !brandInput) return;
+    const brandSelect = document.getElementById('eqBrand');
+    if (!modelInput || !brandSelect) return;
 
     const model = modelInput.value.trim();
     if (!model) return;
 
     const match = priceList.find(p => (p.model || '').trim().toLowerCase() === model.toLowerCase());
     if (match && match.brand) {
-        brandInput.value = match.brand;
+        selectBrandInDropdown(brandSelect, match.brand);
+        onEqBrandSelectChange();
     }
 };
 
 window.openEquipmentModal = function(eqId) {
     populateEquipmentSalesDropdown();
+    populateEquipmentBrandDropdown();
 
     const overlay = document.getElementById('eqModalOverlay');
     overlay.dataset.editId = eqId || '';
@@ -1929,12 +2152,23 @@ window.openEquipmentModal = function(eqId) {
         document.getElementById('eqModalTitle').innerText = `${eq.customerName || ''} － ${eq.model || '編輯儀器'}`;
         document.getElementById('eqCustomer').value = eq.customerName || '';
         document.getElementById('eqModel').value = eq.model || '';
-        document.getElementById('eqBrand').value = eq.brand || '';
+        // 既有資料的廠牌如果不在價格表清單裡（例如舊資料、已停產品項），就落到「其他」並帶出原本文字
+        const eqBrandSelect = document.getElementById('eqBrand');
+        if (eq.brand && ![...eqBrandSelect.options].some(o => o.value === eq.brand)) {
+            eqBrandSelect.value = '其他';
+            onEqBrandSelectChange();
+            document.getElementById('eqBrandOther').value = eq.brand;
+        } else {
+            eqBrandSelect.value = eq.brand || '';
+            onEqBrandSelectChange();
+        }
         document.getElementById('eqSerial').value = eq.serialNo || '';
         document.getElementById('eqSales').value = eq.salesName || '';
         document.getElementById('eqLocation').value = eq.location || '';
         document.getElementById('eqInstallDate').value = eq.installDate || '';
         document.getElementById('eqCycle').value = eq.cycleMonths || 12;
+        document.getElementById('eqNoMaintenance').checked = !!eq.noMaintenance;
+        onEqNoMaintenanceChange();
         document.getElementById('eqLastService').value = eq.lastServiceDate || '';
         document.getElementById('eqNotes').value = eq.notes || '';
 
@@ -1946,12 +2180,16 @@ window.openEquipmentModal = function(eqId) {
         document.getElementById('eqLogDesc').value = '';
     } else {
         document.getElementById('eqModalTitle').innerText = '新增儀器';
-        ['eqCustomer', 'eqModel', 'eqBrand', 'eqSerial', 'eqSales', 'eqLocation', 'eqInstallDate', 'eqLastService', 'eqNotes'].forEach(id => {
+        ['eqCustomer', 'eqModel', 'eqSerial', 'eqSales', 'eqLocation', 'eqInstallDate', 'eqLastService', 'eqNotes'].forEach(id => {
             document.getElementById(id).value = '';
         });
+        document.getElementById('eqBrand').value = '';
+        onEqBrandSelectChange();
         document.getElementById('eqCycle').value = 12;
-        // 一般業務新增儀器時，自動帶出自己的名字（下拉選單本身也只列出自己，見 populateEquipmentSalesDropdown）
-        if (currentUserRole !== 'admin') {
+        document.getElementById('eqNoMaintenance').checked = false;
+        onEqNoMaintenanceChange();
+        // 一般業務新增儀器時，自動帶出自己的名字；管理員／工程師／採購新增時可自行從下拉選單挑選負責業務
+        if (!canViewAllEquipment()) {
             document.getElementById('eqSales').value = currentUserName || '';
         }
         deleteBtn.style.display = 'none';
@@ -1989,19 +2227,24 @@ window.saveEquipmentFromModal = function() {
     const editId = document.getElementById('eqModalOverlay').dataset.editId;
     const data = {
         customerName: document.getElementById('eqCustomer').value.trim(),
-        brand: document.getElementById('eqBrand').value.trim(),
+        brand: getBrandFieldValue('eqBrand', 'eqBrandOther'),
         model: document.getElementById('eqModel').value.trim(),
         serialNo: document.getElementById('eqSerial').value.trim(),
         salesName: document.getElementById('eqSales').value.trim(),
         location: document.getElementById('eqLocation').value.trim(),
         installDate: document.getElementById('eqInstallDate').value,
         cycleMonths: parseInt(document.getElementById('eqCycle').value) || 12,
+        noMaintenance: document.getElementById('eqNoMaintenance').checked,
         lastServiceDate: document.getElementById('eqLastService').value,
         notes: document.getElementById('eqNotes').value.trim()
     };
 
     if (!data.customerName || !data.model) {
         alert('請至少填寫客戶名稱與型號');
+        return;
+    }
+    if (document.getElementById('eqBrand').value === '其他' && !data.brand) {
+        alert('已選擇「其他」廠牌，請輸入廠牌名稱');
         return;
     }
 
@@ -2092,9 +2335,18 @@ window.deleteEquipmentLog = function(eqId, logIndex) {
 };
 
 function loadEquipmentFromCloudThenReopen(eqId) {
-    db.collection('equipment').orderBy('customerName').get().then(snapshot => {
+    let query = db.collection('equipment');
+    if (canViewAllEquipment()) {
+        query = query.orderBy('customerName');
+    } else {
+        query = query.where('salesName', '==', currentUserName);
+    }
+    query.get().then(snapshot => {
         equipmentList = [];
         snapshot.forEach(doc => equipmentList.push({ id: doc.id, ...doc.data() }));
+        if (!canViewAllEquipment()) {
+            equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
+        }
         renderEquipmentList();
         openEquipmentModal(eqId);
     });
@@ -2196,6 +2448,8 @@ window.handleEquipmentExcelUpload = function(input) {
                     }
 
                     const assetIdInFile = String(getField(row, ['儀器編號', '編號'])).trim();
+                    const cycleRaw = String(getField(row, ['保養週期', '週期'])).trim();
+                    const isNoMaintenance = /免保養|不保養|不用保養|無需保養/.test(cycleRaw);
                     const recordData = {
                         customerName: customerName,
                         brand: String(getField(row, ['廠牌', '品牌'])).trim(),
@@ -2207,7 +2461,8 @@ window.handleEquipmentExcelUpload = function(input) {
                             : currentUserName,
                         location: String(getField(row, ['放置地點', '地點'])).trim(),
                         installDate: String(getField(row, ['安裝日期'])).trim(),
-                        cycleMonths: parseInt(getField(row, ['保養週期', '週期'])) || 12,
+                        cycleMonths: parseInt(cycleRaw) || 12,
+                        noMaintenance: isNoMaintenance,
                         lastServiceDate: String(getField(row, ['最近保養日期', '最近保養'])).trim(),
                         notes: String(getField(row, ['備註'])).trim()
                     };
@@ -2277,7 +2532,7 @@ window.exportEquipmentExcel = function() {
             '負責業務': eq.salesName || '',
             '放置地點': eq.location || '',
             '安裝日期': eq.installDate || '',
-            '保養週期': eq.cycleMonths || 12,
+            '保養週期': eq.noMaintenance ? '免保養' : (eq.cycleMonths || 12),
             '最近保養日期': eq.lastServiceDate || '',
             '下次到期': fmtDate(dueDate),
             '狀態': statusLabel[status] || '',
@@ -2303,10 +2558,18 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'sales') reloadSalesFromUsers();
     if (tab === 'prices') renderAdminPricesTable();
     if (tab === 'quotes') renderAdminQuotesList();
+    if (tab === 'transfer') populateTransferDropdowns();
 };
 
 function escapeAttr(str) {
     return (str || '').toString().replace(/"/g, '&quot;');
+}
+
+// 早期估價單/訂單的「業務」欄位存的是「姓名 電話」黏在一起的舊格式（例如「周博恩 0937-907-169」），
+// 訂單管理系統的「負責業務」欄位只需要顯示姓名，這裡統一去掉後面的電話號碼
+function stripPhoneSuffix(name) {
+    if (!name) return '';
+    return name.toString().replace(/\s+\d[\d\-]{6,}\s*$/, '').trim();
 }
 
 /* ---------- 業務名單管理（唯讀，資料來源為 users 集合，與登入帳號綁定） ---------- */
@@ -2338,8 +2601,7 @@ function loadAllUsersForAdmin() {
 window.renderAdminSalesTable = function() {
     const tbody = document.getElementById('adminSalesBody');
     tbody.innerHTML = '';
-    const roleLabel = { admin: '管理員', sales: '業務' };
-    allUsersCache.forEach((u) => {
+const roleLabel = ROLE_LABELS;    allUsersCache.forEach((u) => {
         const tr = document.createElement('tr');
         const hasProfile = !!u.name;
         tr.innerHTML = `
@@ -2356,6 +2618,139 @@ window.renderAdminSalesTable = function() {
 window.reloadSalesFromUsers = function() {
     return Promise.all([initSalesList(), loadAllUsersForAdmin()]).then(renderAdminSalesTable);
 };
+
+/* ---------- 人員異動交接：把某位業務名下的資料整批轉移給新業務 ---------- */
+function populateTransferDropdowns() {
+    const fromSelect = document.getElementById('transferFromSales');
+    const toSelect = document.getElementById('transferToSales');
+    if (!fromSelect || !toSelect) return;
+
+    const fromValue = fromSelect.value;
+    const toValue = toSelect.value;
+    const optionsHtml = '<option value="">請選擇</option>' +
+        salesList.filter(s => s.name).map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(s.name)}</option>`).join('');
+    fromSelect.innerHTML = optionsHtml;
+    toSelect.innerHTML = optionsHtml;
+    if (salesList.some(s => s.name === fromValue)) fromSelect.value = fromValue;
+    if (salesList.some(s => s.name === toValue)) toSelect.value = toValue;
+
+    resetTransferPreview();
+}
+
+// 選項或範圍勾選有變動時，先把「查詢筆數」的結果隱藏，避免用舊的筆數誤按執行
+window.resetTransferPreview = function() {
+    const btn = document.getElementById('transferExecuteBtn');
+    const result = document.getElementById('transferResult');
+    if (btn) btn.style.display = 'none';
+    if (result) result.innerText = '';
+};
+
+function getTransferSelection() {
+    const fromName = document.getElementById('transferFromSales').value;
+    const toName = document.getElementById('transferToSales').value;
+    const scopes = [];
+    if (document.getElementById('transferQuotes').checked) scopes.push({ key: 'quotes', label: '估價單', collection: 'quotes' });
+    if (document.getElementById('transferOrders').checked) scopes.push({ key: 'orders', label: '訂單', collection: 'orders' });
+    if (document.getElementById('transferEquipment').checked) scopes.push({ key: 'equipment', label: '儀器', collection: 'equipment' });
+    return { fromName, toName, scopes };
+}
+
+window.previewSalesTransfer = function() {
+    const { fromName, toName, scopes } = getTransferSelection();
+    const resultEl = document.getElementById('transferResult');
+    const executeBtn = document.getElementById('transferExecuteBtn');
+    executeBtn.style.display = 'none';
+
+    if (!fromName || !toName) {
+        resultEl.innerText = '請先選擇原業務與新業務。';
+        return;
+    }
+    if (fromName === toName) {
+        resultEl.innerText = '原業務與新業務不能是同一個人。';
+        return;
+    }
+    if (scopes.length === 0) {
+        resultEl.innerText = '請至少勾選一種要轉移的資料範圍。';
+        return;
+    }
+
+    resultEl.innerText = '查詢中…';
+
+    Promise.all(scopes.map(s => db.collection(s.collection).where('salesName', '==', fromName).get()))
+        .then(snapshots => {
+            const counts = scopes.map((s, i) => ({ ...s, count: snapshots[i].size }));
+            const totalCount = counts.reduce((sum, c) => sum + c.count, 0);
+
+            if (totalCount === 0) {
+                resultEl.innerText = `「${fromName}」目前在勾選的範圍內沒有任何資料，不需要轉移。`;
+                return;
+            }
+
+            resultEl.innerText = `查詢結果（將把「${fromName}」轉移給「${toName}」）：\n` +
+                counts.map(c => `・${c.label}：${c.count} 筆`).join('\n') +
+                `\n共 ${totalCount} 筆。確認無誤後請按「確認執行轉移」。`;
+            executeBtn.style.display = '';
+        })
+        .catch(err => {
+            console.error(err);
+            resultEl.innerText = '查詢失敗：' + err.message;
+        });
+};
+
+window.executeSalesTransfer = function() {
+    const { fromName, toName, scopes } = getTransferSelection();
+    const resultEl = document.getElementById('transferResult');
+    if (!fromName || !toName || fromName === toName || scopes.length === 0) return;
+
+    if (!confirm(`確定要把「${fromName}」名下勾選的資料（${scopes.map(s => s.label).join('、')}）全部改成掛在「${toName}」名下嗎？\n這個動作會直接修改雲端資料，執行後無法一鍵復原，請確認已經按過「查詢筆數」核對過範圍。`)) return;
+
+    document.getElementById('transferExecuteBtn').disabled = true;
+    resultEl.innerText = '轉移中，請稍候…';
+
+    Promise.all(scopes.map(s => db.collection(s.collection).where('salesName', '==', fromName).get()))
+        .then(snapshots => {
+            const updateChains = scopes.map((s, i) => {
+                const refs = snapshots[i].docs.map(d => d.ref);
+                return runFirestoreBatchUpdates(refs, { salesName: toName }).then(() => ({ label: s.label, count: refs.length }));
+            });
+            return Promise.all(updateChains);
+        })
+        .then(results => {
+            const totalCount = results.reduce((sum, r) => sum + r.count, 0);
+            resultEl.innerText = `轉移完成，共更新 ${totalCount} 筆：\n` +
+                results.map(r => `・${r.label}：${r.count} 筆`).join('\n');
+            document.getElementById('transferExecuteBtn').style.display = 'none';
+            document.getElementById('transferExecuteBtn').disabled = false;
+
+            // 若其他分頁的資料快取已經載入過，順便刷新，避免畫面顯示轉移前的舊資料
+            if (typeof allQuotesCache !== 'undefined' && allQuotesCache.length) loadAllQuotesFromCloud();
+            if (typeof ordersCache !== 'undefined' && ordersCache.length) loadOrdersFromCloud();
+            if (typeof equipmentList !== 'undefined' && equipmentList.length) loadEquipmentFromCloud();
+        })
+        .catch(err => {
+            console.error(err);
+            resultEl.innerText = '轉移過程發生錯誤，部分資料可能已經轉移、部分尚未完成，請重新查詢筆數確認目前狀態：' + err.message;
+            document.getElementById('transferExecuteBtn').disabled = false;
+        });
+};
+
+// 依 Firestore batch 500 筆上限，自動切批次執行文件更新
+function runFirestoreBatchUpdates(refs, updateData) {
+    const CHUNK = 450;
+    const chunks = [];
+    for (let i = 0; i < refs.length; i += CHUNK) {
+        chunks.push(refs.slice(i, i + CHUNK));
+    }
+    let chain = Promise.resolve();
+    chunks.forEach(chunk => {
+        chain = chain.then(() => {
+            const batch = db.batch();
+            chunk.forEach(ref => batch.update(ref, updateData));
+            return batch.commit();
+        });
+    });
+    return chain;
+}
 
 /* ---------- 價格表管理 ---------- */
 window.renderAdminPricesTable = function() {
@@ -2477,7 +2872,8 @@ window.handlePriceExcelUpload = function(input) {
 
 /* ---------- 估價單記錄管理 ---------- */
 window.loadAllQuotesFromCloud = function() {
-    db.collection('quotes').orderBy('quoteDate', 'desc').get().then(snapshot => {
+    // 將排序欄位從 quoteDate 改為 quoteNo
+db.collection('quotes').orderBy('quoteNo', 'desc').get().then(snapshot => {
         allQuotesCache = [];
         snapshot.forEach(doc => allQuotesCache.push({ id: doc.id, ...doc.data() }));
         renderAdminQuotesList();
