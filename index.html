@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 停用 iOS Safari 自動把電話號碼變成藍色連結的行為（否則業務電話會被強制加上藍色 tel: 連結樣式，
+         有時還會被重新排版空白，看起來像格式跑掉），估價單輸出時才會維持原本的純黑色文字 -->
+    <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
     <title>又鑫管理系統</title>
     <!-- Firebase SDK (Compat 模式，支援 Firestore + Auth) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
@@ -45,7 +48,7 @@
         }
         .eq-modal-overlay.active { display: flex; }
         .eq-modal-box {
-            background: #fff; border-radius: 8px; padding: 20px 24px; width: 100%;
+            background: #fff; border-radius: 14px; padding: 20px 24px; width: 100%;
             max-width: 780px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); box-sizing: border-box;
         }
         .eq-modal-box h3 { margin-top: 0; color: #003366; }
@@ -223,35 +226,80 @@
             .stamp-section { width: 100%; text-align: center; }
             .total-section { text-align: left; }
 
-            /* 品項表格：桌面版是橫向表格，手機版改成每個品項一張直式卡片 */
-            #itemTable thead { display: none; }
-            #itemTable, #itemTable tbody, #itemTable tr, #itemTable td {
+            /* 品項表格／訂單列表／儀器列表：桌面版都是橫向表格，手機版統一改成「一張卡片一筆資料」，
+               不用縮放或橫向捲動；卡片本身用圓角＋淡陰影做出立體層次，取代生硬的實線邊框，
+               整體間距也拉開一點，讀起來比較不擁擠 */
+            #itemTable thead, #ordersTable thead, #eqListTable thead { display: none; }
+            #itemTable, #itemTable tbody, #itemTable tr, #itemTable td,
+            #ordersTable, #ordersTable tbody, #ordersTable tr, #ordersTable td,
+            #eqListTable, #eqListTable tbody, #eqListTable tr, #eqListTable td {
                 display: block;
                 width: 100%;
             }
-            #itemTable tr {
-                border: 1px solid #ccc;
-                border-radius: 6px;
-                padding: 8px;
-                margin-bottom: 10px;
-                background: #fff;
-            }
-            #itemTable td {
+            #itemTable tr, #ordersTable tr, #eqListTable tr {
                 border: none;
-                padding: 4px 0;
-                text-align: left;
+                border-radius: 14px;
+                padding: 16px;
+                margin-bottom: 16px;
+                background: #fff;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
             }
-            #itemTable td[data-th]::before {
+            /* 項次／數量／含稅單價／未稅單價／含稅小計這幾欄，桌機版用 nth-child 設了 4%／9% 的窄欄寬，
+               那組選擇器比這裡的寫法更「精確」，即使在手機版媒體查詢裡也會贏，導致欄位被擠成一條窄縫、
+               文字被框線卡住看不全。這裡直接用 !important 蓋掉，確保手機版一定是滿版寬度 */
+            #itemTable th:nth-child(1), #itemTable td:nth-child(1),
+            #itemTable th:nth-child(3), #itemTable td:nth-child(3),
+            #itemTable th:nth-child(4), #itemTable td:nth-child(4),
+            #itemTable th:nth-child(5), #itemTable td:nth-child(5),
+            #itemTable th:nth-child(6), #itemTable td:nth-child(6) {
+                width: 100% !important;
+                display: block !important;
+            }
+            #itemTable td, #ordersTable td, #eqListTable td {
+                border: none;
+                padding: 7px 0;
+                text-align: left;
+                font-size: 13px;
+                line-height: 1.4;
+            }
+            #itemTable td:not(:last-child), #ordersTable td:not(:last-child), #eqListTable td:not(:last-child) {
+                border-bottom: 1px solid #f0f0f0;
+            }
+            #itemTable td[data-th]::before, #ordersTable td[data-th]::before, #eqListTable td[data-th]::before {
                 content: attr(data-th) "：";
                 display: block;
-                font-size: 11px;
-                font-weight: bold;
-                color: #666;
-                margin-bottom: 2px;
+                font-size: 10.5px;
+                font-weight: 700;
+                color: #999;
+                letter-spacing: 0.02em;
+                margin-bottom: 3px;
             }
-            #itemTable input, #itemTable select { width: 100%; box-sizing: border-box; }
-            .item-row-pair { flex-direction: column; align-items: stretch; gap: 6px; }
+            #itemTable input, #itemTable select, #itemTable textarea,
+            #ordersTable input, #ordersTable select {
+                width: 100%;
+                box-sizing: border-box;
+                font-size: 14px;
+                padding: 7px 9px;
+                border-radius: 6px;
+            }
+            .item-row-pair { flex-direction: column; align-items: stretch; gap: 8px; }
             .item-row-pair > div { width: 100%; }
+            .field-row { margin-bottom: 6px; }
+            .item-input-group { gap: 6px; }
+
+            #ordersTable td[data-th="操作"], #eqListTable td[data-th="操作"] {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            #eqListTable tr.clickable-row { cursor: default; }
+
+            /* 搜尋欄／日期範圍等工具列，桌面版是固定寬度橫排，手機上會超出螢幕才需要橫向捲動 */
+            .toolbar { flex-direction: column; align-items: stretch; }
+            .toolbar input[type="text"], .toolbar input[type="date"], .toolbar input[type="number"], .toolbar select {
+                width: 100%;
+                box-sizing: border-box;
+            }
         }
 
              .btn-small {
@@ -289,7 +337,7 @@
             <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="再次輸入新密碼">
             <div id="changePasswordMessage" class="password-message"></div>
             <div class="password-actions">
-                <button type="button" class="btn-secondary" onclick="closeChangePasswordModal()">取消</button>
+                <button type="button" class="btn-secondary" id="changePasswordCancelBtn" onclick="closeChangePasswordModal()">取消</button>
                 <button type="button" onclick="handleChangePassword()">儲存新密碼</button>
             </div>
         </div>
@@ -496,7 +544,7 @@
             <button onclick="exportOrdersByDate()">⬇️ 匯出 Excel（供採購下單）</button>
         </div>
 
-        <table>
+        <table id="ordersTable">
             <thead>
                 <tr>
                      <th>訂單日期</th>
@@ -560,6 +608,7 @@
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
             <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
+            <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫用量與清理</div>
         </div>
 
         <!-- 業務名單管理（唯讀，與 Firebase 登入帳號綁定：資料來自 users 集合） -->
@@ -569,7 +618,7 @@
                 <span style="font-size:12px;color:#666;">（下方列出 users 集合裡所有有登入權限的帳號，讓你能一眼看出目前誰能進系統；紅字 UID 代表該帳號還沒補上姓名/代號，不會出現在業務下拉選單裡。新增/移除人員請到 Firebase Console 的 Authentication 建立/停用帳號，並在 Firestore 的 users 集合維護對應文件）</span>
             </div>
             <table>
-                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>角色</th><th>帳號 UID</th></tr></thead>
+                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>角色</th><th>密碼</th><th>帳號 UID</th></tr></thead>
                 <tbody id="adminSalesBody"></tbody>
             </table>
         </div>
@@ -636,6 +685,55 @@
             </div>
             <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
         </div>
+
+        <!-- 資料庫用量與清理：估算目前雲端資料量、並可批量刪除一定日期範圍內的舊估價單／訂單 -->
+        <div id="admin-storage" class="admin-panel" style="display:none;">
+            <h4 style="margin-top:0;">資料庫用量（估計值）</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button onclick="calculateStorageUsage()">🔄 計算目前用量</button>
+                <span style="font-size:12px;color:#666;">
+                    這裡統計的是各集合裡文件內容的資料量，用來大致抓感覺；跟 Firebase 主控台顯示的實際帳單用量會有些微差異（Firestore 實際計費還會另外計算索引等額外儲存空間），僅供參考。
+                    點一次會把整個集合的資料都抓一遍，資料量大時可能需要幾秒到十幾秒。
+                </span>
+            </div>
+            <table>
+                <thead><tr><th>集合</th><th>文件數</th><th>估計大小</th></tr></thead>
+                <tbody id="storageUsageBody"><tr><td colspan="3" style="color:#888;">尚未計算，請按上方「計算目前用量」。</td></tr></tbody>
+            </table>
+
+            <h4 style="margin-top:28px;">批量清理舊資料</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <span style="font-size:12px;color:#666;">
+                    用於定期清掉太久以前、不再需要留存的估價單或訂單紀錄。這個動作會直接從雲端刪除資料，無法復原，執行前請務必先按「查詢筆數」確認範圍，並自行考慮是否需要先匯出備份。
+                </span>
+            </div>
+            <div class="form-grid" style="max-width:640px;margin-top:10px;">
+                <div>
+                    <label>要清理的資料</label>
+                    <select id="cleanupCollection" onchange="resetCleanupPreview()">
+                        <option value="quotes">估價單</option>
+                        <option value="orders">訂單</option>
+                    </select>
+                </div>
+                <div>
+                    <label>刪除範圍（依日期）</label>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <input type="date" id="cleanupStartDate" onchange="resetCleanupPreview()">
+                        <span>至</span>
+                        <input type="date" id="cleanupEndDate" onchange="resetCleanupPreview()">
+                    </div>
+                </div>
+            </div>
+            <div>
+                <button onclick="previewDataCleanup()">🔍 查詢筆數</button>
+            </div>
+            <div id="cleanupResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
+            <div id="cleanupConfirmArea" style="display:none;margin-top:10px;padding:12px;background:#fff5f5;border:1px solid #f5c2c2;border-radius:6px;">
+                <label style="font-weight:bold;color:#cc0000;">請輸入「確定刪除」以解鎖刪除按鈕：</label><br>
+                <input type="text" id="cleanupConfirmInput" oninput="onCleanupConfirmInput()" style="width:200px;margin-top:6px;">
+                <button class="btn-danger" id="cleanupExecuteBtn" disabled onclick="executeDataCleanup()" style="margin-left:8px;">🗑️ 確認刪除</button>
+            </div>
+        </div>
     </div>
 
     <datalist id="clientList"></datalist>
@@ -677,6 +775,7 @@ let priceList = [];
 let activeBrandFilter = 'ALL';
 let currentUser = null;      // 目前登入的 Firebase Auth 使用者物件
 let currentUserRole = null;  // 'admin' / 'sales' / 'purchaser' / 'engineer'
+let mustChangePassword = false;  // 管理員要求這個帳號下次登入必須先改密碼
 const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', engineer: '工程師' };
 let currentUserName = '';    // 目前登入者自己的業務姓名（來自 users 集合）
 let currentUserPhone = '';   // 目前登入者自己的電話
@@ -752,7 +851,16 @@ window.addEventListener('DOMContentLoaded', () => {
                 currentUserName = d.name || '';
                 currentUserPhone = d.phone || '';
                 currentUserCode = d.code || '';
+                mustChangePassword = !!d.mustChangePassword;
                 showApp();
+                if (mustChangePassword) openChangePasswordModal(true);
+
+                // 把自己的登入 Email 同步存回自己的 users 文件，這樣管理員雲端後台才查得到每個帳號的 Email
+                // （用來寄送密碼重設信）；只寫自己的資料，不影響、也不需要動到別人的帳號
+                if (user.email && d.email !== user.email) {
+                    db.collection('users').doc(user.uid).set({ email: user.email }, { merge: true })
+                        .catch(err => console.error('同步 Email 失敗：', err));
+                }
             }).catch(() => {
                 currentUserRole = 'sales';
                 currentUserName = '';
@@ -816,19 +924,36 @@ function showApp() {
     }
 }
 
-window.openChangePasswordModal = function() {
+window.openChangePasswordModal = function(forced) {
     const overlay = document.getElementById('changePasswordOverlay');
     if (!overlay) return;
     document.getElementById('newPassword').value = '';
     document.getElementById('confirmNewPassword').value = '';
-    document.getElementById('changePasswordMessage').innerText = '';
+    const msg = document.getElementById('changePasswordMessage');
+    msg.style.color = '#c00';
+    msg.innerText = forced ? '管理員要求您重新設定密碼，請設定新密碼後才能繼續使用系統。' : '';
+    overlay.dataset.forced = forced ? '1' : '';
+    const cancelBtn = document.getElementById('changePasswordCancelBtn');
+    if (cancelBtn) cancelBtn.style.display = forced ? 'none' : '';
     overlay.classList.add('active');
 };
 
 window.closeChangePasswordModal = function() {
     const overlay = document.getElementById('changePasswordOverlay');
+    // 被管理員強制要求修改密碼時，不能按取消跳過，一定要先設好新密碼才能關閉這個視窗
+    if (overlay && overlay.dataset.forced === '1') return;
     if (overlay) overlay.classList.remove('active');
 };
+
+// 密碼修改成功後，不管是不是強制模式，一律真正關閉視窗（跳過強制檢查）
+function forceCloseChangePasswordModal() {
+    const overlay = document.getElementById('changePasswordOverlay');
+    if (!overlay) return;
+    overlay.dataset.forced = '';
+    const cancelBtn = document.getElementById('changePasswordCancelBtn');
+    if (cancelBtn) cancelBtn.style.display = '';
+    overlay.classList.remove('active');
+}
 
 window.handleChangePassword = function() {
     const newPassword = document.getElementById('newPassword').value;
@@ -852,7 +977,21 @@ window.handleChangePassword = function() {
     currentUser.updatePassword(newPassword).then(() => {
         msg.style.color = '#187a2f';
         msg.innerText = '密碼修改成功。';
-        setTimeout(closeChangePasswordModal, 800);
+
+        const overlay = document.getElementById('changePasswordOverlay');
+        const wasForced = overlay && overlay.dataset.forced === '1';
+
+        if (wasForced) {
+            // 清掉「強制修改密碼」的記號，這樣下次登入就不會再被擋
+            db.collection('users').doc(currentUser.uid).set({ mustChangePassword: false }, { merge: true })
+                .catch(err => console.error('清除強制改密碼記號失敗：', err))
+                .finally(() => {
+                    mustChangePassword = false;
+                    setTimeout(forceCloseChangePasswordModal, 800);
+                });
+        } else {
+            setTimeout(closeChangePasswordModal, 800);
+        }
     }).catch(err => {
         console.error(err);
         if (err && err.code === 'auth/requires-recent-login') {
@@ -1793,16 +1932,16 @@ window.renderOrdersList = function() {
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${escapeHtml(o.orderDate || '')}</td>
-            <td>${escapeHtml(o.customerName || '')}</td>
-            <td>${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td>${escapeHtml(o.brand || '')}</td>
-            <td>${escapeHtml(o.itemCode || '')}</td>
-            <td>${escapeHtml(o.itemName || '')}</td>
-            <td>${escapeHtml(String(o.qty || ''))}</td>
-            <td>${escapeHtml(String(o.unitPrice || ''))}</td>
-            <td>${escapeHtml(String(o.totalPrice || ''))}</td>
-            <td>
+            <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
+            <td data-th="客戶名稱">${escapeHtml(o.customerName || '')}</td>
+            <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
+            <td data-th="廠牌">${escapeHtml(o.brand || '')}</td>
+            <td data-th="貨號">${escapeHtml(o.itemCode || '')}</td>
+            <td data-th="品名">${escapeHtml(o.itemName || '')}</td>
+            <td data-th="數量">${escapeHtml(String(o.qty || ''))}</td>
+            <td data-th="單價">${escapeHtml(String(o.unitPrice || ''))}</td>
+            <td data-th="總價">${escapeHtml(String(o.totalPrice || ''))}</td>
+            <td data-th="交易方式">
                 <select onchange="updateOrderField('${o.id}','transactionType',this.value)">
                     <option value="" ${!o.transactionType ? 'selected' : ''}>未選擇</option>
                     <option value="直" ${o.transactionType === '直' ? 'selected' : ''}>直</option>
@@ -1810,9 +1949,9 @@ window.renderOrdersList = function() {
                     <option value="扣" ${o.transactionType === '扣' ? 'selected' : ''}>扣</option>
                 </select>
             </td>
-            <td><input type="text" value="${escapeAttr(o.invoiceTitle || '')}" style="width:80px;" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)" ${o.transactionType === '直' ? '' : 'disabled'}></td>
-            <td><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" style="width:100px;" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
-            <td class="no-print">
+            <td data-th="抬頭"><input type="text" value="${escapeAttr(o.invoiceTitle || '')}" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)" ${o.transactionType === '直' ? '' : 'disabled'}></td>
+            <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
+            <td class="no-print" data-th="操作">
                 <button type="button" class="btn-small ${o.isOrdered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isOrdered', ${!o.isOrdered})">已訂貨</button>
                 <button type="button" class="btn-small ${o.isDelivered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isDelivered', ${!o.isDelivered})">已送貨</button>
                 <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})">已報帳</button>
@@ -2063,16 +2202,16 @@ window.renderEquipmentList = function() {
         tr.className = 'clickable-row';
         tr.onclick = () => openEquipmentModal(eq.id);
         tr.innerHTML = `
-            <td>${escapeHtml(eq.assetId || '－')}</td>
-            <td>${escapeHtml(eq.customerName || '')}</td>
-            <td>${escapeHtml(eq.brand || '－')}</td>
-            <td>${escapeHtml(eq.model || '')} / ${escapeHtml(eq.serialNo || '')}</td>
-            <td>${escapeHtml(eq.salesName || '未指定')}</td>
-            <td>${escapeHtml(eq.location || '')}</td>
-            <td>${fmtDate(eq.lastServiceDate)}</td>
-            <td>${fmtDate(dueDate)}</td>
-            <td><span class="status-badge ${statusClass[status]}">${statusLabel[status]}</span></td>
-            <td class="no-print">
+            <td data-th="編號">${escapeHtml(eq.assetId || '－')}</td>
+            <td data-th="客戶">${escapeHtml(eq.customerName || '')}</td>
+            <td data-th="廠牌">${escapeHtml(eq.brand || '－')}</td>
+            <td data-th="型號/序號">${escapeHtml(eq.model || '')} / ${escapeHtml(eq.serialNo || '')}</td>
+            <td data-th="負責業務">${escapeHtml(eq.salesName || '未指定')}</td>
+            <td data-th="放置地點">${escapeHtml(eq.location || '')}</td>
+            <td data-th="最近保養/校正">${fmtDate(eq.lastServiceDate)}</td>
+            <td data-th="下次到期">${fmtDate(dueDate)}</td>
+            <td data-th="狀態"><span class="status-badge ${statusClass[status]}">${statusLabel[status]}</span></td>
+            <td class="no-print" data-th="操作">
                 <button type="button" class="btn-small" onclick="event.stopPropagation(); quickAddMaintenanceLog('${eq.id}')">🔧 保養</button>
                 <button type="button" class="btn-danger" onclick="event.stopPropagation(); deleteEquipment('${eq.id}')">刪除</button>
             </td>
@@ -2559,6 +2698,7 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'prices') renderAdminPricesTable();
     if (tab === 'quotes') renderAdminQuotesList();
     if (tab === 'transfer') populateTransferDropdowns();
+    if (tab === 'storage') resetCleanupPreview();
 };
 
 function escapeAttr(str) {
@@ -2585,7 +2725,9 @@ function loadAllUsersForAdmin() {
                 code: d.code || '',
                 name: d.name || '',
                 phone: d.phone || '',
-                role: d.role || 'sales'
+                role: d.role || 'sales',
+                email: d.email || '',
+                mustChangePassword: !!d.mustChangePassword
             });
         });
         allUsersCache.sort((a, b) => {
@@ -2608,10 +2750,46 @@ const roleLabel = ROLE_LABELS;    allUsersCache.forEach((u) => {
             <td>${escapeHtml(u.code || '—')}</td>
             <td>${escapeHtml(u.name || '（尚未設定姓名）')}</td>
             <td>${escapeHtml(u.phone || '—')}</td>
+            <td>${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
             <td>${escapeHtml(roleLabel[u.role] || u.role || '業務')}</td>
+            <td>
+                ${u.mustChangePassword
+                    ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
+                    : `<button type="button" class="btn-small" onclick="toggleMustChangePassword('${u.uid}', true)">🔒 強制下次登入改密碼</button>`}
+                <br>
+                ${u.email
+                    ? `<button type="button" class="btn-small btn-secondary" style="margin-top:4px;" onclick="sendPasswordResetToUser('${escapeAttr(u.email)}')">📧 寄送密碼重設信</button>`
+                    : ''}
+            </td>
             <td style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">${escapeHtml(u.uid)}</td>
         `;
         tbody.appendChild(tr);
+    });
+};
+
+// 強制某帳號下次登入時必須先修改密碼才能使用系統。
+// 說明：前端 Firebase Auth SDK 沒有「管理員直接幫別人設定新密碼」的權限（那需要後端 Admin SDK／Cloud Function，
+// 這個系統目前沒有後端），所以做法是：先在該帳號的資料上做記號，等他本人下次登入時，
+// 系統會強制跳出「修改密碼」視窗、擋住其他操作，直到他自己設好新密碼為止。
+window.toggleMustChangePassword = function(uid, value) {
+    const msg = value ? '確定要要求這個帳號下次登入時必須先修改密碼嗎？' : '確定要取消這個要求嗎？';
+    if (!confirm(msg)) return;
+
+    db.collection('users').doc(uid).set({ mustChangePassword: value }, { merge: true }).then(() => {
+        reloadSalesFromUsers();
+    }).catch(err => {
+        alert('設定失敗：' + err.message);
+    });
+};
+
+// 寄送 Firebase 官方的密碼重設信到指定 Email，對方收信後可以自己點連結設定新密碼
+// （適合對方忘記密碼、登不進來的情況；跟「強制下次登入改密碼」是兩種互補的做法）
+window.sendPasswordResetToUser = function(email) {
+    if (!confirm(`確定要寄送密碼重設信到 ${email} 嗎？`)) return;
+    firebase.auth().sendPasswordResetEmail(email).then(() => {
+        alert(`密碼重設信已寄出到 ${email}。`);
+    }).catch(err => {
+        alert('寄送失敗：' + err.message);
     });
 };
 
@@ -2751,6 +2929,183 @@ function runFirestoreBatchUpdates(refs, updateData) {
     });
     return chain;
 }
+
+// 依 Firestore batch 500 筆上限，自動切批次執行文件刪除
+function runFirestoreBatchDeletes(refs) {
+    const CHUNK = 450;
+    const chunks = [];
+    for (let i = 0; i < refs.length; i += CHUNK) {
+        chunks.push(refs.slice(i, i + CHUNK));
+    }
+    let chain = Promise.resolve();
+    chunks.forEach(chunk => {
+        chain = chain.then(() => {
+            const batch = db.batch();
+            chunk.forEach(ref => batch.delete(ref));
+            return batch.commit();
+        });
+    });
+    return chain;
+}
+
+/* ---------- 資料庫用量估算 ---------- */
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+// 統計各集合的文件數與內容大小；這是「文件 JSON 內容」的估計值，
+// 跟 Firebase 主控台的實際帳單用量（還包含索引等額外儲存空間）不完全相同，僅供大致參考
+window.calculateStorageUsage = function() {
+    const tbody = document.getElementById('storageUsageBody');
+    tbody.innerHTML = '<tr><td colspan="3" style="color:#888;">計算中，請稍候…（資料量大時可能需要幾秒到十幾秒）</td></tr>';
+
+    const collections = [
+        { key: 'quotes', label: '估價單' },
+        { key: 'orders', label: '訂單' },
+        { key: 'equipment', label: '儀器' },
+        { key: 'users', label: '業務／使用者帳號' },
+        { key: 'settings', label: '價格表等系統設定' }
+    ];
+
+    Promise.all(collections.map(c => db.collection(c.key).get()))
+        .then(snapshots => {
+            let totalBytes = 0;
+            let totalDocs = 0;
+            const rows = collections.map((c, i) => {
+                let bytes = 0;
+                snapshots[i].forEach(doc => {
+                    bytes += new Blob([JSON.stringify(doc.data())]).size;
+                });
+                totalBytes += bytes;
+                totalDocs += snapshots[i].size;
+                return { label: c.label, count: snapshots[i].size, bytes };
+            });
+
+            tbody.innerHTML = rows.map(r => `
+                <tr><td>${escapeHtml(r.label)}</td><td>${r.count}</td><td>${formatBytes(r.bytes)}</td></tr>
+            `).join('') + `
+                <tr style="font-weight:bold;background:#f5f5f5;"><td>總計</td><td>${totalDocs}</td><td>${formatBytes(totalBytes)}</td></tr>
+            `;
+        })
+        .catch(err => {
+            tbody.innerHTML = `<tr><td colspan="3" style="color:#cc0000;">計算失敗：${escapeHtml(err.message)}</td></tr>`;
+        });
+};
+
+/* ---------- 批量清理舊資料 ---------- */
+// 支援 YYYY/MM/DD 或 YYYY-MM-DD 兩種常見日期字串格式（估價單的日期是手動輸入的文字欄位，格式不完全統一），
+// 統一轉成 Date 物件方便比較，避免直接用 Firestore 字串範圍查詢時因格式不一致而漏抓
+function parseFlexibleDate(str) {
+    if (!str) return null;
+    const m = str.toString().trim().match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (!m) return null;
+    const d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+    return isNaN(d.getTime()) ? null : d;
+}
+
+const CLEANUP_DATE_FIELD = { quotes: 'quoteDate', orders: 'orderDate' };
+const CLEANUP_LABEL = { quotes: '估價單', orders: '訂單' };
+
+// 換了要清理的集合或日期，先把上一次查詢的結果／解鎖狀態清掉，避免用舊的筆數誤按刪除
+window.resetCleanupPreview = function() {
+    const resultEl = document.getElementById('cleanupResult');
+    const confirmArea = document.getElementById('cleanupConfirmArea');
+    const confirmInput = document.getElementById('cleanupConfirmInput');
+    const executeBtn = document.getElementById('cleanupExecuteBtn');
+    if (resultEl) resultEl.innerText = '';
+    if (confirmArea) confirmArea.style.display = 'none';
+    if (confirmInput) confirmInput.value = '';
+    if (executeBtn) executeBtn.disabled = true;
+};
+
+window.onCleanupConfirmInput = function() {
+    const input = document.getElementById('cleanupConfirmInput');
+    const btn = document.getElementById('cleanupExecuteBtn');
+    btn.disabled = input.value.trim() !== '確定刪除';
+};
+
+// 抓出目前設定的集合＋日期範圍內符合條件的文件（在前端過濾日期，避免格式不一致漏抓）
+function getMatchingCleanupDocs() {
+    const collectionKey = document.getElementById('cleanupCollection').value;
+    const startStr = document.getElementById('cleanupStartDate').value;
+    const endStr = document.getElementById('cleanupEndDate').value;
+    const dateField = CLEANUP_DATE_FIELD[collectionKey];
+
+    if (!startStr || !endStr) return Promise.reject(new Error('請選擇起訖日期'));
+
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    end.setHours(23, 59, 59, 999);
+
+    return db.collection(collectionKey).get().then(snapshot => {
+        const matched = [];
+        snapshot.forEach(doc => {
+            const d = parseFlexibleDate(doc.data()[dateField]);
+            if (d && d >= start && d <= end) matched.push(doc.ref);
+        });
+        return matched;
+    });
+}
+
+window.previewDataCleanup = function() {
+    const resultEl = document.getElementById('cleanupResult');
+    document.getElementById('cleanupConfirmArea').style.display = 'none';
+
+    const startStr = document.getElementById('cleanupStartDate').value;
+    const endStr = document.getElementById('cleanupEndDate').value;
+    if (!startStr || !endStr) {
+        resultEl.innerText = '請選擇起訖日期。';
+        return;
+    }
+
+    const collectionKey = document.getElementById('cleanupCollection').value;
+    resultEl.innerText = '查詢中…';
+
+    getMatchingCleanupDocs().then(refs => {
+        if (refs.length === 0) {
+            resultEl.innerText = `${startStr} 至 ${endStr} 範圍內沒有符合的${CLEANUP_LABEL[collectionKey]}資料，不需要清理。`;
+            return;
+        }
+        resultEl.innerText = `${startStr} 至 ${endStr} 範圍內共有 ${refs.length} 筆${CLEANUP_LABEL[collectionKey]}資料。\n` +
+            `這個動作會直接從雲端刪除，無法復原，建議先自行匯出備份。\n` +
+            `確認要刪除的話，請在下方輸入「確定刪除」解鎖按鈕。`;
+        document.getElementById('cleanupConfirmArea').style.display = 'block';
+        document.getElementById('cleanupConfirmInput').value = '';
+        document.getElementById('cleanupExecuteBtn').disabled = true;
+    }).catch(err => {
+        resultEl.innerText = '查詢失敗：' + err.message;
+    });
+};
+
+window.executeDataCleanup = function() {
+    const input = document.getElementById('cleanupConfirmInput');
+    if (input.value.trim() !== '確定刪除') return;
+
+    const collectionKey = document.getElementById('cleanupCollection').value;
+    const startStr = document.getElementById('cleanupStartDate').value;
+    const endStr = document.getElementById('cleanupEndDate').value;
+    const resultEl = document.getElementById('cleanupResult');
+
+    if (!confirm(`最後確認：即將刪除 ${startStr} 至 ${endStr} 範圍內的所有${CLEANUP_LABEL[collectionKey]}資料，這個動作無法復原，確定要繼續嗎？`)) return;
+
+    document.getElementById('cleanupExecuteBtn').disabled = true;
+    resultEl.innerText = '刪除中，請稍候…';
+
+    getMatchingCleanupDocs().then(refs => {
+        return runFirestoreBatchDeletes(refs).then(() => refs.length);
+    }).then(count => {
+        resultEl.innerText = `已刪除 ${count} 筆${CLEANUP_LABEL[collectionKey]}資料。`;
+        document.getElementById('cleanupConfirmArea').style.display = 'none';
+
+        if (collectionKey === 'quotes' && typeof allQuotesCache !== 'undefined' && allQuotesCache.length) loadAllQuotesFromCloud();
+        if (collectionKey === 'orders' && typeof ordersCache !== 'undefined' && ordersCache.length) loadOrdersFromCloud();
+    }).catch(err => {
+        resultEl.innerText = '刪除過程發生錯誤，部分資料可能已刪除、部分尚未完成，請重新查詢筆數確認目前狀態：' + err.message;
+        document.getElementById('cleanupExecuteBtn').disabled = false;
+    });
+};
 
 /* ---------- 價格表管理 ---------- */
 window.renderAdminPricesTable = function() {
