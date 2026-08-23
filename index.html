@@ -767,6 +767,13 @@ if (!firebase.apps.length) {
 }
 const db = firebase.firestore();
 
+// 登入一次之後，不用每次重新輸入帳號密碼：明確指定用「LOCAL」持久化方式，
+// 登入狀態會存在瀏覽器本機，關掉分頁、關掉瀏覽器、甚至重開手機，只要沒有登出，
+// 下次打開網址還是會自動維持登入狀態（不用再輸入一次帳號密碼）
+firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err => {
+    console.error('設定登入持久化失敗：', err);
+});
+
 let currentCompany = 'yushin';
 let salesList = [
     { name: "預設業務", code: "01", phone: "0912345678" }
@@ -1644,9 +1651,16 @@ window.handleSaveAndPrint = function() {
 
     prepareQuoteForPrint();
 
-    db.collection('quotes').doc(quoteNo).set(quoteData)
-        .then(() => { window.print(); })
-        .catch(() => { window.print(); });
+    // 列印用的內容本來就是畫面上現有的資料，不需要等雲端存檔完成才印出來——
+    // 之前的寫法是「等 Firestore 寫入完成（不管成功或失敗）才 print()」，
+    // 遇到網路慢或 Firestore 回應慢時，點下去要等好幾秒才會跳出列印/PDF視窗，感覺速度很慢。
+    // 改成：立刻列印，雲端存檔在背景進行；如果存檔失敗才另外提示，不會再讓列印被網路卡住。
+    window.print();
+
+    db.collection('quotes').doc(quoteNo).set(quoteData).catch(err => {
+        console.error('儲存估價單到雲端失敗：', err);
+        alert('提醒：這張估價單剛剛存到雲端失敗（' + err.message + '）。列印內容不受影響，但建議稍後檢查網路連線後，再按一次「存檔並列印」，確保雲端資料庫也有存到這筆紀錄。');
+    });
 };
 
 // 列印前的整理工作：
