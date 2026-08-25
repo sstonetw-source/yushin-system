@@ -134,7 +134,9 @@
            上面已經關掉這個藍色點擊效果跟預設外框，下面改用 focus-visible，只有鍵盤操作時才會顯示外框，
            滑鼠/觸控點擊不會再有這個藍色閃爍 */
         button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
-        button:hover { background-color: #002244; }
+        /* 原本這裡有一條 button:hover 深藍色的規則，選擇器優先權比 .status-ok／.btn-secondary 這種
+           單一 class 還高，只要滑鼠移到按鈕上，不管原本是灰色還是綠色都會被蓋成深藍色，
+           完全不符合每顆按鈕本來該有的顏色。已經直接拿掉，滑鼠移過去就是維持按鈕原本的顏色，不會再變深藍 */
         .btn-danger { background-color: #cc0000; padding: 2px 6px; font-size: 11px; }
         .btn-small { padding: 4px 10px; font-size: 12px; }
         .btn-secondary { background-color: #666; }
@@ -478,7 +480,7 @@
                 <button class="btn-secondary" onclick="loadMyQuotesFromCloud()">🔄 重新整理</button>
             </div>
             <table>
-                <thead><tr><th>單號</th><th>抬頭</th><th>客戶名稱</th><th>日期</th><th>總計</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
+                <thead><tr><th>單號</th><th>抬頭</th><th>客戶名稱</th><th id="myQuotesSalesHeader" style="display:none;">業務</th><th>日期</th><th>總計</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="myQuotesBody"></tbody>
             </table>
             <div class="empty-hint" id="myQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
@@ -581,6 +583,12 @@
 
     <!-- ============ 訂單管理系統 ============ -->
     <div id="order-system" class="content-section">
+        <div class="sub-nav no-print">
+            <div class="sub-tab active" id="osub-list" onclick="switchOrderView('list', this)">📦 訂單清單</div>
+            <div class="sub-tab" id="osub-po" style="display:none;" onclick="switchOrderView('po', this)">🧾 我的訂單</div>
+        </div>
+
+        <div id="orderListPanel">
         <div class="toolbar no-print">
             <input type="text" id="orderSearch" placeholder="搜尋客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="renderOrdersList()">
             <button onclick="openOrderModal()">＋ 新增訂單</button>
@@ -619,6 +627,20 @@
             <tbody id="ordersBody"></tbody>
         </table>
         <div class="empty-hint" id="ordersEmptyHint" style="display:none;">目前沒有訂單資料，可點選「＋ 新增訂單」手動新增，或到估價單系統把已成交的估價單匯入。</div>
+        </div>
+
+        <!-- 我的訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
+        <div id="poListPanel" style="display:none;">
+            <div class="toolbar no-print">
+                <input type="text" id="poListSearch" placeholder="搜尋單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
+                <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
+            </div>
+            <table>
+                <thead><tr><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>品項數</th><th>總計金額</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="poListBody"></tbody>
+            </table>
+            <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何訂購單。</div>
+        </div>
     </div>
 
     <!-- 新增訂單彈出視窗 -->
@@ -637,6 +659,10 @@
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
                 <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
                 <div><label>總價</label><input type="number" id="orderTotalPrice" value="0" readonly style="background:#f5f5f5;"></div>
+                <div id="orderCostFieldWrap" style="display:none;">
+                    <label>含稅成本</label>
+                    <input type="number" id="orderCostPrice" step="0.01" placeholder="有貨號且價目表填了成本時會自動帶入">
+                </div>
                 <div>
                     <label>交易方式</label>
                     <select id="orderTransactionType" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'">
@@ -663,23 +689,28 @@
                 <h3 style="margin:0;">產生訂購單</h3>
                 <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">✕ 關閉</button>
             </div>
-            <div class="no-print" style="font-size:12px;color:#666;margin:6px 0 14px;">
+            <div class="no-print" style="font-size:12px;color:#666;margin:6px 0;">
                 單價欄位預設帶入你在訂單清單填的「含稅成本」，這裡還可以再手動調整；抬頭請填要下單的廠商名稱。
+            </div>
+            <div class="sub-nav no-print" style="padding:0;background:none;margin-bottom:14px;">
+                <div class="sub-tab active" id="po-sub-yushin" onclick="switchPoCompany('yushin', this)">又鑫 (YS)</div>
+                <div class="sub-tab" id="po-sub-morningstar" onclick="switchPoCompany('morningstar', this)">辰星 (MS)</div>
+                <div class="sub-tab" id="po-sub-MULTI-LIFE" onclick="switchPoCompany('MULTI-LIFE', this)">鼎新 (DS)</div>
             </div>
 
             <div id="printablePO">
                 <div class="header-container">
                     <div class="header-info">
-                        <h1>又鑫生物科技有限公司</h1>
-                        <h2>YU SHING BIO-TECH CO., LTD.</h2>
-                        <p>地址：臺北市中山區民生東路1段58號9樓之1</p>
-                        <p>Tel: (02)2100-1008 | Fax: (02)2522-1018 | 統編: 12698994</p>
+                        <h1 id="poCompTitle"></h1>
+                        <h2 id="poCompSub"></h2>
+                        <p id="poCompAddr"></p>
+                        <p id="poCompContact"></p>
                     </div>
                 </div>
                 <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">訂 購 單</h2>
 
                 <div class="meta-row-three">
-                    <div><label>抬頭（廠商）：</label><input type="text" id="poVendorName" placeholder="請輸入要下單的廠商名稱"></div>
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" placeholder="請輸入廠商名稱" style="min-width:0;"></div>
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
                     <div><label>訂購日期：</label><input type="date" id="poDate"></div>
                 </div>
@@ -747,7 +778,7 @@
             <div id="priceBrandTabs" class="brand-nav no-print"></div>
 
             <table>
-                <thead><tr><th>中文品名</th><th>英文品名</th><th>貨號</th><th>廠牌</th><th>含稅單價</th></tr></thead>
+                <thead><tr><th>中文品名</th><th>英文品名</th><th>貨號</th><th>廠牌</th><th>含稅單價</th><th>含稅成本</th></tr></thead>
                 <tbody id="adminPricesBody"></tbody>
             </table>
         </div>
@@ -1030,6 +1061,14 @@ function showApp() {
     if (generatePoBtn) {
         generatePoBtn.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
     }
+    const orderCostFieldWrap = document.getElementById('orderCostFieldWrap');
+    if (orderCostFieldWrap) {
+        orderCostFieldWrap.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
+    }
+    const osubPo = document.getElementById('osub-po');
+    if (osubPo) {
+        osubPo.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
+    }
 
     if (!appInitialized) {
         appInitialized = true;
@@ -1204,6 +1243,7 @@ function actuallySwitchMainTab(tabId, el) {
         populateEquipmentSalesDropdown();
         loadEquipmentFromCloud();
     } else if (tabId === 'order-system') {
+        switchOrderView('list', document.getElementById('osub-list'));
         loadOrdersFromCloud();
     } else if (tabId === 'admin-system') {
         reloadSalesFromUsers();
@@ -1547,6 +1587,10 @@ window.onOrderItemCodeChange = function(input) {
 
     const itemNameInput = document.getElementById('orderItemName');
     if (itemNameInput) itemNameInput.value = match.nameCn || match.nameEn || '';
+
+    // 價目表如果有登記這個貨號的成本，自動帶進「含稅成本」欄位（只有採購／管理員看得到這個欄位）
+    const costInput = document.getElementById('orderCostPrice');
+    if (costInput && match.cost) costInput.value = match.cost;
 };
 
 // 客戶名稱自動完成：僅抓「最近 10 筆」估價單取樣，避免隨估價單累積而讀取量無上限增長
@@ -1943,6 +1987,21 @@ window.switchQuoteView = function(view, el) {
 
 window.loadMyQuotesFromCloud = function() {
     const hint = document.getElementById('myQuotesEmptyHint');
+
+    // 管理員在「估價單系統」這邊也直接看得到所有人的估價單，不用特地切去管理員後台查
+    if (currentUserRole === 'admin') {
+        db.collection('quotes').get().then(snapshot => {
+            myQuotesCache = [];
+            snapshot.forEach(doc => myQuotesCache.push({ id: doc.id, ...doc.data() }));
+            myQuotesCache.sort((a, b) => (b.quoteNo || '').localeCompare(a.quoteNo || ''));
+            renderMyQuotesList();
+        }).catch(err => {
+            console.error(err);
+            alert('讀取估價單失敗，請確認 Firestore 權限設定。');
+        });
+        return;
+    }
+
     if (!currentUserName) {
         document.getElementById('myQuotesBody').innerHTML = '';
         hint.style.display = 'block';
@@ -1974,8 +2033,12 @@ window.renderMyQuotesList = function() {
     tbody.innerHTML = '';
     let shown = 0;
 
+    const isAdminViewingAll = currentUserRole === 'admin';
+    const salesHeader = document.getElementById('myQuotesSalesHeader');
+    if (salesHeader) salesHeader.style.display = isAdminViewingAll ? '' : 'none';
+
     myQuotesCache.forEach(q => {
-        const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''}`.toLowerCase();
+        const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
         shown++;
 
@@ -1995,6 +2058,7 @@ window.renderMyQuotesList = function() {
             <td>${escapeHtml(q.quoteNo || '')}</td>
             <td>${escapeHtml(q.clientName || '')}</td>
             <td>${escapeHtml(q.ordererName || '')}</td>
+            ${isAdminViewingAll ? `<td>${escapeHtml(stripPhoneSuffix(q.salesName))}</td>` : ''}
             <td>${escapeHtml(q.quoteDate || '')}</td>
             <td>${escapeHtml(q.grandTotal || '')}</td>
             <td>${statusCell}</td>
@@ -2031,7 +2095,7 @@ window.markQuoteAsDeal = function(quoteNo) {
         (q.items || []).forEach(item => {
             if (!item.nameCn && !item.nameEn && !item.model) return;
             const orderRef = db.collection('orders').doc();
-            batch.set(orderRef, {
+            const orderData = {
                 orderDate: todayStr,
                 customerName: q.ordererName || '',
                 brand: item.brand || '',
@@ -2044,7 +2108,11 @@ window.markQuoteAsDeal = function(quoteNo) {
                 invoiceTitle: q.clientName || '',
                 quoteNo: quoteNo,
                 salesName: stripPhoneSuffix(q.salesName)
-            });
+            };
+            // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
+            const priceMatch = item.model ? priceList.find(p => p.model && p.model.trim() === item.model.trim()) : null;
+            if (priceMatch && priceMatch.cost) orderData.costPrice = priceMatch.cost;
+            batch.set(orderRef, orderData);
         });
 
         batch.update(db.collection('quotes').doc(quoteNo), { dealClosed: true, dealClosedAt: todayStr });
@@ -2188,12 +2256,92 @@ window.toggleAllOrderSelect = function(checkbox) {
     document.querySelectorAll('.order-select-checkbox').forEach(cb => { cb.checked = checkbox.checked; });
 };
 
+// 訂單管理系統的子分頁：「訂單清單」跟「我的訂單」（已經產生過的訂購單紀錄，只有採購／管理員看得到）
+window.switchOrderView = function(view, el) {
+    document.querySelectorAll('#order-system .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
+    if (el) el.classList.add('active');
+
+    document.getElementById('orderListPanel').style.display = view === 'list' ? 'block' : 'none';
+    document.getElementById('poListPanel').style.display = view === 'po' ? 'block' : 'none';
+
+    if (view === 'po') loadMyPurchaseOrders();
+};
+
+let poListCache = [];
+
+// 「我的訂單」列出所有已經產生過的訂購單紀錄（不分是誰產生的，只要是採購／管理員都看得到全部）
+window.loadMyPurchaseOrders = function() {
+    db.collection('purchaseOrders').get().then(snapshot => {
+        poListCache = [];
+        snapshot.forEach(doc => poListCache.push({ id: doc.id, ...doc.data() }));
+        poListCache.sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
+        renderPoList();
+    }).catch(err => {
+        console.error(err);
+        alert('讀取訂購單紀錄失敗，請確認 Firestore 權限設定。');
+    });
+};
+
+window.renderPoList = function() {
+    const tbody = document.getElementById('poListBody');
+    const searchInput = document.getElementById('poListSearch');
+    if (!tbody || !searchInput) return;
+    const keyword = (searchInput.value || '').toLowerCase();
+    tbody.innerHTML = '';
+    let shown = 0;
+
+    poListCache.forEach(po => {
+        const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
+        if (keyword && !searchable.includes(keyword)) return;
+        shown++;
+
+        const items = po.items || [];
+        const subtotal = items.reduce((sum, item) => sum + (item.qty * item.unitPrice), 0);
+        const grandTotal = Math.round(subtotal) + Math.round(subtotal * 0.05);
+        const companyInfo = companyData[po.company];
+        const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${escapeHtml(po.poNo || '')}</td>
+            <td>${escapeHtml(companyLabel)}</td>
+            <td>${escapeHtml(po.vendorName || '')}</td>
+            <td>${escapeHtml(po.buyerName || '')}</td>
+            <td>${escapeHtml(po.poDate || '')}</td>
+            <td>${items.length}</td>
+            <td>${grandTotal.toLocaleString()}</td>
+            <td class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
+};
+
+// 把「我的訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
+window.reprintPurchaseOrder = function(poId) {
+    const po = poListCache.find(p => p.id === poId);
+    if (!po) return;
+
+    poItems = (po.items || []).map(item => ({ ...item }));
+    switchPoCompany(po.company || 'yushin', null, true);
+
+    document.getElementById('poVendorName').value = po.vendorName || '';
+    document.getElementById('poBuyerName').innerText = po.buyerName || '';
+    document.getElementById('poDate').value = po.poDate || '';
+    document.getElementById('poNo').innerText = po.poNo || '';
+
+    renderPoItemsTable();
+    document.getElementById('poModalOverlay').classList.add('active');
+};
+
 /* =========================================================
    產生訂購單：採購把選好的訂單品項，整理成一張要發給供應商的「訂購單」，
    格式跟估價單相同，但抬頭是廠商、單價預設帶「含稅成本」而不是賣客戶的售價，
-   而且單價在這裡還可以再調整
+   而且單價在這裡還可以再調整；也可以切換又鑫／辰星／鼎新，套用各公司的抬頭資訊跟單號代碼
    ========================================================= */
 let poItems = [];
+let poCurrentCompany = 'yushin';
 
 window.openPurchaseOrderModal = function() {
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
@@ -2205,13 +2353,18 @@ window.openPurchaseOrderModal = function() {
     poItems = checked.map(cb => {
         const o = ordersCache.find(x => x.id === cb.dataset.orderId);
         if (!o) return null;
-        const cost = parseFloat(o.costPrice);
+        let cost = parseFloat(o.costPrice);
+        // 這筆訂單本身還沒填成本的話，再用貨號查一次目前的價目表，價目表如果有登記成本就直接帶入
+        if (!isFinite(cost) || cost <= 0) {
+            const priceMatch = o.itemCode ? priceList.find(p => p.model && p.model.trim() === o.itemCode.trim()) : null;
+            if (priceMatch && priceMatch.cost) cost = parseFloat(priceMatch.cost);
+        }
         return {
             itemName: o.itemName || '',
             itemCode: o.itemCode || '',
             brand: o.brand || '',
             qty: parseFloat(o.qty) || 1,
-            // 單價優先帶「含稅成本」；如果那筆訂單還沒填成本，退回用原本賣客戶的單價，避免直接帶 0 出去
+            // 單價優先帶「含稅成本」；如果連價目表都查不到成本，退回用原本賣客戶的單價，避免直接帶 0 出去
             unitPrice: isFinite(cost) && cost > 0 ? cost : (parseFloat(o.unitPrice) || 0)
         };
     }).filter(Boolean);
@@ -2220,14 +2373,64 @@ window.openPurchaseOrderModal = function() {
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     const today = new Date();
     document.getElementById('poDate').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    document.getElementById('poNo').innerText = `PO-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${String(Math.floor(Math.random() * 900) + 100)}`;
 
     renderPoItemsTable();
+    // 預設用估價單系統目前選的那間公司，比較符合平常的使用情境
+    switchPoCompany(currentCompany || 'yushin');
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
 window.closePurchaseOrderModal = function() {
     document.getElementById('poModalOverlay').classList.remove('active');
+};
+
+// 切換訂購單要用哪間公司的抬頭／單號代碼（又鑫 YS／辰星 MS／鼎新 DS），跟估價單的公司切換邏輯一致
+window.switchPoCompany = function(compKey, el, skipNoGen) {
+    poCurrentCompany = compKey;
+    document.querySelectorAll('#poModalOverlay .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
+    const targetTab = document.getElementById(`po-sub-${compKey}`);
+    if (targetTab) targetTab.classList.add('active');
+    else if (el) el.classList.add('active');
+
+    const info = companyData[compKey];
+    if (info) {
+        document.getElementById('poCompTitle').innerText = info.title;
+        document.getElementById('poCompSub').innerText = info.sub;
+        document.getElementById('poCompAddr').innerText = info.addr;
+        document.getElementById('poCompContact').innerHTML = info.contact;
+    }
+
+    // 重新列印「我的訂單」裡舊有的訂購單時，要沿用當初存的單號，不能在這裡重新產生一個新的
+    if (!skipNoGen) generatePoNo();
+};
+
+// 訂購單號格式：PO-{公司代碼}-{日期}-{採購代號}-{流水號}，跟估價單單號的組成方式一致，
+// 例如又鑫、代號 03 的採購，會是 PO-YS-20260824-03-01。
+// 流水號是真的依照雲端已經產生過幾張訂購單去算「目前最大流水號 + 1」，不是隨機亂數，
+// 邏輯跟估價單的 generateQuoteNo 一致，這樣才能保證同一天同一間公司不會撞號
+window.generatePoNo = async function() {
+    const info = companyData[poCurrentCompany];
+    if (!info) return;
+    const dateStr = getFormattedDateCode();
+    const purchaserCode = currentUserCode || '01';
+    const prefix = `PO-${info.prefix}-${dateStr}-${purchaserCode}-`;
+
+    try {
+        const snapshot = await db.collection('purchaseOrders')
+            .where('poNo', '>=', prefix)
+            .where('poNo', '<=', prefix + '\uf8ff')
+            .get();
+
+        let maxSeq = 0;
+        snapshot.forEach(doc => {
+            const seqStr = (doc.data().poNo || '').split('-').pop();
+            const seq = parseInt(seqStr, 10);
+            if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+        });
+        document.getElementById('poNo').innerText = `${prefix}${String(maxSeq + 1).padStart(2, '0')}`;
+    } catch (e) {
+        document.getElementById('poNo').innerText = `${prefix}01`;
+    }
 };
 
 function renderPoItemsTable() {
@@ -2287,6 +2490,22 @@ window.printPurchaseOrder = function() {
             window.print();
         });
     });
+
+    // 背景把這張訂購單存到雲端（不擋列印），主要是為了讓「流水號」能正確累計，
+    // 下一張訂購單才不會撞號；存檔失敗不影響這次列印，只是下一張單號可能會重複，
+    // 需要的話可以手動微調
+    const poNo = document.getElementById('poNo').innerText;
+    db.collection('purchaseOrders').doc(poNo).set({
+        poNo,
+        company: poCurrentCompany,
+        vendorName: document.getElementById('poVendorName').value.trim(),
+        buyerName: currentUserName || '',
+        poDate: document.getElementById('poDate').value,
+        items: poItems,
+        createdAt: new Date().toISOString()
+    }).catch(err => {
+        console.error('儲存訂購單紀錄失敗：', err);
+    });
 };
 
 window.addEventListener('afterprint', () => {
@@ -2344,6 +2563,7 @@ window.openOrderModal = function() {
     document.getElementById('orderQty').value = 1;
     document.getElementById('orderUnitPrice').value = 0;
     document.getElementById('orderTotalPrice').value = 0;
+    document.getElementById('orderCostPrice').value = '';
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
     document.getElementById('orderModalOverlay').classList.add('active');
@@ -2374,6 +2594,8 @@ window.saveNewOrder = function() {
         quoteNo: '',
         salesName: currentUserName || ''
     };
+    const costInputVal = document.getElementById('orderCostPrice').value;
+    if (costInputVal !== '') data.costPrice = parseFloat(costInputVal);
 
     if (!data.orderDate || !data.itemName) {
         alert('請至少填寫訂單日期與品名');
@@ -3456,6 +3678,7 @@ window.renderAdminPricesTable = function() {
             <td>${escapeHtml(p.model || '')}</td>
             <td>${escapeHtml(p.brand || '')}</td>
             <td>${(p.price || 0).toLocaleString()}</td>
+            <td>${p.cost ? p.cost.toLocaleString() : '<span style="color:#bbb;">未提供</span>'}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -3523,9 +3746,11 @@ window.handlePriceExcelUpload = function(input) {
                     }
 
                     const price = parseFloat(getField(row, ['含稅單價', '單價', '價格'])) || 0;
+                    const costRaw = getField(row, ['含稅成本', '成本', '進貨成本']);
+                    const cost = costRaw === '' ? null : parseFloat(costRaw) || 0;
 
                     if (nameCn || nameEn || model) {
-                        imported.push({ nameCn, nameEn, model, brand, price });
+                        imported.push({ nameCn, nameEn, model, brand, price, cost });
                     }
                 });
             });
