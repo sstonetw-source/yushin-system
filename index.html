@@ -15,6 +15,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <!-- SheetJS 用於讀取 Excel (.xlsx) 檔 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 0; }
         .nav-tabs { background: #003366; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; align-items: center; }
@@ -180,8 +181,10 @@
         .empty-hint { color: #888; font-size: 13px; padding: 15px; text-align: center; }
 
         .brand-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 2px solid #003366; padding-bottom: 6px; }
-        .brand-tab { padding: 4px 12px; background: #e0e0e0; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 13px; font-weight: bold; color: #444; }
+        .brand-tab { padding: 4px 12px; background: #e0e0e0; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 13px; font-weight: bold; color: #444; position: relative; }
         .brand-tab.active { background: #003366; color: #fff; }
+        .brand-tab-delete { margin-left: 8px; opacity: 0.6; font-weight: normal; }
+        .brand-tab-delete:hover { opacity: 1; color: #e74c3c; }
 
         @media print {
             html, body { color-scheme: light; }
@@ -288,24 +291,6 @@
            只在螢幕（screen）套用，列印/存 PDF 一律用上面 @media print 或原本桌面版的表格排版，
            所以「輸出」出來的估價單格式完全不受這裡影響 */
         @media screen and (max-width: 640px) {
-            body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
-            .nav-tabs { display: none; }
-            .content-section { padding: 12px; min-height: calc(100vh - 76px); box-shadow: none; }
-            .mobile-bottom-nav { display: flex; }
-            .mobile-bottom-nav button { flex: 1; min-width: 0; padding: 8px 3px 6px; border-radius: 0; background: transparent; color: #52606d; font-size: 11px; line-height: 1.25; }
-            .mobile-bottom-nav button.active { color: #003366; font-weight: bold; }
-            .mobile-bottom-nav .mobile-nav-icon { display: block; font-size: 20px; margin-bottom: 2px; }
-
-            .mobile-quote-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0 0 12px; }
-            .mobile-quote-steps button { padding: 8px 2px; font-size: 11px; background: #dce7f1; color: #345; }
-            .mobile-quote-steps button.active { background: #003366; color: #fff; }
-            #quoteCreatePanel[data-mobile-step="1"] .mobile-quote-step:not([data-mobile-step="1"]),
-            #quoteCreatePanel[data-mobile-step="2"] .mobile-quote-step:not([data-mobile-step="2"]),
-            #quoteCreatePanel[data-mobile-step="3"] .mobile-quote-step:not([data-mobile-step="3"]),
-            #quoteCreatePanel[data-mobile-step="4"] .mobile-quote-step:not([data-mobile-step="4"]) { display: none; }
-            .mobile-quote-step[data-mobile-step="4"] { text-align: center !important; margin-top: 12px !important; }
-            .mobile-quote-step[data-mobile-step="4"] button { width: 100%; margin: 4px 0; min-height: 46px; }
-
             .meta-row-three { flex-direction: column; gap: 8px; }
             .meta-row-three > div { width: 100%; box-sizing: border-box; }
 
@@ -379,13 +364,6 @@
                 flex-wrap: wrap;
                 gap: 6px;
             }
-            #ordersTable td[data-th="操作"] .btn-small {
-                flex: 1 1 calc(50% - 6px);
-                min-height: 46px;
-                padding: 8px 6px;
-                font-size: 14px;
-            }
-            #ordersTable td[data-th="操作"] .btn-danger { flex-basis: 100%; min-height: 42px; }
             #eqListTable tr.clickable-row { cursor: default; }
 
             /* 搜尋欄／日期範圍等工具列，桌面版是固定寬度橫排，手機上會超出螢幕才需要橫向捲動 */
@@ -396,7 +374,6 @@
             }
         }
 
-        .mobile-bottom-nav { display:none; position:fixed; z-index:700; left:0; right:0; bottom:0; min-height:64px; padding-bottom:env(safe-area-inset-bottom); background:#fff; border-top:1px solid #d7dee5; box-shadow:0 -2px 10px rgba(0,0,0,.08); }
 
              .btn-small {
             margin: 1px;
@@ -459,12 +436,6 @@
             <button class="btn-secondary" onclick="handleLogout()">登出</button>
         </div>
     </div>
-    <nav class="mobile-bottom-nav no-print" aria-label="手機版主選單">
-        <button type="button" class="active" data-mobile-tab="quote-system" onclick="switchMobileMainTab('quote-system')"><span class="mobile-nav-icon">📄</span>估價單</button>
-        <button type="button" data-mobile-tab="order-system" onclick="switchMobileMainTab('order-system')"><span class="mobile-nav-icon">📦</span>訂單</button>
-        <button type="button" data-mobile-tab="equipment-system" onclick="switchMobileMainTab('equipment-system')"><span class="mobile-nav-icon">🔬</span>儀器</button>
-        <button type="button" data-mobile-tab="profile" onclick="openMobileProfile()"><span class="mobile-nav-icon">👤</span>我的資料</button>
-    </nav>
 
     <!-- ============ 估價單系統 ============ -->
     <div id="quote-system" class="content-section active">
@@ -473,19 +444,13 @@
             <div class="sub-tab" id="qsub-my" onclick="switchQuoteView('my', this)">📋 我的估價單</div>
         </div>
 
-        <div id="quoteCreatePanel" data-mobile-step="1">
-        <div class="mobile-quote-steps no-print">
-            <button type="button" class="active" data-mobile-step-button="1" onclick="switchMobileQuoteStep(1)">1 客戶</button>
-            <button type="button" data-mobile-step-button="2" onclick="switchMobileQuoteStep(2)">2 品項</button>
-            <button type="button" data-mobile-step-button="3" onclick="switchMobileQuoteStep(3)">3 金額</button>
-            <button type="button" data-mobile-step-button="4" onclick="switchMobileQuoteStep(4)">4 輸出</button>
-        </div>
+        <div id="quoteCreatePanel">
         <div class="sub-nav company-sub-nav no-print">
             <div class="sub-tab active" id="sub-yushin" onclick="switchCompany('yushin', this)">又鑫 (YS)</div>
             <div class="sub-tab" id="sub-morningstar" onclick="switchCompany('morningstar', this)">辰星 (MS)</div>
             <div class="sub-tab" id="sub-MULTI-LIFE" onclick="switchCompany('MULTI-LIFE', this)">鼎新 (DS)</div>
         </div>
-        <div class="no-print mobile-quote-step" data-mobile-step="1" style="margin: 15px 0; background: #eef5ff; padding: 10px; border-radius: 5px;">
+        <div class="no-print" style="margin: 15px 0; background: #eef5ff; padding: 10px; border-radius: 5px;">
             <label>🔍 雲端調取舊估價單：</label>
             <input type="text" id="searchQuoteNo" placeholder="請輸入完整估價單號" style="width: 280px;">
             <button onclick="loadQuoteFromCloud()">載入估價單</button>
@@ -503,7 +468,7 @@
                     <h2 style="margin-top: 3px; text-decoration: underline;">估 價 單</h2>
                 </div>
             </div>
-            <div class="meta-section mobile-quote-step" data-mobile-step="1">
+            <div class="meta-section">
                 <div class="meta-row"><label>抬頭：</label><input type="text" id="clientName" list="clientList"></div>
                 <div class="meta-row no-print"><label>客戶名稱：</label><input type="text" id="ordererName" placeholder="訂購人姓名（僅供內部管理，不會印在估價單上）"></div>
                 <div class="meta-row-three">
@@ -512,18 +477,18 @@
                     <div><label>單號：</label><input type="text" id="quoteNo" style="font-weight:bold;"></div>
                 </div>
             </div>
-            <div class="table-wrap mobile-quote-step" data-mobile-step="2">
+            <div class="table-wrap">
                 <table id="itemTable">
                     <thead><tr><th>項次</th><th>品名 / 規格 / 型號說明</th><th>數量</th><th>含稅單價</th><th>未稅單價</th><th>含稅小計</th><th class="no-print">操作</th></tr></thead>
                     <tbody id="quoteItems"></tbody>
                 </table>
             </div>
-            <div class="no-print mobile-quote-step" data-mobile-step="2" style="margin-bottom: 8px;">
+            <div class="no-print" style="margin-bottom: 8px;">
                 <button type="button" onclick="addQuoteRow()">＋ 新增品項</button>
                 <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依目前價目表更新所有品項單價</button>
             </div>
-            <div class="footer-note mobile-quote-step" data-mobile-step="3">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
-            <div class="bottom-layout mobile-quote-step" data-mobile-step="3">
+            <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
+            <div class="bottom-layout">
                 <div class="stamp-section"><img id="companyStamp" src=""></div>
                 <div class="total-section">
                     <p>銷售額合計：NT$ <span id="subtotalAmount">0</span></p>
@@ -535,12 +500,32 @@
             </div>
         </div>
 
-        <div class="no-print mobile-quote-step" data-mobile-step="4" style="text-align: center; margin-top: 25px;">
+        <div class="no-print" style="text-align: center; margin-top: 25px;">
             <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">🖨️ 列印 / 存為 PDF（自動同步雲端）</button>
-            <button type="button" style="background:#1a73e8;font-size:16px;padding:10px 24px;" onclick="shareCurrentQuote()">📤 傳送報價單</button>
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
+            <button type="button" style="background: #8a5a00; color:#fff; font-size: 16px; padding: 10px 24px; border:none; border-radius:4px; cursor:pointer;" onclick="openCompanionQuoteModal()">📑 製作三估單</button>
         </div>
         </div> <!-- /#quoteCreatePanel -->
+
+        <!-- 三估單（陪估）設定視窗 -->
+        <div id="companionQuoteModal" class="no-print" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:999; align-items:center; justify-content:center;">
+            <div style="background:#fff; border-radius:8px; padding:24px; width:90%; max-width:420px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+                <h3 style="margin-top:0; color:#003366;">製作三估單（陪估）</h3>
+                <p style="font-size:13px; color:#666;">陪估會依主估的品項內容，用選定公司自己的估價單格式產生 Excel 檔，單價自動比主估貴指定的百分比。</p>
+                <div style="margin-bottom:14px;">
+                    <label style="display:block; font-weight:bold; margin-bottom:4px;">陪估一（貴 10%）</label>
+                    <select id="companionSelect1" style="width:100%; padding:6px;"></select>
+                </div>
+                <div style="margin-bottom:18px;">
+                    <label style="display:block; font-weight:bold; margin-bottom:4px;">陪估二（貴 12%）</label>
+                    <select id="companionSelect2" style="width:100%; padding:6px;"></select>
+                </div>
+                <div style="text-align:right;">
+                    <button type="button" class="btn-secondary" onclick="closeCompanionQuoteModal()">取消</button>
+                    <button type="button" style="background:#003366; color:#fff; padding:8px 20px; border:none; border-radius:4px; cursor:pointer;" onclick="generateCompanionQuotes()">產生並下載</button>
+                </div>
+            </div>
+        </div>
 
         <!-- 我的估價單：只列出目前登入者自己名下的估價單 -->
         <div id="myQuotesPanel" style="display:none;">
@@ -862,7 +847,11 @@
             <div class="toolbar no-print">
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">（⚠️ 上傳 Excel 會整份取代目前雲端的價格表，不會保留舊資料，且不開放在此逐筆編輯；Excel 可加入「類型」欄位，填寫「儀器」或「試劑耗材」供銷售分析分類；未填廠牌時會以工作表名稱作為廠牌）</span>
+                <span style="font-size:12px;color:#666;">（Excel 中每個工作表的名稱即為廠牌名稱，可一次上傳多個廠牌；同一廠牌再次上傳會只取代該廠牌資料。工作表可加入「類型」欄位，填寫「儀器」或「試劑耗材」供銷售分析分類）</span>
+            </div>
+            <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
+                <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
+                <div style="height:8px;background:#d9e5ef;border-radius:999px;overflow:hidden;margin-top:6px;"><div id="priceUploadProgressBar" style="height:100%;width:0;background:#1a73a8;transition:width .2s ease;"></div></div>
             </div>
 
             <!-- 廠牌動態切換分頁 -->
@@ -1458,32 +1447,7 @@ function actuallySwitchMainTab(tabId, el) {
         renderAdminPricesTable();
         loadAllQuotesFromCloud();
     }
-    updateMobileBottomNav(tabId);
 }
-
-window.switchMobileMainTab = function(tabId) {
-    switchMainTab(tabId);
-};
-
-function updateMobileBottomNav(tabId) {
-    document.querySelectorAll('.mobile-bottom-nav [data-mobile-tab]').forEach(button => {
-        button.classList.toggle('active', button.dataset.mobileTab === tabId);
-    });
-}
-
-window.openMobileProfile = function() {
-    openChangePasswordModal();
-};
-
-window.switchMobileQuoteStep = function(step) {
-    const panel = document.getElementById('quoteCreatePanel');
-    if (!panel) return;
-    panel.dataset.mobileStep = String(step);
-    document.querySelectorAll('[data-mobile-step-button]').forEach(button => {
-        button.classList.toggle('active', button.dataset.mobileStepButton === String(step));
-    });
-    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-};
 
 /* =========================================================
    估價單系統
@@ -1699,12 +1663,36 @@ function populateEquipmentSalesDropdown() {
 }
 
 function loadPriceListFromCloud() {
-    db.collection('settings').doc('prices').get().then(doc => {
-        if (doc.exists) {
-            priceList = doc.data().list || [];
-            refreshPriceDatalists();
-            renderKeyStatisticBrands();
+    const priceDoc = db.collection('settings').doc('prices');
+    // 新版每個廠牌各存一份文件；舊版仍保留從同一文件的 list 欄位讀取，避免既有資料失效。
+    priceDoc.get().then(doc => {
+        const meta = doc.exists ? doc.data() : {};
+        if (meta.storage === 'brands' && Array.isArray(meta.brands)) {
+            // 資料量大的廠牌會被拆成多份分片文件（price-brand-xxx、price-brand-xxx-part1...），
+            // 這裡依 chunkCount 展開所有分片 ID 一起讀回，再合併成完整清單。
+            const chunkDocIds = [];
+            meta.brands.forEach(brand => {
+                const count = brand.chunkCount || 1;
+                for (let i = 0; i < count; i++) {
+                    chunkDocIds.push(i === 0 ? brand.id : `${brand.id}-part${i}`);
+                }
+            });
+            return Promise.all(chunkDocIds.map(id =>
+                db.collection('settings').doc(id).get()
+            )).then(docs => {
+                const replacementBrands = new Set(meta.brands.map(brand => brand.name));
+                const legacyItems = Array.isArray(meta.list) ? meta.list.filter(item => !replacementBrands.has((item.brand || '').trim())) : [];
+                priceList = legacyItems.concat(docs.flatMap(brandDoc => {
+                    const data = brandDoc.exists ? brandDoc.data() : {};
+                    return Array.isArray(data.items) ? data.items : [];
+                }));
+                refreshPriceDatalists();
+                renderKeyStatisticBrands();
+            });
         }
+        priceList = meta.list || [];
+        refreshPriceDatalists();
+        renderKeyStatisticBrands();
     }).catch(() => {});
     loadSalesStatisticsSettings();
     loadCompanyAgencyBrandSettings();
@@ -2268,6 +2256,266 @@ function numberToChineseWords(num) {
     return s;
 }
 
+// ====================================================================
+// 三估單（陪估）功能
+// 用主估的品項內容，套進選定公司自己的 Excel 範本格式，單價依比例調高後輸出下載。
+// 範本檔需另外放到網站可存取的路徑（fileUrl），開發者之後新增公司時要在這裡補設定，
+// 並準備對應的 Excel 範本檔（未來會再做成網頁上的設定介面）。
+// ====================================================================
+const COMPANION_TEMPLATES = {
+    yushin: {
+        name: '又鑫生物科技有限公司',
+        fileUrl: 'templates/companion-yushin.xlsx',
+        sheetName: 'sheet',
+        prefix: 'YS',
+        maxItems: 19,
+        fill: fillYushinCompanionSheet
+    },
+    morningstar: {
+        name: '辰星生物科技有限公司',
+        fileUrl: 'templates/companion-morningstar.xlsx',
+        sheetName: '估價單',
+        prefix: 'MS',
+        maxItems: 14,
+        fill: fillMorningstarCompanionSheet
+    },
+    'MULTI-LIFE': {
+        name: '鼎新生物科技有限公司',
+        fileUrl: 'templates/companion-multilife.xlsx',
+        sheetName: '估價單',
+        prefix: 'DS',
+        maxItems: 15,
+        fill: fillMultiLifeCompanionSheet
+    }
+};
+
+// 民國年日期代碼（例如 2026/8/30 -> "1150830"），陪估公司的單號沿用各自過去的編號慣例，跟主站台的西元年編號規則不同。
+function companionMinguoDateCode(dateObj) {
+    const y = dateObj.getFullYear() - 1911;
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
+}
+
+// 依公司自己的編號規則（前綴+民國年月日+序號）產生單號，序號依 Firestore 內已存在的紀錄往後遞增。
+async function generateCompanionQuoteNo(prefix, quoteDateStr) {
+    const dateObj = quoteDateStr ? new Date(quoteDateStr) : new Date();
+    const base = `${prefix}${companionMinguoDateCode(dateObj)}-S`;
+    const snapshot = await db.collection('companionQuotes')
+        .where('quoteNo', '>=', base)
+        .where('quoteNo', '<=', base + '\uf8ff')
+        .get();
+    let maxSeq = 0;
+    snapshot.forEach(doc => {
+        const seq = parseInt((doc.data().quoteNo || '').split('-S').pop(), 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    });
+    return `${base}${String(maxSeq + 1).padStart(2, '0')}`;
+}
+
+// 從畫面上目前的估價單品項列，收集陪估要用的資料（跟 saveQuoteDraft 收集的欄位對應，但價格轉成數字方便運算）。
+function collectQuoteItemsForCompanion() {
+    return Array.from(document.querySelectorAll('#quoteItems tr')).map(row => ({
+        nameEn: row.querySelector('.item-en')?.value || '',
+        nameCn: row.querySelector('.item-cn')?.value || '',
+        model: row.querySelector('.item-model')?.value || '',
+        brand: quoteRowBrandValue(row),
+        spec: row.querySelector('.item-spec')?.value || '',
+        qty: parseFloat(row.querySelector('.qty')?.value) || 0,
+        price: parseFloat(row.querySelector('.inc-price')?.value) || 0,
+        exPrice: parseFloat(row.querySelector('.ex-price')?.value) || 0
+    })).filter(item => item.nameCn || item.nameEn || item.model);
+}
+
+// 把一個品項的名稱／型號／廠牌／規格組成幾行文字，供填入範本的品名欄位使用。
+function composeCompanionItemLines(item) {
+    const lines = [];
+    if (item.nameCn) lines.push(item.nameCn);
+    if (item.nameEn && item.nameEn !== item.nameCn) lines.push(item.nameEn);
+    if (item.model) lines.push(`型號：${item.model}`);
+    const brandSpec = [item.brand ? `廠牌：${item.brand}` : '', item.spec ? `規格：${item.spec}` : ''].filter(Boolean).join('　');
+    if (brandSpec) lines.push(brandSpec);
+    return lines;
+}
+
+// ---- 又鑫：品項為單列，B欄放多行說明文字（自動換行），單價=含稅單價 ----
+function fillYushinCompanionSheet(ws, data, markupRate) {
+    ws.getCell('B8').value = data.clientName;
+    const d = new Date(data.quoteDate || Date.now());
+    ws.getCell('F8').value = `日期:${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+    ws.getCell('F9').value = `單號:${data.quoteNo}`;
+
+    const startRow = 12;
+    data.items.forEach((item, i) => {
+        const r = startRow + i;
+        const lines = composeCompanionItemLines(item);
+        const cellB = ws.getCell(`B${r}`);
+        cellB.value = lines.join('\n');
+        cellB.alignment = { wrapText: true, vertical: 'top' };
+        ws.getRow(r).height = Math.max(15, lines.length * 15);
+
+        ws.getCell(`E${r}`).value = item.qty;
+        const price = Math.round(item.price * markupRate);
+        ws.getCell(`F${r}`).value = price;
+        ws.getCell(`G${r}`).value = { formula: `F${r}*E${r}` };
+    });
+}
+
+// ---- 鼎新（MULTI-LIFE）：項次+品項為單列，C欄放多行說明文字，單價=含稅單價 ----
+function fillMultiLifeCompanionSheet(ws, data, markupRate) {
+    ws.getCell('C8').value = data.clientName;
+    ws.getCell('C9').value = new Date(data.quoteDate || Date.now());
+
+    const startRow = 12;
+    data.items.forEach((item, i) => {
+        const r = startRow + i;
+        ws.getCell(`B${r}`).value = i + 1;
+
+        const lines = composeCompanionItemLines(item);
+        const cellC = ws.getCell(`C${r}`);
+        cellC.value = lines.join('\n');
+        cellC.alignment = { wrapText: true, vertical: 'top' };
+        ws.getRow(r).height = Math.max(15, lines.length * 15);
+
+        // 單位（E欄）範本上沒有對應資料可帶入，維持空白，需要的話再手動填寫
+        ws.getCell(`F${r}`).value = item.qty;
+        const price = Math.round(item.price * markupRate);
+        ws.getCell(`G${r}`).value = price;
+        ws.getCell(`H${r}`).value = { formula: `G${r}*F${r}` };
+    });
+}
+
+// ---- 辰星：品項1佔3列、其餘每項佔2列（沿用原範本既有列高），單價=未稅單價+稅額分開列 ----
+function fillMorningstarCompanionSheet(ws, data, markupRate) {
+    ws.getCell('B8').value = `抬頭：${data.clientName}`;
+    ws.getCell('G8').value = new Date(data.quoteDate || Date.now());
+    ws.getCell('G9').value = data.quoteNo;
+
+    data.items.forEach((item, i) => {
+        const isFirst = i === 0;
+        const blockStart = isFirst ? 12 : 15 + (i - 1) * 2;
+        const blockRows = isFirst ? 3 : 2;
+
+        ws.getCell(`A${blockStart}`).value = i + 1;
+        ws.getCell(`B${blockStart}`).value = item.model || '';
+
+        const descLines = [item.nameEn, item.nameCn].filter(Boolean);
+        const brandSpec = [item.brand ? `廠牌:${item.brand}` : '', item.spec ? `規格：${item.spec}` : ''].filter(Boolean).join('　');
+        if (brandSpec) descLines.push(brandSpec);
+
+        for (let li = 0; li < blockRows; li++) {
+            const row = blockStart + li;
+            if (li === blockRows - 1) {
+                // 最後一列塞入剩下所有敘述行，避免超出這個品項可用的列數
+                ws.getCell(`C${row}`).value = descLines.slice(li).join('　');
+            } else {
+                ws.getCell(`C${row}`).value = descLines[li] || '';
+            }
+        }
+
+        ws.getCell(`D${blockStart}`).value = item.qty;
+        const exPrice = Math.round(item.exPrice * markupRate);
+        ws.getCell(`E${blockStart}`).value = exPrice;
+        ws.getCell(`F${blockStart}`).value = { formula: `ROUND(D${blockStart}*E${blockStart}*0.05,0)` };
+        ws.getCell(`G${blockStart}`).value = { formula: `D${blockStart}*E${blockStart}+F${blockStart}` };
+    });
+
+    // 修正原範本「合計」公式算錯欄位的問題（原本只加總到稅額欄，漏了商品金額），改成加總「小記」欄
+    ws.getCell('G44').value = { formula: 'SUM(G12:G40)' };
+}
+
+window.openCompanionQuoteModal = function() {
+    const items = collectQuoteItemsForCompanion();
+    if (!items.length) {
+        alert('目前的估價單還沒有品項，請先完成品項內容再製作三估單。');
+        return;
+    }
+    const allOptions = Object.keys(COMPANION_TEMPLATES)
+        .map(key => `<option value="${key}">${COMPANION_TEMPLATES[key].name}</option>`).join('');
+
+    document.getElementById('companionSelect1').innerHTML = allOptions;
+    document.getElementById('companionSelect2').innerHTML = allOptions;
+
+    // 預設挑選主估公司以外的兩家，避免主估跟陪估用同一間公司
+    const others = Object.keys(COMPANION_TEMPLATES).filter(key => key !== currentCompany);
+    document.getElementById('companionSelect1').value = others[0] || Object.keys(COMPANION_TEMPLATES)[0];
+    document.getElementById('companionSelect2').value = others[1] || Object.keys(COMPANION_TEMPLATES)[1];
+
+    document.getElementById('companionQuoteModal').style.display = 'flex';
+};
+
+window.closeCompanionQuoteModal = function() {
+    document.getElementById('companionQuoteModal').style.display = 'none';
+};
+
+window.generateCompanionQuotes = async function() {
+    const key1 = document.getElementById('companionSelect1').value;
+    const key2 = document.getElementById('companionSelect2').value;
+    if (key1 === key2) {
+        alert('請選擇兩間不同的公司作為陪估。');
+        return;
+    }
+
+    const items = collectQuoteItemsForCompanion();
+    const clientName = document.getElementById('clientName')?.value || '';
+    const quoteDate = document.getElementById('quoteDate')?.value || '';
+    const mainQuoteNo = document.getElementById('quoteNo')?.value || '';
+
+    const jobs = [
+        { key: key1, markupRate: 1.10 },
+        { key: key2, markupRate: 1.12 }
+    ];
+
+    for (const job of jobs) {
+        const tpl = COMPANION_TEMPLATES[job.key];
+        if (items.length > tpl.maxItems) {
+            alert(`「${tpl.name}」的範本最多支援 ${tpl.maxItems} 個品項，目前估價單有 ${items.length} 項，超過上限，這家無法產生。請減少品項，或請系統開發者擴充範本容量。`);
+            continue;
+        }
+        try {
+            const resp = await fetch(tpl.fileUrl);
+            if (!resp.ok) throw new Error('找不到範本檔案：' + tpl.fileUrl);
+            const buffer = await resp.arrayBuffer();
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.load(buffer);
+            const ws = workbook.getWorksheet(tpl.sheetName);
+
+            let quoteNo = '';
+            if (job.key === 'yushin' || job.key === 'morningstar') {
+                quoteNo = await generateCompanionQuoteNo(tpl.prefix, quoteDate);
+            }
+
+            tpl.fill(ws, { clientName, quoteDate, quoteNo, items }, job.markupRate);
+
+            const outBuffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([outBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${tpl.name}_${quoteNo || mainQuoteNo}_${clientName}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            await db.collection('companionQuotes').add({
+                quoteNo: quoteNo || null,
+                company: job.key,
+                relatedQuoteNo: mainQuoteNo,
+                clientName,
+                quoteDate,
+                markupRate: job.markupRate,
+                itemCount: items.length,
+                createdAt: new Date().toISOString()
+            });
+        } catch (err) {
+            alert(`產生「${tpl.name}」的陪估單失敗：${err.message}`);
+        }
+    }
+
+    closeCompanionQuoteModal();
+};
+
 window.handleSaveAndPrint = function() {
     const quoteNo = document.getElementById('quoteNo').value.trim();
     const clientName = document.getElementById('clientName').value;
@@ -2360,38 +2608,6 @@ window.handleSaveAndPrint = function() {
         console.error('儲存估價單到雲端失敗：', err);
         alert('提醒：這張估價單剛剛存到雲端失敗（' + err.message + '）。列印內容不受影響，但建議稍後檢查網路連線後，再按一次「存檔並列印」，確保雲端資料庫也有存到這筆紀錄。');
     });
-};
-
-// 手機會開啟系統原生分享面板，可直接選 LINE、Email 等已安裝的 App。
-// 瀏覽器無法直接取得列印視窗中另存的 PDF，因此先用「列印／存為 PDF」產出檔案，再由這裡分享報價資訊。
-window.shareCurrentQuote = async function() {
-    const quoteNo = document.getElementById('quoteNo').value.trim();
-    const customer = document.getElementById('clientName').value.trim();
-    const total = document.getElementById('grandTotal').innerText;
-    if (!quoteNo) {
-        alert('請先填寫估價單號，再傳送報價單。');
-        return;
-    }
-    const text = `估價單：${quoteNo}\n抬頭：${customer || '－'}\n總計金額：NT$ ${total}`;
-    try {
-        if (navigator.share) {
-            await navigator.share({ title: `估價單 ${quoteNo}`, text });
-        } else if (navigator.clipboard) {
-            await navigator.clipboard.writeText(text);
-            alert('此瀏覽器不支援直接分享，已將報價資訊複製到剪貼簿，可貼到 LINE 或 Email。');
-        } else {
-            alert('此瀏覽器不支援直接分享，請先列印／存為 PDF 後以手機的分享功能傳送。');
-            return;
-        }
-        await db.collection('quotes').doc(quoteNo).set({
-            sentAt: new Date().toISOString(),
-            sentBy: currentUserName || currentUser?.email || ''
-        }, { merge: true });
-        alert('已開啟分享，並標記這張估價單為已傳送。');
-    } catch (err) {
-        // 使用者關閉原生分享面板不算傳送，不寫入紀錄。
-        if (err && err.name !== 'AbortError') alert('無法開啟分享：' + (err.message || '請稍後再試'));
-    }
 };
 
 // 列印前的整理工作：
@@ -2555,9 +2771,9 @@ window.renderMyQuotesList = function() {
         bindListRowSelection(tr);
         
         // --- 修改這裡：根據狀態顯示不同按鈕 ---
-        const statusCell = `${q.dealClosed
+        const statusCell = q.dealClosed
             ? '<span style="color:#2e7d32;font-weight:bold;">✓ 已成交</span>'
-            : '<span style="color:#888;">未成交</span>'}${q.sentAt ? '<br><span style="color:#1a73e8;font-size:11px;">📤 已傳送</span>' : ''}`;
+            : '<span style="color:#888;">未成交</span>';
 
         const actionBtn = q.dealClosed
             ? `<button type="button" class="btn-small btn-secondary" style="background-color: #666;" onclick="unmarkQuoteAsDeal('${q.quoteNo}')">❌ 取消成交</button>`
@@ -3173,11 +3389,10 @@ function resetQuoteFormForNextOne() {
 // 如果雲端寫入失敗，才把狀態復原並提示錯誤
 window.toggleOrderStatus = function(orderId, field, newValue) {
     const o = ordersCache.find(x => x.id === orderId);
-    const statusLabel = { isOrdered: '已訂貨', isDelivered: '已送貨', isBilled: '已報帳' }[field] || field;
-    if (!confirm(`確定要${newValue ? '標記為' : '取消'}「${statusLabel}」嗎？`)) return;
     const previousValue = o ? o[field] : undefined;
     const previousOrderedBy = o ? o.orderedBy : undefined;
     const previousHistory = o ? [...(o.statusHistory || [])] : [];
+    const statusLabel = { isOrdered: '已訂貨', isDelivered: '已送貨', isBilled: '已報帳' }[field] || field;
     const actor = currentUserName || currentUser?.email || '未知使用者';
     const timestamp = new Date().toISOString();
     const logEntry = { field, value: newValue, label: `${newValue ? statusLabel : `取消${statusLabel}`}`, by: actor, at: timestamp };
@@ -4663,7 +4878,7 @@ function renderBrandTabs() {
 
     brands.forEach(b => {
         const count = priceList.filter(p => (p.brand || '').trim() === b).length;
-        html += `<div class="brand-tab ${activeBrandFilter === b ? 'active' : ''}" onclick="switchBrandTab('${escapeAttr(b)}')">${escapeHtml(b)} (${count})</div>`;
+        html += `<div class="brand-tab ${activeBrandFilter === b ? 'active' : ''}" onclick="switchBrandTab('${escapeAttr(b)}')">${escapeHtml(b)} (${count})<span class="brand-tab-delete no-print" onclick="event.stopPropagation(); deletePriceBrand('${escapeAttr(b)}')" title="刪除此廠牌價格資料">✕</span></div>`;
     });
 
     tabsContainer.innerHTML = html;
@@ -4674,18 +4889,128 @@ window.switchBrandTab = function(brandName) {
     renderAdminPricesTable();
 };
 
+window.deletePriceBrand = async function(brandName) {
+    if (!confirm(`確定要刪除「${brandName}」整個廠牌的價格資料嗎？此動作無法復原。`)) return;
+    try {
+        const priceDoc = db.collection('settings').doc('prices');
+        const doc = await priceDoc.get();
+        const meta = doc.exists ? doc.data() : {};
+        const brands = Array.isArray(meta.brands) ? meta.brands : [];
+        const entry = brands.find(b => b.name === brandName);
+
+        if (entry) {
+            const chunkCount = entry.chunkCount || 1;
+            for (let i = 0; i < chunkCount; i++) {
+                const docId = i === 0 ? entry.id : `${entry.id}-part${i}`;
+                await db.collection('settings').doc(docId).delete().catch(() => {});
+            }
+            const remainingBrands = brands.filter(b => b.id !== entry.id);
+            await priceDoc.set({ brands: remainingBrands, updatedAt: new Date().toISOString() }, { merge: true });
+        } else {
+            // 舊版資料可能還存在 settings/prices 文件的 list 欄位裡，一併清掉。
+            const legacyList = Array.isArray(meta.list) ? meta.list.filter(item => (item.brand || '').trim() !== brandName) : [];
+            await priceDoc.set({ list: legacyList, updatedAt: new Date().toISOString() }, { merge: true });
+        }
+
+        priceList = priceList.filter(p => (p.brand || '').trim() !== brandName);
+        if (activeBrandFilter === brandName) activeBrandFilter = 'ALL';
+        refreshPriceDatalists();
+        renderAdminPricesTable();
+        renderCompanyAgencyBrandSettings();
+        alert(`已刪除「${brandName}」的價格資料。`);
+    } catch (err) {
+        alert('刪除失敗：' + err.message);
+    }
+};
+
 // 價格表僅能透過上傳 Excel 整批更新，不開放在網頁上逐筆編輯／新增／刪除
+function setPriceUploadProgress(percent, status, keepVisible = true) {
+    const wrap = document.getElementById('priceUploadProgress');
+    const statusEl = document.getElementById('priceUploadStatus');
+    const percentEl = document.getElementById('priceUploadPercent');
+    const bar = document.getElementById('priceUploadProgressBar');
+    if (!wrap || !statusEl || !percentEl || !bar) return;
+    wrap.style.display = keepVisible ? '' : 'none';
+    const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+    statusEl.innerText = status;
+    percentEl.innerText = `${safePercent}%`;
+    bar.style.width = `${safePercent}%`;
+}
+
+function priceBrandDocumentId(brand) {
+    return `price-brand-${encodeURIComponent(brand)}`;
+}
+
+// 將一個廠牌的品項陣列依 JSON 大小切成多份，每份控制在 maxBytes 以內，
+// 避免超過 Firestore 單一文件 1MB 的硬限制（保留安全緩衝）。
+function chunkPriceItems(imported, maxBytes) {
+    const chunks = [];
+    let current = [];
+    let currentSize = 2; // 陣列外層的中括號
+    imported.forEach(item => {
+        const itemSize = new Blob([JSON.stringify(item)]).size + 1; // +1 估算逗號
+        if (current.length && currentSize + itemSize > maxBytes) {
+            chunks.push(current);
+            current = [];
+            currentSize = 2;
+        }
+        current.push(item);
+        currentSize += itemSize;
+    });
+    if (current.length) chunks.push(current);
+    return chunks.length ? chunks : [[]];
+}
+
+async function savePriceBrandList(imported, brand) {
+    const maxBytes = 700 * 1024; // 留緩衝空間給欄位名稱等額外開銷，避免貼近 1MB 上限
+    const chunks = chunkPriceItems(imported, maxBytes);
+    const priceDoc = db.collection('settings').doc('prices');
+    const brandId = priceBrandDocumentId(brand);
+    const chunkDocId = (index) => index === 0 ? brandId : `${brandId}-part${index}`;
+
+    for (let i = 0; i < chunks.length; i++) {
+        setPriceUploadProgress(85 + Math.round(((i + 1) / chunks.length) * 10), `正在儲存「${brand}」價目表（第 ${i + 1}/${chunks.length} 個分片）…`);
+        await db.collection('settings').doc(chunkDocId(i)).set({
+            brand, items: chunks[i], updatedAt: new Date().toISOString(),
+            chunkIndex: i, chunkCount: chunks.length
+        });
+    }
+
+    const doc = await priceDoc.get();
+    const meta = doc.exists ? doc.data() : {};
+    const brands = Array.isArray(meta.brands) ? meta.brands.filter(item => item.id !== brandId) : [];
+    const previousEntry = Array.isArray(meta.brands) ? meta.brands.find(item => item.id === brandId) : null;
+    const previousChunkCount = (previousEntry && previousEntry.chunkCount) || 1;
+
+    // 若這次上傳的分片數比上次少，刪除多出來的舊分片文件，避免留下用不到的雲端資料。
+    for (let i = chunks.length; i < previousChunkCount; i++) {
+        await db.collection('settings').doc(chunkDocId(i)).delete().catch(() => {});
+    }
+
+    brands.push({ id: brandId, name: brand, chunkCount: chunks.length });
+    brands.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    return priceDoc.set({
+        // 舊版 list 暫時保留，尚未個別上傳的廠牌仍可正常讀取；同廠牌的新資料會優先取代舊資料。
+        storage: 'brands', brands, updatedAt: new Date().toISOString()
+    }, { merge: true });
+}
+
 window.handlePriceExcelUpload = function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
 
+    setPriceUploadProgress(0, '準備讀取價格表…');
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onprogress = function(event) {
+        if (!event.lengthComputable) return;
+        // 檔案讀取階段使用 0～50%，保留後半段顯示資料整理與雲端儲存（多廠牌需逐一儲存，會分段顯示進度）。
+        setPriceUploadProgress((event.loaded / event.total) * 50, '讀取 Excel 檔案中…');
+    };
+    reader.onload = async function(e) {
         try {
+            setPriceUploadProgress(55, '正在整理價格資料…');
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
-
-            const imported = [];
 
             const getField = (row, keys) => {
                 for (const k of keys) {
@@ -4694,21 +5019,28 @@ window.handlePriceExcelUpload = function(input) {
                 return '';
             };
 
+            // 全形英數字／空白轉半形，避免輸入法不小心切到全形模式時，
+            // 「Ｂiorad」和「Biorad」被系統誤判成兩個不同的廠牌。
+            const toHalfWidth = (str) => String(str || '')
+                .replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+                .replace(/\u3000/g, ' ')
+                .trim();
+
+            // 每個工作表視為一個廠牌，工作表名稱即為廠牌名稱。
+            const brandGroups = [];
             workbook.SheetNames.forEach(sheetName => {
+                const brand = toHalfWidth(sheetName);
+                if (!brand) return;
                 const sheet = workbook.Sheets[sheetName];
                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+                const imported = [];
 
                 rows.forEach(row => {
                     const nameCn = String(getField(row, ['中文品名', '品名', '中文名稱'])).trim();
                     const nameEn = String(getField(row, ['英文品名', '英文名稱'])).trim();
                     const model = String(getField(row, ['貨號', '型號'])).trim();
-                    let brand = String(getField(row, ['廠牌', '品牌'])).trim();
                     const productType = String(getField(row, ['類型', '產品類型', '品項類型', 'Type'])).trim();
                     const productLine = String(getField(row, ['產品線', '產品類別', 'Product Line'])).trim();
-
-                    if (!brand) {
-                        brand = sheetName.trim();
-                    }
 
                     const price = parseFloat(getField(row, ['含稅單價', '單價', '價格'])) || 0;
                     const costRaw = getField(row, ['含稅成本', '成本', '進貨成本']);
@@ -4718,30 +5050,45 @@ window.handlePriceExcelUpload = function(input) {
                         imported.push({ nameCn, nameEn, model, brand, productType, productLine, price, cost });
                     }
                 });
+
+                if (imported.length) brandGroups.push({ brand, imported });
             });
 
-            if (!imported.length) {
-                alert('無法從 Excel 辨識出有效的價格資料。');
+            if (!brandGroups.length) {
+                setPriceUploadProgress(0, '找不到可上傳的價格資料。');
+                alert('無法從 Excel 辨識出有效的價格資料。請確認每個工作表的名稱就是廠牌名稱，且內容包含品名或貨號等欄位。');
                 input.value = '';
                 return;
             }
 
-            // 直接整批覆蓋並儲存到雲端（價格表不開放網頁上逐筆編輯，一律以最新上傳的 Excel 為準）
-            db.collection('settings').doc('prices').set({ list: imported }).then(() => {
-                priceList = imported;
-                activeBrandFilter = 'ALL';
-                refreshPriceDatalists();
-                renderAdminPricesTable();
-                renderCompanyAgencyBrandSettings();
-                alert(`已從 Excel 成功讀取 ${workbook.SheetNames.length} 個分頁，共 ${imported.length} 筆價格資料，並已儲存到雲端！`);
-            }).catch(err => {
-                alert('儲存到雲端失敗：' + err.message);
-            });
+            const savedBrands = [];
+            for (let i = 0; i < brandGroups.length; i++) {
+                const { brand, imported } = brandGroups[i];
+                const basePercent = 55 + Math.round((i / brandGroups.length) * 40);
+                setPriceUploadProgress(basePercent, `正在儲存「${brand}」（${i + 1}/${brandGroups.length} 個廠牌）的 ${imported.length} 筆資料…`);
+                await savePriceBrandList(imported, brand);
+                // 直接更新本機清單，其他廠牌不受這次上傳影響。
+                priceList = priceList.filter(item => (item.brand || '').trim() !== brand).concat(imported);
+                savedBrands.push(`${brand}（${imported.length} 筆）`);
+            }
+
+            activeBrandFilter = 'ALL';
+            refreshPriceDatalists();
+            renderAdminPricesTable();
+            renderCompanyAgencyBrandSettings();
+            setPriceUploadProgress(100, `完成：已更新 ${savedBrands.length} 個廠牌的價格資料。`);
+            alert(`已成功上傳：\n${savedBrands.join('\n')}`);
         } catch (err) {
-            alert('讀取 Excel 檔案失敗：' + err.message);
+            setPriceUploadProgress(0, '儲存雲端失敗，請稍後再試。');
+            alert('上傳失敗：' + err.message);
         } finally {
             input.value = '';
         }
+    };
+    reader.onerror = function() {
+        setPriceUploadProgress(0, '讀取 Excel 檔案失敗。');
+        alert('讀取 Excel 檔案失敗，請重新選擇檔案。');
+        input.value = '';
     };
     reader.readAsArrayBuffer(file);
 };
