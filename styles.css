@@ -1,0 +1,373 @@
+body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 0; }
+.nav-tabs { background: #003366; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; align-items: center; }
+.nav-tab { color: #fff; padding: 10px 20px; cursor: pointer; border-radius: 5px 5px 0 0; margin-right: 5px; background: #002244; }
+.nav-tab.active { background: #fff; color: #003366; font-weight: bold; }
+.nav-spacer { flex-grow: 1; }
+.auth-status { color: #fff; font-size: 12px; padding: 8px 10px; }
+.auth-status button { margin-left: 8px; }
+#loginScreen { position: fixed; inset: 0; background: linear-gradient(135deg, #003366, #001a33); display: flex; align-items: center; justify-content: center; z-index: 999; }
+.login-box { background: #fff; padding: 36px 32px; border-radius: 10px; width: 300px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); text-align: center; }
+.login-box h2 { margin: 0 0 20px; color: #003366; font-size: 18px; }
+.login-box input { width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+.login-box button { width: 100%; padding: 10px; background: #003366; color: #fff; border: none; border-radius: 5px; font-size: 14px; cursor: pointer; }
+.login-box button:hover { background: #00509e; }
+.login-links { margin-top: 12px; font-size: 13px; }
+.login-links a { color: #003366; cursor: pointer; text-decoration: underline; }
+.password-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9999; align-items:center; justify-content:center; }
+.password-modal-overlay.active { display:flex; }
+.password-modal { background:#fff; width:360px; max-width:calc(100vw - 32px); padding:24px; border-radius:10px; box-shadow:0 10px 35px rgba(0,0,0,.3); box-sizing:border-box; }
+.password-modal h3 { margin:0 0 18px; color:#003366; }
+.password-modal label { display:block; margin:10px 0 5px; font-size:13px; font-weight:bold; }
+.password-modal input { width:100%; box-sizing:border-box; padding:9px; border:1px solid #ccc; border-radius:5px; font-size:14px; }
+.password-modal .password-actions { display:flex; gap:8px; margin-top:18px; }
+.password-modal .password-actions button { flex:1; padding:9px; border:0; border-radius:5px; cursor:pointer; }
+.password-message { margin-top:10px; font-size:13px; min-height:18px; }
+.login-error { color: #c0392b; font-size: 12px; min-height: 16px; margin-top: 4px; }
+.eq-modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    display: none; align-items: flex-start; justify-content: center;
+    z-index: 500; padding: 30px 15px; overflow-y: auto; box-sizing: border-box;
+}
+.eq-modal-overlay.active { display: flex; }
+.eq-modal-box {
+    background: #fff; border-radius: 14px; padding: 20px 24px; width: 100%;
+    max-width: 780px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); box-sizing: border-box;
+}
+.eq-modal-box h3 { margin-top: 0; color: #003366; }
+.eq-modal-close-row { text-align: right; margin-top: 15px; padding-top: 12px; border-top: 1px solid #eee; }
+.sub-nav { background: #e0e0e0; padding: 8px 15px; display: flex; gap: 10px; flex-wrap: wrap; }
+.sub-tab { padding: 5px 15px; cursor: pointer; background: #ccc; border-radius: 3px; font-size: 14px; color: #333; }
+.sub-tab.active { background: #003366; color: white; }
+.content-section { display: none; padding: 20px; max-width: 1150px; margin: 0 auto; background: #fff; min-height: 80vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); box-sizing: border-box; }
+.content-section.active { display: block; }
+.header-container { position: relative; display: flex; justify-content: center; align-items: center; border-bottom: 2px solid #333; padding-bottom: 4px; margin-bottom: 4px; }
+.company-logo { position: absolute; left: 2px; top: 50%; transform: translateY(-50%); width: 145px; max-height: 110px; object-fit: contain; display: none; }
+#printableQuote.theme-yushin .company-logo-yushin,
+#printableQuote.theme-morningstar .company-logo-morningstar { display: block; }
+#printableQuote.theme-yushin .company-logo-yushin { width: 125px; max-height: 92px; }
+.header-info { width: 100%; text-align: center; }
+.header-info h1 { margin: 0 0 1px 0; font-size: 20px; color: #003366; }
+.header-info h2 { margin: 0 0 1px 0; font-size: 15px; color: #666; }
+.header-info p { margin: 1px 0; font-size: 12px; color: #444; line-height: 1.1; }
+.meta-section { margin-bottom: 4px; font-size: 12px; }
+.meta-row { display: flex; align-items: center; margin: 2px 0; }
+.meta-row-three { display: flex; justify-content: space-between; gap: 15px; margin: 2px 0; }
+.meta-row-three > div { flex: 1; display: flex; align-items: center; }
+.meta-section label { white-space: nowrap; font-weight: bold; width: 75px; flex-shrink: 0; }
+.meta-section input, .meta-section select { flex-grow: 1; padding: 2px 4px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 12px; background-color: #fff; box-sizing: border-box; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+th, td { border: 1px solid #333; padding: 3px 5px; font-size: 11px; text-align: center; vertical-align: middle; line-height: 1.15; }
+th { background-color: #f0f0f0; }
+td input[type="text"], td input[type="number"], td textarea { width: 100%; padding: 1px 2px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 3px; font-size: 10.5px; line-height: 1.15; }
+td textarea { resize: vertical; height: 20px; min-height: 16px; }
+td .qty, td .inc-price, td .ex-price, td .subtotal-inc { text-align: center; }
+#itemTable th:nth-child(1), #itemTable td:nth-child(1) { width: 4%; }
+#itemTable th:nth-child(3), #itemTable td:nth-child(3),
+#itemTable th:nth-child(4), #itemTable td:nth-child(4),
+#itemTable th:nth-child(5), #itemTable td:nth-child(5),
+#itemTable th:nth-child(6), #itemTable td:nth-child(6) {
+    width: 9%;
+}
+/* 移除數字輸入框的上下微調箭頭，直接輸入即可（全站套用，避免誤點微調箭頭改到價格） */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+.item-input-group { display: flex; flex-direction: column; gap: 1px; text-align: left; padding: 0; font-size: 10.5px; color: #333; }
+.print-text-mirror { display: none; }
+.sales-name-print-mirror { display: none; }
+.field-row { display: flex; align-items: center; gap: 4px; margin-bottom: 0; }
+.field-row label { font-weight: bold; white-space: nowrap; min-width: 60px; flex-shrink: 0; }
+.field-row input, .field-row textarea { flex: 1; width: auto; min-width: 0; }
+
+.item-row-pair { display: flex; gap: 10px; width: 100%; align-items: center; margin-bottom: 0; }
+.item-row-pair > div { flex: 1; display: flex; align-items: center; gap: 4px; }
+.item-row-pair label { white-space: nowrap; margin-bottom: 0; min-width: 40px; }
+/* 「其他（自行輸入）」改在廠牌選單下方顯示，避免在同一列被選單擠到只剩一小格。 */
+.item-brand-field { flex-wrap: wrap; }
+.item-brand-field .item-brand { flex: 1; min-width: 0; }
+.item-brand-field .item-brand-other {
+    flex: 0 0 calc(100% - 44px);
+    width: calc(100% - 44px) !important;
+    margin-left: 44px !important;
+}
+
+.footer-note { font-size: 10.5px; color: #333; line-height: 1.1; margin-bottom: 4px; }
+.footer-note input[type="number"] { text-align: center; }
+.bottom-layout { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+.stamp-section { width: 195px; }
+.stamp-section img { width: 180px; height: auto; }
+.total-section { text-align: right; font-size: 13px; font-weight: bold; }
+.discount-input { width: 50px; padding: 2px 4px; font-size: 12px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
+
+#printableQuote.theme-yushin { font-family: "Microsoft JhengHei", Arial, sans-serif; }
+#printableQuote.theme-yushin table th { background-color: #dbe9ff; }
+#printableQuote.theme-yushin table, #printableQuote.theme-yushin th, #printableQuote.theme-yushin td { border: 1px solid #333; }
+
+#printableQuote.theme-MULTI-LIFE { font-family: "SimSun", "PMingLiU", "細明體", serif; }
+#printableQuote.theme-MULTI-LIFE table { border: 3px double #000; background-color: #fff; }
+#printableQuote.theme-MULTI-LIFE th, #printableQuote.theme-MULTI-LIFE td { border: 1px solid #000; background-color: #fff; }
+#printableQuote.theme-MULTI-LIFE table th { background-color: #000; color: #fff; }
+#printableQuote.theme-MULTI-LIFE .header-container, #printableQuote.theme-MULTI-LIFE .header-info h2 { border-color: #000; }
+
+#printableQuote.theme-morningstar { font-family: "Yuanti SC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+#printableQuote.theme-morningstar .table-wrap { border-radius: 10px; overflow: hidden; border: 1px solid #1b4d3e; }
+#printableQuote.theme-morningstar table { border-collapse: separate; border-spacing: 0; border: none; }
+#printableQuote.theme-morningstar th, #printableQuote.theme-morningstar td { border: none; border-bottom: 1px solid #cfe3d8; border-right: 1px solid #cfe3d8; }
+#printableQuote.theme-morningstar th:last-child, #printableQuote.theme-morningstar td:last-child { border-right: none; }
+#printableQuote.theme-morningstar table th { background-color: #1b4d3e; color: #fff; border-bottom: none; }
+#printableQuote.theme-morningstar table tbody tr:nth-child(even) { background-color: #eef5f0; }
+
+button { padding: 8px 16px; font-size: 14px; background-color: #003366; color: white; border: none; border-radius: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; outline: none; }
+/* 手機瀏覽器點按鈕時，預設會蓋一層半透明藍色的「點擊回饋」效果，加上按下後的焦點外框通常也是藍色，
+   兩個疊在一起，會讓灰色按鈕看起來「先變深藍、點別的地方後才變回真正的顏色（例如綠色）」。
+   上面已經關掉這個藍色點擊效果跟預設外框，下面改用 focus-visible，只有鍵盤操作時才會顯示外框，
+   滑鼠/觸控點擊不會再有這個藍色閃爍 */
+button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
+/* 原本這裡有一條 button:hover 深藍色的規則，選擇器優先權比 .status-ok／.btn-secondary 這種
+   單一 class 還高，只要滑鼠移到按鈕上，不管原本是灰色還是綠色都會被蓋成深藍色，
+   完全不符合每顆按鈕本來該有的顏色。已經直接拿掉，滑鼠移過去就是維持按鈕原本的顏色，不會再變深藍 */
+.btn-danger { background-color: #cc0000; padding: 2px 6px; font-size: 11px; }
+.btn-small { padding: 4px 10px; font-size: 12px; }
+.btn-secondary { background-color: #666; }
+
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; background: #eef5ff; padding: 10px; border-radius: 5px; }
+.toolbar input[type="text"], .toolbar input[type="number"], .toolbar input[type="date"], .toolbar select {
+    padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;
+}
+.panel { border: 1px solid #ddd; border-radius: 6px; padding: 15px; margin-bottom: 15px; background: #fafbfd; }
+.panel h3 { margin-top: 0; color: #003366; }
+.permission-table th:first-child, .permission-table td:first-child { text-align:left; min-width:190px; }
+.permission-select { width:100%; min-width:105px; padding:6px; border:1px solid #bbb; border-radius:4px; background:#fff; }
+.permission-system-row td { background:#eaf2fb; font-weight:bold; color:#003366; }
+.readonly-notice { display:none; padding:9px 14px; background:#fff3cd; color:#664d03; border-bottom:1px solid #ffecb5; font-size:13px; }
+.permission-save-status { font-size:12px; margin-left:8px; color:#2e7d32; }
+.status-badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #fff; display: inline-block; }
+.status-ok { background: #2e7d32; }
+.status-soon { background: #e6a400; }
+.status-overdue { background: #cc0000; }
+.status-unknown { background: #888; }
+.status-none { background: #607d8b; }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover { background: #eef5ff; }
+/* 清單選取列以灰底標示，讓使用者確認目前操作的訂單／估價單。 */
+#ordersBody tr.list-row-selected > td,
+#myQuotesBody tr.list-row-selected > td,
+#adminQuotesBody tr.list-row-selected > td { background-color: #e0e0e0 !important; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.form-grid label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 3px; color: #333; }
+.form-grid input, .form-grid select, .form-grid textarea {
+    width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; box-sizing: border-box; font-family: inherit;
+}
+.log-table td, .log-table th { font-size: 12px; }
+.empty-hint { color: #888; font-size: 13px; padding: 15px; text-align: center; }
+
+.brand-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 2px solid #003366; padding-bottom: 6px; }
+.brand-tab { padding: 4px 12px; background: #e0e0e0; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 13px; font-weight: bold; color: #444; position: relative; }
+.brand-tab.active { background: #003366; color: #fff; }
+.brand-tab-delete { margin-left: 8px; opacity: 0.6; font-weight: normal; }
+.brand-tab-delete:hover { opacity: 1; color: #e74c3c; }
+
+@media print {
+    html, body { color-scheme: light; }
+    .no-print, button, .sub-nav, .nav-tabs { display: none !important; }
+    input, textarea { border: none !important; background: transparent !important; }
+    textarea { resize: none !important; overflow: hidden !important; }
+
+    /* 手機瀏覽器（尤其 iOS Safari）在深色模式下，輸入框/選單文字列印出來常會是灰色甚至看不清楚，
+       這裡強制列印輸出一律使用黑色文字，避免輸出的估價單看起來字很淡 */
+    input, select, textarea, .print-text-mirror, #salesPhone {
+        color: #000 !important;
+        -webkit-text-fill-color: #000 !important;
+    }
+
+    select#salesName {
+        display: none !important;
+    }
+    .sales-name-print-mirror {
+        display: inline !important;
+        color: #000 !important;
+        -webkit-text-fill-color: #000 !important;
+        font-size: 12px;
+    }
+
+    .field-row:has(input[value=""]),
+    .field-row:has(textarea:placeholder-shown),
+    /* 貨號空白時才隱藏該欄；廠牌欄還含有隱藏的產品線 input，不能用泛用 input 判斷，
+       否則即使自行輸入了廠牌，整個廠牌欄也會在列印時被誤隱藏。 */
+    .item-row-pair > div:has(.item-model[value=""]) {
+        display: none !important;
+    }
+    #discountRow:has(input[value="0"]),
+    #discountRow:has(input[value=""]) { display: none !important; }
+
+    /* 英文品名/中文品名/貨號/廠牌：列印時隱藏單行輸入框，改顯示可換行的完整內容鏡像文字 */
+    .item-en, .item-cn, .item-model, .item-brand, .item-brand-other { display: none !important; }
+    .print-text-mirror {
+        display: block !important;
+        flex: 1;
+        min-width: 0;
+        white-space: normal;
+        word-break: break-word;
+        text-align: left;
+        font-size: 10.5px;
+        line-height: 1.15;
+    }
+
+    /* 避免品項表格的每一列被分頁攔腰切斷：放不下就整列移到下一頁 */
+    table tr {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+    thead { display: table-header-group; }
+
+    @page { size: A4; margin: 10mm; }
+    body { margin: 0; }
+
+    /* 手機瀏覽器（尤其 iOS Safari）「儲存為 PDF」時，常常不會乖乖依照上面 @page 的 A4 尺寸重新排版，
+       而是直接拿「手機螢幕目前顯示的寬度」去產生內容，導致在手機上輸出的估價單被壓得非常窄：
+       負責業務的姓名/電話被迫換行、估價單號太長被邊框截斷看不全。
+       這裡強制估價單內容用固定寬度排版（190mm，等於 A4 扣掉左右各 10mm 邊界），
+       不管是在桌機還是手機上輸出，畫面排版都會維持跟桌機列印一樣寬，不會因為手機螢幕窄而被壓縮 */
+    #quote-system.content-section {
+        max-width: none !important;
+        width: 190mm !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+    }
+    #printableQuote {
+        width: 190mm !important;
+    }
+    .company-logo { width: 135px; max-height: 105px; }
+    #printableQuote.theme-yushin .company-logo-yushin { width: 115px; max-height: 84px; }
+
+    /* 產生訂購單：列印時只顯示這張訂購單，其他分頁／導覽列／原本開著的視窗全部隱藏，
+       訂購單本身也比照估價單，強制用 190mm 固定寬度排版，不會被手機窄螢幕壓縮 */
+    body.printing-po .content-section,
+    body.printing-po .nav-tabs,
+    body.printing-po .sub-nav {
+        display: none !important;
+    }
+    body:not(.printing-po) #poModalOverlay {
+        display: none !important;
+    }
+    body.printing-po #poModalOverlay {
+        display: block !important;
+        position: static !important;
+        background: none !important;
+        padding: 0 !important;
+        inset: auto !important;
+    }
+    body.printing-po #poModalOverlay .eq-modal-box {
+        box-shadow: none !important;
+        max-width: none !important;
+        width: 190mm !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        border-radius: 0 !important;
+    }
+}
+
+/* ============ 手機版：建立估價單改成由上到下垂直輸入 ============
+   只在螢幕（screen）套用，列印/存 PDF 一律用上面 @media print 或原本桌面版的表格排版，
+   所以「輸出」出來的估價單格式完全不受這裡影響 */
+@media screen and (max-width: 640px) {
+    .meta-row-three { flex-direction: column; gap: 8px; }
+    .meta-row-three > div { width: 100%; box-sizing: border-box; }
+
+    .bottom-layout { flex-direction: column; align-items: stretch; gap: 10px; }
+    .stamp-section { width: 100%; text-align: center; }
+    .total-section { text-align: left; }
+
+    /* 品項表格／訂單列表／儀器列表：桌面版都是橫向表格，手機版統一改成「一張卡片一筆資料」，
+       不用縮放或橫向捲動；卡片本身用圓角＋淡陰影做出立體層次，取代生硬的實線邊框，
+       整體間距也拉開一點，讀起來比較不擁擠 */
+    #itemTable thead, #ordersTable thead, #eqListTable thead { display: none; }
+    #itemTable, #itemTable tbody, #itemTable tr, #itemTable td,
+    #ordersTable, #ordersTable tbody, #ordersTable tr, #ordersTable td,
+    #eqListTable, #eqListTable tbody, #eqListTable tr, #eqListTable td {
+        display: block;
+        width: 100%;
+    }
+    #itemTable tr, #ordersTable tr, #eqListTable tr {
+        border: none;
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 16px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+    }
+    /* 項次／數量／含稅單價／未稅單價／含稅小計這幾欄，桌機版用 nth-child 設了 4%／9% 的窄欄寬，
+       那組選擇器比這裡的寫法更「精確」，即使在手機版媒體查詢裡也會贏，導致欄位被擠成一條窄縫、
+       文字被框線卡住看不全。這裡直接用 !important 蓋掉，確保手機版一定是滿版寬度 */
+    #itemTable th:nth-child(1), #itemTable td:nth-child(1),
+    #itemTable th:nth-child(3), #itemTable td:nth-child(3),
+    #itemTable th:nth-child(4), #itemTable td:nth-child(4),
+    #itemTable th:nth-child(5), #itemTable td:nth-child(5),
+    #itemTable th:nth-child(6), #itemTable td:nth-child(6) {
+        width: 100% !important;
+        display: block !important;
+    }
+    #itemTable td, #ordersTable td, #eqListTable td {
+        border: none;
+        padding: 7px 0;
+        text-align: left;
+        font-size: 13px;
+        line-height: 1.4;
+    }
+    #itemTable td:not(:last-child), #ordersTable td:not(:last-child), #eqListTable td:not(:last-child) {
+        border-bottom: 1px solid #f0f0f0;
+    }
+    #itemTable td[data-th]::before, #ordersTable td[data-th]::before, #eqListTable td[data-th]::before {
+        content: attr(data-th) "：";
+        display: block;
+        font-size: 10.5px;
+        font-weight: 700;
+        color: #999;
+        letter-spacing: 0.02em;
+        margin-bottom: 3px;
+    }
+    #itemTable input, #itemTable select, #itemTable textarea,
+    #ordersTable input, #ordersTable select {
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 14px;
+        padding: 7px 9px;
+        border-radius: 6px;
+    }
+    .item-row-pair { flex-direction: column; align-items: stretch; gap: 8px; }
+    .item-row-pair > div { width: 100%; }
+    .field-row { margin-bottom: 6px; }
+    .item-input-group { gap: 6px; }
+
+    #ordersTable td[data-th="操作"], #eqListTable td[data-th="操作"] {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    #eqListTable tr.clickable-row { cursor: default; }
+
+    /* 搜尋欄／日期範圍等工具列，桌面版是固定寬度橫排，手機上會超出螢幕才需要橫向捲動 */
+    .toolbar { flex-direction: column; align-items: stretch; }
+    .toolbar input[type="text"], .toolbar input[type="date"], .toolbar input[type="number"], .toolbar select {
+        width: 100%;
+        box-sizing: border-box;
+    }
+}
+
+
+     .btn-small {
+    margin: 1px;
+    padding: 2px 5px;
+    font-size: 11px;
+}
+
+#ordersBody td {
+    vertical-align: middle;
+    padding: 4px 2px;
+}
