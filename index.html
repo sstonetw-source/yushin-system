@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 停用 iOS Safari 自動把電話號碼變成藍色連結的行為（否則業務電話會被強制加上藍色 tel: 連結樣式，
+         有時還會被重新排版空白，看起來像格式跑掉），估價單輸出時才會維持原本的純黑色文字 -->
+    <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+    <title>又鑫管理系統</title>
+    <!-- Firebase SDK (Compat 模式，支援 Firestore + Auth) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+        <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- ============ 登入畫面 ============ -->
+    <div id="loginScreen">
+        <div class="login-box">
+            <h2>又鑫管理系統 登入</h2>
+            <input type="email" id="loginEmail" placeholder="帳號 (Email)" autocomplete="username">
+            <input type="password" id="loginPassword" placeholder="密碼" autocomplete="current-password">
+            <button onclick="handleLogin()">登入</button>
+            <div class="login-links"><a onclick="handleForgotPassword()">忘記密碼？</a></div>
+            <div class="login-error" id="loginError"></div>
+        </div>
+    </div>
+
+    <!-- ============ 修改密碼視窗 ============ -->
+    <div id="changePasswordOverlay" class="password-modal-overlay">
+        <div class="password-modal">
+            <h3>修改密碼</h3>
+            <label for="newPassword">新密碼</label>
+            <input type="password" id="newPassword" autocomplete="new-password" placeholder="至少 6 個字元">
+            <label for="confirmNewPassword">確認新密碼</label>
+            <input type="password" id="confirmNewPassword" autocomplete="new-password" placeholder="再次輸入新密碼">
+            <div id="changePasswordMessage" class="password-message"></div>
+            <div class="password-actions">
+                <button type="button" class="btn-secondary" id="changePasswordCancelBtn" onclick="closeChangePasswordModal()">取消</button>
+                <button type="button" onclick="handleChangePassword()">儲存新密碼</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 系統主體（登入後才顯示） ============ -->
+    <div id="appContainer" style="display:none;">
+    <div class="nav-tabs no-print">
+        <div class="nav-tab active" data-permission-page="quote" onclick="switchMainTab('quote-system', this)">📄 估價單系統</div>
+        <div class="nav-tab" data-permission-page="orders" onclick="switchMainTab('order-system', this)">📦 訂單管理系統</div>
+        <div class="nav-tab" data-permission-page="equipment" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
+        <div class="nav-tab" id="navAdminTab" data-permission-page="admin" onclick="switchMainTab('admin-system', this)">⚙️ 管理員雲端後台</div>
+        <div class="nav-spacer"></div>
+        <div class="auth-status" id="authStatus">
+            <span id="authUserLabel"></span>
+            <select id="viewAsRoleSelect" style="display:none;" onchange="switchViewRole(this.value)">
+                <option value="admin">🛠️ 檢視身份：管理員</option>
+                <option value="sales">👤 檢視身份：業務</option>
+                <option value="purchaser">🛒 檢視身份：採購</option>
+                <option value="engineer">🔧 檢視身份：工程師</option>
+            </select>
+            <button class="btn-secondary" onclick="openChangePasswordModal()">修改密碼</button>
+            <button class="btn-secondary" onclick="handleLogout()">登出</button>
+        </div>
+    </div>
+
+    <!-- ============ 估價單系統 ============ -->
+    <div id="quote-system" class="content-section active">
+        <div class="sub-nav no-print">
+            <div class="sub-tab active" id="qsub-create" data-permission-page="quote.create" onclick="switchQuoteView('create', this)">📝 建立估價單</div>
+            <div class="sub-tab" id="qsub-my" data-permission-page="quote.my" onclick="switchQuoteView('my', this)">📋 我的估價單</div>
+        </div>
+
+        <div id="quoteCreatePanel">
+        <div class="sub-nav company-sub-nav no-print">
+            <div class="sub-tab active" id="sub-yushin" onclick="switchCompany('yushin', this)">又鑫 (YS)</div>
+            <div class="sub-tab" id="sub-morningstar" onclick="switchCompany('morningstar', this)">辰星 (MS)</div>
+            <div class="sub-tab" id="sub-MULTI-LIFE" onclick="switchCompany('MULTI-LIFE', this)">鼎新 (DS)</div>
+        </div>
+        <div class="no-print" style="margin: 15px 0; background: #eef5ff; padding: 10px; border-radius: 5px;">
+            <label>🔍 雲端調取舊估價單：</label>
+            <input type="text" id="searchQuoteNo" placeholder="請輸入完整估價單號" style="width: 280px;">
+            <button onclick="loadQuoteFromCloud()">載入估價單</button>
+        </div>
+
+        <div id="printableQuote">
+            <div class="header-container">
+                <img class="company-logo company-logo-yushin" src="assets/logo-yushin.png" loading="lazy" alt="又鑫生物科技有限公司 Logo">
+                <img class="company-logo company-logo-morningstar" src="assets/logo-morningstar.png" loading="lazy" alt="辰星生物科技有限公司 Logo">
+                <img class="company-logo company-logo-dingxin" src="assets/logo-dingxin.png" loading="lazy" alt="鼎新生物科技有限公司 Logo">
+                <div class="header-info">
+                    <h1 id="compTitle">又鑫生物科技有限公司</h1>
+                    <h2 id="compSub">YU SHING BIO-TECH CO., LTD.</h2>
+                    <p id="compAddr">地址：</p>
+                    <p id="compContact">聯絡資訊：</p>
+                    <h2 style="margin-top: 3px; text-decoration: underline;">估 價 單</h2>
+                </div>
+            </div>
+            <div class="meta-section">
+                <div class="meta-row"><label>抬頭：</label><input type="text" id="clientName" list="clientList"></div>
+                <div class="meta-row no-print"><label>客戶名稱：</label><input type="text" id="ordererName" placeholder="訂購人姓名（僅供內部管理，不會印在估價單上）"></div>
+                <div class="meta-row-three">
+                    <div><label>負責業務：</label><select id="salesName" onchange="onSalesChange()"><option value="">請選擇業務</option></select><span id="salesPhone" style="margin-left:6px;font-size:11px;color:#333;"></span></div>
+                    <div><label>估價日期：</label><input type="text" id="quoteDate"></div>
+                    <div><label>單號：</label><input type="text" id="quoteNo" style="font-weight:bold;"></div>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table id="itemTable">
+                    <thead><tr><th>項次</th><th>品名 / 規格 / 型號說明</th><th>數量</th><th>含稅單價</th><th>未稅單價</th><th>含稅小計</th><th class="no-print">操作</th></tr></thead>
+                    <tbody id="quoteItems"></tbody>
+                </table>
+            </div>
+            <div class="no-print" style="margin-bottom: 8px;">
+                <button type="button" onclick="addQuoteRow()">＋ 新增品項</button>
+                <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依目前價目表更新所有品項單價</button>
+            </div>
+            <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
+            <div class="bottom-layout">
+                <div class="stamp-section"><img id="companyStamp" src=""></div>
+                <div class="total-section">
+                    <p>銷售額合計：NT$ <span id="subtotalAmount">0</span></p>
+                    <p>營業稅 (5%)：NT$ <span id="taxAmount">0</span></p>
+                    <p id="discountRow">優惠折扣：<input type="number" id="discountRateInput" class="discount-input" value="0" min="0" max="100" onclick="if(this.value=='0')this.value='';" oninput="calculateTotals()"> %</p>
+                    <p style="font-size: 14px; color: #003366;">總計金額：NT$ <span id="grandTotal">0</span></p>
+                    <p id="chineseTotal">合計新台幣 零元整</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="no-print" style="text-align: center; margin-top: 25px;">
+            <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">🖨️ 列印 / 存為 PDF（自動同步雲端）</button>
+            <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
+            <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
+        </div>
+        <div id="comparisonQuotePrintPages" aria-hidden="true"></div>
+        </div> <!-- /#quoteCreatePanel -->
+
+        <!-- 我的估價單：只列出目前登入者自己名下的估價單 -->
+        <div id="myQuotesPanel" style="display:none;">
+            <div class="toolbar no-print">
+                <input type="text" id="myQuoteSearch" placeholder="搜尋單號 / 抬頭 / 客戶名稱" style="width:260px;" oninput="renderMyQuotesList()">
+                <button class="btn-secondary" onclick="loadMyQuotesFromCloud()">🔄 重新整理</button>
+            </div>
+            <table>
+                <thead><tr><th>單號</th><th>抬頭</th><th>客戶名稱</th><th id="myQuotesSalesHeader" style="display:none;">業務</th><th>日期</th><th>總計</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="myQuotesBody"></tbody>
+            </table>
+            <div class="empty-hint" id="myQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
+            <div class="quote-load-more-row no-print"><button type="button" id="myQuotesLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreMyQuotes()">載入更多（每次 50 筆）</button></div>
+        </div>
+    </div>
+
+    <div class="eq-modal-overlay no-print" id="threeQuoteOverlay" onclick="if(event.target===this) closeThreeQuoteDialog()">
+        <div class="eq-modal-box three-quote-dialog">
+            <h3>產生三家估價單</h3>
+            <div id="threeQuoteBaseSummary" class="delivery-summary"></div>
+            <div class="three-quote-options">
+                <div class="three-quote-option-card">
+                    <h4>第二張比價單</h4>
+                    <label>公司</label>
+                    <select id="comparisonCompany2" onchange="updateThreeQuoteDialog()"></select>
+                    <label>比第一張貴</label>
+                    <div class="three-quote-percent"><input type="number" id="comparisonPercent2" value="10" min="0" step="0.1" oninput="updateThreeQuoteDialog()"><span>%</span></div>
+                    <div class="three-quote-total">進位後總額 <strong id="comparisonTotal2">NT$ 0</strong></div>
+                </div>
+                <div class="three-quote-option-card">
+                    <h4>第三張比價單</h4>
+                    <label>公司</label>
+                    <select id="comparisonCompany3" onchange="updateThreeQuoteDialog()"></select>
+                    <label>比第一張貴</label>
+                    <div class="three-quote-percent"><input type="number" id="comparisonPercent3" value="15" min="0" step="0.1" oninput="updateThreeQuoteDialog()"><span>%</span></div>
+                    <div class="three-quote-total">進位後總額 <strong id="comparisonTotal3">NT$ 0</strong></div>
+                </div>
+            </div>
+            <div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張只供比價，不會儲存到雲端。</div>
+            <div class="eq-modal-close-row">
+                <button type="button" class="btn-secondary" onclick="closeThreeQuoteDialog()">取消</button>
+                <button type="button" id="threeQuotePrintBtn" onclick="printThreeQuotes()">列印三頁／存為 PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 儀器管理系統：客戶儀器維修保養／校正紀錄 ============ -->
+    <div id="equipment-system" class="content-section">
+        <div class="toolbar no-print">
+            <input type="text" id="eqSearchInput" placeholder="搜尋客戶 / 廠牌 / 業務 / 型號 / 序號 / 編號" style="width:280px;" oninput="renderEquipmentList()">
+            <select id="eqStatusFilter" onchange="renderEquipmentList()">
+                <option value="all">全部狀態</option>
+                <option value="overdue">已逾期</option>
+                <option value="soon">即將到期（30天內）</option>
+                <option value="ok">正常</option>
+                <option value="none">免保養</option>
+                <option value="unknown">尚無紀錄</option>
+            </select>
+            <button onclick="openEquipmentModal()">＋ 新增儀器</button>
+            <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
+            <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
+            <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 批量下載 Excel</button>
+            <button class="btn-secondary" onclick="loadEquipmentFromCloud()">🔄 重新整理</button>
+            <span style="font-size:12px;color:#666;">（批量上傳會依「儀器編號」比對：有既有紀錄就更新、沒有就新增，不會刪除任何既有資料，維修保養紀錄也會保留；一般業務只能新增/更新自己名下的儀器）</span>
+        </div>
+
+        <table id="eqListTable">
+            <thead>
+                <tr>
+                    <th>編號</th><th>客戶</th><th>廠牌</th><th>型號/序號</th><th>負責業務</th><th>放置地點</th>
+                    <th>最近保養/校正</th><th>下次到期</th><th>狀態</th><th class="no-print">操作</th>
+                </tr>
+            </thead>
+            <tbody id="eqListBody"></tbody>
+        </table>
+        <div class="empty-hint" id="eqEmptyHint" style="display:none;">目前沒有儀器紀錄，點選「＋ 新增儀器」或「批量上傳 Excel」開始建立。</div>
+    </div>
+
+    <!-- 儀器編輯／保養紀錄彈出視窗：點列表項目直接彈出，不用捲動頁面 -->
+    <div class="eq-modal-overlay no-print" id="eqModalOverlay" onclick="if(event.target===this) closeEquipmentModal()">
+        <div class="eq-modal-box">
+            <h3 id="eqModalTitle">新增儀器</h3>
+            <div class="form-grid">
+                <div><label>客戶名稱</label><input type="text" id="eqCustomer"></div>
+                <div><label>型號</label><input type="text" id="eqModel" list="priceModelList" oninput="onEqModelChange()" onchange="onEqModelChange()"></div>
+                <div><label>廠牌</label>
+                    <select id="eqBrand" onchange="onEqBrandSelectChange()"></select>
+                    <input type="text" id="eqBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                </div>
+                <div><label>序號</label><input type="text" id="eqSerial"></div>
+                <div><label>負責業務</label><select id="eqSales"></select></div>
+                <div><label>放置地點</label><input type="text" id="eqLocation"></div>
+                <div><label>安裝日期</label><input type="date" id="eqInstallDate"></div>
+                <div>
+                    <label>保養／校正週期（月）</label>
+                    <input type="number" id="eqCycle" value="12" min="1">
+                    <label style="font-weight:normal;margin-top:4px;"><input type="checkbox" id="eqNoMaintenance" onchange="onEqNoMaintenanceChange()"> 免保養（不再提醒）</label>
+                </div>
+                <div><label>最近保養／校正日期</label><input type="date" id="eqLastService"></div>
+            </div>
+            <label style="font-size:12px;font-weight:bold;">備註</label>
+            <textarea id="eqNotes" style="width:100%;min-height:50px;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:4px;"></textarea>
+            <div style="margin-top:10px;">
+                <button onclick="saveEquipmentFromModal()">💾 儲存</button>
+                <span id="eqSaveHint" style="font-size:12px;color:#2e7d32;margin-left:6px;"></span>
+            </div>
+
+            <div id="eqLogSection" style="display:none;margin-top:18px;padding-top:14px;border-top:1px solid #eee;">
+                <h4 style="margin-bottom:6px;">維修保養／校正紀錄</h4>
+                <table class="log-table">
+                    <thead><tr><th>日期</th><th>類型</th><th>執行人員</th><th>說明</th><th class="no-print">操作</th></tr></thead>
+                    <tbody id="eqLogBody"></tbody>
+                </table>
+
+                <div class="form-grid" style="margin-top:10px;">
+                    <div><label>日期</label><input type="date" id="eqLogDate"></div>
+                    <div>
+                        <label>類型</label>
+                        <select id="eqLogType">
+                            <option value="保養">保養</option>
+                            <option value="校正">校正</option>
+                            <option value="維修">維修</option>
+                        </select>
+                    </div>
+                    <div><label>執行人員</label><input type="text" id="eqLogTech"></div>
+                </div>
+                <label style="font-size:12px;font-weight:bold;">說明</label>
+                <textarea id="eqLogDesc" style="width:100%;min-height:40px;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:4px;"></textarea>
+                <div style="margin-top:10px;">
+                    <button onclick="addEquipmentLogFromModal()">＋ 新增紀錄</button>
+                </div>
+            </div>
+
+            <div class="eq-modal-close-row">
+                <button class="btn-danger" id="eqModalDeleteBtn" onclick="deleteEquipment(document.getElementById('eqModalOverlay').dataset.editId)" style="display:none;">🗑️ 刪除這台儀器</button>
+                <button class="btn-secondary" onclick="closeEquipmentModal()">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 訂單管理系統 ============ -->
+    <div id="order-system" class="content-section">
+        <div class="sub-nav no-print">
+            <div class="sub-tab active" id="osub-list" data-permission-page="orders.list" onclick="switchOrderView('list', this)">📦 業務訂單</div>
+            <div class="sub-tab" id="osub-po" data-permission-page="orders.po" style="display:none;" onclick="switchOrderView('po', this)">🧾 採購訂單</div>
+        </div>
+
+        <div id="orderListPanel">
+        <div class="toolbar no-print order-primary-toolbar">
+            <input type="text" id="orderSearch" placeholder="搜尋客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="renderOrdersList()">
+            <span id="purchaserOrderFilters" style="display:none;">
+                <select id="orderSalesFilter" onchange="renderOrdersList()"><option value="">全部業務</option></select>
+                <select id="orderBrandFilter" onchange="renderOrdersList()"><option value="">全部廠牌</option></select>
+            </span>
+            <button onclick="openOrderModal()">＋ 新增訂單</button>
+            <details class="order-export-tools">
+                <summary>⬇️ 匯出資料</summary>
+                <div class="order-export-panel">
+                    <label for="exportStartDate">訂單日期</label>
+                    <input type="date" id="exportStartDate">
+                    <span>至</span>
+                    <input type="date" id="exportEndDate" aria-label="匯出結束日期">
+                    <button type="button" onclick="exportOrdersByDate()">匯出 Excel（供採購下單）</button>
+                </div>
+            </details>
+            <button class="btn-secondary" onclick="loadOrdersFromCloud()">🔄 重新整理</button>
+        </div>
+        <div id="orderWorkCards" class="order-work-cards no-print"></div>
+        <div class="toolbar no-print" id="purchaseOrderActionBar" style="display:none;background:#eef5ff;">
+            <button id="generatePoBtn" style="display:none;" onclick="openPurchaseOrderModal()">🧾 產生訂購單（給廠商下單）</button>
+        </div>
+
+        <table id="ordersTable">
+            <thead>
+                <tr>
+                     <th class="no-print" id="orderSelectHeader" style="display:none;"><input type="checkbox" id="orderSelectAllBox" onchange="toggleAllOrderSelect(this)"></th>
+                     <th>訂單日期</th>
+            <th>客戶名稱</th>
+            <th>負責業務</th> <!-- 新增 -->
+            <th>產品資訊</th>
+            <th>售價</th>
+            <th class="no-print" id="orderCostHeader" style="display:none;">成本／毛利</th>
+            <th>交易資訊</th>
+            <th>備註</th> <!-- 新增 -->
+            <th class="no-print">操作</th>
+            <th class="no-print">訂購單</th>
+                </tr>
+            </thead>
+            <tbody id="ordersBody"></tbody>
+        </table>
+        <div class="empty-hint" id="ordersEmptyHint" style="display:none;">目前沒有訂單資料，可點選「＋ 新增訂單」手動新增，或到估價單系統把已成交的估價單匯入。</div>
+        <div class="order-load-more-row no-print"><button type="button" id="orderLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrders()">載入更多（每次 50 筆）</button></div>
+        </div>
+
+        <div class="eq-modal-overlay no-print" id="customerOrderHistoryOverlay" onclick="if(event.target===this) closeCustomerOrderHistory()">
+            <div class="eq-modal-box" style="max-width:900px;">
+                <h3 id="customerOrderHistoryTitle">客戶近期交易摘要</h3>
+                <div id="customerTransactionSummary" class="customer-transaction-summary"></div>
+                <div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div>
+                <h4>近期訂單</h4>
+                <table><thead><tr><th>訂單日期</th><th>廠牌</th><th>貨號</th><th>品名</th><th>數量</th><th>總價</th><th>訂購狀態</th></tr></thead><tbody id="customerOrderHistoryBody"></tbody></table>
+                <h4 style="margin-top:18px;">近期估價</h4>
+                <table><thead><tr><th>估價日期</th><th>單號</th><th>品名</th><th>數量</th><th>單價</th><th>狀態</th></tr></thead><tbody id="customerQuoteHistoryBody"></tbody></table>
+                <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeCustomerOrderHistory()">關閉</button></div>
+            </div>
+        </div>
+
+        <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
+        <div id="poListPanel" style="display:none;">
+            <div class="toolbar no-print">
+                <input type="text" id="poListSearch" placeholder="搜尋單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
+                <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
+            </div>
+            <table>
+                <thead><tr><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>品項數</th><th>總計金額</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="poListBody"></tbody>
+            </table>
+            <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何訂購單。</div>
+            <div class="po-load-more-row no-print"><button type="button" id="poLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMorePurchaseOrders()">載入更多（每次 50 筆）</button></div>
+        </div>
+    </div>
+
+    <!-- 新增訂單彈出視窗 -->
+    <div class="eq-modal-overlay no-print" id="orderModalOverlay" onclick="if(event.target===this) closeOrderModal()">
+        <div class="eq-modal-box">
+            <h3 id="orderModalTitle">新增訂單</h3>
+            <div class="form-grid">
+                <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
+                <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
+                <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" onchange="onOrderItemCodeChange(this)"></div>
+                <div><label>廠牌</label>
+                    <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
+                    <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                </div>
+                <div><label>品名</label><input type="text" id="orderItemName"></div>
+                <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
+                <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
+                <div><label>總價</label><input type="number" id="orderTotalPrice" value="0" readonly style="background:#f5f5f5;"></div>
+                <div id="orderCostFieldWrap" style="display:none;">
+                    <label>含稅成本</label>
+                    <input type="number" id="orderCostPrice" step="0.01" placeholder="有貨號且價目表填了成本時會自動帶入">
+                </div>
+                <div>
+                    <label>交易方式</label>
+                    <select id="orderTransactionType" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'">
+                        <option value="">未選擇</option>
+                        <option value="直">直（開發票）</option>
+                        <option value="借">借（不開發票）</option>
+                        <option value="扣">扣（扣寄款）</option>
+                    </select>
+                </div>
+                <div><label>抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
+            </div>
+            <div style="margin-top:10px;">
+                <button onclick="saveNewOrder()">💾 儲存</button>
+                <button class="btn-secondary" onclick="closeOrderModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 分批送貨紀錄：每筆訂單可保存多次實際送貨日期與數量 -->
+    <div class="eq-modal-overlay no-print" id="deliveryModalOverlay" onclick="if(event.target===this) closeDeliveryModal()">
+        <div class="eq-modal-box" style="max-width:820px;">
+            <h3 id="deliveryModalTitle">訂單進度</h3>
+            <div id="deliveryOrderSummary" class="delivery-summary"></div>
+            <div id="orderWorkflowSteps" class="order-workflow-steps"></div>
+            <div class="delivery-section-heading">
+                <h4>送貨紀錄</h4>
+                <button type="button" class="btn-small btn-secondary" id="openPartialDeliveryBtn" onclick="openPartialDeliveryForm()">分批送貨</button>
+            </div>
+            <table class="log-table delivery-log-table">
+                <thead><tr><th>送貨日期</th><th>本次數量</th><th>備註</th><th>登錄人／時間</th><th>操作</th></tr></thead>
+                <tbody id="deliveryRecordsBody"></tbody>
+            </table>
+            <div class="panel" id="deliveryFormPanel" style="margin-top:14px;margin-bottom:0;">
+                <h4 id="deliveryFormTitle" style="margin:0 0 10px;">新增送貨紀錄</h4>
+                <input type="hidden" id="deliveryEditId">
+                <div class="form-grid" style="margin-bottom:6px;">
+                    <div><label>送貨日期</label><input type="date" id="deliveryDate"></div>
+                    <div><label>本次送貨數量</label><input type="number" id="deliveryQty" min="0" step="any"></div>
+                    <div><label>備註</label><input type="text" id="deliveryNotes" placeholder="例如：第一批送貨"></div>
+                </div>
+                <div id="deliveryFormHint" style="font-size:12px;color:#666;margin-bottom:8px;"></div>
+                <button type="button" onclick="saveDeliveryRecord()">💾 儲存送貨紀錄</button>
+                <button type="button" class="btn-secondary" id="deliveryCancelEditBtn" style="display:none;" onclick="resetDeliveryForm()">取消編輯</button>
+            </div>
+            <div class="order-progress-secondary">
+            <h4 style="margin:0 0 8px;">退貨與訂單狀態</h4>
+            <div id="orderLifecycleSummary" class="delivery-summary"></div>
+
+            <div class="panel" id="orderStatusEditPanel">
+                <h4 style="margin:0 0 10px;">訂單有效狀態</h4>
+                <div class="form-grid" style="margin-bottom:8px;">
+                    <div><label>狀態</label><select id="orderLifecycleStatus" onchange="onOrderLifecycleStatusChange()"><option value="normal">正常</option><option value="cancelled">已取消</option><option value="voided">已作廢</option></select></div>
+                    <div><label>日期</label><input type="date" id="orderLifecycleDate"></div>
+                    <div><label>原因</label><input type="text" id="orderLifecycleReason" placeholder="取消或作廢時必填"></div>
+                </div>
+                <button type="button" onclick="saveOrderLifecycleStatus()">💾 儲存狀態</button>
+            </div>
+
+            <h4 style="margin:18px 0 8px;">退貨紀錄</h4>
+            <table class="log-table delivery-log-table">
+                <thead><tr><th>退貨日期</th><th>退貨數量</th><th>原因／備註</th><th>登錄人／時間</th><th>操作</th></tr></thead>
+                <tbody id="returnRecordsBody"></tbody>
+            </table>
+            <div class="panel" id="returnFormPanel" style="margin-top:14px;margin-bottom:0;">
+                <h4 id="returnFormTitle" style="margin:0 0 10px;">新增退貨紀錄</h4>
+                <input type="hidden" id="returnEditId">
+                <div class="form-grid" style="margin-bottom:6px;">
+                    <div><label>退貨日期</label><input type="date" id="returnDate"></div>
+                    <div><label>本次退貨數量</label><input type="number" id="returnQty" min="0" step="any"></div>
+                    <div><label>原因／備註</label><input type="text" id="returnReason" placeholder="請輸入退貨原因"></div>
+                </div>
+                <div id="returnFormHint" style="font-size:12px;color:#666;margin-bottom:8px;"></div>
+                <button type="button" onclick="saveReturnRecord()">💾 儲存退貨紀錄</button>
+                <button type="button" class="btn-secondary" id="returnCancelEditBtn" style="display:none;" onclick="resetReturnForm()">取消編輯</button>
+            </div>
+            </div>
+            <div class="order-progress-secondary" id="orderStatusHistorySection">
+                <h4 style="margin:0 0 8px;">操作紀錄</h4>
+                <div id="orderStatusOrderedBy" style="font-size:12px;color:#555;margin-bottom:8px;"></div>
+                <table class="log-table"><thead><tr><th>時間</th><th>動作</th><th>操作人</th><th>說明</th></tr></thead><tbody id="orderStatusHistoryBody"></tbody></table>
+            </div>
+            <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeDeliveryModal()">關閉</button></div>
+        </div>
+    </div>
+
+    <!-- 產生訂購單彈出視窗：把選取的訂單品項，整理成給廠商下單用的「訂購單」，格式跟估價單相同，
+         單價預設帶入「含稅成本」（不是賣給客戶的售價），採購可以在這裡再次修改後才輸出 -->
+    <div class="eq-modal-overlay" id="poModalOverlay" onclick="if(event.target===this) closePurchaseOrderModal()">
+        <div class="eq-modal-box" style="max-width:820px;">
+            <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;">產生訂購單</h3>
+                <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">✕ 關閉</button>
+            </div>
+            <div class="no-print" style="font-size:12px;color:#666;margin:6px 0;">
+                單價欄位預設帶入你在業務訂單填的「含稅成本」，這裡還可以再手動調整；抬頭請填要下單的廠商名稱。
+            </div>
+            <div class="sub-nav no-print" style="padding:0;background:none;margin-bottom:14px;">
+                <div class="sub-tab active" id="po-sub-yushin" onclick="switchPoCompany('yushin', this)">又鑫 (YS)</div>
+                <div class="sub-tab" id="po-sub-morningstar" onclick="switchPoCompany('morningstar', this)">辰星 (MS)</div>
+                <div class="sub-tab" id="po-sub-MULTI-LIFE" onclick="switchPoCompany('MULTI-LIFE', this)">鼎新 (DS)</div>
+            </div>
+
+            <div id="printablePO">
+                <div class="header-container">
+                    <div class="header-info">
+                        <h1 id="poCompTitle"></h1>
+                        <h2 id="poCompSub"></h2>
+                        <p id="poCompAddr"></p>
+                        <p id="poCompContact"></p>
+                    </div>
+                </div>
+                <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">訂 購 單</h2>
+
+                <div class="meta-row-three">
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;"><datalist id="poVendorSuggestions"></datalist></div>
+                    <div><label>採購人員：</label><span id="poBuyerName"></span></div>
+                    <div><label>訂購日期：</label><input type="date" id="poDate"></div>
+                </div>
+                <div style="margin:4px 0;"><label>單號：</label><span id="poNo"></span></div>
+
+                <table id="poItemsTable" style="width:100%;margin-top:8px;border-collapse:collapse;">
+                    <thead>
+                        <tr>
+                            <th style="border:1px solid #999;padding:4px;">品名 / 規格</th>
+                            <th style="border:1px solid #999;padding:4px;">貨號</th>
+                            <th style="border:1px solid #999;padding:4px;">廠牌</th>
+                            <th style="border:1px solid #999;padding:4px;">數量</th>
+                            <th style="border:1px solid #999;padding:4px;">單價</th>
+                            <th style="border:1px solid #999;padding:4px;">小計</th>
+                            <th class="no-print" style="border:1px solid #999;padding:4px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="poItemsBody"></tbody>
+                </table>
+
+                <div style="text-align:right;margin-top:10px;">
+                    <p style="margin:2px 0;">未稅合計：NT$ <span id="poSubtotal">0</span></p>
+                    <p style="margin:2px 0;">營業稅（5%）：NT$ <span id="poTax">0</span></p>
+                    <p style="margin:2px 0;"><b>總計金額：NT$ <span id="poGrandTotal">0</span></b></p>
+                </div>
+            </div>
+
+            <div class="no-print" style="margin-top:16px;text-align:right;border-top:1px solid #eee;padding-top:12px;">
+                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">🖨️ 產生訂購單／輸出 PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 管理員雲端後台 ============ -->
+    <div id="admin-system" class="content-section">
+        <div class="sub-nav no-print">
+            <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
+            <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
+            <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
+            <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 銷售統計</div>
+            <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
+            <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
+            <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>
+            <div class="sub-tab" id="admin-sub-permissions" onclick="switchAdminTab('permissions', this)">🔐 身份權限</div>
+        </div>
+
+        <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
+        <div id="admin-sales" class="admin-panel">
+            <div class="toolbar no-print">
+                <button class="btn-secondary" onclick="reloadSalesFromUsers()">🔄 重新整理</button>
+                <span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span>
+            </div>
+            <table>
+                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>密碼</th><th>帳號 UID</th></tr></thead>
+                <tbody id="adminSalesBody"></tbody>
+            </table>
+        </div>
+
+        <div id="admin-permissions" class="admin-panel" style="display:none;">
+            <div class="panel">
+                <h3>身份權限設定</h3>
+                <p style="font-size:13px;color:#555;line-height:1.7;">設定每個身份可看到的系統與分頁。選擇「僅查看」時可瀏覽與搜尋，但不能新增、修改、刪除或上傳資料。管理員固定擁有完整權限。</p>
+                <div style="overflow-x:auto;">
+                    <table class="permission-table">
+                        <thead><tr><th>系統／分頁</th><th>業務</th><th>採購</th><th>工程師</th><th>管理員</th></tr></thead>
+                        <tbody id="rolePermissionsBody"></tbody>
+                    </table>
+                </div>
+                <h3 style="margin-top:22px;">資料查看範圍</h3>
+                <p style="font-size:13px;color:#555;">分別決定各身份在清單中只能看到自己負責的資料，或能查看所有人資料。</p>
+                <div style="overflow-x:auto;">
+                    <table class="permission-table">
+                        <thead><tr><th>資料類型</th><th>業務</th><th>採購</th><th>工程師</th><th>管理員</th></tr></thead>
+                        <tbody id="roleDataScopesBody"></tbody>
+                    </table>
+                </div>
+                <button type="button" onclick="saveRolePermissions()">💾 儲存權限設定</button>
+                <span id="permissionSaveStatus" class="permission-save-status"></span>
+            </div>
+        </div>
+
+        <!-- 價格表管理（唯讀顯示，僅能透過 Excel 上傳整批更新，不可在網頁上逐筆編輯） -->
+        <div id="admin-prices" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print">
+                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新</button>
+                <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
+                <span style="font-size:12px;color:#666;">（Excel 中每個工作表的名稱即為廠牌名稱，可一次上傳多個廠牌；同一廠牌再次上傳會只取代該廠牌資料。工作表可加入「類型」欄位，填寫「儀器」或「試劑耗材」供銷售分析分類）</span>
+            </div>
+            <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
+                <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
+                <div style="height:8px;background:#d9e5ef;border-radius:999px;overflow:hidden;margin-top:6px;"><div id="priceUploadProgressBar" style="height:100%;width:0;background:#1a73a8;transition:width .2s ease;"></div></div>
+            </div>
+
+            <table class="price-catalog-table">
+                <thead><tr><th>雲端價格表</th><th>最後更新時間</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="adminPriceCatalogBody"><tr><td colspan="3" style="color:#888;">載入中…</td></tr></tbody>
+            </table>
+        </div>
+
+        <div id="admin-agencies" class="admin-panel" style="display:none;">
+            <div class="panel">
+                <strong>統計廠牌設定</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">設定需要獨立統計的廠牌；未列入的廠牌統一歸入「其他廠牌」。英文大小寫、空白、連字號及常見寫法會自動合併。</p>
+                <div class="stat-brand-manager">
+                    <div><h4>獨立統計廠牌</h4><div id="keyStatisticBrands"></div></div>
+                    <div><h4>目前歸入其他廠牌</h4><div id="otherStatisticBrands"></div></div>
+                </div>
+                <div class="stat-brand-add"><input type="text" id="newStatisticBrandName" placeholder="新廠牌名稱"><button type="button" class="btn-secondary" onclick="addStatisticBrand()">＋ 新增獨立廠牌</button></div>
+                <button style="margin-top:10px;" onclick="saveKeyStatisticBrands()">💾 儲存統計廠牌設定</button>
+            </div>
+            <div class="panel" style="margin-top:16px;">
+                <strong>分公司代理廠牌設定</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">勾選各分公司可開立估價單及產生訂購單的代理廠牌。未儲存任何設定前，為相容既有資料，暫時不限制廠牌。</p>
+                <div id="companyAgencyBrandSettings"></div>
+                <button style="margin-top:12px;" onclick="saveCompanyAgencyBrands()">💾 儲存分公司代理廠牌</button>
+            </div>
+        </div>
+
+        <!-- 訂單銷售統計：只計入已建立的訂單；成交估價單會在轉單後自動納入 -->
+        <div id="admin-statistics" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print">
+                <select id="salesStatsPeriod" onchange="setSalesStatisticsPeriod(this.value)">
+                    <option value="q1">今年 Q1</option><option value="q2">今年 Q2</option><option value="q3">今年 Q3</option><option value="q4">今年 Q4</option><option value="ytd">今年累計</option><option value="custom">自訂日期</option>
+                </select>
+                <label>起日 <input type="date" id="salesStatsStart" onchange="document.getElementById('salesStatsPeriod').value='custom';renderSalesStatistics()"></label>
+                <label>迄日 <input type="date" id="salesStatsEnd" onchange="document.getElementById('salesStatsPeriod').value='custom';renderSalesStatistics()"></label>
+                <select id="salesStatsSalesFilter" onchange="renderSalesStatistics()"><option value="">全部業務</option></select>
+                <select id="salesStatsBrandFilter" onchange="renderSalesStatistics()"><option value="">全部廠牌</option></select>
+                <select id="salesStatsTypeFilter" onchange="renderSalesStatistics()"><option value="">全部類型</option></select>
+                <select id="salesStatsLineFilter" onchange="renderSalesStatistics()"><option value="">全部產品線</option></select>
+                <button type="button" onclick="exportSalesStatisticsExcel()">⬇️ 匯出季報 Excel</button>
+                <button class="btn-secondary" onclick="loadSalesStatistics()">🔄 重新整理</button>
+                <span style="font-size:12px;color:#666;">實際送貨依送貨日期計算，退貨依退貨日期負數沖銷；待出貨為截至迄日的未交餘額。</span>
+            </div>
+            <div class="sales-stat-cards">
+                <div class="sales-stat-card"><span>實際送貨金額</span><strong id="salesStatsActualSales">NT$ 0</strong><small id="salesStatsActualDetail"></small></div>
+                <div class="sales-stat-card"><span>待出貨金額</span><strong id="salesStatsPendingSales">NT$ 0</strong><small id="salesStatsPendingDetail"></small></div>
+                <div class="sales-stat-card sales-stat-card-total"><span>總金額</span><strong id="salesStatsTotalSales">NT$ 0</strong><small id="salesStatsTotalDetail"></small></div>
+            </div>
+            <div class="panel" style="overflow-x:auto;">
+                <table style="margin:0;"><thead><tr><th>總銷售額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>成本未填</th><th>歷史推估</th></tr></thead>
+                <tbody><tr><td id="salesStatsSalesInc">NT$ 0</td><td id="salesStatsCostInc">NT$ 0</td><td id="salesStatsProfit">NT$ 0</td><td id="salesStatsProfitRate">－</td><td><button type="button" id="salesStatsMissingCost" class="missing-cost-trigger" onclick="openMissingCostOrders()" disabled>0 筆</button></td><td id="salesStatsEstimated">NT$ 0／0 筆</td></tr></tbody></table>
+                <span id="salesStatsOrderCount" style="display:block;margin-top:8px;color:#666;font-size:13px;"></span>
+            </div>
+            <div class="sales-stat-tables">
+                <div><h3>各廠牌統計</h3><table class="sales-stats-table"><thead><tr><th>廠牌</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByBrand"></tbody></table></div>
+                <div><h3>各業務統計</h3><table class="sales-stats-table"><thead><tr><th>業務</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsBySales"></tbody></table></div>
+                <div><h3>各類型統計</h3><table class="sales-stats-table"><thead><tr><th>類型</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByType"></tbody></table></div>
+                <div><h3>各產品線統計</h3><table class="sales-stats-table"><thead><tr><th>產品線</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByLine"></tbody></table></div>
+            </div>
+        </div>
+
+        <div class="eq-modal-overlay no-print" id="missingCostOrdersOverlay" onclick="if(event.target===this) closeMissingCostOrders()">
+            <div class="eq-modal-box" style="max-width:980px;">
+                <h3>待補成本訂單</h3>
+                <p id="missingCostOrdersSummary" style="font-size:13px;color:#666;"></p>
+                <div style="overflow-x:auto;">
+                    <table class="missing-cost-table">
+                        <thead><tr><th>日期</th><th>客戶</th><th>業務</th><th>廠牌</th><th>產品</th><th>數量</th><th>售價</th><th>單位成本</th></tr></thead>
+                        <tbody id="missingCostOrdersBody"></tbody>
+                    </table>
+                </div>
+                <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeMissingCostOrders()">關閉</button></div>
+            </div>
+        </div>
+
+        <!-- 估價單記錄管理 -->
+        <div id="admin-quotes" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print">
+                <input type="text" id="adminQuoteSearch" placeholder="搜尋單號 / 客戶名稱" style="width:260px;" oninput="renderAdminQuotesList()">
+                <button class="btn-secondary" onclick="loadAllQuotesFromCloud()">🔄 重新整理</button>
+                <button onclick="exportQuotesCSV()">⬇️ 匯出目前清單為 CSV</button>
+            </div>
+            <table>
+                <thead><tr><th>單號</th><th>公司</th><th>客戶</th><th>業務</th><th>日期</th><th>總計</th><th class="no-print">操作</th></tr></thead>
+                <tbody id="adminQuotesBody"></tbody>
+            </table>
+            <div class="empty-hint" id="adminQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
+            <div class="quote-load-more-row no-print"><button type="button" id="adminQuotesLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreAdminQuotes()">載入更多（每次 50 筆）</button></div>
+        </div>
+
+        <!-- 人員異動交接：離職／轉調時，把某位業務名下的估價單、訂單、儀器整批改成掛在新業務名下 -->
+        <div id="admin-transfer" class="admin-panel" style="display:none;">
+            <div class="toolbar no-print" style="display:block;">
+                <span style="font-size:12px;color:#666;">
+                    用於人員離職或職務異動交接：把「原業務」名下的估價單／訂單／儀器紀錄，整批改成掛在「新業務」名下。
+                    執行前請先確認新業務已經是「業務名單」裡的正式帳號（有姓名與代號），否則對方登入後仍看不到轉移過去的資料。
+                    此動作會直接修改雲端資料，執行前請務必先按「查詢筆數」確認範圍。
+                </span>
+            </div>
+            <div class="form-grid" style="max-width:640px;margin-top:10px;">
+                <div>
+                    <label>原業務（資料轉出）</label>
+                    <select id="transferFromSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+                </div>
+                <div>
+                    <label>新業務（資料轉入）</label>
+                    <select id="transferToSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+                </div>
+            </div>
+            <div style="margin:12px 0;">
+                <label style="font-weight:bold;font-size:13px;">要一併轉移的資料範圍：</label><br>
+                <label style="font-weight:normal;font-size:13px;"><input type="checkbox" id="transferQuotes" checked onchange="resetTransferPreview()"> 估價單</label>
+                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferOrders" checked onchange="resetTransferPreview()"> 訂單</label>
+                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferEquipment" checked onchange="resetTransferPreview()"> 儀器</label>
+            </div>
+            <div>
+                <button onclick="previewSalesTransfer()">🔍 查詢筆數</button>
+                <button class="btn-danger" id="transferExecuteBtn" onclick="executeSalesTransfer()" style="display:none;">✅ 確認執行轉移</button>
+            </div>
+            <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
+        </div>
+
+        <!-- 資料庫管理：備份、估算雲端資料量與清理舊資料 -->
+        <div id="admin-storage" class="admin-panel" style="display:none;">
+            <h4 style="margin-top:0;">資料庫備份</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button id="databaseBackupBtn" onclick="downloadDatabaseBackup()">⬇️ 下載資料庫備份</button>
+                <span style="font-size:12px;color:#666;">
+                    備份會將訂單、估價單、採購單、儀器、使用者與系統設定整理成一個 JSON 檔下載到電腦。不會占用 Firebase 儲存空間，但每次會讀取全部資料。
+                </span>
+                <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
+            </div>
+
+            <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button onclick="calculateStorageUsage()">🔄 計算目前用量</button>
+                <span style="font-size:12px;color:#666;">
+                    這裡統計的是各集合裡文件內容的資料量，用來大致抓感覺；跟 Firebase 主控台顯示的實際帳單用量會有些微差異（Firestore 實際計費還會另外計算索引等額外儲存空間），僅供參考。
+                    點一次會把整個集合的資料都抓一遍，資料量大時可能需要幾秒到十幾秒。
+                </span>
+            </div>
+            <table>
+                <thead><tr><th>集合</th><th>文件數</th><th>估計大小</th></tr></thead>
+                <tbody id="storageUsageBody"><tr><td colspan="3" style="color:#888;">尚未計算，請按上方「計算目前用量」。</td></tr></tbody>
+            </table>
+
+            <h4 style="margin-top:28px;">批量清理舊資料</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <span style="font-size:12px;color:#666;">
+                    用於定期清掉太久以前、不再需要留存的估價單或訂單紀錄。這個動作會直接從雲端刪除資料，無法復原，執行前請務必先按「查詢筆數」確認範圍，並自行考慮是否需要先匯出備份。
+                </span>
+            </div>
+            <div class="form-grid" style="max-width:640px;margin-top:10px;">
+                <div>
+                    <label>要清理的資料</label>
+                    <select id="cleanupCollection" onchange="resetCleanupPreview()">
+                        <option value="quotes">估價單</option>
+                        <option value="orders">訂單</option>
+                    </select>
+                </div>
+                <div>
+                    <label>刪除範圍（依日期）</label>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <input type="date" id="cleanupStartDate" onchange="resetCleanupPreview()">
+                        <span>至</span>
+                        <input type="date" id="cleanupEndDate" onchange="resetCleanupPreview()">
+                    </div>
+                </div>
+            </div>
+            <div>
+                <button onclick="previewDataCleanup()">🔍 查詢筆數</button>
+            </div>
+            <div id="cleanupResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
+            <div id="cleanupConfirmArea" style="display:none;margin-top:10px;padding:12px;background:#fff5f5;border:1px solid #f5c2c2;border-radius:6px;">
+                <label style="font-weight:bold;color:#cc0000;">請輸入「確定刪除」以解鎖刪除按鈕：</label><br>
+                <input type="text" id="cleanupConfirmInput" oninput="onCleanupConfirmInput()" style="width:200px;margin-top:6px;">
+                <button class="btn-danger" id="cleanupExecuteBtn" disabled onclick="executeDataCleanup()" style="margin-left:8px;">🗑️ 確認刪除</button>
+            </div>
+        </div>
+    </div>
+
+    <datalist id="clientList"></datalist>
+    <datalist id="priceNameCnList"></datalist>
+    <datalist id="priceNameEnList"></datalist>
+    <datalist id="priceModelList"></datalist>
+    </div> <!-- /#appContainer -->
+
+
+
+    <script src="app.js"></script>
+</body>
+</html>
