@@ -503,13 +503,92 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     .nav-spacer { display: none; }
     .auth-status {
         grid-column: 1 / -1;
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         align-items: center;
         gap: 8px;
         padding: 6px 2px 2px;
     }
-    .auth-status button { margin: 0; }
+    #authUserLabel,
+    #viewAsRoleSelect {
+        grid-column: 1 / -1;
+    }
+    #viewAsRoleSelect {
+        width: 100%;
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+    .auth-status button {
+        width: 100%;
+        min-height: 44px;
+        margin: 0;
+    }
+
+    /* 管理後台的功能入口固定兩欄，避免按鍵依文字長度散落。 */
+    #admin-system > .sub-nav {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px;
+    }
+    #admin-system > .sub-nav .sub-tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 48px;
+        padding: 8px 6px;
+        box-sizing: border-box;
+        text-align: center;
+        line-height: 1.3;
+    }
+
+    /* 人員名單在手機改為一人一卡；桌機仍維持原本的橫向表格。 */
+    .admin-users-table,
+    .admin-users-table tbody,
+    .admin-users-table tr,
+    .admin-users-table td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .admin-users-table thead { display: none; }
+    .admin-users-table tr {
+        margin-bottom: 14px;
+        padding: 8px 12px;
+        border: 1px solid #c9d6e4;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(0, 51, 102, 0.08);
+    }
+    .admin-users-table td {
+        display: grid;
+        grid-template-columns: 82px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        padding: 9px 0;
+        border: 0;
+        border-bottom: 1px solid #edf1f5;
+        font-size: 14px;
+        line-height: 1.45;
+        text-align: left;
+        overflow-wrap: anywhere;
+    }
+    .admin-users-table td:last-child { border-bottom: 0; }
+    .admin-users-table td::before {
+        content: attr(data-label);
+        color: #4e6275;
+        font-weight: 700;
+    }
+    .admin-user-password-actions button {
+        display: block;
+        width: 100%;
+        min-height: 44px;
+        margin: 6px 0 0 !important;
+        white-space: normal;
+    }
+    .admin-user-password-actions br { display: none; }
+    .admin-user-uid { word-break: break-all; }
 
     .three-quote-options { grid-template-columns:1fr; }
     .meta-row-three { flex-direction: column; gap: 8px; }
