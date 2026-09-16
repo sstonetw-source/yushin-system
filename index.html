@@ -141,7 +141,7 @@
                 <input type="text" id="myQuoteSearch" placeholder="搜尋單號 / 抬頭 / 客戶名稱" style="width:260px;" oninput="renderMyQuotesList()">
                 <button class="btn-secondary" onclick="loadMyQuotesFromCloud()">🔄 重新整理</button>
             </div>
-            <table>
+            <table class="admin-users-table">
                 <thead><tr><th>單號</th><th>抬頭</th><th>客戶名稱</th><th id="myQuotesSalesHeader" style="display:none;">業務</th><th>日期</th><th>總計</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="myQuotesBody"></tbody>
             </table>
