@@ -2094,7 +2094,12 @@ window.markQuoteAsDeal = function(quoteNo) {
                 invoiceTitle: q.clientName || '',
                 quoteNo: quoteNo,
                 salesName: stripPhoneSuffix(q.salesName),
-                ownerUid: q.ownerUid || salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(q.salesName))?.uid || ''
+                ownerUid: q.ownerUid || salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(q.salesName))?.uid || '',
+                isOrdered: false,
+                isArrived: false,
+                isDelivered: false,
+                isBilled: false,
+                invoiceDate: ''
             };
             // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
             const priceMatch = item.model ? priceList.find(p => p.model && p.model.trim() === item.model.trim()) : null;
@@ -2142,8 +2147,64 @@ let currentLifecycleOrderId = null;
 let deliveryPartialFormOpen = false;
 const pendingDeliveryOrderIds = new Set();
 let activeOrderWorkFilter = 'all';
+let activeOrderPeriod = 'this-year';
 let orderPaginationState = null;
 let orderPageLoading = false;
+
+function dateOnlyFromTimestamp(value) {
+    if (!value) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return String(value);
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// 開發票日期同時視為收款與完成日期。舊資料優先由「已報帳」操作紀錄推回日期；
+// 若舊資料完全沒有操作紀錄，才暫以訂單日期顯示，避免既有完成訂單從統計消失。
+function orderInvoiceDate(order) {
+    if (order?.invoiceDate) return order.invoiceDate;
+    const history = Array.isArray(order?.statusHistory) ? order.statusHistory : [];
+    const billedEntry = [...history].reverse().find(entry => entry.field === 'isBilled' && entry.value);
+    return dateOnlyFromTimestamp(billedEntry?.at) || (order?.isBilled ? order.orderDate || '' : '');
+}
+
+function orderPeriodRange() {
+    if (activeOrderPeriod === 'all') return { start: '', end: '' };
+    if (activeOrderPeriod === 'custom') {
+        return {
+            start: document.getElementById('orderPeriodStart')?.value || '',
+            end: document.getElementById('orderPeriodEnd')?.value || ''
+        };
+    }
+    const year = new Date().getFullYear() - (activeOrderPeriod === 'last-year' ? 1 : 0);
+    return { start: `${year}-01-01`, end: `${year}-12-31` };
+}
+
+function dateInOrderPeriod(date) {
+    const { start, end } = orderPeriodRange();
+    if (!start && !end) return true;
+    return !!date && (!start || date >= start) && (!end || date <= end);
+}
+
+function orderMatchesWorkPeriod(order, category = orderWorkCategory(order)) {
+    if (category === 'billing') return true;
+    if (category === 'complete') return dateInOrderPeriod(orderInvoiceDate(order));
+    return dateInOrderPeriod(order.orderDate || '');
+}
+
+window.changeOrderPeriod = function(value) {
+    activeOrderPeriod = ['this-year', 'last-year', 'custom', 'all'].includes(value) ? value : 'this-year';
+    const custom = document.getElementById('orderCustomPeriod');
+    if (custom) custom.style.display = activeOrderPeriod === 'custom' ? 'flex' : 'none';
+    if (activeOrderPeriod === 'custom') {
+        const start = document.getElementById('orderPeriodStart');
+        const end = document.getElementById('orderPeriodEnd');
+        const year = new Date().getFullYear();
+        if (start && !start.value) start.value = `${year}-01-01`;
+        if (end && !end.value) end.value = dateOnlyFromTimestamp(new Date().toISOString());
+    }
+    renderOrdersList();
+};
 
 function orderQuantity(order) {
     const qty = parseFloat(order?.qty);
@@ -2248,10 +2309,14 @@ function renderOrderWorkCards(orders) {
     orders.forEach(order => {
         const category = orderWorkCategory(order);
         const amount = orderWorkAmount(order, category);
-        metrics.all.count++;
-        metrics.all.amount += amount;
-        metrics[category].count++;
-        metrics[category].amount += amount;
+        if (dateInOrderPeriod(order.orderDate || '')) {
+            metrics.all.count++;
+            metrics.all.amount += salesAmount(order);
+        }
+        if (orderMatchesWorkPeriod(order, category)) {
+            metrics[category].count++;
+            metrics[category].amount += amount;
+        }
     });
     container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
 }
@@ -2421,7 +2486,9 @@ window.renderOrdersList = function() {
     renderOrderWorkCards(baseOrders);
 
     baseOrders.forEach(o => {
-        if (activeOrderWorkFilter !== 'all' && orderWorkCategory(o) !== activeOrderWorkFilter) return;
+        const category = orderWorkCategory(o);
+        if (activeOrderWorkFilter !== 'all' && category !== activeOrderWorkFilter) return;
+        if (!orderMatchesWorkPeriod(o, activeOrderWorkFilter === 'all' ? 'all' : category)) return;
         shown++;
 
         const tr = document.createElement('tr');
@@ -2443,6 +2510,7 @@ window.renderOrdersList = function() {
                     <option value="扣" ${o.transactionType === '扣' ? 'selected' : ''}>扣</option>
                 </select>
                 ${o.transactionType === '直' ? `<input type="text" aria-label="發票抬頭" placeholder="發票抬頭" value="${escapeAttr(o.invoiceTitle || '')}" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)">` : ''}
+                ${o.isBilled ? `<label class="order-invoice-date-label">開票／收款日<input type="date" aria-label="開發票及收款日期" value="${escapeAttr(orderInvoiceDate(o))}" onchange="updateOrderInvoiceDate('${o.id}',this.value)"></label>` : ''}
             </td>
             <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
@@ -2947,9 +3015,17 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     const delivery = deliveryProgressInfo(o);
     if (field === 'isOrdered' && !newValue && (o.isArrived || delivery.delivered > 0)) { alert('已有到貨或送貨紀錄，不能直接取消訂貨。'); return; }
     if (field === 'isArrived' && !newValue && delivery.delivered > 0) { alert('已有送貨紀錄，不能直接取消到貨。'); return; }
+    let invoiceDate = o.invoiceDate || '';
+    if (field === 'isBilled' && newValue) {
+        invoiceDate = prompt('請確認開發票日期（同時視為收款／完成日期）：', orderInvoiceDate(o) || localDateString());
+        if (invoiceDate === null) return;
+        invoiceDate = invoiceDate.trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) { alert('請輸入正確日期，格式為 YYYY-MM-DD。'); return; }
+    }
+    if (field === 'isBilled' && !newValue) invoiceDate = '';
     const previous = {
         isOrdered: o.isOrdered, isArrived: o.isArrived, isBilled: o.isBilled,
-        orderedBy: o.orderedBy, statusHistory: [...(o.statusHistory || [])]
+        invoiceDate: o.invoiceDate || '', orderedBy: o.orderedBy, statusHistory: [...(o.statusHistory || [])]
     };
     const statusLabel = { isOrdered: '已訂貨', isArrived: '已到貨', isDelivered: '已送貨', isBilled: '已報帳' }[field] || field;
     const actor = currentUserName || currentUser?.email || '未知使用者';
@@ -2962,6 +3038,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         optimisticEntries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: timestamp });
     }
     o[field] = newValue;
+    if (field === 'isBilled') o.invoiceDate = invoiceDate;
     if (field === 'isOrdered') o.orderedBy = newValue ? actor : '';
     optimisticEntries.push(logEntry);
     o.statusHistory = [...previous.statusHistory, ...optimisticEntries];
@@ -2984,6 +3061,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
             updates.orderedBy = order.orderedBy || actor;
             entries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: timestamp });
         }
+        if (field === 'isBilled') updates.invoiceDate = invoiceDate;
         if (field === 'isOrdered') updates.orderedBy = newValue ? actor : '';
         entries.push(logEntry);
         updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...entries);
@@ -2992,6 +3070,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
             isOrdered: updates.isOrdered !== undefined ? updates.isOrdered : order.isOrdered,
             isArrived: updates.isArrived !== undefined ? updates.isArrived : order.isArrived,
             isBilled: updates.isBilled !== undefined ? updates.isBilled : order.isBilled,
+            invoiceDate: updates.invoiceDate !== undefined ? updates.invoiceDate : order.invoiceDate,
             orderedBy: updates.orderedBy !== undefined ? updates.orderedBy : order.orderedBy,
             statusHistory: [...(order.statusHistory || []), ...entries]
         };
@@ -3007,6 +3086,27 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
             renderOrderLifecycleModal();
         }
         alert('更新狀態失敗，已還原：' + err.message);
+    });
+};
+
+window.updateOrderInvoiceDate = function(orderId, value) {
+    const order = ordersCache.find(item => item.id === orderId);
+    if (!order || !order.isBilled || !canEditPage('orders.list')) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) { alert('請選擇正確的開發票日期。'); renderOrdersList(); return; }
+    const previous = order.invoiceDate || '';
+    if (previous === value) return;
+    const history = {
+        field: 'invoiceDate', label: '修改開票／收款日期', before: previous || orderInvoiceDate(order), after: value,
+        by: currentUserName || currentUser?.email || '未知使用者', at: new Date().toISOString()
+    };
+    order.invoiceDate = value;
+    order.fieldEditHistory = [...(order.fieldEditHistory || []), history];
+    renderOrdersList();
+    db.collection('orders').doc(orderId).update({ invoiceDate: value, fieldEditHistory: firebase.firestore.FieldValue.arrayUnion(history) }).catch(err => {
+        order.invoiceDate = previous;
+        order.fieldEditHistory = (order.fieldEditHistory || []).filter(item => item !== history);
+        renderOrdersList();
+        alert('更新開票日期失敗，已還原：' + err.message);
     });
 };
 
@@ -3845,7 +3945,12 @@ window.saveNewOrder = function() {
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
         salesName: currentUserName || '',
-        ownerUid: currentUser?.uid || ''
+        ownerUid: currentUser?.uid || '',
+        isOrdered: false,
+        isArrived: false,
+        isDelivered: false,
+        isBilled: false,
+        invoiceDate: ''
     };
     const costInputVal = document.getElementById('orderCostPrice').value;
     if (costInputVal !== '') data.costPrice = parseFloat(costInputVal);
@@ -3907,6 +4012,7 @@ window.exportOrdersByDate = async function() {
                     '總價': o.totalPrice || '',
                     '交易方式': o.transactionType || '',
                     '抬頭': o.invoiceTitle || '',
+                    '開票／收款日期': orderInvoiceDate(o),
                     '來源估價單': o.quoteNo || '',
                     '業務': stripPhoneSuffix(o.salesName)
                 });
