@@ -616,12 +616,15 @@ window.switchMainTab = function(tabId, el) {
 window.switchViewRole = function(role) {
     if (trueUserRole !== 'admin') return;
     currentUserRole = role;
+    // 先清掉前一個視角的分頁狀態，避免非同步查詢完成前短暫顯示不屬於新視角的資料。
+    myQuotesCache = [];
+    myQuotesPaginationState = null;
+    ordersCache = [];
+    orderPaginationState = null;
     showApp();
 
     // showApp 只會重新載入目前正在看的模組；其他模組等使用者切入時再載入。
     // 避免管理員每切換一次檢視身份，就同時查詢估價單、訂單與全部儀器。
-    myQuotesPaginationState = null;
-    orderPaginationState = null;
 
     // 如果目前正在看管理員後台，但模擬身份已經不是管理員，就先跳轉離開，避免卡在打不開的分頁
     const activeSection = document.querySelector('.content-section.active');
@@ -1911,6 +1914,7 @@ window.copyQuoteAsNew = async function(quoteNo) {
 let myQuotesCache = [];
 let myQuotesPaginationState = null;
 let myQuotesPageLoading = false;
+let myQuotesReloadRequested = false;
 
 window.switchQuoteView = function(view, el) {
     const pageKey = view === 'create' ? 'quote.create' : 'quote.my';
@@ -1950,7 +1954,10 @@ function updateMyQuotesLoadMoreButton() {
 
 async function loadMyQuotesPage(reset) {
     const hint = document.getElementById('myQuotesEmptyHint');
-    if (myQuotesPageLoading) return;
+    if (myQuotesPageLoading) {
+        if (reset) myQuotesReloadRequested = true;
+        return;
+    }
     if (getDataScope('quotes') === 'none') {
         myQuotesCache = [];
         myQuotesPaginationState = null;
@@ -1965,6 +1972,7 @@ async function loadMyQuotesPage(reset) {
         myQuotesCache = [];
     }
     myQuotesPageLoading = true;
+    const requestedRole = currentUserRole;
     updateMyQuotesLoadMoreButton();
     const records = new Map(myQuotesCache.map(quote => [quote.id, quote]));
     let remainingReads = DEFAULT_LIST_LIMIT;
@@ -1975,6 +1983,10 @@ async function loadMyQuotesPage(reset) {
             let query = source.query().limit(requested);
             if (source.cursor) query = query.startAfter(source.cursor);
             const snapshot = await query.get();
+            if (requestedRole !== currentUserRole) {
+                myQuotesReloadRequested = true;
+                return;
+            }
             if (!snapshot.empty) {
                 source.cursor = snapshot.docs[snapshot.docs.length - 1];
                 snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
@@ -1997,6 +2009,10 @@ async function loadMyQuotesPage(reset) {
     } finally {
         myQuotesPageLoading = false;
         updateMyQuotesLoadMoreButton();
+        if (myQuotesReloadRequested) {
+            myQuotesReloadRequested = false;
+            loadMyQuotesPage(true);
+        }
     }
 }
 
@@ -2153,6 +2169,7 @@ let activeOrderWorkFilter = 'all';
 let activeOrderPeriod = 'this-year';
 let orderPaginationState = null;
 let orderPageLoading = false;
+let orderReloadRequested = false;
 
 function dateOnlyFromTimestamp(value) {
     if (!value) return '';
@@ -2361,7 +2378,10 @@ function updateOrderLoadMoreButton() {
 }
 
 async function loadOrderPage(reset) {
-    if (orderPageLoading) return;
+    if (orderPageLoading) {
+        if (reset) orderReloadRequested = true;
+        return;
+    }
     if (getDataScope('orders') === 'none') {
         ordersCache = [];
         orderPaginationState = null;
@@ -2374,6 +2394,7 @@ async function loadOrderPage(reset) {
         ordersCache = [];
     }
     orderPageLoading = true;
+    const requestedRole = currentUserRole;
     updateOrderLoadMoreButton();
     const records = new Map(ordersCache.map(order => [order.id, order]));
     let remainingReads = DEFAULT_LIST_LIMIT;
@@ -2384,6 +2405,10 @@ async function loadOrderPage(reset) {
             let query = source.query().limit(requested);
             if (source.cursor) query = query.startAfter(source.cursor);
             const snapshot = await query.get();
+            if (requestedRole !== currentUserRole) {
+                orderReloadRequested = true;
+                return;
+            }
             if (!snapshot.empty) {
                 source.cursor = snapshot.docs[snapshot.docs.length - 1];
                 snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
@@ -2405,6 +2430,10 @@ async function loadOrderPage(reset) {
     } finally {
         orderPageLoading = false;
         updateOrderLoadMoreButton();
+        if (orderReloadRequested) {
+            orderReloadRequested = false;
+            loadOrderPage(true);
+        }
     }
 }
 

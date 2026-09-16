@@ -103,3 +103,15 @@ test('saving one new order updates the local cache without reloading the list', 
     assert.doesNotMatch(saveOrder, /loadOrdersFromCloud\(\)/);
     assert.match(saveOrder, /findPriceItemForOrder\(data\)/);
 });
+
+test('role changes cannot leave an older in-flight page in the cache', () => {
+    assert.match(appSource, /const requestedRole = currentUserRole;/);
+    assert.match(appSource, /requestedRole !== currentUserRole/);
+    assert.match(appSource, /orderReloadRequested = true/);
+    assert.match(appSource, /myQuotesReloadRequested = true/);
+    const roleSwitchStart = appSource.indexOf('window.switchViewRole =');
+    const roleSwitchEnd = appSource.indexOf('\n};', roleSwitchStart) + 3;
+    const roleSwitch = appSource.slice(roleSwitchStart, roleSwitchEnd);
+    assert.match(roleSwitch, /ordersCache = \[\]/);
+    assert.match(roleSwitch, /myQuotesCache = \[\]/);
+});
