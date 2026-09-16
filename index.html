@@ -110,7 +110,7 @@
                     <tbody id="quoteItems"></tbody>
                 </table>
             </div>
-            <div class="no-print" style="margin-bottom: 8px;">
+            <div class="no-print quote-item-actions" style="margin-bottom: 8px;">
                 <button type="button" onclick="addQuoteRow()">＋ 新增品項</button>
                 <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依目前價目表更新所有品項單價</button>
             </div>
@@ -127,7 +127,7 @@
             </div>
         </div>
 
-        <div class="no-print" style="text-align: center; margin-top: 25px;">
+        <div class="no-print quote-primary-actions" style="text-align: center; margin-top: 25px;">
             <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">🖨️ 列印 / 存為 PDF（自動同步雲端）</button>
             <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
@@ -141,7 +141,7 @@
                 <input type="text" id="myQuoteSearch" placeholder="搜尋單號 / 抬頭 / 客戶名稱" style="width:260px;" oninput="renderMyQuotesList()">
                 <button class="btn-secondary" onclick="loadMyQuotesFromCloud()">🔄 重新整理</button>
             </div>
-            <table>
+            <table class="admin-users-table">
                 <thead><tr><th>單號</th><th>抬頭</th><th>客戶名稱</th><th id="myQuotesSalesHeader" style="display:none;">業務</th><th>日期</th><th>總計</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="myQuotesBody"></tbody>
             </table>
@@ -217,7 +217,7 @@
         <div class="eq-modal-box">
             <h3 id="eqModalTitle">新增儀器</h3>
             <div class="form-grid">
-                <div><label>客戶名稱</label><input type="text" id="eqCustomer"></div>
+                <div><label>客戶名稱</label><input type="text" id="eqCustomer" list="orderCustomerSuggestions" autocomplete="off"></div>
                 <div><label>型號</label><input type="text" id="eqModel" list="priceModelList" oninput="onEqModelChange()" onchange="onEqModelChange()"></div>
                 <div><label>廠牌</label>
                     <select id="eqBrand" onchange="onEqBrandSelectChange()"></select>
@@ -300,6 +300,21 @@
                 </div>
             </details>
             <button class="btn-secondary" onclick="loadOrdersFromCloud()">🔄 重新整理</button>
+        </div>
+        <div class="order-period-toolbar no-print">
+            <label for="orderPeriodPreset">統計期間</label>
+            <select id="orderPeriodPreset" onchange="changeOrderPeriod(this.value)">
+                <option value="this-year">今年</option>
+                <option value="last-year">去年</option>
+                <option value="custom">自訂日期</option>
+                <option value="all">全部年度</option>
+            </select>
+            <div id="orderCustomPeriod" class="order-custom-period" style="display:none;">
+                <input type="date" id="orderPeriodStart" aria-label="訂單統計開始日期" onchange="renderOrdersList()">
+                <span>至</span>
+                <input type="date" id="orderPeriodEnd" aria-label="訂單統計結束日期" onchange="renderOrdersList()">
+            </div>
+            <span class="order-period-note">訂單進度依訂單日期；待報帳包含跨年度；已完成依開發票日期。</span>
         </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
         <div class="toolbar no-print" id="purchaseOrderActionBar" style="display:none;background:#eef5ff;">
@@ -445,7 +460,7 @@
                 <div class="form-grid" style="margin-bottom:6px;">
                     <div><label>退貨日期</label><input type="date" id="returnDate"></div>
                     <div><label>本次退貨數量</label><input type="number" id="returnQty" min="0" step="any"></div>
-                    <div><label>原因／備註</label><input type="text" id="returnReason" placeholder="請輸入退貨原因"></div>
+                    <div><label>原因／備註（選填）</label><input type="text" id="returnReason" placeholder="可不填寫"></div>
                 </div>
                 <div id="returnFormHint" style="font-size:12px;color:#666;margin-bottom:8px;"></div>
                 <button type="button" onclick="saveReturnRecord()">💾 儲存退貨紀錄</button>

@@ -118,7 +118,7 @@ input[type="number"] {
 .three-quote-total strong { display:block; margin-top:3px; color:#2e7d32; font-size:22px; }
 .three-quote-rounding-note { margin-top:14px; padding:10px 12px; border-radius:6px; background:#fff8e1; color:#665200; font-size:12px; line-height:1.6; }
 
-.comparison-quote-page { box-sizing:border-box; width:190mm; min-height:277mm; color:#111; background:#fff; }
+.comparison-quote-page { box-sizing:border-box; width:190mm; color:#111; background:#fff; }
 .comparison-quote-header { display:flex; justify-content:space-between; align-items:flex-start; gap:15mm; min-height:39mm; text-align:left; }
 .comparison-company-block { flex:1; text-align:left; }
 .comparison-company-logo { display:block; width:auto; max-width:78mm; max-height:25mm; margin:0 0 3mm; object-fit:contain; object-position:left top; }
@@ -131,7 +131,15 @@ input[type="number"] {
 .comparison-quote-meta span { display:block; margin-bottom:2mm; color:#666; font-size:10px; }
 .comparison-quote-meta strong { display:block; font-size:13px; font-weight:normal; }
 .comparison-product-list { margin-top:2mm; }
-.comparison-product-item { display:flex; justify-content:space-between; align-items:flex-start; gap:10mm; min-height:18mm; padding:5mm 1mm; }
+.comparison-product-item { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto auto; align-items:center; gap:4mm; min-height:18mm; padding:5mm 1mm; font-size:13px; }
+.comparison-product-model,
+.comparison-unit-price,
+.comparison-product-qty,
+.comparison-product-subtotal { white-space:nowrap; }
+.comparison-product-name { min-width:0; }
+.comparison-unit-price,
+.comparison-product-qty,
+.comparison-product-subtotal { text-align:right; }
 .comparison-product-copy { display:flex; align-items:flex-start; gap:5mm; min-width:0; }
 .comparison-item-number { flex:0 0 auto; color:#888; }
 .comparison-product-copy h3 { margin:0 0 2mm; font-weight:normal; }
@@ -153,36 +161,30 @@ input[type="number"] {
 .comparison-style-a .comparison-quote-header h2 { font-family:Georgia,"Times New Roman",serif; font-size:14px; font-style:italic; font-weight:normal; }
 .comparison-style-a .comparison-document-title { margin-top:3mm; color:#343434; font-family:Georgia,"Times New Roman",serif; font-size:30px; letter-spacing:2px; }
 .comparison-style-a .comparison-product-list { margin-top:8mm; }
-.comparison-style-a .comparison-product-item { position:relative; min-height:21mm; padding:5mm 0 7mm; border:none; }
-.comparison-style-a .comparison-product-item::after { content:""; position:absolute; left:10mm; right:43mm; top:10.5mm; border-top:1px dotted #777; z-index:0; }
-.comparison-style-a .comparison-product-copy { position:relative; z-index:1; align-items:baseline; max-width:125mm; }
-.comparison-style-a .comparison-item-number { min-width:7mm; color:#333; font-family:"Courier New",monospace; font-size:12px; }
-.comparison-style-a .comparison-product-copy > div { padding-right:3mm; background:#fff; }
-.comparison-style-a .comparison-product-copy h3 { display:inline; margin:0; padding-right:2mm; background:#fff; font-family:"PMingLiU","Songti TC",serif; font-size:18px; letter-spacing:1px; }
-.comparison-style-a .comparison-product-copy p { margin-top:3mm; color:#555; font-family:"Courier New",monospace; font-size:11px; letter-spacing:.3px; }
-.comparison-style-a .comparison-product-numbers { position:relative; z-index:1; padding-left:3mm; background:#fff; font-family:"Courier New",monospace; font-size:11px; }
-.comparison-style-a .comparison-product-numbers span { color:#444; letter-spacing:1px; }
-.comparison-style-a .comparison-product-numbers strong { font-family:"Courier New",monospace; font-size:16px; font-weight:normal; }
+.comparison-style-a .comparison-product-item { grid-template-columns:minmax(0,1fr) auto auto auto; min-height:15mm; padding:4mm 0; border-bottom:1px dotted #777; font-family:"PMingLiU","Songti TC",serif; }
+.comparison-style-a .comparison-product-main { display:flex; flex-direction:column; gap:.7mm; min-width:0; line-height:1.15; }
+.comparison-style-a .comparison-product-main .comparison-product-name,
+.comparison-style-a .comparison-product-main .comparison-product-model { font-size:13px; letter-spacing:0; }
+.comparison-style-a .comparison-product-name,
+.comparison-style-a .comparison-product-subtotal { font-weight:normal; }
 .comparison-style-a .comparison-quote-total-row { border-top:3px double #333; padding-top:5mm; }
 .comparison-style-a .comparison-quote-total-row span, .comparison-style-a .comparison-quote-total-row strong { font-family:"Courier New",monospace; }
 
 /* 第三張：現代中文報價風格，無衬線體、中段標題、品項為無框色塊。 */
 .comparison-style-b { padding:16mm 17mm; font-family:"Helvetica Neue",Helvetica,Arial,"PingFang TC",sans-serif; }
-.comparison-style-b .comparison-quote-header { min-height:31mm; }
+.comparison-style-b .comparison-quote-header { display:block; min-height:31mm; }
+.comparison-style-b .comparison-company-block { text-align:center; }
+.comparison-style-b .comparison-company-identity { position:relative; display:flex; align-items:center; justify-content:center; min-height:22mm; }
+.comparison-style-b .comparison-company-name { text-align:center; }
 .comparison-style-b .comparison-quote-header h1 { font-size:20px; font-weight:500; letter-spacing:5px; }
 .comparison-style-b .comparison-quote-header h2 { font-size:10px; font-weight:normal; letter-spacing:2px; text-transform:uppercase; }
-.comparison-style-b .comparison-company-logo { max-width:88mm; max-height:26mm; }
-.comparison-style-b .comparison-document-title { align-self:flex-end; padding:3mm 6mm; background:#31363b; color:#fff; font-size:19px; font-weight:300; letter-spacing:7px; }
+.comparison-style-b .comparison-company-logo { position:absolute; left:0; width:auto; max-width:24mm; max-height:18mm; margin:0; object-position:left center; }
+.comparison-style-b .comparison-quote-header p { text-align:center; }
 .comparison-style-b .comparison-quote-meta { margin-top:13mm; }
 .comparison-style-b .comparison-product-list { display:grid; gap:5mm; margin-top:8mm; }
-.comparison-style-b .comparison-product-item { min-height:23mm; margin:0; padding:7mm; border:none; border-radius:12px; background:linear-gradient(135deg,#f1f3f5 0%,#fafafa 100%); box-shadow:0 1.5mm 4mm rgba(31,43,55,.09); }
-.comparison-style-b .comparison-product-copy { align-items:flex-start; gap:5mm; }
-.comparison-style-b .comparison-item-number { min-width:9mm; color:#8b949e; font-size:22px; font-weight:300; line-height:1; }
-.comparison-style-b .comparison-product-copy h3 { margin-bottom:3mm; color:#20252a; font-size:17px; font-weight:600; letter-spacing:.5px; }
-.comparison-style-b .comparison-product-copy p { display:inline-block; margin:0; padding:1.5mm 3mm; border-radius:9px; background:#e1e5e8; color:#525a61; font-size:10px; }
-.comparison-style-b .comparison-product-numbers { align-self:stretch; display:flex; flex-direction:column; justify-content:space-between; font-size:10px; }
-.comparison-style-b .comparison-product-numbers span { color:#707980; letter-spacing:1px; }
-.comparison-style-b .comparison-product-numbers strong { color:#222a30; font-size:18px; font-weight:500; }
+.comparison-style-b .comparison-product-item { min-height:15mm; margin:0; padding:5mm; border:none; border-radius:12px; background:linear-gradient(135deg,#f1f3f5 0%,#fafafa 100%); box-shadow:0 1.5mm 4mm rgba(31,43,55,.09); }
+.comparison-style-b .comparison-product-name,
+.comparison-style-b .comparison-product-subtotal { color:#20252a; font-weight:600; }
 .comparison-style-b .comparison-quote-total-row { flex-direction:column; align-items:flex-end; gap:2mm; }
 .comparison-style-b .comparison-quote-total-row strong { padding:3mm 5mm; background:#31363b; color:#fff; font-size:25px; font-weight:400; }
 .comparison-style-b .comparison-quote-stamp { margin-left:auto; }
@@ -286,6 +288,8 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-transaction-cell { min-width:130px; }
 .order-transaction-cell select, .order-transaction-cell input { display:block; width:100%; box-sizing:border-box; }
 .order-transaction-cell input { margin-top:5px; }
+.order-transaction-cell .order-invoice-date-label { display:block; margin-top:7px; color:#555; font-size:10px; text-align:left; }
+.order-transaction-cell .order-invoice-date-label input { margin-top:3px; font-size:11px; }
 .order-progress-button { min-width:126px; padding:7px 10px; font-size:12px; font-weight:bold; }
 .order-progress-pending { background:#777; }
 .order-progress-active { background:#1565c0; }
@@ -299,6 +303,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-more-menu-popover button { display:block; width:100%; margin:2px 0; padding:7px 8px; background:#fff; color:#333; text-align:left; font-size:12px; }
 .order-more-menu-popover button:hover { background:#f0f3f6; }
 .order-more-menu-popover .danger-menu-item { color:#c00; }
+.order-period-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 10px; padding:10px 12px; border:1px solid #d8e4f2; border-radius:7px; background:#f7faff; }
+.order-period-toolbar label { color:#334; font-size:13px; font-weight:bold; }
+.order-period-toolbar select, .order-period-toolbar input { min-height:36px; padding:6px 8px; border:1px solid #bfcbd7; border-radius:5px; box-sizing:border-box; }
+.order-custom-period { display:flex; align-items:center; gap:7px; }
+.order-period-note { flex:1 1 320px; color:#5d6a76; font-size:12px; line-height:1.5; }
 .order-work-cards { display:grid; grid-template-columns:repeat(7,minmax(105px,1fr)); gap:8px; margin:0 0 14px; }
 .order-work-card { border:1px solid #d5dde5; background:#f7f9fb; color:#334; border-radius:8px; padding:10px 8px; text-align:left; min-width:0; }
 .order-work-card:hover { background:#edf3f8; }
@@ -319,6 +328,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 @media (max-width: 600px) { .order-workflow-steps { grid-template-columns:repeat(2,1fr); } .order-progress-button { min-width:112px; } }
 @media (max-width: 900px) { .order-work-cards { grid-template-columns:repeat(3,1fr); } }
 @media (max-width: 520px) { .order-work-cards { grid-template-columns:repeat(2,1fr); } }
+@media (max-width: 640px) {
+    .order-period-toolbar, .order-custom-period { align-items:stretch; flex-direction:column; }
+    .order-period-toolbar select, .order-period-toolbar input { width:100%; min-height:44px; }
+    .order-period-note { flex-basis:auto; }
+}
 .sales-stat-cards { display:grid; grid-template-columns:repeat(3,minmax(180px,1fr)); gap:12px; margin:14px 0; }
 .sales-stat-card { background:#f7f9fc; border:1px solid #d7e0ea; border-radius:9px; padding:16px; display:flex; flex-direction:column; gap:7px; }
 .sales-stat-card span { color:#555; font-size:13px; }
@@ -438,7 +452,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     body:not(.printing-three-quotes) #comparisonQuotePrintPages { display:none !important; }
     body.printing-three-quotes #comparisonQuotePrintPages { display:block !important; width:190mm !important; }
     body.printing-three-quotes #printableQuote { break-after:page; page-break-after:always; }
-    body.printing-three-quotes .comparison-quote-page { display:block !important; break-before:page; page-break-before:always; }
+    body.printing-three-quotes .comparison-quote-page { display:block !important; min-height:0 !important; break-before:auto; page-break-before:auto; break-after:page; page-break-after:always; }
     body.printing-three-quotes .comparison-quote-page:last-child { break-after:auto; page-break-after:auto; }
     .company-logo { width: 135px; max-height: 105px; }
     #printableQuote.theme-yushin .company-logo-yushin { width: 115px; max-height: 84px; }
@@ -475,9 +489,143 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
    只在螢幕（screen）套用，列印/存 PDF 一律用上面 @media print 或原本桌面版的表格排版，
    所以「輸出」出來的估價單格式完全不受這裡影響 */
 @media screen and (max-width: 640px) {
+    /* 四個主系統入口固定為整齊的 2 × 2 等寬按鍵。 */
+    .nav-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 8px;
+        padding: 12px;
+    }
+    .nav-tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 52px;
+        margin: 0;
+        padding: 10px 8px;
+        border-radius: 8px;
+        box-sizing: border-box;
+        font-size: 16px;
+        line-height: 1.25;
+        text-align: center;
+        white-space: nowrap;
+    }
+    .nav-spacer { display: none; }
+    .auth-status {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: center;
+        gap: 8px;
+        padding: 6px 2px 2px;
+    }
+    #authUserLabel,
+    #viewAsRoleSelect {
+        grid-column: 1 / -1;
+    }
+    #viewAsRoleSelect {
+        width: 100%;
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+    .auth-status button {
+        width: 100%;
+        min-height: 44px;
+        margin: 0;
+    }
+
+    /* 管理後台的功能入口固定兩欄，避免按鍵依文字長度散落。 */
+    #admin-system > .sub-nav {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px;
+    }
+    #admin-system > .sub-nav .sub-tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 48px;
+        padding: 8px 6px;
+        box-sizing: border-box;
+        text-align: center;
+        line-height: 1.3;
+    }
+
+    /* 人員名單在手機改為一人一卡；桌機仍維持原本的橫向表格。 */
+    .admin-users-table,
+    .admin-users-table tbody,
+    .admin-users-table tr,
+    .admin-users-table td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .admin-users-table thead { display: none; }
+    .admin-users-table tr {
+        margin-bottom: 14px;
+        padding: 8px 12px;
+        border: 1px solid #c9d6e4;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(0, 51, 102, 0.08);
+    }
+    .admin-users-table td {
+        display: grid;
+        grid-template-columns: 82px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        padding: 9px 0;
+        border: 0;
+        border-bottom: 1px solid #edf1f5;
+        font-size: 14px;
+        line-height: 1.45;
+        text-align: left;
+        overflow-wrap: anywhere;
+    }
+    .admin-users-table td:last-child { border-bottom: 0; }
+    .admin-users-table td::before {
+        content: attr(data-label);
+        color: #4e6275;
+        font-weight: 700;
+    }
+    .admin-user-password-actions button {
+        display: block;
+        width: 100%;
+        min-height: 44px;
+        margin: 6px 0 0 !important;
+        white-space: normal;
+    }
+    .admin-user-password-actions br { display: none; }
+    .admin-user-uid { word-break: break-all; }
+
     .three-quote-options { grid-template-columns:1fr; }
     .meta-row-three { flex-direction: column; gap: 8px; }
     .meta-row-three > div { width: 100%; box-sizing: border-box; }
+
+    /* 建立估價單的主要操作改為單欄滿版，避免手機上按鈕擠在同一列而誤觸。 */
+    .quote-item-actions,
+    .quote-primary-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        width: 100%;
+    }
+    .quote-item-actions button,
+    .quote-primary-actions button {
+        width: 100%;
+        min-height: 52px;
+        margin: 0;
+        padding: 12px 16px !important;
+        box-sizing: border-box;
+        font-size: 16px !important;
+        line-height: 1.35;
+        touch-action: manipulation;
+    }
 
     .bottom-layout { flex-direction: column; align-items: stretch; gap: 10px; }
     .stamp-section { width: 100%; text-align: center; }
