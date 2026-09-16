@@ -2406,9 +2406,18 @@ async function loadOrderPage(reset) {
 }
 
 // 訂單資料範圍由管理員在身份權限中設定：只看自己或查看所有人。
-// 重新整理會從第一批開始；「載入更多」沿用各查詢來源的最後一筆文件繼續讀取。
-window.loadOrdersFromCloud = function() {
-    return loadOrderPage(true);
+// 年度統計與跨年度待報帳必須以完整資料計算，因此重新整理時會逐批載入所有可查看訂單；
+// 每批仍維持 50 筆，避免單次查詢過大。
+window.loadOrdersFromCloud = async function() {
+    await loadOrderPage(true);
+    while (orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length) {
+        const before = `${orderPaginationState.sourceIndex}:${orderPaginationState.sources.map(source => source.cursor?.id || '').join('|')}`;
+        await loadOrderPage(false);
+        const after = orderPaginationState
+            ? `${orderPaginationState.sourceIndex}:${orderPaginationState.sources.map(source => source.cursor?.id || '').join('|')}`
+            : '';
+        if (before === after) break;
+    }
 };
 
 window.loadMoreOrders = function() {
