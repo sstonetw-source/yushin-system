@@ -161,7 +161,10 @@ input[type="number"] {
 .comparison-style-a .comparison-quote-header h2 { font-family:Georgia,"Times New Roman",serif; font-size:14px; font-style:italic; font-weight:normal; }
 .comparison-style-a .comparison-document-title { margin-top:3mm; color:#343434; font-family:Georgia,"Times New Roman",serif; font-size:30px; letter-spacing:2px; }
 .comparison-style-a .comparison-product-list { margin-top:8mm; }
-.comparison-style-a .comparison-product-item { min-height:15mm; padding:4mm 0; border-bottom:1px dotted #777; font-family:"PMingLiU","Songti TC",serif; }
+.comparison-style-a .comparison-product-item { grid-template-columns:minmax(0,1fr) auto auto auto; min-height:15mm; padding:4mm 0; border-bottom:1px dotted #777; font-family:"PMingLiU","Songti TC",serif; }
+.comparison-style-a .comparison-product-main { display:flex; flex-direction:column; gap:.7mm; min-width:0; line-height:1.15; }
+.comparison-style-a .comparison-product-main .comparison-product-name,
+.comparison-style-a .comparison-product-main .comparison-product-model { font-size:13px; letter-spacing:0; }
 .comparison-style-a .comparison-product-name,
 .comparison-style-a .comparison-product-subtotal { font-weight:normal; }
 .comparison-style-a .comparison-quote-total-row { border-top:3px double #333; padding-top:5mm; }
