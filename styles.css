@@ -288,6 +288,8 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-transaction-cell { min-width:130px; }
 .order-transaction-cell select, .order-transaction-cell input { display:block; width:100%; box-sizing:border-box; }
 .order-transaction-cell input { margin-top:5px; }
+.order-transaction-cell .order-invoice-date-label { display:block; margin-top:7px; color:#555; font-size:10px; text-align:left; }
+.order-transaction-cell .order-invoice-date-label input { margin-top:3px; font-size:11px; }
 .order-progress-button { min-width:126px; padding:7px 10px; font-size:12px; font-weight:bold; }
 .order-progress-pending { background:#777; }
 .order-progress-active { background:#1565c0; }
@@ -301,6 +303,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-more-menu-popover button { display:block; width:100%; margin:2px 0; padding:7px 8px; background:#fff; color:#333; text-align:left; font-size:12px; }
 .order-more-menu-popover button:hover { background:#f0f3f6; }
 .order-more-menu-popover .danger-menu-item { color:#c00; }
+.order-period-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 10px; padding:10px 12px; border:1px solid #d8e4f2; border-radius:7px; background:#f7faff; }
+.order-period-toolbar label { color:#334; font-size:13px; font-weight:bold; }
+.order-period-toolbar select, .order-period-toolbar input { min-height:36px; padding:6px 8px; border:1px solid #bfcbd7; border-radius:5px; box-sizing:border-box; }
+.order-custom-period { display:flex; align-items:center; gap:7px; }
+.order-period-note { flex:1 1 320px; color:#5d6a76; font-size:12px; line-height:1.5; }
 .order-work-cards { display:grid; grid-template-columns:repeat(7,minmax(105px,1fr)); gap:8px; margin:0 0 14px; }
 .order-work-card { border:1px solid #d5dde5; background:#f7f9fb; color:#334; border-radius:8px; padding:10px 8px; text-align:left; min-width:0; }
 .order-work-card:hover { background:#edf3f8; }
@@ -321,6 +328,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 @media (max-width: 600px) { .order-workflow-steps { grid-template-columns:repeat(2,1fr); } .order-progress-button { min-width:112px; } }
 @media (max-width: 900px) { .order-work-cards { grid-template-columns:repeat(3,1fr); } }
 @media (max-width: 520px) { .order-work-cards { grid-template-columns:repeat(2,1fr); } }
+@media (max-width: 640px) {
+    .order-period-toolbar, .order-custom-period { align-items:stretch; flex-direction:column; }
+    .order-period-toolbar select, .order-period-toolbar input { width:100%; min-height:44px; }
+    .order-period-note { flex-basis:auto; }
+}
 .sales-stat-cards { display:grid; grid-template-columns:repeat(3,minmax(180px,1fr)); gap:12px; margin:14px 0; }
 .sales-stat-card { background:#f7f9fc; border:1px solid #d7e0ea; border-radius:9px; padding:16px; display:flex; flex-direction:column; gap:7px; }
 .sales-stat-card span { color:#555; font-size:13px; }
