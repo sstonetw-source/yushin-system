@@ -477,6 +477,40 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
    只在螢幕（screen）套用，列印/存 PDF 一律用上面 @media print 或原本桌面版的表格排版，
    所以「輸出」出來的估價單格式完全不受這裡影響 */
 @media screen and (max-width: 640px) {
+    /* 四個主系統入口固定為整齊的 2 × 2 等寬按鍵。 */
+    .nav-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 8px;
+        padding: 12px;
+    }
+    .nav-tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 52px;
+        margin: 0;
+        padding: 10px 8px;
+        border-radius: 8px;
+        box-sizing: border-box;
+        font-size: 16px;
+        line-height: 1.25;
+        text-align: center;
+        white-space: nowrap;
+    }
+    .nav-spacer { display: none; }
+    .auth-status {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 2px 2px;
+    }
+    .auth-status button { margin: 0; }
+
     .three-quote-options { grid-template-columns:1fr; }
     .meta-row-three { flex-direction: column; gap: 8px; }
     .meta-row-three > div { width: 100%; box-sizing: border-box; }
