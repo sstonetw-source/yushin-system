@@ -2146,6 +2146,9 @@ let currentDeliveryOrderId = null;
 let currentLifecycleOrderId = null;
 let deliveryPartialFormOpen = false;
 const pendingDeliveryOrderIds = new Set();
+// 同一個狀態欄位寫入期間不接受第二次操作，避免手機連點造成兩個 Firestore
+// transaction 交錯，最後畫面被較慢回來的舊結果覆蓋。
+const pendingOrderStatusKeys = new Set();
 let activeOrderWorkFilter = 'all';
 let activeOrderPeriod = 'this-year';
 let orderPaginationState = null;
@@ -2406,18 +2409,10 @@ async function loadOrderPage(reset) {
 }
 
 // 訂單資料範圍由管理員在身份權限中設定：只看自己或查看所有人。
-// 年度統計與跨年度待報帳必須以完整資料計算，因此重新整理時會逐批載入所有可查看訂單；
-// 每批仍維持 50 筆，避免單次查詢過大。
-window.loadOrdersFromCloud = async function() {
-    await loadOrderPage(true);
-    while (orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length) {
-        const before = `${orderPaginationState.sourceIndex}:${orderPaginationState.sources.map(source => source.cursor?.id || '').join('|')}`;
-        await loadOrderPage(false);
-        const after = orderPaginationState
-            ? `${orderPaginationState.sourceIndex}:${orderPaginationState.sources.map(source => source.cursor?.id || '').join('|')}`
-            : '';
-        if (before === after) break;
-    }
+// 首次與重新整理只載入 50 筆；歷史資料由「載入更多」明確取得，避免資料增加後
+// 每次進入訂單頁都在背景掃完整個 orders 集合。
+window.loadOrdersFromCloud = function() {
+    return loadOrderPage(true);
 };
 
 window.loadMoreOrders = function() {
@@ -2524,10 +2519,10 @@ window.renderOrdersList = function() {
             <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
                 <div class="order-compact-actions">
-                    <button type="button" class="btn-small ${o.isOrdered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isOrdered', ${!o.isOrdered})" ${normalizedOrderStatus(o) !== 'normal' ? 'disabled' : ''}>${o.isOrdered ? '已訂貨' : '訂貨'}</button>
-                    <button type="button" class="btn-small ${o.isArrived ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isArrived', ${!o.isArrived})" ${normalizedOrderStatus(o) !== 'normal' ? 'disabled' : ''}>${o.isArrived ? '已到貨' : '到貨'}</button>
+                    <button type="button" class="btn-small ${o.isOrdered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isOrdered', ${!o.isOrdered})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isOrdered`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isOrdered`) ? '儲存中…' : o.isOrdered ? '已訂貨' : '訂貨'}</button>
+                    <button type="button" class="btn-small ${o.isArrived ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isArrived', ${!o.isArrived})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isArrived`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isArrived`) ? '儲存中…' : o.isArrived ? '已到貨' : '到貨'}</button>
                     <button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : deliveryProgressInfo(o).state === 'partial' ? `送貨 ${deliveryProgressInfo(o).delivered}/${deliveryProgressInfo(o).total}` : '送貨'}</button>
-                    <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' ? 'disabled' : ''}>${o.isBilled ? '已報帳' : '報帳'}</button>
+                    <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已報帳' : '報帳'}</button>
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
@@ -2697,6 +2692,39 @@ let poCurrentCompany = 'yushin';
 let poEditingId = null;
 let poSaveInProgress = false;
 
+// 將不同時期的訂單品項格式統一成訂購單使用的格式。舊資料是一張訂單一個
+// itemName/itemCode/qty；新版或匯入資料可能使用 items、orderItems 或 products。
+// 只在讀取時轉換，不回寫原訂單，避免 Phase 1 變成資料模型遷移。
+function purchaseItemsFromOrder(order) {
+    const collections = [order?.items, order?.orderItems, order?.products];
+    const sourceItems = collections.find(items => Array.isArray(items) && items.length) || [order || {}];
+    return sourceItems.map((item, index) => {
+        const itemCode = item.itemCode || item.productCode || item.code || item.model || order.itemCode || order.productCode || '';
+        const itemName = item.itemName || item.productName || item.name || item.nameCn || order.itemName || order.productName || '';
+        const brand = item.brand || item.manufacturer || order.brand || '';
+        const qtyValue = item.qty ?? item.quantity ?? item.count ?? (sourceItems.length === 1 ? order.qty ?? order.quantity : 1);
+        let cost = parseFloat(item.costPrice ?? item.cost ?? item.purchasePrice ?? (sourceItems.length === 1 ? order.costPrice : NaN));
+        if (!Number.isFinite(cost) || cost <= 0) {
+            const normalizedCode = normalizeItemCode(itemCode);
+            const normalizedBrand = String(brand || '').trim().toLocaleLowerCase();
+            const priceMatch = (normalizedBrand && priceItemLookup.get(`brand:${normalizedBrand}:${normalizedCode}`))
+                || priceItemLookup.get(`code:${normalizedCode}`);
+            if (priceMatch) cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
+        }
+        const parsedQty = parseFloat(qtyValue);
+        return {
+            orderId: order.id,
+            orderItemIndex: index,
+            itemName,
+            itemCode,
+            brand,
+            qty: Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1,
+            unit: item.unit || order.unit || '',
+            unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0
+        };
+    }).filter(item => item.itemName || item.itemCode);
+}
+
 window.openPurchaseOrderModal = function() {
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
     if (checked.length === 0) {
@@ -2713,23 +2741,11 @@ window.openPurchaseOrderModal = function() {
     }
     poEditingId = null;
     populatePoVendorSuggestions();
-    poAllItems = selectedOrders.map(o => {
-        let cost = parseFloat(o.costPrice);
-        // 這筆訂單本身還沒填成本的話，再用貨號查一次目前的價目表，價目表如果有登記成本就直接帶入
-        if (!isFinite(cost) || cost <= 0) {
-            const priceMatch = o.itemCode ? priceList.find(p => p.model && p.model.trim() === o.itemCode.trim()) : null;
-            if (priceMatch && priceMatch.cost) cost = parseFloat(priceMatch.cost);
-        }
-        return {
-            orderId: o.id,
-            itemName: o.itemName || '',
-            itemCode: o.itemCode || '',
-            brand: o.brand || '',
-            qty: parseFloat(o.qty) || 1,
-            // 單價只帶訂單或價目表中的含稅成本；找不到時留 0，避免誤把客戶售價當成供應商進貨價。
-            unitPrice: isFinite(cost) && cost > 0 ? cost : 0
-        };
-    }).filter(Boolean);
+    poAllItems = selectedOrders.flatMap(purchaseItemsFromOrder);
+    if (!poAllItems.length) {
+        alert('選取的訂單沒有可辨識的品項，請確認品名、貨號或 items 資料。');
+        return;
+    }
     poItems = poAllItems;
 
     document.getElementById('poVendorName').value = '';
@@ -3017,6 +3033,8 @@ function resetQuoteFormForNextOne() {
 window.toggleOrderStatus = function(orderId, field, newValue) {
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
+    const pendingKey = `${orderId}:${field}`;
+    if (pendingOrderStatusKeys.has(pendingKey)) return;
     if (normalizedOrderStatus(o) !== 'normal') { alert('已取消或已作廢的訂單不能更改進度。'); return; }
     if (field === 'isBilled' && o.isBilled && !newValue) {
         alert('這筆訂單已完成報帳；如需更正，請直接修改「開票／收款日」。');
@@ -3055,6 +3073,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     if (field === 'isOrdered') o.orderedBy = newValue ? actor : '';
     optimisticEntries.push(logEntry);
     o.statusHistory = [...previous.statusHistory, ...optimisticEntries];
+    pendingOrderStatusKeys.add(pendingKey);
     renderOrdersList();
 
     let committed;
@@ -3089,10 +3108,12 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         };
     }).then(() => {
         Object.assign(o, committed);
+        pendingOrderStatusKeys.delete(pendingKey);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     }).catch(err => {
         Object.assign(o, previous);
+        pendingOrderStatusKeys.delete(pendingKey);
         activeOrderWorkFilter = previousWorkFilter;
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) {
