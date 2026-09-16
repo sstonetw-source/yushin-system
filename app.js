@@ -5218,12 +5218,12 @@ window.renderAdminSalesTable = function() {
         const tr = document.createElement('tr');
         const hasProfile = !!u.name;
         tr.innerHTML = `
-            <td>${escapeHtml(u.code || '—')}</td>
-            <td>${escapeHtml(u.name || '（尚未設定姓名）')}</td>
-            <td>${escapeHtml(u.phone || '—')}</td>
-            <td>${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
-            <td>${escapeHtml(roleLabel[u.role] || u.role || '業務')}</td>
-            <td>
+            <td data-label="代號">${escapeHtml(u.code || '—')}</td>
+            <td data-label="姓名">${escapeHtml(u.name || '（尚未設定姓名）')}</td>
+            <td data-label="電話">${escapeHtml(u.phone || '—')}</td>
+            <td data-label="Email">${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
+            <td data-label="身份">${escapeHtml(roleLabel[u.role] || u.role || '業務')}</td>
+            <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
                     ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
                     : `<button type="button" class="btn-small" onclick="toggleMustChangePassword('${u.uid}', true)">🔒 強制下次登入改密碼</button>`}
@@ -5232,7 +5232,7 @@ window.renderAdminSalesTable = function() {
                     ? `<button type="button" class="btn-small btn-secondary" style="margin-top:4px;" onclick="sendPasswordResetToUser('${escapeAttr(u.email)}')">📧 寄送密碼重設信</button>`
                     : ''}
             </td>
-            <td style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">${escapeHtml(u.uid)}</td>
+            <td data-label="帳號 UID" class="admin-user-uid" style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">${escapeHtml(u.uid)}</td>
         `;
         tbody.appendChild(tr);
     });
