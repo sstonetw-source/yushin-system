@@ -217,7 +217,7 @@
         <div class="eq-modal-box">
             <h3 id="eqModalTitle">新增儀器</h3>
             <div class="form-grid">
-                <div><label>客戶名稱</label><input type="text" id="eqCustomer"></div>
+                <div><label>客戶名稱</label><input type="text" id="eqCustomer" list="orderCustomerSuggestions" autocomplete="off"></div>
                 <div><label>型號</label><input type="text" id="eqModel" list="priceModelList" oninput="onEqModelChange()" onchange="onEqModelChange()"></div>
                 <div><label>廠牌</label>
                     <select id="eqBrand" onchange="onEqBrandSelectChange()"></select>
