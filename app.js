@@ -1567,8 +1567,12 @@ function comparisonItemsForTotal(targetTotal) {
     return items.map((item, index) => {
         const amount = index === items.length - 1 ? targetTotal - allocated : Math.round(targetTotal * (weightTotal ? item.weight / weightTotal : 1 / items.length));
         allocated += amount;
-        return { ...item, amount };
+        return { ...item, amount, unitPrice: item.qty ? amount / item.qty : 0 };
     });
+}
+
+function formatComparisonMoney(value) {
+    return Number(value || 0).toLocaleString('zh-TW', { maximumFractionDigits: 4 });
 }
 
 function renderComparisonQuotePage(companyKey, percent, variant) {
@@ -1579,11 +1583,14 @@ function renderComparisonQuotePage(companyKey, percent, variant) {
     const stamp = company.stamp
         ? `<img src="${escapeAttr(company.stamp)}" alt="${escapeAttr(company.title)} 估價單章">`
         : `<div class="comparison-css-stamp">${escapeHtml(company.label)}估價專用章</div>`;
-    const textHeader = company.logoIsHeader ? '' : `<h1>${escapeHtml(company.title)}</h1>${company.sub ? `<h2>${escapeHtml(company.sub)}</h2>` : ''}`;
+    const textHeader = company.logoIsHeader && variant === 'a' ? '' : `<h1>${escapeHtml(company.title)}</h1>${company.sub ? `<h2>${escapeHtml(company.sub)}</h2>` : ''}`;
+    const headerIdentity = variant === 'b'
+        ? `<div class="comparison-company-identity">${logo}<div class="comparison-company-name">${textHeader}</div></div>`
+        : `${logo}${textHeader}`;
     return `<section class="comparison-quote-page comparison-style-${variant}">
-        <header class="comparison-quote-header"><div class="comparison-company-block">${logo}${textHeader}${company.addr ? `<p>${escapeHtml(company.addr)}</p>` : ''}${company.contact ? `<p>${company.contact}</p>` : ''}</div><div class="comparison-document-title">${variant === 'a' ? 'QUOTATION' : '報價單'}</div></header>
+        <header class="comparison-quote-header"><div class="comparison-company-block">${headerIdentity}${company.addr ? `<p>${escapeHtml(company.addr)}</p>` : ''}${company.contact ? `<p>${company.contact}</p>` : ''}</div>${variant === 'a' ? '<div class="comparison-document-title">QUOTATION</div>' : ''}</header>
         <div class="comparison-quote-meta">${document.getElementById('clientName').value.trim() ? `<div><span>${variant === 'a' ? 'CUSTOMER' : '抬頭'}</span><strong>${escapeHtml(document.getElementById('clientName').value)}</strong></div>` : ''}<div><span>${variant === 'a' ? 'DATE' : '報價日期'}</span><strong>${escapeHtml(document.getElementById('quoteDate').value || '')}</strong></div></div>
-        <div class="comparison-product-list">${items.map((item, index) => `<article class="comparison-product-item"><div class="comparison-product-copy"><span class="comparison-item-number">${String(index + 1).padStart(2, '0')}</span><div><h3>${escapeHtml(item.name || '－')}</h3>${item.model ? `<p>${variant === 'a' ? 'MODEL' : '型號'}：${escapeHtml(item.model)}</p>` : ''}</div></div><div class="comparison-product-numbers"><span>${variant === 'a' ? 'QTY' : '數量'} ${escapeHtml(String(item.qty || 0))}</span><strong>NT$ ${item.amount.toLocaleString()}</strong></div></article>`).join('')}</div>
+        <div class="comparison-product-list">${items.map(item => `<article class="comparison-product-item"><span class="comparison-product-model">${variant === 'a' ? 'MODEL' : '型號'}：${escapeHtml(item.model || '－')}</span><strong class="comparison-product-name">${escapeHtml(item.name || '－')}</strong><span class="comparison-unit-price">${variant === 'a' ? 'UNIT' : '單價'} NT$ ${formatComparisonMoney(item.unitPrice)}</span><span class="comparison-product-qty">${variant === 'a' ? 'QTY' : '數量'} ${escapeHtml(String(item.qty || 0))}</span><strong class="comparison-product-subtotal">${variant === 'a' ? 'SUBTOTAL' : '小計'} NT$ ${formatComparisonMoney(item.amount)}</strong></article>`).join('')}</div>
         <div class="comparison-quote-total-row"><span>${variant === 'a' ? 'TOTAL (TAX INCLUDED)' : '含稅總金額'}</span><strong>NT$ ${total.toLocaleString()}</strong></div>
         <div class="comparison-quote-chinese-total">合計新台幣 ${numberToChineseWords(total)}元整</div>
         <div class="comparison-quote-stamp">${stamp}</div>
