@@ -618,10 +618,10 @@ window.switchViewRole = function(role) {
     currentUserRole = role;
     showApp();
 
-    // 重新整理跟身份有關的資料快取，這樣不管接下來切到哪個分頁，看到的都已經是這個模擬身份該有的範圍
-    loadMyQuotesFromCloud();
-    loadOrdersFromCloud();
-    loadEquipmentFromCloud();
+    // showApp 只會重新載入目前正在看的模組；其他模組等使用者切入時再載入。
+    // 避免管理員每切換一次檢視身份，就同時查詢估價單、訂單與全部儀器。
+    myQuotesPaginationState = null;
+    orderPaginationState = null;
 
     // 如果目前正在看管理員後台，但模擬身份已經不是管理員，就先跳轉離開，避免卡在打不開的分頁
     const activeSection = document.querySelector('.content-section.active');
@@ -2625,7 +2625,7 @@ window.renderPoList = function() {
         if (keyword && !searchable.includes(keyword)) return;
         shown++;
 
-        const items = po.items || [];
+        const items = purchaseItemsFromSavedPo(po);
         const subtotal = items.reduce((sum, item) => sum + (item.qty * item.unitPrice), 0);
         const grandTotal = Math.round(subtotal) + Math.round(subtotal * 0.05);
         const companyInfo = companyData[po.company];
@@ -2654,7 +2654,7 @@ window.reprintPurchaseOrder = function(poId) {
     if (!po) return;
 
     populatePoVendorSuggestions();
-    poItems = (po.items || []).map(item => ({ ...item }));
+    poItems = purchaseItemsFromSavedPo(po);
     poAllItems = poItems;
     poEditingId = po.id;
     switchPoCompany(po.company || 'yushin', null, true);
@@ -2691,6 +2691,22 @@ let poAllItems = [];
 let poCurrentCompany = 'yushin';
 let poEditingId = null;
 let poSaveInProgress = false;
+
+function purchaseItemsFromSavedPo(po) {
+    const sourceItems = [po?.items, po?.orderItems, po?.products]
+        .find(items => Array.isArray(items) && items.length) || [];
+    return sourceItems.map((item, index) => ({
+        ...item,
+        orderId: item.orderId || item.sourceOrderId || '',
+        orderItemIndex: item.orderItemIndex ?? index,
+        itemName: item.itemName || item.productName || item.name || item.nameCn || '',
+        itemCode: item.itemCode || item.productCode || item.code || item.model || '',
+        brand: item.brand || item.manufacturer || '',
+        qty: parseFloat(item.qty ?? item.quantity ?? item.count) || 1,
+        unit: item.unit || '',
+        unitPrice: parseFloat(item.unitPrice ?? item.costPrice ?? item.cost ?? item.purchasePrice) || 0
+    })).filter(item => item.itemName || item.itemCode);
+}
 
 // 將不同時期的訂單品項格式統一成訂購單使用的格式。舊資料是一張訂單一個
 // itemName/itemCode/qty；新版或匯入資料可能使用 items、orderItems 或 products。

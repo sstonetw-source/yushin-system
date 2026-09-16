@@ -22,6 +22,16 @@ function loadPurchaseMapper() {
     return context.purchaseItemsFromOrder;
 }
 
+function loadSavedPurchaseMapper() {
+    const start = appSource.indexOf('function purchaseItemsFromSavedPo(po)');
+    const end = appSource.indexOf('\n}\n\n// 將不同時期', start) + 2;
+    assert.ok(start >= 0 && end > start, 'purchaseItemsFromSavedPo must exist');
+    const context = {};
+    vm.createContext(context);
+    vm.runInContext(appSource.slice(start, end), context);
+    return context.purchaseItemsFromSavedPo;
+}
+
 test('purchase mapper supports legacy single-item orders', () => {
     const items = loadPurchaseMapper()({ id: 'old', itemName: 'Legacy', itemCode: 'A-1', brand: 'Acme', qty: '3' });
     assert.equal(items.length, 1);
@@ -48,6 +58,14 @@ test('purchase mapper supports products and embedded purchase prices', () => {
     assert.deepEqual([item.itemName, item.itemCode, item.qty, item.unitPrice], ['Third', 'C-3', 5, 12]);
 });
 
+test('saved purchase orders remain readable with alternate item containers', () => {
+    const items = loadSavedPurchaseMapper()({
+        orderItems: [{ productName: 'Saved', productCode: 'P-1', quantity: '6', costPrice: '18' }]
+    });
+    assert.equal(items.length, 1);
+    assert.deepEqual([items[0].itemName, items[0].itemCode, items[0].qty, items[0].unitPrice], ['Saved', 'P-1', 6, 18]);
+});
+
 test('order refresh stays paginated and status writes have an in-flight guard', () => {
     const loaderStart = appSource.indexOf('window.loadOrdersFromCloud =');
     const loaderEnd = appSource.indexOf('\n};', loaderStart) + 3;
@@ -56,4 +74,8 @@ test('order refresh stays paginated and status writes have an in-flight guard', 
     assert.doesNotMatch(loader, /while\s*\(/);
     assert.match(appSource, /pendingOrderStatusKeys\.has\(pendingKey\)/);
     assert.match(appSource, /pendingOrderStatusKeys\.delete\(pendingKey\)/);
+    const roleSwitchStart = appSource.indexOf('window.switchViewRole =');
+    const roleSwitchEnd = appSource.indexOf('\n};', roleSwitchStart) + 3;
+    const roleSwitch = appSource.slice(roleSwitchStart, roleSwitchEnd);
+    assert.doesNotMatch(roleSwitch, /loadMyQuotesFromCloud\(\)|loadOrdersFromCloud\(\)|loadEquipmentFromCloud\(\)/);
 });
