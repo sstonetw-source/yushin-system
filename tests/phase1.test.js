@@ -114,4 +114,6 @@ test('role changes cannot leave an older in-flight page in the cache', () => {
     const roleSwitch = appSource.slice(roleSwitchStart, roleSwitchEnd);
     assert.match(roleSwitch, /ordersCache = \[\]/);
     assert.match(roleSwitch, /myQuotesCache = \[\]/);
+    assert.match(roleSwitch, /equipmentList = \[\]/);
+    assert.match(appSource, /generation !== equipmentLoadGeneration \|\| requestedRole !== currentUserRole/);
 });

@@ -90,6 +90,7 @@ function ensureXlsxLoaded() {
 // 儀器管理系統狀態
 let equipmentList = [];
 let currentEquipmentId = null;
+let equipmentLoadGeneration = 0;
 
 // 管理員後台狀態
 let allQuotesCache = [];
@@ -621,13 +622,17 @@ window.switchViewRole = function(role) {
     myQuotesPaginationState = null;
     ordersCache = [];
     orderPaginationState = null;
+    equipmentList = [];
+    const activeSection = document.querySelector('.content-section.active');
+    if (activeSection?.id === 'order-system') renderOrdersList();
+    if (activeSection?.id === 'quote-system' && document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
+    if (activeSection?.id === 'equipment-system') renderEquipmentList();
     showApp();
 
     // showApp 只會重新載入目前正在看的模組；其他模組等使用者切入時再載入。
     // 避免管理員每切換一次檢視身份，就同時查詢估價單、訂單與全部儀器。
 
     // 如果目前正在看管理員後台，但模擬身份已經不是管理員，就先跳轉離開，避免卡在打不開的分頁
-    const activeSection = document.querySelector('.content-section.active');
     if (activeSection && activeSection.id === 'admin-system' && currentUserRole !== 'admin') {
         actuallySwitchMainTab('quote-system');
     }
@@ -4181,6 +4186,8 @@ function canViewAllEquipment() {
 }
 
 window.loadEquipmentFromCloud = function() {
+    const generation = ++equipmentLoadGeneration;
+    const requestedRole = currentUserRole;
     let query = db.collection('equipment');
     if (canViewAllEquipment()) {
         query = query.orderBy('customerName');
@@ -4188,6 +4195,7 @@ window.loadEquipmentFromCloud = function() {
         query = query.where('salesName', '==', currentUserName);
     }
     query.get().then(snapshot => {
+        if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         equipmentList = [];
         snapshot.forEach(doc => {
             equipmentList.push({ id: doc.id, ...doc.data() });
@@ -4197,6 +4205,7 @@ window.loadEquipmentFromCloud = function() {
         }
         renderEquipmentList();
     }).catch(err => {
+        if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         console.error(err);
         alert('讀取儀器資料失敗，請確認 Firestore 權限設定。');
     });
