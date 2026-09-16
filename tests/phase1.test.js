@@ -64,6 +64,8 @@ test('saved purchase orders remain readable with alternate item containers', () 
     });
     assert.equal(items.length, 1);
     assert.deepEqual([items[0].itemName, items[0].itemCode, items[0].qty, items[0].unitPrice], ['Saved', 'P-1', 6, 18]);
+    const [legacyRoot] = loadSavedPurchaseMapper()({ itemName: 'Root', itemCode: 'R-1', qty: 2, unitPrice: 9 });
+    assert.deepEqual([legacyRoot.itemName, legacyRoot.qty, legacyRoot.unitPrice], ['Root', 2, 9]);
 });
 
 test('order refresh stays paginated and status writes have an in-flight guard', () => {

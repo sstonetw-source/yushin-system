@@ -2693,8 +2693,9 @@ let poEditingId = null;
 let poSaveInProgress = false;
 
 function purchaseItemsFromSavedPo(po) {
-    const sourceItems = [po?.items, po?.orderItems, po?.products]
-        .find(items => Array.isArray(items) && items.length) || [];
+    const sourceItems = [po?.items, po?.orderItems, po?.purchaseItems, po?.lineItems, po?.products]
+        .find(items => Array.isArray(items) && items.length)
+        || ((po?.itemName || po?.productName || po?.itemCode || po?.productCode) ? [po] : []);
     return sourceItems.map((item, index) => ({
         ...item,
         orderId: item.orderId || item.sourceOrderId || '',
@@ -2712,7 +2713,7 @@ function purchaseItemsFromSavedPo(po) {
 // itemName/itemCode/qty；新版或匯入資料可能使用 items、orderItems 或 products。
 // 只在讀取時轉換，不回寫原訂單，避免 Phase 1 變成資料模型遷移。
 function purchaseItemsFromOrder(order) {
-    const collections = [order?.items, order?.orderItems, order?.products];
+    const collections = [order?.items, order?.orderItems, order?.lineItems, order?.products];
     const sourceItems = collections.find(items => Array.isArray(items) && items.length) || [order || {}];
     return sourceItems.map((item, index) => {
         const itemCode = item.itemCode || item.productCode || item.code || item.model || order.itemCode || order.productCode || '';
