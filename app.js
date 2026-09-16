@@ -3742,9 +3742,13 @@ function populateOrderCustomerSuggestions() {
     if (!list) return;
     const customersByKey = new Map();
     const names = [
+        ...getRecentCustomerNames(),
         ...ordersCache.map(order => order.customerName),
+        ...equipmentList.map(equipment => equipment.customerName),
         ...myQuotesCache.map(quote => quote.clientName),
+        ...myQuotesCache.map(quote => quote.ordererName),
         ...allQuotesCache.map(quote => quote.clientName),
+        ...allQuotesCache.map(quote => quote.ordererName),
         ...[...document.querySelectorAll('#clientList option')].map(option => option.value)
     ];
     names.forEach(value => {
@@ -3754,13 +3758,35 @@ function populateOrderCustomerSuggestions() {
         if (!customersByKey.has(key)) customersByKey.set(key, name);
     });
     list.innerHTML = '';
-    [...customersByKey.values()]
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
-        .forEach(name => {
+    [...customersByKey.values()].forEach(name => {
             const option = document.createElement('option');
             option.value = name;
             list.appendChild(option);
         });
+}
+
+const RECENT_CUSTOMERS_STORAGE_KEY = 'recent_customer_names_v1';
+
+function customerNameKey(value) {
+    return String(value || '').trim().normalize('NFKC').replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function getRecentCustomerNames() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(RECENT_CUSTOMERS_STORAGE_KEY) || '[]');
+        return Array.isArray(saved) ? saved.map(value => String(value || '').trim()).filter(Boolean).slice(0, 20) : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function rememberRecentCustomerName(value) {
+    const name = String(value || '').trim();
+    if (!name) return;
+    const key = customerNameKey(name);
+    const recent = getRecentCustomerNames().filter(item => customerNameKey(item) !== key);
+    localStorage.setItem(RECENT_CUSTOMERS_STORAGE_KEY, JSON.stringify([name, ...recent].slice(0, 20)));
+    populateOrderCustomerSuggestions();
 }
 
 window.copyOrderAsNew = function(orderId) {
@@ -3834,6 +3860,7 @@ window.saveNewOrder = function() {
     }
 
     db.collection('orders').add(data).then(() => {
+        rememberRecentCustomerName(data.customerName);
         closeOrderModal();
         loadOrdersFromCloud();
     }).catch(err => {
@@ -4061,6 +4088,7 @@ window.onEqModelChange = function() {
 window.openEquipmentModal = function(eqId) {
     populateEquipmentSalesDropdown();
     populateEquipmentBrandDropdown();
+    populateOrderCustomerSuggestions();
 
     const overlay = document.getElementById('eqModalOverlay');
     overlay.dataset.editId = eqId || '';
@@ -4178,6 +4206,7 @@ window.saveEquipmentFromModal = function() {
 
     ref.set(payload, { merge: true }).then(() => {
         const savedId = editId || ref.id;
+        rememberRecentCustomerName(data.customerName);
         loadEquipmentFromCloudThenReopen(savedId);
         document.getElementById('eqSaveHint').innerText = '✓ 已儲存';
     }).catch(err => {
