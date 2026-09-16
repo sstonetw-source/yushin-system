@@ -4729,8 +4729,10 @@ window.switchAdminTab = function(tab, el) {
 
     if (tab === 'sales') ensureSalesListLoaded().then(reloadSalesFromUsers);
     if (tab === 'prices') loadPriceCatalogSummary();
-    if (tab === 'agencies') ensurePriceListLoaded().then(() => loadSalesStatistics()).then(() => { renderKeyStatisticBrands(); renderCompanyAgencyBrandSettings(); });
-    if (tab === 'statistics') ensurePriceListLoaded().then(loadSalesStatistics);
+    // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
+    if (tab === 'agencies') ensurePriceListLoaded().then(() => { renderKeyStatisticBrands(); renderCompanyAgencyBrandSettings(); });
+    // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
+    if (tab === 'statistics') ensurePriceListLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
     if (tab === 'quotes') loadAllQuotesFromCloud();
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
     if (tab === 'storage') resetCleanupPreview();

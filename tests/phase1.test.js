@@ -79,3 +79,14 @@ test('order refresh stays paginated and status writes have an in-flight guard', 
     const roleSwitch = appSource.slice(roleSwitchStart, roleSwitchEnd);
     assert.doesNotMatch(roleSwitch, /loadMyQuotesFromCloud\(\)|loadOrdersFromCloud\(\)|loadEquipmentFromCloud\(\)/);
 });
+
+test('agency settings do not trigger a full orders statistics query', () => {
+    const switchStart = appSource.indexOf('window.switchAdminTab =');
+    const switchEnd = appSource.indexOf('\n};', switchStart) + 3;
+    const adminSwitch = appSource.slice(switchStart, switchEnd);
+    const agencyLine = adminSwitch.split('\n').find(line => line.includes("tab === 'agencies'"));
+    assert.ok(agencyLine);
+    assert.doesNotMatch(agencyLine, /loadSalesStatistics/);
+    const statisticsLine = adminSwitch.split('\n').find(line => line.includes("tab === 'statistics'"));
+    assert.match(statisticsLine, /salesStatisticsOrders\.length/);
+});
