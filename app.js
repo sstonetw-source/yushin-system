@@ -2531,15 +2531,12 @@ window.renderOrdersList = function() {
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
-                            <button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批送貨</button>
-                            <button type="button" onclick="openDeliveryModal('${o.id}')">查看／更正送貨紀錄</button>
-                            <button type="button" onclick="openReturnManagement('${o.id}')">退貨紀錄</button>
-                            <button type="button" onclick="openOrderStatusHistory('${o.id}')">操作紀錄</button>
+                            ${normalizedOrderStatus(o) === 'normal' ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>
+                            <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
-                            <button type="button" onclick="prepareOrderLifecycle('${o.id}', '${normalizedOrderStatus(o) !== 'normal' ? 'normal' : 'cancelled'}')">${normalizedOrderStatus(o) !== 'normal' ? '恢復訂單' : '取消訂單'}</button>
-                            ${isDeletableOrderDraft(o)
-                                ? `<button type="button" class="danger-menu-item" onclick="deleteOrder('${o.id}')">刪除草稿</button>`
-                                : normalizedOrderStatus(o) !== 'voided' ? `<button type="button" class="danger-menu-item" onclick="prepareOrderLifecycle('${o.id}', 'voided')">作廢訂單</button>` : ''}
+                            ${normalizedOrderStatus(o) === 'normal'
+                                ? `<button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>`
+                                : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                         </div>
                     </details>
                 </div>
@@ -3021,6 +3018,10 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
     if (normalizedOrderStatus(o) !== 'normal') { alert('已取消或已作廢的訂單不能更改進度。'); return; }
+    if (field === 'isBilled' && o.isBilled && !newValue) {
+        alert('這筆訂單已完成報帳；如需更正，請直接修改「開票／收款日」。');
+        return;
+    }
     const delivery = deliveryProgressInfo(o);
     if (field === 'isOrdered' && !newValue && (o.isArrived || delivery.delivered > 0)) { alert('已有到貨或送貨紀錄，不能直接取消訂貨。'); return; }
     if (field === 'isArrived' && !newValue && delivery.delivered > 0) { alert('已有送貨紀錄，不能直接取消到貨。'); return; }
@@ -3032,6 +3033,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) { alert('請輸入正確日期，格式為 YYYY-MM-DD。'); return; }
     }
     if (field === 'isBilled' && !newValue) invoiceDate = '';
+    const previousWorkFilter = activeOrderWorkFilter;
     const previous = {
         isOrdered: o.isOrdered, isArrived: o.isArrived, isBilled: o.isBilled,
         invoiceDate: o.invoiceDate || '', orderedBy: o.orderedBy, statusHistory: [...(o.statusHistory || [])]
@@ -3048,6 +3050,8 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     }
     o[field] = newValue;
     if (field === 'isBilled') o.invoiceDate = invoiceDate;
+    if (field === 'isBilled' && !newValue && activeOrderWorkFilter === 'complete') activeOrderWorkFilter = 'billing';
+    if (field === 'isBilled' && newValue && activeOrderWorkFilter === 'billing') activeOrderWorkFilter = 'complete';
     if (field === 'isOrdered') o.orderedBy = newValue ? actor : '';
     optimisticEntries.push(logEntry);
     o.statusHistory = [...previous.statusHistory, ...optimisticEntries];
@@ -3089,6 +3093,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     }).catch(err => {
         Object.assign(o, previous);
+        activeOrderWorkFilter = previousWorkFilter;
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) {
             renderDeliveryModal();
@@ -3231,6 +3236,47 @@ window.prepareOrderLifecycle = function(orderId, status) {
     document.getElementById('orderLifecycleReason').focus();
 };
 
+window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
+    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!['normal', 'cancelled'].includes(nextStatus)) return;
+    const cachedOrder = ordersCache.find(item => item.id === orderId);
+    if (!cachedOrder) return;
+    try {
+        let savedOrder;
+        await db.runTransaction(async transaction => {
+            const ref = db.collection('orders').doc(orderId);
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
+            const order = snapshot.data();
+            const previous = { status: normalizedOrderStatus(order), date: order.orderStatusDate || '', reason: order.orderStatusReason || '' };
+            if (previous.status === nextStatus) { savedOrder = order; return; }
+            const date = localDateString();
+            const actor = deliveryActor();
+            const history = {
+                action: nextStatus === 'normal' ? 'restore' : 'status_change',
+                before: previous,
+                after: { status: nextStatus, date, reason: '' },
+                by: actor,
+                at: new Date().toISOString()
+            };
+            const updates = {
+                orderStatus: nextStatus,
+                orderStatusDate: date,
+                orderStatusReason: '',
+                orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(history)
+            };
+            transaction.update(ref, updates);
+            savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
+        });
+        const index = ordersCache.findIndex(item => item.id === orderId);
+        if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
+        renderOrdersList();
+        if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
+    } catch (err) {
+        alert(`${nextStatus === 'normal' ? '恢復' : '取消'}訂單失敗：` + err.message);
+    }
+};
+
 window.toggleOrderProgressStatus = function(field, newValue) {
     const orderId = currentDeliveryOrderId;
     if (!orderId || !canEditPage('orders.list')) return;
@@ -3270,7 +3316,9 @@ window.openPartialDeliveryForOrder = function(orderId) {
 
 window.openReturnManagement = function(orderId) {
     openDeliveryModal(orderId);
-    document.getElementById('returnRecordsBody').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const form = document.getElementById('returnFormPanel');
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById('returnDate').focus();
 };
 
 window.openOrderStatusHistory = function(orderId) {
@@ -3633,7 +3681,7 @@ window.closeOrderLifecycleModal = function() {
 
 window.onOrderLifecycleStatusChange = function() {
     const status = document.getElementById('orderLifecycleStatus').value;
-    document.getElementById('orderLifecycleReason').placeholder = status === 'normal' ? '恢復為正常時可填寫說明' : '取消或作廢時必填';
+    document.getElementById('orderLifecycleReason').placeholder = status === 'normal' ? '恢復說明（選填）' : '取消或作廢原因（選填）';
 };
 
 window.resetReturnForm = function() {
@@ -3676,7 +3724,6 @@ window.saveOrderLifecycleStatus = async function() {
     const date = document.getElementById('orderLifecycleDate').value;
     const reason = document.getElementById('orderLifecycleReason').value.trim();
     if (!date) { alert('請填寫狀態日期。'); return; }
-    if (nextStatus !== 'normal' && !reason) { alert('取消或作廢時必須填寫原因。'); return; }
     const previous = { status: normalizedOrderStatus(order), date: order.orderStatusDate || '', reason: order.orderStatusReason || '' };
     if (previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
     const actor = deliveryActor();
@@ -3719,7 +3766,7 @@ window.saveReturnRecord = async function() {
     const qty = parseFloat(document.getElementById('returnQty').value);
     const reason = document.getElementById('returnReason').value.trim();
     const editId = document.getElementById('returnEditId').value;
-    if (!orderId || !date || !Number.isFinite(qty) || qty <= 0 || !reason) { alert('請填寫退貨日期、大於 0 的數量與退貨原因。'); return; }
+    if (!orderId || !date || !Number.isFinite(qty) || qty <= 0) { alert('請填寫退貨日期與大於 0 的退貨數量。'); return; }
     try {
         let savedOrder;
         await db.runTransaction(async transaction => {
