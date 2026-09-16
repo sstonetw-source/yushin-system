@@ -4020,17 +4020,19 @@ window.calcOrderTotal = function() {
     document.getElementById('orderTotalPrice').value = (qty * price).toFixed(0);
 };
 
+let newOrderSaveInProgress = false;
+
 window.saveNewOrder = function() {
+    if (newOrderSaveInProgress) return;
     const itemCode = document.getElementById('orderItemCode').value.trim();
-    const priceMatch = itemCode ? priceList.find(p => p.model && p.model.trim() === itemCode) : null;
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
         customerName: document.getElementById('orderCustomer').value.trim(),
         brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
         itemCode: itemCode,
         itemName: document.getElementById('orderItemName').value.trim(),
-        productLine: (priceMatch && priceMatch.productLine) || '',
-        productType: (priceMatch && priceMatch.productType) || '',
+        productLine: '',
+        productType: '',
         qty: document.getElementById('orderQty').value,
         unitPrice: document.getElementById('orderUnitPrice').value,
         totalPrice: document.getElementById('orderTotalPrice').value,
@@ -4057,12 +4059,25 @@ window.saveNewOrder = function() {
         return;
     }
 
-    db.collection('orders').add(data).then(() => {
+    const priceMatch = findPriceItemForOrder(data);
+    data.productLine = (priceMatch && priceMatch.productLine) || '';
+    data.productType = (priceMatch && priceMatch.productType) || '';
+
+    const saveButton = document.getElementById('saveNewOrderBtn');
+    newOrderSaveInProgress = true;
+    if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
+    db.collection('orders').add(data).then(docRef => {
         rememberRecentCustomerName(data.customerName);
         closeOrderModal();
-        loadOrdersFromCloud();
+        // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
+        ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
+            .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
+        renderOrdersList();
     }).catch(err => {
         alert('新增失敗：' + err.message);
+    }).finally(() => {
+        newOrderSaveInProgress = false;
+        if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存'; }
     });
 };
 

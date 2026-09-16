@@ -90,3 +90,14 @@ test('agency settings do not trigger a full orders statistics query', () => {
     const statisticsLine = adminSwitch.split('\n').find(line => line.includes("tab === 'statistics'"));
     assert.match(statisticsLine, /salesStatisticsOrders\.length/);
 });
+
+test('saving one new order updates the local cache without reloading the list', () => {
+    const saveStart = appSource.indexOf('window.saveNewOrder =');
+    const saveEnd = appSource.indexOf('\n};', saveStart) + 3;
+    const saveOrder = appSource.slice(saveStart, saveEnd);
+    assert.match(saveOrder, /newOrderSaveInProgress/);
+    assert.match(saveOrder, /ordersCache\s*=\s*\[/);
+    assert.match(saveOrder, /renderOrdersList\(\)/);
+    assert.doesNotMatch(saveOrder, /loadOrdersFromCloud\(\)/);
+    assert.match(saveOrder, /findPriceItemForOrder\(data\)/);
+});
