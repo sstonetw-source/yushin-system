@@ -2270,7 +2270,8 @@ function returnedQuantity(order) {
 }
 
 function normalizedOrderStatus(order) {
-    return ['cancelled', 'voided'].includes(order?.orderStatus) ? order.orderStatus : 'normal';
+    // 舊版的「作廢」與「取消」意義重複；保留舊資料相容，但統一視為已取消。
+    return ['cancelled', 'voided'].includes(order?.orderStatus) ? 'cancelled' : 'normal';
 }
 
 function orderLifecycleInfo(order) {
@@ -2279,7 +2280,6 @@ function orderLifecycleInfo(order) {
     const effectiveDelivered = Math.max(0, delivered - returned);
     const status = normalizedOrderStatus(order);
     if (status === 'cancelled') return { status, label: '已取消', css: 'invalid', delivered, returned, effectiveDelivered };
-    if (status === 'voided') return { status, label: '已作廢', css: 'invalid', delivered, returned, effectiveDelivered };
     if (returned > 0 && effectiveDelivered <= 0) return { status, label: '全數退貨', css: 'invalid', delivered, returned, effectiveDelivered };
     if (returned > 0) return { status, label: '部分退貨', css: 'returned', delivered, returned, effectiveDelivered };
     return { status, label: '正常', css: 'normal', delivered, returned, effectiveDelivered };
@@ -3108,7 +3108,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     if (!o || !canEditPage('orders.list')) return;
     const pendingKey = `${orderId}:${field}`;
     if (pendingOrderStatusKeys.has(pendingKey)) return;
-    if (normalizedOrderStatus(o) !== 'normal') { alert('已取消或已作廢的訂單不能更改進度。'); return; }
+    if (normalizedOrderStatus(o) !== 'normal') { alert('已取消的訂單不能更改進度。'); return; }
     if (field === 'isBilled' && o.isBilled && !newValue) {
         alert('這筆訂單已完成報帳；如需更正，請直接修改「開票／收款日」。');
         return;
@@ -3154,7 +3154,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         const snapshot = await transaction.get(ref);
         if (!snapshot.exists) throw new Error('找不到這筆訂單。');
         const order = snapshot.data();
-        if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消或作廢。');
+        if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
         const serverDelivery = deliveryProgressInfo(order);
         if (field === 'isOrdered' && !newValue && (order.isArrived || serverDelivery.delivered > 0)) throw new Error('已有到貨或送貨進度，不能取消訂貨。');
         if (field === 'isArrived' && !newValue && serverDelivery.delivered > 0) throw new Error('已有送貨進度，不能取消到貨。');
@@ -3393,7 +3393,7 @@ window.resetDeliveryForm = function() {
 window.openPartialDeliveryForm = function() {
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     if (!order || !canEditPage('orders.list')) return;
-    if (normalizedOrderStatus(order) !== 'normal') { alert('已取消或已作廢的訂單不能新增送貨紀錄。'); return; }
+    if (normalizedOrderStatus(order) !== 'normal') { alert('已取消的訂單不能新增送貨紀錄。'); return; }
     const progress = deliveryProgressInfo(order);
     if (progress.remaining <= 0) { alert('這筆訂單已全數送貨。'); return; }
     deliveryPartialFormOpen = true;
@@ -3438,7 +3438,7 @@ function renderOrderStatusHistory(order) {
         entries.push({ at: item.at, action, by: item.by, detail: `${record.date || ''}${record.qty != null ? `／${record.qty} 個` : ''}${record.reason ? `／${record.reason}` : ''}` });
     });
     (order.orderLifecycleHistory || []).forEach(item => {
-        const statusLabels = { normal: '恢復正常', cancelled: '取消訂單', voided: '作廢訂單' };
+        const statusLabels = { normal: '恢復正常', cancelled: '取消訂單', voided: '取消訂單' };
         const after = item.after || {};
         entries.push({ at: item.at, action: statusLabels[after.status] || '訂單狀態變更', by: item.by, detail: `${after.date || ''}${after.reason ? `／${after.reason}` : ''}` });
     });
@@ -3462,7 +3462,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canEditPage('orders.list')) return;
     const cachedProgress = deliveryProgressInfo(cachedOrder);
-    if (normalizedOrderStatus(cachedOrder) !== 'normal') { alert('已取消或已作廢的訂單不能送貨。'); return; }
+    if (normalizedOrderStatus(cachedOrder) !== 'normal') { alert('已取消的訂單不能送貨。'); return; }
     if (cachedProgress.state === 'complete') return quickCancelAllDelivery(orderId);
     if (cachedProgress.remaining <= 0) return;
     const today = localDateString();
@@ -3489,7 +3489,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
             const order = snapshot.data();
-            if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消或作廢。');
+            if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
             if (order.isDelivered && savedDeliveryRecords(order).length === 0) throw new Error('這筆舊資料已視為全數送貨。');
             const total = orderQuantity(order);
             const records = savedDeliveryRecords(order).slice();
@@ -3674,7 +3674,7 @@ window.saveDeliveryRecord = async function() {
             const records = savedDeliveryRecords(order).slice();
             const existingIndex = records.findIndex(item => item.id === editId);
             if (editId && existingIndex < 0) throw new Error('這筆送貨紀錄已被其他人修改或刪除，請重新開啟後再試。');
-            if (normalizedOrderStatus(order) !== 'normal' && existingIndex < 0) throw new Error('已取消或已作廢的訂單不能新增送貨紀錄。');
+            if (normalizedOrderStatus(order) !== 'normal' && existingIndex < 0) throw new Error('已取消的訂單不能新增送貨紀錄。');
             const now = new Date().toISOString();
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
@@ -3774,7 +3774,7 @@ window.closeOrderLifecycleModal = function() {
 
 window.onOrderLifecycleStatusChange = function() {
     const status = document.getElementById('orderLifecycleStatus').value;
-    document.getElementById('orderLifecycleReason').placeholder = status === 'normal' ? '恢復說明（選填）' : '取消或作廢原因（選填）';
+    document.getElementById('orderLifecycleReason').placeholder = status === 'normal' ? '恢復說明（選填）' : '取消原因（選填）';
 };
 
 window.resetReturnForm = function() {
@@ -3870,7 +3870,7 @@ window.saveReturnRecord = async function() {
             const records = savedReturnRecords(order).slice();
             const existingIndex = records.findIndex(item => item.id === editId);
             if (editId && existingIndex < 0) throw new Error('這筆退貨紀錄已被其他人修改或刪除，請重新開啟後再試。');
-            if (normalizedOrderStatus(order) !== 'normal' && existingIndex < 0) throw new Error('已取消或已作廢的訂單不能新增退貨紀錄。');
+            if (normalizedOrderStatus(order) !== 'normal' && existingIndex < 0) throw new Error('已取消的訂單不能新增退貨紀錄。');
             const now = new Date().toISOString();
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
@@ -3949,8 +3949,8 @@ window.deleteOrder = function(orderId) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order || !canEditPage('orders.list')) return;
     if (!isDeletableOrderDraft(order)) {
-        alert('這筆訂單已有來源或流程紀錄，不能直接刪除，請改用作廢。');
-        prepareOrderLifecycle(orderId, 'voided');
+        alert('這筆訂單已有來源或流程紀錄，不能直接刪除，請改用取消。');
+        prepareOrderLifecycle(orderId, 'cancelled');
         return;
     }
     if (!confirm('確定要刪除這筆尚未進入流程的草稿訂單嗎？')) return;
@@ -3958,7 +3958,7 @@ window.deleteOrder = function(orderId) {
         const ref = db.collection('orders').doc(orderId);
         const snapshot = await transaction.get(ref);
         if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-        if (!isDeletableOrderDraft(snapshot.data())) throw new Error('這筆訂單已有新的流程紀錄，不能刪除，請改用作廢。');
+        if (!isDeletableOrderDraft(snapshot.data())) throw new Error('這筆訂單已有新的流程紀錄，不能刪除，請改用取消。');
         transaction.delete(ref);
     }).then(() => {
         ordersCache = ordersCache.filter(item => item.id !== orderId);
