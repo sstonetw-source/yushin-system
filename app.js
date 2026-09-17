@@ -2171,6 +2171,7 @@ let currentDeliveryOrderId = null;
 let currentLifecycleOrderId = null;
 let deliveryPartialFormOpen = false;
 const pendingDeliveryOrderIds = new Set();
+const pendingLifecycleOrderIds = new Set();
 // 同一個狀態欄位寫入期間不接受第二次操作，避免手機連點造成兩個 Firestore
 // transaction 交錯，最後畫面被較慢回來的舊結果覆蓋。
 const pendingOrderStatusKeys = new Set();
@@ -2568,9 +2569,13 @@ window.renderOrdersList = function() {
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
-                            ${normalizedOrderStatus(o) === 'normal' ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>
+                            ${pendingLifecycleOrderIds.has(o.id)
+                                ? '<button type="button" disabled>處理中…</button>'
+                                : normalizedOrderStatus(o) === 'normal'
+                                    ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>
                             <button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>
-                            <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
+                            <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>`
+                                    : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                         </div>
@@ -3333,6 +3338,28 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if (!['normal', 'cancelled'].includes(nextStatus)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder) return;
+    if (pendingLifecycleOrderIds.has(orderId) || normalizedOrderStatus(cachedOrder) === nextStatus) return;
+    const optimisticBefore = {
+        orderStatus: cachedOrder.orderStatus,
+        orderStatusDate: cachedOrder.orderStatusDate,
+        orderStatusReason: cachedOrder.orderStatusReason,
+        orderLifecycleHistory: [...(cachedOrder.orderLifecycleHistory || [])]
+    };
+    const optimisticDate = localDateString();
+    const optimisticHistory = {
+        action: nextStatus === 'normal' ? 'restore' : 'status_change',
+        before: { status: normalizedOrderStatus(cachedOrder), date: cachedOrder.orderStatusDate || '', reason: cachedOrder.orderStatusReason || '' },
+        after: { status: nextStatus, date: optimisticDate, reason: '' },
+        by: deliveryActor(),
+        at: new Date().toISOString()
+    };
+    cachedOrder.orderStatus = nextStatus;
+    cachedOrder.orderStatusDate = optimisticDate;
+    cachedOrder.orderStatusReason = '';
+    cachedOrder.orderLifecycleHistory = [...optimisticBefore.orderLifecycleHistory, optimisticHistory];
+    pendingLifecycleOrderIds.add(orderId);
+    renderOrdersList();
+    if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     try {
         let savedOrder;
         await db.runTransaction(async transaction => {
@@ -3362,9 +3389,14 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
         });
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
+        pendingLifecycleOrderIds.delete(orderId);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     } catch (err) {
+        Object.assign(cachedOrder, optimisticBefore);
+        pendingLifecycleOrderIds.delete(orderId);
+        renderOrdersList();
+        if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
         alert(`${nextStatus === 'normal' ? '恢復' : '取消'}訂單失敗：` + err.message);
     }
 };
