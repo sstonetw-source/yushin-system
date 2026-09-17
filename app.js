@@ -96,6 +96,7 @@ let equipmentLoadGeneration = 0;
 let allQuotesCache = [];
 let allUsersCache = [];
 let salesStatisticsOrders = [];
+let salesStatisticsLoadPromise = null;
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
 const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman', 'Thermo'];
@@ -4978,11 +4979,14 @@ window.saveCompanyAgencyBrands = function() {
 
 // 管理員銷售統計以「訂單」為準，避免把尚未成交的估價單也算進營收。
 window.loadSalesStatistics = function() {
-    if (currentUserRole !== 'admin') return;
+    if (currentUserRole !== 'admin') return Promise.resolve();
+    if (salesStatisticsLoadPromise) return salesStatisticsLoadPromise;
+    const requestedRole = currentUserRole;
     const totalEl = document.getElementById('salesStatsSalesInc');
     if (totalEl) totalEl.innerText = '讀取中…';
 
-    return db.collection('orders').get().then(snapshot => {
+    salesStatisticsLoadPromise = db.collection('orders').get().then(snapshot => {
+        if (requestedRole !== currentUserRole) return;
         salesStatisticsOrders = [];
         snapshot.forEach(doc => salesStatisticsOrders.push({ id: doc.id, ...doc.data() }));
         const startInput = document.getElementById('salesStatsStart');
@@ -4995,10 +4999,14 @@ window.loadSalesStatistics = function() {
             renderSalesStatistics();
         }
     }).catch(err => {
+        if (requestedRole !== currentUserRole) return;
         console.error('讀取銷售統計失敗：', err);
         if (totalEl) totalEl.innerText = '讀取失敗';
         alert('讀取銷售統計失敗，請確認 Firestore 權限設定。');
+    }).finally(() => {
+        salesStatisticsLoadPromise = null;
     });
+    return salesStatisticsLoadPromise;
 };
 
 function salesAmount(order) {

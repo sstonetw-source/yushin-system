@@ -131,3 +131,12 @@ test('document number generation reads only the newest matching document', () =>
     assert.match(poGenerator, /limit\(1\)/);
     assert.match(appSource, /priceItemLookup\.get\(`code:\$\{normalizeItemCode\(value\)\}`\)/);
 });
+
+test('sales statistics reuses one in-flight full query and ignores stale roles', () => {
+    const start = appSource.indexOf('window.loadSalesStatistics =');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const loader = appSource.slice(start, end);
+    assert.match(loader, /if \(salesStatisticsLoadPromise\) return salesStatisticsLoadPromise/);
+    assert.match(loader, /requestedRole !== currentUserRole/);
+    assert.match(loader, /salesStatisticsLoadPromise = null/);
+});
