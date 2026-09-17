@@ -2105,6 +2105,7 @@ window.markQuoteAsDeal = function(quoteNo) {
             const orderRef = db.collection('orders').doc();
             const orderData = {
                 orderDate: todayStr,
+                company: q.company || '',
                 customerName: q.ordererName || '',
                 brand: item.brand || '',
                 productLine: item.productLine || '',
@@ -2779,6 +2780,16 @@ function purchaseItemsFromOrder(order) {
     }).filter(item => item.itemName || item.itemCode);
 }
 
+function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
+    const companies = ['yushin', 'morningstar', 'MULTI-LIFE'];
+    const savedCompanies = [...new Set(selectedOrders.map(order => order.company).filter(company => companies.includes(company)))];
+    if (savedCompanies.length === 1 && items.some(item => isCompanyBrandAllowed(savedCompanies[0], item.brand))) return savedCompanies[0];
+    if (companies.includes(preferredCompany) && items.some(item => isCompanyBrandAllowed(preferredCompany, item.brand))) return preferredCompany;
+    return companies
+        .map(company => ({ company, count: items.filter(item => isCompanyBrandAllowed(company, item.brand)).length }))
+        .sort((a, b) => b.count - a.count)[0]?.company || 'yushin';
+}
+
 window.openPurchaseOrderModal = function() {
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
     if (checked.length === 0) {
@@ -2807,8 +2818,14 @@ window.openPurchaseOrderModal = function() {
     const today = new Date();
     document.getElementById('poDate').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-    // 預設用估價單系統目前選的那間公司，比較符合平常的使用情境
-    switchPoCompany(currentCompany || 'yushin');
+    // 優先沿用來源訂單公司；舊訂單沒有 company 時，選擇能保留最多品項的公司，
+    // 避免目前估價單公司不相符而把全部採購品項靜默過濾掉。
+    const initialCompany = bestPurchaseOrderCompany(selectedOrders, poAllItems, currentCompany || 'yushin');
+    switchPoCompany(initialCompany);
+    if (!poItems.length) {
+        alert('品項已讀取，但目前三間公司的代理廠牌設定都不允許這些品項。請先到管理後台調整代理廠牌，或確認訂單廠牌是否正確。');
+        return;
+    }
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
@@ -4067,6 +4084,7 @@ window.saveNewOrder = function() {
     const itemCode = document.getElementById('orderItemCode').value.trim();
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
+        company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
         brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
         itemCode: itemCode,

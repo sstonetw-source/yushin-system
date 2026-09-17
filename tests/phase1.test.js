@@ -140,3 +140,21 @@ test('sales statistics reuses one in-flight full query and ignores stale roles',
     assert.match(loader, /requestedRole !== currentUserRole/);
     assert.match(loader, /salesStatisticsLoadPromise = null/);
 });
+
+test('purchase modal chooses a company that does not silently filter every item', () => {
+    const start = appSource.indexOf('function bestPurchaseOrderCompany(');
+    const end = appSource.indexOf('\n}\n\nwindow.openPurchaseOrderModal', start) + 2;
+    assert.ok(start >= 0 && end > start);
+    const context = {
+        isCompanyBrandAllowed: (company, brand) => ({
+            yushin: ['Roche'], morningstar: ['Qiagen'], 'MULTI-LIFE': ['Beckman']
+        })[company].includes(brand)
+    };
+    vm.createContext(context);
+    vm.runInContext(appSource.slice(start, end), context);
+    assert.equal(context.bestPurchaseOrderCompany([], [{ brand: 'Qiagen' }], 'yushin'), 'morningstar');
+    assert.equal(context.bestPurchaseOrderCompany([{ company: 'MULTI-LIFE' }], [{ brand: 'Beckman' }], 'yushin'), 'MULTI-LIFE');
+    const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
+    const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
+    assert.match(appSource.slice(dealStart, dealEnd), /company: q\.company \|\| ''/);
+});
