@@ -5050,7 +5050,11 @@ window.loadSalesStatistics = function() {
     const totalEl = document.getElementById('salesStatsSalesInc');
     if (totalEl) totalEl.innerText = '讀取中…';
 
-    salesStatisticsLoadPromise = db.collection('orders').get().then(snapshot => {
+    // 統計只需要截至今天已成立的訂單；排除未來日期，避免直接無條件掃描 orders。
+    // 歷史訂單仍保留，因為舊訂單可能在本期才送貨或退貨，不能只依訂單日起日截斷。
+    salesStatisticsLoadPromise = db.collection('orders')
+        .where('orderDate', '<=', localDateString())
+        .get().then(snapshot => {
         if (requestedRole !== currentUserRole) return;
         salesStatisticsOrders = [];
         snapshot.forEach(doc => salesStatisticsOrders.push({ id: doc.id, ...doc.data() }));

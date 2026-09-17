@@ -132,13 +132,15 @@ test('document number generation reads only the newest matching document', () =>
     assert.match(appSource, /priceItemLookup\.get\(`code:\$\{normalizeItemCode\(value\)\}`\)/);
 });
 
-test('sales statistics reuses one in-flight full query and ignores stale roles', () => {
+test('sales statistics uses a bounded cached query and ignores stale roles', () => {
     const start = appSource.indexOf('window.loadSalesStatistics =');
     const end = appSource.indexOf('\n};', start) + 3;
     const loader = appSource.slice(start, end);
     assert.match(loader, /if \(salesStatisticsLoadPromise\) return salesStatisticsLoadPromise/);
     assert.match(loader, /requestedRole !== currentUserRole/);
     assert.match(loader, /salesStatisticsLoadPromise = null/);
+    assert.match(loader, /where\('orderDate', '<=', localDateString\(\)\)/);
+    assert.doesNotMatch(loader, /collection\('orders'\)\.get\(\)/);
 });
 
 test('purchase modal chooses a company that does not silently filter every item', () => {
