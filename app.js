@@ -90,11 +90,13 @@ function ensureXlsxLoaded() {
 // 儀器管理系統狀態
 let equipmentList = [];
 let currentEquipmentId = null;
+let equipmentLoadGeneration = 0;
 
 // 管理員後台狀態
 let allQuotesCache = [];
 let allUsersCache = [];
 let salesStatisticsOrders = [];
+let salesStatisticsLoadPromise = null;
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
 const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman', 'Thermo'];
@@ -616,15 +618,22 @@ window.switchMainTab = function(tabId, el) {
 window.switchViewRole = function(role) {
     if (trueUserRole !== 'admin') return;
     currentUserRole = role;
+    // 先清掉前一個視角的分頁狀態，避免非同步查詢完成前短暫顯示不屬於新視角的資料。
+    myQuotesCache = [];
+    myQuotesPaginationState = null;
+    ordersCache = [];
+    orderPaginationState = null;
+    equipmentList = [];
+    const activeSection = document.querySelector('.content-section.active');
+    if (activeSection?.id === 'order-system') renderOrdersList();
+    if (activeSection?.id === 'quote-system' && document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
+    if (activeSection?.id === 'equipment-system') renderEquipmentList();
     showApp();
 
-    // 重新整理跟身份有關的資料快取，這樣不管接下來切到哪個分頁，看到的都已經是這個模擬身份該有的範圍
-    loadMyQuotesFromCloud();
-    loadOrdersFromCloud();
-    loadEquipmentFromCloud();
+    // showApp 只會重新載入目前正在看的模組；其他模組等使用者切入時再載入。
+    // 避免管理員每切換一次檢視身份，就同時查詢估價單、訂單與全部儀器。
 
     // 如果目前正在看管理員後台，但模擬身份已經不是管理員，就先跳轉離開，避免卡在打不開的分頁
-    const activeSection = document.querySelector('.content-section.active');
     if (activeSection && activeSection.id === 'admin-system' && currentUserRole !== 'admin') {
         actuallySwitchMainTab('quote-system');
     }
@@ -765,6 +774,8 @@ window.generateQuoteNo = async function() {
         const snapshot = await db.collection('quotes')
             .where('quoteNo', '>=', prefix)
             .where('quoteNo', '<=', prefix + '\uf8ff')
+            .orderBy('quoteNo', 'desc')
+            .limit(1)
             .get();
 
         // 用「目前已存在的最大流水號 + 1」而非「筆數 + 1」：
@@ -1135,7 +1146,7 @@ function getBrandFieldValue(selectId, otherInputId) {
 window.onOrderItemCodeChange = function(input) {
     const value = input.value.trim();
     if (!value) return;
-    const match = priceList.find(p => p.model && p.model.trim() === value);
+    const match = priceItemLookup.get(`code:${normalizeItemCode(value)}`);
     if (!match) return;
 
     if (match.brand) {
@@ -1250,7 +1261,7 @@ window.onItemCnChange = function(input) {
 window.onItemModelChange = function(input) {
     const value = input.value.trim();
     if (!value) return;
-    const match = priceList.find(p => p.model && p.model.trim() === value);
+    const match = priceItemLookup.get(`code:${normalizeItemCode(value)}`);
     if (!match) return;
     const row = input.closest('tr');
     row.querySelector('.item-en').value = match.nameEn || '';
@@ -1296,7 +1307,7 @@ window.refreshAllItemPricesFromPriceList = function() {
         const cn = (cnInput.value || '').trim();
 
         // 優先用貨號比對（比較不會撞名），貨號比對不到才退而用中文品名比對
-        let match = model ? priceList.find(p => p.model && p.model.trim() === model) : null;
+        let match = model ? priceItemLookup.get(`code:${normalizeItemCode(model)}`) : null;
         if (!match && cn) match = priceList.find(p => p.nameCn === cn);
 
         if (!match) {
@@ -1911,6 +1922,7 @@ window.copyQuoteAsNew = async function(quoteNo) {
 let myQuotesCache = [];
 let myQuotesPaginationState = null;
 let myQuotesPageLoading = false;
+let myQuotesReloadRequested = false;
 
 window.switchQuoteView = function(view, el) {
     const pageKey = view === 'create' ? 'quote.create' : 'quote.my';
@@ -1950,7 +1962,10 @@ function updateMyQuotesLoadMoreButton() {
 
 async function loadMyQuotesPage(reset) {
     const hint = document.getElementById('myQuotesEmptyHint');
-    if (myQuotesPageLoading) return;
+    if (myQuotesPageLoading) {
+        if (reset) myQuotesReloadRequested = true;
+        return;
+    }
     if (getDataScope('quotes') === 'none') {
         myQuotesCache = [];
         myQuotesPaginationState = null;
@@ -1965,6 +1980,7 @@ async function loadMyQuotesPage(reset) {
         myQuotesCache = [];
     }
     myQuotesPageLoading = true;
+    const requestedRole = currentUserRole;
     updateMyQuotesLoadMoreButton();
     const records = new Map(myQuotesCache.map(quote => [quote.id, quote]));
     let remainingReads = DEFAULT_LIST_LIMIT;
@@ -1975,6 +1991,10 @@ async function loadMyQuotesPage(reset) {
             let query = source.query().limit(requested);
             if (source.cursor) query = query.startAfter(source.cursor);
             const snapshot = await query.get();
+            if (requestedRole !== currentUserRole) {
+                myQuotesReloadRequested = true;
+                return;
+            }
             if (!snapshot.empty) {
                 source.cursor = snapshot.docs[snapshot.docs.length - 1];
                 snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
@@ -1997,6 +2017,10 @@ async function loadMyQuotesPage(reset) {
     } finally {
         myQuotesPageLoading = false;
         updateMyQuotesLoadMoreButton();
+        if (myQuotesReloadRequested) {
+            myQuotesReloadRequested = false;
+            loadMyQuotesPage(true);
+        }
     }
 }
 
@@ -2081,6 +2105,7 @@ window.markQuoteAsDeal = function(quoteNo) {
             const orderRef = db.collection('orders').doc();
             const orderData = {
                 orderDate: todayStr,
+                company: q.company || '',
                 customerName: q.ordererName || '',
                 brand: item.brand || '',
                 productLine: item.productLine || '',
@@ -2102,7 +2127,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 invoiceDate: ''
             };
             // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
-            const priceMatch = item.model ? priceList.find(p => p.model && p.model.trim() === item.model.trim()) : null;
+            const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: item.brand }) : null;
             if (priceMatch && priceMatch.cost) orderData.costPrice = priceMatch.cost;
             batch.set(orderRef, orderData);
         });
@@ -2146,10 +2171,14 @@ let currentDeliveryOrderId = null;
 let currentLifecycleOrderId = null;
 let deliveryPartialFormOpen = false;
 const pendingDeliveryOrderIds = new Set();
+// 同一個狀態欄位寫入期間不接受第二次操作，避免手機連點造成兩個 Firestore
+// transaction 交錯，最後畫面被較慢回來的舊結果覆蓋。
+const pendingOrderStatusKeys = new Set();
 let activeOrderWorkFilter = 'all';
 let activeOrderPeriod = 'this-year';
 let orderPaginationState = null;
 let orderPageLoading = false;
+let orderReloadRequested = false;
 
 function dateOnlyFromTimestamp(value) {
     if (!value) return '';
@@ -2358,7 +2387,10 @@ function updateOrderLoadMoreButton() {
 }
 
 async function loadOrderPage(reset) {
-    if (orderPageLoading) return;
+    if (orderPageLoading) {
+        if (reset) orderReloadRequested = true;
+        return;
+    }
     if (getDataScope('orders') === 'none') {
         ordersCache = [];
         orderPaginationState = null;
@@ -2371,6 +2403,7 @@ async function loadOrderPage(reset) {
         ordersCache = [];
     }
     orderPageLoading = true;
+    const requestedRole = currentUserRole;
     updateOrderLoadMoreButton();
     const records = new Map(ordersCache.map(order => [order.id, order]));
     let remainingReads = DEFAULT_LIST_LIMIT;
@@ -2381,6 +2414,10 @@ async function loadOrderPage(reset) {
             let query = source.query().limit(requested);
             if (source.cursor) query = query.startAfter(source.cursor);
             const snapshot = await query.get();
+            if (requestedRole !== currentUserRole) {
+                orderReloadRequested = true;
+                return;
+            }
             if (!snapshot.empty) {
                 source.cursor = snapshot.docs[snapshot.docs.length - 1];
                 snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
@@ -2402,22 +2439,18 @@ async function loadOrderPage(reset) {
     } finally {
         orderPageLoading = false;
         updateOrderLoadMoreButton();
+        if (orderReloadRequested) {
+            orderReloadRequested = false;
+            loadOrderPage(true);
+        }
     }
 }
 
 // 訂單資料範圍由管理員在身份權限中設定：只看自己或查看所有人。
-// 年度統計與跨年度待報帳必須以完整資料計算，因此重新整理時會逐批載入所有可查看訂單；
-// 每批仍維持 50 筆，避免單次查詢過大。
-window.loadOrdersFromCloud = async function() {
-    await loadOrderPage(true);
-    while (orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length) {
-        const before = `${orderPaginationState.sourceIndex}:${orderPaginationState.sources.map(source => source.cursor?.id || '').join('|')}`;
-        await loadOrderPage(false);
-        const after = orderPaginationState
-            ? `${orderPaginationState.sourceIndex}:${orderPaginationState.sources.map(source => source.cursor?.id || '').join('|')}`
-            : '';
-        if (before === after) break;
-    }
+// 首次與重新整理只載入 50 筆；歷史資料由「載入更多」明確取得，避免資料增加後
+// 每次進入訂單頁都在背景掃完整個 orders 集合。
+window.loadOrdersFromCloud = function() {
+    return loadOrderPage(true);
 };
 
 window.loadMoreOrders = function() {
@@ -2524,10 +2557,10 @@ window.renderOrdersList = function() {
             <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
                 <div class="order-compact-actions">
-                    <button type="button" class="btn-small ${o.isOrdered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isOrdered', ${!o.isOrdered})" ${normalizedOrderStatus(o) !== 'normal' ? 'disabled' : ''}>${o.isOrdered ? '已訂貨' : '訂貨'}</button>
-                    <button type="button" class="btn-small ${o.isArrived ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isArrived', ${!o.isArrived})" ${normalizedOrderStatus(o) !== 'normal' ? 'disabled' : ''}>${o.isArrived ? '已到貨' : '到貨'}</button>
+                    <button type="button" class="btn-small ${o.isOrdered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isOrdered', ${!o.isOrdered})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isOrdered`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isOrdered`) ? '儲存中…' : o.isOrdered ? '已訂貨' : '訂貨'}</button>
+                    <button type="button" class="btn-small ${o.isArrived ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isArrived', ${!o.isArrived})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isArrived`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isArrived`) ? '儲存中…' : o.isArrived ? '已到貨' : '到貨'}</button>
                     <button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : deliveryProgressInfo(o).state === 'partial' ? `送貨 ${deliveryProgressInfo(o).delivered}/${deliveryProgressInfo(o).total}` : '送貨'}</button>
-                    <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' ? 'disabled' : ''}>${o.isBilled ? '已報帳' : '報帳'}</button>
+                    <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已報帳' : '報帳'}</button>
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
@@ -2630,7 +2663,7 @@ window.renderPoList = function() {
         if (keyword && !searchable.includes(keyword)) return;
         shown++;
 
-        const items = po.items || [];
+        const items = purchaseItemsFromSavedPo(po);
         const subtotal = items.reduce((sum, item) => sum + (item.qty * item.unitPrice), 0);
         const grandTotal = Math.round(subtotal) + Math.round(subtotal * 0.05);
         const companyInfo = companyData[po.company];
@@ -2659,7 +2692,7 @@ window.reprintPurchaseOrder = function(poId) {
     if (!po) return;
 
     populatePoVendorSuggestions();
-    poItems = (po.items || []).map(item => ({ ...item }));
+    poItems = purchaseItemsFromSavedPo(po);
     poAllItems = poItems;
     poEditingId = po.id;
     switchPoCompany(po.company || 'yushin', null, true);
@@ -2697,6 +2730,66 @@ let poCurrentCompany = 'yushin';
 let poEditingId = null;
 let poSaveInProgress = false;
 
+function purchaseItemsFromSavedPo(po) {
+    const sourceItems = [po?.items, po?.orderItems, po?.purchaseItems, po?.lineItems, po?.products]
+        .find(items => Array.isArray(items) && items.length)
+        || ((po?.itemName || po?.productName || po?.itemCode || po?.productCode) ? [po] : []);
+    return sourceItems.map((item, index) => ({
+        ...item,
+        orderId: item.orderId || item.sourceOrderId || '',
+        orderItemIndex: item.orderItemIndex ?? index,
+        itemName: item.itemName || item.productName || item.name || item.nameCn || '',
+        itemCode: item.itemCode || item.productCode || item.code || item.model || '',
+        brand: item.brand || item.manufacturer || '',
+        qty: parseFloat(item.qty ?? item.quantity ?? item.count) || 1,
+        unit: item.unit || '',
+        unitPrice: parseFloat(item.unitPrice ?? item.costPrice ?? item.cost ?? item.purchasePrice) || 0
+    })).filter(item => item.itemName || item.itemCode);
+}
+
+// 將不同時期的訂單品項格式統一成訂購單使用的格式。舊資料是一張訂單一個
+// itemName/itemCode/qty；新版或匯入資料可能使用 items、orderItems 或 products。
+// 只在讀取時轉換，不回寫原訂單，避免 Phase 1 變成資料模型遷移。
+function purchaseItemsFromOrder(order) {
+    const collections = [order?.items, order?.orderItems, order?.lineItems, order?.products];
+    const sourceItems = collections.find(items => Array.isArray(items) && items.length) || [order || {}];
+    return sourceItems.map((item, index) => {
+        const itemCode = item.itemCode || item.productCode || item.code || item.model || order.itemCode || order.productCode || '';
+        const itemName = item.itemName || item.productName || item.name || item.nameCn || order.itemName || order.productName || '';
+        const brand = item.brand || item.manufacturer || order.brand || '';
+        const qtyValue = item.qty ?? item.quantity ?? item.count ?? (sourceItems.length === 1 ? order.qty ?? order.quantity : 1);
+        let cost = parseFloat(item.costPrice ?? item.cost ?? item.purchasePrice ?? (sourceItems.length === 1 ? order.costPrice : NaN));
+        if (!Number.isFinite(cost) || cost <= 0) {
+            const normalizedCode = normalizeItemCode(itemCode);
+            const normalizedBrand = String(brand || '').trim().toLocaleLowerCase();
+            const priceMatch = (normalizedBrand && priceItemLookup.get(`brand:${normalizedBrand}:${normalizedCode}`))
+                || priceItemLookup.get(`code:${normalizedCode}`);
+            if (priceMatch) cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
+        }
+        const parsedQty = parseFloat(qtyValue);
+        return {
+            orderId: order.id,
+            orderItemIndex: index,
+            itemName,
+            itemCode,
+            brand,
+            qty: Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1,
+            unit: item.unit || order.unit || '',
+            unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0
+        };
+    }).filter(item => item.itemName || item.itemCode);
+}
+
+function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
+    const companies = ['yushin', 'morningstar', 'MULTI-LIFE'];
+    const savedCompanies = [...new Set(selectedOrders.map(order => order.company).filter(company => companies.includes(company)))];
+    if (savedCompanies.length === 1 && items.some(item => isCompanyBrandAllowed(savedCompanies[0], item.brand))) return savedCompanies[0];
+    if (companies.includes(preferredCompany) && items.some(item => isCompanyBrandAllowed(preferredCompany, item.brand))) return preferredCompany;
+    return companies
+        .map(company => ({ company, count: items.filter(item => isCompanyBrandAllowed(company, item.brand)).length }))
+        .sort((a, b) => b.count - a.count)[0]?.company || 'yushin';
+}
+
 window.openPurchaseOrderModal = function() {
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
     if (checked.length === 0) {
@@ -2713,23 +2806,11 @@ window.openPurchaseOrderModal = function() {
     }
     poEditingId = null;
     populatePoVendorSuggestions();
-    poAllItems = selectedOrders.map(o => {
-        let cost = parseFloat(o.costPrice);
-        // 這筆訂單本身還沒填成本的話，再用貨號查一次目前的價目表，價目表如果有登記成本就直接帶入
-        if (!isFinite(cost) || cost <= 0) {
-            const priceMatch = o.itemCode ? priceList.find(p => p.model && p.model.trim() === o.itemCode.trim()) : null;
-            if (priceMatch && priceMatch.cost) cost = parseFloat(priceMatch.cost);
-        }
-        return {
-            orderId: o.id,
-            itemName: o.itemName || '',
-            itemCode: o.itemCode || '',
-            brand: o.brand || '',
-            qty: parseFloat(o.qty) || 1,
-            // 單價只帶訂單或價目表中的含稅成本；找不到時留 0，避免誤把客戶售價當成供應商進貨價。
-            unitPrice: isFinite(cost) && cost > 0 ? cost : 0
-        };
-    }).filter(Boolean);
+    poAllItems = selectedOrders.flatMap(purchaseItemsFromOrder);
+    if (!poAllItems.length) {
+        alert('選取的訂單沒有可辨識的品項，請確認品名、貨號或 items 資料。');
+        return;
+    }
     poItems = poAllItems;
 
     document.getElementById('poVendorName').value = '';
@@ -2737,8 +2818,14 @@ window.openPurchaseOrderModal = function() {
     const today = new Date();
     document.getElementById('poDate').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-    // 預設用估價單系統目前選的那間公司，比較符合平常的使用情境
-    switchPoCompany(currentCompany || 'yushin');
+    // 優先沿用來源訂單公司；舊訂單沒有 company 時，選擇能保留最多品項的公司，
+    // 避免目前估價單公司不相符而把全部採購品項靜默過濾掉。
+    const initialCompany = bestPurchaseOrderCompany(selectedOrders, poAllItems, currentCompany || 'yushin');
+    switchPoCompany(initialCompany);
+    if (!poItems.length) {
+        alert('品項已讀取，但目前三間公司的代理廠牌設定都不允許這些品項。請先到管理後台調整代理廠牌，或確認訂單廠牌是否正確。');
+        return;
+    }
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
@@ -2807,6 +2894,8 @@ window.generatePoNo = async function() {
         const snapshot = await db.collection('purchaseOrders')
             .where('poNo', '>=', prefix)
             .where('poNo', '<=', prefix + '\uf8ff')
+            .orderBy('poNo', 'desc')
+            .limit(1)
             .get();
 
         let maxSeq = 0;
@@ -3017,6 +3106,8 @@ function resetQuoteFormForNextOne() {
 window.toggleOrderStatus = function(orderId, field, newValue) {
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
+    const pendingKey = `${orderId}:${field}`;
+    if (pendingOrderStatusKeys.has(pendingKey)) return;
     if (normalizedOrderStatus(o) !== 'normal') { alert('已取消或已作廢的訂單不能更改進度。'); return; }
     if (field === 'isBilled' && o.isBilled && !newValue) {
         alert('這筆訂單已完成報帳；如需更正，請直接修改「開票／收款日」。');
@@ -3055,6 +3146,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     if (field === 'isOrdered') o.orderedBy = newValue ? actor : '';
     optimisticEntries.push(logEntry);
     o.statusHistory = [...previous.statusHistory, ...optimisticEntries];
+    pendingOrderStatusKeys.add(pendingKey);
     renderOrdersList();
 
     let committed;
@@ -3089,10 +3181,12 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         };
     }).then(() => {
         Object.assign(o, committed);
+        pendingOrderStatusKeys.delete(pendingKey);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     }).catch(err => {
         Object.assign(o, previous);
+        pendingOrderStatusKeys.delete(pendingKey);
         activeOrderWorkFilter = previousWorkFilter;
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) {
@@ -3983,17 +4077,20 @@ window.calcOrderTotal = function() {
     document.getElementById('orderTotalPrice').value = (qty * price).toFixed(0);
 };
 
+let newOrderSaveInProgress = false;
+
 window.saveNewOrder = function() {
+    if (newOrderSaveInProgress) return;
     const itemCode = document.getElementById('orderItemCode').value.trim();
-    const priceMatch = itemCode ? priceList.find(p => p.model && p.model.trim() === itemCode) : null;
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
+        company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
         brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
         itemCode: itemCode,
         itemName: document.getElementById('orderItemName').value.trim(),
-        productLine: (priceMatch && priceMatch.productLine) || '',
-        productType: (priceMatch && priceMatch.productType) || '',
+        productLine: '',
+        productType: '',
         qty: document.getElementById('orderQty').value,
         unitPrice: document.getElementById('orderUnitPrice').value,
         totalPrice: document.getElementById('orderTotalPrice').value,
@@ -4020,12 +4117,25 @@ window.saveNewOrder = function() {
         return;
     }
 
-    db.collection('orders').add(data).then(() => {
+    const priceMatch = findPriceItemForOrder(data);
+    data.productLine = (priceMatch && priceMatch.productLine) || '';
+    data.productType = (priceMatch && priceMatch.productType) || '';
+
+    const saveButton = document.getElementById('saveNewOrderBtn');
+    newOrderSaveInProgress = true;
+    if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
+    db.collection('orders').add(data).then(docRef => {
         rememberRecentCustomerName(data.customerName);
         closeOrderModal();
-        loadOrdersFromCloud();
+        // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
+        ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
+            .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
+        renderOrdersList();
     }).catch(err => {
         alert('新增失敗：' + err.message);
+    }).finally(() => {
+        newOrderSaveInProgress = false;
+        if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存'; }
     });
 };
 
@@ -4099,6 +4209,8 @@ function canViewAllEquipment() {
 }
 
 window.loadEquipmentFromCloud = function() {
+    const generation = ++equipmentLoadGeneration;
+    const requestedRole = currentUserRole;
     let query = db.collection('equipment');
     if (canViewAllEquipment()) {
         query = query.orderBy('customerName');
@@ -4106,6 +4218,7 @@ window.loadEquipmentFromCloud = function() {
         query = query.where('salesName', '==', currentUserName);
     }
     query.get().then(snapshot => {
+        if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         equipmentList = [];
         snapshot.forEach(doc => {
             equipmentList.push({ id: doc.id, ...doc.data() });
@@ -4115,6 +4228,7 @@ window.loadEquipmentFromCloud = function() {
         }
         renderEquipmentList();
     }).catch(err => {
+        if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         console.error(err);
         alert('讀取儀器資料失敗，請確認 Firestore 權限設定。');
     });
@@ -4240,7 +4354,7 @@ window.onEqModelChange = function() {
     const model = modelInput.value.trim();
     if (!model) return;
 
-    const match = priceList.find(p => (p.model || '').trim().toLowerCase() === model.toLowerCase());
+    const match = priceItemLookup.get(`code:${normalizeItemCode(model)}`);
     if (match && match.brand) {
         selectBrandInDropdown(brandSelect, match.brand);
         onEqBrandSelectChange();
@@ -4692,8 +4806,10 @@ window.switchAdminTab = function(tab, el) {
 
     if (tab === 'sales') ensureSalesListLoaded().then(reloadSalesFromUsers);
     if (tab === 'prices') loadPriceCatalogSummary();
-    if (tab === 'agencies') ensurePriceListLoaded().then(() => loadSalesStatistics()).then(() => { renderKeyStatisticBrands(); renderCompanyAgencyBrandSettings(); });
-    if (tab === 'statistics') ensurePriceListLoaded().then(loadSalesStatistics);
+    // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
+    if (tab === 'agencies') ensurePriceListLoaded().then(() => { renderKeyStatisticBrands(); renderCompanyAgencyBrandSettings(); });
+    // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
+    if (tab === 'statistics') ensurePriceListLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
     if (tab === 'quotes') loadAllQuotesFromCloud();
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
     if (tab === 'storage') resetCleanupPreview();
@@ -4881,11 +4997,14 @@ window.saveCompanyAgencyBrands = function() {
 
 // 管理員銷售統計以「訂單」為準，避免把尚未成交的估價單也算進營收。
 window.loadSalesStatistics = function() {
-    if (currentUserRole !== 'admin') return;
+    if (currentUserRole !== 'admin') return Promise.resolve();
+    if (salesStatisticsLoadPromise) return salesStatisticsLoadPromise;
+    const requestedRole = currentUserRole;
     const totalEl = document.getElementById('salesStatsSalesInc');
     if (totalEl) totalEl.innerText = '讀取中…';
 
-    return db.collection('orders').get().then(snapshot => {
+    salesStatisticsLoadPromise = db.collection('orders').get().then(snapshot => {
+        if (requestedRole !== currentUserRole) return;
         salesStatisticsOrders = [];
         snapshot.forEach(doc => salesStatisticsOrders.push({ id: doc.id, ...doc.data() }));
         const startInput = document.getElementById('salesStatsStart');
@@ -4898,10 +5017,14 @@ window.loadSalesStatistics = function() {
             renderSalesStatistics();
         }
     }).catch(err => {
+        if (requestedRole !== currentUserRole) return;
         console.error('讀取銷售統計失敗：', err);
         if (totalEl) totalEl.innerText = '讀取失敗';
         alert('讀取銷售統計失敗，請確認 Firestore 權限設定。');
+    }).finally(() => {
+        salesStatisticsLoadPromise = null;
     });
+    return salesStatisticsLoadPromise;
 };
 
 function salesAmount(order) {
