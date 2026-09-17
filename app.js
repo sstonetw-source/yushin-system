@@ -2534,6 +2534,10 @@ window.renderOrdersList = function() {
         shown++;
 
         const tr = document.createElement('tr');
+        const lifecycle = orderLifecycleInfo(o);
+        if (lifecycle.status !== 'normal' || (lifecycle.returned > 0 && lifecycle.effectiveDelivered <= 0)) {
+            tr.classList.add('order-row-closed');
+        }
         bindListRowSelection(tr);
         tr.innerHTML = `
             ${canGeneratePo ? `<td class="no-print" data-th="選取">${o.purchaseOrderNo ? '<span style="color:#777;font-size:10px;">已建立</span>' : `<input type="checkbox" class="order-select-checkbox" data-order-id="${o.id}">`}</td>` : ''}
@@ -2565,11 +2569,10 @@ window.renderOrdersList = function() {
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
                             ${normalizedOrderStatus(o) === 'normal' ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>
-                            <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}
+                            <button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>
+                            <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
-                            ${normalizedOrderStatus(o) === 'normal'
-                                ? `<button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>`
-                                : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
+                            <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                         </div>
                     </details>
                 </div>
@@ -3109,10 +3112,6 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     const pendingKey = `${orderId}:${field}`;
     if (pendingOrderStatusKeys.has(pendingKey)) return;
     if (normalizedOrderStatus(o) !== 'normal') { alert('已取消的訂單不能更改進度。'); return; }
-    if (field === 'isBilled' && o.isBilled && !newValue) {
-        alert('這筆訂單已完成報帳；如需更正，請直接修改「開票／收款日」。');
-        return;
-    }
     const delivery = deliveryProgressInfo(o);
     if (field === 'isOrdered' && !newValue && (o.isArrived || delivery.delivered > 0)) { alert('已有到貨或送貨紀錄，不能直接取消訂貨。'); return; }
     if (field === 'isArrived' && !newValue && delivery.delivered > 0) { alert('已有送貨紀錄，不能直接取消到貨。'); return; }
