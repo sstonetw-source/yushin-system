@@ -3118,10 +3118,9 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     if (field === 'isArrived' && !newValue && delivery.delivered > 0) { alert('已有送貨紀錄，不能直接取消到貨。'); return; }
     let invoiceDate = o.invoiceDate || '';
     if (field === 'isBilled' && newValue) {
-        invoiceDate = prompt('請確認開發票日期（同時視為收款／完成日期）：', orderInvoiceDate(o) || localDateString());
-        if (invoiceDate === null) return;
-        invoiceDate = invoiceDate.trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)) { alert('請輸入正確日期，格式為 YYYY-MM-DD。'); return; }
+        // 某些手機內建瀏覽器不顯示 window.prompt，會讓按鈕看起來完全沒反應。
+        // 點擊時直接以今天完成報帳；若實際開票日不同，可立刻在列內日期欄修改。
+        invoiceDate = orderInvoiceDate(o) || localDateString();
     }
     if (field === 'isBilled' && !newValue) invoiceDate = '';
     const previousWorkFilter = activeOrderWorkFilter;
