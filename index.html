@@ -442,9 +442,9 @@
             <div class="panel" id="orderStatusEditPanel">
                 <h4 style="margin:0 0 10px;">訂單有效狀態</h4>
                 <div class="form-grid" style="margin-bottom:8px;">
-                    <div><label>狀態</label><select id="orderLifecycleStatus" onchange="onOrderLifecycleStatusChange()"><option value="normal">正常</option><option value="cancelled">已取消</option><option value="voided">已作廢</option></select></div>
+                    <div><label>狀態</label><select id="orderLifecycleStatus" onchange="onOrderLifecycleStatusChange()"><option value="normal">正常</option><option value="cancelled">已取消</option></select></div>
                     <div><label>日期</label><input type="date" id="orderLifecycleDate"></div>
-                    <div><label>原因</label><input type="text" id="orderLifecycleReason" placeholder="取消或作廢時必填"></div>
+                    <div><label>原因</label><input type="text" id="orderLifecycleReason" placeholder="取消原因（選填）"></div>
                 </div>
                 <button type="button" onclick="saveOrderLifecycleStatus()">💾 儲存狀態</button>
             </div>
