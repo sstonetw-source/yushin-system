@@ -303,6 +303,8 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-more-menu-popover button { display:block; width:100%; margin:2px 0; padding:7px 8px; background:#fff; color:#333; text-align:left; font-size:12px; }
 .order-more-menu-popover button:hover { background:#f0f3f6; }
 .order-more-menu-popover .danger-menu-item { color:#c00; }
+.order-row-closed > td { background:#e5e5e5 !important; color:#777; }
+.order-row-closed input, .order-row-closed select { background:#eeeeee; color:#777; }
 .order-period-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 10px; padding:10px 12px; border:1px solid #d8e4f2; border-radius:7px; background:#f7faff; }
 .order-period-toolbar label { color:#334; font-size:13px; font-weight:bold; }
 .order-period-toolbar select, .order-period-toolbar input { min-height:36px; padding:6px 8px; border:1px solid #bfcbd7; border-radius:5px; box-sizing:border-box; }
