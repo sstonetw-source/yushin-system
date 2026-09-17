@@ -3851,10 +3851,14 @@ window.saveOrderLifecycleStatus = async function() {
     if (!date) { alert('請填寫狀態日期。'); return; }
     const previous = { status: normalizedOrderStatus(order), date: order.orderStatusDate || '', reason: order.orderStatusReason || '' };
     if (previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
+    if (pendingLifecycleOrderIds.has(order.id)) return;
     const actor = deliveryActor();
     const at = new Date().toISOString();
     const history = { action: nextStatus === 'normal' && previous.status !== 'normal' ? 'restore' : 'status_change', before: previous, after: { status: nextStatus, date, reason }, by: actor, at };
     const updates = { orderStatus: nextStatus, orderStatusDate: date, orderStatusReason: reason, orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+    const saveButton = document.getElementById('orderLifecycleSaveBtn');
+    pendingLifecycleOrderIds.add(order.id);
+    if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     try {
         await db.collection('orders').doc(order.id).update(updates);
         order.orderStatus = nextStatus;
@@ -3866,6 +3870,9 @@ window.saveOrderLifecycleStatus = async function() {
         renderOrdersList();
     } catch (err) {
         alert('訂單狀態儲存失敗：' + err.message);
+    } finally {
+        pendingLifecycleOrderIds.delete(order.id);
+        if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存狀態'; }
     }
 };
 
