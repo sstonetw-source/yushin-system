@@ -158,3 +158,39 @@ test('purchase modal chooses a company that does not silently filter every item'
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
     assert.match(appSource.slice(dealStart, dealEnd), /company: q\.company \|\| ''/);
 });
+
+test('billing status is optimistic and ignores a rapid duplicate tap', async () => {
+    const start = appSource.indexOf('window.toggleOrderStatus =');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const order = { id: 'o1', isOrdered: true, isArrived: true, isBilled: false, statusHistory: [] };
+    let promptCount = 0;
+    let updatePayload;
+    const context = {
+        window: {}, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
+        canEditPage: () => true, normalizedOrderStatus: () => 'normal',
+        deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
+        prompt: () => { promptCount++; return '2026-09-17'; }, alert: message => { throw new Error(message); },
+        currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {},
+        currentDeliveryOrderId: null, renderDeliveryModal: () => {}, renderOrderLifecycleModal: () => {},
+        firebase: { firestore: { FieldValue: { arrayUnion: (...entries) => ({ entries }) } } },
+        db: {
+            collection: () => ({ doc: () => ({}) }),
+            runTransaction: async callback => callback({
+                get: async () => ({ exists: true, data: () => ({ ...order, isBilled: false, statusHistory: [] }) }),
+                update: (_ref, payload) => { updatePayload = payload; }
+            })
+        },
+        Date
+    };
+    vm.createContext(context);
+    vm.runInContext(appSource.slice(start, end), context);
+    context.window.toggleOrderStatus('o1', 'isBilled', true);
+    context.window.toggleOrderStatus('o1', 'isBilled', true);
+    assert.equal(order.isBilled, true);
+    assert.equal(promptCount, 1);
+    assert.equal(context.pendingOrderStatusKeys.has('o1:isBilled'), true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(updatePayload.isBilled, true);
+    assert.equal(updatePayload.invoiceDate, '2026-09-17');
+    assert.equal(context.pendingOrderStatusKeys.has('o1:isBilled'), false);
+});
