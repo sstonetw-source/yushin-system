@@ -2172,6 +2172,7 @@ let currentLifecycleOrderId = null;
 let deliveryPartialFormOpen = false;
 const pendingDeliveryOrderIds = new Set();
 const pendingLifecycleOrderIds = new Set();
+const pendingReturnOrderIds = new Set();
 // 同一個狀態欄位寫入期間不接受第二次操作，避免手機連點造成兩個 Firestore
 // transaction 交錯，最後畫面被較慢回來的舊結果覆蓋。
 const pendingOrderStatusKeys = new Set();
@@ -3891,6 +3892,10 @@ window.saveReturnRecord = async function() {
     const reason = document.getElementById('returnReason').value.trim();
     const editId = document.getElementById('returnEditId').value;
     if (!orderId || !date || !Number.isFinite(qty) || qty <= 0) { alert('請填寫退貨日期與大於 0 的退貨數量。'); return; }
+    if (pendingReturnOrderIds.has(orderId)) return;
+    const saveButton = document.getElementById('returnSaveBtn');
+    pendingReturnOrderIds.add(orderId);
+    if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     try {
         let savedOrder;
         await db.runTransaction(async transaction => {
@@ -3920,7 +3925,12 @@ window.saveReturnRecord = async function() {
         resetReturnForm();
         renderOrderLifecycleModal();
         renderOrdersList();
-    } catch (err) { alert('退貨紀錄儲存失敗：' + err.message); }
+    } catch (err) {
+        alert('退貨紀錄儲存失敗：' + err.message);
+    } finally {
+        pendingReturnOrderIds.delete(orderId);
+        if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存退貨紀錄'; }
+    }
 };
 
 window.deleteReturnRecord = async function(recordId) {
