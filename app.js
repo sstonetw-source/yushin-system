@@ -1260,7 +1260,7 @@ window.onItemCnChange = function(input) {
 window.onItemModelChange = function(input) {
     const value = input.value.trim();
     if (!value) return;
-    const match = priceList.find(p => p.model && p.model.trim() === value);
+    const match = priceItemLookup.get(`code:${normalizeItemCode(value)}`);
     if (!match) return;
     const row = input.closest('tr');
     row.querySelector('.item-en').value = match.nameEn || '';
@@ -1306,7 +1306,7 @@ window.refreshAllItemPricesFromPriceList = function() {
         const cn = (cnInput.value || '').trim();
 
         // 優先用貨號比對（比較不會撞名），貨號比對不到才退而用中文品名比對
-        let match = model ? priceList.find(p => p.model && p.model.trim() === model) : null;
+        let match = model ? priceItemLookup.get(`code:${normalizeItemCode(model)}`) : null;
         if (!match && cn) match = priceList.find(p => p.nameCn === cn);
 
         if (!match) {
@@ -2125,7 +2125,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 invoiceDate: ''
             };
             // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
-            const priceMatch = item.model ? priceList.find(p => p.model && p.model.trim() === item.model.trim()) : null;
+            const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: item.brand }) : null;
             if (priceMatch && priceMatch.cost) orderData.costPrice = priceMatch.cost;
             batch.set(orderRef, orderData);
         });
@@ -4335,7 +4335,7 @@ window.onEqModelChange = function() {
     const model = modelInput.value.trim();
     if (!model) return;
 
-    const match = priceList.find(p => (p.model || '').trim().toLowerCase() === model.toLowerCase());
+    const match = priceItemLookup.get(`code:${normalizeItemCode(model)}`);
     if (match && match.brand) {
         selectBrandInDropdown(brandSelect, match.brand);
         onEqBrandSelectChange();
