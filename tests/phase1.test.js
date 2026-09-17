@@ -194,3 +194,31 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     assert.equal(updatePayload.invoiceDate, '2026-09-17');
     assert.equal(context.pendingOrderStatusKeys.has('o1:isBilled'), false);
 });
+
+test('failed billing write restores the previous state and unlocks the button', async () => {
+    const start = appSource.indexOf('window.toggleOrderStatus =');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const order = { id: 'o2', isOrdered: true, isArrived: true, isBilled: false, invoiceDate: '', statusHistory: [] };
+    let alertMessage = '';
+    const context = {
+        window: {}, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
+        canEditPage: () => true, normalizedOrderStatus: () => 'normal',
+        deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
+        prompt: () => '2026-09-17', alert: message => { alertMessage = message; },
+        currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {},
+        currentDeliveryOrderId: null, renderDeliveryModal: () => {}, renderOrderLifecycleModal: () => {},
+        firebase: { firestore: { FieldValue: { arrayUnion: (...entries) => ({ entries }) } } },
+        db: { collection: () => ({ doc: () => ({}) }), runTransaction: async () => { throw new Error('offline'); } },
+        Date
+    };
+    vm.createContext(context);
+    vm.runInContext(appSource.slice(start, end), context);
+    context.window.toggleOrderStatus('o2', 'isBilled', true);
+    assert.equal(order.isBilled, true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(order.isBilled, false);
+    assert.equal(order.invoiceDate, '');
+    assert.equal(context.activeOrderWorkFilter, 'billing');
+    assert.equal(context.pendingOrderStatusKeys.has('o2:isBilled'), false);
+    assert.match(alertMessage, /已還原/);
+});
