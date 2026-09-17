@@ -773,6 +773,8 @@ window.generateQuoteNo = async function() {
         const snapshot = await db.collection('quotes')
             .where('quoteNo', '>=', prefix)
             .where('quoteNo', '<=', prefix + '\uf8ff')
+            .orderBy('quoteNo', 'desc')
+            .limit(1)
             .get();
 
         // 用「目前已存在的最大流水號 + 1」而非「筆數 + 1」：
@@ -1143,7 +1145,7 @@ function getBrandFieldValue(selectId, otherInputId) {
 window.onOrderItemCodeChange = function(input) {
     const value = input.value.trim();
     if (!value) return;
-    const match = priceList.find(p => p.model && p.model.trim() === value);
+    const match = priceItemLookup.get(`code:${normalizeItemCode(value)}`);
     if (!match) return;
 
     if (match.brand) {
@@ -2874,6 +2876,8 @@ window.generatePoNo = async function() {
         const snapshot = await db.collection('purchaseOrders')
             .where('poNo', '>=', prefix)
             .where('poNo', '<=', prefix + '\uf8ff')
+            .orderBy('poNo', 'desc')
+            .limit(1)
             .get();
 
         let maxSeq = 0;

@@ -117,3 +117,17 @@ test('role changes cannot leave an older in-flight page in the cache', () => {
     assert.match(roleSwitch, /equipmentList = \[\]/);
     assert.match(appSource, /generation !== equipmentLoadGeneration \|\| requestedRole !== currentUserRole/);
 });
+
+test('document number generation reads only the newest matching document', () => {
+    const quoteStart = appSource.indexOf('window.generateQuoteNo =');
+    const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
+    const quoteGenerator = appSource.slice(quoteStart, quoteEnd);
+    assert.match(quoteGenerator, /orderBy\('quoteNo', 'desc'\)/);
+    assert.match(quoteGenerator, /limit\(1\)/);
+    const poStart = appSource.indexOf('window.generatePoNo =');
+    const poEnd = appSource.indexOf('\n};', poStart) + 3;
+    const poGenerator = appSource.slice(poStart, poEnd);
+    assert.match(poGenerator, /orderBy\('poNo', 'desc'\)/);
+    assert.match(poGenerator, /limit\(1\)/);
+    assert.match(appSource, /priceItemLookup\.get\(`code:\$\{normalizeItemCode\(value\)\}`\)/);
+});
