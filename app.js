@@ -919,15 +919,15 @@ function loadPriceListFromCloud() {
             )).then(docs => {
                 const replacementBrands = new Set(meta.brands.map(brand => String(brand.name || '').trim().toLocaleLowerCase()));
                 const legacyItems = Array.isArray(meta.list) ? meta.list.filter(item => !replacementBrands.has((item.brand || '').trim().toLocaleLowerCase())) : [];
-                priceList = legacyItems.concat(docs.flatMap(brandDoc => {
+                priceList = normalizeProductMasterList(legacyItems.concat(docs.flatMap(brandDoc => {
                     const data = brandDoc.exists ? brandDoc.data() : {};
                     return Array.isArray(data.items) ? data.items : [];
-                }));
+                })));
                 refreshPriceDatalists();
                 renderKeyStatisticBrands();
             });
         }
-        priceList = meta.list || [];
+        priceList = normalizeProductMasterList(meta.list || []);
         refreshPriceDatalists();
         renderKeyStatisticBrands();
     }).catch(() => {});
@@ -1258,6 +1258,7 @@ window.addQuoteRow = function(itemData = {}) {
                         <input type="text" class="item-brand-other" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
                         <input type="hidden" class="item-product-line" value="${itemData.productLine || ''}">
                         <input type="hidden" class="item-product-type" value="${itemData.productType || ''}">
+                        <input type="hidden" class="item-product-id" value="${itemData.productId || ''}">
                     </div>
                 </div>
 
@@ -1288,6 +1289,8 @@ window.onItemCnChange = function(input) {
     row.querySelector('.item-brand').value = match.brand || '';
     row.querySelector('.item-product-line').value = match.productLine || '';
     row.querySelector('.item-product-type').value = match.productType || '';
+    row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
+    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
     if (match.price) {
         row.querySelector('.inc-price').value = match.price;
         onIncPriceChange(row.querySelector('.inc-price'));
@@ -1305,6 +1308,8 @@ window.onItemModelChange = function(input) {
     row.querySelector('.item-brand').value = match.brand || '';
     row.querySelector('.item-product-line').value = match.productLine || '';
     row.querySelector('.item-product-type').value = match.productType || '';
+    row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
+    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
     if (match.price) {
         row.querySelector('.inc-price').value = match.price;
         onIncPriceChange(row.querySelector('.inc-price'));
@@ -1545,7 +1550,7 @@ function collectCurrentQuoteRecord() {
         nameEn: row.querySelector('.item-en').value, nameCn: row.querySelector('.item-cn').value,
         model: row.querySelector('.item-model').value, brand: quoteRowBrandValue(row),
         productLine: row.querySelector('.item-product-line').value, productType: row.querySelector('.item-product-type').value,
-        spec: row.querySelector('.item-spec').value, qty: row.querySelector('.qty').value,
+        productId: row.querySelector('.item-product-id')?.value || '', spec: row.querySelector('.item-spec').value, qty: row.querySelector('.qty').value,
         price: row.querySelector('.inc-price').value, exPrice: row.querySelector('.ex-price').value,
         subtotal: row.querySelector('.subtotal-inc').value
     }));
@@ -1774,6 +1779,7 @@ window.handleSaveAndPrint = function() {
             brand: quoteRowBrandValue(row),
             productLine: row.querySelector('.item-product-line').value,
             productType: row.querySelector('.item-product-type').value,
+            productId: row.querySelector('.item-product-id')?.value || '',
             spec: row.querySelector('.item-spec').value,
             qty: row.querySelector('.qty').value,
             price: row.querySelector('.inc-price').value,
@@ -2212,6 +2218,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 brand: item.brand || '',
                 productLine: item.productLine || '',
                 productType: item.productType || '',
+                productId: item.productId || '',
                 itemCode: item.model || '',
                 itemCodeKey: normalizeHistoryItemCode(item.model || ''),
                 itemName: item.nameCn || item.nameEn || '',
@@ -2231,7 +2238,13 @@ window.markQuoteAsDeal = function(quoteNo) {
             };
             // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
             const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: item.brand }) : null;
-            if (priceMatch && priceMatch.cost) orderData.costPrice = priceMatch.cost;
+            if (priceMatch) {
+                orderData.productId = orderData.productId || priceMatch.productId || stableProductId(priceMatch);
+                orderData.unit = priceMatch.unit || '';
+                orderData.supplier = priceMatch.supplier || '';
+                orderData.spec = item.spec || priceMatch.spec || '';
+                if (priceMatch.cost) orderData.costPrice = priceMatch.cost;
+            }
             batch.set(orderRef, orderData);
         });
 
@@ -4377,6 +4390,12 @@ window.saveNewOrder = function() {
     const priceMatch = findPriceItemForOrder(data);
     data.productLine = (priceMatch && priceMatch.productLine) || '';
     data.productType = (priceMatch && priceMatch.productType) || '';
+    if (priceMatch) {
+        data.productId = priceMatch.productId || stableProductId(priceMatch);
+        data.unit = priceMatch.unit || '';
+        data.supplier = priceMatch.supplier || '';
+        data.spec = priceMatch.spec || '';
+    }
 
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
@@ -5301,6 +5320,33 @@ function costAmount(order) {
 
 function normalizeItemCode(value) {
     return String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
+}
+
+function stableProductId(item) {
+    const brand = String(item?.brand || '').trim().toLocaleLowerCase();
+    const code = normalizeItemCode(item?.model);
+    if (code) return `prd:${encodeURIComponent(brand)}:${encodeURIComponent(code)}`;
+    const name = String(item?.nameCn || item?.nameEn || '').normalize('NFKC').trim().toLocaleLowerCase();
+    return `prd:${encodeURIComponent(brand)}:name:${encodeURIComponent(name)}`;
+}
+
+function normalizeProductMasterItem(item) {
+    return {
+        ...item,
+        productId: item.productId || stableProductId(item),
+        sku: item.sku || item.model || '',
+        unit: item.unit || '',
+        supplier: item.supplier || '',
+        spec: item.spec || '',
+        inventoryTracked: !!item.inventoryTracked,
+        lotTracked: !!item.lotTracked,
+        expiryTracked: !!item.expiryTracked,
+        active: item.active !== false
+    };
+}
+
+function normalizeProductMasterList(items) {
+    return (items || []).map(normalizeProductMasterItem);
 }
 
 function rebuildPriceItemLookup() {
@@ -6374,7 +6420,7 @@ async function savePriceBrandList(imported, brand) {
     const matchingEntry = currentBrands.find(item => String(item.name || '').trim().toLocaleLowerCase() === brand.toLocaleLowerCase());
     // 廠牌名稱不分大小寫；如雲端已有 Thermo，上傳 thermo 會直接更新原本那份。
     const storedBrand = matchingEntry?.name || brand;
-    const normalizedItems = imported.map(item => ({ ...item, brand: storedBrand }));
+    const normalizedItems = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
     const chunks = chunkPriceItems(normalizedItems, maxBytes);
     const brandId = matchingEntry?.id || priceBrandDocumentId(storedBrand);
     const chunkDocId = (index) => index === 0 ? brandId : `${brandId}-part${index}`;
@@ -6404,6 +6450,29 @@ async function savePriceBrandList(imported, brand) {
         storage: 'brands', brands, updatedAt
     }, { merge: true });
     return storedBrand;
+}
+
+let pendingPriceImportPreview = null;
+
+function summarizeProductMasterImport(groups) {
+    const existingById = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
+    let added = 0, updated = 0, inactive = 0;
+    const brands = groups.map(group => {
+        let brandAdded = 0, brandUpdated = 0;
+        group.imported.forEach(raw => {
+            const item = normalizeProductMasterItem(raw);
+            if (existingById.has(item.productId)) { updated++; brandUpdated++; } else { added++; brandAdded++; }
+            if (!item.active) inactive++;
+        });
+        return { brand: group.brand, count: group.imported.length, added: brandAdded, updated: brandUpdated };
+    });
+    return { added, updated, inactive, total: added + updated, brands };
+}
+
+function confirmProductMasterImport(groups) {
+    const summary = summarizeProductMasterImport(groups);
+    const lines = summary.brands.map(item => `${item.brand}：${item.count} 筆（新增 ${item.added}／更新 ${item.updated}）`);
+    return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n同廠牌會以本次 Excel 內容更新；歷史估價單與訂單保存的是當時快照，不會被改寫。確定寫入雲端嗎？`);
 }
 
 window.handlePriceExcelUpload = async function(input) {
@@ -6464,13 +6533,21 @@ window.handlePriceExcelUpload = async function(input) {
                     const model = String(getField(row, ['貨號', '型號'])).trim();
                     const productType = String(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type'])).trim();
                     const productLine = String(getField(row, ['產品線', '产品线', '產品類別', '产品类别', 'Product Line', 'ProductLine'])).trim();
+                    const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
+                    const supplier = String(getField(row, ['供應商', '供应商', 'Supplier', 'Vendor'])).trim();
+                    const unit = String(getField(row, ['單位', '单位', 'Unit'])).trim();
+                    const activeRaw = String(getField(row, ['啟用', '启用', 'Active', 'Status'])).trim().toLocaleLowerCase();
+                    const yes = value => ['1', 'true', 'yes', 'y', '是', '啟用', '启用'].includes(String(value || '').trim().toLocaleLowerCase());
+                    const inventoryTracked = yes(getField(row, ['庫存管理', '库存管理', 'Inventory Tracked', 'Inventory']));
+                    const lotTracked = yes(getField(row, ['批號管理', '批号管理', 'Lot Tracked', 'Lot']));
+                    const expiryTracked = yes(getField(row, ['效期管理', 'Expiry Tracked', 'Expiry']));
 
                     const price = parseFloat(getField(row, ['含稅單價', '單價', '價格'])) || 0;
                     const costRaw = getField(row, ['含稅成本', '成本', '進貨成本']);
                     const cost = costRaw === '' ? null : parseFloat(costRaw) || 0;
 
                     if (nameCn || nameEn || model) {
-                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, price, cost });
+                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, supplier, unit, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost });
                     }
                 });
 
@@ -6484,6 +6561,12 @@ window.handlePriceExcelUpload = async function(input) {
                 return;
             }
 
+            if (!confirmProductMasterImport(brandGroups)) {
+                setPriceUploadProgress(0, '已取消，尚未寫入雲端。', false);
+                input.value = '';
+                return;
+            }
+
             const savedBrands = [];
             for (let i = 0; i < brandGroups.length; i++) {
                 const { brand, imported } = brandGroups[i];
@@ -6491,7 +6574,7 @@ window.handlePriceExcelUpload = async function(input) {
                 setPriceUploadProgress(basePercent, `正在儲存「${brand}」（${i + 1}/${brandGroups.length} 個廠牌）的 ${imported.length} 筆資料…`);
                 const storedBrand = await savePriceBrandList(imported, brand);
                 // 直接更新本機清單，其他廠牌不受這次上傳影響。
-                const normalizedImported = imported.map(item => ({ ...item, brand: storedBrand }));
+                const normalizedImported = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
                 priceList = priceList.filter(item => (item.brand || '').trim().toLocaleLowerCase() !== storedBrand.toLocaleLowerCase()).concat(normalizedImported);
                 savedBrands.push(`${storedBrand}（${imported.length} 筆）`);
             }
