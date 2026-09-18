@@ -734,6 +734,15 @@
                 <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
+            <h4 style="margin-top:28px;">舊訂單搜尋索引</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正舊訂單貨號索引</button>
+                <span style="font-size:12px;color:#666;">
+                    供「全歷史貨號搜尋」使用。系統每次只讀取 200 筆並分批寫入，只補上缺少或不一致的 itemCodeKey；不會改變訂單金額、狀態或其他商業資料。通常只需在升級後執行一次。
+                </span>
+                <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
+            </div>
+
             <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button onclick="calculateStorageUsage()">🔄 計算目前用量</button>
