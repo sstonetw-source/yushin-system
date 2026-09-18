@@ -323,3 +323,21 @@ test('phase 2 product master extends the existing price catalog instead of creat
     assert.match(appSource, /normalizeProductMasterList\(imported/);
     assert.doesNotMatch(appSource, /collection\(['"]products['"]\)/);
 });
+
+
+test('phase 2 documents link to productId while retaining historical snapshots', () => {
+    assert.match(appSource, /class="item-product-id"/);
+    assert.match(appSource, /productId: row\.querySelector\('\.item-product-id'\)/);
+    assert.match(appSource, /data\.productId = priceMatch\.productId/);
+    assert.match(appSource, /orderData\.productId = orderData\.productId/);
+    assert.match(appSource, /data\.supplier = priceMatch\.supplier/);
+    assert.match(appSource, /data\.spec = priceMatch\.spec/);
+});
+
+test('phase 2 product-master Excel import supports enrichment fields and preview', () => {
+    assert.match(appSource, /Product Master 匯入預覽/);
+    assert.match(appSource, /confirmProductMasterImport\(brandGroups\)/);
+    for (const field of ['供應商', '單位', '庫存管理', '批號管理', '效期管理', '啟用']) {
+        assert.ok(appSource.includes(field), `missing import field: ${field}`);
+    }
+});
