@@ -40,7 +40,7 @@ let currentUser = null;      // 目前登入的 Firebase Auth 使用者物件
 let currentUserRole = null;  // 'admin' / 'sales' / 'purchaser' / 'engineer' —— 目前實際套用在畫面上的「有效身份」
 let trueUserRole = null;     // 真正登入帳號的身份；只有這個是 admin，才能用下面的「檢視身份」切換功能
 let mustChangePassword = false;  // 管理員要求這個帳號下次登入必須先改密碼
-const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', engineer: '工程師' };
+const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', warehouse: '倉管', engineer: '工程師' };
 const PERMISSION_LEVELS = { none: 0, view: 1, edit: 2 };
 const PERMISSION_PAGES = [
     { key: 'forecast', label: '📈 Forecast', system: true },
