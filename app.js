@@ -1815,6 +1815,65 @@ window.handleSaveAndPrint = function() {
 // 3) 英文品名/中文品名/貨號/廠牌需要保留原本的輸入／選擇功能，
 //    太長的文字會被裁掉看不見，所以在旁邊插入一份可換行、顯示完整內容的鏡像文字，
 //    列印時蓋過輸入框顯示（純 CSS @media print 控制顯示/隱藏，不用另外還原）
+function markQuotePrintPagination() {
+    const root = document.getElementById('printableQuote');
+    const table = document.getElementById('itemTable');
+    const tbody = document.getElementById('quoteItems');
+    if (!root || !table || !tbody) return;
+
+    root.classList.remove('quote-multipage-print');
+    tbody.querySelectorAll('tr').forEach(row => row.classList.remove('quote-print-page-break'));
+
+    const rows = [...tbody.querySelectorAll('tr')].filter(row => {
+        const text = [
+            row.querySelector('.item-en')?.value,
+            row.querySelector('.item-cn')?.value,
+            row.querySelector('.item-model')?.value,
+            row.querySelector('.item-spec')?.value
+        ].join('').trim();
+        return !!text;
+    });
+    if (!rows.length) return;
+
+    // A4 可列印高度約 277mm。以目前 190mm 固定寬度先量實際 DOM 高度，
+    // 首頁需扣除公司抬頭與客戶資料；最後一頁需額外保留有效期限、印章與總計。
+    const pxPerMm = 96 / 25.4;
+    const printableHeight = 277 * pxPerMm;
+    const headerHeight = (root.querySelector('.header-container')?.getBoundingClientRect().height || 0)
+        + (root.querySelector('.meta-section')?.getBoundingClientRect().height || 0)
+        + (table.querySelector('thead')?.getBoundingClientRect().height || 0);
+    const footerHeight = (root.querySelector('.footer-note')?.getBoundingClientRect().height || 0)
+        + (root.querySelector('.bottom-layout')?.getBoundingClientRect().height || 0)
+        + 14 * pxPerMm;
+    const repeatedHeaderHeight = table.querySelector('thead')?.getBoundingClientRect().height || 0;
+    const firstCapacity = Math.max(120, printableHeight - headerHeight - 8 * pxPerMm);
+    const nextCapacity = Math.max(120, printableHeight - repeatedHeaderHeight - 8 * pxPerMm);
+
+    let pageUsed = 0;
+    let capacity = firstCapacity;
+    const rowHeights = rows.map(row => Math.ceil(row.getBoundingClientRect().height || row.scrollHeight || 0));
+
+    rows.forEach((row, index) => {
+        const rowHeight = Math.max(rowHeights[index], 18);
+        const remainingRowsHeight = rowHeights.slice(index).reduce((sum, h) => sum + Math.max(h, 18), 0);
+        const reserveFooterNow = remainingRowsHeight + footerHeight <= capacity - pageUsed;
+        const required = rowHeight + (reserveFooterNow ? footerHeight : 0);
+        if (pageUsed > 0 && pageUsed + required > capacity) {
+            row.classList.add('quote-print-page-break');
+            pageUsed = 0;
+            capacity = nextCapacity;
+        }
+        pageUsed += rowHeight;
+    });
+
+    // 若最後一頁的品項加上總計／印章仍放不下，把最後一個完整品項移到下一頁；
+    // 不拆列，也避免總計被擠出頁面。
+    if (pageUsed + footerHeight > capacity && rows.length > 1) {
+        rows[rows.length - 1].classList.add('quote-print-page-break');
+    }
+    root.classList.toggle('quote-multipage-print', rows.some(row => row.classList.contains('quote-print-page-break')));
+}
+
 function prepareQuoteForPrint() {
     const root = document.getElementById('printableQuote');
     if (!root) return;
@@ -1849,6 +1908,8 @@ function prepareQuoteForPrint() {
         toggleEmpty(row.querySelector('.item-brand-field'), quoteRowBrandValue(row));
         toggleEmpty(row.querySelector('.item-spec')?.closest('.field-row'), row.querySelector('.item-spec')?.value);
     });
+
+    markQuotePrintPagination();
 
     const clientRow = document.getElementById('clientName')?.closest('.meta-row');
     clientRow?.classList.toggle('print-empty-field', !document.getElementById('clientName').value.trim());
