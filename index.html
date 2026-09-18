@@ -595,7 +595,7 @@
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
-            <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 銷售統計</div>
+            <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
             <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>
@@ -620,7 +620,7 @@
                 <p style="font-size:13px;color:#555;line-height:1.7;">設定每個身份可看到的系統與分頁。選擇「僅查看」時可瀏覽與搜尋，但不能新增、修改、刪除或上傳資料。管理員固定擁有完整權限。</p>
                 <div style="overflow-x:auto;">
                     <table class="permission-table">
-                        <thead><tr><th>系統／分頁</th><th>業務</th><th>採購</th><th>工程師</th><th>管理員</th></tr></thead>
+                        <thead><tr><th>系統／分頁</th><th>業務</th><th>採購</th><th>倉管</th><th>工程師</th><th>管理員</th></tr></thead>
                         <tbody id="rolePermissionsBody"></tbody>
                     </table>
                 </div>
@@ -628,7 +628,7 @@
                 <p style="font-size:13px;color:#555;">分別決定各身份在清單中只能看到自己負責的資料，或能查看所有人資料。</p>
                 <div style="overflow-x:auto;">
                     <table class="permission-table">
-                        <thead><tr><th>資料類型</th><th>業務</th><th>採購</th><th>工程師</th><th>管理員</th></tr></thead>
+                        <thead><tr><th>資料類型</th><th>業務</th><th>採購</th><th>倉管</th><th>工程師</th><th>管理員</th></tr></thead>
                         <tbody id="roleDataScopesBody"></tbody>
                     </table>
                 </div>
@@ -674,7 +674,7 @@
             </div>
         </div>
 
-        <!-- 訂單銷售統計：只計入已建立的訂單；成交估價單會在轉單後自動納入 -->
+        <!-- 進銷存分析：銷售以訂單/送貨、進貨以實際 receipt、庫存以 inventory 為準 -->
         <div id="admin-statistics" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
                 <select id="salesStatsPeriod" onchange="setSalesStatisticsPeriod(this.value)">
