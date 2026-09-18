@@ -48,6 +48,7 @@
         <div class="nav-tab active" data-permission-page="quote" onclick="switchMainTab('quote-system', this)">📄 估價單系統</div>
         <div class="nav-tab" data-permission-page="forecast" onclick="switchMainTab('forecast-system', this)">📈 Forecast</div>
         <div class="nav-tab" data-permission-page="orders" onclick="switchMainTab('order-system', this)">📦 訂單管理系統</div>
+        <div class="nav-tab" data-permission-page="inventory" onclick="switchMainTab('inventory-system', this)">📦 庫存管理</div>
         <div class="nav-tab" data-permission-page="equipment" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
         <div class="nav-tab" id="navAdminTab" data-permission-page="admin" onclick="switchMainTab('admin-system', this)">⚙️ 管理員雲端後台</div>
         <div class="nav-spacer"></div>
@@ -98,6 +99,14 @@
       </div>
     </div>
 
+    <!-- ============ 庫存管理 ============ -->
+    <div id="inventory-system" class="content-section">
+      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 庫存異動</button></div>
+      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>On Hand</th><th>Reserved</th><th>Available</th><th>Incoming</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
+      <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>貨號</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
+    </div>
     <!-- ============ 估價單系統 ============ -->
     <div id="quote-system" class="content-section active">
         <div class="sub-nav no-print">
