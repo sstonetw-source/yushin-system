@@ -146,7 +146,7 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
 
 test('purchase modal chooses a company that does not silently filter every item', () => {
     const start = appSource.indexOf('function bestPurchaseOrderCompany(');
-    const end = appSource.indexOf('\n}\n\nwindow.openPurchaseOrderModal', start) + 2;
+    const end = appSource.indexOf('\n}\n\nwindow.openDirectStockPurchase', start) + 2;
     assert.ok(start >= 0 && end > start);
     const context = {
         isCompanyBrandAllowed: (company, brand) => ({
