@@ -445,3 +445,33 @@ test('phase 5 cancelling and restoring orders adjusts reservations without delet
     assert.match(s,/inventoryMovementRecord\('release'/);
     assert.doesNotMatch(s,/\.delete\(/);
 });
+
+
+test('phase 6 purchase orders create incoming without increasing on-hand', () => {
+    const start=appSource.indexOf('async function registerPurchaseIncoming');
+    const end=appSource.indexOf('window.receivePurchaseOrder',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/incoming:Math\.max\(0,stock\.incoming\+delta\)/);
+    assert.match(s,/onHand:stock\.onHand/);
+    assert.match(s,/purchase_incoming/);
+});
+
+test('phase 6 receipt transaction decreases incoming and increases on-hand with partial receipts', () => {
+    const start=appSource.indexOf('window.receivePurchaseOrder');
+    const end=appSource.indexOf('function purchaseItemsFromSavedPo',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/onHand:stock\.onHand\+qty/);
+    assert.match(s,/incoming:Math\.max\(0,stock\.incoming-qty\)/);
+    assert.match(s,/receiptRecords/);
+    assert.match(s,/receiptStatus/);
+    assert.match(s,/type:'receipt'/);
+});
+
+test('phase 6 supports direct stock purchase independent of customer orders', () => {
+    const start=appSource.indexOf('window.openDirectStockPurchase');
+    const end=appSource.indexOf('window.openPurchaseOrderModal',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/orderId:''/);
+    assert.match(s,/priceItemLookup/);
+    assert.match(s,/generateNextPoNumber/);
+});

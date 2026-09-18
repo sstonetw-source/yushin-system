@@ -3196,7 +3196,8 @@ window.renderPoList = function() {
             <td>${escapeHtml(po.poDate || '')}</td>
             <td>${items.length}</td>
             <td>${grandTotal.toLocaleString()}</td>
-            <td class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button></td>
+            <td>${(() => { const progress = poReceiptProgress(po); return progress.complete ? '已全部到貨' : progress.received > 0 ? '部分到貨 ' + progress.received + '/' + progress.ordered : '待到貨 0/' + progress.ordered; })()}</td>
+            <td class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button> <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button></td>
         `;
         tbody.appendChild(tr);
     });
@@ -3247,6 +3248,69 @@ let poAllItems = [];
 let poCurrentCompany = 'yushin';
 let poEditingId = null;
 let poSaveInProgress = false;
+
+function receivedQuantityForPoItem(po, itemIndex) {
+    return (Array.isArray(po?.receiptRecords) ? po.receiptRecords : [])
+        .filter(r => Number(r.itemIndex) === Number(itemIndex))
+        .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+}
+function poReceiptProgress(po) {
+    const items = purchaseItemsFromSavedPo(po);
+    const ordered = items.reduce((s,i)=>s+Number(i.qty||0),0);
+    const received = items.reduce((s,i,index)=>s+Math.min(Number(i.qty||0), receivedQuantityForPoItem(po,index)),0);
+    return { ordered, received, remaining: Math.max(0, ordered-received), complete: ordered>0 && received>=ordered };
+}
+function poIncomingKey(item) {
+    return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
+}
+async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
+    const previousItems = previousPo ? purchaseItemsFromSavedPo(previousPo) : [];
+    const nextItems = purchaseItemsFromSavedPo(poRecord);
+    await db.runTransaction(async tx => {
+        const refs = new Map();
+        [...previousItems, ...nextItems].forEach(item => { const key=poIncomingKey(item); if(key) refs.set(key, db.collection('inventory').doc(encodeURIComponent(key))); });
+        const snaps = new Map();
+        for (const [key,ref] of refs) snaps.set(key, await tx.get(ref));
+        for (const [key,ref] of refs) {
+            const oldQty=previousItems.filter(i=>poIncomingKey(i)===key).reduce((s,i)=>s+Number(i.qty||0),0);
+            const newQty=nextItems.filter(i=>poIncomingKey(i)===key).reduce((s,i)=>s+Number(i.qty||0),0);
+            const delta=newQty-oldQty; if(!delta) continue;
+            const stock=inventoryNumbers(snaps.get(key)?.exists ? snaps.get(key).data() : {});
+            const sample=nextItems.find(i=>poIncomingKey(i)===key)||previousItems.find(i=>poIncomingKey(i)===key)||{};
+            tx.set(ref,{productKey:key,productId:sample.productId||'',itemCode:sample.itemCode||'',itemName:sample.itemName||'',onHand:stock.onHand,reserved:stock.reserved,incoming:Math.max(0,stock.incoming+delta),updatedAt:new Date().toISOString()},{merge:true});
+            tx.set(db.collection('inventoryMovements').doc(),{type:'purchase_incoming',qty:delta,productKey:key,sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,sourceId:poId,createdAt:new Date().toISOString(),createdBy:currentUserName||currentUser?.email||''});
+        }
+    });
+}
+
+window.receivePurchaseOrder = async function(poId) {
+    if (!canEditPage('orders.po')) return;
+    const po = poListCache.find(p=>p.id===poId); if(!po) return;
+    const items=purchaseItemsFromSavedPo(po), remainingItems=items.map((item,index)=>({item,index,remaining:Math.max(0,Number(item.qty||0)-receivedQuantityForPoItem(po,index))})).filter(x=>x.remaining>0);
+    if(!remainingItems.length){alert('這張訂購單已全部到貨。');return;}
+    const itemText=remainingItems.map(x=>`${x.index+1}. ${x.item.itemName||x.item.itemCode}（尚未到貨 ${x.remaining}）`).join('\n');
+    const indexInput=prompt(`登錄到貨品項：\n${itemText}\n\n請輸入品項序號`,'1'); if(indexInput===null)return;
+    const target=remainingItems.find(x=>x.index===Number(indexInput)-1); if(!target){alert('品項序號不正確。');return;}
+    const qty=Number(prompt(`本次收到數量（最多 ${target.remaining}）`,String(target.remaining))); if(!qty||qty<=0||qty>target.remaining){alert('到貨數量不正確。');return;}
+    const now=new Date().toISOString(), actor=currentUserName||currentUser?.email||'', receiptId=`rcv-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    try{
+        let saved;
+        await db.runTransaction(async tx=>{
+            const poRef=db.collection('purchaseOrders').doc(poId), poSnap=await tx.get(poRef); if(!poSnap.exists)throw new Error('找不到訂購單');
+            const live=poSnap.data(), liveItems=purchaseItemsFromSavedPo(live), item=liveItems[target.index]; if(!item)throw new Error('找不到品項');
+            const already=receivedQuantityForPoItem(live,target.index), remaining=Math.max(0,Number(item.qty||0)-already); if(qty>remaining)throw new Error('到貨數量超過尚未到貨數量');
+            const key=poIncomingKey(item); if(!key)throw new Error('此品項缺少 Product ID／貨號，無法入庫');
+            const invRef=db.collection('inventory').doc(encodeURIComponent(key)), invSnap=await tx.get(invRef), stock=inventoryNumbers(invSnap.exists?invSnap.data():{});
+            const record={id:receiptId,itemIndex:target.index,productKey:key,productId:item.productId||'',itemCode:item.itemCode||'',itemName:item.itemName||'',qty,date:localDateString(),createdAt:now,createdBy:actor};
+            const records=[...(live.receiptRecords||[]),record];
+            tx.set(invRef,{productKey:key,productId:item.productId||'',itemCode:item.itemCode||'',itemName:item.itemName||'',onHand:stock.onHand+qty,reserved:stock.reserved,incoming:Math.max(0,stock.incoming-qty),updatedAt:now},{merge:true});
+            tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey:key,sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,sourceId:poId,receiptId,createdAt:now,createdBy:actor});
+            tx.update(poRef,{receiptRecords:records,updatedAt:now,receiptStatus:records.reduce((s,r)=>s+Number(r.qty||0),0)>=liveItems.reduce((s,i)=>s+Number(i.qty||0),0)?'received':'partial'});
+            saved={id:poId,...live,receiptRecords:records,updatedAt:now};
+        });
+        const idx=poListCache.findIndex(p=>p.id===poId);if(idx>=0)poListCache[idx]=saved;renderPoList();
+    }catch(err){alert('到貨入庫失敗：'+err.message);}
+};
 
 function purchaseItemsFromSavedPo(po) {
     const sourceItems = [po?.items, po?.orderItems, po?.purchaseItems, po?.lineItems, po?.products]
@@ -3309,6 +3373,25 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
         .map(company => ({ company, count: items.filter(item => isCompanyBrandAllowed(company, item.brand)).length }))
         .sort((a, b) => b.count - a.count)[0]?.company || 'yushin';
 }
+
+window.openDirectStockPurchase = function() {
+    if (!canEditPage('orders.po')) return;
+    const code = prompt('請輸入備貨產品貨號'); if (!code) return;
+    const normalized = normalizeItemCode(code);
+    const match = priceItemLookup.get(`code:${normalized}`);
+    if (!match) { alert('Product Master 找不到此貨號，請先更新產品主檔。'); return; }
+    const qty = Number(prompt('請輸入備貨採購數量','1')); if (!qty || qty <= 0) return;
+    poItems = [{ orderId:'', itemName:match.nameCn||match.nameEn||'', itemCode:match.model||code, productId:match.productId||stableProductId(match), brand:match.brand||'', qty, unit:match.unit||'', unitPrice:Number(match.cost||0) }];
+    poAllItems = poItems; poEditingId = null;
+    switchPoCompany(currentCompany || 'yushin', null, true);
+    populatePoVendorSuggestions();
+    document.getElementById('poVendorName').value = match.supplier || '';
+    document.getElementById('poBuyerName').innerText = currentUserName || '';
+    document.getElementById('poDate').value = localDateString();
+    generateNextPoNumber();
+    renderPoItemsTable();
+    document.getElementById('poModalOverlay').classList.add('active');
+};
 
 window.openPurchaseOrderModal = function() {
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
@@ -3518,11 +3601,13 @@ window.printPurchaseOrder = async function() {
     }
     try {
         const poDocumentId = poEditingId || poNo;
+        let previousPoForIncoming = null;
         await db.runTransaction(async transaction => {
             const poRef = db.collection('purchaseOrders').doc(poDocumentId);
             const orderRefs = orderIds.map(orderId => db.collection('orders').doc(orderId));
             const poSnapshot = await transaction.get(poRef);
             const orderSnapshots = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
+            previousPoForIncoming = poSnapshot.exists ? { id: poDocumentId, ...poSnapshot.data() } : null;
             if (poSnapshot.exists && !poEditingId) throw new Error(`訂購單號 ${poNo} 已存在，請關閉視窗後重新產生單號。`);
             const conflicts = orderSnapshots
                 .filter(snapshot => snapshot.exists && snapshot.data().purchaseOrderNo && snapshot.data().purchaseOrderNo !== poNo)
@@ -3539,6 +3624,8 @@ window.printPurchaseOrder = async function() {
                 }
             });
         });
+
+        await registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming);
 
         ordersCache.forEach(order => {
             if (poItems.some(item => item.orderId === order.id)) order.purchaseOrderNo = poNo;
