@@ -366,21 +366,6 @@
         </div>
     </div>
 </div>
-      <div class="modal">
-        <h3 id="forecastModalTitle">新增 Forecast</h3>
-        <input type="hidden" id="forecastId">
-        <label>客戶名稱</label><input id="forecastCustomer" list="clientList">
-        <label>產品／品項</label><input id="forecastProduct" placeholder="可輸入品名或貨號">
-        <label>預估金額</label><input id="forecastAmount" type="number" min="0" step="1">
-        <label>最新進度</label><textarea id="forecastProgress" rows="4" placeholder="例如：已提供報價，等待院方預算核准"></textarea>
-        <label>狀態</label><select id="forecastStatus"><option value="active">進行中</option><option value="won">已成交</option><option value="lost">未成交</option></select>
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="closeForecastModal()">取消</button>
-          <button id="saveForecastBtn" onclick="saveForecast()">儲存</button>
-        </div>
-      </div>
-    </div>
-
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
       <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 庫存異動</button></div>
