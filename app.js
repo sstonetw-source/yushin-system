@@ -50,6 +50,7 @@ const PERMISSION_PAGES = [
     { key: 'orders', label: '📦 訂單管理系統', system: true },
     { key: 'orders.list', label: '　業務訂單' },
     { key: 'orders.po', label: '　採購訂單' },
+    { key: 'inventory', label: '📦 庫存管理', system: true },
     { key: 'equipment', label: '🔬 儀器管理系統', system: true },
     { key: 'admin', label: '⚙️ 管理員雲端後台', system: true }
 ];
@@ -677,7 +678,7 @@ window.switchViewRole = function(role) {
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
-    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
+    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
     if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
         return;
@@ -694,7 +695,9 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
         if (tab) tab.classList.add('active');
     }
 
-    if (tabId === 'forecast-system') {
+    if (tabId === 'inventory-system') {
+        if (!options.skipReload) loadInventory(true);
+    } else if (tabId === 'forecast-system') {
         if (!options.skipReload) loadForecasts(true);
     } else if (tabId === 'equipment-system') {
         if (!options.skipReload) initializePageData('equipment');
@@ -2611,6 +2614,28 @@ window.changeOrderPeriod = function(value) {
         if (end && !end.value) end.value = dateOnlyFromTimestamp(new Date().toISOString());
     }
     renderOrdersList();
+};
+
+let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[];
+function expiryDays(date){if(!date)return null;return Math.ceil((new Date(date+'T23:59:59')-new Date())/86400000);}
+function lotStatus(lot){const d=expiryDays(lot.expiryDate);if(d===null)return '';if(d<0)return '已過期';if(d<=30)return '30天內';if(d<=60)return '60天內';if(d<=90)return '90天內';return '';}
+function fefoLots(stock){return [...(stock.lots||[])].filter(l=>Number(l.qty||0)>0).sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));}
+window.loadInventory=async function(reset=true){
+ if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCache=[];inventoryCursor=null;inventoryHasMore=true;} inventoryLoading=true;
+ try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const s=await q.get();if(!s.empty)inventoryCursor=s.docs[s.docs.length-1];s.forEach(d=>{const x={id:d.id,...d.data()};const i=inventoryCache.findIndex(v=>v.id===d.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});inventoryHasMore=s.size===DEFAULT_LIST_LIMIT;
+ const m=await db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get();inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));renderInventoryList();renderInventoryLedger();
+ }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
+};
+window.renderInventoryList=function(){const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';inventoryCache.forEach(x=>{const lots=fefoLots(x);const text=`${x.itemCode||''} ${x.itemName||''} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(k&&!text.includes(k))return;const n=inventoryNumbers(x);const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');body.insertAdjacentHTML('beforeend',`<tr><td>${escapeHtml(x.itemCode||'')}</td><td>${escapeHtml(x.itemName||'')}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td><td>${n.incoming}</td><td>${lotHtml}</td></tr>`);});};
+window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
+window.openInventoryAdjustment=async function(){
+ if(!canEditPage('inventory'))return;const code=prompt('貨號');if(!code)return;const match=priceItemLookup.get('code:'+normalizeItemCode(code));if(!match){alert('Product Master 找不到此貨號');return;}
+ const type=prompt('異動類型：initial（期初）/ adjustment（盤點調整）/ return（退貨）/ scrap（報廢）','adjustment');if(!['initial','adjustment','return','scrap'].includes(type))return;
+ const qty=Number(prompt(type==='scrap'?'報廢數量（輸入正數）':'異動數量；增加填正數、減少填負數','0'));if(!qty)return;const lotNo=prompt('批號（無則留白）','')||'';const expiryDate=prompt('效期 YYYY-MM-DD（無則留白）','')||'';
+ const key=match.productId||stableProductId(match),ref=db.collection('inventory').doc(encodeURIComponent(key)),actor=currentUserName||currentUser?.email||'',delta=type==='scrap'?-Math.abs(qty):qty;
+ try{await db.runTransaction(async tx=>{const s=await tx.get(ref),old=s.exists?s.data():{},n=inventoryNumbers(old);if(n.onHand+delta<0)throw new Error('異動後庫存不可小於 0');let lots=[...(old.lots||[])];if(lotNo||expiryDate){const i=lots.findIndex(l=>l.lotNo===lotNo&&l.expiryDate===expiryDate);if(i>=0)lots[i]={...lots[i],qty:Number(lots[i].qty||0)+delta};else lots.push({lotNo,expiryDate,qty:delta});}
+ tx.set(ref,{productKey:key,productId:key,itemCode:match.model||code,itemName:match.nameCn||match.nameEn||'',onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:new Date().toISOString()},{merge:true});
+ tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,lotNo,expiryDate,sourceType:'manual',sourceId:'',createdAt:new Date().toISOString(),createdBy:actor});});await loadInventory(true);}catch(e){alert('庫存異動失敗：'+e.message);}
 };
 
 function inventoryProductKey(record) {

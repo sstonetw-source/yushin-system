@@ -475,3 +475,12 @@ test('phase 6 supports direct stock purchase independent of customer orders', ()
     assert.match(s,/priceItemLookup/);
     assert.match(s,/generateNextPoNumber/);
 });
+
+
+test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustments',()=>{
+ assert.match(appSource,/function fefoLots\(stock\)/);assert.match(appSource,/function lotStatus\(lot\)/);
+ assert.match(appSource,/30天內/);assert.match(appSource,/60天內/);assert.match(appSource,/90天內/);
+ assert.match(appSource,/inventoryMovements/);assert.match(appSource,/initial/);assert.match(appSource,/adjustment/);assert.match(appSource,/scrap/);
+ assert.match(appSource,/orderBy\('updatedAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+ assert.match(appSource,/orderBy\('createdAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+});
