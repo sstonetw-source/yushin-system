@@ -222,3 +222,15 @@ test('failed billing write restores the previous state and unlocks the button', 
     assert.equal(context.pendingOrderStatusKeys.has('o2:isBilled'), false);
     assert.match(alertMessage, /已還原/);
 });
+
+
+test('quote and order lists use global business-date ordering across companies', () => {
+    assert.match(appSource, /collection\('quotes'\)\.orderBy\('quoteDate', 'desc'\)/);
+    assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'quoteDate', 'quoteNo'\)/);
+    assert.match(appSource, /collection\('orders'\)\.orderBy\('orderDate', 'desc'\)/);
+    assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'orderDate', 'id'\)/);
+    const compareStart = appSource.indexOf('function compareBusinessRecordsNewestFirst');
+    const compareEnd = appSource.indexOf('\n}', compareStart) + 2;
+    const comparator = appSource.slice(compareStart, compareEnd);
+    assert.doesNotMatch(comparator, /company/);
+});
