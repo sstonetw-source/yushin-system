@@ -433,6 +433,22 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     }
     thead { display: table-header-group; }
 
+    /* Phase 1D：JS 依每個品項實際列印高度標出換頁點；每個品項保持完整，
+       瀏覽器換頁後 thead 會自動重複，不讓第二、三頁失去欄位名稱。 */
+    #quoteItems tr.quote-print-page-break {
+        break-before: page !important;
+        page-break-before: always !important;
+    }
+    #printableQuote .footer-note,
+    #printableQuote .bottom-layout,
+    #printableQuote .total-section {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+    #printableQuote.quote-multipage-print #itemTable {
+        margin-bottom: 3mm;
+    }
+
     @page { size: A4; margin: 10mm; }
     body { margin: 0; }
 
