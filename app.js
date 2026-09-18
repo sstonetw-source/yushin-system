@@ -1537,7 +1537,7 @@ function collectCurrentQuoteRecord() {
         quoteNo: document.getElementById('quoteNo').value.trim(), company: currentCompany,
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
         salesName, ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName) ? currentUser?.uid || '' : ''),
-        quoteDate: document.getElementById('quoteDate').value, validDays: document.getElementById('validDays').value,
+        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
     };
@@ -1759,6 +1759,7 @@ window.handleSaveAndPrint = function() {
         salesName: selectedSalesName,
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
+        createdAt: new Date().toISOString(),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
         grandTotal: document.getElementById('grandTotal').innerText,
@@ -2205,6 +2206,7 @@ window.markQuoteAsDeal = function(quoteNo) {
             const orderRef = db.collection('orders').doc();
             const orderData = {
                 orderDate: todayStr,
+                createdAt: new Date().toISOString(),
                 company: q.company || '',
                 customerName: q.ordererName || '',
                 brand: item.brand || '',
@@ -4337,6 +4339,7 @@ window.saveNewOrder = function() {
     const itemCode = document.getElementById('orderItemCode').value.trim();
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
+        createdAt: new Date().toISOString(),
         company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
         brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
