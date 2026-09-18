@@ -1,0 +1,19 @@
+name: System regression tests
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'upgrade/**'
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax check
+        run: node --check app.js
+      - name: Regression tests
+        run: node --test tests/phase1.test.js

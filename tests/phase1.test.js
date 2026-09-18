@@ -9,7 +9,7 @@ const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf
 
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
-    const end = appSource.indexOf('\n}\n\nwindow.openPurchaseOrderModal', start) + 2;
+    const end = appSource.indexOf('\n}\n\nfunction bestPurchaseOrderCompany', start) + 2;
     assert.ok(start >= 0 && end > start, 'purchaseItemsFromOrder must exist');
     const context = {
         priceItemLookup: new Map([
@@ -146,7 +146,7 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
 
 test('purchase modal chooses a company that does not silently filter every item', () => {
     const start = appSource.indexOf('function bestPurchaseOrderCompany(');
-    const end = appSource.indexOf('\n}\n\nwindow.openPurchaseOrderModal', start) + 2;
+    const end = appSource.indexOf('\n}\n\nwindow.openDirectStockPurchase', start) + 2;
     assert.ok(start >= 0 && end > start);
     const context = {
         isCompanyBrandAllowed: (company, brand) => ({
@@ -372,7 +372,7 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
 test('phase 3 preserves legacy links and cancels generated orders instead of hard deleting them', () => {
     assert.match(appSource, /function legacyDocumentLinks\(record, type\)/);
     const start = appSource.indexOf('window.unmarkQuoteAsDeal =');
-    const end = appSource.indexOf('訂單管理系統', start);
+   const end = appSource.indexOf('/* =========================================================\n   訂單管理系統', start);
     const source = appSource.slice(start, end);
     assert.match(source, /status: 'cancelled'/);
     assert.match(source, /cancelReason: '來源估價單取消成交'/);
@@ -386,7 +386,7 @@ test('phase 4 forecast is lightweight, paginated and has no expected-close-date 
     assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
     assert.match(appSource, /where\('ownerUid', '==', currentUser/);
     assert.match(appSource, /latestProgress:/);
-    const forecastStart = appSource.indexOf('Forecast：輕量商機追蹤');
+    const forecastStart = appSource.indexOf('let forecastCache =');
     const forecastEnd = appSource.indexOf('估價單系統', forecastStart);
     assert.doesNotMatch(appSource.slice(forecastStart, forecastEnd), /expectedClose|closeDate|預計成交日期/);
 });
@@ -491,9 +491,19 @@ test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(ap
 
 test('phase 9 analysis separates actual receipts sales stock value incoming and purchase-sales difference',()=>{
  assert.match(appSource,/function inventoryAnalysisTotals\(start,end\)/);
- assert.match(appSource,/filter\(x=>x\.type==='receipt'\)/);
+ assert.match(appSource,/where\('type','==','receipt'\)/);
  assert.match(appSource,/difference:sales-purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
  assert.match(appSource,/limit\(1000\)/);
 });
 test('phase 8 permission editor includes warehouse role',()=>{assert.match(appSource,/\['sales', 'purchaser', 'warehouse', 'engineer', 'admin'\]/);});
+
+
+test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=>{
+ assert.match(appSource,/where\('type','==','receipt'\)/);
+ assert.match(appSource,/inventoryMovements[\s\S]{0,300}limit\(1000\)/);
+ assert.doesNotMatch(appSource,/collection\('inventoryMovements'\)\.get\(\)/);
+});
+test('phase 10 role model consistently documents warehouse',()=>{
+ assert.match(appSource,/admin' \/ 'sales' \/ 'purchaser' \/ 'warehouse' \/ 'engineer'/);
+});
