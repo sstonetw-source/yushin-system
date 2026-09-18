@@ -1691,7 +1691,7 @@ function collectCurrentQuoteRecord() {
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
         salesName, ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
-        ...linkedDocumentFields('', '', []), validDays: document.getElementById('validDays').value,
+        ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
     };
@@ -1914,7 +1914,7 @@ window.handleSaveAndPrint = function() {
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
-        ...linkedDocumentFields('', '', []),
+        ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
         grandTotal: document.getElementById('grandTotal').innerText,
@@ -1958,7 +1958,14 @@ window.handleSaveAndPrint = function() {
         });
     });
 
-    db.collection('quotes').doc(quoteNo).set(quoteData).catch(err => {
+    db.collection('quotes').doc(quoteNo).set(quoteData).then(() => {
+        if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
+            return db.collection('forecasts').doc(quoteData.sourceId).set({
+                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'created')),
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        }
+    }).catch(err => {
         console.error('儲存估價單到雲端失敗：', err);
         alert('提醒：這張估價單剛剛存到雲端失敗（' + err.message + '）。列印內容不受影響，但建議稍後檢查網路連線後，再按一次「存檔並列印」，確保雲端資料庫也有存到這筆紀錄。');
     });
@@ -4587,7 +4594,8 @@ window.saveNewOrder = function() {
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
-        ...linkedDocumentFields('', '', []),
+        ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
+        productId: window._orderModalProductId || '',
         salesName: currentUserName || '',
         ownerUid: currentUser?.uid || '',
         isOrdered: false,
@@ -4623,6 +4631,13 @@ window.saveNewOrder = function() {
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     db.collection('orders').add(data).then(docRef => {
         rememberRecentCustomerName(data.customerName);
+        if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
+            db.collection('forecasts').doc(data.sourceId).set({
+                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, docRef.id, 'created')),
+                updatedAt: new Date().toISOString()
+            }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
+        }
+        window._orderModalSourceLink = null; window._orderModalProductId = '';
         closeOrderModal();
         // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
         ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
