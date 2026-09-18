@@ -372,7 +372,7 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
 test('phase 3 preserves legacy links and cancels generated orders instead of hard deleting them', () => {
     assert.match(appSource, /function legacyDocumentLinks\(record, type\)/);
     const start = appSource.indexOf('window.unmarkQuoteAsDeal =');
-    const end = appSource.indexOf('window.editOrder', start);
+   const end = appSource.indexOf('/* =========================================================\n   訂單管理系統', start);
     const source = appSource.slice(start, end);
     assert.match(source, /status: 'cancelled'/);
     assert.match(source, /cancelReason: '來源估價單取消成交'/);
