@@ -491,9 +491,19 @@ test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(ap
 
 test('phase 9 analysis separates actual receipts sales stock value incoming and purchase-sales difference',()=>{
  assert.match(appSource,/function inventoryAnalysisTotals\(start,end\)/);
- assert.match(appSource,/filter\(x=>x\.type==='receipt'\)/);
+ assert.match(appSource,/where\('type','==','receipt'\)/);
  assert.match(appSource,/difference:sales-purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
  assert.match(appSource,/limit\(1000\)/);
 });
 test('phase 8 permission editor includes warehouse role',()=>{assert.match(appSource,/\['sales', 'purchaser', 'warehouse', 'engineer', 'admin'\]/);});
+
+
+test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=>{
+ assert.match(appSource,/where\('type','==','receipt'\)/);
+ assert.match(appSource,/inventoryMovements[\s\S]{0,300}limit\(1000\)/);
+ assert.doesNotMatch(appSource,/collection\('inventoryMovements'\)\.get\(\)/);
+});
+test('phase 10 role model consistently documents warehouse',()=>{
+ assert.match(appSource,/admin' \/ 'sales' \/ 'purchaser' \/ 'warehouse' \/ 'engineer'/);
+});
