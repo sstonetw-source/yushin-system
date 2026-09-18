@@ -3581,11 +3581,13 @@ window.printPurchaseOrder = async function() {
     }
     try {
         const poDocumentId = poEditingId || poNo;
+        let previousPoForIncoming = null;
         await db.runTransaction(async transaction => {
             const poRef = db.collection('purchaseOrders').doc(poDocumentId);
             const orderRefs = orderIds.map(orderId => db.collection('orders').doc(orderId));
             const poSnapshot = await transaction.get(poRef);
             const orderSnapshots = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
+            previousPoForIncoming = poSnapshot.exists ? { id: poDocumentId, ...poSnapshot.data() } : null;
             if (poSnapshot.exists && !poEditingId) throw new Error(`訂購單號 ${poNo} 已存在，請關閉視窗後重新產生單號。`);
             const conflicts = orderSnapshots
                 .filter(snapshot => snapshot.exists && snapshot.data().purchaseOrderNo && snapshot.data().purchaseOrderNo !== poNo)
@@ -3602,6 +3604,8 @@ window.printPurchaseOrder = async function() {
                 }
             });
         });
+
+        await registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming);
 
         ordersCache.forEach(order => {
             if (poItems.some(item => item.orderId === order.id)) order.purchaseOrderNo = poNo;
