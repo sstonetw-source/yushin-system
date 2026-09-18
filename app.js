@@ -848,30 +848,54 @@ function populateForecastSalesFilter() {
 
 function populateForecastBrandDropdown(selectedBrand = '') {
     const select = document.getElementById('forecastBrand');
+    const otherInput = document.getElementById('forecastBrandOther');
     if (!select) return;
 
     const selected = normalizeForecastBrand(selectedBrand);
-    const brands = getPriceListBrands(false).slice();
+    populateBrandSelect(select, '請選擇廠牌');
 
-    if (
-        selected &&
-        !brands.some(brand => String(brand || '').trim().toLocaleLowerCase() === selected.toLocaleLowerCase())
-    ) {
-        brands.push(selected);
+    const officialBrands = getPriceListBrands(false);
+    const officialMatch = officialBrands.find(
+        brand => String(brand || '').trim().toLocaleLowerCase() === selected.toLocaleLowerCase()
+    );
+
+    if (selected && officialMatch) {
+        select.value = officialMatch;
+        if (otherInput) {
+            otherInput.value = '';
+            otherInput.style.display = 'none';
+        }
+    } else if (selected) {
+        select.value = '其他';
+        if (otherInput) {
+            otherInput.value = selected;
+            otherInput.style.display = '';
+        }
+    } else {
+        select.value = '';
+        if (otherInput) {
+            otherInput.value = '';
+            otherInput.style.display = 'none';
+        }
     }
+}
 
-    select.innerHTML = '<option value="">請選擇廠牌</option>';
+window.onForecastBrandSelectChange = function() {
+    const select = document.getElementById('forecastBrand');
+    const otherInput = document.getElementById('forecastBrandOther');
+    if (!select || !otherInput) return;
 
-    dedupeBrandsCaseInsensitive(brands)
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
-        .forEach(brand => {
-            const option = document.createElement('option');
-            option.value = brand;
-            option.textContent = brand;
-            select.appendChild(option);
-        });
+    const isOther = select.value === '其他';
+    otherInput.style.display = isOther ? '' : 'none';
+    if (!isOther) otherInput.value = '';
+};
 
-    select.value = selected || '';
+function getForecastBrandValue() {
+    const select = document.getElementById('forecastBrand');
+    const otherInput = document.getElementById('forecastBrandOther');
+    if (!select) return '';
+    if (select.value === '其他') return normalizeForecastBrand(otherInput?.value || '');
+    return normalizeForecastBrand(select.value || '');
 }
 
 window.loadForecasts = async function(reset = true) {
@@ -1060,7 +1084,7 @@ window.saveForecast = async function() {
     const existing = id ? forecastCache.find(item => item.id === id) : null;
 
     const customerName = document.getElementById('forecastCustomer').value.trim();
-    const brand = normalizeForecastBrand(document.getElementById('forecastBrand').value);
+    const brand = getForecastBrandValue();
     const productName = document.getElementById('forecastProduct').value.trim();
 
     if (!customerName) {
