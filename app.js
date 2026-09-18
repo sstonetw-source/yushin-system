@@ -3374,6 +3374,25 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
         .sort((a, b) => b.count - a.count)[0]?.company || 'yushin';
 }
 
+window.openDirectStockPurchase = function() {
+    if (!canEditPage('orders.po')) return;
+    const code = prompt('請輸入備貨產品貨號'); if (!code) return;
+    const normalized = normalizeItemCode(code);
+    const match = priceItemLookup.get(`code:${normalized}`);
+    if (!match) { alert('Product Master 找不到此貨號，請先更新產品主檔。'); return; }
+    const qty = Number(prompt('請輸入備貨採購數量','1')); if (!qty || qty <= 0) return;
+    poItems = [{ orderId:'', itemName:match.nameCn||match.nameEn||'', itemCode:match.model||code, productId:match.productId||stableProductId(match), brand:match.brand||'', qty, unit:match.unit||'', unitPrice:Number(match.cost||0) }];
+    poAllItems = poItems; poEditingId = null;
+    switchPoCompany(currentCompany || 'yushin', null, true);
+    populatePoVendorSuggestions();
+    document.getElementById('poVendorName').value = match.supplier || '';
+    document.getElementById('poBuyerName').innerText = currentUserName || '';
+    document.getElementById('poDate').value = localDateString();
+    generateNextPoNumber();
+    renderPoItemsTable();
+    document.getElementById('poModalOverlay').classList.add('active');
+};
+
 window.openPurchaseOrderModal = function() {
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
     if (checked.length === 0) {
