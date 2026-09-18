@@ -38,6 +38,35 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 .sub-nav { background: #e0e0e0; padding: 8px 15px; display: flex; gap: 10px; flex-wrap: wrap; }
 .sub-tab { padding: 5px 15px; cursor: pointer; background: #ccc; border-radius: 3px; font-size: 14px; color: #333; }
 .sub-tab.active { background: #003366; color: white; }
+/* Generic modal overlay (Forecast and future lightweight dialogs). Hidden by default so it never leaks across main tabs. */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+}
+.modal-overlay.active { display: flex; }
+.modal-overlay .modal {
+    width: min(560px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px;
+    box-sizing: border-box;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+}
+.modal-overlay .modal > label { display: block; margin-top: 10px; font-weight: 600; }
+.modal-overlay .modal > input,
+.modal-overlay .modal > textarea,
+.modal-overlay .modal > select { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
 .content-section { display: none; padding: 20px; max-width: 1150px; margin: 0 auto; background: #fff; min-height: 80vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); box-sizing: border-box; }
 .content-section.active { display: block; }
 .header-container { position: relative; display: flex; justify-content: center; align-items: center; border-bottom: 2px solid #333; padding-bottom: 4px; margin-bottom: 4px; }
