@@ -234,3 +234,20 @@ test('quote and order lists use global business-date ordering across companies',
     const comparator = appSource.slice(compareStart, compareEnd);
     assert.doesNotMatch(comparator, /company/);
 });
+
+
+test('browser history restores internal pages without forcing Firestore reloads', () => {
+    assert.match(appSource, /history\.pushState/);
+    assert.match(appSource, /addEventListener\('popstate'/);
+    assert.match(appSource, /skipReload: true/);
+    assert.match(appSource, /window\.scrollTo/);
+    const mainStart = appSource.indexOf('window.switchMainTab =');
+    const mainEnd = appSource.indexOf('// 「檢視身份」切換', mainStart);
+    assert.match(appSource.slice(mainStart, mainEnd), /pushAppNavigationState/);
+    const quoteStart = appSource.indexOf('window.switchQuoteView =');
+    const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
+    assert.match(appSource.slice(quoteStart, quoteEnd), /skipHistory/);
+    const orderStart = appSource.indexOf('window.switchOrderView =');
+    const orderEnd = appSource.indexOf('\n};', orderStart) + 3;
+    assert.match(appSource.slice(orderStart, orderEnd), /skipHistory/);
+});
