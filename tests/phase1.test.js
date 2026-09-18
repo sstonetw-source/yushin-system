@@ -341,3 +341,40 @@ test('phase 2 product-master Excel import supports enrichment fields and preview
         assert.ok(appSource.includes(field), `missing import field: ${field}`);
     }
 });
+
+
+test('phase 3 defines a flexible common document relationship layer', () => {
+    assert.match(appSource, /const DOCUMENT_TYPES = Object\.freeze/);
+    assert.match(appSource, /function documentLink\(type, id, relation/);
+    assert.match(appSource, /function normalizeDocumentLinks\(links\)/);
+    assert.match(appSource, /function linkedDocumentFields\(sourceType = '', sourceId = '', links = \[\]\)/);
+    assert.match(appSource, /sourceType:/);
+    assert.match(appSource, /sourceId:/);
+    assert.match(appSource, /linkedDocuments:/);
+});
+
+test('phase 3 links quote to orders and orders to purchase orders in both directions', () => {
+    const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
+    const dealEnd = appSource.indexOf('window.unmarkQuoteAsDeal', dealStart);
+    const deal = appSource.slice(dealStart, dealEnd);
+    assert.match(deal, /DOCUMENT_TYPES\.QUOTE/);
+    assert.match(deal, /createdOrderLinks/);
+    assert.match(deal, /DOCUMENT_TYPES\.ORDER/);
+
+    const poStart = appSource.indexOf('window.printPurchaseOrder =');
+    const poEnd = appSource.indexOf("window.addEventListener('afterprint'", poStart);
+    const po = appSource.slice(poStart, poEnd);
+    assert.match(po, /linkedDocumentFields/);
+    assert.match(po, /DOCUMENT_TYPES\.PURCHASE_ORDER/);
+    assert.match(po, /linkedDocuments: normalizeDocumentLinks/);
+});
+
+test('phase 3 preserves legacy links and cancels generated orders instead of hard deleting them', () => {
+    assert.match(appSource, /function legacyDocumentLinks\(record, type\)/);
+    const start = appSource.indexOf('window.unmarkQuoteAsDeal =');
+    const end = appSource.indexOf('訂單管理系統', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /status: 'cancelled'/);
+    assert.match(source, /cancelReason: '來源估價單取消成交'/);
+    assert.doesNotMatch(source, /batch\.delete/);
+});
