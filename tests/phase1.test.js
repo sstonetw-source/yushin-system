@@ -9,7 +9,7 @@ const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf
 
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
-    const end = appSource.indexOf('\n}\n\nwindow.openPurchaseOrderModal', start) + 2;
+    const end = appSource.indexOf('\n}\n\nfunction bestPurchaseOrderCompany', start) + 2;
     assert.ok(start >= 0 && end > start, 'purchaseItemsFromOrder must exist');
     const context = {
         priceItemLookup: new Map([
@@ -372,7 +372,7 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
 test('phase 3 preserves legacy links and cancels generated orders instead of hard deleting them', () => {
     assert.match(appSource, /function legacyDocumentLinks\(record, type\)/);
     const start = appSource.indexOf('window.unmarkQuoteAsDeal =');
-    const end = appSource.indexOf('訂單管理系統', start);
+    const end = appSource.indexOf('window.editOrder', start);
     const source = appSource.slice(start, end);
     assert.match(source, /status: 'cancelled'/);
     assert.match(source, /cancelReason: '來源估價單取消成交'/);
@@ -386,7 +386,7 @@ test('phase 4 forecast is lightweight, paginated and has no expected-close-date 
     assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
     assert.match(appSource, /where\('ownerUid', '==', currentUser/);
     assert.match(appSource, /latestProgress:/);
-    const forecastStart = appSource.indexOf('Forecast：輕量商機追蹤');
+    const forecastStart = appSource.indexOf('let forecastCache =');
     const forecastEnd = appSource.indexOf('估價單系統', forecastStart);
     assert.doesNotMatch(appSource.slice(forecastStart, forecastEnd), /expectedClose|closeDate|預計成交日期/);
 });
