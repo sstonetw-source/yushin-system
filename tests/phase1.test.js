@@ -308,3 +308,18 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     assert.match(deal, /createdAt: new Date\(\)\.toISOString\(\)/);
     assert.match(deal, /itemCodeKey: normalizeHistoryItemCode/);
 });
+
+
+test('phase 2 product master extends the existing price catalog instead of creating a parallel product source', () => {
+    assert.match(appSource, /function stableProductId\(item\)/);
+    assert.match(appSource, /function normalizeProductMasterItem\(item\)/);
+    assert.match(appSource, /productId:/);
+    assert.match(appSource, /inventoryTracked:/);
+    assert.match(appSource, /lotTracked:/);
+    assert.match(appSource, /expiryTracked:/);
+    assert.match(appSource, /supplier:/);
+    assert.match(appSource, /unit:/);
+    assert.match(appSource, /spec:/);
+    assert.match(appSource, /normalizeProductMasterList\(imported/);
+    assert.doesNotMatch(appSource, /collection\(['"]products['"]\)/);
+});
