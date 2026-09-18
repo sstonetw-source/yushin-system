@@ -2610,6 +2610,45 @@ window.changeOrderPeriod = function(value) {
     renderOrdersList();
 };
 
+function inventoryProductKey(record) {
+    return String(record?.productId || (record?.itemCode ? `code:${normalizeHistoryItemCode(record.itemCode)}` : '')).trim();
+}
+function inventoryRefFor(record) {
+    const key = inventoryProductKey(record);
+    return key ? db.collection('inventory').doc(encodeURIComponent(key)) : null;
+}
+function inventoryNumbers(data = {}) {
+    const onHand = Number(data.onHand || 0), reserved = Number(data.reserved || 0), incoming = Number(data.incoming || 0);
+    return { onHand, reserved, available: onHand - reserved, incoming };
+}
+function inventoryMovementRecord(type, qty, orderId, productKey, actor, extra = {}) {
+    return { type, qty: Number(qty || 0), productKey, sourceType: DOCUMENT_TYPES.ORDER, sourceId: orderId, createdAt: new Date().toISOString(), createdBy: actor, ...extra };
+}
+function orderReservedQuantity(order) {
+    if (normalizedOrderStatus(order) !== 'normal') return 0;
+    return Math.max(0, orderQuantity(order) - deliveredQuantity(order));
+}
+
+async function reserveInventoryForNewOrder(orderId, order) {
+    const ref = inventoryRefFor(order); if (!ref || !orderQuantity(order)) return { reservedQty: 0, shortageQty: orderQuantity(order) };
+    const productKey = inventoryProductKey(order), actor = currentUserName || currentUser?.email || '';
+    let result;
+    await db.runTransaction(async tx => {
+        const snap = await tx.get(ref), stock = inventoryNumbers(snap.exists ? snap.data() : {});
+        const requested = orderQuantity(order);
+        const reservable = Math.max(0, Math.min(requested, stock.available));
+        const shortage = Math.max(0, requested - reservable);
+        tx.set(ref, { productKey, productId: order.productId || '', itemCode: order.itemCode || '', itemName: order.itemName || '', onHand: stock.onHand, reserved: stock.reserved + reservable, incoming: stock.incoming, updatedAt: new Date().toISOString() }, { merge: true });
+        if (reservable) {
+            const movement = db.collection('inventoryMovements').doc();
+            tx.set(movement, inventoryMovementRecord('reserve', reservable, orderId, productKey, actor));
+        }
+        tx.update(db.collection('orders').doc(orderId), { inventoryReservedQty: reservable, inventoryShortageQty: shortage, inventoryProductKey: productKey });
+        result = { reservedQty: reservable, shortageQty: shortage };
+    });
+    return result;
+}
+
 function orderQuantity(order) {
     const qty = parseFloat(order?.qty);
     return Number.isFinite(qty) && qty > 0 ? qty : 0;
