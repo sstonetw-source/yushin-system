@@ -6067,6 +6067,60 @@ window.downloadDatabaseBackup = async function() {
     }
 };
 
+/* ---------- Phase 1B：舊訂單搜尋索引補建 ---------- */
+let orderSearchIndexMigrationRunning = false;
+
+window.backfillOrderSearchIndex = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
+        alert('只有管理員可以執行搜尋索引補建。');
+        return;
+    }
+    if (orderSearchIndexMigrationRunning) return;
+    if (!confirm('這會逐批檢查舊訂單，僅為缺少 itemCodeKey 的文件補上標準化貨號，不會修改訂單內容或狀態。確定執行嗎？')) return;
+
+    const button = document.getElementById('orderSearchIndexMigrationBtn');
+    const status = document.getElementById('orderSearchIndexMigrationStatus');
+    orderSearchIndexMigrationRunning = true;
+    if (button) button.disabled = true;
+    let cursor = null;
+    let scanned = 0;
+    let updated = 0;
+    try {
+        while (true) {
+            let query = db.collection('orders').orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
+            if (cursor) query = query.startAfter(cursor);
+            const snapshot = await query.get();
+            if (snapshot.empty) break;
+
+            let batch = db.batch();
+            let batchWrites = 0;
+            snapshot.docs.forEach(doc => {
+                const data = doc.data() || {};
+                const sourceCode = data.itemCode || data.productCode || data.model || '';
+                const normalized = normalizeHistoryItemCode(sourceCode);
+                scanned += 1;
+                if (normalized && data.itemCodeKey !== normalized) {
+                    batch.update(doc.ref, { itemCodeKey: normalized });
+                    batchWrites += 1;
+                    updated += 1;
+                }
+            });
+            if (batchWrites) await batch.commit();
+            cursor = snapshot.docs[snapshot.docs.length - 1];
+            if (status) status.innerText = `已檢查 ${scanned} 筆，補建 ${updated} 筆搜尋索引…`;
+            if (snapshot.size < 200) break;
+        }
+        if (status) status.innerText = `完成：共檢查 ${scanned} 筆舊訂單，補建／修正 ${updated} 筆貨號搜尋索引。`;
+    } catch (err) {
+        console.error('舊訂單搜尋索引補建失敗：', err);
+        if (status) status.innerText = `補建中斷：已檢查 ${scanned} 筆、更新 ${updated} 筆。可稍後重新執行，已完成的資料不會重複修改。`;
+        alert('搜尋索引補建未完成，請確認 Firestore 權限與網路連線後再試。');
+    } finally {
+        orderSearchIndexMigrationRunning = false;
+        if (button) button.disabled = false;
+    }
+};
+
 /* ---------- 批量清理舊資料 ---------- */
 // 支援 YYYY/MM/DD 或 YYYY-MM-DD 兩種常見日期字串格式（估價單的日期是手動輸入的文字欄位，格式不完全統一），
 // 統一轉成 Date 物件方便比較，避免直接用 Firestore 字串範圍查詢時因格式不一致而漏抓
