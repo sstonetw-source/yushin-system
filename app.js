@@ -170,6 +170,9 @@ const comparisonCompanyData = {
 const COMPARISON_COMPANY_ORDER = ['yushin', 'morningstar', 'MULTI-LIFE', 'youfu', 'yihder', 'kangning', 'wiseregen'];
 
 window.addEventListener('DOMContentLoaded', () => {
+    if (!history.state?.yushinApp) {
+        history.replaceState({ yushinApp: true, tabId: '', scrollY: 0 }, '', location.href);
+    }
     const printBtn = document.getElementById('printBtn');
     if (printBtn) {
         printBtn.addEventListener('click', handleSaveAndPrint);
@@ -608,9 +611,42 @@ window.handleLogout = function() {
 /* =========================================================
    主分頁切換
    ========================================================= */
+let restoringBrowserNavigation = false;
+
+function currentAppNavigationState() {
+    const active = document.querySelector('.content-section.active');
+    const tabId = active?.id || '';
+    const state = { yushinApp: true, tabId, scrollY: window.scrollY || 0 };
+    if (tabId === 'quote-system') state.quoteView = document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'my' : 'create';
+    if (tabId === 'order-system') state.orderView = document.getElementById('poListPanel')?.style.display === 'block' ? 'po' : 'list';
+    return state;
+}
+
+function pushAppNavigationState(extra = {}) {
+    if (restoringBrowserNavigation) return;
+    const current = currentAppNavigationState();
+    history.replaceState({ ...(history.state || {}), ...current, scrollY: window.scrollY || 0 }, '', location.href);
+    history.pushState({ ...current, ...extra, yushinApp: true, scrollY: 0 }, '', location.href);
+}
+
 window.switchMainTab = function(tabId, el) {
-    actuallySwitchMainTab(tabId, el);
+    if (document.querySelector('.content-section.active')?.id !== tabId) pushAppNavigationState({ tabId });
+    actuallySwitchMainTab(tabId, el, { preserveSubView: true });
 };
+
+window.addEventListener('popstate', event => {
+    const state = event.state;
+    if (!state?.yushinApp || !currentUser) return;
+    restoringBrowserNavigation = true;
+    try {
+        if (state.tabId) actuallySwitchMainTab(state.tabId, null, { preserveSubView: true, skipReload: true });
+        if (state.tabId === 'quote-system' && state.quoteView) switchQuoteView(state.quoteView, null, { skipHistory: true, skipReload: true });
+        if (state.tabId === 'order-system' && state.orderView) switchOrderView(state.orderView, null, { skipHistory: true, skipReload: true });
+        requestAnimationFrame(() => window.scrollTo(0, Number(state.scrollY) || 0));
+    } finally {
+        restoringBrowserNavigation = false;
+    }
+});
 
 // 「檢視身份」切換：只是把畫面上用來判斷權限/欄位的 currentUserRole 換成別的角色，
 // 讓管理員可以確認/測試各角色實際看到的畫面長怎樣。真正的身份還是 trueUserRole，
@@ -639,7 +675,7 @@ window.switchViewRole = function(role) {
     }
 };
 
-function actuallySwitchMainTab(tabId, el) {
+function actuallySwitchMainTab(tabId, el, options = {}) {
     const mainKey = { 'quote-system':'quote', 'order-system':'orders', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
     if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
@@ -658,17 +694,17 @@ function actuallySwitchMainTab(tabId, el) {
     }
 
     if (tabId === 'equipment-system') {
-        initializePageData('equipment');
+        if (!options.skipReload) initializePageData('equipment');
     } else if (tabId === 'order-system') {
         const orderView = canAccessPage('orders.list') ? 'list' : 'po';
-        switchOrderView(orderView, document.getElementById(orderView === 'list' ? 'osub-list' : 'osub-po'));
-        initializePageData('orders');
+        if (!options.preserveSubView) switchOrderView(orderView, document.getElementById(orderView === 'list' ? 'osub-list' : 'osub-po'), { skipHistory: true });
+        if (!options.skipReload) initializePageData('orders');
     } else if (tabId === 'quote-system') {
-        initializePageData('quote');
+        if (!options.skipReload) initializePageData('quote');
         const quoteView = canAccessPage('quote.create') ? 'create' : 'my';
-        switchQuoteView(quoteView, document.getElementById(quoteView === 'create' ? 'qsub-create' : 'qsub-my'));
+        if (!options.preserveSubView) switchQuoteView(quoteView, document.getElementById(quoteView === 'create' ? 'qsub-create' : 'qsub-my'), { skipHistory: true });
     } else if (tabId === 'admin-system') {
-        initializePageData('admin');
+        if (!options.skipReload) initializePageData('admin');
     }
     updateReadonlyNotice();
 }
@@ -1924,8 +1960,10 @@ let myQuotesPaginationState = null;
 let myQuotesPageLoading = false;
 let myQuotesReloadRequested = false;
 
-window.switchQuoteView = function(view, el) {
+window.switchQuoteView = function(view, el, options = {}) {
     const pageKey = view === 'create' ? 'quote.create' : 'quote.my';
+    const previousView = document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'my' : 'create';
+    if (!options.skipHistory && previousView !== view) pushAppNavigationState({ tabId: 'quote-system', quoteView: view });
     if (!canAccessPage(pageKey)) { alert('您沒有權限查看這個分頁。'); return; }
     document.querySelectorAll('#quote-system > .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
     const targetEl = el || document.getElementById(view === 'create' ? 'qsub-create' : 'qsub-my');
@@ -1934,7 +1972,7 @@ window.switchQuoteView = function(view, el) {
     document.getElementById('quoteCreatePanel').style.display = view === 'create' ? 'block' : 'none';
     document.getElementById('myQuotesPanel').style.display = view === 'my' ? 'block' : 'none';
 
-    if (view === 'my') {
+    if (view === 'my' && !options.skipReload && myQuotesCache.length === 0) {
         loadMyQuotesFromCloud();
     }
     updateReadonlyNotice();
@@ -2700,8 +2738,10 @@ window.toggleAllOrderSelect = function(checkbox) {
 };
 
 // 訂單管理系統的子分頁：「業務訂單」跟「採購訂單」（已經產生過的訂購單紀錄，只有採購／管理員看得到）
-window.switchOrderView = function(view, el) {
+window.switchOrderView = function(view, el, options = {}) {
     const pageKey = view === 'po' ? 'orders.po' : 'orders.list';
+    const previousView = document.getElementById('poListPanel')?.style.display === 'block' ? 'po' : 'list';
+    if (!options.skipHistory && previousView !== view) pushAppNavigationState({ tabId: 'order-system', orderView: view });
     if (!canAccessPage(pageKey)) { alert('您沒有權限查看這個分頁。'); return; }
     document.querySelectorAll('#order-system .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
     if (el) el.classList.add('active');
@@ -2709,7 +2749,7 @@ window.switchOrderView = function(view, el) {
     document.getElementById('orderListPanel').style.display = view === 'list' ? 'block' : 'none';
     document.getElementById('poListPanel').style.display = view === 'po' ? 'block' : 'none';
 
-    if (view === 'po') loadMyPurchaseOrders();
+    if (view === 'po' && !options.skipReload && poListCache.length === 0) loadMyPurchaseOrders();
     updateReadonlyNotice();
 };
 
