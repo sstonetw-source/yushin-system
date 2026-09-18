@@ -1258,6 +1258,7 @@ window.addQuoteRow = function(itemData = {}) {
                         <input type="text" class="item-brand-other" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
                         <input type="hidden" class="item-product-line" value="${itemData.productLine || ''}">
                         <input type="hidden" class="item-product-type" value="${itemData.productType || ''}">
+                        <input type="hidden" class="item-product-id" value="${itemData.productId || ''}">
                     </div>
                 </div>
 
@@ -1288,6 +1289,8 @@ window.onItemCnChange = function(input) {
     row.querySelector('.item-brand').value = match.brand || '';
     row.querySelector('.item-product-line').value = match.productLine || '';
     row.querySelector('.item-product-type').value = match.productType || '';
+    row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
+    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
     if (match.price) {
         row.querySelector('.inc-price').value = match.price;
         onIncPriceChange(row.querySelector('.inc-price'));
@@ -1305,6 +1308,8 @@ window.onItemModelChange = function(input) {
     row.querySelector('.item-brand').value = match.brand || '';
     row.querySelector('.item-product-line').value = match.productLine || '';
     row.querySelector('.item-product-type').value = match.productType || '';
+    row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
+    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
     if (match.price) {
         row.querySelector('.inc-price').value = match.price;
         onIncPriceChange(row.querySelector('.inc-price'));
@@ -1545,7 +1550,7 @@ function collectCurrentQuoteRecord() {
         nameEn: row.querySelector('.item-en').value, nameCn: row.querySelector('.item-cn').value,
         model: row.querySelector('.item-model').value, brand: quoteRowBrandValue(row),
         productLine: row.querySelector('.item-product-line').value, productType: row.querySelector('.item-product-type').value,
-        spec: row.querySelector('.item-spec').value, qty: row.querySelector('.qty').value,
+        productId: row.querySelector('.item-product-id')?.value || '', spec: row.querySelector('.item-spec').value, qty: row.querySelector('.qty').value,
         price: row.querySelector('.inc-price').value, exPrice: row.querySelector('.ex-price').value,
         subtotal: row.querySelector('.subtotal-inc').value
     }));
@@ -1774,6 +1779,7 @@ window.handleSaveAndPrint = function() {
             brand: quoteRowBrandValue(row),
             productLine: row.querySelector('.item-product-line').value,
             productType: row.querySelector('.item-product-type').value,
+            productId: row.querySelector('.item-product-id')?.value || '',
             spec: row.querySelector('.item-spec').value,
             qty: row.querySelector('.qty').value,
             price: row.querySelector('.inc-price').value,
@@ -2212,6 +2218,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 brand: item.brand || '',
                 productLine: item.productLine || '',
                 productType: item.productType || '',
+                productId: item.productId || '',
                 itemCode: item.model || '',
                 itemCodeKey: normalizeHistoryItemCode(item.model || ''),
                 itemName: item.nameCn || item.nameEn || '',
@@ -2231,7 +2238,13 @@ window.markQuoteAsDeal = function(quoteNo) {
             };
             // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
             const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: item.brand }) : null;
-            if (priceMatch && priceMatch.cost) orderData.costPrice = priceMatch.cost;
+            if (priceMatch) {
+                orderData.productId = orderData.productId || priceMatch.productId || stableProductId(priceMatch);
+                orderData.unit = priceMatch.unit || '';
+                orderData.supplier = priceMatch.supplier || '';
+                orderData.spec = item.spec || priceMatch.spec || '';
+                if (priceMatch.cost) orderData.costPrice = priceMatch.cost;
+            }
             batch.set(orderRef, orderData);
         });
 
@@ -4377,6 +4390,12 @@ window.saveNewOrder = function() {
     const priceMatch = findPriceItemForOrder(data);
     data.productLine = (priceMatch && priceMatch.productLine) || '';
     data.productType = (priceMatch && priceMatch.productType) || '';
+    if (priceMatch) {
+        data.productId = priceMatch.productId || stableProductId(priceMatch);
+        data.unit = priceMatch.unit || '';
+        data.supplier = priceMatch.supplier || '';
+        data.spec = priceMatch.spec || '';
+    }
 
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
