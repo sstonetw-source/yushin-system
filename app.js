@@ -43,6 +43,7 @@ let mustChangePassword = false;  // 管理員要求這個帳號下次登入必�
 const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', engineer: '工程師' };
 const PERMISSION_LEVELS = { none: 0, view: 1, edit: 2 };
 const PERMISSION_PAGES = [
+    { key: 'forecast', label: '📈 Forecast', system: true },
     { key: 'quote', label: '📄 估價單系統', system: true },
     { key: 'quote.create', label: '　建立估價單' },
     { key: 'quote.my', label: '　我的估價單' },
@@ -676,7 +677,7 @@ window.switchViewRole = function(role) {
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
-    const mainKey = { 'quote-system':'quote', 'order-system':'orders', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
+    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
     if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
         return;
@@ -693,7 +694,9 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
         if (tab) tab.classList.add('active');
     }
 
-    if (tabId === 'equipment-system') {
+    if (tabId === 'forecast-system') {
+        if (!options.skipReload) loadForecasts(true);
+    } else if (tabId === 'equipment-system') {
         if (!options.skipReload) initializePageData('equipment');
     } else if (tabId === 'order-system') {
         const orderView = canAccessPage('orders.list') ? 'list' : 'po';
@@ -708,6 +711,151 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
     }
     updateReadonlyNotice();
 }
+
+/* =========================================================
+   Forecast：輕量商機追蹤，不要求預計成交日期，也不直接異動庫存
+   ========================================================= */
+let forecastCache = [];
+let forecastCursor = null;
+let forecastHasMore = true;
+let forecastLoading = false;
+let forecastSaveInProgress = false;
+
+function forecastStatusLabel(status) {
+    return ({ active: '進行中', won: '已成交', lost: '未成交' })[status] || status || '進行中';
+}
+
+window.loadForecasts = async function(reset = true) {
+    if (forecastLoading || !canAccessPage('forecast')) return;
+    if (reset) { forecastCache = []; forecastCursor = null; forecastHasMore = true; }
+    if (!forecastHasMore) return;
+    forecastLoading = true;
+    const btn = document.getElementById('forecastLoadMoreBtn');
+    if (btn) { btn.disabled = true; btn.innerText = '載入中…'; }
+    try {
+        const status = document.getElementById('forecastStatusFilter')?.value || 'active';
+        let query = db.collection('forecasts').orderBy('updatedAt', 'desc');
+        if (status !== 'all') query = query.where('status', '==', status);
+        if (!canViewAllData('forecast')) query = query.where('ownerUid', '==', currentUser?.uid || '');
+        query = query.limit(DEFAULT_LIST_LIMIT);
+        if (forecastCursor) query = query.startAfter(forecastCursor);
+        const snapshot = await query.get();
+        if (!snapshot.empty) forecastCursor = snapshot.docs[snapshot.docs.length - 1];
+        const records = new Map(forecastCache.map(item => [item.id, item]));
+        snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
+        forecastCache = [...records.values()].sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+        forecastHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
+        renderForecastList();
+    } catch (err) {
+        console.error('讀取 Forecast 失敗', err);
+        alert('讀取 Forecast 失敗：' + err.message);
+    } finally {
+        forecastLoading = false;
+        if (btn) { btn.disabled = false; btn.innerText = '載入更多（每次 50 筆）'; btn.style.display = forecastHasMore ? '' : 'none'; }
+    }
+};
+
+window.renderForecastList = function() {
+    const body = document.getElementById('forecastListBody');
+    if (!body) return;
+    const keyword = (document.getElementById('forecastSearch')?.value || '').trim().toLocaleLowerCase();
+    body.innerHTML = '';
+    let shown = 0;
+    forecastCache.forEach(item => {
+        const searchable = `${item.customerName || ''} ${item.productName || ''} ${item.latestProgress || ''} ${item.salesName || ''}`.toLocaleLowerCase();
+        if (keyword && !searchable.includes(keyword)) return;
+        shown++;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${escapeHtml(item.customerName || '')}</td><td>${escapeHtml(item.productName || '')}</td><td>${Number(item.estimatedAmount || 0).toLocaleString()}</td><td>${escapeHtml(item.latestProgress || '')}</td><td>${escapeHtml(forecastStatusLabel(item.status))}</td><td>${escapeHtml(stripPhoneSuffix(item.salesName || ''))}</td><td class="no-print"><button class="btn-small" onclick="openForecastModal('${escapeAttr(item.id)}')">編輯</button> <button class="btn-small btn-secondary" onclick="createQuoteFromForecast('${escapeAttr(item.id)}')">轉估價單</button> <button class="btn-small btn-secondary" onclick="createOrderFromForecast('${escapeAttr(item.id)}')">轉訂單</button></td>`;
+        body.appendChild(tr);
+    });
+    const hint = document.getElementById('forecastEmptyHint');
+    if (hint) hint.style.display = shown ? 'none' : 'block';
+};
+
+window.openForecastModal = function(id = '') {
+    if (!canEditPage('forecast')) return;
+    const item = id ? forecastCache.find(x => x.id === id) : null;
+    document.getElementById('forecastId').value = item?.id || '';
+    document.getElementById('forecastCustomer').value = item?.customerName || '';
+    document.getElementById('forecastProduct').value = item?.productName || '';
+    document.getElementById('forecastAmount').value = item?.estimatedAmount || '';
+    document.getElementById('forecastProgress').value = item?.latestProgress || '';
+    document.getElementById('forecastStatus').value = item?.status || 'active';
+    document.getElementById('forecastModalTitle').innerText = item ? '編輯 Forecast' : '新增 Forecast';
+    document.getElementById('forecastModalOverlay').classList.add('active');
+};
+window.closeForecastModal = () => document.getElementById('forecastModalOverlay').classList.remove('active');
+
+window.saveForecast = async function() {
+    if (forecastSaveInProgress || !canEditPage('forecast')) return;
+    const id = document.getElementById('forecastId').value;
+    const existing = id ? forecastCache.find(x => x.id === id) : null;
+    const customerName = document.getElementById('forecastCustomer').value.trim();
+    const productName = document.getElementById('forecastProduct').value.trim();
+    if (!customerName || !productName) { alert('請填寫客戶名稱與產品／品項。'); return; }
+    const now = new Date().toISOString();
+    const record = {
+        customerName, productName,
+        estimatedAmount: Number(document.getElementById('forecastAmount').value) || 0,
+        latestProgress: document.getElementById('forecastProgress').value.trim(),
+        status: document.getElementById('forecastStatus').value || 'active',
+        salesName: existing?.salesName || currentUserName || '',
+        ownerUid: existing?.ownerUid || currentUser?.uid || '',
+        productId: existing?.productId || '',
+        createdAt: existing?.createdAt || now, updatedAt: now,
+        ...linkedDocumentFields(existing?.sourceType || '', existing?.sourceId || '', existing?.linkedDocuments || [])
+    };
+    forecastSaveInProgress = true;
+    const btn = document.getElementById('saveForecastBtn'); if (btn) { btn.disabled = true; btn.innerText = '儲存中…'; }
+    try {
+        const ref = id ? db.collection('forecasts').doc(id) : db.collection('forecasts').doc();
+        await ref.set(record, { merge: true });
+        const saved = { id: ref.id, ...record };
+        forecastCache = [saved, ...forecastCache.filter(x => x.id !== ref.id)].sort((a,b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+        closeForecastModal(); renderForecastList();
+    } catch (err) { alert('Forecast 儲存失敗：' + err.message); }
+    finally { forecastSaveInProgress = false; if (btn) { btn.disabled = false; btn.innerText = '儲存'; } }
+};
+
+function forecastProductMatch(item) {
+    const key = String(item.productName || '').trim().toLocaleLowerCase();
+    return priceList.find(p => [p.model,p.nameCn,p.nameEn].some(v => String(v || '').trim().toLocaleLowerCase() === key)) || null;
+}
+
+window.createQuoteFromForecast = function(id) {
+    const f = forecastCache.find(x => x.id === id); if (!f) return;
+    const match = forecastProductMatch(f);
+    actuallySwitchMainTab('quote-system', null, { preserveSubView: false });
+    document.getElementById('clientName').value = f.customerName || '';
+    document.getElementById('ordererName').value = f.customerName || '';
+    const row = document.querySelector('#quoteItems tr') || addQuoteRow();
+    const target = document.querySelector('#quoteItems tr');
+    if (target) {
+        target.querySelector('.item-cn').value = match?.nameCn || f.productName || '';
+        target.querySelector('.item-en').value = match?.nameEn || '';
+        target.querySelector('.item-model').value = match?.model || '';
+        target.querySelector('.item-product-id').value = match?.productId || f.productId || '';
+        target.querySelector('.item-brand').value = match?.brand || '';
+        target.querySelector('.item-product-line').value = match?.productLine || '';
+        target.querySelector('.item-product-type').value = match?.productType || '';
+        target.querySelector('.item-spec').value = match?.spec || '';
+        if (match?.price) target.querySelector('.inc-price').value = match.price;
+        calculateTotals();
+    }
+    window._pendingForecastQuoteLink = { forecastId: f.id };
+};
+
+window.createOrderFromForecast = function(id) {
+    const f = forecastCache.find(x => x.id === id); if (!f) return;
+    const match = forecastProductMatch(f);
+    openOrderModal({
+        customerName: f.customerName, itemName: match?.nameCn || f.productName, itemCode: match?.model || '',
+        brand: match?.brand || '', unitPrice: match?.price || '', totalPrice: match?.price || '',
+        sourceType: DOCUMENT_TYPES.FORECAST, sourceId: f.id, productId: match?.productId || f.productId || ''
+    });
+    window._pendingForecastOrderLink = { forecastId: f.id };
+};
 
 /* =========================================================
    估價單系統
@@ -1543,7 +1691,7 @@ function collectCurrentQuoteRecord() {
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
         salesName, ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
-        ...linkedDocumentFields('', '', []), validDays: document.getElementById('validDays').value,
+        ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
     };
@@ -1766,7 +1914,7 @@ window.handleSaveAndPrint = function() {
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
-        ...linkedDocumentFields('', '', []),
+        ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
         grandTotal: document.getElementById('grandTotal').innerText,
@@ -1810,7 +1958,14 @@ window.handleSaveAndPrint = function() {
         });
     });
 
-    db.collection('quotes').doc(quoteNo).set(quoteData).catch(err => {
+    db.collection('quotes').doc(quoteNo).set(quoteData).then(() => {
+        if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
+            return db.collection('forecasts').doc(quoteData.sourceId).set({
+                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'created')),
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        }
+    }).catch(err => {
         console.error('儲存估價單到雲端失敗：', err);
         alert('提醒：這張估價單剛剛存到雲端失敗（' + err.message + '）。列印內容不受影響，但建議稍後檢查網路連線後，再按一次「存檔並列印」，確保雲端資料庫也有存到這筆紀錄。');
     });
@@ -2181,6 +2336,7 @@ window.renderMyQuotesList = function() {
             <td class="no-print">
                 <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${q.quoteNo}')">載入</button>
                 <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
+                ${canEditPage('forecast') ? `<button type="button" class="btn-small btn-secondary" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">Forecast</button>` : ''}
                 ${actionBtn}
             </td>
         `;
@@ -2191,6 +2347,33 @@ window.renderMyQuotesList = function() {
 };
 
 // 成交：標記估價單為已成交，並把裡面每一個品項匯入訂單管理系統（一次性動作，避免重複匯入）
+window.createForecastFromQuote = async function(quoteNo) {
+    if (!canEditPage('forecast')) { alert('您沒有 Forecast 編輯權限。'); return; }
+    try {
+        const cached = myQuotesCache.find(q => q.quoteNo === quoteNo) || allQuotesCache.find(q => q.quoteNo === quoteNo);
+        const q = cached || (await db.collection('quotes').doc(quoteNo).get()).data();
+        if (!q) throw new Error('找不到估價單');
+        const existing = await db.collection('forecasts').where('sourceType', '==', DOCUMENT_TYPES.QUOTE).where('sourceId', '==', quoteNo).limit(1).get();
+        if (!existing.empty) { alert('這張估價單已建立 Forecast。'); return; }
+        const now = new Date().toISOString();
+        const productName = (q.items || []).map(i => i.nameCn || i.nameEn || i.model).filter(Boolean).join('、');
+        const ref = db.collection('forecasts').doc();
+        const record = {
+            customerName: q.ordererName || q.clientName || '', productName,
+            estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g,'')) || 0,
+            latestProgress: '由估價單建立', status: q.dealClosed ? 'won' : 'active',
+            salesName: q.salesName || currentUserName || '', ownerUid: q.ownerUid || currentUser?.uid || '',
+            createdAt: now, updatedAt: now,
+            ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE, quoteNo, [documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')])
+        };
+        const batch = db.batch();
+        batch.set(ref, record);
+        batch.update(db.collection('quotes').doc(quoteNo), { linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), documentLink(DOCUMENT_TYPES.FORECAST, ref.id, 'created')]) });
+        await batch.commit();
+        alert('已從估價單建立 Forecast。');
+    } catch (err) { alert('建立 Forecast 失敗：' + err.message); }
+};
+
 window.markQuoteAsDeal = function(quoteNo) {
     if (!confirm(`確定要將估價單 ${quoteNo} 標記為成交嗎？裡面的品項會自動匯入訂單管理系統。`)) return;
 
@@ -4439,7 +4622,8 @@ window.saveNewOrder = function() {
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
-        ...linkedDocumentFields('', '', []),
+        ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
+        productId: window._orderModalProductId || '',
         salesName: currentUserName || '',
         ownerUid: currentUser?.uid || '',
         isOrdered: false,
@@ -4475,6 +4659,13 @@ window.saveNewOrder = function() {
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     db.collection('orders').add(data).then(docRef => {
         rememberRecentCustomerName(data.customerName);
+        if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
+            db.collection('forecasts').doc(data.sourceId).set({
+                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, docRef.id, 'created')),
+                updatedAt: new Date().toISOString()
+            }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
+        }
+        window._orderModalSourceLink = null; window._orderModalProductId = '';
         closeOrderModal();
         // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
         ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]

@@ -46,6 +46,7 @@
     <div id="appContainer" style="display:none;">
     <div class="nav-tabs no-print">
         <div class="nav-tab active" data-permission-page="quote" onclick="switchMainTab('quote-system', this)">📄 估價單系統</div>
+        <div class="nav-tab" data-permission-page="forecast" onclick="switchMainTab('forecast-system', this)">📈 Forecast</div>
         <div class="nav-tab" data-permission-page="orders" onclick="switchMainTab('order-system', this)">📦 訂單管理系統</div>
         <div class="nav-tab" data-permission-page="equipment" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
         <div class="nav-tab" id="navAdminTab" data-permission-page="admin" onclick="switchMainTab('admin-system', this)">⚙️ 管理員雲端後台</div>
@@ -61,6 +62,40 @@
             <button class="btn-secondary" onclick="openChangePasswordModal()">修改密碼</button>
             <button class="btn-secondary" onclick="handleLogout()">登出</button>
         </div>
+    </div>
+
+    <!-- ============ Forecast 系統 ============ -->
+    <div id="forecast-system" class="content-section">
+        <div class="section-header no-print">
+            <h2>Forecast</h2>
+            <button type="button" onclick="openForecastModal()">＋ 新增 Forecast</button>
+        </div>
+        <div class="toolbar no-print">
+            <input id="forecastSearch" type="search" placeholder="搜尋客戶、產品、最新進度" oninput="renderForecastList()">
+            <select id="forecastStatusFilter" onchange="loadForecasts(true)">
+                <option value="active">進行中</option><option value="won">已成交</option><option value="lost">未成交</option><option value="all">全部</option>
+            </select>
+            <button class="btn-secondary" onclick="loadForecasts(true)">重新整理</button>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>客戶</th><th>產品／品項</th><th>預估金額</th><th>最新進度</th><th>狀態</th><th>業務</th><th class="no-print">操作</th></tr></thead><tbody id="forecastListBody"></tbody></table></div>
+        <div id="forecastEmptyHint" class="empty-hint">目前沒有 Forecast。</div>
+        <button id="forecastLoadMoreBtn" class="btn-secondary no-print" style="display:none;" onclick="loadForecasts(false)">載入更多（每次 50 筆）</button>
+    </div>
+
+    <div id="forecastModalOverlay" class="modal-overlay">
+      <div class="modal">
+        <h3 id="forecastModalTitle">新增 Forecast</h3>
+        <input type="hidden" id="forecastId">
+        <label>客戶名稱</label><input id="forecastCustomer" list="clientList">
+        <label>產品／品項</label><input id="forecastProduct" placeholder="可輸入品名或貨號">
+        <label>預估金額</label><input id="forecastAmount" type="number" min="0" step="1">
+        <label>最新進度</label><textarea id="forecastProgress" rows="4" placeholder="例如：已提供報價，等待院方預算核准"></textarea>
+        <label>狀態</label><select id="forecastStatus"><option value="active">進行中</option><option value="won">已成交</option><option value="lost">未成交</option></select>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeForecastModal()">取消</button>
+          <button id="saveForecastBtn" onclick="saveForecast()">儲存</button>
+        </div>
+      </div>
     </div>
 
     <!-- ============ 估價單系統 ============ -->

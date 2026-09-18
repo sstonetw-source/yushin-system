@@ -378,3 +378,31 @@ test('phase 3 preserves legacy links and cancels generated orders instead of har
     assert.match(source, /cancelReason: '來源估價單取消成交'/);
     assert.doesNotMatch(source, /batch\.delete/);
 });
+
+
+test('phase 4 forecast is lightweight, paginated and has no expected-close-date requirement', () => {
+    assert.match(appSource, /db\.collection\('forecasts'\)/);
+    assert.match(appSource, /orderBy\('updatedAt', 'desc'\)/);
+    assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(appSource, /where\('ownerUid', '==', currentUser/);
+    assert.match(appSource, /latestProgress:/);
+    const forecastStart = appSource.indexOf('Forecast：輕量商機追蹤');
+    const forecastEnd = appSource.indexOf('估價單系統', forecastStart);
+    assert.doesNotMatch(appSource.slice(forecastStart, forecastEnd), /expectedClose|closeDate|預計成交日期/);
+});
+
+test('phase 4 supports forecast manual edit, quote conversion, order conversion and quote-origin creation', () => {
+    for (const fn of ['saveForecast', 'createQuoteFromForecast', 'createOrderFromForecast', 'createForecastFromQuote']) {
+        assert.ok(appSource.includes(fn), 'missing '+fn);
+    }
+    assert.match(appSource, /DOCUMENT_TYPES\.FORECAST/);
+    assert.match(appSource, /FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.QUOTE/);
+    assert.match(appSource, /FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.ORDER/);
+});
+
+test('phase 4 forecast permission is integrated into the common permission system', () => {
+    assert.match(appSource, /key: 'forecast'/);
+    assert.match(appSource, /'forecast-system':'forecast'/);
+    assert.match(appSource, /canViewAllData\('forecast'\)/);
+    assert.match(appSource, /canEditPage\('forecast'\)/);
+});
