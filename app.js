@@ -2112,6 +2112,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 productLine: item.productLine || '',
                 productType: item.productType || '',
                 itemCode: item.model || '',
+                itemCodeKey: normalizeHistoryItemCode(item.model || ''),
                 itemName: item.nameCn || item.nameEn || '',
                 qty: item.qty || '',
                 unitPrice: item.price || '',
@@ -2471,6 +2472,97 @@ window.loadMoreOrders = function() {
     return loadOrderPage(false);
 };
 
+/*
+ * Phase 1B 全歷史搜尋
+ * Firestore 本身不適合直接做任意「品名包含文字」搜尋。為避免每次搜尋掃完整個歷史集合，
+ * 先提供可索引的「精確貨號」全歷史搜尋；一般文字仍搜尋目前已載入的 50 筆。
+ * Phase 2 Product Master 建立 productId/search tokens 後，再把品名全歷史搜尋接到正式索引。
+ */
+let orderHistorySearchActive = false;
+let orderHistorySearchLoading = false;
+let orderHistorySearchCursor = null;
+let orderHistorySearchKeyword = '';
+let orderHistorySearchResults = [];
+
+function normalizeHistoryItemCode(value) {
+    return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function updateOrderHistorySearchUi(message = '') {
+    const status = document.getElementById('orderHistorySearchStatus');
+    const more = document.getElementById('orderHistorySearchMoreBtn');
+    if (status) status.innerText = message;
+    if (more) {
+        more.style.display = orderHistorySearchActive && orderHistorySearchCursor ? '' : 'none';
+        more.disabled = orderHistorySearchLoading;
+    }
+}
+
+async function runOrderHistoryItemCodeSearch(reset = true) {
+    const input = document.getElementById('orderSearch');
+    const rawKeyword = input?.value || '';
+    const keyword = normalizeHistoryItemCode(rawKeyword);
+    if (!keyword) {
+        orderHistorySearchActive = false;
+        orderHistorySearchResults = [];
+        orderHistorySearchCursor = null;
+        updateOrderHistorySearchUi('');
+        renderOrdersList();
+        return;
+    }
+    if (orderHistorySearchLoading) return;
+    orderHistorySearchLoading = true;
+    if (reset || keyword !== orderHistorySearchKeyword) {
+        orderHistorySearchKeyword = keyword;
+        orderHistorySearchResults = [];
+        orderHistorySearchCursor = null;
+    }
+    updateOrderHistorySearchUi('正在搜尋全部歷史訂單…');
+    try {
+        let query = db.collection('orders').where('itemCodeKey', '==', keyword).orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT);
+        if (orderHistorySearchCursor) query = query.startAfter(orderHistorySearchCursor);
+        const snapshot = await query.get();
+        const records = new Map(orderHistorySearchResults.map(order => [order.id, order]));
+        snapshot.forEach(doc => {
+            const data = { id: doc.id, ...doc.data() };
+            if (canViewAllData('orders') || belongsToCurrentUser(data.salesName) || data.ownerUid === currentUser?.uid) records.set(doc.id, data);
+        });
+        orderHistorySearchResults = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
+        orderHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
+        orderHistorySearchActive = true;
+        updateOrderHistorySearchUi(`全歷史貨號搜尋：已找到 ${orderHistorySearchResults.length} 筆${orderHistorySearchCursor ? '，可繼續載入' : ''}`);
+        renderOrdersList();
+    } catch (err) {
+        console.error('全歷史貨號搜尋失敗：', err);
+        orderHistorySearchActive = false;
+        orderHistorySearchCursor = null;
+        updateOrderHistorySearchUi('目前資料尚未建立全歷史搜尋索引；仍可搜尋已載入資料。');
+        renderOrdersList();
+    } finally {
+        orderHistorySearchLoading = false;
+        updateOrderHistorySearchUi(document.getElementById('orderHistorySearchStatus')?.innerText || '');
+    }
+}
+
+window.searchAllOrderHistory = function() {
+    return runOrderHistoryItemCodeSearch(true);
+};
+
+window.loadMoreOrderHistorySearch = function() {
+    return runOrderHistoryItemCodeSearch(false);
+};
+
+window.clearOrderHistorySearch = function() {
+    orderHistorySearchActive = false;
+    orderHistorySearchKeyword = '';
+    orderHistorySearchResults = [];
+    orderHistorySearchCursor = null;
+    const input = document.getElementById('orderSearch');
+    if (input) input.value = '';
+    updateOrderHistorySearchUi('');
+    renderOrdersList();
+};
+
 // 依「成本」跟「單價（售價）」計算利潤% = (售價－成本) / 成本 × 100，也就是以成本為基準的加成率
 function formatProfitPercent(unitPrice, costPrice) {
     const price = parseFloat(unitPrice);
@@ -2532,7 +2624,8 @@ window.renderOrdersList = function() {
     tbody.innerHTML = '';
     let shown = 0;
 
-    const baseOrders = ordersCache.filter(o => {
+    const visibleOrderSource = orderHistorySearchActive ? orderHistorySearchResults : ordersCache;
+    const baseOrders = visibleOrderSource.filter(o => {
         const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return false;
         if (salesFilter && stripPhoneSuffix(o.salesName) !== salesFilter) return false;
