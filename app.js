@@ -3852,6 +3852,24 @@ window.prepareOrderLifecycle = function(orderId, status) {
     document.getElementById('orderLifecycleReason').focus();
 };
 
+async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor) {
+    const invRef = inventoryRefFor(order); if (!invRef) return;
+    const snap = await transaction.get(invRef), stock = inventoryNumbers(snap.exists ? snap.data() : {});
+    const currentlyReserved = Math.max(0, Number(order.inventoryReservedQty || 0) - deliveredQuantity(order));
+    if (nextStatus === 'cancelled') {
+        const release = Math.min(currentlyReserved, stock.reserved);
+        if (!release) return;
+        transaction.set(invRef, { reserved: Math.max(0, stock.reserved - release), updatedAt: new Date().toISOString() }, { merge: true });
+        transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release', -release, orderId, inventoryProductKey(order), actor, { reason: 'order_cancelled' }));
+    } else if (nextStatus === 'normal') {
+        const needed = Math.max(0, orderQuantity(order) - deliveredQuantity(order));
+        const reserve = Math.min(needed, Math.max(0, stock.available));
+        transaction.set(invRef, { reserved: stock.reserved + reserve, updatedAt: new Date().toISOString() }, { merge: true });
+        if (reserve) transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('reserve', reserve, orderId, inventoryProductKey(order), actor, { reason: 'order_restored' }));
+        transaction.update(db.collection('orders').doc(orderId), { inventoryReservedQty: deliveredQuantity(order) + reserve, inventoryShortageQty: Math.max(0, needed - reserve) });
+    }
+}
+
 window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
     if (!['normal', 'cancelled'].includes(nextStatus)) return;
@@ -3897,6 +3915,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
                 by: actor,
                 at: new Date().toISOString()
             };
+            await adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor);
             const updates = {
                 orderStatus: nextStatus,
                 orderStatusDate: date,
