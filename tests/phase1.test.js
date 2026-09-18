@@ -237,6 +237,18 @@ test('quote and order lists use global business-date ordering across companies',
 });
 
 
+test('full-history order item-code search stays indexed and paginated', () => {
+    assert.match(appSource, /where\('itemCodeKey', '==', keyword\)/);
+    assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(appSource, /startAfter\(orderHistorySearchCursor\)/);
+    assert.match(appSource, /itemCodeKey: normalizeHistoryItemCode/);
+    const searchStart = appSource.indexOf('async function runOrderHistoryItemCodeSearch');
+    const searchEnd = appSource.indexOf('\n}\n\nwindow.searchAllOrderHistory', searchStart) + 2;
+    const searchSource = appSource.slice(searchStart, searchEnd);
+    assert.doesNotMatch(searchSource, /collection\('orders'\)\.get\(\)/);
+    assert.doesNotMatch(searchSource, /while\s*\(/);
+});
+
 test('browser history restores internal pages without forcing Firestore reloads', () => {
     assert.match(appSource, /history\.pushState/);
     assert.match(appSource, /addEventListener\('popstate'/);
