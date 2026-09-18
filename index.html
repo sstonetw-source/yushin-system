@@ -591,12 +591,12 @@
             </div>
         </div>
 
-        <!-- 價格表管理（唯讀顯示，僅能透過 Excel 上傳整批更新，不可在網頁上逐筆編輯） -->
+        <!-- Product Master：沿用既有價格表儲存結構，避免建立第二份產品來源 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
-                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新</button>
+                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">（Excel 中每個工作表的名稱即為廠牌名稱，可一次上傳多個廠牌；同一廠牌再次上傳會只取代該廠牌資料。工作表可加入「類型」欄位，填寫「儀器」或「試劑耗材」供銷售分析分類）</span>
+                <span style="font-size:12px;color:#666;">（每個工作表＝一個廠牌。同廠牌再次上傳會更新該廠牌。支援：產品線、類型、規格、供應商、單位、成本、售價、庫存管理、批號管理、效期管理、啟用／停用；寫入前會先顯示新增／更新預覽。）</span>
             </div>
             <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
                 <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -604,7 +604,7 @@
             </div>
 
             <table class="price-catalog-table">
-                <thead><tr><th>雲端價格表</th><th>最後更新時間</th><th class="no-print">操作</th></tr></thead>
+                <thead><tr><th>Product Master／廠牌</th><th>最後更新時間</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="adminPriceCatalogBody"><tr><td colspan="3" style="color:#888;">載入中…</td></tr></tbody>
             </table>
         </div>
