@@ -2322,7 +2322,8 @@ window.renderMyQuotesList = function() {
     if (salesHeader) salesHeader.style.display = isAdminViewingAll ? '' : 'none';
 
     myQuotesCache.forEach(q => {
-        const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''}`.toLowerCase();
+        const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
+        const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
         shown++;
 
