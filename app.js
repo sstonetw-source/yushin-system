@@ -1542,7 +1542,8 @@ function collectCurrentQuoteRecord() {
         quoteNo: document.getElementById('quoteNo').value.trim(), company: currentCompany,
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
         salesName, ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName) ? currentUser?.uid || '' : ''),
-        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), validDays: document.getElementById('validDays').value,
+        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
+        ...linkedDocumentFields('', '', []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
     };
@@ -1765,6 +1766,7 @@ window.handleSaveAndPrint = function() {
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
+        ...linkedDocumentFields('', '', []),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
         grandTotal: document.getElementById('grandTotal').innerText,
@@ -2228,6 +2230,9 @@ window.markQuoteAsDeal = function(quoteNo) {
                 transactionType: '',
                 invoiceTitle: q.clientName || '',
                 quoteNo: quoteNo,
+                ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE, quoteNo, [
+                    documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')
+                ]),
                 salesName: stripPhoneSuffix(q.salesName),
                 ownerUid: q.ownerUid || salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(q.salesName))?.uid || '',
                 isOrdered: false,
@@ -2309,6 +2314,30 @@ function dateOnlyFromTimestamp(value) {
 // 所有公司共用同一套時間排序：先依業務日期，再依建立時間。
 // company 不參與排序，避免又鑫／辰星／鼎新的紀錄被分組後破壞真正的時間順序。
 // 舊資料若沒有 createdAt，最後才以單號／文件 id 做穩定排序。
+const DOCUMENT_TYPES = Object.freeze({ FORECAST: 'forecast', QUOTE: 'quote', ORDER: 'order', PURCHASE_ORDER: 'purchaseOrder', RECEIPT: 'receipt', INVENTORY_MOVEMENT: 'inventoryMovement' });
+
+function documentLink(type, id, relation = 'related') {
+    return { type, id: String(id || ''), relation };
+}
+
+function normalizeDocumentLinks(links) {
+    const unique = new Map();
+    (Array.isArray(links) ? links : []).forEach(link => {
+        if (!link?.type || !link?.id) return;
+        const normalized = documentLink(link.type, link.id, link.relation || 'related');
+        unique.set(`${normalized.type}:${normalized.id}:${normalized.relation}`, normalized);
+    });
+    return [...unique.values()];
+}
+
+function linkedDocumentFields(sourceType = '', sourceId = '', links = []) {
+    return {
+        sourceType: sourceType || '',
+        sourceId: String(sourceId || ''),
+        linkedDocuments: normalizeDocumentLinks(links)
+    };
+}
+
 function compareBusinessRecordsNewestFirst(a, b, dateField, numberField) {
     const dateCompare = String(b?.[dateField] || '').localeCompare(String(a?.[dateField] || ''));
     if (dateCompare) return dateCompare;
@@ -3002,6 +3031,7 @@ function purchaseItemsFromOrder(order) {
             orderItemIndex: index,
             itemName,
             itemCode,
+            productId: item.productId || order.productId || '',
             brand,
             qty: Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1,
             unit: item.unit || order.unit || '',
@@ -3217,7 +3247,8 @@ window.printPurchaseOrder = async function() {
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
         items: poItems.map(item => ({ ...item })),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        ...linkedDocumentFields(orderIds.length === 1 ? DOCUMENT_TYPES.ORDER : '', orderIds.length === 1 ? orderIds[0] : '', orderIds.map(orderId => documentLink(DOCUMENT_TYPES.ORDER, orderId, 'source')))
     };
     const button = document.getElementById('printPurchaseOrderBtn');
     poSaveInProgress = true;
@@ -4367,6 +4398,7 @@ window.saveNewOrder = function() {
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
+        ...linkedDocumentFields('', '', []),
         salesName: currentUserName || '',
         ownerUid: currentUser?.uid || '',
         isOrdered: false,
