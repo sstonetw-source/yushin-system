@@ -595,7 +595,7 @@
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
-            <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 銷售統計</div>
+            <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
             <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>
@@ -674,7 +674,7 @@
             </div>
         </div>
 
-        <!-- 訂單銷售統計：只計入已建立的訂單；成交估價單會在轉單後自動納入 -->
+        <!-- 進銷存分析：銷售以訂單/送貨、進貨以實際 receipt、庫存以 inventory 為準 -->
         <div id="admin-statistics" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
                 <select id="salesStatsPeriod" onchange="setSalesStatisticsPeriod(this.value)">
