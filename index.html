@@ -283,7 +283,11 @@
 
         <div id="orderListPanel">
         <div class="toolbar no-print order-primary-toolbar">
-            <input type="text" id="orderSearch" placeholder="搜尋客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="renderOrdersList()">
+            <input type="text" id="orderSearch" placeholder="搜尋客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="if(orderHistorySearchActive){orderHistorySearchActive=false;orderHistorySearchResults=[];} renderOrdersList()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
+            <button type="button" class="btn-secondary" onclick="searchAllOrderHistory()">🔎 全歷史貨號</button>
+            <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
+            <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
+            <button type="button" id="orderHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrderHistorySearch()">載入更多搜尋結果</button>
             <span id="purchaserOrderFilters" style="display:none;">
                 <select id="orderSalesFilter" onchange="renderOrdersList()"><option value="">全部業務</option></select>
                 <select id="orderBrandFilter" onchange="renderOrdersList()"><option value="">全部廠牌</option></select>
