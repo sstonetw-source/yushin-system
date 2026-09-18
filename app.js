@@ -2209,9 +2209,11 @@ window.markQuoteAsDeal = function(quoteNo) {
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
         const batch = db.batch();
+        const createdOrderLinks = [];
         (q.items || []).forEach(item => {
             if (!item.nameCn && !item.nameEn && !item.model) return;
             const orderRef = db.collection('orders').doc();
+            createdOrderLinks.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
             const orderData = {
                 orderDate: todayStr,
                 createdAt: new Date().toISOString(),
@@ -2253,7 +2255,11 @@ window.markQuoteAsDeal = function(quoteNo) {
             batch.set(orderRef, orderData);
         });
 
-        batch.update(db.collection('quotes').doc(quoteNo), { dealClosed: true, dealClosedAt: todayStr });
+        batch.update(db.collection('quotes').doc(quoteNo), {
+            dealClosed: true,
+            dealClosedAt: todayStr,
+            linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
+        });
 
         batch.commit().then(() => {
             alert('已標記成交，品項已匯入訂單管理系統。');
@@ -3270,7 +3276,13 @@ window.printPurchaseOrder = async function() {
             if (conflicts.length) throw new Error(`以下訂單已被建立訂購單：${conflicts.join('、')}`);
             transaction.set(poRef, poRecord);
             orderSnapshots.forEach((snapshot, index) => {
-                if (snapshot.exists) transaction.update(orderRefs[index], { purchaseOrderNo: poNo });
+                if (snapshot.exists) {
+                    const orderData = snapshot.data();
+                    transaction.update(orderRefs[index], {
+                        purchaseOrderNo: poNo,
+                        linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'created')])
+                    });
+                }
             });
         });
 
