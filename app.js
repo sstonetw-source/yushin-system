@@ -2393,6 +2393,7 @@ window.markQuoteAsDeal = function(quoteNo) {
 
         const batch = db.batch();
         const createdOrderLinks = [];
+        const createdOrders = [];
         (q.items || []).forEach(item => {
             if (!item.nameCn && !item.nameEn && !item.model) return;
             const orderRef = db.collection('orders').doc();
@@ -2436,6 +2437,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 if (priceMatch.cost) orderData.costPrice = priceMatch.cost;
             }
             batch.set(orderRef, orderData);
+            createdOrders.push({ id: orderRef.id, data: orderData });
         });
 
         batch.update(db.collection('quotes').doc(quoteNo), {
@@ -2444,8 +2446,9 @@ window.markQuoteAsDeal = function(quoteNo) {
             linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
         });
 
-        batch.commit().then(() => {
-            alert('已標記成交，品項已匯入訂單管理系統。');
+        batch.commit().then(async () => {
+            await Promise.all(createdOrders.map(entry => reserveInventoryForNewOrder(entry.id, entry.data)));
+            alert('已標記成交，品項已匯入訂單管理系統並完成可用庫存保留。');
             loadMyQuotesFromCloud();
         }).catch(err => {
             alert('匯入失敗：' + err.message);
@@ -2609,6 +2612,45 @@ window.changeOrderPeriod = function(value) {
     }
     renderOrdersList();
 };
+
+function inventoryProductKey(record) {
+    return String(record?.productId || (record?.itemCode ? `code:${normalizeHistoryItemCode(record.itemCode)}` : '')).trim();
+}
+function inventoryRefFor(record) {
+    const key = inventoryProductKey(record);
+    return key ? db.collection('inventory').doc(encodeURIComponent(key)) : null;
+}
+function inventoryNumbers(data = {}) {
+    const onHand = Number(data.onHand || 0), reserved = Number(data.reserved || 0), incoming = Number(data.incoming || 0);
+    return { onHand, reserved, available: onHand - reserved, incoming };
+}
+function inventoryMovementRecord(type, qty, orderId, productKey, actor, extra = {}) {
+    return { type, qty: Number(qty || 0), productKey, sourceType: DOCUMENT_TYPES.ORDER, sourceId: orderId, createdAt: new Date().toISOString(), createdBy: actor, ...extra };
+}
+function orderReservedQuantity(order) {
+    if (normalizedOrderStatus(order) !== 'normal') return 0;
+    return Math.max(0, orderQuantity(order) - deliveredQuantity(order));
+}
+
+async function reserveInventoryForNewOrder(orderId, order) {
+    const ref = inventoryRefFor(order); if (!ref || !orderQuantity(order)) return { reservedQty: 0, shortageQty: orderQuantity(order) };
+    const productKey = inventoryProductKey(order), actor = currentUserName || currentUser?.email || '';
+    let result;
+    await db.runTransaction(async tx => {
+        const snap = await tx.get(ref), stock = inventoryNumbers(snap.exists ? snap.data() : {});
+        const requested = orderQuantity(order);
+        const reservable = Math.max(0, Math.min(requested, stock.available));
+        const shortage = Math.max(0, requested - reservable);
+        tx.set(ref, { productKey, productId: order.productId || '', itemCode: order.itemCode || '', itemName: order.itemName || '', onHand: stock.onHand, reserved: stock.reserved + reservable, incoming: stock.incoming, updatedAt: new Date().toISOString() }, { merge: true });
+        if (reservable) {
+            const movement = db.collection('inventoryMovements').doc();
+            tx.set(movement, inventoryMovementRecord('reserve', reservable, orderId, productKey, actor));
+        }
+        tx.update(db.collection('orders').doc(orderId), { inventoryReservedQty: reservable, inventoryShortageQty: shortage, inventoryProductKey: productKey });
+        result = { reservedQty: reservable, shortageQty: shortage };
+    });
+    return result;
+}
 
 function orderQuantity(order) {
     const qty = parseFloat(order?.qty);
@@ -3810,6 +3852,24 @@ window.prepareOrderLifecycle = function(orderId, status) {
     document.getElementById('orderLifecycleReason').focus();
 };
 
+async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor) {
+    const invRef = inventoryRefFor(order); if (!invRef) return;
+    const snap = await transaction.get(invRef), stock = inventoryNumbers(snap.exists ? snap.data() : {});
+    const currentlyReserved = Math.max(0, Number(order.inventoryReservedQty || 0) - deliveredQuantity(order));
+    if (nextStatus === 'cancelled') {
+        const release = Math.min(currentlyReserved, stock.reserved);
+        if (!release) return;
+        transaction.set(invRef, { reserved: Math.max(0, stock.reserved - release), updatedAt: new Date().toISOString() }, { merge: true });
+        transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release', -release, orderId, inventoryProductKey(order), actor, { reason: 'order_cancelled' }));
+    } else if (nextStatus === 'normal') {
+        const needed = Math.max(0, orderQuantity(order) - deliveredQuantity(order));
+        const reserve = Math.min(needed, Math.max(0, stock.available));
+        transaction.set(invRef, { reserved: stock.reserved + reserve, updatedAt: new Date().toISOString() }, { merge: true });
+        if (reserve) transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('reserve', reserve, orderId, inventoryProductKey(order), actor, { reason: 'order_restored' }));
+        transaction.update(db.collection('orders').doc(orderId), { inventoryReservedQty: deliveredQuantity(order) + reserve, inventoryShortageQty: Math.max(0, needed - reserve) });
+    }
+}
+
 window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
     if (!['normal', 'cancelled'].includes(nextStatus)) return;
@@ -3855,6 +3915,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
                 by: actor,
                 at: new Date().toISOString()
             };
+            await adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor);
             const updates = {
                 orderStatus: nextStatus,
                 orderStatusDate: date,
@@ -3965,6 +4026,23 @@ function renderOrderStatusHistory(order) {
     tbody.innerHTML = entries.length ? entries.map(item => `<tr><td>${escapeHtml(formatOrderStatusTime(item.at))}</td><td>${escapeHtml(item.action || '')}</td><td>${escapeHtml(item.by || '')}</td><td>${escapeHtml(item.detail || '')}</td></tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚無操作紀錄。</td></tr>';
 }
 
+function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
+    const invRef = inventoryRefFor(order);
+    if (!invRef || deliveryQty <= 0) return Promise.resolve(null);
+    return transaction.get(invRef).then(invSnap => {
+        const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : {});
+        const reservedForOrder = Number(order.inventoryReservedQty || 0);
+        const alreadyDelivered = deliveredQuantity(order);
+        const reservedRemaining = Math.max(0, reservedForOrder - alreadyDelivered);
+        const fromReserved = Math.min(deliveryQty, reservedRemaining);
+        if (stock.onHand < deliveryQty) throw new Error(`庫存不足：現有 ${stock.onHand}，本次需出貨 ${deliveryQty}。`);
+        transaction.set(invRef, { onHand: stock.onHand - deliveryQty, reserved: Math.max(0, stock.reserved - fromReserved), incoming: stock.incoming, updatedAt: new Date().toISOString() }, { merge: true });
+        const movement = db.collection('inventoryMovements').doc();
+        transaction.set(movement, inventoryMovementRecord('ship', -deliveryQty, sourceId, inventoryProductKey(order), actor, { reservedReleasedQty: fromReserved }));
+        return { fromReserved };
+    });
+}
+
 window.quickCompleteDelivery = async function(orderIdOverride) {
     const orderId = orderIdOverride || currentDeliveryOrderId;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
@@ -4012,6 +4090,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             const statusEntries = [];
             if (!order.isOrdered) statusEntries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: now });
             if (!order.isArrived) statusEntries.push({ field: 'isArrived', value: true, label: '已到貨', by: actor, at: now });
+            await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
             const updates = {
                 deliveryRecords: records, deliveredQty: total, isDelivered: true,
                 isOrdered: true, isArrived: true,
@@ -4198,6 +4277,7 @@ window.saveDeliveryRecord = async function() {
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
             const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            if (action === 'create') await applyInventoryDeliveryInTransaction(transaction, ref, order, qty, actor, orderId);
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -4657,7 +4737,11 @@ window.saveNewOrder = function() {
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
-    db.collection('orders').add(data).then(docRef => {
+    db.collection('orders').add(data).then(async docRef => {
+        const reservation = await reserveInventoryForNewOrder(docRef.id, data);
+        data.inventoryReservedQty = reservation.reservedQty;
+        data.inventoryShortageQty = reservation.shortageQty;
+        data.inventoryProductKey = inventoryProductKey(data);
         rememberRecentCustomerName(data.customerName);
         if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
             db.collection('forecasts').doc(data.sourceId).set({
