@@ -1943,10 +1943,11 @@ window.switchQuoteView = function(view, el) {
 function createMyQuotesPaginationState() {
     const sources = [];
     if (canViewAllData('quotes')) {
-        sources.push({ cursor: null, query: () => db.collection('quotes').orderBy('quoteNo', 'desc') });
+        // 全公司估價單直接由 Firestore 依日期分頁，不能先按公司／單號分組後才在前端重排。
+        sources.push({ cursor: null, query: () => db.collection('quotes').orderBy('quoteDate', 'desc') });
     } else {
-        if (currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('ownerUid', '==', currentUser.uid) });
-        if (currentUserName) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesName', '>=', currentUserName).where('salesName', '<=', currentUserName + '\uf8ff') });
+        if (currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('ownerUid', '==', currentUser.uid).orderBy('quoteDate', 'desc') });
+        if (currentUserName) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesName', '>=', currentUserName).where('salesName', '<=', currentUserName + '\uf8ff').orderBy('quoteDate', 'desc') });
     }
     return { sources, sourceIndex: 0 };
 }
@@ -2003,7 +2004,7 @@ async function loadMyQuotesPage(reset) {
             remainingReads -= snapshot.size;
             if (snapshot.size < requested) myQuotesPaginationState.sourceIndex++;
         }
-        myQuotesCache.sort((a, b) => (b.quoteNo || '').localeCompare(a.quoteNo || ''));
+        myQuotesCache.sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
         renderMyQuotesList();
         if (!currentUserName && myQuotesCache.length === 0) {
             hint.style.display = 'block';
@@ -2011,7 +2012,7 @@ async function loadMyQuotesPage(reset) {
         }
     } catch (err) {
         console.error(err);
-        myQuotesCache = [...records.values()].sort((a, b) => (b.quoteNo || '').localeCompare(a.quoteNo || ''));
+        myQuotesCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
         renderMyQuotesList();
         alert('讀取我的估價單失敗，請確認 Firestore 權限設定。');
     } finally {
@@ -2188,6 +2189,17 @@ function dateOnlyFromTimestamp(value) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+// 所有公司共用同一套時間排序：先依業務日期，再依建立時間。
+// company 不參與排序，避免又鑫／辰星／鼎新的紀錄被分組後破壞真正的時間順序。
+// 舊資料若沒有 createdAt，最後才以單號／文件 id 做穩定排序。
+function compareBusinessRecordsNewestFirst(a, b, dateField, numberField) {
+    const dateCompare = String(b?.[dateField] || '').localeCompare(String(a?.[dateField] || ''));
+    if (dateCompare) return dateCompare;
+    const createdCompare = String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''));
+    if (createdCompare) return createdCompare;
+    return String(b?.[numberField] || b?.id || '').localeCompare(String(a?.[numberField] || a?.id || ''));
 }
 
 // 開發票日期同時視為收款與完成日期。舊資料優先由「已報帳」操作紀錄推回日期；
@@ -2431,11 +2443,11 @@ async function loadOrderPage(reset) {
                 orderPaginationState.sourceIndex++;
             }
         }
-        ordersCache.sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
+        ordersCache.sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         renderOrdersList();
     } catch (err) {
         console.error("讀取訂單失敗：", err);
-        ordersCache = [...records.values()].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
+        ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         renderOrdersList();
         alert('讀取訂單資料失敗，請確認 Firestore 權限設定。');
     } finally {
@@ -6276,13 +6288,13 @@ async function loadAdminQuotesPage(reset) {
     adminQuotesPageLoading = true;
     updateAdminQuotesLoadMoreButton();
     try {
-        let query = db.collection('quotes').orderBy('quoteNo', 'desc').limit(DEFAULT_LIST_LIMIT);
+        let query = db.collection('quotes').orderBy('quoteDate', 'desc').limit(DEFAULT_LIST_LIMIT);
         if (adminQuotesCursor) query = query.startAfter(adminQuotesCursor);
         const snapshot = await query.get();
         if (!snapshot.empty) adminQuotesCursor = snapshot.docs[snapshot.docs.length - 1];
         const records = new Map(allQuotesCache.map(quote => [quote.id, quote]));
         snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
-        allQuotesCache = [...records.values()].sort((a, b) => (b.quoteNo || '').localeCompare(a.quoteNo || ''));
+        allQuotesCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
         adminQuotesHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
         renderAdminQuotesList();
     } catch (err) {
