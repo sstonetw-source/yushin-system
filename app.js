@@ -1203,15 +1203,16 @@ function getAllPriceListBrandsRaw() {
 const OTHER_BRAND_OPTION_KEY = '其他廠牌';
 
 function isCompanyBrandAllowed(company, brand) {
-    // 「維修」與「其他／自行輸入廠牌」都不是受代理廠牌限制的正式品牌，
-    // 可由三間分公司開立／發單；尚未建立設定時則保留既有的全部廠牌行為。
+    // 「維修」可由三間分公司開立；尚未建立設定時保留既有的全部廠牌行為。
     const normalizedBrand = String(brand || '').trim();
     if (normalizedBrand === '維修' || normalizedBrand === '其他' || normalizedBrand === OTHER_BRAND_OPTION_KEY || !companyAgencyBrandsConfigured) return true;
 
-    // 訂單在選擇「其他」後會保存實際自行輸入的品牌名稱。若該名稱不在 Product Master
-    // 的正式廠牌清單，視為「其他廠牌」，同樣允許三間公司發單。
-    const knownBrands = getAllPriceListBrandsRaw();
-    if (normalizedBrand && !includesBrandCaseInsensitive(knownBrands, normalizedBrand)) return true;
+    // 「其他」的訂單會保存使用者實際輸入的廠牌名稱，因此不能只靠品牌名稱判斷。
+    // 只有明確列在任一分公司代理清單中的品牌才受公司限制；
+    // 未被任何分公司列為代理品牌者，一律視為「其他廠牌」，三家公司都可發單。
+    const assignedToAnyCompany = ['yushin', 'morningstar', 'MULTI-LIFE']
+        .some(key => includesBrandCaseInsensitive(companyAgencyBrands[key], normalizedBrand));
+    if (!assignedToAnyCompany) return true;
 
     return includesBrandCaseInsensitive(companyAgencyBrands[company], normalizedBrand);
 }
