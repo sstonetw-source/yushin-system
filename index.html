@@ -67,24 +67,305 @@
     </div>
 
     <!-- ============ Forecast 系統 ============ -->
-    <div id="forecast-system" class="content-section">
-        <div class="section-header no-print">
-            <h2>Forecast</h2>
+<div id="forecast-system" class="content-section">
+    <div class="section-header no-print">
+        <h2>Forecast</h2>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button type="button" class="btn-secondary" onclick="openForecastStageInfo()">ⓘ Stage 說明</button>
             <button type="button" onclick="openForecastModal()">＋ 新增 Forecast</button>
         </div>
-        <div class="toolbar no-print">
-            <input id="forecastSearch" type="search" placeholder="搜尋客戶、產品、最新進度" oninput="renderForecastList()">
-            <select id="forecastStatusFilter" onchange="loadForecasts(true)">
-                <option value="active">進行中</option><option value="won">已成交</option><option value="lost">未成交</option><option value="all">全部</option>
-            </select>
-            <button class="btn-secondary" onclick="loadForecasts(true)">重新整理</button>
-        </div>
-        <div class="table-wrap"><table><thead><tr><th>客戶</th><th>產品／品項</th><th>預估金額</th><th>最新進度</th><th>狀態</th><th>業務</th><th class="no-print">操作</th></tr></thead><tbody id="forecastListBody"></tbody></table></div>
-        <div id="forecastEmptyHint" class="empty-hint">目前沒有 Forecast。</div>
-        <button id="forecastLoadMoreBtn" class="btn-secondary no-print" style="display:none;" onclick="loadForecasts(false)">載入更多（每次 50 筆）</button>
     </div>
 
-    <div id="forecastModalOverlay" class="modal-overlay">
+    <div class="toolbar no-print forecast-toolbar">
+        <input
+            id="forecastSearch"
+            type="search"
+            placeholder="搜尋客戶、廠牌、產品、最新進度"
+            oninput="renderForecastList()"
+        >
+
+        <select id="forecastBrandFilter" onchange="renderForecastList()">
+            <option value="">全部廠牌</option>
+        </select>
+
+        <select id="forecastSalesFilter" onchange="renderForecastList()">
+            <option value="">全部業務</option>
+        </select>
+
+        <select id="forecastStatusFilter" onchange="loadForecasts(true)">
+            <option value="active">進行中</option>
+            <option value="won">Win</option>
+            <option value="lost">Lost</option>
+            <option value="all">全部狀態</option>
+        </select>
+
+        <select id="forecastStageFilter" onchange="renderForecastList()">
+            <option value="">全部 Stage</option>
+            <option value="stage1">Stage 1</option>
+            <option value="stage2">Stage 2</option>
+            <option value="stage3">Stage 3</option>
+            <option value="stage4">Stage 4</option>
+            <option value="stage5">Stage 5</option>
+        </select>
+
+        <button class="btn-secondary" onclick="loadForecasts(true)">重新整理</button>
+    </div>
+
+    <div class="table-wrap">
+        <table id="forecastTable">
+            <thead>
+                <tr>
+                    <th>客戶</th>
+                    <th>廠牌</th>
+                    <th>產品／品項</th>
+                    <th>預估金額</th>
+                    <th>Stage</th>
+                    <th>狀態</th>
+                    <th>最新進度</th>
+                    <th>業務</th>
+                    <th class="no-print">操作</th>
+                </tr>
+            </thead>
+            <tbody id="forecastListBody"></tbody>
+        </table>
+    </div>
+
+    <div id="forecastEmptyHint" class="empty-hint">
+        目前沒有符合條件的 Forecast。
+    </div>
+
+    <button
+        id="forecastLoadMoreBtn"
+        class="btn-secondary no-print"
+        style="display:none;"
+        onclick="loadForecasts(false)"
+    >
+        載入更多（每次 50 筆）
+    </button>
+</div>
+
+<!-- Forecast 新增／編輯 -->
+<div
+    id="forecastModalOverlay"
+    class="modal-overlay"
+    onclick="if(event.target===this) closeForecastModal()"
+>
+    <div class="modal forecast-modal">
+        <h3 id="forecastModalTitle">新增 Forecast</h3>
+
+        <input type="hidden" id="forecastId">
+
+        <label>客戶名稱 *</label>
+        <input
+            id="forecastCustomer"
+            list="clientList"
+            autocomplete="off"
+            placeholder="請輸入客戶名稱"
+        >
+
+        <label>廠牌 *</label>
+        <select id="forecastBrand"></select>
+
+        <label>產品／品項 *</label>
+        <input
+            id="forecastProduct"
+            placeholder="可輸入品名、型號或貨號"
+        >
+
+        <label>預估金額</label>
+        <input
+            id="forecastAmount"
+            type="number"
+            min="0"
+            step="1"
+            placeholder="例如：2500000"
+        >
+
+        <div class="forecast-form-grid">
+            <div>
+                <label>Stage *</label>
+                <select id="forecastStage">
+                    <option value="stage1">Stage 1</option>
+                    <option value="stage2">Stage 2</option>
+                    <option value="stage3">Stage 3</option>
+                    <option value="stage4">Stage 4</option>
+                    <option value="stage5">Stage 5</option>
+                </select>
+            </div>
+
+            <div>
+                <label>狀態 *</label>
+                <select id="forecastStatus">
+                    <option value="active">進行中</option>
+                    <option value="won">Win</option>
+                    <option value="lost">Lost</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="forecastNewProgressSection">
+            <label>立案進度</label>
+            <textarea
+                id="forecastProgress"
+                rows="4"
+                placeholder="可不填；若空白，系統會自動記錄「MM/DD 立案」"
+            ></textarea>
+            <div class="forecast-form-note">
+                日期由系統自動加入，不需要自行輸入日期。
+            </div>
+        </div>
+
+        <div id="forecastCurrentProgressSection" style="display:none;">
+            <label>目前最新進度</label>
+            <div id="forecastCurrentProgress" class="forecast-current-progress"></div>
+            <div class="forecast-form-note">
+                若要新增追蹤紀錄，請使用主列表的「＋進度」。
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button
+                type="button"
+                class="btn-secondary"
+                onclick="closeForecastModal()"
+            >
+                取消
+            </button>
+
+            <button
+                type="button"
+                id="saveForecastBtn"
+                onclick="saveForecast()"
+            >
+                儲存
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Forecast ＋進度 -->
+<div
+    id="forecastProgressOverlay"
+    class="modal-overlay"
+    onclick="if(event.target===this) closeForecastProgressModal()"
+>
+    <div class="modal forecast-progress-modal">
+        <h3>更新 Forecast 進度</h3>
+
+        <input type="hidden" id="forecastProgressId">
+
+        <div id="forecastProgressSummary" class="forecast-progress-summary"></div>
+
+        <label>最新進度 *</label>
+        <textarea
+            id="forecastProgressText"
+            rows="4"
+            placeholder="例如：老師已送明年度設備預算"
+        ></textarea>
+
+        <div class="forecast-form-note">
+            儲存後系統會自動加入今天日期，例如「09/18 老師已送明年度設備預算」。
+        </div>
+
+        <div class="forecast-form-grid">
+            <div>
+                <label>Stage</label>
+                <select id="forecastProgressStage">
+                    <option value="stage1">Stage 1</option>
+                    <option value="stage2">Stage 2</option>
+                    <option value="stage3">Stage 3</option>
+                    <option value="stage4">Stage 4</option>
+                    <option value="stage5">Stage 5</option>
+                </select>
+            </div>
+
+            <div>
+                <label>狀態</label>
+                <select id="forecastProgressStatus">
+                    <option value="active">進行中</option>
+                    <option value="won">Win</option>
+                    <option value="lost">Lost</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="forecast-form-note">
+            Win 原則上搭配 Stage 5；Lost 會保留案件失敗前最後所在 Stage。
+        </div>
+
+        <div class="modal-actions">
+            <button
+                type="button"
+                class="btn-secondary"
+                onclick="closeForecastProgressModal()"
+            >
+                取消
+            </button>
+
+            <button
+                type="button"
+                id="saveForecastProgressBtn"
+                onclick="saveForecastProgress()"
+            >
+                儲存進度
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Forecast Stage 說明 -->
+<div
+    id="forecastStageInfoOverlay"
+    class="modal-overlay"
+    onclick="if(event.target===this) closeForecastStageInfo()"
+>
+    <div class="modal forecast-stage-info-modal">
+        <h3>Forecast Stage 定義</h3>
+
+        <div class="forecast-stage-info-list">
+            <div class="forecast-stage-info-item">
+                <strong>Stage 1</strong>
+                <span>介紹機台／產品，確認客戶需求以及是否需要 Demo。</span>
+            </div>
+
+            <div class="forecast-stage-info-item">
+                <strong>Stage 2</strong>
+                <span>提供詳細報價、產品規格與購機方案。</span>
+            </div>
+
+            <div class="forecast-stage-info-item">
+                <strong>Stage 3</strong>
+                <span>使用者進入預算編列、經費申請或等待預算核准。</span>
+            </div>
+
+            <div class="forecast-stage-info-item">
+                <strong>Stage 4</strong>
+                <span>進入標案、請購、議價或其他正式採購程序。</span>
+            </div>
+
+            <div class="forecast-stage-info-item">
+                <strong>Stage 5</strong>
+                <span>案件成交／交機。</span>
+            </div>
+        </div>
+
+        <div class="forecast-status-info">
+            <div><strong>進行中：</strong>案件仍在持續追蹤。</div>
+            <div><strong>Win：</strong>案件已成交，資料仍保留供日後查詢與統計。</div>
+            <div><strong>Lost：</strong>案件未成交，保留失敗前最後 Stage 與歷史進度。</div>
+        </div>
+
+        <div class="modal-actions">
+            <button
+                type="button"
+                class="btn-secondary"
+                onclick="closeForecastStageInfo()"
+            >
+                關閉
+            </button>
+        </div>
+    </div>
+</div>
       <div class="modal">
         <h3 id="forecastModalTitle">新增 Forecast</h3>
         <input type="hidden" id="forecastId">
