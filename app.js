@@ -2393,6 +2393,7 @@ window.markQuoteAsDeal = function(quoteNo) {
 
         const batch = db.batch();
         const createdOrderLinks = [];
+        const createdOrders = [];
         (q.items || []).forEach(item => {
             if (!item.nameCn && !item.nameEn && !item.model) return;
             const orderRef = db.collection('orders').doc();
@@ -2436,6 +2437,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 if (priceMatch.cost) orderData.costPrice = priceMatch.cost;
             }
             batch.set(orderRef, orderData);
+            createdOrders.push({ id: orderRef.id, data: orderData });
         });
 
         batch.update(db.collection('quotes').doc(quoteNo), {
@@ -2444,8 +2446,9 @@ window.markQuoteAsDeal = function(quoteNo) {
             linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
         });
 
-        batch.commit().then(() => {
-            alert('已標記成交，品項已匯入訂單管理系統。');
+        batch.commit().then(async () => {
+            await Promise.all(createdOrders.map(entry => reserveInventoryForNewOrder(entry.id, entry.data)));
+            alert('已標記成交，品項已匯入訂單管理系統並完成可用庫存保留。');
             loadMyQuotesFromCloud();
         }).catch(err => {
             alert('匯入失敗：' + err.message);
@@ -4696,7 +4699,11 @@ window.saveNewOrder = function() {
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
-    db.collection('orders').add(data).then(docRef => {
+    db.collection('orders').add(data).then(async docRef => {
+        const reservation = await reserveInventoryForNewOrder(docRef.id, data);
+        data.inventoryReservedQty = reservation.reservedQty;
+        data.inventoryShortageQty = reservation.shortageQty;
+        data.inventoryProductKey = inventoryProductKey(data);
         rememberRecentCustomerName(data.customerName);
         if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
             db.collection('forecasts').doc(data.sourceId).set({
