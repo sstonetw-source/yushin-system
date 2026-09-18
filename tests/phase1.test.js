@@ -406,3 +406,42 @@ test('phase 4 forecast permission is integrated into the common permission syste
     assert.match(appSource, /canViewAllData\('forecast'\)/);
     assert.match(appSource, /canEditPage\('forecast'\)/);
 });
+
+
+test('phase 5 inventory uses on-hand reserved available incoming and transaction-backed movements', () => {
+    assert.match(appSource, /function inventoryNumbers\(data = \{\}\)/);
+    assert.match(appSource, /available: onHand - reserved/);
+    assert.match(appSource, /incoming/);
+    assert.match(appSource, /collection\('inventoryMovements'\)/);
+    assert.match(appSource, /inventoryMovementRecord\('reserve'/);
+    assert.match(appSource, /inventoryMovementRecord\('ship'/);
+});
+
+test('phase 5 order creation reserves only available stock and records shortage', () => {
+    const start=appSource.indexOf('async function reserveInventoryForNewOrder');
+    const end=appSource.indexOf('function orderQuantity',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/Math\.min\(requested, stock\.available\)/);
+    assert.match(s,/inventoryReservedQty/);
+    assert.match(s,/inventoryShortageQty/);
+    assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
+});
+
+test('phase 5 shipment consumes on-hand and releases reserved stock transactionally', () => {
+    const start=appSource.indexOf('function applyInventoryDeliveryInTransaction');
+    const end=appSource.indexOf('window.quickCompleteDelivery',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/stock\.onHand < deliveryQty/);
+    assert.match(s,/onHand: stock\.onHand - deliveryQty/);
+    assert.match(s,/reserved: Math\.max\(0, stock\.reserved - fromReserved\)/);
+});
+
+test('phase 5 cancelling and restoring orders adjusts reservations without deleting inventory history', () => {
+    const start=appSource.indexOf('async function adjustInventoryReservationForLifecycle');
+    const end=appSource.indexOf('window.quickSetOrderLifecycle',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/nextStatus === 'cancelled'/);
+    assert.match(s,/nextStatus === 'normal'/);
+    assert.match(s,/inventoryMovementRecord\('release'/);
+    assert.doesNotMatch(s,/\.delete\(/);
+});
