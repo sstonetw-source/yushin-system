@@ -289,3 +289,22 @@ test('legacy order search-index migration is admin-only, batched and idempotent'
     assert.match(migration, /batch\.update/);
     assert.doesNotMatch(migration, /collection\('orders'\)\.get\(\)/);
 });
+
+
+test('new quotes and orders persist createdAt and normalized order item-code keys', () => {
+    const saveOrderStart = appSource.indexOf('window.saveNewOrder =');
+    const saveOrderEnd = appSource.indexOf('\n};', saveOrderStart) + 3;
+    const saveOrder = appSource.slice(saveOrderStart, saveOrderEnd);
+    assert.match(saveOrder, /createdAt: new Date\(\)\.toISOString\(\)/);
+    assert.match(saveOrder, /itemCodeKey: normalizeHistoryItemCode\(itemCode\)/);
+
+    const quoteStart = appSource.indexOf('window.handleSaveAndPrint =');
+    const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
+    assert.match(appSource.slice(quoteStart, quoteEnd), /createdAt: new Date\(\)\.toISOString\(\)/);
+
+    const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
+    const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
+    const deal = appSource.slice(dealStart, dealEnd);
+    assert.match(deal, /createdAt: new Date\(\)\.toISOString\(\)/);
+    assert.match(deal, /itemCodeKey: normalizeHistoryItemCode/);
+});
