@@ -2346,6 +2346,33 @@ window.renderMyQuotesList = function() {
 };
 
 // 成交：標記估價單為已成交，並把裡面每一個品項匯入訂單管理系統（一次性動作，避免重複匯入）
+window.createForecastFromQuote = async function(quoteNo) {
+    if (!canEditPage('forecast')) { alert('您沒有 Forecast 編輯權限。'); return; }
+    try {
+        const cached = myQuotesCache.find(q => q.quoteNo === quoteNo) || allQuotesCache.find(q => q.quoteNo === quoteNo);
+        const q = cached || (await db.collection('quotes').doc(quoteNo).get()).data();
+        if (!q) throw new Error('找不到估價單');
+        const existing = await db.collection('forecasts').where('sourceType', '==', DOCUMENT_TYPES.QUOTE).where('sourceId', '==', quoteNo).limit(1).get();
+        if (!existing.empty) { alert('這張估價單已建立 Forecast。'); return; }
+        const now = new Date().toISOString();
+        const productName = (q.items || []).map(i => i.nameCn || i.nameEn || i.model).filter(Boolean).join('、');
+        const ref = db.collection('forecasts').doc();
+        const record = {
+            customerName: q.ordererName || q.clientName || '', productName,
+            estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g,'')) || 0,
+            latestProgress: '由估價單建立', status: q.dealClosed ? 'won' : 'active',
+            salesName: q.salesName || currentUserName || '', ownerUid: q.ownerUid || currentUser?.uid || '',
+            createdAt: now, updatedAt: now,
+            ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE, quoteNo, [documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')])
+        };
+        const batch = db.batch();
+        batch.set(ref, record);
+        batch.update(db.collection('quotes').doc(quoteNo), { linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), documentLink(DOCUMENT_TYPES.FORECAST, ref.id, 'created')]) });
+        await batch.commit();
+        alert('已從估價單建立 Forecast。');
+    } catch (err) { alert('建立 Forecast 失敗：' + err.message); }
+};
+
 window.markQuoteAsDeal = function(quoteNo) {
     if (!confirm(`確定要將估價單 ${quoteNo} 標記為成交嗎？裡面的品項會自動匯入訂單管理系統。`)) return;
 
