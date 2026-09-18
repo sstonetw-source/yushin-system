@@ -37,7 +37,7 @@ let priceList = [];
 let priceCatalogMeta = [];
 let priceItemLookup = new Map();
 let currentUser = null;      // 目前登入的 Firebase Auth 使用者物件
-let currentUserRole = null;  // 'admin' / 'sales' / 'purchaser' / 'engineer' —— 目前實際套用在畫面上的「有效身份」
+let currentUserRole = null;  // 'admin' / 'sales' / 'purchaser' / 'warehouse' / 'engineer' —— 目前實際套用在畫面上的「有效身份」
 let trueUserRole = null;     // 真正登入帳號的身份；只有這個是 admin，才能用下面的「檢視身份」切換功能
 let mustChangePassword = false;  // 管理員要求這個帳號下次登入必須先改密碼
 const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', warehouse: '倉管', engineer: '工程師' };
@@ -5773,10 +5773,10 @@ window.loadSalesStatistics = function() {
 
 async function loadInventoryAnalysisSupport(start, end) {
     const [movements, stocks] = await Promise.all([
-        db.collection('inventoryMovements').where('createdAt','>=',start+'T00:00:00').where('createdAt','<=',end+'T23:59:59').orderBy('createdAt','desc').limit(1000).get(),
+        db.collection('inventoryMovements').where('createdAt','>=',start+'T00:00:00').where('createdAt','<=',end+'T23:59:59').where('type','==','receipt').orderBy('createdAt','desc').limit(1000).get(),
         db.collection('inventory').orderBy('updatedAt','desc').limit(1000).get()
     ]);
-    inventoryAnalysisReceipts = movements.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.type==='receipt');
+    inventoryAnalysisReceipts = movements.docs.map(d=>({id:d.id,...d.data()}));
     inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
 }
 function inventoryAnalysisTotals(start,end) {
