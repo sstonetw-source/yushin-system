@@ -251,3 +251,14 @@ test('browser history restores internal pages without forcing Firestore reloads'
     const orderEnd = appSource.indexOf('\n};', orderStart) + 3;
     assert.match(appSource.slice(orderStart, orderEnd), /skipHistory/);
 });
+
+
+test('quote print pagination measures rendered rows and keeps rows/footer intact', () => {
+    assert.match(appSource, /function markQuotePrintPagination\(\)/);
+    assert.match(appSource, /getBoundingClientRect\(\)\.height/);
+    assert.match(appSource, /quote-print-page-break/);
+    assert.match(appSource, /markQuotePrintPagination\(\)/);
+    assert.match(cssSource, /#quoteItems tr\.quote-print-page-break/);
+    assert.match(cssSource, /thead \{ display: table-header-group; \}/);
+    assert.match(cssSource, /#printableQuote \.bottom-layout/);
+});
