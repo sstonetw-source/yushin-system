@@ -4341,6 +4341,7 @@ window.saveNewOrder = function() {
         customerName: document.getElementById('orderCustomer').value.trim(),
         brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
         itemCode: itemCode,
+        itemCodeKey: normalizeHistoryItemCode(itemCode),
         itemName: document.getElementById('orderItemName').value.trim(),
         productLine: '',
         productType: '',
