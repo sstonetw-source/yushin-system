@@ -770,3 +770,193 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     vertical-align: middle;
     padding: 4px 2px;
 }
+
+
+/* Forecast UI */
+.forecast-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.forecast-toolbar input,
+.forecast-toolbar select {
+    min-height: 36px;
+}
+#forecastSearch {
+    flex: 1 1 240px;
+    min-width: 220px;
+}
+.forecast-stage-details {
+    position: relative;
+}
+.forecast-stage-details > summary {
+    list-style: none;
+    cursor: pointer;
+    background: #666;
+    color: #fff;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-weight: 600;
+    user-select: none;
+}
+.forecast-stage-details > summary::-webkit-details-marker {
+    display: none;
+}
+.forecast-stage-details[open] > summary {
+    background: #003366;
+}
+.forecast-stage-details-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 2100;
+    width: min(460px, calc(100vw - 32px));
+    background: #fff;
+    border: 1px solid #d8dee8;
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.18);
+    padding: 12px 14px;
+    color: #222;
+}
+.forecast-stage-details-panel > div {
+    display: grid;
+    grid-template-columns: 76px 1fr;
+    gap: 8px;
+    padding: 5px 0;
+    line-height: 1.45;
+}
+.forecast-stage-details-panel strong {
+    color: #003366;
+}
+.forecast-stage-details-panel hr {
+    border: 0;
+    border-top: 1px solid #e5e5e5;
+    margin: 7px 0;
+}
+.forecast-modal,
+.forecast-progress-modal {
+    width: min(620px, 100%) !important;
+}
+.forecast-modal h3,
+.forecast-progress-modal h3 {
+    margin: 0 0 14px;
+    color: #003366;
+}
+.forecast-modal > label,
+.forecast-progress-modal > label {
+    margin-top: 12px !important;
+}
+.forecast-modal input,
+.forecast-modal select,
+.forecast-modal textarea,
+.forecast-progress-modal input,
+.forecast-progress-modal select,
+.forecast-progress-modal textarea {
+    width: 100%;
+    min-height: 38px;
+    padding: 8px 10px;
+    border: 1px solid #c9ced6;
+    border-radius: 5px;
+    box-sizing: border-box;
+    font: inherit;
+    background: #fff;
+}
+.forecast-modal textarea,
+.forecast-progress-modal textarea {
+    min-height: 88px;
+    resize: vertical;
+}
+.forecast-brand-field {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    margin-top: 4px;
+}
+.forecast-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+.forecast-form-grid > div > label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+.forecast-form-note {
+    margin-top: 5px;
+    color: #666;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.forecast-current-progress,
+.forecast-progress-summary {
+    margin-top: 5px;
+    padding: 10px 12px;
+    background: #f5f8fc;
+    border: 1px solid #dbe4ef;
+    border-radius: 6px;
+    line-height: 1.5;
+}
+.forecast-progress-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-bottom: 12px;
+}
+.forecast-row-lost {
+    background: #f1f1f1;
+    color: #666;
+}
+.forecast-row-won {
+    background: #f2faf4;
+}
+.forecast-status-badge,
+.forecast-stage-badge {
+    display: inline-block;
+    padding: 3px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.forecast-status-active {
+    background: #eef5ff;
+    color: #174a7e;
+}
+.forecast-status-won {
+    background: #e6f5ea;
+    color: #24713a;
+}
+.forecast-status-lost {
+    background: #e5e5e5;
+    color: #666;
+}
+.forecast-actions {
+    white-space: nowrap;
+}
+.forecast-actions button {
+    margin: 2px;
+}
+
+@media (max-width: 700px) {
+    .forecast-toolbar > * {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+    .forecast-form-grid {
+        grid-template-columns: 1fr;
+    }
+    .forecast-stage-details-panel {
+        position: fixed;
+        top: 86px;
+        left: 16px;
+        right: 16px;
+        width: auto;
+        max-height: calc(100vh - 110px);
+        overflow-y: auto;
+    }
+    #forecastTable {
+        min-width: 980px;
+    }
+}
