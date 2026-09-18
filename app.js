@@ -5557,7 +5557,7 @@ window.switchAdminTab = function(tab, el) {
 function renderRolePermissions() {
     const tbody = document.getElementById('rolePermissionsBody');
     if (!tbody) return;
-    const roles = ['sales', 'purchaser', 'engineer', 'admin'];
+    const roles = ['sales', 'purchaser', 'warehouse', 'engineer', 'admin'];
     tbody.innerHTML = PERMISSION_PAGES.map(page => {
         const cells = roles.map(role => {
             const value = getPagePermission(page.key, role);
@@ -5573,7 +5573,7 @@ function renderRolePermissions() {
 
     const scopeBody = document.getElementById('roleDataScopesBody');
     if (scopeBody) {
-        const roles = ['sales', 'purchaser', 'engineer', 'admin'];
+        const roles = ['sales', 'purchaser', 'warehouse', 'engineer', 'admin'];
         const types = [{ key:'quotes', label:'📄 估價單' }, { key:'orders', label:'📦 訂單' }];
         scopeBody.innerHTML = types.map(type => {
             const cells = roles.map(role => {
@@ -5592,17 +5592,17 @@ function renderRolePermissions() {
 window.saveRolePermissions = function() {
     if (trueUserRole !== 'admin') return;
     const next = JSON.parse(JSON.stringify(rolePermissions));
-    ['sales', 'purchaser', 'engineer'].forEach(role => { if (!next[role]) next[role] = {}; });
+    ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => { if (!next[role]) next[role] = {}; });
     document.querySelectorAll('#rolePermissionsBody .permission-select:not([disabled])').forEach(select => {
         next[select.dataset.role][select.dataset.page] = select.value;
     });
     const nextScopes = JSON.parse(JSON.stringify(roleDataScopes));
-    ['sales', 'purchaser', 'engineer'].forEach(role => { if (!nextScopes[role]) nextScopes[role] = {}; });
+    ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => { if (!nextScopes[role]) nextScopes[role] = {}; });
     document.querySelectorAll('#roleDataScopesBody .data-scope-select:not([disabled])').forEach(select => {
         nextScopes[select.dataset.role][select.dataset.type] = select.value;
     });
     // 主系統若禁止查看，其子分頁也一併禁止，避免留下無法進入的孤立設定。
-    ['sales', 'purchaser', 'engineer'].forEach(role => {
+    ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => {
         if (next[role].quote === 'none') { next[role]['quote.create'] = 'none'; next[role]['quote.my'] = 'none'; }
         if (next[role].orders === 'none') { next[role]['orders.list'] = 'none'; next[role]['orders.po'] = 'none'; }
     });
