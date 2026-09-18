@@ -2463,21 +2463,86 @@ window.markQuoteAsDeal = function(quoteNo) {
     });
 };
 
-window.unmarkQuoteAsDeal = function(quoteNo) {
-    if (!confirm(`確定要取消估價單 ${quoteNo} 的成交狀態嗎？這將會自動刪除訂單管理系統中對應的項目。`)) return;
+window.unmarkQuoteAsDeal = async function(quoteNo) {
+    if (!confirm(
+        `確定要取消估價單 ${quoteNo} 的成交狀態嗎？相關訂單將標記為取消並釋放已預留庫存，不會永久刪除。`
+    )) return;
 
-    db.collection('orders').where('quoteNo', '==', quoteNo).get().then(snapshot => {
-        const batch = db.batch();
-        snapshot.forEach(doc => {
-            const order = doc.data();
-            batch.update(doc.ref, {
-                status: 'cancelled',
-                cancelledAt: new Date().toISOString(),
-                cancelledBy: currentUserName || currentUser?.email || '',
-                cancelReason: '來源估價單取消成交',
-                linkedDocuments: normalizeDocumentLinks(order.linkedDocuments || [])
+    try {
+        const snapshot = await db.collection('orders')
+            .where('quoteNo', '==', quoteNo)
+            .get();
+
+        const actor = deliveryActor();
+        const cancelledAt = new Date().toISOString();
+        const cancelledDate = localDateString();
+
+        // 每筆來源訂單沿用正式的訂單生命週期與庫存釋放邏輯
+        for (const doc of snapshot.docs) {
+            await db.runTransaction(async transaction => {
+                const orderRef = db.collection('orders').doc(doc.id);
+                const orderSnap = await transaction.get(orderRef);
+
+                if (!orderSnap.exists) return;
+
+                const order = orderSnap.data();
+
+                // 已取消的訂單不重複釋放庫存
+                if (normalizedOrderStatus(order) === 'cancelled') return;
+
+                await adjustInventoryReservationForLifecycle(
+                    transaction,
+                    doc.id,
+                    order,
+                    'cancelled',
+                    actor
+                );
+
+                const history = {
+                    action: 'status_change',
+                    before: {
+                        status: normalizedOrderStatus(order),
+                        date: order.orderStatusDate || '',
+                        reason: order.orderStatusReason || ''
+                    },
+                    after: {
+                        status: 'cancelled',
+                        date: cancelledDate,
+                        reason: '來源估價單取消成交'
+                    },
+                    by: actor,
+                    at: cancelledAt
+                };
+
+                transaction.update(orderRef, {
+                    status: 'cancelled',
+                    orderStatus: 'cancelled',
+                    orderStatusDate: cancelledDate,
+                    orderStatusReason: '來源估價單取消成交',
+                    cancelledAt,
+                    cancelledBy: actor,
+                    cancelReason: '來源估價單取消成交',
+                    orderLifecycleHistory:
+                        firebase.firestore.FieldValue.arrayUnion(history),
+                    linkedDocuments:
+                        normalizeDocumentLinks(order.linkedDocuments || [])
+                });
             });
+        }
+
+        // 所有來源訂單處理完成後，才解除估價單成交狀態
+        await db.collection('quotes').doc(quoteNo).update({
+            dealClosed: false,
+            dealClosedAt: null
         });
+
+        alert('成交狀態已取消；相關訂單已保留並標記為取消，預留庫存已同步釋放。');
+        loadMyQuotesFromCloud();
+
+    } catch (err) {
+        alert('取消失敗：' + err.message);
+    }
+};
 
         const quoteRef = db.collection('quotes').doc(quoteNo);
         batch.update(quoteRef, { dealClosed: false, dealClosedAt: null });
