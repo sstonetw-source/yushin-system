@@ -718,149 +718,703 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
 }
 
 /* =========================================================
-   Forecast：輕量商機追蹤，不要求預計成交日期，也不直接異動庫存
+   Forecast：業務機會追蹤
+   - Stage 1~5
+   - 狀態：進行中 / Win / Lost
+   - 最新進度自動帶日期
+   - 完整進度歷史存於 forecasts/{id}/progress
+   - 不要求預計成交日期，也不直接異動庫存
    ========================================================= */
 let forecastCache = [];
 let forecastCursor = null;
 let forecastHasMore = true;
 let forecastLoading = false;
 let forecastSaveInProgress = false;
+let forecastProgressSaveInProgress = false;
 
 function forecastStatusLabel(status) {
-    return ({ active: '進行中', won: '已成交', lost: '未成交' })[status] || status || '進行中';
+    return ({ active: '進行中', won: 'Win', lost: 'Lost' })[status] || status || '進行中';
+}
+
+function forecastStageLabel(stage) {
+    return ({
+        stage1: 'Stage 1',
+        stage2: 'Stage 2',
+        stage3: 'Stage 3',
+        stage4: 'Stage 4',
+        stage5: 'Stage 5'
+    })[stage] || '未設定';
+}
+
+function forecastTodayLabel(date = new Date()) {
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${mm}/${dd}`;
+}
+
+function forecastNowIso() {
+    return new Date().toISOString();
+}
+
+function buildForecastProgressText(text, fallback = '立案') {
+    const content = String(text || '').trim() || fallback;
+    return `${forecastTodayLabel()} ${content}`;
+}
+
+function normalizeForecastBrand(value) {
+    const input = String(value || '').trim();
+    if (!input) return '';
+    const exact = getPriceListBrands(false).find(
+        brand => String(brand || '').trim().toLocaleLowerCase() === input.toLocaleLowerCase()
+    );
+    return exact || input;
+}
+
+function populateForecastBrandFilter() {
+    const select = document.getElementById('forecastBrandFilter');
+    if (!select) return;
+
+    const current = select.value;
+    const brands = new Map();
+
+    getPriceListBrands(false).forEach(brand => {
+        const key = String(brand || '').trim().toLocaleLowerCase();
+        if (key && !brands.has(key)) brands.set(key, brand);
+    });
+
+    forecastCache.forEach(item => {
+        const brand = normalizeForecastBrand(item.brand || '');
+        const key = brand.toLocaleLowerCase();
+        if (key && !brands.has(key)) brands.set(key, brand);
+    });
+
+    select.innerHTML = '<option value="">全部廠牌</option>';
+    [...brands.values()]
+        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+        .forEach(brand => {
+            const option = document.createElement('option');
+            option.value = brand;
+            option.textContent = brand;
+            select.appendChild(option);
+        });
+
+    if ([...select.options].some(option => option.value === current)) {
+        select.value = current;
+    }
+}
+
+function populateForecastSalesFilter() {
+    const select = document.getElementById('forecastSalesFilter');
+    if (!select) return;
+
+    const canSeeAll = canViewAllData('forecast');
+    if (!canSeeAll) {
+        const label = currentUserName || '我的 Forecast';
+        select.innerHTML = `<option value="${escapeAttr(currentUserName || '')}">${escapeHtml(label)}</option>`;
+        select.value = currentUserName || '';
+        select.disabled = true;
+        return;
+    }
+
+    const current = select.value;
+    const names = new Set();
+
+    salesList.forEach(person => {
+        const name = stripPhoneSuffix(person.name || '');
+        if (name) names.add(name);
+    });
+
+    forecastCache.forEach(item => {
+        const name = stripPhoneSuffix(item.salesName || '');
+        if (name) names.add(name);
+    });
+
+    select.disabled = false;
+    select.innerHTML = '<option value="">全部業務</option>';
+
+    [...names]
+        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+        .forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+        });
+
+    if ([...select.options].some(option => option.value === current)) {
+        select.value = current;
+    }
+}
+
+function populateForecastBrandDropdown(selectedBrand = '') {
+    const select = document.getElementById('forecastBrand');
+    if (!select) return;
+
+    const selected = normalizeForecastBrand(selectedBrand);
+    const brands = getPriceListBrands(false).slice();
+
+    if (
+        selected &&
+        !brands.some(brand => String(brand || '').trim().toLocaleLowerCase() === selected.toLocaleLowerCase())
+    ) {
+        brands.push(selected);
+    }
+
+    select.innerHTML = '<option value="">請選擇廠牌</option>';
+
+    dedupeBrandsCaseInsensitive(brands)
+        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+        .forEach(brand => {
+            const option = document.createElement('option');
+            option.value = brand;
+            option.textContent = brand;
+            select.appendChild(option);
+        });
+
+    select.value = selected || '';
 }
 
 window.loadForecasts = async function(reset = true) {
     if (forecastLoading || !canAccessPage('forecast')) return;
-    if (reset) { forecastCache = []; forecastCursor = null; forecastHasMore = true; }
+
+    if (reset) {
+        forecastCache = [];
+        forecastCursor = null;
+        forecastHasMore = true;
+    }
+
     if (!forecastHasMore) return;
+
     forecastLoading = true;
-    const btn = document.getElementById('forecastLoadMoreBtn');
-    if (btn) { btn.disabled = true; btn.innerText = '載入中…'; }
+    const button = document.getElementById('forecastLoadMoreBtn');
+
+    if (button) {
+        button.disabled = true;
+        button.innerText = '載入中…';
+    }
+
     try {
+        await Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]);
+
         const status = document.getElementById('forecastStatusFilter')?.value || 'active';
+
         let query = db.collection('forecasts').orderBy('updatedAt', 'desc');
-        if (status !== 'all') query = query.where('status', '==', status);
-        if (!canViewAllData('forecast')) query = query.where('ownerUid', '==', currentUser?.uid || '');
+
+        if (status !== 'all') {
+            query = query.where('status', '==', status);
+        }
+
+        if (!canViewAllData('forecast')) {
+            query = query.where('ownerUid', '==', currentUser?.uid || '');
+        }
+
         query = query.limit(DEFAULT_LIST_LIMIT);
-        if (forecastCursor) query = query.startAfter(forecastCursor);
+
+        if (forecastCursor) {
+            query = query.startAfter(forecastCursor);
+        }
+
         const snapshot = await query.get();
-        if (!snapshot.empty) forecastCursor = snapshot.docs[snapshot.docs.length - 1];
+
+        if (!snapshot.empty) {
+            forecastCursor = snapshot.docs[snapshot.docs.length - 1];
+        }
+
         const records = new Map(forecastCache.map(item => [item.id, item]));
         snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
-        forecastCache = [...records.values()].sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+
+        forecastCache = [...records.values()].sort(
+            (a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+        );
+
         forecastHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
+
+        populateForecastBrandFilter();
+        populateForecastSalesFilter();
         renderForecastList();
     } catch (err) {
         console.error('讀取 Forecast 失敗', err);
         alert('讀取 Forecast 失敗：' + err.message);
     } finally {
         forecastLoading = false;
-        if (btn) { btn.disabled = false; btn.innerText = '載入更多（每次 50 筆）'; btn.style.display = forecastHasMore ? '' : 'none'; }
+
+        if (button) {
+            button.disabled = false;
+            button.innerText = '載入更多（每次 50 筆）';
+            button.style.display = forecastHasMore ? '' : 'none';
+        }
     }
 };
 
 window.renderForecastList = function() {
     const body = document.getElementById('forecastListBody');
     if (!body) return;
+
     const keyword = (document.getElementById('forecastSearch')?.value || '').trim().toLocaleLowerCase();
+    const brandFilter = document.getElementById('forecastBrandFilter')?.value || '';
+    const salesFilter = document.getElementById('forecastSalesFilter')?.value || '';
+    const stageFilter = document.getElementById('forecastStageFilter')?.value || '';
+
     body.innerHTML = '';
     let shown = 0;
+
     forecastCache.forEach(item => {
-        const searchable = `${item.customerName || ''} ${item.productName || ''} ${item.latestProgress || ''} ${item.salesName || ''}`.toLocaleLowerCase();
+        const brand = normalizeForecastBrand(item.brand || '');
+        const salesName = stripPhoneSuffix(item.salesName || '');
+
+        const searchable = `
+            ${item.customerName || ''}
+            ${brand}
+            ${item.productName || ''}
+            ${item.latestProgress || ''}
+            ${salesName}
+            ${forecastStageLabel(item.stage)}
+            ${forecastStatusLabel(item.status)}
+        `.toLocaleLowerCase();
+
         if (keyword && !searchable.includes(keyword)) return;
+        if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
+        if (salesFilter && salesName !== salesFilter) return;
+        if (stageFilter && item.stage !== stageFilter) return;
+
         shown++;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeHtml(item.customerName || '')}</td><td>${escapeHtml(item.productName || '')}</td><td>${Number(item.estimatedAmount || 0).toLocaleString()}</td><td>${escapeHtml(item.latestProgress || '')}</td><td>${escapeHtml(forecastStatusLabel(item.status))}</td><td>${escapeHtml(stripPhoneSuffix(item.salesName || ''))}</td><td class="no-print"><button class="btn-small" onclick="openForecastModal('${escapeAttr(item.id)}')">編輯</button> <button class="btn-small btn-secondary" onclick="createQuoteFromForecast('${escapeAttr(item.id)}')">轉估價單</button> <button class="btn-small btn-secondary" onclick="createOrderFromForecast('${escapeAttr(item.id)}')">轉訂單</button></td>`;
-        body.appendChild(tr);
+
+        const row = document.createElement('tr');
+
+        if (item.status === 'lost') row.classList.add('forecast-row-lost');
+        if (item.status === 'won') row.classList.add('forecast-row-won');
+
+        const statusClass = item.status === 'won'
+            ? 'forecast-status-won'
+            : item.status === 'lost'
+                ? 'forecast-status-lost'
+                : 'forecast-status-active';
+
+        const actions = canEditPage('forecast') ? `
+            <button type="button" class="btn-small" onclick="openForecastProgressModal('${escapeAttr(item.id)}')">＋進度</button>
+            <button type="button" class="btn-small btn-secondary" onclick="openForecastModal('${escapeAttr(item.id)}')">編輯</button>
+            <button type="button" class="btn-small btn-secondary" onclick="createQuoteFromForecast('${escapeAttr(item.id)}')">轉估價</button>
+            <button type="button" class="btn-small btn-secondary" onclick="createOrderFromForecast('${escapeAttr(item.id)}')">轉訂單</button>
+        ` : '';
+
+        row.innerHTML = `
+            <td>${escapeHtml(item.customerName || '')}</td>
+            <td>${escapeHtml(brand || '')}</td>
+            <td>${escapeHtml(item.productName || '')}</td>
+            <td>${Number(item.estimatedAmount || 0).toLocaleString()}</td>
+            <td><span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span></td>
+            <td><span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span></td>
+            <td class="forecast-progress-cell">${escapeHtml(item.latestProgress || '')}</td>
+            <td>${escapeHtml(salesName)}</td>
+            <td class="no-print forecast-actions">${actions}</td>
+        `;
+
+        body.appendChild(row);
     });
+
     const hint = document.getElementById('forecastEmptyHint');
     if (hint) hint.style.display = shown ? 'none' : 'block';
 };
 
 window.openForecastModal = function(id = '') {
     if (!canEditPage('forecast')) return;
-    const item = id ? forecastCache.find(x => x.id === id) : null;
+
+    const item = id ? forecastCache.find(entry => entry.id === id) : null;
+
     document.getElementById('forecastId').value = item?.id || '';
     document.getElementById('forecastCustomer').value = item?.customerName || '';
+    populateForecastBrandDropdown(item?.brand || '');
     document.getElementById('forecastProduct').value = item?.productName || '';
     document.getElementById('forecastAmount').value = item?.estimatedAmount || '';
-    document.getElementById('forecastProgress').value = item?.latestProgress || '';
+    document.getElementById('forecastStage').value = item?.stage || 'stage1';
     document.getElementById('forecastStatus').value = item?.status || 'active';
+
+    const newProgressSection = document.getElementById('forecastNewProgressSection');
+    const currentProgressSection = document.getElementById('forecastCurrentProgressSection');
+    const progressInput = document.getElementById('forecastProgress');
+    const currentProgress = document.getElementById('forecastCurrentProgress');
+
+    if (item) {
+        if (newProgressSection) newProgressSection.style.display = 'none';
+        if (currentProgressSection) currentProgressSection.style.display = '';
+        if (currentProgress) currentProgress.textContent = item.latestProgress || '尚無進度';
+        if (progressInput) progressInput.value = '';
+    } else {
+        if (newProgressSection) newProgressSection.style.display = '';
+        if (currentProgressSection) currentProgressSection.style.display = 'none';
+        if (progressInput) progressInput.value = '';
+    }
+
     document.getElementById('forecastModalTitle').innerText = item ? '編輯 Forecast' : '新增 Forecast';
     document.getElementById('forecastModalOverlay').classList.add('active');
 };
-window.closeForecastModal = () => document.getElementById('forecastModalOverlay').classList.remove('active');
+
+window.closeForecastModal = function() {
+    document.getElementById('forecastModalOverlay')?.classList.remove('active');
+};
 
 window.saveForecast = async function() {
     if (forecastSaveInProgress || !canEditPage('forecast')) return;
+
     const id = document.getElementById('forecastId').value;
-    const existing = id ? forecastCache.find(x => x.id === id) : null;
+    const existing = id ? forecastCache.find(item => item.id === id) : null;
+
     const customerName = document.getElementById('forecastCustomer').value.trim();
+    const brand = normalizeForecastBrand(document.getElementById('forecastBrand').value);
     const productName = document.getElementById('forecastProduct').value.trim();
-    if (!customerName || !productName) { alert('請填寫客戶名稱與產品／品項。'); return; }
-    const now = new Date().toISOString();
-    const record = {
-        customerName, productName,
-        estimatedAmount: Number(document.getElementById('forecastAmount').value) || 0,
-        latestProgress: document.getElementById('forecastProgress').value.trim(),
-        status: document.getElementById('forecastStatus').value || 'active',
-        salesName: existing?.salesName || currentUserName || '',
-        ownerUid: existing?.ownerUid || currentUser?.uid || '',
-        productId: existing?.productId || '',
-        createdAt: existing?.createdAt || now, updatedAt: now,
-        ...linkedDocumentFields(existing?.sourceType || '', existing?.sourceId || '', existing?.linkedDocuments || [])
-    };
+
+    if (!customerName) {
+        alert('請填寫客戶名稱。');
+        return;
+    }
+
+    if (!brand) {
+        alert('請選擇廠牌。');
+        return;
+    }
+
+    if (!productName) {
+        alert('請填寫產品／品項。');
+        return;
+    }
+
+    let stage = document.getElementById('forecastStage').value || 'stage1';
+    const status = document.getElementById('forecastStatus').value || 'active';
+
+    if (status === 'won') {
+        stage = 'stage5';
+    }
+
+    const now = forecastNowIso();
+    const estimatedAmount = Number(document.getElementById('forecastAmount').value) || 0;
+
     forecastSaveInProgress = true;
-    const btn = document.getElementById('saveForecastBtn'); if (btn) { btn.disabled = true; btn.innerText = '儲存中…'; }
+    const button = document.getElementById('saveForecastBtn');
+
+    if (button) {
+        button.disabled = true;
+        button.innerText = '儲存中…';
+    }
+
     try {
         const ref = id ? db.collection('forecasts').doc(id) : db.collection('forecasts').doc();
-        await ref.set(record, { merge: true });
-        const saved = { id: ref.id, ...record };
-        forecastCache = [saved, ...forecastCache.filter(x => x.id !== ref.id)].sort((a,b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-        closeForecastModal(); renderForecastList();
-    } catch (err) { alert('Forecast 儲存失敗：' + err.message); }
-    finally { forecastSaveInProgress = false; if (btn) { btn.disabled = false; btn.innerText = '儲存'; } }
+
+        if (!existing) {
+            const rawProgress = document.getElementById('forecastProgress').value.trim();
+            const latestProgress = buildForecastProgressText(rawProgress, '立案');
+
+            const record = {
+                customerName,
+                brand,
+                productName,
+                estimatedAmount,
+                stage,
+                status,
+                latestProgress,
+                latestProgressAt: now,
+                salesName: currentUserName || '',
+                ownerUid: currentUser?.uid || '',
+                productId: '',
+                createdAt: now,
+                updatedAt: now,
+                ...linkedDocumentFields('', '', [])
+            };
+
+            const batch = db.batch();
+            batch.set(ref, record);
+
+            batch.set(ref.collection('progress').doc(), {
+                text: rawProgress || '立案',
+                displayText: latestProgress,
+                stage,
+                status,
+                createdAt: now,
+                createdByUid: currentUser?.uid || '',
+                createdByName: currentUserName || ''
+            });
+
+            await batch.commit();
+
+            forecastCache = [{ id: ref.id, ...record }, ...forecastCache];
+        } else {
+            const oldStage = existing.stage || '';
+            const oldStatus = existing.status || 'active';
+
+            const updateData = {
+                customerName,
+                brand,
+                productName,
+                estimatedAmount,
+                stage,
+                status,
+                updatedAt: now
+            };
+
+            const batch = db.batch();
+            batch.set(ref, updateData, { merge: true });
+
+            if (oldStage !== stage || oldStatus !== status) {
+                const changes = [];
+
+                if (oldStage !== stage) {
+                    changes.push(`${forecastStageLabel(oldStage)} → ${forecastStageLabel(stage)}`);
+                }
+
+                if (oldStatus !== status) {
+                    changes.push(`${forecastStatusLabel(oldStatus)} → ${forecastStatusLabel(status)}`);
+                }
+
+                batch.set(ref.collection('progress').doc(), {
+                    text: `基本資料更新：${changes.join('；')}`,
+                    displayText: `${forecastTodayLabel()} 基本資料更新：${changes.join('；')}`,
+                    stage,
+                    status,
+                    isSystemEntry: true,
+                    createdAt: now,
+                    createdByUid: currentUser?.uid || '',
+                    createdByName: currentUserName || ''
+                });
+            }
+
+            await batch.commit();
+
+            forecastCache = [
+                { ...existing, ...updateData },
+                ...forecastCache.filter(item => item.id !== id)
+            ];
+        }
+
+        forecastCache.sort(
+            (a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+        );
+
+        closeForecastModal();
+        populateForecastBrandFilter();
+        populateForecastSalesFilter();
+        renderForecastList();
+    } catch (err) {
+        console.error('Forecast 儲存失敗', err);
+        alert('Forecast 儲存失敗：' + err.message);
+    } finally {
+        forecastSaveInProgress = false;
+
+        if (button) {
+            button.disabled = false;
+            button.innerText = '儲存';
+        }
+    }
+};
+
+window.openForecastProgressModal = function(id) {
+    if (!canEditPage('forecast')) return;
+
+    const item = forecastCache.find(entry => entry.id === id);
+    if (!item) return;
+
+    document.getElementById('forecastProgressId').value = item.id;
+    document.getElementById('forecastProgressText').value = '';
+    document.getElementById('forecastProgressStage').value = item.stage || 'stage1';
+    document.getElementById('forecastProgressStatus').value = item.status || 'active';
+
+    const summary = document.getElementById('forecastProgressSummary');
+    if (summary) {
+        summary.innerHTML = `
+            <strong>${escapeHtml(item.customerName || '')}</strong>
+            <span>${escapeHtml(item.brand || '')}</span>
+            <span>${escapeHtml(item.productName || '')}</span>
+            <div style="margin-top:6px;color:#666;">
+                目前：${escapeHtml(forecastStageLabel(item.stage))} ／ ${escapeHtml(forecastStatusLabel(item.status))}
+            </div>
+        `;
+    }
+
+    document.getElementById('forecastProgressOverlay').classList.add('active');
+
+    setTimeout(() => {
+        document.getElementById('forecastProgressText')?.focus();
+    }, 0);
+};
+
+window.closeForecastProgressModal = function() {
+    document.getElementById('forecastProgressOverlay')?.classList.remove('active');
+};
+
+window.saveForecastProgress = async function() {
+    if (forecastProgressSaveInProgress || !canEditPage('forecast')) return;
+
+    const id = document.getElementById('forecastProgressId').value;
+    const item = forecastCache.find(entry => entry.id === id);
+
+    if (!item) {
+        alert('找不到這筆 Forecast。');
+        return;
+    }
+
+    const progressText = document.getElementById('forecastProgressText').value.trim();
+
+    if (!progressText) {
+        alert('請輸入最新進度。');
+        return;
+    }
+
+    let stage = document.getElementById('forecastProgressStage').value || item.stage || 'stage1';
+    const status = document.getElementById('forecastProgressStatus').value || item.status || 'active';
+
+    if (status === 'won') {
+        stage = 'stage5';
+    }
+
+    const now = forecastNowIso();
+    const displayText = buildForecastProgressText(progressText);
+
+    forecastProgressSaveInProgress = true;
+    const button = document.getElementById('saveForecastProgressBtn');
+
+    if (button) {
+        button.disabled = true;
+        button.innerText = '儲存中…';
+    }
+
+    try {
+        const forecastRef = db.collection('forecasts').doc(id);
+        const progressRef = forecastRef.collection('progress').doc();
+        const batch = db.batch();
+
+        batch.update(forecastRef, {
+            latestProgress: displayText,
+            latestProgressAt: now,
+            stage,
+            status,
+            updatedAt: now
+        });
+
+        batch.set(progressRef, {
+            text: progressText,
+            displayText,
+            previousStage: item.stage || '',
+            stage,
+            previousStatus: item.status || 'active',
+            status,
+            createdAt: now,
+            createdByUid: currentUser?.uid || '',
+            createdByName: currentUserName || ''
+        });
+
+        await batch.commit();
+
+        Object.assign(item, {
+            latestProgress: displayText,
+            latestProgressAt: now,
+            stage,
+            status,
+            updatedAt: now
+        });
+
+        forecastCache.sort(
+            (a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+        );
+
+        closeForecastProgressModal();
+        populateForecastBrandFilter();
+        populateForecastSalesFilter();
+        renderForecastList();
+    } catch (err) {
+        console.error('Forecast 進度更新失敗', err);
+        alert('Forecast 進度更新失敗：' + err.message);
+    } finally {
+        forecastProgressSaveInProgress = false;
+
+        if (button) {
+            button.disabled = false;
+            button.innerText = '儲存進度';
+        }
+    }
+};
+
+window.openForecastStageInfo = function() {
+    document.getElementById('forecastStageInfoOverlay')?.classList.add('active');
+};
+
+window.closeForecastStageInfo = function() {
+    document.getElementById('forecastStageInfoOverlay')?.classList.remove('active');
 };
 
 function forecastProductMatch(item) {
     const key = String(item.productName || '').trim().toLocaleLowerCase();
-    return priceList.find(p => [p.model,p.nameCn,p.nameEn].some(v => String(v || '').trim().toLocaleLowerCase() === key)) || null;
+
+    return priceList.find(product =>
+        [product.model, product.nameCn, product.nameEn].some(
+            value => String(value || '').trim().toLocaleLowerCase() === key
+        )
+    ) || null;
 }
 
 window.createQuoteFromForecast = function(id) {
-    const f = forecastCache.find(x => x.id === id); if (!f) return;
-    const match = forecastProductMatch(f);
+    const forecast = forecastCache.find(item => item.id === id);
+    if (!forecast) return;
+
+    const match = forecastProductMatch(forecast);
+
     actuallySwitchMainTab('quote-system', null, { preserveSubView: false });
-    document.getElementById('clientName').value = f.customerName || '';
-    document.getElementById('ordererName').value = f.customerName || '';
-    const row = document.querySelector('#quoteItems tr') || addQuoteRow();
+
+    document.getElementById('clientName').value = forecast.customerName || '';
+    document.getElementById('ordererName').value = forecast.customerName || '';
+
+    if (!document.querySelector('#quoteItems tr')) {
+        addQuoteRow();
+    }
+
     const target = document.querySelector('#quoteItems tr');
+
     if (target) {
-        target.querySelector('.item-cn').value = match?.nameCn || f.productName || '';
+        target.querySelector('.item-cn').value = match?.nameCn || forecast.productName || '';
         target.querySelector('.item-en').value = match?.nameEn || '';
         target.querySelector('.item-model').value = match?.model || '';
-        target.querySelector('.item-product-id').value = match?.productId || f.productId || '';
-        target.querySelector('.item-brand').value = match?.brand || '';
+        target.querySelector('.item-product-id').value = match?.productId || forecast.productId || '';
+
+        const brandSelect = target.querySelector('.item-brand');
+        const forecastBrand = normalizeForecastBrand(forecast.brand || match?.brand || '');
+
+        if (brandSelect && forecastBrand) {
+            selectBrandInDropdown(brandSelect, forecastBrand);
+            onQuoteBrandSelectChange(brandSelect);
+        }
+
         target.querySelector('.item-product-line').value = match?.productLine || '';
         target.querySelector('.item-product-type').value = match?.productType || '';
         target.querySelector('.item-spec').value = match?.spec || '';
-        if (match?.price) target.querySelector('.inc-price').value = match.price;
+
+        if (match?.price) {
+            target.querySelector('.inc-price').value = match.price;
+        }
+
         calculateTotals();
     }
-    window._pendingForecastQuoteLink = { forecastId: f.id };
+
+    window._pendingForecastQuoteLink = { forecastId: forecast.id };
 };
 
 window.createOrderFromForecast = function(id) {
-    const f = forecastCache.find(x => x.id === id); if (!f) return;
-    const match = forecastProductMatch(f);
+    const forecast = forecastCache.find(item => item.id === id);
+    if (!forecast) return;
+
+    const match = forecastProductMatch(forecast);
+
     openOrderModal({
-        customerName: f.customerName, itemName: match?.nameCn || f.productName, itemCode: match?.model || '',
-        brand: match?.brand || '', unitPrice: match?.price || '', totalPrice: match?.price || '',
-        sourceType: DOCUMENT_TYPES.FORECAST, sourceId: f.id, productId: match?.productId || f.productId || ''
+        customerName: forecast.customerName || '',
+        itemName: match?.nameCn || forecast.productName || '',
+        itemCode: match?.model || '',
+        brand: normalizeForecastBrand(forecast.brand || match?.brand || ''),
+        unitPrice: match?.price || '',
+        totalPrice: match?.price || '',
+        sourceType: DOCUMENT_TYPES.FORECAST,
+        sourceId: forecast.id,
+        productId: match?.productId || forecast.productId || ''
     });
-    window._pendingForecastOrderLink = { forecastId: f.id };
+
+    window._pendingForecastOrderLink = { forecastId: forecast.id };
 };
+
 
 /* =========================================================
    估價單系統
@@ -2363,30 +2917,97 @@ window.renderMyQuotesList = function() {
 
 // 成交：標記估價單為已成交，並把裡面每一個品項匯入訂單管理系統（一次性動作，避免重複匯入）
 window.createForecastFromQuote = async function(quoteNo) {
-    if (!canEditPage('forecast')) { alert('您沒有 Forecast 編輯權限。'); return; }
+    if (!canEditPage('forecast')) {
+        alert('您沒有 Forecast 編輯權限。');
+        return;
+    }
+
     try {
         const cached = myQuotesCache.find(q => q.quoteNo === quoteNo) || allQuotesCache.find(q => q.quoteNo === quoteNo);
         const q = cached || (await db.collection('quotes').doc(quoteNo).get()).data();
-        if (!q) throw new Error('找不到估價單');
-        const existing = await db.collection('forecasts').where('sourceType', '==', DOCUMENT_TYPES.QUOTE).where('sourceId', '==', quoteNo).limit(1).get();
-        if (!existing.empty) { alert('這張估價單已建立 Forecast。'); return; }
-        const now = new Date().toISOString();
-        const productName = (q.items || []).map(i => i.nameCn || i.nameEn || i.model).filter(Boolean).join('、');
+
+        if (!q) {
+            throw new Error('找不到估價單');
+        }
+
+        const existing = await db.collection('forecasts')
+            .where('sourceType', '==', DOCUMENT_TYPES.QUOTE)
+            .where('sourceId', '==', quoteNo)
+            .limit(1)
+            .get();
+
+        if (!existing.empty) {
+            alert('這張估價單已建立 Forecast。');
+            return;
+        }
+
+        const now = forecastNowIso();
+        const items = q.items || [];
+
+        const productName = items
+            .map(item => item.nameCn || item.nameEn || item.model)
+            .filter(Boolean)
+            .join('、');
+
+        const brands = dedupeBrandsCaseInsensitive(
+            items.map(item => item.brand).filter(Boolean)
+        );
+
+        const brand = brands.length === 1 ? brands[0] : brands.join(' / ');
+        const status = q.dealClosed ? 'won' : 'active';
+        const stage = q.dealClosed ? 'stage5' : 'stage2';
+        const displayProgress = `${forecastTodayLabel()} 由估價單建立`;
+
         const ref = db.collection('forecasts').doc();
+
         const record = {
-            customerName: q.ordererName || q.clientName || '', productName,
-            estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g,'')) || 0,
-            latestProgress: '由估價單建立', status: q.dealClosed ? 'won' : 'active',
-            salesName: q.salesName || currentUserName || '', ownerUid: q.ownerUid || currentUser?.uid || '',
-            createdAt: now, updatedAt: now,
-            ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE, quoteNo, [documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')])
+            customerName: q.ordererName || q.clientName || '',
+            brand,
+            productName,
+            estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g, '')) || 0,
+            stage,
+            status,
+            latestProgress: displayProgress,
+            latestProgressAt: now,
+            salesName: q.salesName || currentUserName || '',
+            ownerUid: q.ownerUid || currentUser?.uid || '',
+            createdAt: now,
+            updatedAt: now,
+            ...linkedDocumentFields(
+                DOCUMENT_TYPES.QUOTE,
+                quoteNo,
+                [documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')]
+            )
         };
+
         const batch = db.batch();
+
         batch.set(ref, record);
-        batch.update(db.collection('quotes').doc(quoteNo), { linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), documentLink(DOCUMENT_TYPES.FORECAST, ref.id, 'created')]) });
+
+        batch.set(ref.collection('progress').doc(), {
+            text: '由估價單建立',
+            displayText: displayProgress,
+            stage,
+            status,
+            createdAt: now,
+            createdByUid: currentUser?.uid || '',
+            createdByName: currentUserName || ''
+        });
+
+        batch.update(db.collection('quotes').doc(quoteNo), {
+            linkedDocuments: normalizeDocumentLinks([
+                ...(q.linkedDocuments || []),
+                documentLink(DOCUMENT_TYPES.FORECAST, ref.id, 'created')
+            ])
+        });
+
         await batch.commit();
+
         alert('已從估價單建立 Forecast。');
-    } catch (err) { alert('建立 Forecast 失敗：' + err.message); }
+    } catch (err) {
+        console.error('建立 Forecast 失敗', err);
+        alert('建立 Forecast 失敗：' + err.message);
+    }
 };
 
 window.markQuoteAsDeal = function(quoteNo) {
