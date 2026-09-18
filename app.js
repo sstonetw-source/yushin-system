@@ -4007,6 +4007,23 @@ function renderOrderStatusHistory(order) {
     tbody.innerHTML = entries.length ? entries.map(item => `<tr><td>${escapeHtml(formatOrderStatusTime(item.at))}</td><td>${escapeHtml(item.action || '')}</td><td>${escapeHtml(item.by || '')}</td><td>${escapeHtml(item.detail || '')}</td></tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚無操作紀錄。</td></tr>';
 }
 
+function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
+    const invRef = inventoryRefFor(order);
+    if (!invRef || deliveryQty <= 0) return Promise.resolve(null);
+    return transaction.get(invRef).then(invSnap => {
+        const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : {});
+        const reservedForOrder = Number(order.inventoryReservedQty || 0);
+        const alreadyDelivered = deliveredQuantity(order);
+        const reservedRemaining = Math.max(0, reservedForOrder - alreadyDelivered);
+        const fromReserved = Math.min(deliveryQty, reservedRemaining);
+        if (stock.onHand < deliveryQty) throw new Error(`庫存不足：現有 ${stock.onHand}，本次需出貨 ${deliveryQty}。`);
+        transaction.set(invRef, { onHand: stock.onHand - deliveryQty, reserved: Math.max(0, stock.reserved - fromReserved), incoming: stock.incoming, updatedAt: new Date().toISOString() }, { merge: true });
+        const movement = db.collection('inventoryMovements').doc();
+        transaction.set(movement, inventoryMovementRecord('ship', -deliveryQty, sourceId, inventoryProductKey(order), actor, { reservedReleasedQty: fromReserved }));
+        return { fromReserved };
+    });
+}
+
 window.quickCompleteDelivery = async function(orderIdOverride) {
     const orderId = orderIdOverride || currentDeliveryOrderId;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
@@ -4054,6 +4071,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             const statusEntries = [];
             if (!order.isOrdered) statusEntries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: now });
             if (!order.isArrived) statusEntries.push({ field: 'isArrived', value: true, label: '已到貨', by: actor, at: now });
+            await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
             const updates = {
                 deliveryRecords: records, deliveredQty: total, isDelivered: true,
                 isOrdered: true, isArrived: true,
@@ -4240,6 +4258,7 @@ window.saveDeliveryRecord = async function() {
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
             const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            if (action === 'create') await applyInventoryDeliveryInTransaction(transaction, ref, order, qty, actor, orderId);
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
