@@ -2543,18 +2543,6 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
         alert('取消失敗：' + err.message);
     }
 };
-
-        const quoteRef = db.collection('quotes').doc(quoteNo);
-        batch.update(quoteRef, { dealClosed: false, dealClosedAt: null });
-
-        return batch.commit();
-    }).then(() => {
-        alert('成交狀態已取消；已建立的來源訂單保留追蹤紀錄並標記為取消。');
-        loadMyQuotesFromCloud();
-    }).catch(err => {
-        alert('取消失敗：' + err.message);
-    });
-};
 /* =========================================================
    訂單管理系統
    ========================================================= */
