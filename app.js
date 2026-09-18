@@ -2277,14 +2277,23 @@ window.unmarkQuoteAsDeal = function(quoteNo) {
 
     db.collection('orders').where('quoteNo', '==', quoteNo).get().then(snapshot => {
         const batch = db.batch();
-        snapshot.forEach(doc => batch.delete(doc.ref)); // 刪除訂單
+        snapshot.forEach(doc => {
+            const order = doc.data();
+            batch.update(doc.ref, {
+                status: 'cancelled',
+                cancelledAt: new Date().toISOString(),
+                cancelledBy: currentUserName || currentUser?.email || '',
+                cancelReason: '來源估價單取消成交',
+                linkedDocuments: normalizeDocumentLinks(order.linkedDocuments || [])
+            });
+        });
 
         const quoteRef = db.collection('quotes').doc(quoteNo);
         batch.update(quoteRef, { dealClosed: false, dealClosedAt: null });
 
         return batch.commit();
     }).then(() => {
-        alert('成交狀態已取消。');
+        alert('成交狀態已取消；已建立的來源訂單保留追蹤紀錄並標記為取消。');
         loadMyQuotesFromCloud();
     }).catch(err => {
         alert('取消失敗：' + err.message);
@@ -2342,6 +2351,25 @@ function linkedDocumentFields(sourceType = '', sourceId = '', links = []) {
         sourceId: String(sourceId || ''),
         linkedDocuments: normalizeDocumentLinks(links)
     };
+}
+
+
+function legacyDocumentLinks(record, type) {
+    const links = [...(record?.linkedDocuments || [])];
+    if (type === DOCUMENT_TYPES.ORDER) {
+        if (record?.quoteNo) links.push(documentLink(DOCUMENT_TYPES.QUOTE, record.quoteNo, 'source'));
+        if (record?.purchaseOrderNo) links.push(documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, record.purchaseOrderNo, 'created'));
+    }
+    if (type === DOCUMENT_TYPES.PURCHASE_ORDER) {
+        purchaseItemsFromSavedPo(record).forEach(item => {
+            if (item.orderId) links.push(documentLink(DOCUMENT_TYPES.ORDER, item.orderId, 'source'));
+        });
+    }
+    return normalizeDocumentLinks(links);
+}
+
+function documentLinksFor(record, type) {
+    return legacyDocumentLinks(record || {}, type);
 }
 
 function compareBusinessRecordsNewestFirst(a, b, dateField, numberField) {
@@ -3005,6 +3033,7 @@ function purchaseItemsFromSavedPo(po) {
         orderItemIndex: item.orderItemIndex ?? index,
         itemName: item.itemName || item.productName || item.name || item.nameCn || '',
         itemCode: item.itemCode || item.productCode || item.code || item.model || '',
+        productId: item.productId || '',
         brand: item.brand || item.manufacturer || '',
         qty: parseFloat(item.qty ?? item.quantity ?? item.count) || 1,
         unit: item.unit || '',
