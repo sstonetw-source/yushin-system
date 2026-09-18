@@ -487,3 +487,13 @@ test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustme
 
 
 test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(appSource,/warehouse: '倉管'/);assert.match(appSource,/key: 'inventory'/);});
+
+
+test('phase 9 analysis separates actual receipts sales stock value incoming and purchase-sales difference',()=>{
+ assert.match(appSource,/function inventoryAnalysisTotals\(start,end\)/);
+ assert.match(appSource,/filter\(x=>x\.type==='receipt'\)/);
+ assert.match(appSource,/difference:sales-purchase/);
+ assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
+ assert.match(appSource,/limit\(1000\)/);
+});
+test('phase 8 permission editor includes warehouse role',()=>{assert.match(appSource,/\['sales', 'purchaser', 'warehouse', 'engineer', 'admin'\]/);});
