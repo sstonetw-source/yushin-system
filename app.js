@@ -6452,6 +6452,29 @@ async function savePriceBrandList(imported, brand) {
     return storedBrand;
 }
 
+let pendingPriceImportPreview = null;
+
+function summarizeProductMasterImport(groups) {
+    const existingById = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
+    let added = 0, updated = 0, inactive = 0;
+    const brands = groups.map(group => {
+        let brandAdded = 0, brandUpdated = 0;
+        group.imported.forEach(raw => {
+            const item = normalizeProductMasterItem(raw);
+            if (existingById.has(item.productId)) { updated++; brandUpdated++; } else { added++; brandAdded++; }
+            if (!item.active) inactive++;
+        });
+        return { brand: group.brand, count: group.imported.length, added: brandAdded, updated: brandUpdated };
+    });
+    return { added, updated, inactive, total: added + updated, brands };
+}
+
+function confirmProductMasterImport(groups) {
+    const summary = summarizeProductMasterImport(groups);
+    const lines = summary.brands.map(item => `${item.brand}：${item.count} 筆（新增 ${item.added}／更新 ${item.updated}）`);
+    return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n同廠牌會以本次 Excel 內容更新；歷史估價單與訂單保存的是當時快照，不會被改寫。確定寫入雲端嗎？`);
+}
+
 window.handlePriceExcelUpload = async function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -6534,6 +6557,12 @@ window.handlePriceExcelUpload = async function(input) {
             if (!brandGroups.length) {
                 setPriceUploadProgress(0, '找不到可上傳的價格資料。');
                 alert('無法從 Excel 辨識出有效的價格資料。請確認每個工作表的名稱就是廠牌名稱，且內容包含品名或貨號等欄位。');
+                input.value = '';
+                return;
+            }
+
+            if (!confirmProductMasterImport(brandGroups)) {
+                setPriceUploadProgress(0, '已取消，尚未寫入雲端。', false);
                 input.value = '';
                 return;
             }
