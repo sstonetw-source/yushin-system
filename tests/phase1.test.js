@@ -5,10 +5,11 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
 
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
-    const end = appSource.indexOf('\n}\n\nwindow.openPurchaseOrderModal', start) + 2;
+    const end = appSource.indexOf('\n}\n\nfunction bestPurchaseOrderCompany', start) + 2;
     assert.ok(start >= 0 && end > start, 'purchaseItemsFromOrder must exist');
     const context = {
         priceItemLookup: new Map([
@@ -145,7 +146,7 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
 
 test('purchase modal chooses a company that does not silently filter every item', () => {
     const start = appSource.indexOf('function bestPurchaseOrderCompany(');
-    const end = appSource.indexOf('\n}\n\nwindow.openPurchaseOrderModal', start) + 2;
+    const end = appSource.indexOf('\n}\n\nwindow.openDirectStockPurchase', start) + 2;
     assert.ok(start >= 0 && end > start);
     const context = {
         isCompanyBrandAllowed: (company, brand) => ({
@@ -221,4 +222,288 @@ test('failed billing write restores the previous state and unlocks the button', 
     assert.equal(context.activeOrderWorkFilter, 'billing');
     assert.equal(context.pendingOrderStatusKeys.has('o2:isBilled'), false);
     assert.match(alertMessage, /已還原/);
+});
+
+
+test('quote and order lists use global business-date ordering across companies', () => {
+    assert.match(appSource, /collection\('quotes'\)\.orderBy\('quoteDate', 'desc'\)/);
+    assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'quoteDate', 'quoteNo'\)/);
+    assert.match(appSource, /collection\('orders'\)\.orderBy\('orderDate', 'desc'\)/);
+    assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'orderDate', 'id'\)/);
+    const compareStart = appSource.indexOf('function compareBusinessRecordsNewestFirst');
+    const compareEnd = appSource.indexOf('\n}', compareStart) + 2;
+    const comparator = appSource.slice(compareStart, compareEnd);
+    assert.doesNotMatch(comparator, /company/);
+});
+
+
+test('full-history order item-code search stays indexed and paginated', () => {
+    assert.match(appSource, /where\('itemCodeKey', '==', keyword\)/);
+    assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(appSource, /startAfter\(orderHistorySearchCursor\)/);
+    assert.match(appSource, /itemCodeKey: normalizeHistoryItemCode/);
+    const searchStart = appSource.indexOf('async function runOrderHistoryItemCodeSearch');
+    const searchEnd = appSource.indexOf('\n}\n\nwindow.searchAllOrderHistory', searchStart) + 2;
+    const searchSource = appSource.slice(searchStart, searchEnd);
+    assert.doesNotMatch(searchSource, /collection\('orders'\)\.get\(\)/);
+    assert.doesNotMatch(searchSource, /while\s*\(/);
+});
+
+test('browser history restores internal pages without forcing Firestore reloads', () => {
+    assert.match(appSource, /history\.pushState/);
+    assert.match(appSource, /addEventListener\('popstate'/);
+    assert.match(appSource, /skipReload: true/);
+    assert.match(appSource, /window\.scrollTo/);
+    const mainStart = appSource.indexOf('window.switchMainTab =');
+    const mainEnd = appSource.indexOf('// 「檢視身份」切換', mainStart);
+    assert.match(appSource.slice(mainStart, mainEnd), /pushAppNavigationState/);
+    const quoteStart = appSource.indexOf('window.switchQuoteView =');
+    const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
+    assert.match(appSource.slice(quoteStart, quoteEnd), /skipHistory/);
+    const orderStart = appSource.indexOf('window.switchOrderView =');
+    const orderEnd = appSource.indexOf('\n};', orderStart) + 3;
+    assert.match(appSource.slice(orderStart, orderEnd), /skipHistory/);
+});
+
+
+test('quote print pagination measures rendered rows and keeps rows/footer intact', () => {
+    assert.match(appSource, /function markQuotePrintPagination\(\)/);
+    assert.match(appSource, /getBoundingClientRect\(\)\.height/);
+    assert.match(appSource, /quote-print-page-break/);
+    assert.match(appSource, /markQuotePrintPagination\(\)/);
+    assert.match(cssSource, /#quoteItems tr\.quote-print-page-break/);
+    assert.match(cssSource, /thead \{ display: table-header-group; \}/);
+    assert.match(cssSource, /#printableQuote \.bottom-layout/);
+});
+
+
+test('legacy order search-index migration is admin-only, batched and idempotent', () => {
+    const start = appSource.indexOf('window.backfillOrderSearchIndex =');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const migration = appSource.slice(start, end);
+    assert.match(migration, /trueUserRole !== 'admin'/);
+    assert.match(migration, /currentUserRole !== 'admin'/);
+    assert.match(migration, /limit\(200\)/);
+    assert.match(migration, /startAfter\(cursor\)/);
+    assert.match(migration, /data\.itemCodeKey !== normalized/);
+    assert.match(migration, /batch\.update/);
+    assert.doesNotMatch(migration, /collection\('orders'\)\.get\(\)/);
+});
+
+
+test('new quotes and orders persist createdAt and normalized order item-code keys', () => {
+    const saveOrderStart = appSource.indexOf('window.saveNewOrder =');
+    const saveOrderEnd = appSource.indexOf('\n};', saveOrderStart) + 3;
+    const saveOrder = appSource.slice(saveOrderStart, saveOrderEnd);
+    assert.match(saveOrder, /createdAt: new Date\(\)\.toISOString\(\)/);
+    assert.match(saveOrder, /itemCodeKey: normalizeHistoryItemCode\(itemCode\)/);
+
+    const quoteStart = appSource.indexOf('window.handleSaveAndPrint =');
+    const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
+    assert.match(appSource.slice(quoteStart, quoteEnd), /createdAt: new Date\(\)\.toISOString\(\)/);
+
+    const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
+    const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
+    const deal = appSource.slice(dealStart, dealEnd);
+    assert.match(deal, /createdAt: new Date\(\)\.toISOString\(\)/);
+    assert.match(deal, /itemCodeKey: normalizeHistoryItemCode/);
+});
+
+
+test('phase 2 product master extends the existing price catalog instead of creating a parallel product source', () => {
+    assert.match(appSource, /function stableProductId\(item\)/);
+    assert.match(appSource, /function normalizeProductMasterItem\(item\)/);
+    assert.match(appSource, /productId:/);
+    assert.match(appSource, /inventoryTracked:/);
+    assert.match(appSource, /lotTracked:/);
+    assert.match(appSource, /expiryTracked:/);
+    assert.match(appSource, /supplier:/);
+    assert.match(appSource, /unit:/);
+    assert.match(appSource, /spec:/);
+    assert.match(appSource, /normalizeProductMasterList\(imported/);
+    assert.doesNotMatch(appSource, /collection\(['"]products['"]\)/);
+});
+
+
+test('phase 2 documents link to productId while retaining historical snapshots', () => {
+    assert.match(appSource, /class="item-product-id"/);
+    assert.match(appSource, /productId: row\.querySelector\('\.item-product-id'\)/);
+    assert.match(appSource, /data\.productId = priceMatch\.productId/);
+    assert.match(appSource, /orderData\.productId = orderData\.productId/);
+    assert.match(appSource, /data\.supplier = priceMatch\.supplier/);
+    assert.match(appSource, /data\.spec = priceMatch\.spec/);
+});
+
+test('phase 2 product-master Excel import supports enrichment fields and preview', () => {
+    assert.match(appSource, /Product Master 匯入預覽/);
+    assert.match(appSource, /confirmProductMasterImport\(brandGroups\)/);
+    for (const field of ['供應商', '單位', '庫存管理', '批號管理', '效期管理', '啟用']) {
+        assert.ok(appSource.includes(field), `missing import field: ${field}`);
+    }
+});
+
+
+test('phase 3 defines a flexible common document relationship layer', () => {
+    assert.match(appSource, /const DOCUMENT_TYPES = Object\.freeze/);
+    assert.match(appSource, /function documentLink\(type, id, relation/);
+    assert.match(appSource, /function normalizeDocumentLinks\(links\)/);
+    assert.match(appSource, /function linkedDocumentFields\(sourceType = '', sourceId = '', links = \[\]\)/);
+    assert.match(appSource, /sourceType:/);
+    assert.match(appSource, /sourceId:/);
+    assert.match(appSource, /linkedDocuments:/);
+});
+
+test('phase 3 links quote to orders and orders to purchase orders in both directions', () => {
+    const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
+    const dealEnd = appSource.indexOf('window.unmarkQuoteAsDeal', dealStart);
+    const deal = appSource.slice(dealStart, dealEnd);
+    assert.match(deal, /DOCUMENT_TYPES\.QUOTE/);
+    assert.match(deal, /createdOrderLinks/);
+    assert.match(deal, /DOCUMENT_TYPES\.ORDER/);
+
+    const poStart = appSource.indexOf('window.printPurchaseOrder =');
+    const poEnd = appSource.indexOf("window.addEventListener('afterprint'", poStart);
+    const po = appSource.slice(poStart, poEnd);
+    assert.match(po, /linkedDocumentFields/);
+    assert.match(po, /DOCUMENT_TYPES\.PURCHASE_ORDER/);
+    assert.match(po, /linkedDocuments: normalizeDocumentLinks/);
+});
+
+test('phase 3 preserves legacy links and cancels generated orders instead of hard deleting them', () => {
+    assert.match(appSource, /function legacyDocumentLinks\(record, type\)/);
+    const start = appSource.indexOf('window.unmarkQuoteAsDeal =');
+   const end = appSource.indexOf('/* =========================================================\n   訂單管理系統', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /status: 'cancelled'/);
+    assert.match(source, /cancelReason: '來源估價單取消成交'/);
+    assert.doesNotMatch(source, /batch\.delete/);
+});
+
+
+test('phase 4 forecast is lightweight, paginated and has no expected-close-date requirement', () => {
+    assert.match(appSource, /db\.collection\('forecasts'\)/);
+    assert.match(appSource, /orderBy\('updatedAt', 'desc'\)/);
+    assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(appSource, /where\('ownerUid', '==', currentUser/);
+    assert.match(appSource, /latestProgress:/);
+    const forecastStart = appSource.indexOf('let forecastCache =');
+    const forecastEnd = appSource.indexOf('估價單系統', forecastStart);
+    assert.doesNotMatch(appSource.slice(forecastStart, forecastEnd), /expectedClose|closeDate|預計成交日期/);
+});
+
+test('phase 4 supports forecast manual edit, quote conversion, order conversion and quote-origin creation', () => {
+    for (const fn of ['saveForecast', 'createQuoteFromForecast', 'createOrderFromForecast', 'createForecastFromQuote']) {
+        assert.ok(appSource.includes(fn), 'missing '+fn);
+    }
+    assert.match(appSource, /DOCUMENT_TYPES\.FORECAST/);
+    assert.match(appSource, /FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.QUOTE/);
+    assert.match(appSource, /FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.ORDER/);
+});
+
+test('phase 4 forecast permission is integrated into the common permission system', () => {
+    assert.match(appSource, /key: 'forecast'/);
+    assert.match(appSource, /'forecast-system':'forecast'/);
+    assert.match(appSource, /canViewAllData\('forecast'\)/);
+    assert.match(appSource, /canEditPage\('forecast'\)/);
+});
+
+
+test('phase 5 inventory uses on-hand reserved available incoming and transaction-backed movements', () => {
+    assert.match(appSource, /function inventoryNumbers\(data = \{\}\)/);
+    assert.match(appSource, /available: onHand - reserved/);
+    assert.match(appSource, /incoming/);
+    assert.match(appSource, /collection\('inventoryMovements'\)/);
+    assert.match(appSource, /inventoryMovementRecord\('reserve'/);
+    assert.match(appSource, /inventoryMovementRecord\('ship'/);
+});
+
+test('phase 5 order creation reserves only available stock and records shortage', () => {
+    const start=appSource.indexOf('async function reserveInventoryForNewOrder');
+    const end=appSource.indexOf('function orderQuantity',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/Math\.min\(requested, stock\.available\)/);
+    assert.match(s,/inventoryReservedQty/);
+    assert.match(s,/inventoryShortageQty/);
+    assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
+});
+
+test('phase 5 shipment consumes on-hand and releases reserved stock transactionally', () => {
+    const start=appSource.indexOf('function applyInventoryDeliveryInTransaction');
+    const end=appSource.indexOf('window.quickCompleteDelivery',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/stock\.onHand < deliveryQty/);
+    assert.match(s,/onHand: stock\.onHand - deliveryQty/);
+    assert.match(s,/reserved: Math\.max\(0, stock\.reserved - fromReserved\)/);
+});
+
+test('phase 5 cancelling and restoring orders adjusts reservations without deleting inventory history', () => {
+    const start=appSource.indexOf('async function adjustInventoryReservationForLifecycle');
+    const end=appSource.indexOf('window.quickSetOrderLifecycle',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/nextStatus === 'cancelled'/);
+    assert.match(s,/nextStatus === 'normal'/);
+    assert.match(s,/inventoryMovementRecord\('release'/);
+    assert.doesNotMatch(s,/\.delete\(/);
+});
+
+
+test('phase 6 purchase orders create incoming without increasing on-hand', () => {
+    const start=appSource.indexOf('async function registerPurchaseIncoming');
+    const end=appSource.indexOf('window.receivePurchaseOrder',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/incoming:Math\.max\(0,stock\.incoming\+delta\)/);
+    assert.match(s,/onHand:stock\.onHand/);
+    assert.match(s,/purchase_incoming/);
+});
+
+test('phase 6 receipt transaction decreases incoming and increases on-hand with partial receipts', () => {
+    const start=appSource.indexOf('window.receivePurchaseOrder');
+    const end=appSource.indexOf('function purchaseItemsFromSavedPo',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/onHand:stock\.onHand\+qty/);
+    assert.match(s,/incoming:Math\.max\(0,stock\.incoming-qty\)/);
+    assert.match(s,/receiptRecords/);
+    assert.match(s,/receiptStatus/);
+    assert.match(s,/type:'receipt'/);
+});
+
+test('phase 6 supports direct stock purchase independent of customer orders', () => {
+    const start=appSource.indexOf('window.openDirectStockPurchase');
+    const end=appSource.indexOf('window.openPurchaseOrderModal',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/orderId:''/);
+    assert.match(s,/priceItemLookup/);
+    assert.match(s,/generateNextPoNumber/);
+});
+
+
+test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustments',()=>{
+ assert.match(appSource,/function fefoLots\(stock\)/);assert.match(appSource,/function lotStatus\(lot\)/);
+ assert.match(appSource,/30天內/);assert.match(appSource,/60天內/);assert.match(appSource,/90天內/);
+ assert.match(appSource,/inventoryMovements/);assert.match(appSource,/initial/);assert.match(appSource,/adjustment/);assert.match(appSource,/scrap/);
+ assert.match(appSource,/orderBy\('updatedAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+ assert.match(appSource,/orderBy\('createdAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+});
+
+
+test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(appSource,/warehouse: '倉管'/);assert.match(appSource,/key: 'inventory'/);});
+
+
+test('phase 9 analysis separates actual receipts sales stock value incoming and purchase-sales difference',()=>{
+ assert.match(appSource,/function inventoryAnalysisTotals\(start,end\)/);
+ assert.match(appSource,/where\('type','==','receipt'\)/);
+ assert.match(appSource,/difference:sales-purchase/);
+ assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
+ assert.match(appSource,/limit\(1000\)/);
+});
+test('phase 8 permission editor includes warehouse role',()=>{assert.match(appSource,/\['sales', 'purchaser', 'warehouse', 'engineer', 'admin'\]/);});
+
+
+test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=>{
+ assert.match(appSource,/where\('type','==','receipt'\)/);
+ assert.match(appSource,/inventoryMovements[\s\S]{0,300}limit\(1000\)/);
+ assert.doesNotMatch(appSource,/collection\('inventoryMovements'\)\.get\(\)/);
+});
+test('phase 10 role model consistently documents warehouse',()=>{
+ assert.match(appSource,/admin' \/ 'sales' \/ 'purchaser' \/ 'warehouse' \/ 'engineer'/);
 });

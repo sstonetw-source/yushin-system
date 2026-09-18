@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function role() { return signedIn() ? userDoc().data.role : null; }
+    function admin() { return role() == 'admin'; }
+    function purchaser() { return role() == 'purchaser'; }
+    function warehouse() { return role() == 'warehouse'; }
+    function sales() { return role() == 'sales'; }
+    function engineer() { return role() == 'engineer'; }
+    function own(resourceData) { return signedIn() && resourceData.ownerUid == request.auth.uid; }
+
+    match /users/{id} { allow read: if signedIn(); allow write: if admin(); }
+    match /settings/{id} { allow read: if signedIn(); allow write: if admin(); }
+    match /quotes/{id} { allow read: if admin() || own(resource.data) || sales(); allow create: if admin() || sales(); allow update: if admin() || own(resource.data); allow delete: if false; }
+    match /forecasts/{id} { allow read: if admin() || own(resource.data) || sales(); allow create: if admin() || sales(); allow update: if admin() || own(resource.data); allow delete: if false; }
+    match /orders/{id} { allow read: if signedIn(); allow create: if admin() || sales(); allow update: if admin() || sales() || purchaser() || warehouse(); allow delete: if false; }
+    match /purchaseOrders/{id} { allow read: if signedIn(); allow create, update: if admin() || purchaser(); allow delete: if false; }
+    match /inventory/{id} { allow read: if signedIn(); allow create, update: if admin() || warehouse() || purchaser(); allow delete: if false; }
+    match /inventoryMovements/{id} { allow read: if signedIn(); allow create: if admin() || warehouse() || purchaser() || sales(); allow update, delete: if false; }
+    match /equipment/{id} { allow read: if signedIn(); allow create, update: if admin() || engineer(); allow delete: if false; }
+    match /{document=**} { allow read: if signedIn(); allow write: if admin(); }
+  }
+}

@@ -46,7 +46,9 @@
     <div id="appContainer" style="display:none;">
     <div class="nav-tabs no-print">
         <div class="nav-tab active" data-permission-page="quote" onclick="switchMainTab('quote-system', this)">📄 估價單系統</div>
+        <div class="nav-tab" data-permission-page="forecast" onclick="switchMainTab('forecast-system', this)">📈 Forecast</div>
         <div class="nav-tab" data-permission-page="orders" onclick="switchMainTab('order-system', this)">📦 訂單管理系統</div>
+        <div class="nav-tab" data-permission-page="inventory" onclick="switchMainTab('inventory-system', this)">📦 庫存管理</div>
         <div class="nav-tab" data-permission-page="equipment" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
         <div class="nav-tab" id="navAdminTab" data-permission-page="admin" onclick="switchMainTab('admin-system', this)">⚙️ 管理員雲端後台</div>
         <div class="nav-spacer"></div>
@@ -56,6 +58,7 @@
                 <option value="admin">🛠️ 檢視身份：管理員</option>
                 <option value="sales">👤 檢視身份：業務</option>
                 <option value="purchaser">🛒 檢視身份：採購</option>
+                <option value="warehouse">📦 檢視身份：倉管</option>
                 <option value="engineer">🔧 檢視身份：工程師</option>
             </select>
             <button class="btn-secondary" onclick="openChangePasswordModal()">修改密碼</button>
@@ -63,6 +66,48 @@
         </div>
     </div>
 
+    <!-- ============ Forecast 系統 ============ -->
+    <div id="forecast-system" class="content-section">
+        <div class="section-header no-print">
+            <h2>Forecast</h2>
+            <button type="button" onclick="openForecastModal()">＋ 新增 Forecast</button>
+        </div>
+        <div class="toolbar no-print">
+            <input id="forecastSearch" type="search" placeholder="搜尋客戶、產品、最新進度" oninput="renderForecastList()">
+            <select id="forecastStatusFilter" onchange="loadForecasts(true)">
+                <option value="active">進行中</option><option value="won">已成交</option><option value="lost">未成交</option><option value="all">全部</option>
+            </select>
+            <button class="btn-secondary" onclick="loadForecasts(true)">重新整理</button>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>客戶</th><th>產品／品項</th><th>預估金額</th><th>最新進度</th><th>狀態</th><th>業務</th><th class="no-print">操作</th></tr></thead><tbody id="forecastListBody"></tbody></table></div>
+        <div id="forecastEmptyHint" class="empty-hint">目前沒有 Forecast。</div>
+        <button id="forecastLoadMoreBtn" class="btn-secondary no-print" style="display:none;" onclick="loadForecasts(false)">載入更多（每次 50 筆）</button>
+    </div>
+
+    <div id="forecastModalOverlay" class="modal-overlay">
+      <div class="modal">
+        <h3 id="forecastModalTitle">新增 Forecast</h3>
+        <input type="hidden" id="forecastId">
+        <label>客戶名稱</label><input id="forecastCustomer" list="clientList">
+        <label>產品／品項</label><input id="forecastProduct" placeholder="可輸入品名或貨號">
+        <label>預估金額</label><input id="forecastAmount" type="number" min="0" step="1">
+        <label>最新進度</label><textarea id="forecastProgress" rows="4" placeholder="例如：已提供報價，等待院方預算核准"></textarea>
+        <label>狀態</label><select id="forecastStatus"><option value="active">進行中</option><option value="won">已成交</option><option value="lost">未成交</option></select>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeForecastModal()">取消</button>
+          <button id="saveForecastBtn" onclick="saveForecast()">儲存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 庫存管理 ============ -->
+    <div id="inventory-system" class="content-section">
+      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 庫存異動</button></div>
+      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>On Hand</th><th>Reserved</th><th>Available</th><th>Incoming</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
+      <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>貨號</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
+    </div>
     <!-- ============ 估價單系統 ============ -->
     <div id="quote-system" class="content-section active">
         <div class="sub-nav no-print">
@@ -283,7 +328,11 @@
 
         <div id="orderListPanel">
         <div class="toolbar no-print order-primary-toolbar">
-            <input type="text" id="orderSearch" placeholder="搜尋客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="renderOrdersList()">
+            <input type="text" id="orderSearch" placeholder="搜尋客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="if(orderHistorySearchActive){orderHistorySearchActive=false;orderHistorySearchResults=[];} renderOrdersList()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
+            <button type="button" class="btn-secondary" onclick="searchAllOrderHistory()">🔎 全歷史貨號</button>
+            <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
+            <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
+            <button type="button" id="orderHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrderHistorySearch()">載入更多搜尋結果</button>
             <span id="purchaserOrderFilters" style="display:none;">
                 <select id="orderSalesFilter" onchange="renderOrdersList()"><option value="">全部業務</option></select>
                 <select id="orderBrandFilter" onchange="renderOrdersList()"><option value="">全部廠牌</option></select>
@@ -361,9 +410,10 @@
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
                 <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
+                <button onclick="openDirectStockPurchase()">＋ 原廠備貨採購</button>
             </div>
             <table>
-                <thead><tr><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>品項數</th><th>總計金額</th><th class="no-print">操作</th></tr></thead>
+                <thead><tr><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="poListBody"></tbody>
             </table>
             <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何訂購單。</div>
@@ -545,7 +595,7 @@
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
-            <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 銷售統計</div>
+            <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
             <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>
@@ -570,7 +620,7 @@
                 <p style="font-size:13px;color:#555;line-height:1.7;">設定每個身份可看到的系統與分頁。選擇「僅查看」時可瀏覽與搜尋，但不能新增、修改、刪除或上傳資料。管理員固定擁有完整權限。</p>
                 <div style="overflow-x:auto;">
                     <table class="permission-table">
-                        <thead><tr><th>系統／分頁</th><th>業務</th><th>採購</th><th>工程師</th><th>管理員</th></tr></thead>
+                        <thead><tr><th>系統／分頁</th><th>業務</th><th>採購</th><th>倉管</th><th>工程師</th><th>管理員</th></tr></thead>
                         <tbody id="rolePermissionsBody"></tbody>
                     </table>
                 </div>
@@ -578,7 +628,7 @@
                 <p style="font-size:13px;color:#555;">分別決定各身份在清單中只能看到自己負責的資料，或能查看所有人資料。</p>
                 <div style="overflow-x:auto;">
                     <table class="permission-table">
-                        <thead><tr><th>資料類型</th><th>業務</th><th>採購</th><th>工程師</th><th>管理員</th></tr></thead>
+                        <thead><tr><th>資料類型</th><th>業務</th><th>採購</th><th>倉管</th><th>工程師</th><th>管理員</th></tr></thead>
                         <tbody id="roleDataScopesBody"></tbody>
                     </table>
                 </div>
@@ -587,12 +637,12 @@
             </div>
         </div>
 
-        <!-- 價格表管理（唯讀顯示，僅能透過 Excel 上傳整批更新，不可在網頁上逐筆編輯） -->
+        <!-- Product Master：沿用既有價格表儲存結構，避免建立第二份產品來源 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
-                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新</button>
+                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">（Excel 中每個工作表的名稱即為廠牌名稱，可一次上傳多個廠牌；同一廠牌再次上傳會只取代該廠牌資料。工作表可加入「類型」欄位，填寫「儀器」或「試劑耗材」供銷售分析分類）</span>
+                <span style="font-size:12px;color:#666;">（每個工作表＝一個廠牌。同廠牌再次上傳會更新該廠牌。支援：產品線、類型、規格、供應商、單位、成本、售價、庫存管理、批號管理、效期管理、啟用／停用；寫入前會先顯示新增／更新預覽。）</span>
             </div>
             <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
                 <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -600,7 +650,7 @@
             </div>
 
             <table class="price-catalog-table">
-                <thead><tr><th>雲端價格表</th><th>最後更新時間</th><th class="no-print">操作</th></tr></thead>
+                <thead><tr><th>Product Master／廠牌</th><th>最後更新時間</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="adminPriceCatalogBody"><tr><td colspan="3" style="color:#888;">載入中…</td></tr></tbody>
             </table>
         </div>
@@ -624,7 +674,7 @@
             </div>
         </div>
 
-        <!-- 訂單銷售統計：只計入已建立的訂單；成交估價單會在轉單後自動納入 -->
+        <!-- 進銷存分析：銷售以訂單/送貨、進貨以實際 receipt、庫存以 inventory 為準 -->
         <div id="admin-statistics" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
                 <select id="salesStatsPeriod" onchange="setSalesStatisticsPeriod(this.value)">
@@ -728,6 +778,15 @@
                     備份會將訂單、估價單、採購單、儀器、使用者與系統設定整理成一個 JSON 檔下載到電腦。不會占用 Firebase 儲存空間，但每次會讀取全部資料。
                 </span>
                 <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
+            </div>
+
+            <h4 style="margin-top:28px;">舊訂單搜尋索引</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正舊訂單貨號索引</button>
+                <span style="font-size:12px;color:#666;">
+                    供「全歷史貨號搜尋」使用。系統每次只讀取 200 筆並分批寫入，只補上缺少或不一致的 itemCodeKey；不會改變訂單金額、狀態或其他商業資料。通常只需在升級後執行一次。
+                </span>
+                <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
             <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
