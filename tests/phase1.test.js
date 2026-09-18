@@ -275,3 +275,17 @@ test('quote print pagination measures rendered rows and keeps rows/footer intact
     assert.match(cssSource, /thead \{ display: table-header-group; \}/);
     assert.match(cssSource, /#printableQuote \.bottom-layout/);
 });
+
+
+test('legacy order search-index migration is admin-only, batched and idempotent', () => {
+    const start = appSource.indexOf('window.backfillOrderSearchIndex =');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const migration = appSource.slice(start, end);
+    assert.match(migration, /trueUserRole !== 'admin'/);
+    assert.match(migration, /currentUserRole !== 'admin'/);
+    assert.match(migration, /limit\(200\)/);
+    assert.match(migration, /startAfter\(cursor\)/);
+    assert.match(migration, /data\.itemCodeKey !== normalized/);
+    assert.match(migration, /batch\.update/);
+    assert.doesNotMatch(migration, /collection\('orders'\)\.get\(\)/);
+});
