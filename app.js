@@ -1542,7 +1542,8 @@ function collectCurrentQuoteRecord() {
         quoteNo: document.getElementById('quoteNo').value.trim(), company: currentCompany,
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
         salesName, ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName) ? currentUser?.uid || '' : ''),
-        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), validDays: document.getElementById('validDays').value,
+        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
+        ...linkedDocumentFields('', '', []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
     };
@@ -1765,6 +1766,7 @@ window.handleSaveAndPrint = function() {
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
+        ...linkedDocumentFields('', '', []),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
         grandTotal: document.getElementById('grandTotal').innerText,
@@ -2207,9 +2209,11 @@ window.markQuoteAsDeal = function(quoteNo) {
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
         const batch = db.batch();
+        const createdOrderLinks = [];
         (q.items || []).forEach(item => {
             if (!item.nameCn && !item.nameEn && !item.model) return;
             const orderRef = db.collection('orders').doc();
+            createdOrderLinks.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
             const orderData = {
                 orderDate: todayStr,
                 createdAt: new Date().toISOString(),
@@ -2228,6 +2232,9 @@ window.markQuoteAsDeal = function(quoteNo) {
                 transactionType: '',
                 invoiceTitle: q.clientName || '',
                 quoteNo: quoteNo,
+                ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE, quoteNo, [
+                    documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')
+                ]),
                 salesName: stripPhoneSuffix(q.salesName),
                 ownerUid: q.ownerUid || salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(q.salesName))?.uid || '',
                 isOrdered: false,
@@ -2248,7 +2255,11 @@ window.markQuoteAsDeal = function(quoteNo) {
             batch.set(orderRef, orderData);
         });
 
-        batch.update(db.collection('quotes').doc(quoteNo), { dealClosed: true, dealClosedAt: todayStr });
+        batch.update(db.collection('quotes').doc(quoteNo), {
+            dealClosed: true,
+            dealClosedAt: todayStr,
+            linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
+        });
 
         batch.commit().then(() => {
             alert('已標記成交，品項已匯入訂單管理系統。');
@@ -2266,14 +2277,23 @@ window.unmarkQuoteAsDeal = function(quoteNo) {
 
     db.collection('orders').where('quoteNo', '==', quoteNo).get().then(snapshot => {
         const batch = db.batch();
-        snapshot.forEach(doc => batch.delete(doc.ref)); // 刪除訂單
+        snapshot.forEach(doc => {
+            const order = doc.data();
+            batch.update(doc.ref, {
+                status: 'cancelled',
+                cancelledAt: new Date().toISOString(),
+                cancelledBy: currentUserName || currentUser?.email || '',
+                cancelReason: '來源估價單取消成交',
+                linkedDocuments: normalizeDocumentLinks(order.linkedDocuments || [])
+            });
+        });
 
         const quoteRef = db.collection('quotes').doc(quoteNo);
         batch.update(quoteRef, { dealClosed: false, dealClosedAt: null });
 
         return batch.commit();
     }).then(() => {
-        alert('成交狀態已取消。');
+        alert('成交狀態已取消；已建立的來源訂單保留追蹤紀錄並標記為取消。');
         loadMyQuotesFromCloud();
     }).catch(err => {
         alert('取消失敗：' + err.message);
@@ -2309,6 +2329,49 @@ function dateOnlyFromTimestamp(value) {
 // 所有公司共用同一套時間排序：先依業務日期，再依建立時間。
 // company 不參與排序，避免又鑫／辰星／鼎新的紀錄被分組後破壞真正的時間順序。
 // 舊資料若沒有 createdAt，最後才以單號／文件 id 做穩定排序。
+const DOCUMENT_TYPES = Object.freeze({ FORECAST: 'forecast', QUOTE: 'quote', ORDER: 'order', PURCHASE_ORDER: 'purchaseOrder', RECEIPT: 'receipt', INVENTORY_MOVEMENT: 'inventoryMovement' });
+
+function documentLink(type, id, relation = 'related') {
+    return { type, id: String(id || ''), relation };
+}
+
+function normalizeDocumentLinks(links) {
+    const unique = new Map();
+    (Array.isArray(links) ? links : []).forEach(link => {
+        if (!link?.type || !link?.id) return;
+        const normalized = documentLink(link.type, link.id, link.relation || 'related');
+        unique.set(`${normalized.type}:${normalized.id}:${normalized.relation}`, normalized);
+    });
+    return [...unique.values()];
+}
+
+function linkedDocumentFields(sourceType = '', sourceId = '', links = []) {
+    return {
+        sourceType: sourceType || '',
+        sourceId: String(sourceId || ''),
+        linkedDocuments: normalizeDocumentLinks(links)
+    };
+}
+
+
+function legacyDocumentLinks(record, type) {
+    const links = [...(record?.linkedDocuments || [])];
+    if (type === DOCUMENT_TYPES.ORDER) {
+        if (record?.quoteNo) links.push(documentLink(DOCUMENT_TYPES.QUOTE, record.quoteNo, 'source'));
+        if (record?.purchaseOrderNo) links.push(documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, record.purchaseOrderNo, 'created'));
+    }
+    if (type === DOCUMENT_TYPES.PURCHASE_ORDER) {
+        purchaseItemsFromSavedPo(record).forEach(item => {
+            if (item.orderId) links.push(documentLink(DOCUMENT_TYPES.ORDER, item.orderId, 'source'));
+        });
+    }
+    return normalizeDocumentLinks(links);
+}
+
+function documentLinksFor(record, type) {
+    return legacyDocumentLinks(record || {}, type);
+}
+
 function compareBusinessRecordsNewestFirst(a, b, dateField, numberField) {
     const dateCompare = String(b?.[dateField] || '').localeCompare(String(a?.[dateField] || ''));
     if (dateCompare) return dateCompare;
@@ -2970,6 +3033,7 @@ function purchaseItemsFromSavedPo(po) {
         orderItemIndex: item.orderItemIndex ?? index,
         itemName: item.itemName || item.productName || item.name || item.nameCn || '',
         itemCode: item.itemCode || item.productCode || item.code || item.model || '',
+        productId: item.productId || '',
         brand: item.brand || item.manufacturer || '',
         qty: parseFloat(item.qty ?? item.quantity ?? item.count) || 1,
         unit: item.unit || '',
@@ -3002,6 +3066,7 @@ function purchaseItemsFromOrder(order) {
             orderItemIndex: index,
             itemName,
             itemCode,
+            productId: item.productId || order.productId || '',
             brand,
             qty: Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1,
             unit: item.unit || order.unit || '',
@@ -3217,7 +3282,8 @@ window.printPurchaseOrder = async function() {
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
         items: poItems.map(item => ({ ...item })),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        ...linkedDocumentFields(orderIds.length === 1 ? DOCUMENT_TYPES.ORDER : '', orderIds.length === 1 ? orderIds[0] : '', orderIds.map(orderId => documentLink(DOCUMENT_TYPES.ORDER, orderId, 'source')))
     };
     const button = document.getElementById('printPurchaseOrderBtn');
     poSaveInProgress = true;
@@ -3239,7 +3305,13 @@ window.printPurchaseOrder = async function() {
             if (conflicts.length) throw new Error(`以下訂單已被建立訂購單：${conflicts.join('、')}`);
             transaction.set(poRef, poRecord);
             orderSnapshots.forEach((snapshot, index) => {
-                if (snapshot.exists) transaction.update(orderRefs[index], { purchaseOrderNo: poNo });
+                if (snapshot.exists) {
+                    const orderData = snapshot.data();
+                    transaction.update(orderRefs[index], {
+                        purchaseOrderNo: poNo,
+                        linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'created')])
+                    });
+                }
             });
         });
 
@@ -4367,6 +4439,7 @@ window.saveNewOrder = function() {
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
+        ...linkedDocumentFields('', '', []),
         salesName: currentUserName || '',
         ownerUid: currentUser?.uid || '',
         isOrdered: false,
