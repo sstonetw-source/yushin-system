@@ -99,6 +99,8 @@ let allQuotesCache = [];
 let allUsersCache = [];
 let salesStatisticsOrders = [];
 let salesStatisticsLoadPromise = null;
+let inventoryAnalysisReceipts = [];
+let inventoryAnalysisStocks = [];
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
 const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman', 'Thermo'];
@@ -5754,7 +5756,9 @@ window.loadSalesStatistics = function() {
             document.getElementById('salesStatsPeriod').value = currentQuarter;
             setSalesStatisticsPeriod(currentQuarter);
         } else {
-            renderSalesStatistics();
+            const start=document.getElementById('salesStatsStart')?.value||localDateString().slice(0,4)+'-01-01';
+            const end=document.getElementById('salesStatsEnd')?.value||localDateString();
+            loadInventoryAnalysisSupport(start,end).then(()=>renderSalesStatistics());
         }
     }).catch(err => {
         if (requestedRole !== currentUserRole) return;
@@ -5766,6 +5770,28 @@ window.loadSalesStatistics = function() {
     });
     return salesStatisticsLoadPromise;
 };
+
+async function loadInventoryAnalysisSupport(start, end) {
+    const [movements, stocks] = await Promise.all([
+        db.collection('inventoryMovements').where('createdAt','>=',start+'T00:00:00').where('createdAt','<=',end+'T23:59:59').orderBy('createdAt','desc').limit(1000).get(),
+        db.collection('inventory').orderBy('updatedAt','desc').limit(1000).get()
+    ]);
+    inventoryAnalysisReceipts = movements.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.type==='receipt');
+    inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
+}
+function inventoryAnalysisTotals(start,end) {
+    let purchase=0;
+    inventoryAnalysisReceipts.forEach(r=>{const product=priceList.find(p=>(p.productId||stableProductId(p))===r.productKey);purchase+=Number(r.qty||0)*Number(product?.cost||0);});
+    const sales=salesStatisticsOrders.reduce((sum,o)=>{const x=calculateOrderStatsContribution(o,start,end);return sum+x.actualSales;},0);
+    let stockValue=0,incoming=0;
+    inventoryAnalysisStocks.forEach(s=>{const product=priceList.find(p=>(p.productId||stableProductId(p))===s.productKey);const n=inventoryNumbers(s);stockValue+=n.onHand*Number(product?.cost||0);incoming+=n.incoming*Number(product?.cost||0);});
+    return {purchase,sales,difference:sales-purchase,stockValue,incoming};
+}
+function renderInventoryAnalysisSummary(start,end){
+    const t=inventoryAnalysisTotals(start,end),fmt=v=>Math.round(v).toLocaleString();
+    const ids={invAnalysisPurchases:t.purchase,invAnalysisSales:t.sales,invAnalysisDifference:t.difference,invAnalysisStockValue:t.stockValue,invAnalysisIncoming:t.incoming};
+    Object.entries(ids).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.innerText=fmt(v);});
+}
 
 function salesAmount(order) {
     const total = parseFloat(String(order.totalPrice == null ? '' : order.totalPrice).replace(/,/g, ''));
@@ -6023,6 +6049,10 @@ function buildSalesStatisticsReport() {
 }
 
 window.renderSalesStatistics = function() {
+    const _analysisStart=document.getElementById('salesStatsStart')?.value||localDateString().slice(0,4)+'-01-01';
+    const _analysisEnd=document.getElementById('salesStatsEnd')?.value||localDateString();
+    if(inventoryAnalysisStocks.length||inventoryAnalysisReceipts.length) renderInventoryAnalysisSummary(_analysisStart,_analysisEnd);
+
     populateSalesStatisticsFilters();
     const { total, byBrand, bySales, byType, byLine } = buildSalesStatisticsReport();
 
