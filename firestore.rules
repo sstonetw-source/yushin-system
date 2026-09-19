@@ -9,7 +9,18 @@ service cloud.firestore {
     function warehouse() { return role() == 'warehouse'; }
     function sales() { return role() == 'sales'; }
     function engineer() { return role() == 'engineer'; }
-    function own(resourceData) { return signedIn() && resourceData.ownerUid == request.auth.uid; }
+    function currentSalesCode() { return signedIn() ? userDoc().data.code : null; }
+    function ownBySalesCode(resourceData) {
+      return signedIn()
+        && currentSalesCode() != null
+        && currentSalesCode() != ''
+        && resourceData.salesCode != null
+        && resourceData.salesCode == currentSalesCode();
+    }
+    // salesCode 是正式資料歸屬；ownerUid 僅保留給尚未補 salesCode 的舊資料相容。
+    function own(resourceData) {
+      return signedIn() && (ownBySalesCode(resourceData) || resourceData.ownerUid == request.auth.uid);
+    }
 
     match /users/{id} { allow read: if signedIn(); allow write: if admin(); }
     match /settings/{id} { allow read: if signedIn(); allow write: if admin(); }
@@ -40,30 +51,31 @@ service cloud.firestore {
     }
 
     match /quotes/{id} {
-      allow read: if admin() || own(resource.data) || sales();
+      allow read: if admin() || purchaser() || own(resource.data);
       allow create: if admin() || sales();
       allow update: if admin() || own(resource.data);
       allow delete: if false;
     }
 
     match /forecasts/{id} {
-      allow read: if admin() || own(resource.data) || sales();
+      allow read: if admin() || own(resource.data);
       allow create: if admin() || sales();
       allow update: if admin() || own(resource.data);
       allow delete: if false;
     }
 
-    // Forecast 進度為 append-only 歷史；原本只有根文件規則，sales 寫 subcollection 會被拒絕。
+    // Forecast 進度為 append-only 歷史，權限跟隨父 Forecast。
     match /forecasts/{forecastId}/progress/{progressId} {
-      allow read: if admin() || sales();
-      allow create: if admin() || sales();
+      allow read: if admin() || own(get(/databases/$(database)/documents/forecasts/$(forecastId)).data);
+      allow create: if admin()
+        || (sales() && own(getAfter(/databases/$(database)/documents/forecasts/$(forecastId)).data));
       allow update, delete: if false;
     }
 
     match /orders/{id} {
-      allow read: if signedIn();
+      allow read: if admin() || purchaser() || warehouse() || engineer() || own(resource.data);
       allow create: if admin() || sales();
-      allow update: if admin() || sales() || purchaser() || warehouse();
+      allow update: if admin() || purchaser() || warehouse() || own(resource.data);
       allow delete: if false;
     }
 
