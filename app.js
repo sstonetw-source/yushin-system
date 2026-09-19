@@ -5887,59 +5887,100 @@ window.prepareOrderLifecycle = function(orderId, status) {
 };
 
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor) {
-    const invRef = inventoryRefFor(order);
+    const productKey = inventoryProductKey(order);
     const currentlyReserved = Math.max(0, Number(order.inventoryReservedQty || 0) - deliveredQuantity(order));
+    const directShip = (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
+
+    if (directShip) {
+        transaction.update(db.collection('orders').doc(orderId), {
+            inventoryReservedQty: 0,
+            inventoryShortageQty: 0
+        });
+        transaction.set(reservationDocRef(orderId), {
+            ...inventoryReservationPayload(orderId, order, 0, nextStatus === 'cancelled' ? 'released' : 'direct_ship'),
+            warehouseId:''
+        }, { merge:true });
+        return;
+    }
+
+    const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
+    const invRef = inventoryRefFor(order);
+    const whRef = warehouseId && productKey ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)) : null;
 
     if (nextStatus === 'cancelled') {
-        if (invRef) {
-            const snap = await transaction.get(invRef);
-            if (snap.exists) {
-                const stock = inventoryNumbers(snap.data());
-                const release = Math.min(currentlyReserved, stock.reserved);
-                if (release > 0) {
-                    transaction.update(invRef, { reserved: Math.max(0, stock.reserved - release), updatedAt: new Date().toISOString() });
-                    transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release', -release, orderId, inventoryProductKey(order), actor, { reason: 'order_cancelled' }));
-                }
-            }
+        const invSnap = invRef ? await transaction.get(invRef) : null;
+        const whSnap = whRef ? await transaction.get(whRef) : null;
+        const inv = inventoryNumbers(invSnap?.exists ? invSnap.data() : {});
+        const wh = inventoryNumbers(whSnap?.exists ? whSnap.data() : {});
+        const release = Math.min(currentlyReserved, wh.reserved || 0, inv.reserved || 0);
+        const now = new Date().toISOString();
+
+        if (release > 0) {
+            if (invRef && invSnap?.exists) transaction.update(invRef,{reserved:Math.max(0,inv.reserved-release),updatedAt:now});
+            if (whRef && whSnap?.exists) transaction.update(whRef,{reserved:Math.max(0,wh.reserved-release),updatedAt:now});
+            transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
+                'release', -release, orderId, productKey, actor, { reason:'order_cancelled', warehouseId }
+            ));
         }
+
         transaction.update(db.collection('orders').doc(orderId), {
             inventoryReservedQty: deliveredQuantity(order),
             inventoryShortageQty: 0
         });
-        transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, 'released'), { merge: true });
+        transaction.set(reservationDocRef(orderId), {
+            ...inventoryReservationPayload(orderId, order, 0, 'released'),
+            warehouseId
+        }, { merge:true });
         return;
     }
 
     if (nextStatus === 'normal') {
         const needed = Math.max(0, orderQuantity(order) - deliveredQuantity(order));
-        if (!invRef) {
+        if (!invRef || !whRef) {
             transaction.update(db.collection('orders').doc(orderId), {
                 inventoryReservedQty: deliveredQuantity(order),
                 inventoryShortageQty: needed
             });
-            transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'), { merge: true });
+            transaction.set(reservationDocRef(orderId), {
+                ...inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'),
+                warehouseId
+            }, { merge:true });
             return;
         }
 
-        const snap = await transaction.get(invRef);
-        if (!snap.exists) {
+        const invSnap = await transaction.get(invRef);
+        const whSnap = await transaction.get(whRef);
+        if (!invSnap.exists || !whSnap.exists) {
             transaction.update(db.collection('orders').doc(orderId), {
                 inventoryReservedQty: deliveredQuantity(order),
                 inventoryShortageQty: needed
             });
-            transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'), { merge: true });
+            transaction.set(reservationDocRef(orderId), {
+                ...inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'),
+                warehouseId
+            }, { merge:true });
             return;
         }
 
-        const stock = inventoryNumbers(snap.data());
-        const reserve = Math.min(needed, Math.max(0, stock.available));
-        transaction.update(invRef, { reserved: stock.reserved + reserve, updatedAt: new Date().toISOString() });
-        if (reserve) transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('reserve', reserve, orderId, inventoryProductKey(order), actor, { reason: 'order_restored' }));
+        const inv = inventoryNumbers(invSnap.data());
+        const wh = inventoryNumbers(whSnap.data());
+        const reserve = Math.min(needed, Math.max(0, wh.available), Math.max(0, inv.available));
+        const now = new Date().toISOString();
+        if (reserve) {
+            transaction.update(invRef,{reserved:inv.reserved+reserve,updatedAt:now});
+            transaction.update(whRef,{reserved:wh.reserved+reserve,updatedAt:now});
+            transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
+                'reserve', reserve, orderId, productKey, actor, { reason:'order_restored', warehouseId }
+            ));
+        }
         transaction.update(db.collection('orders').doc(orderId), {
             inventoryReservedQty: deliveredQuantity(order) + reserve,
             inventoryShortageQty: Math.max(0, needed - reserve)
         });
-        transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, reserve, reserve > 0 ? 'active' : (needed > 0 ? 'shortage' : 'released')), { merge: true });
+        transaction.set(reservationDocRef(orderId), {
+            ...inventoryReservationPayload(orderId, order, reserve, reserve > 0 ? 'active' : (needed > 0 ? 'shortage' : 'released')),
+            warehouseId
+        }, { merge:true });
     }
 }
 
