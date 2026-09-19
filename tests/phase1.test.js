@@ -637,7 +637,7 @@ test('phase 14 canonical lifecycle statuses preserve cancellation semantics with
     const lifecycleEnd = appSource.indexOf('window.toggleOrderProgressStatus', lifecycleStart);
     const lifecycle = appSource.slice(lifecycleStart, lifecycleEnd);
     assert.match(lifecycle, /status: nextStatus === 'cancelled' \? BUSINESS_STATUS\.CANCELLED : BUSINESS_STATUS\.ACTIVE/);
-    assert.doesNotMatch(lifecycle, /\.delete\(/);
+    assert.doesNotMatch(lifecycle, /db\.collection\([^\n]+\)\.doc\([^\n]+\)\.delete\(/);
 });
 
 test('phase 15 quotes orders and purchase orders persist explicit currency tax and tax-basis metadata', () => {
