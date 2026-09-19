@@ -68,6 +68,45 @@ let priceListLoadPromise = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
 const DEFAULT_LIST_LIMIT = 50;
+const DEFAULT_CURRENCY = 'TWD';
+const DEFAULT_TAX_RATE = 0.05;
+const BUSINESS_STATUS = Object.freeze({
+    ACTIVE: 'active',
+    COMPLETED: 'completed',
+    CANCELLED: 'cancelled',
+    VOIDED: 'voided'
+});
+
+function parseMoney(value) {
+    const number = Number(String(value ?? '').replace(/,/g, '').trim());
+    return Number.isFinite(number) ? number : 0;
+}
+
+function grossAmountMetadata(grossValue, taxRate = DEFAULT_TAX_RATE, currency = DEFAULT_CURRENCY) {
+    const gross = Math.round(parseMoney(grossValue));
+    const net = Math.round(gross / (1 + taxRate));
+    return {
+        currency,
+        taxRate,
+        priceIncludesTax: true,
+        subtotalExTax: net,
+        taxAmount: gross - net,
+        totalIncTax: gross
+    };
+}
+
+function netAmountMetadata(netValue, taxRate = DEFAULT_TAX_RATE, currency = DEFAULT_CURRENCY) {
+    const net = Math.round(parseMoney(netValue));
+    const tax = Math.round(net * taxRate);
+    return {
+        currency,
+        taxRate,
+        priceIncludesTax: false,
+        subtotalExTax: net,
+        taxAmount: tax,
+        totalIncTax: net + tax
+    };
+}
 const XLSX_SCRIPT_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 let xlsxLoadPromise = null;
 
@@ -97,6 +136,7 @@ let equipmentLoadGeneration = 0;
 // 管理員後台狀態
 let allQuotesCache = [];
 let allUsersCache = [];
+let salesCodeMasterCache = [];
 let salesStatisticsOrders = [];
 let salesStatisticsLoadPromise = null;
 let inventoryAnalysisReceipts = [];
@@ -107,6 +147,9 @@ const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', '
 const DEFAULT_STATISTIC_BRAND_ALIASES = { 'Bio-Rad': ['Biorad', 'Bio Rad', 'BIO-RAD'], 'Thermo': ['Thermo Fisher', 'Thermo Fisher Scientific'] };
 let companyAgencyBrands = { yushin: [], morningstar: [], 'MULTI-LIFE': [] };
 let companyAgencyBrandsConfigured = false;
+// Phase 1：Brand Master 為全系統正式廠牌來源；尚未完成舊資料移轉前，仍合併價目表／統計／分公司舊設定以保持相容。
+let brandMasterCache = [];
+let brandMasterLoadPromise = null;
 let hiddenBrands = [];       // 舊欄位，保留避免舊資料丟失，畫面已經不再使用黑名單模式
 
 // 印章圖片常數定義在 stamps-data.js（需在此檔案之前載入）。
@@ -328,7 +371,43 @@ function getDataScope(dataType, role = currentUserRole) {
     return roleDataScopes[role]?.[dataType] || 'none';
 }
 
-function belongsToCurrentUser(salesName, ownerUid) {
+function salesCodeForName(salesName) {
+    const normalizedName = stripPhoneSuffix(salesName || '');
+    if (!normalizedName) return '';
+    if (normalizedName === stripPhoneSuffix(currentUserName || '') && currentUserCode) return currentUserCode;
+    const match = salesList.find(person => stripPhoneSuffix(person.name || '') === normalizedName);
+    return String(match?.code || '').trim();
+}
+
+function normalizeCustomerKey(value) {
+    return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function customerIdForName(value) {
+    const key = normalizeCustomerKey(value);
+    return key ? `cus:${encodeURIComponent(key).slice(0, 180)}` : '';
+}
+
+function syncCustomerMaster(customerName, extra = {}) {
+    const name = String(customerName || '').trim();
+    const customerId = customerIdForName(name);
+    if (!customerId || !currentUser) return customerId;
+
+    // 主交易不等待 Customer Master 寫入，避免新增估價／訂單被次要同步拖慢。
+    if (currentUserRole === 'admin' || currentUserRole === 'sales') {
+        db.collection('customers').doc(customerId).set({
+            customerId,
+            name,
+            active: true,
+            lastSalesCode: extra.salesCode || currentUserCode || '',
+            updatedAt: new Date().toISOString()
+        }, { merge: true }).catch(err => console.warn('Customer Master 同步失敗：', err));
+    }
+    return customerId;
+}
+
+function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
+    if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
     if (!currentUserName) return false;
     return stripPhoneSuffix(salesName || '') === stripPhoneSuffix(currentUserName);
@@ -339,6 +418,8 @@ function getActivePermissionPage() {
     if (!section) return '';
     if (section.id === 'quote-system') return document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'quote.my' : 'quote.create';
     if (section.id === 'order-system') return document.getElementById('poListPanel')?.style.display === 'block' ? 'orders.po' : 'orders.list';
+    if (section.id === 'forecast-system') return 'forecast';
+    if (section.id === 'inventory-system') return 'inventory';
     if (section.id === 'equipment-system') return 'equipment';
     if (section.id === 'admin-system') return 'admin';
     return '';
@@ -369,7 +450,7 @@ function updateReadonlyNotice() {
 }
 
 function firstAccessibleMainPage() {
-    return ['quote', 'orders', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
+    return ['forecast', 'quote', 'orders', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
 }
 
 function showLoginScreen() {
@@ -404,10 +485,10 @@ function showApp() {
 
     applyPermissionVisibility();
     const activeSection = document.querySelector('.content-section.active');
-    const activeMainKey = activeSection ? { 'quote-system':'quote', 'order-system':'orders', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
+    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
     if (activeMainKey && !canAccessPage(activeMainKey)) {
         const fallback = firstAccessibleMainPage();
-        const fallbackId = { quote:'quote-system', orders:'order-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
+        const fallbackId = { forecast:'forecast-system', quote:'quote-system', orders:'order-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
         if (fallbackId) {
             document.getElementById('noPermissionMessage')?.remove();
             setTimeout(() => actuallySwitchMainTab(fallbackId), 0);
@@ -447,8 +528,10 @@ function showApp() {
 }
 
 function initializePageData(mainKey) {
+    if (mainKey === 'forecast') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'orders') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(loadOrdersFromCloud);
+    if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => {
         populateEquipmentSalesDropdown();
         loadEquipmentFromCloud();
@@ -663,10 +746,19 @@ window.switchViewRole = function(role) {
     myQuotesPaginationState = null;
     ordersCache = [];
     orderPaginationState = null;
+    forecastCache = [];
+    forecastCursor = null;
+    forecastHasMore = true;
+    inventoryCache = [];
+    inventoryCursor = null;
+    inventoryHasMore = true;
+    pendingInventoryCache = [];
     equipmentList = [];
     const activeSection = document.querySelector('.content-section.active');
     if (activeSection?.id === 'order-system') renderOrdersList();
     if (activeSection?.id === 'quote-system' && document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
+    if (activeSection?.id === 'forecast-system') renderForecastList();
+    if (activeSection?.id === 'inventory-system') { renderInventoryList(); renderPendingInventoryItems(); }
     if (activeSection?.id === 'equipment-system') renderEquipmentList();
     showApp();
 
@@ -762,12 +854,7 @@ function buildForecastProgressText(text, fallback = '立案') {
 }
 
 function normalizeForecastBrand(value) {
-    const input = String(value || '').trim();
-    if (!input) return '';
-    const exact = getPriceListBrands(false).find(
-        brand => String(brand || '').trim().toLocaleLowerCase() === input.toLocaleLowerCase()
-    );
-    return exact || input;
+    return resolveBrandName(value);
 }
 
 function populateForecastBrandFilter() {
@@ -847,31 +934,23 @@ function populateForecastSalesFilter() {
 }
 
 function populateForecastBrandDropdown(selectedBrand = '') {
-    const select = document.getElementById('forecastBrand');
-    if (!select) return;
+    const input = document.getElementById('forecastBrand');
+    const list = document.getElementById('forecastBrandList');
+    if (!input || !list) return;
 
     const selected = normalizeForecastBrand(selectedBrand);
-    const brands = getPriceListBrands(false).slice();
+    const entries = getUnifiedBrandEntries(false)
+        .sort((x, y) => Number(y.isKeyBrand) - Number(x.isKeyBrand) || x.name.localeCompare(y.name, 'zh-Hant'));
 
-    if (
-        selected &&
-        !brands.some(brand => String(brand || '').trim().toLocaleLowerCase() === selected.toLocaleLowerCase())
-    ) {
-        brands.push(selected);
-    }
+    list.innerHTML = '';
+    entries.forEach(entry => {
+        const option = document.createElement('option');
+        option.value = entry.name;
+        option.label = entry.isKeyBrand ? '重點代理' : '廠牌';
+        list.appendChild(option);
+    });
 
-    select.innerHTML = '<option value="">請選擇廠牌</option>';
-
-    dedupeBrandsCaseInsensitive(brands)
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
-        .forEach(brand => {
-            const option = document.createElement('option');
-            option.value = brand;
-            option.textContent = brand;
-            select.appendChild(option);
-        });
-
-    select.value = selected || '';
+    input.value = selected || '';
 }
 
 window.loadForecasts = async function(reset = true) {
@@ -905,7 +984,8 @@ window.loadForecasts = async function(reset = true) {
         }
 
         if (!canViewAllData('forecast')) {
-            query = query.where('ownerUid', '==', currentUser?.uid || '');
+            if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
+            else query = query.where('ownerUid', '==', currentUser?.uid || '');
         }
 
         query = query.limit(DEFAULT_LIST_LIMIT);
@@ -954,6 +1034,7 @@ window.renderForecastList = function() {
     const brandFilter = document.getElementById('forecastBrandFilter')?.value || '';
     const salesFilter = document.getElementById('forecastSalesFilter')?.value || '';
     const stageFilter = document.getElementById('forecastStageFilter')?.value || '';
+    const periodFilter = document.getElementById('forecastPeriodFilter')?.value || 'this-year';
 
     body.innerHTML = '';
     let shown = 0;
@@ -976,6 +1057,8 @@ window.renderForecastList = function() {
         if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
         if (salesFilter && salesName !== salesFilter) return;
         if (stageFilter && item.stage !== stageFilter) return;
+        // 進行中 Forecast 是目前 pipeline，跨年度持續顯示；Win/Lost 才依結案/更新時間套用統計期間。
+        if (item.status !== 'active' && !dateInUnifiedPeriod(item.closedAt || item.latestProgressAt || item.updatedAt || item.createdAt, periodFilter)) return;
 
         shown++;
 
@@ -998,15 +1081,15 @@ window.renderForecastList = function() {
         ` : '';
 
         row.innerHTML = `
-            <td>${escapeHtml(item.customerName || '')}</td>
-            <td>${escapeHtml(brand || '')}</td>
-            <td>${escapeHtml(item.productName || '')}</td>
-            <td>${Number(item.estimatedAmount || 0).toLocaleString()}</td>
-            <td><span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span></td>
-            <td><span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span></td>
-            <td class="forecast-progress-cell">${escapeHtml(item.latestProgress || '')}</td>
-            <td>${escapeHtml(salesName)}</td>
-            <td class="no-print forecast-actions">${actions}</td>
+            <td data-th="客戶">${escapeHtml(item.customerName || '')}</td>
+            <td data-th="廠牌">${escapeHtml(brand || '')}</td>
+            <td data-th="產品／品項">${escapeHtml(item.productName || '')}</td>
+            <td data-th="預估金額">${Number(item.estimatedAmount || 0).toLocaleString()}</td>
+            <td data-th="Stage"><span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span></td>
+            <td data-th="狀態"><span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span></td>
+            <td data-th="最新進度" class="forecast-progress-cell">${escapeHtml(item.latestProgress || '')}</td>
+            <td data-th="業務">${escapeHtml(salesName)}</td>
+            <td data-th="操作" class="no-print forecast-actions">${actions}</td>
         `;
 
         body.appendChild(row);
@@ -1105,14 +1188,17 @@ window.saveForecast = async function() {
 
             const record = {
                 customerName,
+                customerId: syncCustomerMaster(customerName, { salesCode: currentUserCode || '' }),
                 brand,
                 productName,
                 estimatedAmount,
                 stage,
                 status,
+                closedAt: status === 'active' ? null : now,
                 latestProgress,
                 latestProgressAt: now,
                 salesName: currentUserName || '',
+                salesCode: currentUserCode || '',
                 ownerUid: currentUser?.uid || '',
                 productId: '',
                 createdAt: now,
@@ -1142,11 +1228,13 @@ window.saveForecast = async function() {
 
             const updateData = {
                 customerName,
+                customerId: syncCustomerMaster(customerName, { salesCode: existing.salesCode || currentUserCode || '' }),
                 brand,
                 productName,
                 estimatedAmount,
                 stage,
                 status,
+                closedAt: status === 'active' ? null : (existing.closedAt || now),
                 updatedAt: now
             };
 
@@ -1638,7 +1726,13 @@ function loadPriceListFromCloud() {
         refreshPriceDatalists();
         renderKeyStatisticBrands();
     }).catch(() => {});
-    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings()]);
+    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(result => {
+        // 四個來源都完成後再統一刷新一次，避免載入順序造成不同模組看到不同廠牌清單。
+        refreshPriceDatalists();
+        renderKeyStatisticBrands();
+        renderCompanyAgencyBrandSettings();
+        return result;
+    });
 }
 
 function loadCompanyAgencyBrandSettings() {
@@ -1719,11 +1813,9 @@ function refreshPriceDatalists() {
     populateQuoteBrandDropdowns();
 }
 
-// 廠牌下拉選單的正式廠牌全部來自價格表。
+// 舊函式名稱保留供既有模組呼叫；實際候選廠牌已統一由 Brand Master 相容層提供。
 function getPriceListBrands(includeMaintenance = false) {
-    const brands = dedupeBrandsCaseInsensitive(priceList.map(p => p.brand));
-    if (includeMaintenance && !brands.some(b => b.toLocaleLowerCase() === '維修')) brands.push('維修');
-    return brands.sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    return getUnifiedBrandNames(includeMaintenance);
 }
 
 function dedupeBrandsCaseInsensitive(brands) {
@@ -1736,6 +1828,157 @@ function dedupeBrandsCaseInsensitive(brands) {
     return [...unique.values()];
 }
 
+function normalizeBrandLookupKey(value) {
+    return String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/[\s\-_]+/g, '');
+}
+
+function normalizeBrandMasterRecord(id, data = {}) {
+    const name = String(data.name || data.brand || id || '').trim();
+    return {
+        id: id || '',
+        name,
+        aliases: dedupeBrandsCaseInsensitive(data.aliases || []),
+        isKeyBrand: data.isKeyBrand === true,
+        companies: Array.isArray(data.companies) ? data.companies.filter(Boolean) : [],
+        active: data.active !== false
+    };
+}
+
+function getUnifiedBrandEntries(includeMaintenance = false) {
+    const entries = new Map();
+
+    const upsert = (name, patch = {}) => {
+        const cleanName = String(name || '').trim();
+        if (!cleanName) return;
+        if (!includeMaintenance && normalizeBrandLookupKey(cleanName) === normalizeBrandLookupKey('維修')) return;
+
+        // Brand Master 先載入；後續價目表／舊設定若只是 master alias，
+        // 直接歸到 canonical entry，不再產生第二個看似不同的廠牌。
+        const cleanKey = normalizeBrandLookupKey(cleanName);
+        const aliasOwner = [...entries.values()].find(entry =>
+            (entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === cleanKey)
+        );
+        const canonicalName = aliasOwner?.name || cleanName;
+        const key = normalizeBrandLookupKey(canonicalName);
+        const existing = entries.get(key) || aliasOwner || {
+            id: '',
+            name: canonicalName,
+            aliases: [],
+            isKeyBrand: false,
+            companies: [],
+            active: true
+        };
+
+        if (patch.id && !existing.id) existing.id = patch.id;
+        if (patch.name && patch.preferName) existing.name = String(patch.name).trim() || existing.name;
+        existing.aliases = dedupeBrandsCaseInsensitive([...(existing.aliases || []), ...(patch.aliases || [])])
+            .filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(existing.name));
+        existing.isKeyBrand = existing.isKeyBrand || patch.isKeyBrand === true;
+        existing.companies = [...new Set([...(existing.companies || []), ...(patch.companies || [])])];
+        if (patch.active === false) existing.active = false;
+        entries.set(key, existing);
+    };
+
+    // 正式 Brand Master 優先決定顯示名稱。
+    brandMasterCache.filter(item => item && item.active !== false).forEach(item => {
+        upsert(item.name, { ...item, preferName: true });
+    });
+
+    // 舊資料相容層：價目表、統計設定、分公司代理設定在完成移轉前仍納入候選品牌。
+    priceList.forEach(item => upsert(item.brand));
+    keyStatisticBrands.forEach(name => upsert(name, {
+        isKeyBrand: true,
+        aliases: keyStatisticBrandAliases[name] || []
+    }));
+    Object.entries(keyStatisticBrandAliases).forEach(([name, aliases]) => upsert(name, { aliases }));
+
+    ['yushin', 'morningstar', 'MULTI-LIFE'].forEach(company => {
+        (companyAgencyBrands[company] || []).forEach(name => {
+            if (name !== OTHER_BRAND_OPTION_KEY && name !== '其他') upsert(name, { companies: [company] });
+        });
+    });
+
+    if (includeMaintenance) upsert('維修');
+    return [...entries.values()]
+        .filter(item => item.active !== false)
+        .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hant'));
+}
+
+function getUnifiedBrandNames(includeMaintenance = false) {
+    return getUnifiedBrandEntries(includeMaintenance).map(item => item.name);
+}
+
+function resolveBrandName(value) {
+    const input = String(value || '').trim();
+    if (!input) return '';
+    const key = normalizeBrandLookupKey(input);
+
+    for (const entry of getUnifiedBrandEntries(true)) {
+        if (normalizeBrandLookupKey(entry.name) === key) return entry.name;
+        if ((entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)) return entry.name;
+    }
+    return input;
+}
+
+function loadBrandMaster() {
+    if (brandMasterLoadPromise) return brandMasterLoadPromise;
+    brandMasterLoadPromise = db.collection('brands').limit(500).get().then(snapshot => {
+        brandMasterCache = snapshot.docs
+            .map(doc => normalizeBrandMasterRecord(doc.id, doc.data()))
+            .filter(item => item.name && item.active !== false);
+        return brandMasterCache;
+    }).catch(err => {
+        console.warn('讀取 Brand Master 失敗，暫時沿用既有廠牌設定：', err);
+        brandMasterCache = [];
+        return brandMasterCache;
+    });
+    return brandMasterLoadPromise;
+}
+
+function brandMasterDocumentId(name) {
+    const normalized = normalizeBrandLookupKey(name) || 'brand';
+    return encodeURIComponent(normalized).slice(0, 180);
+}
+
+async function upsertBrandMaster(name, patch = {}) {
+    const canonicalName = String(name || '').trim();
+    if (!canonicalName || canonicalName === '其他' || canonicalName === OTHER_BRAND_OPTION_KEY || canonicalName === '維修') return;
+    const id = brandMasterDocumentId(canonicalName);
+    const current = brandMasterCache.find(item => normalizeBrandLookupKey(item.name) === normalizeBrandLookupKey(canonicalName));
+    const payload = {
+        name: current?.name || canonicalName,
+        aliases: patch.replaceAliases
+            ? dedupeBrandsCaseInsensitive(patch.aliases || [])
+            : dedupeBrandsCaseInsensitive([...(current?.aliases || []), ...(patch.aliases || [])]),
+        isKeyBrand: patch.isKeyBrand ?? current?.isKeyBrand ?? false,
+        companies: patch.replaceCompanies
+            ? [...new Set(patch.companies || [])]
+            : [...new Set([...(current?.companies || []), ...(patch.companies || [])])],
+        active: patch.active ?? current?.active ?? true,
+        updatedAt: new Date().toISOString()
+    };
+    await db.collection('brands').doc(id).set(payload, { merge: true });
+    const next = normalizeBrandMasterRecord(id, payload);
+    const index = brandMasterCache.findIndex(item => item.id === id || normalizeBrandLookupKey(item.name) === normalizeBrandLookupKey(canonicalName));
+    if (index >= 0) brandMasterCache[index] = { ...brandMasterCache[index], ...next };
+    else brandMasterCache.push(next);
+}
+
+async function syncLegacyBrandSettingsToMaster() {
+    if (currentUserRole !== 'admin') return;
+    const names = getUnifiedBrandNames(false);
+    for (const name of names) {
+        const canonical = resolveBrandName(name);
+        const companies = ['yushin', 'morningstar', 'MULTI-LIFE'].filter(company =>
+            includesBrandCaseInsensitive(companyAgencyBrands[company] || [], canonical)
+        );
+        const isKeyBrand = keyStatisticBrands.some(brand => normalizeBrandLookupKey(resolveBrandName(brand)) === normalizeBrandLookupKey(canonical));
+        const aliases = keyStatisticBrandAliases[canonical] || keyStatisticBrandAliases[name] || [];
+        await upsertBrandMaster(canonical, { companies, isKeyBrand, aliases, replaceCompanies: true, replaceAliases: true });
+    }
+}
+
+
 function normalizeThermoBrandList(brands) {
     return dedupeBrandsCaseInsensitive((brands || []).map(value =>
         String(value || '').trim().toLocaleLowerCase() === 'thermo' ? 'Thermo' : value
@@ -1747,7 +1990,7 @@ function includesBrandCaseInsensitive(brands, brand) {
     return (brands || []).some(value => String(value || '').trim().toLocaleLowerCase() === key);
 }
 
-// 廠牌管理的候選項目只來自價目表。
+// 價格表原始廠牌清單僅供價格資料管理使用；一般模組請改走 Brand Master 相容層。
 function getAllPriceListBrandsRaw() {
     return dedupeBrandsCaseInsensitive(priceList.map(p => p.brand))
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
@@ -1840,8 +2083,10 @@ function populateQuoteBrandDropdowns() {
 function quoteRowBrandValue(row) {
     const select = row.querySelector('.item-brand');
     if (!select) return '';
-    if (select.value !== '其他') return select.value.trim();
-    return (row.querySelector('.item-brand-other')?.value || '').trim();
+    const raw = select.value !== '其他'
+        ? select.value.trim()
+        : (row.querySelector('.item-brand-other')?.value || '').trim();
+    return resolveBrandName(raw);
 }
 
 window.onQuoteBrandSelectChange = function(select) {
@@ -1887,11 +2132,10 @@ window.onEqBrandSelectChange = function() {
 function getBrandFieldValue(selectId, otherInputId) {
     const select = document.getElementById(selectId);
     if (!select) return '';
-    if (select.value === '其他') {
-        const otherInput = document.getElementById(otherInputId);
-        return otherInput ? otherInput.value.trim() : '';
-    }
-    return select.value.trim();
+    const raw = select.value === '其他'
+        ? (document.getElementById(otherInputId)?.value || '').trim()
+        : select.value.trim();
+    return resolveBrandName(raw);
 }
 
 // 新增訂單時輸入「貨號」，依價格表帶出廠牌與品名
@@ -1908,6 +2152,8 @@ window.onOrderItemCodeChange = function(input) {
 
     const itemNameInput = document.getElementById('orderItemName');
     if (itemNameInput) itemNameInput.value = match.nameCn || match.nameEn || '';
+    const unitInput = document.getElementById('orderUnit');
+    if (unitInput) unitInput.value = match.unit || unitInput.value || '';
 
     // 產品線只隨訂單資料保存供後台統計，不額外出現在業務端的廠牌下拉選單。
     input.dataset.productLine = match.productLine || '';
@@ -1955,19 +2201,19 @@ window.addQuoteRow = function(itemData = {}) {
         <td>
             <div class="item-input-group">
                 <div class="field-row">
-                    <label>英文品名：</label>
-                    <input type="text" class="item-en" list="priceNameEnList" value="${itemData.nameEn || ''}">
+                    <label>貨號：</label>
+                    <input type="text" class="item-model" list="priceModelList" value="${itemData.model || ''}" onchange="onItemModelChange(this)">
                 </div>
                 <div class="field-row">
                     <label>中文品名：</label>
                     <input type="text" class="item-cn" list="priceNameCnList" value="${itemData.nameCn || ''}" onchange="onItemCnChange(this)">
                 </div>
+                <div class="field-row">
+                    <label>英文品名：</label>
+                    <input type="text" class="item-en" list="priceNameEnList" value="${itemData.nameEn || ''}">
+                </div>
 
                 <div class="item-row-pair">
-                    <div>
-                        <label>貨號：</label>
-                        <input type="text" class="item-model" list="priceModelList" value="${itemData.model || ''}" onchange="onItemModelChange(this)">
-                    </div>
                     <div class="item-brand-field">
                         <label>廠牌：</label>
                         <select class="item-brand" onchange="onQuoteBrandSelectChange(this)">${quoteBrandOptions(itemData.brand)}</select>
@@ -2257,7 +2503,8 @@ function collectCurrentQuoteRecord() {
     const record = {
         quoteNo: document.getElementById('quoteNo').value.trim(), company: currentCompany,
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
-        salesName, ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName) ? currentUser?.uid || '' : ''),
+        salesName, salesCode: selectedSales?.code || salesCodeForName(salesName),
+        ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName, '', selectedSales?.code || salesCodeForName(salesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
@@ -2478,14 +2725,18 @@ window.handleSaveAndPrint = function() {
         company: currentCompany,
         clientName: clientName,
         ordererName: ordererName,
+        customerId: syncCustomerMaster(ordererName || clientName, { salesCode: selectedSales?.code || salesCodeForName(selectedSalesName) }),
         salesName: selectedSalesName,
-        ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName) ? currentUser?.uid || '' : ''),
+        salesCode: selectedSales?.code || salesCodeForName(selectedSalesName),
+        ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName, '', selectedSales?.code || salesCodeForName(selectedSalesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
         grandTotal: document.getElementById('grandTotal').innerText,
+        status: BUSINESS_STATUS.ACTIVE,
+        ...grossAmountMetadata(document.getElementById('grandTotal').innerText),
         items: []
     };
 
@@ -2777,6 +3028,7 @@ function createMyQuotesPaginationState() {
         // 全公司估價單直接由 Firestore 依日期分頁，不能先按公司／單號分組後才在前端重排。
         sources.push({ cursor: null, query: () => db.collection('quotes').orderBy('quoteDate', 'desc') });
     } else {
+        if (currentUserCode) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesCode', '==', currentUserCode).orderBy('quoteDate', 'desc') });
         if (currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('ownerUid', '==', currentUser.uid).orderBy('quoteDate', 'desc') });
         if (currentUserName) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesName', '>=', currentUserName).where('salesName', '<=', currentUserName + '\uf8ff').orderBy('quoteDate', 'desc') });
     }
@@ -2868,6 +3120,7 @@ window.renderMyQuotesList = function() {
     const tbody = document.getElementById('myQuotesBody');
     const searchInput = document.getElementById('myQuoteSearch');
     const keyword = (searchInput.value || '').toLowerCase();
+    const periodFilter = document.getElementById('myQuotePeriodFilter')?.value || 'this-year';
     tbody.innerHTML = '';
     let shown = 0;
 
@@ -2879,6 +3132,7 @@ window.renderMyQuotesList = function() {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
+        if (q.dealClosed && !dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
         shown++;
 
         const tr = document.createElement('tr');
@@ -2950,7 +3204,7 @@ window.createForecastFromQuote = async function(quoteNo) {
             .join('、');
 
         const brands = dedupeBrandsCaseInsensitive(
-            items.map(item => item.brand).filter(Boolean)
+            items.map(item => resolveBrandName(item.brand)).filter(Boolean)
         );
 
         const brand = brands.length === 1 ? brands[0] : brands.join(' / ');
@@ -2960,16 +3214,20 @@ window.createForecastFromQuote = async function(quoteNo) {
 
         const ref = db.collection('forecasts').doc();
 
+        const forecastCustomerName = q.ordererName || q.clientName || '';
         const record = {
-            customerName: q.ordererName || q.clientName || '',
+            customerName: forecastCustomerName,
+            customerId: q.customerId || syncCustomerMaster(forecastCustomerName, { salesCode: q.salesCode || salesCodeForName(q.salesName) }),
             brand,
             productName,
             estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g, '')) || 0,
             stage,
             status,
+            closedAt: status === 'active' ? null : now,
             latestProgress: displayProgress,
             latestProgressAt: now,
             salesName: q.salesName || currentUserName || '',
+            salesCode: q.salesCode || salesCodeForName(q.salesName) || currentUserCode || '',
             ownerUid: q.ownerUid || currentUser?.uid || '',
             createdAt: now,
             updatedAt: now,
@@ -3038,8 +3296,9 @@ window.markQuoteAsDeal = function(quoteNo) {
                 orderDate: todayStr,
                 createdAt: new Date().toISOString(),
                 company: q.company || '',
-                customerName: q.ordererName || '',
-                brand: item.brand || '',
+                customerName: q.ordererName || q.clientName || '',
+                customerId: q.customerId || customerIdForName(q.ordererName || q.clientName || ''),
+                brand: resolveBrandName(item.brand || ''),
                 productLine: item.productLine || '',
                 productType: item.productType || '',
                 productId: item.productId || '',
@@ -3049,6 +3308,8 @@ window.markQuoteAsDeal = function(quoteNo) {
                 qty: item.qty || '',
                 unitPrice: item.price || '',
                 totalPrice: item.subtotal || '',
+                status: BUSINESS_STATUS.ACTIVE,
+                ...grossAmountMetadata(item.subtotal || 0),
                 transactionType: '',
                 invoiceTitle: q.clientName || '',
                 quoteNo: quoteNo,
@@ -3056,6 +3317,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                     documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')
                 ]),
                 salesName: stripPhoneSuffix(q.salesName),
+                salesCode: q.salesCode || salesCodeForName(q.salesName),
                 ownerUid: q.ownerUid || salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(q.salesName))?.uid || '',
                 isOrdered: false,
                 isArrived: false,
@@ -3064,7 +3326,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 invoiceDate: ''
             };
             // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
-            const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: item.brand }) : null;
+            const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: resolveBrandName(item.brand || '') }) : null;
             if (priceMatch) {
                 orderData.productId = orderData.productId || priceMatch.productId || stableProductId(priceMatch);
                 orderData.unit = priceMatch.unit || '';
@@ -3079,6 +3341,7 @@ window.markQuoteAsDeal = function(quoteNo) {
         batch.update(db.collection('quotes').doc(quoteNo), {
             dealClosed: true,
             dealClosedAt: todayStr,
+            status: BUSINESS_STATUS.COMPLETED,
             linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
         });
 
@@ -3164,7 +3427,8 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
         // 所有來源訂單處理完成後，才解除估價單成交狀態
         await db.collection('quotes').doc(quoteNo).update({
             dealClosed: false,
-            dealClosedAt: null
+            dealClosedAt: null,
+            status: BUSINESS_STATUS.ACTIVE
         });
 
         alert('成交狀態已取消；相關訂單已保留並標記為取消，預留庫存已同步釋放。');
@@ -3265,15 +3529,13 @@ function orderInvoiceDate(order) {
 }
 
 function orderPeriodRange() {
-    if (activeOrderPeriod === 'all') return { start: '', end: '' };
     if (activeOrderPeriod === 'custom') {
         return {
             start: document.getElementById('orderPeriodStart')?.value || '',
             end: document.getElementById('orderPeriodEnd')?.value || ''
         };
     }
-    const year = new Date().getFullYear() - (activeOrderPeriod === 'last-year' ? 1 : 0);
-    return { start: `${year}-01-01`, end: `${year}-12-31` };
+    return unifiedPeriodRange(activeOrderPeriod);
 }
 
 function dateInOrderPeriod(date) {
@@ -3289,7 +3551,7 @@ function orderMatchesWorkPeriod(order, category = orderWorkCategory(order)) {
 }
 
 window.changeOrderPeriod = function(value) {
-    activeOrderPeriod = ['this-year', 'last-year', 'custom', 'all'].includes(value) ? value : 'this-year';
+    activeOrderPeriod = ['this-month', 'last-month', 'this-quarter', 'this-year', 'last-year', 'custom', 'all'].includes(value) ? value : 'this-year';
     const custom = document.getElementById('orderCustomPeriod');
     if (custom) custom.style.display = activeOrderPeriod === 'custom' ? 'flex' : 'none';
     if (activeOrderPeriod === 'custom') {
@@ -3302,17 +3564,22 @@ window.changeOrderPeriod = function(value) {
     renderOrdersList();
 };
 
-let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[];
+let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[], pendingInventoryCache=[];
 function expiryDays(date){if(!date)return null;return Math.ceil((new Date(date+'T23:59:59')-new Date())/86400000);}
 function lotStatus(lot){const d=expiryDays(lot.expiryDate);if(d===null)return '';if(d<0)return '已過期';if(d<=30)return '30天內';if(d<=60)return '60天內';if(d<=90)return '90天內';return '';}
 function fefoLots(stock){return [...(stock.lots||[])].filter(l=>Number(l.qty||0)>0).sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));}
 window.loadInventory=async function(reset=true){
  if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCache=[];inventoryCursor=null;inventoryHasMore=true;} inventoryLoading=true;
  try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const s=await q.get();if(!s.empty)inventoryCursor=s.docs[s.docs.length-1];s.forEach(d=>{const x={id:d.id,...d.data()};const i=inventoryCache.findIndex(v=>v.id===d.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});inventoryHasMore=s.size===DEFAULT_LIST_LIMIT;
- const m=await db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get();inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));renderInventoryList();renderInventoryLedger();
+ const [m,pending]=await Promise.all([
+ db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
+ db.collection('pendingInventoryItems').where('status','==','pending-arrival').limit(100).get()
+ ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
-window.renderInventoryList=function(){const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';inventoryCache.forEach(x=>{const lots=fefoLots(x);const text=`${x.itemCode||''} ${x.itemName||''} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(k&&!text.includes(k))return;const n=inventoryNumbers(x);const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');body.insertAdjacentHTML('beforeend',`<tr><td>${escapeHtml(x.itemCode||'')}</td><td>${escapeHtml(x.itemName||'')}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td><td>${n.incoming}</td><td>${lotHtml}</td></tr>`);});};
+window.renderInventoryList=function(){const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';inventoryCache.forEach(x=>{const lots=fefoLots(x);const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(k&&!text.includes(k))return;const n=inventoryNumbers(x);const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');const reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails('${escapeAttr(x.productKey||x.id||'')}')">${n.reserved}</button>`:'0';body.insertAdjacentHTML('beforeend',`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="現有庫存">${n.onHand}</td><td data-th="已占用">${reserved}</td><td data-th="可用庫存">${n.available}</td><td data-th="在途">${n.incoming}</td><td data-th="批號／效期">${lotHtml}</td></tr>`);});};
+
+window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;body.innerHTML=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`).join('');if(hint)hint.style.display=pendingInventoryCache.length?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 window.openInventoryAdjustment=async function(){
  if(!canEditPage('inventory'))return;const code=prompt('貨號');if(!code)return;const match=priceItemLookup.get('code:'+normalizeItemCode(code));if(!match){alert('Product Master 找不到此貨號');return;}
@@ -3338,26 +3605,109 @@ function inventoryNumbers(data = {}) {
 function inventoryMovementRecord(type, qty, orderId, productKey, actor, extra = {}) {
     return { type, qty: Number(qty || 0), productKey, sourceType: DOCUMENT_TYPES.ORDER, sourceId: orderId, createdAt: new Date().toISOString(), createdBy: actor, ...extra };
 }
+
+function inventoryReservationPayload(orderId, order, reservedQty, status = 'active') {
+    return {
+        orderId,
+        orderNo: order.orderNo || order.quoteNo || orderId,
+        productKey: inventoryProductKey(order),
+        itemCode: order.itemCode || '',
+        itemName: order.itemName || '',
+        customerName: order.customerName || '',
+        salesCode: order.salesCode || salesCodeForName(order.salesName),
+        salesName: order.salesName || '',
+        orderDate: order.orderDate || '',
+        quantity: Math.max(0, Number(reservedQty || 0)),
+        status,
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function reservationDocRef(orderId) {
+    return db.collection('inventoryReservations').doc(String(orderId));
+}
+
+window.openInventoryReservationDetails = async function(productKey) {
+    const overlay = document.getElementById('inventoryReservationOverlay');
+    const body = document.getElementById('inventoryReservationBody');
+    const title = document.getElementById('inventoryReservationTitle');
+    if (!overlay || !body) return;
+    body.innerHTML = '<tr><td colspan="7">讀取中…</td></tr>';
+    if (title) title.innerText = '已占用訂單';
+    overlay.classList.add('active');
+    try {
+        const snapshot = await db.collection('inventoryReservations').where('productKey', '==', productKey).limit(100).get();
+        const rows = snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(item => item.status === 'active' && Number(item.quantity || 0) > 0)
+            .sort((x, y) => String(y.orderDate || '').localeCompare(String(x.orderDate || '')));
+        body.innerHTML = rows.length ? rows.map(item => `<tr>
+            <td>${escapeHtml(item.orderNo || item.orderId || item.id)}</td>
+            <td>${escapeHtml(item.customerName || '')}</td>
+            <td>${escapeHtml(item.itemCode || '')}</td>
+            <td>${escapeHtml(item.itemName || '')}</td>
+            <td>${Number(item.quantity || 0)}</td>
+            <td>${escapeHtml(item.salesName || item.salesCode || '')}</td>
+            <td>${escapeHtml(item.orderDate || '')}</td>
+        </tr>`).join('') : '<tr><td colspan="7" style="color:#888;">目前沒有有效占用訂單。</td></tr>';
+    } catch (err) {
+        body.innerHTML = `<tr><td colspan="7">讀取失敗：${escapeHtml(err.message || String(err))}</td></tr>`;
+    }
+};
+
+window.closeInventoryReservationDetails = function() {
+    document.getElementById('inventoryReservationOverlay')?.classList.remove('active');
+};
 function orderReservedQuantity(order) {
     if (normalizedOrderStatus(order) !== 'normal') return 0;
     return Math.max(0, orderQuantity(order) - deliveredQuantity(order));
 }
 
 async function reserveInventoryForNewOrder(orderId, order) {
-    const ref = inventoryRefFor(order); if (!ref || !orderQuantity(order)) return { reservedQty: 0, shortageQty: orderQuantity(order) };
-    const productKey = inventoryProductKey(order), actor = currentUserName || currentUser?.email || '';
+    const ref = inventoryRefFor(order);
+    const requested = orderQuantity(order);
+    if (!ref || !requested) return { reservedQty: 0, shortageQty: requested };
+
+    const productKey = inventoryProductKey(order);
+    const actor = currentUserName || currentUser?.email || '';
     let result;
+
     await db.runTransaction(async tx => {
-        const snap = await tx.get(ref), stock = inventoryNumbers(snap.exists ? snap.data() : {});
-        const requested = orderQuantity(order);
+        const snap = await tx.get(ref);
+
+        // 新產品在「訂單成立」時不建立正式 inventory 主檔。
+        // 先把整筆需求列為 shortage；等 PO 送出後進 pendingInventoryItems，到貨時才一鍵建檔。
+        if (!snap.exists) {
+            tx.update(db.collection('orders').doc(orderId), {
+                inventoryReservedQty: 0,
+                inventoryShortageQty: requested,
+                inventoryProductKey: productKey
+            });
+            tx.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, 'shortage'), { merge: true });
+            result = { reservedQty: 0, shortageQty: requested };
+            return;
+        }
+
+        const stock = inventoryNumbers(snap.data());
         const reservable = Math.max(0, Math.min(requested, stock.available));
         const shortage = Math.max(0, requested - reservable);
-        tx.set(ref, { productKey, productId: order.productId || '', itemCode: order.itemCode || '', itemName: order.itemName || '', onHand: stock.onHand, reserved: stock.reserved + reservable, incoming: stock.incoming, updatedAt: new Date().toISOString() }, { merge: true });
+
+        tx.update(ref, {
+            reserved: stock.reserved + reservable,
+            updatedAt: new Date().toISOString()
+        });
+
         if (reservable) {
             const movement = db.collection('inventoryMovements').doc();
             tx.set(movement, inventoryMovementRecord('reserve', reservable, orderId, productKey, actor));
         }
-        tx.update(db.collection('orders').doc(orderId), { inventoryReservedQty: reservable, inventoryShortageQty: shortage, inventoryProductKey: productKey });
+
+        tx.update(db.collection('orders').doc(orderId), {
+            inventoryReservedQty: reservable,
+            inventoryShortageQty: shortage,
+            inventoryProductKey: productKey
+        });
+        tx.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, reservable, reservable > 0 ? 'active' : 'shortage'), { merge: true });
         result = { reservedQty: reservable, shortageQty: shortage };
     });
     return result;
@@ -3398,8 +3748,12 @@ function returnedQuantity(order) {
 }
 
 function normalizedOrderStatus(order) {
-    // 舊版的「作廢」與「取消」意義重複；保留舊資料相容，但統一視為已取消。
-    return ['cancelled', 'voided'].includes(order?.orderStatus) ? 'cancelled' : 'normal';
+    // UI 將取消／作廢視為同一個「不可繼續履約」狀態；底層 status 仍保留 cancelled / voided 以利稽核。
+    const canonical = order?.status || '';
+    const legacy = order?.orderStatus || '';
+    if ([BUSINESS_STATUS.CANCELLED, BUSINESS_STATUS.VOIDED, 'cancelled', 'voided'].includes(canonical)
+        || ['cancelled', 'voided'].includes(legacy)) return 'cancelled';
+    return 'normal';
 }
 
 function orderLifecycleInfo(order) {
@@ -3487,6 +3841,13 @@ function createOrderPaginationState() {
             query: () => db.collection('orders').orderBy('orderDate', 'desc')
         });
     } else {
+        if (currentUserCode) {
+            sources.push({
+                cursor: null,
+                exhausted: false,
+                query: () => db.collection('orders').where('salesCode', '==', currentUserCode)
+            });
+        }
         if (currentUser?.uid) {
             sources.push({
                 cursor: null,
@@ -3638,7 +3999,7 @@ async function runOrderHistoryItemCodeSearch(reset = true) {
         const records = new Map(orderHistorySearchResults.map(order => [order.id, order]));
         snapshot.forEach(doc => {
             const data = { id: doc.id, ...doc.data() };
-            if (canViewAllData('orders') || belongsToCurrentUser(data.salesName) || data.ownerUid === currentUser?.uid) records.set(doc.id, data);
+            if (canViewAllData('orders') || belongsToCurrentUser(data.salesName, data.ownerUid, data.salesCode)) records.set(doc.id, data);
         });
         orderHistorySearchResults = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         orderHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
@@ -3884,12 +4245,15 @@ window.renderPoList = function() {
     const searchInput = document.getElementById('poListSearch');
     if (!tbody || !searchInput) return;
     const keyword = (searchInput.value || '').toLowerCase();
+    const periodFilter = document.getElementById('poPeriodFilter')?.value || 'this-year';
     tbody.innerHTML = '';
     let shown = 0;
 
     poListCache.forEach(po => {
         const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
+        // 未到貨 PO 屬於未完成狀態，跨期間保留；已完成 PO 依訂購日期套用統計期間。
+        if (poReceiptProgress(po).complete && !dateInUnifiedPeriod(po.poDate || po.createdAt, periodFilter)) return;
         shown++;
 
         const items = purchaseItemsFromSavedPo(po);
@@ -3900,15 +4264,15 @@ window.renderPoList = function() {
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${escapeHtml(po.poNo || '')}</td>
-            <td>${escapeHtml(companyLabel)}</td>
-            <td>${escapeHtml(po.vendorName || '')}</td>
-            <td>${escapeHtml(po.buyerName || '')}</td>
-            <td>${escapeHtml(po.poDate || '')}</td>
-            <td>${items.length}</td>
-            <td>${grandTotal.toLocaleString()}</td>
-            <td>${(() => { const progress = poReceiptProgress(po); return progress.complete ? '已全部到貨' : progress.received > 0 ? '部分到貨 ' + progress.received + '/' + progress.ordered : '待到貨 0/' + progress.ordered; })()}</td>
-            <td class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button> <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button></td>
+            <td data-th="單號">${escapeHtml(po.poNo || '')}</td>
+            <td data-th="公司">${escapeHtml(companyLabel)}</td>
+            <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
+            <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
+            <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
+            <td data-th="品項數">${items.length}</td>
+            <td data-th="總計金額">${grandTotal.toLocaleString()}</td>
+            <td data-th="到貨進度">${(() => { const progress = poReceiptProgress(po); return progress.complete ? '已全部到貨' : progress.received > 0 ? '部分到貨 ' + progress.received + '/' + progress.ordered : '待到貨 0/' + progress.ordered; })()}</td>
+            <td data-th="操作" class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button> <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button></td>
         `;
         tbody.appendChild(tr);
     });
@@ -3977,50 +4341,225 @@ function poIncomingKey(item) {
 async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
     const previousItems = previousPo ? purchaseItemsFromSavedPo(previousPo) : [];
     const nextItems = purchaseItemsFromSavedPo(poRecord);
+
     await db.runTransaction(async tx => {
         const refs = new Map();
-        [...previousItems, ...nextItems].forEach(item => { const key=poIncomingKey(item); if(key) refs.set(key, db.collection('inventory').doc(encodeURIComponent(key))); });
-        const snaps = new Map();
-        for (const [key,ref] of refs) snaps.set(key, await tx.get(ref));
-        for (const [key,ref] of refs) {
-            const oldQty=previousItems.filter(i=>poIncomingKey(i)===key).reduce((s,i)=>s+Number(i.qty||0),0);
-            const newQty=nextItems.filter(i=>poIncomingKey(i)===key).reduce((s,i)=>s+Number(i.qty||0),0);
-            const delta=newQty-oldQty; if(!delta) continue;
-            const stock=inventoryNumbers(snaps.get(key)?.exists ? snaps.get(key).data() : {});
-            const sample=nextItems.find(i=>poIncomingKey(i)===key)||previousItems.find(i=>poIncomingKey(i)===key)||{};
-            tx.set(ref,{productKey:key,productId:sample.productId||'',itemCode:sample.itemCode||'',itemName:sample.itemName||'',onHand:stock.onHand,reserved:stock.reserved,incoming:Math.max(0,stock.incoming+delta),updatedAt:new Date().toISOString()},{merge:true});
-            tx.set(db.collection('inventoryMovements').doc(),{type:'purchase_incoming',qty:delta,productKey:key,sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,sourceId:poId,createdAt:new Date().toISOString(),createdBy:currentUserName||currentUser?.email||''});
+        [...previousItems, ...nextItems].forEach(item => {
+            const key = poIncomingKey(item);
+            if (key) refs.set(key, db.collection('inventory').doc(encodeURIComponent(key)));
+        });
+
+        // Firestore transaction 要求所有 reads 在 writes 之前完成。
+        const inventorySnaps = new Map();
+        const pendingSnaps = new Map();
+        for (const [key, ref] of refs) {
+            const invSnap = await tx.get(ref);
+            inventorySnaps.set(key, invSnap);
+            if (!invSnap.exists) {
+                const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
+                pendingSnaps.set(key, await tx.get(pendingRef));
+            }
+        }
+
+        for (const [key, ref] of refs) {
+            const oldQty = previousItems.filter(i => poIncomingKey(i) === key).reduce((s, i) => s + Number(i.qty || 0), 0);
+            const newQty = nextItems.filter(i => poIncomingKey(i) === key).reduce((s, i) => s + Number(i.qty || 0), 0);
+            const delta = newQty - oldQty;
+            if (!delta) continue;
+
+            const sample = nextItems.find(i => poIncomingKey(i) === key) || previousItems.find(i => poIncomingKey(i) === key) || {};
+            const invSnap = inventorySnaps.get(key);
+
+            if (invSnap?.exists) {
+                const stock = inventoryNumbers(invSnap.data());
+                tx.update(ref, {
+                    incoming: Math.max(0, stock.incoming + delta),
+                    updatedAt: new Date().toISOString()
+                });
+            } else {
+                const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
+                const pending = pendingSnaps.get(key);
+                const oldPendingQty = Number(pending?.exists ? pending.data().incomingQty : 0) || 0;
+                const sourceOrderIds = nextItems.filter(i => poIncomingKey(i) === key && i.orderId).map(i => i.orderId);
+                const payload = {
+                    productKey: key,
+                    productId: sample.productId || '',
+                    itemCode: sample.itemCode || '',
+                    itemName: sample.itemName || '',
+                    brand: resolveBrandName(sample.brand || ''),
+                    supplier: poRecord.vendorName || '',
+                    incomingQty: Math.max(0, oldPendingQty + delta),
+                    status: Math.max(0, oldPendingQty + delta) > 0 ? 'pending-arrival' : 'cancelled',
+                    sourcePurchaseOrders: firebase.firestore.FieldValue.arrayUnion(poId),
+                    updatedAt: new Date().toISOString(),
+                    createdAt: pending?.exists ? (pending.data().createdAt || new Date().toISOString()) : new Date().toISOString()
+                };
+                if (sourceOrderIds.length) payload.sourceOrderIds = firebase.firestore.FieldValue.arrayUnion(...sourceOrderIds);
+                tx.set(pendingRef, payload, { merge: true });
+            }
+
+            tx.set(db.collection('inventoryMovements').doc(), {
+                type: 'purchase_incoming',
+                qty: delta,
+                productKey: key,
+                sourceType: DOCUMENT_TYPES.PURCHASE_ORDER,
+                sourceId: poId,
+                createdAt: new Date().toISOString(),
+                createdBy: currentUserName || currentUser?.email || ''
+            });
         }
     });
 }
 
 window.receivePurchaseOrder = async function(poId) {
     if (!canEditPage('orders.po')) return;
-    const po = poListCache.find(p=>p.id===poId); if(!po) return;
-    const items=purchaseItemsFromSavedPo(po), remainingItems=items.map((item,index)=>({item,index,remaining:Math.max(0,Number(item.qty||0)-receivedQuantityForPoItem(po,index))})).filter(x=>x.remaining>0);
-    if(!remainingItems.length){alert('這張訂購單已全部到貨。');return;}
-    const itemText=remainingItems.map(x=>`${x.index+1}. ${x.item.itemName||x.item.itemCode}（尚未到貨 ${x.remaining}）`).join('\n');
-    const indexInput=prompt(`登錄到貨品項：\n${itemText}\n\n請輸入品項序號`,'1'); if(indexInput===null)return;
-    const target=remainingItems.find(x=>x.index===Number(indexInput)-1); if(!target){alert('品項序號不正確。');return;}
-    const qty=Number(prompt(`本次收到數量（最多 ${target.remaining}）`,String(target.remaining))); if(!qty||qty<=0||qty>target.remaining){alert('到貨數量不正確。');return;}
-    const now=new Date().toISOString(), actor=currentUserName||currentUser?.email||'', receiptId=`rcv-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-    try{
+    const po = poListCache.find(p => p.id === poId);
+    if (!po) return;
+    const items = purchaseItemsFromSavedPo(po);
+    const remainingItems = items.map((item, index) => ({
+        item, index, remaining: Math.max(0, Number(item.qty || 0) - receivedQuantityForPoItem(po, index))
+    })).filter(x => x.remaining > 0);
+    if (!remainingItems.length) { alert('這張訂購單已全部到貨。'); return; }
+
+    const itemText = remainingItems.map(x => `${x.index + 1}. ${x.item.itemCode || '無貨號'}｜${x.item.itemName || ''}（尚未到貨 ${x.remaining}）`).join('\n');
+    const indexInput = prompt(`登錄到貨品項：\n${itemText}\n\n請輸入品項序號`, '1');
+    if (indexInput === null) return;
+    const target = remainingItems.find(x => x.index === Number(indexInput) - 1);
+    if (!target) { alert('品項序號不正確。'); return; }
+    const qty = Number(prompt(`本次收到數量（最多 ${target.remaining}）`, String(target.remaining)));
+    if (!qty || qty <= 0 || qty > target.remaining) { alert('到貨數量不正確。'); return; }
+
+    const now = new Date().toISOString();
+    const actor = currentUserName || currentUser?.email || '';
+    const receiptId = `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    try {
         let saved;
-        await db.runTransaction(async tx=>{
-            const poRef=db.collection('purchaseOrders').doc(poId), poSnap=await tx.get(poRef); if(!poSnap.exists)throw new Error('找不到訂購單');
-            const live=poSnap.data(), liveItems=purchaseItemsFromSavedPo(live), item=liveItems[target.index]; if(!item)throw new Error('找不到品項');
-            const already=receivedQuantityForPoItem(live,target.index), remaining=Math.max(0,Number(item.qty||0)-already); if(qty>remaining)throw new Error('到貨數量超過尚未到貨數量');
-            const key=poIncomingKey(item); if(!key)throw new Error('此品項缺少 Product ID／貨號，無法入庫');
-            const invRef=db.collection('inventory').doc(encodeURIComponent(key)), invSnap=await tx.get(invRef), stock=inventoryNumbers(invSnap.exists?invSnap.data():{});
-            const record={id:receiptId,itemIndex:target.index,productKey:key,productId:item.productId||'',itemCode:item.itemCode||'',itemName:item.itemName||'',qty,date:localDateString(),createdAt:now,createdBy:actor};
-            const records=[...(live.receiptRecords||[]),record];
-            tx.set(invRef,{productKey:key,productId:item.productId||'',itemCode:item.itemCode||'',itemName:item.itemName||'',onHand:stock.onHand+qty,reserved:stock.reserved,incoming:Math.max(0,stock.incoming-qty),updatedAt:now},{merge:true});
-            tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey:key,sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,sourceId:poId,receiptId,createdAt:now,createdBy:actor});
-            tx.update(poRef,{receiptRecords:records,updatedAt:now,receiptStatus:records.reduce((s,r)=>s+Number(r.qty||0),0)>=liveItems.reduce((s,i)=>s+Number(i.qty||0),0)?'received':'partial'});
-            saved={id:poId,...live,receiptRecords:records,updatedAt:now};
+        await db.runTransaction(async tx => {
+            const poRef = db.collection('purchaseOrders').doc(poId);
+            const poSnap = await tx.get(poRef);
+            if (!poSnap.exists) throw new Error('找不到訂購單');
+            const live = poSnap.data();
+            const liveItems = purchaseItemsFromSavedPo(live);
+            const item = liveItems[target.index];
+            if (!item) throw new Error('找不到品項');
+
+            const already = receivedQuantityForPoItem(live, target.index);
+            const remaining = Math.max(0, Number(item.qty || 0) - already);
+            if (qty > remaining) throw new Error('到貨數量超過尚未到貨數量');
+
+            const key = poIncomingKey(item);
+            if (!key) throw new Error('此品項缺少貨號／Product ID，無法建立庫存');
+
+            const invRef = db.collection('inventory').doc(encodeURIComponent(key));
+            const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
+            const invSnap = await tx.get(invRef);
+            const pendingSnap = await tx.get(pendingRef);
+            const pendingIncoming = Number(pendingSnap.exists ? pendingSnap.data().incomingQty : 0) || 0;
+            const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : { incoming: pendingIncoming });
+            let reserveFromReceipt = 0;
+            let sourceOrder = null;
+
+            if (item.orderId) {
+                const orderRef = db.collection('orders').doc(item.orderId);
+                const orderSnap = await tx.get(orderRef);
+                if (orderSnap.exists) {
+                    sourceOrder = { id: orderSnap.id, ...orderSnap.data() };
+                    const shortage = Math.max(0, Number(sourceOrder.inventoryShortageQty || 0));
+                    reserveFromReceipt = Math.min(qty, shortage);
+                    if (reserveFromReceipt > 0) {
+                        tx.update(orderRef, {
+                            inventoryReservedQty: Number(sourceOrder.inventoryReservedQty || 0) + reserveFromReceipt,
+                            inventoryShortageQty: Math.max(0, shortage - reserveFromReceipt),
+                            inventoryProductKey: key
+                        });
+                        tx.set(reservationDocRef(item.orderId), inventoryReservationPayload(
+                            item.orderId,
+                            sourceOrder,
+                            Math.max(0, Number(sourceOrder.inventoryReservedQty || 0) - deliveredQuantity(sourceOrder)) + reserveFromReceipt,
+                            'active'
+                        ), { merge: true });
+                    }
+                }
+            }
+
+            const record = {
+                id: receiptId,
+                itemIndex: target.index,
+                productKey: key,
+                productId: item.productId || '',
+                itemCode: item.itemCode || '',
+                itemName: item.itemName || '',
+                brand: resolveBrandName(item.brand || ''),
+                qty,
+                date: localDateString(),
+                createdAt: now,
+                createdBy: actor
+            };
+            const records = [...(live.receiptRecords || []), record];
+
+            tx.set(invRef, {
+                productKey: key,
+                productId: item.productId || '',
+                itemCode: item.itemCode || '',
+                itemName: item.itemName || '',
+                brand: resolveBrandName(item.brand || ''),
+                unitCost: Number(item.unitPrice || 0),
+                currency: live.currency || DEFAULT_CURRENCY,
+                onHand: stock.onHand + qty,
+                reserved: stock.reserved + reserveFromReceipt,
+                incoming: Math.max(0, stock.incoming - qty),
+                updatedAt: now
+            }, { merge: true });
+
+            tx.set(db.collection('inventoryMovements').doc(), {
+                type: 'receipt',
+                qty,
+                productKey: key,
+                itemCode: item.itemCode || '',
+                itemName: item.itemName || '',
+                brand: resolveBrandName(item.brand || ''),
+                unitCost: Number(item.unitPrice || 0),
+                purchaseNetAmount: Number(item.unitPrice || 0) * qty,
+                sourceType: DOCUMENT_TYPES.PURCHASE_ORDER,
+                sourceId: poId,
+                receiptId,
+                createdAt: now,
+                createdBy: actor
+            });
+
+            const pendingRemaining = Math.max(0, pendingIncoming - qty);
+            tx.set(pendingRef, {
+                productKey: key,
+                productId: item.productId || '',
+                itemCode: item.itemCode || '',
+                itemName: item.itemName || '',
+                brand: resolveBrandName(item.brand || ''),
+                incomingQty: pendingRemaining,
+                status: pendingRemaining > 0 ? 'pending-arrival' : 'completed',
+                completedAt: pendingRemaining > 0 ? null : now,
+                completedBy: pendingRemaining > 0 ? '' : actor,
+                updatedAt: now
+            }, { merge: true });
+
+            const receiptComplete = records.reduce((s, r) => s + Number(r.qty || 0), 0) >= liveItems.reduce((s, i) => s + Number(i.qty || 0), 0);
+            tx.update(poRef, {
+                receiptRecords: records,
+                updatedAt: now,
+                status: receiptComplete ? BUSINESS_STATUS.COMPLETED : BUSINESS_STATUS.ACTIVE,
+                receiptStatus: receiptComplete ? 'received' : 'partial'
+            });
+            saved = { id: poId, ...live, receiptRecords: records, updatedAt: now };
         });
-        const idx=poListCache.findIndex(p=>p.id===poId);if(idx>=0)poListCache[idx]=saved;renderPoList();
-    }catch(err){alert('到貨入庫失敗：'+err.message);}
+
+        const idx = poListCache.findIndex(p => p.id === poId);
+        if (idx >= 0) poListCache[idx] = saved;
+        renderPoList();
+        if (canAccessPage('inventory')) loadInventory(true);
+        alert('到貨完成；若為新品已一鍵建立庫存，來源訂單的缺貨數量也已優先轉為占用。');
+    } catch (err) {
+        alert('到貨入庫失敗：' + err.message);
+    }
 };
 
 function purchaseItemsFromSavedPo(po) {
@@ -4087,16 +4626,40 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
 
 window.openDirectStockPurchase = function() {
     if (!canEditPage('orders.po')) return;
-    const code = prompt('請輸入備貨產品貨號'); if (!code) return;
+    const code = (prompt('請輸入備貨產品貨號') || '').trim();
+    if (!code) return;
+
     const normalized = normalizeItemCode(code);
-    const match = priceItemLookup.get(`code:${normalized}`);
-    if (!match) { alert('Product Master 找不到此貨號，請先更新產品主檔。'); return; }
-    const qty = Number(prompt('請輸入備貨採購數量','1')); if (!qty || qty <= 0) return;
-    poItems = [{ orderId:'', itemName:match.nameCn||match.nameEn||'', itemCode:match.model||code, productId:match.productId||stableProductId(match), brand:match.brand||'', qty, unit:match.unit||'', unitPrice:Number(match.cost||0) }];
-    poAllItems = poItems; poEditingId = null;
+    const match = priceItemLookup.get(`code:${normalized}`) || null;
+
+    const itemName = match?.nameCn || match?.nameEn || (prompt('Product Master 尚無此貨號，請輸入品名') || '').trim();
+    if (!itemName) { alert('請輸入品名。'); return; }
+
+    const brand = resolveBrandName(match?.brand || (prompt('請輸入廠牌（可輸入新廠牌）') || '').trim());
+    if (!brand) { alert('請輸入廠牌。'); return; }
+
+    const qty = Number(prompt('請輸入備貨採購數量', '1'));
+    if (!qty || qty <= 0) return;
+
+    const unit = match?.unit || (prompt('單位（可留白）', '') || '').trim();
+    const supplier = match?.supplier || (prompt('供應商（可留白）', '') || '').trim();
+    const unitPrice = Number(match?.cost || prompt('未稅進貨單價（可填 0 稍後修改）', '0') || 0);
+
+    poItems = [{
+        orderId: '',
+        itemName,
+        itemCode: match?.model || code,
+        productId: match?.productId || '',
+        brand,
+        qty,
+        unit,
+        unitPrice
+    }];
+    poAllItems = poItems;
+    poEditingId = null;
     switchPoCompany(currentCompany || 'yushin', null, true);
     populatePoVendorSuggestions();
-    document.getElementById('poVendorName').value = match.supplier || '';
+    document.getElementById('poVendorName').value = supplier;
     document.getElementById('poBuyerName').innerText = currentUserName || '';
     document.getElementById('poDate').value = localDateString();
     generateNextPoNumber();
@@ -4294,13 +4857,16 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
+    const poNetTotal = poItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.unitPrice || 0)), 0);
     const poRecord = {
         poNo,
         company: poCurrentCompany,
         vendorName,
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
-        items: poItems.map(item => ({ ...item })),
+        status: BUSINESS_STATUS.ACTIVE,
+        items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
+        ...netAmountMetadata(poNetTotal),
         createdAt: new Date().toISOString(),
         ...linkedDocumentFields(orderIds.length === 1 ? DOCUMENT_TYPES.ORDER : '', orderIds.length === 1 ? orderIds[0] : '', orderIds.map(orderId => documentLink(DOCUMENT_TYPES.ORDER, orderId, 'source')))
     };
@@ -4480,13 +5046,16 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         if (field === 'isOrdered' && !newValue && (order.isArrived || serverDelivery.delivered > 0)) throw new Error('已有到貨或送貨進度，不能取消訂貨。');
         if (field === 'isArrived' && !newValue && serverDelivery.delivered > 0) throw new Error('已有送貨進度，不能取消到貨。');
         const entries = [];
-        const updates = { [field]: newValue };
+        const updates = { [field]: newValue, updatedAt: timestamp };
         if (field === 'isArrived' && newValue && !order.isOrdered) {
             updates.isOrdered = true;
             updates.orderedBy = order.orderedBy || actor;
             entries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: timestamp });
         }
-        if (field === 'isBilled') updates.invoiceDate = invoiceDate;
+        if (field === 'isBilled') {
+            updates.invoiceDate = invoiceDate;
+            updates.status = newValue ? BUSINESS_STATUS.COMPLETED : BUSINESS_STATUS.ACTIVE;
+        }
         if (field === 'isOrdered') updates.orderedBy = newValue ? actor : '';
         entries.push(logEntry);
         updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...entries);
@@ -4530,7 +5099,7 @@ window.updateOrderInvoiceDate = function(orderId, value) {
     order.invoiceDate = value;
     order.fieldEditHistory = [...(order.fieldEditHistory || []), history];
     renderOrdersList();
-    db.collection('orders').doc(orderId).update({ invoiceDate: value, fieldEditHistory: firebase.firestore.FieldValue.arrayUnion(history) }).catch(err => {
+    db.collection('orders').doc(orderId).update({ invoiceDate: value, updatedAt: history.at, fieldEditHistory: firebase.firestore.FieldValue.arrayUnion(history) }).catch(err => {
         order.invoiceDate = previous;
         order.fieldEditHistory = (order.fieldEditHistory || []).filter(item => item !== history);
         renderOrdersList();
@@ -4616,6 +5185,36 @@ function localDateString() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
+function normalizeBusinessDate(value) {
+    if (!value) return '';
+    const raw = String(value).trim().replace(/\//g, '-');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    return dateOnlyFromTimestamp(value);
+}
+
+function unifiedPeriodRange(key = 'this-year') {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (key === 'all') return { start: '', end: '' };
+    if (key === 'this-month') return { start: fmt(new Date(y, m, 1)), end: fmt(new Date(y, m + 1, 0)) };
+    if (key === 'last-month') return { start: fmt(new Date(y, m - 1, 1)), end: fmt(new Date(y, m, 0)) };
+    if (key === 'this-quarter') {
+        const qStart = Math.floor(m / 3) * 3;
+        return { start: fmt(new Date(y, qStart, 1)), end: fmt(new Date(y, qStart + 3, 0)) };
+    }
+    if (key === 'last-year') return { start: `${y - 1}-01-01`, end: `${y - 1}-12-31` };
+    return { start: `${y}-01-01`, end: `${y}-12-31` };
+}
+
+function dateInUnifiedPeriod(value, key = 'this-year') {
+    const date = normalizeBusinessDate(value);
+    const { start, end } = unifiedPeriodRange(key);
+    if (!start && !end) return true;
+    return !!date && (!start || date >= start) && (!end || date <= end);
+}
+
 window.openDeliveryModal = function(orderId) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order) return;
@@ -4651,20 +5250,59 @@ window.prepareOrderLifecycle = function(orderId, status) {
 };
 
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor) {
-    const invRef = inventoryRefFor(order); if (!invRef) return;
-    const snap = await transaction.get(invRef), stock = inventoryNumbers(snap.exists ? snap.data() : {});
+    const invRef = inventoryRefFor(order);
     const currentlyReserved = Math.max(0, Number(order.inventoryReservedQty || 0) - deliveredQuantity(order));
+
     if (nextStatus === 'cancelled') {
-        const release = Math.min(currentlyReserved, stock.reserved);
-        if (!release) return;
-        transaction.set(invRef, { reserved: Math.max(0, stock.reserved - release), updatedAt: new Date().toISOString() }, { merge: true });
-        transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release', -release, orderId, inventoryProductKey(order), actor, { reason: 'order_cancelled' }));
-    } else if (nextStatus === 'normal') {
+        if (invRef) {
+            const snap = await transaction.get(invRef);
+            if (snap.exists) {
+                const stock = inventoryNumbers(snap.data());
+                const release = Math.min(currentlyReserved, stock.reserved);
+                if (release > 0) {
+                    transaction.update(invRef, { reserved: Math.max(0, stock.reserved - release), updatedAt: new Date().toISOString() });
+                    transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release', -release, orderId, inventoryProductKey(order), actor, { reason: 'order_cancelled' }));
+                }
+            }
+        }
+        transaction.update(db.collection('orders').doc(orderId), {
+            inventoryReservedQty: deliveredQuantity(order),
+            inventoryShortageQty: 0
+        });
+        transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, 'released'), { merge: true });
+        return;
+    }
+
+    if (nextStatus === 'normal') {
         const needed = Math.max(0, orderQuantity(order) - deliveredQuantity(order));
+        if (!invRef) {
+            transaction.update(db.collection('orders').doc(orderId), {
+                inventoryReservedQty: deliveredQuantity(order),
+                inventoryShortageQty: needed
+            });
+            transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'), { merge: true });
+            return;
+        }
+
+        const snap = await transaction.get(invRef);
+        if (!snap.exists) {
+            transaction.update(db.collection('orders').doc(orderId), {
+                inventoryReservedQty: deliveredQuantity(order),
+                inventoryShortageQty: needed
+            });
+            transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'), { merge: true });
+            return;
+        }
+
+        const stock = inventoryNumbers(snap.data());
         const reserve = Math.min(needed, Math.max(0, stock.available));
-        transaction.set(invRef, { reserved: stock.reserved + reserve, updatedAt: new Date().toISOString() }, { merge: true });
+        transaction.update(invRef, { reserved: stock.reserved + reserve, updatedAt: new Date().toISOString() });
         if (reserve) transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('reserve', reserve, orderId, inventoryProductKey(order), actor, { reason: 'order_restored' }));
-        transaction.update(db.collection('orders').doc(orderId), { inventoryReservedQty: deliveredQuantity(order) + reserve, inventoryShortageQty: Math.max(0, needed - reserve) });
+        transaction.update(db.collection('orders').doc(orderId), {
+            inventoryReservedQty: deliveredQuantity(order) + reserve,
+            inventoryShortageQty: Math.max(0, needed - reserve)
+        });
+        transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, reserve, reserve > 0 ? 'active' : (needed > 0 ? 'shortage' : 'released')), { merge: true });
     }
 }
 
@@ -4715,9 +5353,11 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             };
             await adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor);
             const updates = {
+                status: nextStatus === 'cancelled' ? BUSINESS_STATUS.CANCELLED : BUSINESS_STATUS.ACTIVE,
                 orderStatus: nextStatus,
                 orderStatusDate: date,
                 orderStatusReason: '',
+                updatedAt: history.at,
                 orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(history)
             };
             transaction.update(ref, updates);
@@ -4955,7 +5595,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
                 ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
                 : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
-            const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -5074,7 +5714,7 @@ window.saveDeliveryRecord = async function() {
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
-            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             if (action === 'create') await applyInventoryDeliveryInTransaction(transaction, ref, order, qty, actor, orderId);
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -5109,7 +5749,7 @@ window.deleteDeliveryRecord = async function(recordId) {
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`刪除後的送貨數量會低於已登錄的退貨數量 ${alreadyReturned}，請先更正退貨紀錄。`);
             const history = { action: 'delete', recordId, before: removed, after: null, by: deliveryActor(), at: new Date().toISOString() };
-            const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -5132,7 +5772,7 @@ window.clearLegacyDelivery = async function() {
     if (returnedQuantity(order) > 0) { alert('這筆訂單已有退貨紀錄，請先更正或刪除退貨紀錄。'); return; }
     const history = { action: 'clear_legacy_estimate', before: { isDelivered: true, estimatedDate: order.orderDate || '' }, after: null, by: deliveryActor(), at: new Date().toISOString() };
     try {
-        await db.collection('orders').doc(order.id).update({ isDelivered: false, deliveredQty: 0, deliveryRecords: [], deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) });
+        await db.collection('orders').doc(order.id).update({ isDelivered: false, deliveredQty: 0, deliveryRecords: [], deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now });
         order.isDelivered = false;
         order.deliveredQty = 0;
         order.deliveryRecords = [];
@@ -5277,7 +5917,7 @@ window.saveReturnRecord = async function() {
             const delivered = deliveredQuantity(order);
             if (totalReturned > delivered + 1e-9) throw new Error(`累計退貨數量 ${totalReturned} 超過已送貨數量 ${delivered}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
-            const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
         });
@@ -5311,7 +5951,7 @@ window.deleteReturnRecord = async function(recordId) {
             const next = records.filter(item => item.id !== recordId);
             const totalReturned = next.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const history = { action: 'delete', recordId, before: removed, after: null, by: deliveryActor(), at: new Date().toISOString() };
-            const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
         });
@@ -5375,7 +6015,7 @@ window.openOrderModal = function() {
     if (title) title.innerText = '新增訂單';
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderInvoiceTitle'].forEach(id => {
+    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderUnit', 'orderInvoiceTitle'].forEach(id => {
         document.getElementById(id).value = '';
     });
     onOrderBrandSelectChange();
@@ -5455,6 +6095,7 @@ window.copyOrderAsNew = function(orderId) {
     if (source.brand) selectBrandInDropdown(document.getElementById('orderBrand'), source.brand);
     onOrderBrandSelectChange();
     document.getElementById('orderQty').value = source.qty || 1;
+    document.getElementById('orderUnit').value = source.unit || '';
     document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
     if (source.totalPrice !== undefined && source.totalPrice !== null && String(source.totalPrice).trim() !== '') {
         document.getElementById('orderTotalPrice').value = String(source.totalPrice).replace(/,/g, '');
@@ -5488,6 +6129,7 @@ window.saveNewOrder = function() {
         createdAt: new Date().toISOString(),
         company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
+        customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
         brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
         itemCode: itemCode,
         itemCodeKey: normalizeHistoryItemCode(itemCode),
@@ -5495,14 +6137,18 @@ window.saveNewOrder = function() {
         productLine: '',
         productType: '',
         qty: document.getElementById('orderQty').value,
+        unit: document.getElementById('orderUnit').value.trim(),
         unitPrice: document.getElementById('orderUnitPrice').value,
         totalPrice: document.getElementById('orderTotalPrice').value,
+        status: BUSINESS_STATUS.ACTIVE,
+        ...grossAmountMetadata(document.getElementById('orderTotalPrice').value),
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
         productId: window._orderModalProductId || '',
         salesName: currentUserName || '',
+        salesCode: currentUserCode || '',
         ownerUid: currentUser?.uid || '',
         isOrdered: false,
         isArrived: false,
@@ -5522,12 +6168,13 @@ window.saveNewOrder = function() {
         return;
     }
 
+    data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode });
     const priceMatch = findPriceItemForOrder(data);
     data.productLine = (priceMatch && priceMatch.productLine) || '';
     data.productType = (priceMatch && priceMatch.productType) || '';
     if (priceMatch) {
         data.productId = priceMatch.productId || stableProductId(priceMatch);
-        data.unit = priceMatch.unit || '';
+        data.unit = data.unit || priceMatch.unit || '';
         data.supplier = priceMatch.supplier || '';
         data.spec = priceMatch.spec || '';
     }
@@ -5637,7 +6284,7 @@ window.loadEquipmentFromCloud = function() {
     if (canViewAllEquipment()) {
         query = query.orderBy('customerName');
     } else {
-        query = query.where('salesName', '==', currentUserName);
+        query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('salesName', '==', currentUserName);
     }
     query.get().then(snapshot => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
@@ -5878,10 +6525,12 @@ window.saveEquipmentFromModal = function() {
     const editId = document.getElementById('eqModalOverlay').dataset.editId;
     const data = {
         customerName: document.getElementById('eqCustomer').value.trim(),
+        customerId: customerIdForName(document.getElementById('eqCustomer').value.trim()),
         brand: getBrandFieldValue('eqBrand', 'eqBrandOther'),
         model: document.getElementById('eqModel').value.trim(),
         serialNo: document.getElementById('eqSerial').value.trim(),
         salesName: document.getElementById('eqSales').value.trim(),
+        salesCode: salesCodeForName(document.getElementById('eqSales').value.trim()),
         location: document.getElementById('eqLocation').value.trim(),
         installDate: document.getElementById('eqInstallDate').value,
         cycleMonths: parseInt(document.getElementById('eqCycle').value) || 12,
@@ -5899,6 +6548,7 @@ window.saveEquipmentFromModal = function() {
         return;
     }
 
+    data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode }) || data.customerId;
     const ref = editId ? db.collection('equipment').doc(editId) : db.collection('equipment').doc();
     const payload = editId ? data : { ...data, assetId: getNextAssetId(data.salesName), logs: [] };
 
@@ -6322,9 +6972,19 @@ function normalizeStatisticBrandKey(value) {
 
 function statisticBrandAliasLookup() {
     const lookup = new Map();
+    const masterEntries = getUnifiedBrandEntries(true);
     [...keyStatisticBrands, '維修'].forEach(brand => {
-        lookup.set(normalizeStatisticBrandKey(brand), brand);
-        (keyStatisticBrandAliases[brand] || []).forEach(alias => lookup.set(normalizeStatisticBrandKey(alias), brand));
+        const canonical = resolveBrandName(brand) || brand;
+        lookup.set(normalizeStatisticBrandKey(canonical), canonical);
+        lookup.set(normalizeStatisticBrandKey(brand), canonical);
+
+        const master = masterEntries.find(entry => normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(canonical));
+        const aliases = dedupeBrandsCaseInsensitive([
+            ...(keyStatisticBrandAliases[brand] || []),
+            ...(keyStatisticBrandAliases[canonical] || []),
+            ...(master?.aliases || [])
+        ]);
+        aliases.forEach(alias => lookup.set(normalizeStatisticBrandKey(alias), canonical));
     });
     return lookup;
 }
@@ -6373,24 +7033,29 @@ window.addStatisticBrand = function() {
     renderKeyStatisticBrands();
 };
 
-window.saveKeyStatisticBrands = function() {
+window.saveKeyStatisticBrands = async function() {
     if (currentUserRole !== 'admin') return;
     const selected = normalizeThermoBrandList(keyStatisticBrands).filter(brand => normalizeStatisticBrandKey(brand) !== normalizeStatisticBrandKey('維修'));
     const aliases = {};
     [...selected, '維修'].forEach(brand => { aliases[brand] = dedupeBrandsCaseInsensitive(keyStatisticBrandAliases[brand] || []); });
-    db.collection('settings').doc('salesStatistics').set({ keyBrands: selected, brandAliases: aliases }, { merge: true }).then(() => {
+    try {
+        await db.collection('settings').doc('salesStatistics').set({ keyBrands: selected, brandAliases: aliases }, { merge: true });
         keyStatisticBrands = selected;
         keyStatisticBrandAliases = aliases;
+        await syncLegacyBrandSettingsToMaster();
         if (salesStatisticsOrders.length) renderSalesStatistics();
         renderKeyStatisticBrands();
-        alert('已儲存統計廠牌設定。');
-    }).catch(err => alert('儲存設定失敗：' + err.message));
+        renderCompanyAgencyBrandSettings();
+        alert('已儲存廠牌設定，並同步 Brand Master。');
+    } catch (err) {
+        alert('儲存設定失敗：' + err.message);
+    }
 };
 
 function renderCompanyAgencyBrandSettings() {
     const container = document.getElementById('companyAgencyBrandSettings');
     if (!container) return;
-    const brands = getAllPriceListBrandsRaw();
+    const brands = getUnifiedBrandNames(false);
     const companies = ['yushin', 'morningstar', 'MULTI-LIFE'];
     container.innerHTML = companies.map(company => {
         const info = companyData[company];
@@ -6403,19 +7068,32 @@ function renderCompanyAgencyBrandSettings() {
     }).join('');
 }
 
-window.saveCompanyAgencyBrands = function() {
+window.saveCompanyAgencyBrands = async function() {
     if (currentUserRole !== 'admin') return;
     const companies = ['yushin', 'morningstar', 'MULTI-LIFE'];
     const next = { yushin: [], morningstar: [], 'MULTI-LIFE': [] };
     document.querySelectorAll('.company-agency-brand:checked').forEach(input => next[input.dataset.company].push(input.value));
     companies.forEach(company => { next[company] = normalizeThermoBrandList(next[company]); });
-    db.collection('settings').doc('companyAgencyBrands').set({ companies: next }, { merge: true }).then(() => {
+    try {
+        await db.collection('settings').doc('companyAgencyBrands').set({ companies: next }, { merge: true });
         companyAgencyBrands = next;
         companyAgencyBrandsConfigured = true;
+        await syncLegacyBrandSettingsToMaster();
         populateQuoteBrandDropdowns();
-        alert('已儲存各分公司的代理廠牌設定。');
-    }).catch(err => alert('儲存設定失敗：' + err.message));
+        if (typeof populateForecastBrandDropdown === 'function') populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+        alert('已儲存各分公司的代理廠牌設定，並同步 Brand Master。');
+    } catch (err) {
+        alert('儲存設定失敗：' + err.message);
+    }
 };
+
+function salesStatisticsQueryWindow() {
+    const end = document.getElementById('salesStatsEnd')?.value || localDateString();
+    const currentQuarterStartMonth = Math.floor(new Date().getMonth() / 3) * 3;
+    const defaultStart = `${new Date().getFullYear()}-${String(currentQuarterStartMonth + 1).padStart(2, '0')}-01`;
+    const start = document.getElementById('salesStatsStart')?.value || defaultStart;
+    return { start, end };
+}
 
 // 管理員銷售統計以「訂單」為準，避免把尚未成交的估價單也算進營收。
 window.loadSalesStatistics = function() {
@@ -6425,14 +7103,35 @@ window.loadSalesStatistics = function() {
     const totalEl = document.getElementById('salesStatsSalesInc');
     if (totalEl) totalEl.innerText = '讀取中…';
 
-    // 統計只需要截至今天已成立的訂單；排除未來日期，避免直接無條件掃描 orders。
-    // 歷史訂單仍保留，因為舊訂單可能在本期才送貨或退貨，不能只依訂單日起日截斷。
-    salesStatisticsLoadPromise = db.collection('orders')
-        .where('orderDate', '<=', localDateString())
-        .get().then(snapshot => {
+    // 不掃描全部歷史訂單：只抓「本統計期間成立」、「本期間有異動」與「目前仍進行中」三群，
+    // 合併去重後再計算。這樣資料量隨年度增加時不會每次把全部舊訂單下載到瀏覽器。
+    const { start, end } = salesStatisticsQueryWindow();
+    const startIso = start + 'T00:00:00';
+    const endIso = end + 'T23:59:59';
+    const periodOrders = db.collection('orders')
+        .where('orderDate', '>=', start)
+        .where('orderDate', '<=', end)
+        .orderBy('orderDate', 'desc')
+        .limit(1500)
+        .get();
+    const activityOrders = db.collection('orders')
+        .where('updatedAt', '>=', startIso)
+        .where('updatedAt', '<=', endIso)
+        .orderBy('updatedAt', 'desc')
+        .limit(1500)
+        .get();
+    const openOrders = db.collection('orders')
+        .where('status', '==', BUSINESS_STATUS.ACTIVE)
+        .limit(1000)
+        .get();
+
+    salesStatisticsLoadPromise = Promise.all([periodOrders, activityOrders, openOrders]).then(([periodSnapshot, activitySnapshot, openSnapshot]) => {
         if (requestedRole !== currentUserRole) return;
-        salesStatisticsOrders = [];
-        snapshot.forEach(doc => salesStatisticsOrders.push({ id: doc.id, ...doc.data() }));
+        const records = new Map();
+        [periodSnapshot, activitySnapshot, openSnapshot].forEach(snapshot => {
+            snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
+        });
+        salesStatisticsOrders = [...records.values()];
         const startInput = document.getElementById('salesStatsStart');
         const endInput = document.getElementById('salesStatsEnd');
         if (startInput && endInput && !startInput.value && !endInput.value) {
@@ -6440,8 +7139,6 @@ window.loadSalesStatistics = function() {
             document.getElementById('salesStatsPeriod').value = currentQuarter;
             setSalesStatisticsPeriod(currentQuarter);
         } else {
-            const start=document.getElementById('salesStatsStart')?.value||localDateString().slice(0,4)+'-01-01';
-            const end=document.getElementById('salesStatsEnd')?.value||localDateString();
             loadInventoryAnalysisSupport(start,end).then(()=>renderSalesStatistics());
         }
     }).catch(err => {
@@ -6464,12 +7161,25 @@ async function loadInventoryAnalysisSupport(start, end) {
     inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
 }
 function inventoryAnalysisTotals(start,end) {
-    let purchase=0;
-    inventoryAnalysisReceipts.forEach(r=>{const product=priceList.find(p=>(p.productId||stableProductId(p))===r.productKey);purchase+=Number(r.qty||0)*Number(product?.cost||0);});
-    const sales=salesStatisticsOrders.reduce((sum,o)=>{const x=calculateOrderStatsContribution(o,start,end);return sum+x.actualSales;},0);
-    let stockValue=0,incoming=0;
-    inventoryAnalysisStocks.forEach(s=>{const product=priceList.find(p=>(p.productId||stableProductId(p))===s.productKey);const n=inventoryNumbers(s);stockValue+=n.onHand*Number(product?.cost||0);incoming+=n.incoming*Number(product?.cost||0);});
-    return {purchase,sales,difference:sales-purchase,stockValue,incoming};
+    let purchase = 0;
+    inventoryAnalysisReceipts.forEach(receipt => {
+        const product = priceList.find(p => (p.productId || stableProductId(p)) === receipt.productKey);
+        const unitCost = Number(receipt.unitCost ?? product?.cost ?? 0);
+        purchase += Number(receipt.purchaseNetAmount ?? (Number(receipt.qty || 0) * unitCost));
+    });
+    const sales = salesStatisticsOrders.reduce((sum, order) => {
+        const contribution = calculateOrderStatsContribution(order, start, end);
+        return sum + contribution.actualSales;
+    }, 0);
+    let stockValue = 0, incoming = 0;
+    inventoryAnalysisStocks.forEach(stock => {
+        const product = priceList.find(p => (p.productId || stableProductId(p)) === stock.productKey);
+        const unitCost = Number(stock.unitCost ?? product?.cost ?? 0);
+        const numbers = inventoryNumbers(stock);
+        stockValue += numbers.onHand * unitCost;
+        incoming += numbers.incoming * unitCost;
+    });
+    return { purchase, sales, difference: sales - purchase, stockValue, incoming };
 }
 function renderInventoryAnalysisSummary(start,end){
     const t=inventoryAnalysisTotals(start,end),fmt=v=>Math.round(v).toLocaleString();
@@ -7030,29 +7740,58 @@ window.sendPasswordResetToUser = function(email) {
     });
 };
 
+async function syncSalesCodeMasterFromUsers() {
+    if (trueUserRole !== 'admin') return;
+    const now = new Date().toISOString();
+    for (const person of salesList.filter(item => item.code)) {
+        await db.collection('salesCodes').doc(String(person.code)).set({
+            code: String(person.code),
+            currentUserUid: person.uid || '',
+            currentUserName: person.name || '',
+            active: true,
+            updatedAt: now
+        }, { merge: true });
+    }
+}
+
+async function loadSalesCodeMaster() {
+    const snapshot = await db.collection('salesCodes').limit(500).get();
+    salesCodeMasterCache = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(item => item.active !== false)
+        .sort((x, y) => String(x.code || x.id).localeCompare(String(y.code || y.id), 'zh-Hant'));
+    return salesCodeMasterCache;
+}
+
 window.reloadSalesFromUsers = function() {
-    return Promise.all([initSalesList(), loadAllUsersForAdmin()]).then(renderAdminSalesTable);
+    return Promise.all([initSalesList(), loadAllUsersForAdmin()]).then(async () => {
+        if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
+        await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
+        renderAdminSalesTable();
+        populateTransferDropdowns();
+    });
 };
 
-/* ---------- 人員異動交接：把某位業務名下的資料整批轉移給新業務 ---------- */
+/* ---------- 業務代號交接：資料歸屬維持 salesCode，只更換代號目前負責人 ---------- */
 function populateTransferDropdowns() {
-    const fromSelect = document.getElementById('transferFromSales');
-    const toSelect = document.getElementById('transferToSales');
-    if (!fromSelect || !toSelect) return;
+    const codeSelect = document.getElementById('transferFromSales');
+    const userSelect = document.getElementById('transferToSales');
+    if (!codeSelect || !userSelect) return;
 
-    const fromValue = fromSelect.value;
-    const toValue = toSelect.value;
-    const optionsHtml = '<option value="">請選擇</option>' +
-        salesList.filter(s => s.name).map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(s.name)}</option>`).join('');
-    fromSelect.innerHTML = optionsHtml;
-    toSelect.innerHTML = optionsHtml;
-    if (salesList.some(s => s.name === fromValue)) fromSelect.value = fromValue;
-    if (salesList.some(s => s.name === toValue)) toSelect.value = toValue;
-
+    const codeValue = codeSelect.value;
+    const userValue = userSelect.value;
+    const codeRows = salesCodeMasterCache.length
+        ? salesCodeMasterCache
+        : salesList.filter(s => s.code).map(s => ({ code: s.code, currentUserName: s.name, currentUserUid: s.uid }));
+    codeSelect.innerHTML = '<option value="">請選擇業務代號</option>' +
+        codeRows.map(s => `<option value="${escapeAttr(s.code || s.id)}">${escapeHtml(s.code || s.id)}｜${escapeHtml(s.currentUserName || '未指派')}</option>`).join('');
+    userSelect.innerHTML = '<option value="">請選擇接手同仁</option>' +
+        allUsersCache.filter(u => u.name).map(u => `<option value="${escapeAttr(u.uid)}">${escapeHtml(u.name)}｜${escapeHtml(u.email || u.uid)}</option>`).join('');
+    if ([...codeSelect.options].some(o => o.value === codeValue)) codeSelect.value = codeValue;
+    if ([...userSelect.options].some(o => o.value === userValue)) userSelect.value = userValue;
     resetTransferPreview();
 }
 
-// 選項或範圍勾選有變動時，先把「查詢筆數」的結果隱藏，避免用舊的筆數誤按執行
 window.resetTransferPreview = function() {
     const btn = document.getElementById('transferExecuteBtn');
     const result = document.getElementById('transferResult');
@@ -7061,92 +7800,133 @@ window.resetTransferPreview = function() {
 };
 
 function getTransferSelection() {
-    const fromName = document.getElementById('transferFromSales').value;
-    const toName = document.getElementById('transferToSales').value;
-    const scopes = [];
-    if (document.getElementById('transferQuotes').checked) scopes.push({ key: 'quotes', label: '估價單', collection: 'quotes' });
-    if (document.getElementById('transferOrders').checked) scopes.push({ key: 'orders', label: '訂單', collection: 'orders' });
-    if (document.getElementById('transferEquipment').checked) scopes.push({ key: 'equipment', label: '儀器', collection: 'equipment' });
-    return { fromName, toName, scopes };
+    const salesCode = document.getElementById('transferFromSales')?.value || '';
+    const targetUid = document.getElementById('transferToSales')?.value || '';
+    const master = salesCodeMasterCache.find(item => String(item.code || item.id) === String(salesCode)) || null;
+    const currentHolder = master?.currentUserUid
+        ? allUsersCache.find(u => u.uid === master.currentUserUid) || { uid: master.currentUserUid, name: master.currentUserName || '', code: salesCode }
+        : salesList.find(s => String(s.code) === String(salesCode)) || null;
+    const target = allUsersCache.find(u => u.uid === targetUid) || null;
+    return { salesCode, targetUid, currentHolder, target, master };
 }
 
-window.previewSalesTransfer = function() {
-    const { fromName, toName, scopes } = getTransferSelection();
+async function countLegacyRecordsForSalesCode(person) {
+    if (!person?.name) return { quotes:0, orders:0, forecasts:0, equipment:0, total:0 };
+    const configs = [
+        ['quotes','quotes'], ['orders','orders'], ['forecasts','forecasts'], ['equipment','equipment']
+    ];
+    const counts = {};
+    await Promise.all(configs.map(async ([key, collection]) => {
+        const snap = await db.collection(collection).where('salesName', '==', person.name).get();
+        counts[key] = snap.docs.filter(doc => !doc.data().salesCode).length;
+    }));
+    counts.total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+    return counts;
+}
+
+window.previewSalesTransfer = async function() {
+    const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const executeBtn = document.getElementById('transferExecuteBtn');
     executeBtn.style.display = 'none';
 
-    if (!fromName || !toName) {
-        resultEl.innerText = '請先選擇原業務與新業務。';
+    if (!salesCode || !target) {
+        resultEl.innerText = '請先選擇要交接的業務代號與接手同仁。';
         return;
     }
-    if (fromName === toName) {
-        resultEl.innerText = '原業務與新業務不能是同一個人。';
+    if (currentHolder?.uid === target.uid) {
+        resultEl.innerText = '這位同仁目前已經是此業務代號的負責人。';
         return;
     }
-    if (scopes.length === 0) {
-        resultEl.innerText = '請至少勾選一種要轉移的資料範圍。';
+    if (target.code && String(target.code) !== String(salesCode)) {
+        resultEl.innerText = `接手同仁目前已有業務代號 ${target.code}。請先完成該代號的交接或解除後，再接手 ${salesCode}，避免同一帳號同時擁有兩個代號。`;
         return;
     }
 
-    resultEl.innerText = '查詢中…';
-
-    Promise.all(scopes.map(s => db.collection(s.collection).where('salesName', '==', fromName).get()))
-        .then(snapshots => {
-            const counts = scopes.map((s, i) => ({ ...s, count: snapshots[i].size }));
-            const totalCount = counts.reduce((sum, c) => sum + c.count, 0);
-
-            if (totalCount === 0) {
-                resultEl.innerText = `「${fromName}」目前在勾選的範圍內沒有任何資料，不需要轉移。`;
-                return;
-            }
-
-            resultEl.innerText = `查詢結果（將把「${fromName}」轉移給「${toName}」）：\n` +
-                counts.map(c => `・${c.label}：${c.count} 筆`).join('\n') +
-                `\n共 ${totalCount} 筆。確認無誤後請按「確認執行轉移」。`;
-            executeBtn.style.display = '';
-        })
-        .catch(err => {
-            console.error(err);
-            resultEl.innerText = '查詢失敗：' + err.message;
-        });
+    resultEl.innerText = '檢查舊資料中…';
+    try {
+        const counts = await countLegacyRecordsForSalesCode(currentHolder);
+        resultEl.innerText =
+            `業務代號：${salesCode}\n目前負責人：${currentHolder?.name || '未指定'}\n接手同仁：${target.name}\n\n` +
+            `舊資料需要補上 salesCode：${counts.total} 筆\n` +
+            `・估價單 ${counts.quotes || 0}\n・訂單 ${counts.orders || 0}\n・Forecast ${counts.forecasts || 0}\n・儀器 ${counts.equipment || 0}\n\n` +
+            '交接後歷史 salesName/createdBy 不會被改寫；資料歸屬只改由此業務代號的現任負責人接手。';
+        executeBtn.style.display = '';
+    } catch (err) {
+        resultEl.innerText = '檢查失敗：' + err.message;
+    }
 };
 
-window.executeSalesTransfer = function() {
-    const { fromName, toName, scopes } = getTransferSelection();
+async function backfillSalesCodeForLegacyRecords(person, salesCode) {
+    if (!person?.name || !salesCode) return 0;
+    const collections = ['quotes','orders','forecasts','equipment'];
+    let total = 0;
+    for (const collection of collections) {
+        const snap = await db.collection(collection).where('salesName', '==', person.name).get();
+        const refs = snap.docs.filter(doc => !doc.data().salesCode).map(doc => doc.ref);
+        if (refs.length) {
+            await runFirestoreBatchUpdates(refs, { salesCode, ownershipMigratedAt: new Date().toISOString() });
+            total += refs.length;
+        }
+    }
+    return total;
+}
+
+window.executeSalesTransfer = async function() {
+    const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
-    if (!fromName || !toName || fromName === toName || scopes.length === 0) return;
+    const button = document.getElementById('transferExecuteBtn');
+    if (!salesCode || !target || !button) return;
 
-    if (!confirm(`確定要把「${fromName}」名下勾選的資料（${scopes.map(s => s.label).join('、')}）全部改成掛在「${toName}」名下嗎？\n這個動作會直接修改雲端資料，執行後無法一鍵復原，請確認已經按過「查詢筆數」核對過範圍。`)) return;
+    if (!confirm(`確定把業務代號「${salesCode}」交接給「${target.name}」嗎？\n歷史交易內容與原建立人不會改寫；此代號的新舊資料會改由接手同仁查看與管理。`)) return;
 
-    document.getElementById('transferExecuteBtn').disabled = true;
-    resultEl.innerText = '轉移中，請稍候…';
+    button.disabled = true;
+    resultEl.innerText = '交接中…';
+    try {
+        const migrated = await backfillSalesCodeForLegacyRecords(currentHolder, salesCode);
+        const now = new Date().toISOString();
+        const codeRef = db.collection('salesCodes').doc(String(salesCode));
+        const codeSnap = await codeRef.get();
+        const history = Array.isArray(codeSnap.data()?.handoffHistory) ? codeSnap.data().handoffHistory : [];
+        const entry = {
+            fromUid: currentHolder?.uid || '',
+            fromName: currentHolder?.name || '',
+            toUid: target.uid,
+            toName: target.name || '',
+            at: now,
+            byUid: currentUser?.uid || '',
+            byName: currentUserName || ''
+        };
 
-    Promise.all(scopes.map(s => db.collection(s.collection).where('salesName', '==', fromName).get()))
-        .then(snapshots => {
-            const updateChains = scopes.map((s, i) => {
-                const refs = snapshots[i].docs.map(d => d.ref);
-                return runFirestoreBatchUpdates(refs, { salesName: toName }).then(() => ({ label: s.label, count: refs.length }));
-            });
-            return Promise.all(updateChains);
-        })
-        .then(results => {
-            const totalCount = results.reduce((sum, r) => sum + r.count, 0);
-            resultEl.innerText = `轉移完成，共更新 ${totalCount} 筆：\n` +
-                results.map(r => `・${r.label}：${r.count} 筆`).join('\n');
-            document.getElementById('transferExecuteBtn').style.display = 'none';
-            document.getElementById('transferExecuteBtn').disabled = false;
+        const batch = db.batch();
+        batch.set(codeRef, {
+            code: String(salesCode),
+            currentUserUid: target.uid,
+            currentUserName: target.name || '',
+            active: true,
+            handoffHistory: [...history, entry],
+            updatedAt: now
+        }, { merge: true });
+        batch.set(db.collection('users').doc(target.uid), { code: String(salesCode), codeAssignedAt: now }, { merge: true });
+        if (currentHolder?.uid && currentHolder.uid !== target.uid) {
+            batch.set(db.collection('users').doc(currentHolder.uid), {
+                code: '',
+                previousSalesCode: String(salesCode),
+                codeHandedOffAt: now
+            }, { merge: true });
+        }
+        await batch.commit();
 
-            // 若其他分頁的資料快取已經載入過，順便刷新，避免畫面顯示轉移前的舊資料
-            if (typeof allQuotesCache !== 'undefined' && allQuotesCache.length) loadAllQuotesFromCloud();
-            if (typeof ordersCache !== 'undefined' && ordersCache.length) loadOrdersFromCloud();
-            if (typeof equipmentList !== 'undefined' && equipmentList.length) loadEquipmentFromCloud();
-        })
-        .catch(err => {
-            console.error(err);
-            resultEl.innerText = '轉移過程發生錯誤，部分資料可能已經轉移、部分尚未完成，請重新查詢筆數確認目前狀態：' + err.message;
-            document.getElementById('transferExecuteBtn').disabled = false;
-        });
+        resultEl.innerText = `交接完成。業務代號 ${salesCode} 現由 ${target.name} 負責；另補上 ${migrated} 筆舊資料的 salesCode。歷史姓名與操作紀錄均保留。`;
+        button.style.display = 'none';
+        button.disabled = false;
+        salesListLoadPromise = null;
+        await reloadSalesFromUsers();
+    } catch (err) {
+        console.error(err);
+        resultEl.innerText = '交接失敗：' + err.message;
+        button.disabled = false;
+    }
 };
 
 // 依 Firestore batch 500 筆上限，自動切批次執行文件更新

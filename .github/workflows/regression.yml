@@ -17,3 +17,10 @@ jobs:
         run: node --check app.js
       - name: Regression tests
         run: node --test tests/phase1.test.js
+      - name: Set up Java 21 for Firestore emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Validate Firestore rules
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "echo Firestore-rules-ok"

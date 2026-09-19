@@ -108,6 +108,14 @@
             <option value="stage5">Stage 5</option>
         </select>
 
+        <select id="forecastPeriodFilter" onchange="renderForecastList()">
+            <option value="this-month">本月</option>
+            <option value="last-month">上月</option>
+            <option value="this-quarter">本季</option>
+            <option value="this-year" selected>今年</option>
+            <option value="last-year">去年</option>
+            <option value="all">全部期間</option>
+        </select>
         <button class="btn-secondary" onclick="loadForecasts(true)">重新整理</button>
     </div>
 
@@ -164,7 +172,8 @@
         >
 
         <label>廠牌 *</label>
-        <select id="forecastBrand"></select>
+        <input id="forecastBrand" list="forecastBrandList" autocomplete="off" placeholder="選擇既有廠牌或自行輸入">
+        <datalist id="forecastBrandList"></datalist>
 
         <label>產品／品項 *</label>
         <input
@@ -369,10 +378,24 @@
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
       <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 庫存異動</button></div>
-      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
-      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>On Hand</th><th>Reserved</th><th>Available</th><th>Incoming</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、廠牌、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
+      <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
+
+      <h3>待建檔品項</h3>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>在途數量</th><th>供應商</th><th>狀態</th></tr></thead><tbody id="pendingInventoryBody"></tbody></table></div>
+      <div class="empty-hint" id="pendingInventoryEmptyHint" style="display:none;">目前沒有待建檔品項。</div>
+
       <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>貨號</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
+    </div>
+
+    <div class="eq-modal-overlay no-print" id="inventoryReservationOverlay" onclick="if(event.target===this) closeInventoryReservationDetails()">
+      <div class="eq-modal-box" style="max-width:980px;">
+        <h3 id="inventoryReservationTitle">已占用訂單</h3>
+        <div class="table-wrap"><table><thead><tr><th>訂單</th><th>客戶</th><th>貨號</th><th>品名</th><th>占用數量</th><th>業務</th><th>訂單日期</th></tr></thead><tbody id="inventoryReservationBody"></tbody></table></div>
+        <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeInventoryReservationDetails()">關閉</button></div>
+      </div>
     </div>
     <!-- ============ 估價單系統 ============ -->
     <div id="quote-system" class="content-section active">
@@ -450,6 +473,9 @@
         <div id="myQuotesPanel" style="display:none;">
             <div class="toolbar no-print">
                 <input type="text" id="myQuoteSearch" placeholder="搜尋單號 / 抬頭 / 客戶 / 廠牌 / 品項" style="width:260px;" oninput="renderMyQuotesList()">
+                <select id="myQuotePeriodFilter" onchange="renderMyQuotesList()">
+                    <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
+                </select>
                 <button class="btn-secondary" onclick="loadMyQuotesFromCloud()">🔄 重新整理</button>
             </div>
             <table class="admin-users-table">
@@ -619,10 +645,13 @@
         <div class="order-period-toolbar no-print">
             <label for="orderPeriodPreset">統計期間</label>
             <select id="orderPeriodPreset" onchange="changeOrderPeriod(this.value)">
-                <option value="this-year">今年</option>
+                <option value="this-month">本月</option>
+                <option value="last-month">上月</option>
+                <option value="this-quarter">本季</option>
+                <option value="this-year" selected>今年</option>
                 <option value="last-year">去年</option>
                 <option value="custom">自訂日期</option>
-                <option value="all">全部年度</option>
+                <option value="all">全部期間</option>
             </select>
             <div id="orderCustomPeriod" class="order-custom-period" style="display:none;">
                 <input type="date" id="orderPeriodStart" aria-label="訂單統計開始日期" onchange="renderOrdersList()">
@@ -675,6 +704,9 @@
         <div id="poListPanel" style="display:none;">
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
+                <select id="poPeriodFilter" onchange="renderPoList()">
+                    <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
+                </select>
                 <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
                 <button onclick="openDirectStockPurchase()">＋ 原廠備貨採購</button>
             </div>
@@ -695,12 +727,13 @@
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
                 <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" onchange="onOrderItemCodeChange(this)"></div>
+                <div><label>品名</label><input type="text" id="orderItemName"></div>
                 <div><label>廠牌</label>
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
                     <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
                 </div>
-                <div><label>品名</label><input type="text" id="orderItemName"></div>
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
+                <div><label>單位</label><input type="text" id="orderUnit" placeholder="例如：盒、瓶、台"></div>
                 <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
                 <div><label>總價</label><input type="number" id="orderTotalPrice" value="0" readonly style="background:#f5f5f5;"></div>
                 <div id="orderCostFieldWrap" style="display:none;">
@@ -1003,36 +1036,31 @@
             <div class="quote-load-more-row no-print"><button type="button" id="adminQuotesLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreAdminQuotes()">載入更多（每次 50 筆）</button></div>
         </div>
 
-        <!-- 人員異動交接：離職／轉調時，把某位業務名下的估價單、訂單、儀器整批改成掛在新業務名下 -->
+        <!-- 業務代號交接：交易資料歸屬在 salesCode，不重寫歷史業務姓名 -->
         <div id="admin-transfer" class="admin-panel" style="display:none;">
-            <div class="toolbar no-print" style="display:block;">
-                <span style="font-size:12px;color:#666;">
-                    用於人員離職或職務異動交接：把「原業務」名下的估價單／訂單／儀器紀錄，整批改成掛在「新業務」名下。
-                    執行前請先確認新業務已經是「業務名單」裡的正式帳號（有姓名與代號），否則對方登入後仍看不到轉移過去的資料。
-                    此動作會直接修改雲端資料，執行前請務必先按「查詢筆數」確認範圍。
-                </span>
-            </div>
-            <div class="form-grid" style="max-width:640px;margin-top:10px;">
-                <div>
-                    <label>原業務（資料轉出）</label>
-                    <select id="transferFromSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+            <div class="panel">
+                <h3 style="margin-top:0;">業務代號交接</h3>
+                <p style="font-size:13px;color:#555;line-height:1.7;">
+                    Forecast、估價單、訂單與儀器的資料歸屬以「業務代號」為核心。人員離職或交接時，
+                    不再逐筆把歷史資料改成新同仁姓名；只把該業務代號的目前負責人交給新同仁。
+                    系統會先替舊資料補上 salesCode，原 salesName、建立人與修改紀錄均保留。
+                </p>
+                <div class="form-grid" style="max-width:760px;margin-top:12px;">
+                    <div>
+                        <label>要交接的業務代號</label>
+                        <select id="transferFromSales" onchange="resetTransferPreview()"><option value="">請選擇業務代號</option></select>
+                    </div>
+                    <div>
+                        <label>接手同仁</label>
+                        <select id="transferToSales" onchange="resetTransferPreview()"><option value="">請選擇接手同仁</option></select>
+                    </div>
                 </div>
-                <div>
-                    <label>新業務（資料轉入）</label>
-                    <select id="transferToSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+                <div style="margin-top:12px;">
+                    <button onclick="previewSalesTransfer()">🔍 檢查交接內容</button>
+                    <button class="btn-danger" id="transferExecuteBtn" onclick="executeSalesTransfer()" style="display:none;">✅ 確認交接</button>
                 </div>
+                <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
             </div>
-            <div style="margin:12px 0;">
-                <label style="font-weight:bold;font-size:13px;">要一併轉移的資料範圍：</label><br>
-                <label style="font-weight:normal;font-size:13px;"><input type="checkbox" id="transferQuotes" checked onchange="resetTransferPreview()"> 估價單</label>
-                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferOrders" checked onchange="resetTransferPreview()"> 訂單</label>
-                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferEquipment" checked onchange="resetTransferPreview()"> 儀器</label>
-            </div>
-            <div>
-                <button onclick="previewSalesTransfer()">🔍 查詢筆數</button>
-                <button class="btn-danger" id="transferExecuteBtn" onclick="executeSalesTransfer()" style="display:none;">✅ 確認執行轉移</button>
-            </div>
-            <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
         </div>
 
         <!-- 資料庫管理：備份、估算雲端資料量與清理舊資料 -->

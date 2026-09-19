@@ -770,3 +770,147 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     vertical-align: middle;
     padding: 4px 2px;
 }
+
+
+/* ===== 系統統一：庫存／連動資訊 ===== */
+.inventory-summary-note {
+    margin: 8px 0 12px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    background: #f5f7f9;
+    color: #4b5964;
+    font-size: 12px;
+    line-height: 1.6;
+}
+.link-button {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: #0b63a4;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.inventory-reserved-link {
+    min-width: 28px;
+    font-weight: 700;
+}
+#pendingInventoryEmptyHint {
+    margin-bottom: 16px;
+}
+@media (max-width: 768px) {
+    #inventory-system .table-wrap,
+    #inventoryReservationOverlay .table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    #inventory-system table,
+    #inventoryReservationOverlay table {
+        min-width: 760px;
+    }
+}
+
+
+/* ===== Phase 17：Forecast／採購／庫存手機版一致化 ===== */
+@media (max-width: 768px) {
+    #forecastTable thead,
+    #poListPanel table thead,
+    #inventory-system > .table-wrap table thead,
+    #inventory-system h3 + .table-wrap table thead {
+        display: none;
+    }
+
+    #forecastTable,
+    #forecastTable tbody,
+    #forecastTable tr,
+    #forecastTable td,
+    #poListPanel table,
+    #poListPanel table tbody,
+    #poListPanel table tr,
+    #poListPanel table td,
+    #inventory-system > .table-wrap table,
+    #inventory-system > .table-wrap table tbody,
+    #inventory-system > .table-wrap table tr,
+    #inventory-system > .table-wrap table td,
+    #inventory-system h3 + .table-wrap table,
+    #inventory-system h3 + .table-wrap table tbody,
+    #inventory-system h3 + .table-wrap table tr,
+    #inventory-system h3 + .table-wrap table td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        min-width: 0;
+    }
+
+    #forecastTable tr,
+    #poListPanel table tbody tr,
+    #inventory-system > .table-wrap table tbody tr,
+    #inventory-system h3 + .table-wrap table tbody tr {
+        border: 0;
+        border-radius: 14px;
+        padding: 14px;
+        margin-bottom: 14px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+    }
+
+    #forecastTable td,
+    #poListPanel table td,
+    #inventory-system > .table-wrap table td,
+    #inventory-system h3 + .table-wrap table td {
+        border: 0;
+        padding: 7px 0;
+        text-align: left;
+        line-height: 1.45;
+    }
+
+    #forecastTable td:not(:last-child),
+    #poListPanel table td:not(:last-child),
+    #inventory-system > .table-wrap table td:not(:last-child),
+    #inventory-system h3 + .table-wrap table td:not(:last-child) {
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    #forecastTable td[data-th]::before,
+    #poListPanel table td[data-th]::before,
+    #inventory-system td[data-th]::before {
+        content: attr(data-th) "：";
+        display: block;
+        margin-bottom: 3px;
+        color: #8a8f94;
+        font-size: 10.5px;
+        font-weight: 700;
+    }
+
+    #forecastTable .forecast-actions,
+    #poListPanel td[data-th="操作"] {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    #forecastTable .forecast-actions button,
+    #poListPanel td[data-th="操作"] button {
+        flex: 1 1 120px;
+        min-height: 42px;
+    }
+
+    /* 卡片化後不再需要橫向強制 760px。 */
+    #inventory-system .table-wrap {
+        overflow-x: visible;
+    }
+    #inventory-system table {
+        min-width: 0;
+    }
+
+    .forecast-toolbar,
+    .order-period-toolbar {
+        align-items: stretch;
+    }
+    .forecast-toolbar > *,
+    .order-period-toolbar > * {
+        width: 100%;
+        box-sizing: border-box;
+    }
+}

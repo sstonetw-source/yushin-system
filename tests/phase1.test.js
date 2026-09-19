@@ -6,6 +6,8 @@ const vm = require('node:vm');
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const rulesSource = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
 
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
@@ -140,7 +142,12 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
     assert.match(loader, /if \(salesStatisticsLoadPromise\) return salesStatisticsLoadPromise/);
     assert.match(loader, /requestedRole !== currentUserRole/);
     assert.match(loader, /salesStatisticsLoadPromise = null/);
-    assert.match(loader, /where\('orderDate', '<=', localDateString\(\)\)/);
+    assert.match(loader, /where\('orderDate', '>=', start\)/);
+    assert.match(loader, /where\('orderDate', '<=', end\)/);
+    assert.match(loader, /where\('updatedAt', '>=', startIso\)/);
+    assert.match(loader, /where\('status', '==', BUSINESS_STATUS\.ACTIVE\)/);
+    assert.match(loader, /limit\(1500\)/);
+    assert.match(loader, /limit\(1000\)/);
     assert.doesNotMatch(loader, /collection\('orders'\)\.get\(\)/);
 });
 
@@ -168,7 +175,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     const order = { id: 'o1', isOrdered: true, isArrived: true, isBilled: false, statusHistory: [] };
     let updatePayload;
     const context = {
-        window: {}, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
+        window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
         canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => { throw new Error('billing must not depend on window.prompt'); }, alert: message => { throw new Error(message); },
@@ -202,7 +209,7 @@ test('failed billing write restores the previous state and unlocks the button', 
     const order = { id: 'o2', isOrdered: true, isArrived: true, isBilled: false, invoiceDate: '', statusHistory: [] };
     let alertMessage = '';
     const context = {
-        window: {}, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
+        window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
         canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => '2026-09-17', alert: message => { alertMessage = message; },
@@ -447,12 +454,13 @@ test('phase 5 cancelling and restoring orders adjusts reservations without delet
 });
 
 
-test('phase 6 purchase orders create incoming without increasing on-hand', () => {
+test('phase 6 purchase orders create incoming or pending items without increasing on-hand', () => {
     const start=appSource.indexOf('async function registerPurchaseIncoming');
     const end=appSource.indexOf('window.receivePurchaseOrder',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/incoming:Math\.max\(0,stock\.incoming\+delta\)/);
-    assert.match(s,/onHand:stock\.onHand/);
+    assert.match(s,/incoming:\s*Math\.max\(0,\s*stock\.incoming\s*\+\s*delta\)/);
+    assert.doesNotMatch(s,/onHand:\s*stock\.onHand\s*\+/);
+    assert.match(s,/pendingInventoryItems/);
     assert.match(s,/purchase_incoming/);
 });
 
@@ -460,19 +468,23 @@ test('phase 6 receipt transaction decreases incoming and increases on-hand with 
     const start=appSource.indexOf('window.receivePurchaseOrder');
     const end=appSource.indexOf('function purchaseItemsFromSavedPo',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/onHand:stock\.onHand\+qty/);
-    assert.match(s,/incoming:Math\.max\(0,stock\.incoming-qty\)/);
+    assert.match(s,/onHand:\s*stock\.onHand\s*\+\s*qty/);
+    assert.match(s,/incoming:\s*Math\.max\(0,\s*stock\.incoming\s*-\s*qty\)/);
     assert.match(s,/receiptRecords/);
     assert.match(s,/receiptStatus/);
-    assert.match(s,/type:'receipt'/);
+    assert.match(s,/type:\s*'receipt'/);
+    assert.match(s,/pendingInventoryItems/);
+    assert.match(s,/inventoryShortageQty/);
 });
 
-test('phase 6 supports direct stock purchase independent of customer orders', () => {
+test('phase 6 supports direct stock purchase independent of customer orders and new Product Master items', () => {
     const start=appSource.indexOf('window.openDirectStockPurchase');
     const end=appSource.indexOf('window.openPurchaseOrderModal',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/orderId:''/);
+    assert.match(s,/orderId:\s*''/);
     assert.match(s,/priceItemLookup/);
+    assert.match(s,/Product Master 尚無此貨號/);
+    assert.match(s,/resolveBrandName/);
     assert.match(s,/generateNextPoNumber/);
 });
 
@@ -492,7 +504,7 @@ test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(ap
 test('phase 9 analysis separates actual receipts sales stock value incoming and purchase-sales difference',()=>{
  assert.match(appSource,/function inventoryAnalysisTotals\(start,end\)/);
  assert.match(appSource,/where\('type','==','receipt'\)/);
- assert.match(appSource,/difference:sales-purchase/);
+ assert.match(appSource,/difference:\s*sales\s*-\s*purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
  assert.match(appSource,/limit\(1000\)/);
 });
@@ -506,4 +518,192 @@ test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=
 });
 test('phase 10 role model consistently documents warehouse',()=>{
  assert.match(appSource,/admin' \/ 'sales' \/ 'purchaser' \/ 'warehouse' \/ 'engineer'/);
+});
+
+
+test('system unification uses a shared Brand Master compatibility layer', () => {
+    assert.match(appSource, /function getUnifiedBrandEntries/);
+    assert.match(appSource, /function resolveBrandName/);
+    assert.match(appSource, /function loadBrandMaster/);
+    assert.match(appSource, /syncLegacyBrandSettingsToMaster/);
+    assert.match(appSource, /getUnifiedBrandNames/);
+});
+
+test('Forecast brand entry accepts known brands and free-input new brands', () => {
+    assert.match(appSource, /forecastBrandList/);
+    assert.match(appSource, /populateForecastBrandDropdown/);
+    assert.match(appSource, /input\.value = selected \|\| ''/);
+});
+
+test('new business records persist stable salesCode while keeping legacy owner fields', () => {
+    assert.match(appSource, /salesCode:\s*currentUserCode/);
+    assert.match(appSource, /function salesCodeForName/);
+    assert.match(appSource, /function belongsToCurrentUser\(salesName, ownerUid, salesCode/);
+    assert.match(appSource, /collection\('salesCodes'\)/);
+});
+
+test('sales handoff changes the sales-code holder instead of rewriting historical sales names', () => {
+    const start = appSource.indexOf('window.executeSalesTransfer =');
+    const end = appSource.indexOf('// 依 Firestore batch 500 筆上限', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /salesCodes/);
+    assert.match(s, /handoffHistory/);
+    assert.match(s, /backfillSalesCodeForLegacyRecords/);
+    assert.doesNotMatch(s, /\{\s*salesName:\s*toName\s*\}/);
+});
+
+test('inventory reservation is traceable to occupying orders', () => {
+    assert.match(appSource, /inventoryReservations/);
+    assert.match(appSource, /openInventoryReservationDetails/);
+    assert.match(appSource, /inventoryReservedQty/);
+    assert.match(appSource, /inventoryShortageQty/);
+});
+
+test('unknown order items do not create inventory before purchase receipt', () => {
+    const start = appSource.indexOf('async function reserveInventoryForNewOrder');
+    const end = appSource.indexOf('function orderQuantity', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /if \(!snap\.exists\)/);
+    assert.match(s, /inventoryShortageQty:\s*requested/);
+    assert.doesNotMatch(s, /if \(!snap\.exists\)[\s\S]*?tx\.set\(ref/);
+});
+
+test('period semantics are shared across Forecast Quote Order and PO', () => {
+    assert.match(appSource, /function unifiedPeriodRange/);
+    assert.match(appSource, /function dateInUnifiedPeriod/);
+    assert.match(appSource, /forecastPeriodFilter/);
+    assert.match(appSource, /myQuotePeriodFilter/);
+    assert.match(appSource, /poPeriodFilter/);
+    assert.match(appSource, /this-month/);
+    assert.match(appSource, /this-quarter/);
+});
+
+test('permission routing includes Forecast and Inventory', () => {
+    const start = appSource.indexOf('function getActivePermissionPage');
+    const end = appSource.indexOf('function applyPermissionVisibility', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /forecast-system/);
+    assert.match(s, /inventory-system/);
+    assert.match(appSource, /\['forecast', 'quote', 'orders', 'inventory', 'equipment'\]/);
+});
+
+
+test('shared Customer Master and order unit are persisted in the unified workflow', () => {
+    assert.match(appSource, /function customerIdForName/);
+    assert.match(appSource, /function syncCustomerMaster/);
+    assert.match(appSource, /customerId:/);
+    assert.match(appSource, /document\.getElementById\('orderUnit'\)/);
+    assert.match(indexSource, /id="orderUnit"/);
+});
+
+test('inventory UI exposes reservation and pending-item detail without duplicate HTML ids', () => {
+    assert.match(indexSource, /id="inventoryReservationOverlay"/);
+    assert.match(indexSource, /id="pendingInventoryBody"/);
+    const ids = [...indexSource.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+    const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+    assert.deepEqual([...new Set(duplicates)], []);
+});
+
+test('Firestore rules deny unspecified collections and enforce sales-code ownership', () => {
+    assert.match(rulesSource, /function ownBySalesCode/);
+    assert.match(rulesSource, /match \/forecasts\/\{forecastId\}\/progress\/\{progressId\}/);
+    assert.match(rulesSource, /salesInventoryOperationalUpdate/);
+    assert.match(rulesSource, /match \/\{document=\*\*\}/);
+    assert.match(rulesSource, /allow read, write: if false/);
+    assert.doesNotMatch(rulesSource, /match \/\{document=\*\*\}[\s\S]*allow read: if signedIn/);
+});
+
+test('all major product-entry screens put item code before downstream product fields', () => {
+    const orderCode = indexSource.indexOf('id="orderItemCode"');
+    const orderName = indexSource.indexOf('id="orderItemName"');
+    const orderBrand = indexSource.indexOf('id="orderBrand"');
+    assert.ok(orderCode >= 0 && orderName > orderCode && orderBrand > orderName);
+
+    const quoteRowStart = appSource.indexOf('window.addQuoteRow');
+    const quoteRowEnd = appSource.indexOf('window.deleteQuoteRow', quoteRowStart);
+    const quoteRow = appSource.slice(quoteRowStart, quoteRowEnd);
+    assert.ok(quoteRow.indexOf('class="item-model"') >= 0);
+    assert.ok(quoteRow.indexOf('class="item-model"') < quoteRow.indexOf('class="item-cn"'));
+});
+
+
+test('phase 14 canonical lifecycle statuses preserve cancellation semantics without hard delete', () => {
+    assert.match(appSource, /const BUSINESS_STATUS = Object\.freeze/);
+    assert.match(appSource, /ACTIVE: 'active'/);
+    assert.match(appSource, /COMPLETED: 'completed'/);
+    assert.match(appSource, /CANCELLED: 'cancelled'/);
+    assert.match(appSource, /VOIDED: 'voided'/);
+    const lifecycleStart = appSource.indexOf('window.quickSetOrderLifecycle =');
+    const lifecycleEnd = appSource.indexOf('window.toggleOrderProgressStatus', lifecycleStart);
+    const lifecycle = appSource.slice(lifecycleStart, lifecycleEnd);
+    assert.match(lifecycle, /status: nextStatus === 'cancelled' \? BUSINESS_STATUS\.CANCELLED : BUSINESS_STATUS\.ACTIVE/);
+    assert.doesNotMatch(lifecycle, /db\.collection\([^\n]+\)\.doc\([^\n]+\)\.delete\(/);
+});
+
+test('phase 15 quotes orders and purchase orders persist explicit currency tax and tax-basis metadata', () => {
+    assert.match(appSource, /const DEFAULT_CURRENCY = 'TWD'/);
+    assert.match(appSource, /const DEFAULT_TAX_RATE = 0\.05/);
+    assert.match(appSource, /function grossAmountMetadata/);
+    assert.match(appSource, /function netAmountMetadata/);
+    assert.match(appSource, /priceIncludesTax: true/);
+    assert.match(appSource, /priceIncludesTax: false/);
+    assert.match(appSource, /subtotalExTax/);
+    assert.match(appSource, /taxAmount/);
+    assert.match(appSource, /totalIncTax/);
+});
+
+test('phase 16 inventory analysis uses actual receipt cost snapshots before catalog fallback', () => {
+    const start = appSource.indexOf('function inventoryAnalysisTotals');
+    const end = appSource.indexOf('function renderInventoryAnalysisSummary', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /receipt\.unitCost/);
+    assert.match(source, /receipt\.purchaseNetAmount/);
+    assert.match(appSource, /purchaseNetAmount: Number\(item\.unitPrice \|\| 0\) \* qty/);
+    assert.match(appSource, /unitCost: Number\(item\.unitPrice \|\| 0\)/);
+});
+
+test('phase 17 Forecast PO and Inventory provide mobile data labels and card layout', () => {
+    assert.match(appSource, /data-th="客戶"/);
+    assert.match(appSource, /data-th="到貨進度"/);
+    assert.match(appSource, /data-th="可用庫存"/);
+    assert.match(cssSource, /Phase 17：Forecast／採購／庫存手機版一致化/);
+    assert.match(cssSource, /#forecastTable td\[data-th\]::before/);
+    assert.match(cssSource, /#poListPanel table td\[data-th\]::before/);
+    assert.match(cssSource, /#inventory-system td\[data-th\]::before/);
+});
+
+test('phase 18 statistics avoid all-history downloads and important writes stamp updatedAt', () => {
+    const start = appSource.indexOf('window.loadSalesStatistics =');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const loader = appSource.slice(start, end);
+    assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
+    assert.match(loader, /\.limit\(1500\)/);
+    assert.match(loader, /\.limit\(1000\)/);
+    assert.doesNotMatch(loader, /db\.collection\('orders'\)\.get\(\)/);
+    assert.match(appSource, /updatedAt: timestamp/);
+    assert.match(appSource, /updatedAt: history\.at/);
+});
+
+test('phase 19 Firestore rules enforce role boundaries for PO inventory reservations and equipment', () => {
+    assert.match(rulesSource, /match \/purchaseOrders\/\{id\}/);
+    assert.match(rulesSource, /allow read: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
+    assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
+    assert.match(rulesSource, /sales\(\) && ownBySalesCode\(resource\.data\)/);
+    assert.match(rulesSource, /match \/equipment\/\{id\}/);
+    assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(sales\(\) && ownBySalesCode\(resource\.data\)\)/);
+    assert.match(rulesSource, /allow read, write: if false/);
+});
+
+test('phase 20 core workflow contracts are all represented in regression coverage', () => {
+    const required = [
+        'forecasts', 'quotes', 'orders', 'purchaseOrders', 'inventoryReservations',
+        'pendingInventoryItems', 'inventoryMovements', 'salesCodes', 'brands', 'customers'
+    ];
+    required.forEach(name => assert.match(appSource, new RegExp(name)));
+    assert.match(appSource, /reserveInventoryForNewOrder/);
+    assert.match(appSource, /registerPurchaseIncoming/);
+    assert.match(appSource, /receivePurchaseOrder/);
+    assert.match(appSource, /applyInventoryDeliveryInTransaction/);
+    assert.match(appSource, /syncLegacyBrandSettingsToMaster/);
+    assert.match(appSource, /executeSalesTransfer/);
 });
