@@ -416,7 +416,7 @@
       <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 批量庫存異動</button></div>
       <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、廠牌、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
-      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
 
       <h3>待建檔品項</h3>
@@ -446,7 +446,7 @@
         <div class="inventory-summary-note">可一次輸入多個品項；正數增加庫存，盤點調整可輸入負數。報廢請輸入正數，系統會自動扣除。</div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
+            <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫</th><th>數量</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
             <tbody id="inventoryAdjustmentRows"></tbody>
           </table>
         </div>
