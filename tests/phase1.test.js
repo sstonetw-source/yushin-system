@@ -452,7 +452,7 @@ test('phase 6 purchase orders create incoming or pending items without increasin
     const end=appSource.indexOf('window.receivePurchaseOrder',start);
     const s=appSource.slice(start,end);
     assert.match(s,/incoming:\s*Math\.max\(0,\s*stock\.incoming\s*\+\s*delta\)/);
-    assert.match(s,/onHand:\s*stock\.onHand/);
+    assert.doesNotMatch(s,/onHand:\s*stock\.onHand\s*\+/);
     assert.match(s,/pendingInventoryItems/);
     assert.match(s,/purchase_incoming/);
 });
