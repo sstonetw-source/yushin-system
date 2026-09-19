@@ -707,3 +707,61 @@ test('phase 20 core workflow contracts are all represented in regression coverag
     assert.match(appSource, /syncLegacyBrandSettingsToMaster/);
     assert.match(appSource, /executeSalesTransfer/);
 });
+
+
+test('forecast quote-origin keeps line-item snapshots for later order splitting', () => {
+    const start = appSource.indexOf('window.createForecastFromQuote');
+    const end = appSource.indexOf('window.markQuoteAsDeal', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /items:\s*items\.map/);
+    assert.match(s, /model:\s*item\.model/);
+    assert.match(s, /qty:\s*Number\(item\.qty/);
+    assert.match(s, /subtotal:\s*parseMoney\(item\.subtotal\)/);
+});
+
+test('forecast to order supports one-item prefill and multi-item split', () => {
+    assert.match(appSource, /async function forecastOrderItems/);
+    assert.match(appSource, /function forecastItemToOrderSource/);
+    assert.match(appSource, /async function createForecastOrdersDirectly/);
+    const start = appSource.indexOf('window.createOrderFromForecast');
+    const end = appSource.indexOf('估價單系統', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /items\.length === 1/);
+    assert.match(s, /openOrderModal\(forecastItemToOrderSource/);
+    assert.match(s, /createForecastOrdersDirectly\(forecast, items\)/);
+});
+
+test('order modal accepts Forecast source data and uses the actual source-link fields', () => {
+    const start = appSource.indexOf('window.openOrderModal = function');
+    const end = appSource.indexOf('function populateOrderCustomerSuggestions', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /function\(source = null\)/);
+    assert.match(s, /orderItemCode/);
+    assert.match(s, /orderItemName/);
+    assert.match(s, /orderQty/);
+    assert.match(s, /orderUnitPrice/);
+    assert.match(s, /_orderModalSourceLink/);
+    assert.match(s, /_orderModalProductId/);
+});
+
+test('Forecast edit hides workflow fields and history is available from the main list', () => {
+    assert.match(indexSource, /id="forecastWorkflowSection"/);
+    assert.match(indexSource, /id="forecastHistoryOverlay"/);
+    assert.match(indexSource, /id="forecastHistoryBody"/);
+    assert.match(appSource, /openForecastHistoryModal/);
+    assert.match(appSource, />紀錄<\/button>/);
+    const start = appSource.indexOf('window.openForecastModal');
+    const end = appSource.indexOf('window.closeForecastModal', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /workflowSection\.style\.display = 'none'/);
+    assert.match(s, /currentProgressSection\.style\.display = 'none'/);
+});
+
+test('Forecast basic edits preserve Stage and status for the progress workflow', () => {
+    const start = appSource.indexOf('window.saveForecast');
+    const end = appSource.indexOf('window.openForecastProgressModal', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /existing\?\.stage/);
+    assert.match(s, /existing\?\.status/);
+    assert.match(s, /基本資料更新/);
+});
