@@ -2316,15 +2316,12 @@ function getBrandFieldValue(selectId, otherInputId) {
     return resolveBrandName(raw);
 }
 
-// 新增訂單時輸入「貨號」，依價格表帶出廠牌與品名
-window.onOrderItemCodeChange = function(input) {
-    const value = input.value.trim();
-    if (!value) return;
-    const match = priceItemLookup.get(`code:${normalizeItemCode(value)}`);
-    if (!match) return;
+// 新增訂單貨號自動帶入：首次進入系統也不需要手動重新載入價目表。
+function applyOrderProductMatch(input, match) {
+    if (!input || !match) return false;
 
     if (match.brand) {
-        selectBrandInDropdown(document.getElementById('orderBrand'), match.brand);
+        selectBrandInDropdown(document.getElementById('orderBrand'), resolveBrandName(match.brand));
         onOrderBrandSelectChange();
     }
 
@@ -2333,13 +2330,36 @@ window.onOrderItemCodeChange = function(input) {
     const unitInput = document.getElementById('orderUnit');
     if (unitInput) unitInput.value = match.unit || unitInput.value || '';
 
-    // 產品線只隨訂單資料保存供後台統計，不額外出現在業務端的廠牌下拉選單。
     input.dataset.productLine = match.productLine || '';
     input.dataset.productType = match.productType || '';
+    window._orderModalProductId = match.productId || stableProductId(match);
 
-    // 價目表如果有登記這個貨號的成本，自動帶進「含稅成本」欄位（只有採購／管理員看得到這個欄位）
     const costInput = document.getElementById('orderCostPrice');
-    if (costInput && match.cost) costInput.value = match.cost;
+    if (costInput && match.cost !== undefined && match.cost !== null && String(match.cost).trim() !== '') {
+        costInput.value = match.cost;
+    }
+    return true;
+}
+
+let orderItemInputTimer = null;
+window.onOrderItemCodeInput = function(input) {
+    clearTimeout(orderItemInputTimer);
+    orderItemInputTimer = setTimeout(async () => {
+        const value = input.value.trim();
+        if (!value) return;
+        await ensurePriceListLoaded().catch(() => {});
+        const match = findPriceItemByCodeValue(value);
+        if (match && input.value.trim() === value) applyOrderProductMatch(input, match);
+    }, 180);
+};
+
+window.onOrderItemCodeChange = async function(input) {
+    const value = input.value.trim();
+    if (!value) return;
+    await ensurePriceListLoaded().catch(() => {});
+    const match = findPriceItemByCodeValue(value);
+    if (!match) return;
+    applyOrderProductMatch(input, match);
 };
 
 // 客戶名稱自動完成：僅抓「最近 10 筆」估價單取樣，避免隨估價單累積而讀取量無上限增長
@@ -3761,14 +3781,188 @@ window.renderInventoryList=function(){const body=document.getElementById('invent
 
 window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;body.innerHTML=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`).join('');if(hint)hint.style.display=pendingInventoryCache.length?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
-window.openInventoryAdjustment=async function(){
- if(!canEditPage('inventory'))return;const code=prompt('貨號');if(!code)return;const match=priceItemLookup.get('code:'+normalizeItemCode(code));if(!match){alert('Product Master 找不到此貨號');return;}
- const type=prompt('異動類型：initial（期初）/ adjustment（盤點調整）/ return（退貨）/ scrap（報廢）','adjustment');if(!['initial','adjustment','return','scrap'].includes(type))return;
- const qty=Number(prompt(type==='scrap'?'報廢數量（輸入正數）':'異動數量；增加填正數、減少填負數','0'));if(!qty)return;const lotNo=prompt('批號（無則留白）','')||'';const expiryDate=prompt('效期 YYYY-MM-DD（無則留白）','')||'';
- const key=match.productId||stableProductId(match),ref=db.collection('inventory').doc(encodeURIComponent(key)),actor=currentUserName||currentUser?.email||'',delta=type==='scrap'?-Math.abs(qty):qty;
- try{await db.runTransaction(async tx=>{const s=await tx.get(ref),old=s.exists?s.data():{},n=inventoryNumbers(old);if(n.onHand+delta<0)throw new Error('異動後庫存不可小於 0');let lots=[...(old.lots||[])];if(lotNo||expiryDate){const i=lots.findIndex(l=>l.lotNo===lotNo&&l.expiryDate===expiryDate);if(i>=0)lots[i]={...lots[i],qty:Number(lots[i].qty||0)+delta};else lots.push({lotNo,expiryDate,qty:delta});}
- tx.set(ref,{productKey:key,productId:key,itemCode:match.model||code,itemName:match.nameCn||match.nameEn||'',onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:new Date().toISOString()},{merge:true});
- tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,lotNo,expiryDate,sourceType:'manual',sourceId:'',createdAt:new Date().toISOString(),createdBy:actor});});await loadInventory(true);}catch(e){alert('庫存異動失敗：'+e.message);}
+let inventoryAdjustmentRows = [];
+
+window.openInventoryAdjustment = async function() {
+    if (!canEditPage('inventory')) return;
+    await ensurePriceListLoaded().catch(() => {});
+    inventoryAdjustmentRows = [];
+    addInventoryAdjustmentRow();
+    renderInventoryAdjustmentRows();
+    document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');
+};
+
+window.closeInventoryAdjustment = function() {
+    document.getElementById('inventoryAdjustmentOverlay')?.classList.remove('active');
+};
+
+window.addInventoryAdjustmentRow = function() {
+    inventoryAdjustmentRows.push({
+        type: 'adjustment',
+        itemCode: '',
+        itemName: '',
+        brand: '',
+        productId: '',
+        qty: 0,
+        lotNo: '',
+        expiryDate: '',
+        note: ''
+    });
+    renderInventoryAdjustmentRows();
+};
+
+window.removeInventoryAdjustmentRow = function(idx) {
+    inventoryAdjustmentRows.splice(idx, 1);
+    if (!inventoryAdjustmentRows.length) inventoryAdjustmentRows.push({ type:'adjustment', itemCode:'', itemName:'', brand:'', productId:'', qty:0, lotNo:'', expiryDate:'', note:'' });
+    renderInventoryAdjustmentRows();
+};
+
+window.updateInventoryAdjustmentField = function(idx, field, value) {
+    if (!inventoryAdjustmentRows[idx]) return;
+    inventoryAdjustmentRows[idx][field] = field === 'qty' ? Number(value || 0) : value;
+};
+
+window.onInventoryAdjustmentCodeChange = async function(idx, input) {
+    if (!inventoryAdjustmentRows[idx]) return;
+    const value = input.value.trim();
+    inventoryAdjustmentRows[idx].itemCode = value;
+    if (!value) return;
+
+    await ensurePriceListLoaded().catch(() => {});
+    const match = findPriceItemByCodeValue(value);
+    if (match) {
+        inventoryAdjustmentRows[idx] = {
+            ...inventoryAdjustmentRows[idx],
+            itemCode: match.model || value,
+            itemName: match.nameCn || match.nameEn || '',
+            brand: resolveBrandName(match.brand || ''),
+            productId: match.productId || stableProductId(match)
+        };
+        renderInventoryAdjustmentRows();
+    }
+};
+
+window.renderInventoryAdjustmentRows = function() {
+    const body = document.getElementById('inventoryAdjustmentBody');
+    if (!body) return;
+    body.innerHTML = inventoryAdjustmentRows.map((row, idx) => `
+        <tr>
+            <td>
+                <select onchange="updateInventoryAdjustmentField(${idx}, 'type', this.value)">
+                    <option value="initial" ${row.type==='initial'?'selected':''}>期初入庫</option>
+                    <option value="adjustment" ${row.type==='adjustment'?'selected':''}>盤點調整</option>
+                    <option value="return" ${row.type==='return'?'selected':''}>退貨入庫</option>
+                    <option value="scrap" ${row.type==='scrap'?'selected':''}>報廢</option>
+                </select>
+            </td>
+            <td><input type="text" list="priceModelList" value="${escapeAttr(row.itemCode || '')}" onchange="onInventoryAdjustmentCodeChange(${idx}, this)"></td>
+            <td><input type="text" value="${escapeAttr(row.itemName || '')}" onchange="updateInventoryAdjustmentField(${idx}, 'itemName', this.value)"></td>
+            <td><input type="text" value="${escapeAttr(row.brand || '')}" onchange="updateInventoryAdjustmentField(${idx}, 'brand', resolveBrandName(this.value))"></td>
+            <td><input type="number" step="any" value="${row.qty || ''}" placeholder="數量" onchange="updateInventoryAdjustmentField(${idx}, 'qty', this.value)"></td>
+            <td><input type="text" value="${escapeAttr(row.lotNo || '')}" placeholder="批號" onchange="updateInventoryAdjustmentField(${idx}, 'lotNo', this.value)"></td>
+            <td><input type="date" value="${escapeAttr(row.expiryDate || '')}" onchange="updateInventoryAdjustmentField(${idx}, 'expiryDate', this.value)"></td>
+            <td><input type="text" value="${escapeAttr(row.note || '')}" placeholder="備註" onchange="updateInventoryAdjustmentField(${idx}, 'note', this.value)"></td>
+            <td><button type="button" class="btn-small btn-danger" onclick="removeInventoryAdjustmentRow(${idx})">刪除</button></td>
+        </tr>
+    `).join('');
+};
+
+window.saveInventoryAdjustments = async function() {
+    const rows = inventoryAdjustmentRows
+        .map(row => ({ ...row, itemCode:String(row.itemCode||'').trim(), itemName:String(row.itemName||'').trim(), brand:resolveBrandName(row.brand||'') }))
+        .filter(row => row.itemCode || row.itemName || row.qty);
+
+    if (!rows.length) { alert('請先輸入至少一筆庫存異動。'); return; }
+    for (const row of rows) {
+        if (!row.itemCode || !row.itemName || !row.brand || !Number(row.qty)) {
+            alert('每筆庫存異動都需要貨號、品名、廠牌與數量。');
+            return;
+        }
+        if (row.type === 'scrap' && Number(row.qty) < 0) row.qty = Math.abs(Number(row.qty));
+    }
+
+    const button = document.getElementById('saveInventoryAdjustmentBtn');
+    if (button) { button.disabled = true; button.innerText = '儲存中…'; }
+
+    try {
+        const actor = currentUserName || currentUser?.email || '';
+        const now = new Date().toISOString();
+        await db.runTransaction(async tx => {
+            const keyed = rows.map(row => {
+                const match = findPriceItemByCodeValue(row.itemCode);
+                const productId = row.productId || match?.productId || (match ? stableProductId(match) : `code:${normalizeHistoryItemCode(row.itemCode)}`);
+                const key = productId;
+                return { ...row, match, productId, key, ref: db.collection('inventory').doc(encodeURIComponent(key)) };
+            });
+            const uniqueRefs = new Map(keyed.map(row => [row.key, row.ref]));
+            const snapshots = new Map();
+            for (const [key, ref] of uniqueRefs) snapshots.set(key, await tx.get(ref));
+
+            const staged = new Map();
+            keyed.forEach(row => {
+                const snap = snapshots.get(row.key);
+                const current = staged.get(row.key) || {
+                    data: snap?.exists ? { ...snap.data() } : {},
+                    numbers: inventoryNumbers(snap?.exists ? snap.data() : {}),
+                    lots: [...(snap?.exists ? (snap.data().lots || []) : [])]
+                };
+                const rawQty = Number(row.qty || 0);
+                const delta = row.type === 'scrap' ? -Math.abs(rawQty) : rawQty;
+                if (current.numbers.onHand + delta < 0) throw new Error(`${row.itemCode} 異動後庫存不可小於 0`);
+                current.numbers.onHand += delta;
+                if (row.lotNo || row.expiryDate) {
+                    const lotIndex = current.lots.findIndex(l => l.lotNo === row.lotNo && l.expiryDate === row.expiryDate);
+                    if (lotIndex >= 0) current.lots[lotIndex] = { ...current.lots[lotIndex], qty:Number(current.lots[lotIndex].qty||0)+delta };
+                    else current.lots.push({ lotNo:row.lotNo, expiryDate:row.expiryDate, qty:delta });
+                }
+                current.itemCode = row.itemCode;
+                current.itemName = row.itemName;
+                current.brand = row.brand;
+                current.productId = row.productId;
+                staged.set(row.key, current);
+
+                tx.set(db.collection('inventoryMovements').doc(), {
+                    type: row.type,
+                    qty: delta,
+                    productKey: row.key,
+                    itemCode: row.itemCode,
+                    itemName: row.itemName,
+                    brand: row.brand,
+                    lotNo: row.lotNo || '',
+                    expiryDate: row.expiryDate || '',
+                    note: row.note || '',
+                    sourceType: 'manual',
+                    sourceId: '',
+                    createdAt: now,
+                    createdBy: actor
+                });
+            });
+
+            staged.forEach((state, key) => {
+                const ref = uniqueRefs.get(key);
+                tx.set(ref, {
+                    productKey:key,
+                    productId:state.productId || key,
+                    itemCode:state.itemCode || '',
+                    itemName:state.itemName || '',
+                    brand:state.brand || '',
+                    onHand:state.numbers.onHand,
+                    reserved:state.numbers.reserved,
+                    incoming:state.numbers.incoming,
+                    lots:state.lots,
+                    updatedAt:now
+                }, { merge:true });
+            });
+        });
+
+        closeInventoryAdjustment();
+        await loadInventory(true);
+        alert(`已完成 ${rows.length} 筆庫存異動。`);
+    } catch (e) {
+        alert('庫存異動失敗：' + e.message);
+    } finally {
+        if (button) { button.disabled = false; button.innerText = '💾 儲存全部'; }
+    }
 };
 
 function inventoryProductKey(record) {
@@ -4503,6 +4697,7 @@ let poAllItems = [];
 let poCurrentCompany = 'yushin';
 let poEditingId = null;
 let poSaveInProgress = false;
+let poDirectStockMode = false;
 
 function receivedQuantityForPoItem(po, itemIndex) {
     return (Array.isArray(po?.receiptRecords) ? po.receiptRecords : [])
@@ -4804,50 +4999,83 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
         .sort((a, b) => b.count - a.count)[0]?.company || 'yushin';
 }
 
-window.openDirectStockPurchase = function() {
+window.openDirectStockPurchase = async function() {
     if (!canEditPage('orders.po')) return;
-    const code = (prompt('請輸入備貨產品貨號') || '').trim();
-    if (!code) return;
+    await ensurePriceListLoaded().catch(() => {});
 
-    const normalized = normalizeItemCode(code);
-    const match = priceItemLookup.get(`code:${normalized}`) || null;
-
-    const itemName = match?.nameCn || match?.nameEn || (prompt('Product Master 尚無此貨號，請輸入品名') || '').trim();
-    if (!itemName) { alert('請輸入品名。'); return; }
-
-    const brand = resolveBrandName(match?.brand || (prompt('請輸入廠牌（可輸入新廠牌）') || '').trim());
-    if (!brand) { alert('請輸入廠牌。'); return; }
-
-    const qty = Number(prompt('請輸入備貨採購數量', '1'));
-    if (!qty || qty <= 0) return;
-
-    const unit = match?.unit || (prompt('單位（可留白）', '') || '').trim();
-    const supplier = match?.supplier || (prompt('供應商（可留白）', '') || '').trim();
-    const unitPrice = Number(match?.cost || prompt('未稅進貨單價（可填 0 稍後修改）', '0') || 0);
-
-    poItems = [{
-        orderId: '',
-        itemName,
-        itemCode: match?.model || code,
-        productId: match?.productId || '',
-        brand,
-        qty,
-        unit,
-        unitPrice
-    }];
-    poAllItems = poItems;
+    poDirectStockMode = true;
     poEditingId = null;
-    switchPoCompany(currentCompany || 'yushin', null, true);
+    poItems = [];
+    poAllItems = poItems;
+
     populatePoVendorSuggestions();
-    document.getElementById('poVendorName').value = supplier;
-    document.getElementById('poBuyerName').innerText = currentUserName || '';
+    document.getElementById('poVendorName').value = '';
+    document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
+
+    const title = document.getElementById('poModalTitle');
+    if (title) title.textContent = '原廠備貨訂購單';
+    const hint = document.getElementById('poModalHint');
+    if (hint) hint.textContent = '可一次加入多個備貨品項；完成後會正式產生訂購單並列入在途庫存。';
+
+    switchPoCompany(currentCompany || 'yushin', null, true);
     generateNextPoNumber();
+    addDirectStockPoItem();
     renderPoItemsTable();
+    document.getElementById('poAddStockItemBtn')?.classList.remove('hidden');
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
+window.addDirectStockPoItem = function() {
+    const item = { orderId:'', itemName:'', itemCode:'', productId:'', brand:'', qty:1, unit:'', unitPrice:0, supplier:'' };
+    poItems.push(item);
+    poAllItems = poItems;
+    renderPoItemsTable();
+};
+
+window.onDirectStockCodeChange = async function(idx, input) {
+    const value = input.value.trim();
+    if (!poItems[idx]) return;
+    poItems[idx].itemCode = value;
+    if (!value) return;
+
+    await ensurePriceListLoaded().catch(() => {});
+    const match = findPriceItemByCodeValue(value);
+    if (!match) {
+        renderPoItemsTable();
+        return;
+    }
+
+    poItems[idx] = {
+        ...poItems[idx],
+        itemCode: match.model || value,
+        itemName: match.nameCn || match.nameEn || '',
+        productId: match.productId || stableProductId(match),
+        brand: resolveBrandName(match.brand || ''),
+        unit: match.unit || '',
+        unitPrice: Number(match.cost || 0),
+        supplier: match.supplier || ''
+    };
+    if (!document.getElementById('poVendorName').value && match.supplier) {
+        document.getElementById('poVendorName').value = match.supplier;
+    }
+    poAllItems = poItems;
+    renderPoItemsTable();
+};
+
+window.updateDirectStockPoText = function(idx, field, value) {
+    if (!poItems[idx]) return;
+    poItems[idx][field] = value;
+    poAllItems = poItems;
+};
+
 window.openPurchaseOrderModal = function() {
+    poDirectStockMode = false;
+    const title = document.getElementById('poModalTitle');
+    if (title) title.textContent = '產生訂購單';
+    const hint = document.getElementById('poModalHint');
+    if (hint) hint.textContent = '單價預設帶入成本，可再手動調整；抬頭請填要下單的廠商名稱。';
+    document.getElementById('poAddStockItemBtn')?.classList.add('hidden');
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
     if (checked.length === 0) {
         alert('請先在業務訂單左邊勾選要放進訂購單的品項。');
@@ -4973,15 +5201,31 @@ function renderPoItemsTable() {
     poItems.forEach((item, idx) => {
         const missingPrice = !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) <= 0;
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.itemName)}</td>
-            <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.itemCode)}</td>
-            <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.brand)}</td>
-            <td style="border:1px solid #999;padding:4px;"><input type="number" step="1" value="${item.qty}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'qty', this.value)"></td>
-            <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.01" step="0.01" value="${missingPrice ? '' : item.unitPrice}" placeholder="請填進貨單價" class="${missingPrice ? 'po-missing-price' : ''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'unitPrice', this.value)">${missingPrice ? '<small class="po-missing-price-hint">缺少成本</small>' : ''}</td>
-            <td style="border:1px solid #999;padding:4px;text-align:right;">${(item.qty * item.unitPrice).toFixed(0)}</td>
-            <td class="no-print" style="border:1px solid #999;padding:4px;text-align:center;"><button type="button" class="btn-small btn-danger" onclick="removePoItem(${idx})">刪除</button></td>
-        `;
+
+        if (poDirectStockMode) {
+            tr.innerHTML = `
+                <td style="border:1px solid #999;padding:4px;">
+                    <input type="text" value="${escapeAttr(item.itemName || '')}" placeholder="品名" style="width:100%;box-sizing:border-box;" onchange="updateDirectStockPoText(${idx}, 'itemName', this.value)">
+                    <input type="text" value="${escapeAttr(item.unit || '')}" placeholder="單位" style="width:100%;box-sizing:border-box;margin-top:4px;" onchange="updateDirectStockPoText(${idx}, 'unit', this.value)">
+                </td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode || '')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectStockCodeChange(${idx}, this)"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" value="${escapeAttr(item.brand || '')}" placeholder="廠牌" style="width:100%;box-sizing:border-box;" onchange="updateDirectStockPoText(${idx}, 'brand', resolveBrandName(this.value))"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.01" step="any" value="${item.qty}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'qty', this.value)"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.01" step="0.01" value="${missingPrice ? '' : item.unitPrice}" placeholder="未稅進貨單價" class="${missingPrice ? 'po-missing-price' : ''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'unitPrice', this.value)">${missingPrice ? '<small class="po-missing-price-hint">缺少成本</small>' : ''}</td>
+                <td style="border:1px solid #999;padding:4px;text-align:right;">${(Number(item.qty || 0) * Number(item.unitPrice || 0)).toFixed(0)}</td>
+                <td class="no-print" style="border:1px solid #999;padding:4px;text-align:center;"><button type="button" class="btn-small btn-danger" onclick="removePoItem(${idx})">刪除</button></td>
+            `;
+        } else {
+            tr.innerHTML = `
+                <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.itemName)}</td>
+                <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.itemCode)}</td>
+                <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.brand)}</td>
+                <td style="border:1px solid #999;padding:4px;"><input type="number" step="1" value="${item.qty}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'qty', this.value)"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.01" step="0.01" value="${missingPrice ? '' : item.unitPrice}" placeholder="請填進貨單價" class="${missingPrice ? 'po-missing-price' : ''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'unitPrice', this.value)">${missingPrice ? '<small class="po-missing-price-hint">缺少成本</small>' : ''}</td>
+                <td style="border:1px solid #999;padding:4px;text-align:right;">${(item.qty * item.unitPrice).toFixed(0)}</td>
+                <td class="no-print" style="border:1px solid #999;padding:4px;text-align:center;"><button type="button" class="btn-small btn-danger" onclick="removePoItem(${idx})">刪除</button></td>
+            `;
+        }
         tbody.appendChild(tr);
     });
     recalcPoTotals();
@@ -5012,8 +5256,15 @@ function recalcPoTotals() {
 window.printPurchaseOrder = async function() {
     if (poSaveInProgress) return;
     if (poItems.length === 0) {
-        alert('目前沒有任何品項，請先選取或不要刪光所有品項。');
+        alert('目前沒有任何品項，請先新增品項。');
         return;
+    }
+    if (poDirectStockMode) {
+        const invalid = poItems.filter(item => !String(item.itemCode || '').trim() || !String(item.itemName || '').trim() || !String(item.brand || '').trim());
+        if (invalid.length) {
+            alert('備貨訂購單每個品項都必須填寫貨號、品名與廠牌。');
+            return;
+        }
     }
     const missingPriceItems = poItems.filter(item => !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) <= 0);
     if (missingPriceItems.length) {
