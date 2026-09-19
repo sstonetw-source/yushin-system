@@ -4857,76 +4857,77 @@ function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
 async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
-    const previousItems = previousPo ? purchaseItemsFromSavedPo(previousPo) : [];
-    const nextItems = purchaseItemsFromSavedPo(poRecord);
+    const previousItems = (previousPo ? purchaseItemsFromSavedPo(previousPo) : [])
+        .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
+    const nextItems = purchaseItemsFromSavedPo(poRecord)
+        .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
 
-    await db.runTransaction(async tx => {
-        const refs = new Map();
-        [...previousItems, ...nextItems].forEach(item => {
-            const key = poIncomingKey(item);
-            if (key) refs.set(key, db.collection('inventory').doc(encodeURIComponent(key)));
-        });
+    const compositeKey = item => {
+        const productKey = poIncomingKey(item);
+        const warehouseId = item.warehouseId || defaultWarehouse()?.id || '';
+        return productKey ? `${productKey}||${warehouseId}` : '';
+    };
+    const keys = new Set([...previousItems, ...nextItems].map(compositeKey).filter(Boolean));
 
-        // Firestore transaction 要求所有 reads 在 writes 之前完成。
-        const inventorySnaps = new Map();
-        const pendingSnaps = new Map();
-        for (const [key, ref] of refs) {
-            const invSnap = await tx.get(ref);
-            inventorySnaps.set(key, invSnap);
-            if (!invSnap.exists) {
-                const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
-                pendingSnaps.set(key, await tx.get(pendingRef));
-            }
-        }
+    for (const composite of keys) {
+        const [key, warehouseId] = composite.split('||');
+        const oldQty = previousItems.filter(item => compositeKey(item) === composite).reduce((sum,item)=>sum+Number(item.qty||0),0);
+        const newQty = nextItems.filter(item => compositeKey(item) === composite).reduce((sum,item)=>sum+Number(item.qty||0),0);
+        const delta = newQty - oldQty;
+        if (!delta) continue;
+        const sample = nextItems.find(item => compositeKey(item) === composite)
+            || previousItems.find(item => compositeKey(item) === composite) || {};
 
-        for (const [key, ref] of refs) {
-            const oldQty = previousItems.filter(i => poIncomingKey(i) === key).reduce((s, i) => s + Number(i.qty || 0), 0);
-            const newQty = nextItems.filter(i => poIncomingKey(i) === key).reduce((s, i) => s + Number(i.qty || 0), 0);
-            const delta = newQty - oldQty;
-            if (!delta) continue;
+        await db.runTransaction(async tx => {
+            const invRef = db.collection('inventory').doc(encodeURIComponent(key));
+            const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)) : null;
+            const pendingId = warehouseId ? warehouseStockDocId(warehouseId,key) : encodeURIComponent(key);
+            const pendingRef = db.collection('pendingInventoryItems').doc(pendingId);
 
-            const sample = nextItems.find(i => poIncomingKey(i) === key) || previousItems.find(i => poIncomingKey(i) === key) || {};
-            const invSnap = inventorySnaps.get(key);
+            const invSnap = await tx.get(invRef);
+            const whSnap = whRef ? await tx.get(whRef) : null;
+            const pendingSnap = await tx.get(pendingRef);
+            const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {});
+            const wh = inventoryNumbers(whSnap?.exists ? whSnap.data() : {});
+            const oldPending = Number(pendingSnap.exists ? pendingSnap.data().incomingQty : 0) || 0;
+            const nextIncoming = Math.max(0, oldPending + delta);
+            const now = new Date().toISOString();
 
-            if (invSnap?.exists) {
-                const stock = inventoryNumbers(invSnap.data());
-                tx.update(ref, {
-                    incoming: Math.max(0, stock.incoming + delta),
-                    updatedAt: new Date().toISOString()
-                });
+            if (invSnap.exists) {
+                tx.set(invRef, { incoming:Math.max(0,inv.incoming+delta), updatedAt:now }, { merge:true });
             } else {
-                const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
-                const pending = pendingSnaps.get(key);
-                const oldPendingQty = Number(pending?.exists ? pending.data().incomingQty : 0) || 0;
-                const sourceOrderIds = nextItems.filter(i => poIncomingKey(i) === key && i.orderId).map(i => i.orderId);
-                const payload = {
-                    productKey: key,
-                    productId: sample.productId || '',
-                    itemCode: sample.itemCode || '',
-                    itemName: sample.itemName || '',
-                    brand: resolveBrandName(sample.brand || ''),
-                    supplier: poRecord.vendorName || '',
-                    incomingQty: Math.max(0, oldPendingQty + delta),
-                    status: Math.max(0, oldPendingQty + delta) > 0 ? 'pending-arrival' : 'cancelled',
-                    sourcePurchaseOrders: firebase.firestore.FieldValue.arrayUnion(poId),
-                    updatedAt: new Date().toISOString(),
-                    createdAt: pending?.exists ? (pending.data().createdAt || new Date().toISOString()) : new Date().toISOString()
-                };
-                if (sourceOrderIds.length) payload.sourceOrderIds = firebase.firestore.FieldValue.arrayUnion(...sourceOrderIds);
-                tx.set(pendingRef, payload, { merge: true });
+                tx.set(invRef, {
+                    productKey:key, productId:sample.productId||'', itemCode:sample.itemCode||'', itemName:sample.itemName||'',
+                    brand:resolveBrandName(sample.brand||''), onHand:0, reserved:0, incoming:Math.max(0,delta), lots:[], updatedAt:now
+                }, { merge:true });
             }
+
+            if (whRef) {
+                tx.set(whRef, {
+                    warehouseId, productKey:key, productId:sample.productId||'', itemCode:sample.itemCode||'',
+                    itemName:sample.itemName||'', brand:resolveBrandName(sample.brand||''),
+                    onHand:wh.onHand, reserved:wh.reserved, incoming:Math.max(0,wh.incoming+delta), updatedAt:now
+                }, { merge:true });
+            }
+
+            const sourceOrderIds = nextItems.filter(item => compositeKey(item) === composite && item.orderId).map(item=>item.orderId);
+            const pendingPayload = {
+                productKey:key, productId:sample.productId||'', itemCode:sample.itemCode||'', itemName:sample.itemName||'',
+                brand:resolveBrandName(sample.brand||''), supplier:poRecord.vendorName||'', warehouseId,
+                incomingQty:nextIncoming, status:nextIncoming>0?'pending-arrival':'cancelled',
+                sourcePurchaseOrders:firebase.firestore.FieldValue.arrayUnion(poId),
+                updatedAt:now, createdAt:pendingSnap.exists?(pendingSnap.data().createdAt||now):now
+            };
+            if (sourceOrderIds.length) pendingPayload.sourceOrderIds=firebase.firestore.FieldValue.arrayUnion(...sourceOrderIds);
+            tx.set(pendingRef,pendingPayload,{merge:true});
 
             tx.set(db.collection('inventoryMovements').doc(), {
-                type: 'purchase_incoming',
-                qty: delta,
-                productKey: key,
-                sourceType: DOCUMENT_TYPES.PURCHASE_ORDER,
-                sourceId: poId,
-                createdAt: new Date().toISOString(),
-                createdBy: currentUserName || currentUser?.email || ''
+                type:'purchase_incoming', qty:delta, productKey:key, warehouseId,
+                fulfillmentType:'WAREHOUSE', sourceType:DOCUMENT_TYPES.PURCHASE_ORDER, sourceId:poId,
+                createdAt:now, createdBy:currentUserName||currentUser?.email||''
             });
-        }
-    });
+        });
+    }
 }
 
 let poReceiptTargetId = '';
