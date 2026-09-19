@@ -1031,12 +1031,24 @@
             </div>
         </div>
 
-        <!-- Product Master：沿用既有價格表儲存結構，避免建立第二份產品來源 -->
+        <!-- Product Master：正式資料存 products / productCosts；舊 settings/prices 暫時作相容來源。 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
+            <div class="panel no-print" style="margin-bottom:14px;">
+                <strong>Product Master v2 遷移</strong>
+                <p style="font-size:12px;color:#666;line-height:1.7;margin:6px 0 10px;">
+                    將目前舊價目表安全遷移至正式 products / productCosts。遷移不會修改歷史估價與訂單；
+                    舊價目表會保留產品與售價，但移除成本欄位，避免業務從舊 settings 文件讀到代理產品成本。
+                </p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" class="btn-secondary" id="productMasterMigrationPreviewBtn" onclick="previewProductMasterMigration()">🔎 預覽遷移</button>
+                    <button type="button" id="productMasterMigrationBtn" onclick="runProductMasterMigration()" disabled>⬆️ 執行安全遷移</button>
+                </div>
+                <div id="productMasterMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
+            </div>
             <div class="toolbar no-print">
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">（每個工作表＝一個廠牌。同廠牌再次上傳會更新該廠牌。支援：產品線、類型、規格、供應商、單位、成本、售價、庫存管理、批號管理、效期管理、啟用／停用；寫入前會先顯示新增／更新預覽。）</span>
+                <span style="font-size:12px;color:#666;">（每個工作表＝一個廠牌。同廠牌再次上傳會更新該廠牌。產品與售價寫入 Product Master；成本只寫入 productCosts，不再寫回業務可讀的舊價目表。）</span>
             </div>
             <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
                 <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
