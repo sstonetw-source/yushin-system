@@ -79,8 +79,8 @@ service cloud.firestore {
         || (sales()
           && request.resource.data.productId == id
           && request.resource.data.salesVisible == true
-          && getAfter(/databases/$(database)/documents/products/$(id)).data.status == 'TEMPORARY'
-          && getAfter(/databases/$(database)/documents/products/$(id)).data.authorizationType == 'NON_AUTHORIZED');
+          && get(/databases/$(database)/documents/products/$(id)).data.status == 'TEMPORARY'
+          && get(/databases/$(database)/documents/products/$(id)).data.authorizationType == 'NON_AUTHORIZED');
       allow update: if admin() || purchaser();
       allow delete: if false;
     }
