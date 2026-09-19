@@ -4388,8 +4388,11 @@ window.receivePurchaseOrder = async function(poId) {
             if (!key) throw new Error('此品項缺少貨號／Product ID，無法建立庫存');
 
             const invRef = db.collection('inventory').doc(encodeURIComponent(key));
+            const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
             const invSnap = await tx.get(invRef);
-            const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : {});
+            const pendingSnap = await tx.get(pendingRef);
+            const pendingIncoming = Number(pendingSnap.exists ? pendingSnap.data().incomingQty : 0) || 0;
+            const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : { incoming: pendingIncoming });
             let reserveFromReceipt = 0;
             let sourceOrder = null;
 
@@ -4454,16 +4457,17 @@ window.receivePurchaseOrder = async function(poId) {
                 createdBy: actor
             });
 
-            const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
+            const pendingRemaining = Math.max(0, pendingIncoming - qty);
             tx.set(pendingRef, {
                 productKey: key,
                 productId: item.productId || '',
                 itemCode: item.itemCode || '',
                 itemName: item.itemName || '',
                 brand: resolveBrandName(item.brand || ''),
-                status: 'completed',
-                completedAt: now,
-                completedBy: actor,
+                incomingQty: pendingRemaining,
+                status: pendingRemaining > 0 ? 'pending-arrival' : 'completed',
+                completedAt: pendingRemaining > 0 ? null : now,
+                completedBy: pendingRemaining > 0 ? '' : actor,
                 updatedAt: now
             }, { merge: true });
 
