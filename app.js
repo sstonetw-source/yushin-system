@@ -153,6 +153,10 @@ let companyAgencyBrandsConfigured = false;
 // Phase 1：Brand Master 為全系統正式廠牌來源；尚未完成舊資料移轉前，仍合併價目表／統計／分公司舊設定以保持相容。
 let brandMasterCache = [];
 let brandMasterLoadPromise = null;
+let supplierMasterCache = [];
+let supplierMappingCache = [];
+let warehouseMasterCache = [];
+let supplierWarehouseLoadPromise = null;
 let hiddenBrands = [];       // 舊欄位，保留避免舊資料丟失，畫面已經不再使用黑名單模式
 
 // 印章圖片常數定義在 stamps-data.js（需在此檔案之前載入）。
@@ -2089,6 +2093,200 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
 function getUnifiedBrandNames(includeMaintenance = false) {
     return getUnifiedBrandEntries(includeMaintenance).map(item => item.name);
 }
+
+function stableMasterId(prefix, value) {
+    const normalized = String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '');
+    return prefix + ':' + (normalized || Date.now().toString(36));
+}
+
+function warehouseStockDocId(warehouseId, productKey) {
+    return encodeURIComponent(String(warehouseId || '')) + '__' + encodeURIComponent(String(productKey || ''));
+}
+
+function defaultWarehouse() {
+    return warehouseMasterCache.find(item => item.active !== false && item.isDefault) || warehouseMasterCache.find(item => item.active !== false) || null;
+}
+
+async function loadSupplierWarehouseMasters(force = false) {
+    if (supplierWarehouseLoadPromise && !force) return supplierWarehouseLoadPromise;
+    supplierWarehouseLoadPromise = Promise.all([
+        db.collection('suppliers').limit(500).get(),
+        db.collection('brandSupplierMappings').limit(1000).get(),
+        db.collection('warehouses').limit(50).get()
+    ]).then(([suppliers, mappings, warehouses]) => {
+        supplierMasterCache = suppliers.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
+        supplierMappingCache = mappings.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
+        warehouseMasterCache = warehouses.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
+        supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
+        warehouseMasterCache.sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
+        renderSupplierMappingAdmin();
+        renderWarehouseMasterAdmin();
+        populateOrderWarehouseOptions();
+        return { suppliers:supplierMasterCache, mappings:supplierMappingCache, warehouses:warehouseMasterCache };
+    }).catch(err => {
+        supplierWarehouseLoadPromise = null;
+        console.warn('讀取供應商／倉庫主檔失敗：', err);
+        return { suppliers:[], mappings:[], warehouses:[] };
+    });
+    return supplierWarehouseLoadPromise;
+}
+
+function supplierForProduct(brand, productLine = '') {
+    const brandKey = normalizeBrandLookupKey(resolveBrandName(brand));
+    const lineKey = String(productLine || '').normalize('NFKC').trim().toLocaleLowerCase();
+    const candidates = supplierMappingCache.filter(item =>
+        normalizeBrandLookupKey(item.brandName || item.brand || '') === brandKey
+    );
+    const lineMatch = candidates.find(item => String(item.productLine || '').normalize('NFKC').trim().toLocaleLowerCase() === lineKey && lineKey);
+    const fallback = candidates.find(item => !String(item.productLine || '').trim() && item.isDefault !== false) || candidates.find(item => !String(item.productLine || '').trim());
+    const mapping = lineMatch || fallback || null;
+    if (!mapping) return null;
+    return supplierMasterCache.find(item => item.id === mapping.supplierId || item.supplierId === mapping.supplierId) || null;
+}
+
+function renderSupplierMappingAdmin() {
+    const body = document.getElementById('supplierMappingBody');
+    if (!body) return;
+    body.innerHTML = supplierMappingCache.length ? supplierMappingCache.map(mapping => {
+        const supplier = supplierMasterCache.find(item => item.id === mapping.supplierId || item.supplierId === mapping.supplierId) || {};
+        return `<tr>
+            <td>${escapeHtml(mapping.brandName || '')}</td>
+            <td>${escapeHtml(mapping.productLine || '預設')}</td>
+            <td>${escapeHtml(supplier.supplierName || mapping.supplierName || '')}</td>
+            <td>${escapeHtml(supplier.purchaseHeaderName || supplier.supplierName || '')}</td>
+            <td><button type="button" class="btn-small btn-danger" onclick="disableSupplierMapping('${escapeAttr(mapping.id)}')">停用</button></td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="5" style="color:#888;">尚未設定供應商對應。</td></tr>';
+}
+
+function renderWarehouseMasterAdmin() {
+    const body = document.getElementById('warehouseMasterBody');
+    if (!body) return;
+    body.innerHTML = warehouseMasterCache.length ? warehouseMasterCache.map(item => `<tr>
+        <td>${escapeHtml(item.warehouseName || '')}</td>
+        <td>${item.isDefault ? '是' : ''}</td>
+        <td>${item.active === false ? '停用' : '啟用'}</td>
+        <td><button type="button" class="btn-small btn-danger" onclick="disableWarehouseMaster('${escapeAttr(item.id)}')">停用</button></td>
+    </tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚未建立倉庫。</td></tr>';
+}
+
+window.saveSupplierMapping = async function() {
+    if (trueUserRole !== 'admin') return;
+    const supplierName = String(document.getElementById('supplierMasterName')?.value || '').trim();
+    const purchaseHeaderName = String(document.getElementById('supplierMasterHeader')?.value || '').trim() || supplierName;
+    const brandName = resolveBrandName(document.getElementById('supplierMappingBrand')?.value || '');
+    const productLine = String(document.getElementById('supplierMappingLine')?.value || '').trim();
+    const status = document.getElementById('supplierMappingStatus');
+    if (!supplierName || !brandName) {
+        if (status) status.innerText = '請至少填寫供應商名稱與廠牌。';
+        return;
+    }
+    try {
+        const supplierId = stableMasterId('sup', supplierName);
+        const mappingId = stableMasterId('bsm', brandName + '|' + (productLine || 'default'));
+        const now = new Date().toISOString();
+        const batch = db.batch();
+        batch.set(db.collection('suppliers').doc(supplierId), { supplierId, supplierName, purchaseHeaderName, active:true, updatedAt:now }, { merge:true });
+        batch.set(db.collection('brandSupplierMappings').doc(mappingId), {
+            mappingId, brandName, productLine, supplierId, isDefault:!productLine, active:true, updatedAt:now
+        }, { merge:true });
+        await batch.commit();
+        supplierWarehouseLoadPromise = null;
+        await loadSupplierWarehouseMasters(true);
+        if (status) status.innerText = '供應商對應已儲存。';
+    } catch (err) {
+        if (status) status.innerText = '儲存失敗：' + err.message;
+    }
+};
+
+window.disableSupplierMapping = async function(id) {
+    if (trueUserRole !== 'admin' || !id) return;
+    await db.collection('brandSupplierMappings').doc(id).set({ active:false, updatedAt:new Date().toISOString() }, { merge:true });
+    supplierWarehouseLoadPromise = null;
+    await loadSupplierWarehouseMasters(true);
+};
+
+window.saveWarehouseMaster = async function() {
+    if (trueUserRole !== 'admin') return;
+    const name = String(document.getElementById('warehouseMasterName')?.value || '').trim();
+    const makeDefault = !!document.getElementById('warehouseMasterDefault')?.checked;
+    const status = document.getElementById('warehouseMasterStatus');
+    if (!name) { if (status) status.innerText = '請輸入倉庫名稱。'; return; }
+    try {
+        const id = stableMasterId('wh', name);
+        const now = new Date().toISOString();
+        if (makeDefault) {
+            const defaults = warehouseMasterCache.filter(item => item.isDefault && item.id !== id);
+            const batch = db.batch();
+            defaults.forEach(item => batch.set(db.collection('warehouses').doc(item.id), { isDefault:false, updatedAt:now }, { merge:true }));
+            batch.set(db.collection('warehouses').doc(id), { warehouseId:id, warehouseName:name, isDefault:true, active:true, updatedAt:now }, { merge:true });
+            await batch.commit();
+        } else {
+            await db.collection('warehouses').doc(id).set({ warehouseId:id, warehouseName:name, isDefault:false, active:true, updatedAt:now }, { merge:true });
+        }
+        supplierWarehouseLoadPromise = null;
+        await loadSupplierWarehouseMasters(true);
+        if (status) status.innerText = '倉庫已儲存。';
+        const input=document.getElementById('warehouseMasterName'); if(input) input.value='';
+    } catch (err) {
+        if (status) status.innerText = '儲存失敗：' + err.message;
+    }
+};
+
+window.disableWarehouseMaster = async function(id) {
+    if (trueUserRole !== 'admin' || !id) return;
+    await db.collection('warehouses').doc(id).set({ active:false, isDefault:false, updatedAt:new Date().toISOString() }, { merge:true });
+    supplierWarehouseLoadPromise = null;
+    await loadSupplierWarehouseMasters(true);
+};
+
+function populateOrderWarehouseOptions(selected = '') {
+    const select = document.getElementById('orderWarehouse');
+    if (!select) return;
+    const current = selected || select.value;
+    select.innerHTML = '<option value="">請選擇倉庫</option>' + warehouseMasterCache
+        .filter(item => item.active !== false)
+        .map(item => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.warehouseName || item.id)}${item.isDefault ? '（預設）' : ''}</option>`).join('');
+    if (warehouseMasterCache.some(item => item.id === current)) select.value = current;
+    else if (defaultWarehouse()) select.value = defaultWarehouse().id;
+}
+
+async function warehouseStockSnapshot(productKey, warehouseId) {
+    if (!productKey || !warehouseId) return null;
+    const ref = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey));
+    const snap = await ref.get().catch(() => null);
+    return snap && snap.exists ? { id:snap.id, ...snap.data() } : null;
+}
+
+window.refreshOrderWarehouseStock = async function() {
+    const hint = document.getElementById('orderWarehouseStockHint');
+    const fulfillment = document.getElementById('orderFulfillmentType')?.value || 'WAREHOUSE';
+    if (!hint) return;
+    if (fulfillment === 'DIRECT_SHIP') {
+        hint.innerText = '原廠直送：不占用、不入庫、不出庫；採購與銷售紀錄仍會保留。';
+        return;
+    }
+    const code = document.getElementById('orderItemCode')?.value || '';
+    const match = findPriceItemByCodeValue(code);
+    const key = match ? (match.productId || stableProductId(match)) : '';
+    if (!key) { hint.innerText = '輸入貨號後會顯示各倉庫可用庫存。'; return; }
+    await loadSupplierWarehouseMasters();
+    const rows = [];
+    for (const warehouse of warehouseMasterCache) {
+        const stock = await warehouseStockSnapshot(key, warehouse.id);
+        const onHand = Number(stock?.onHand || 0), reserved = Number(stock?.reserved || 0);
+        rows.push(`${warehouse.warehouseName || warehouse.id}：${Math.max(0,onHand-reserved)} 可用（現有 ${onHand}）`);
+    }
+    hint.innerText = rows.length ? rows.join(' ｜ ') : '尚未建立倉庫；可先到管理員後台 → 廠牌管理建立。';
+};
+
+window.onOrderFulfillmentChange = function() {
+    const type = document.getElementById('orderFulfillmentType')?.value || 'WAREHOUSE';
+    const wrap = document.getElementById('orderWarehouseWrap');
+    if (wrap) wrap.style.display = type === 'WAREHOUSE' ? '' : 'none';
+    refreshOrderWarehouseStock();
+};
+
 
 function resolveBrandName(value) {
     const input = String(value || '').trim();
