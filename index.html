@@ -413,7 +413,7 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 庫存異動</button></div>
+      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 批量庫存異動</button></div>
       <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、廠牌、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
       <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
@@ -424,6 +424,31 @@
       <div class="empty-hint" id="pendingInventoryEmptyHint" style="display:none;">目前沒有待建檔品項。</div>
 
       <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>貨號</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
+    </div>
+
+    <div class="eq-modal-overlay no-print" id="inventoryAdjustmentOverlay" onclick="if(event.target===this) closeInventoryAdjustment()">
+      <div class="eq-modal-box" style="max-width:1200px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <div>
+            <h3 style="margin:0;">批量庫存異動</h3>
+            <div style="font-size:12px;color:#666;margin-top:4px;">可一次處理多個品項、批號與效期。貨號有 Product Master 時會自動帶入品名與廠牌。</div>
+          </div>
+          <button type="button" class="btn-secondary" onclick="closeInventoryAdjustment()">✕ 關閉</button>
+        </div>
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead><tr><th>類型</th><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>批號</th><th>效期</th><th>備註</th><th>操作</th></tr></thead>
+            <tbody id="inventoryAdjustmentBody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:10px;">
+          <button type="button" class="btn-secondary" onclick="addInventoryAdjustmentRow()">＋ 新增一列</button>
+          <div>
+            <button type="button" id="saveInventoryAdjustmentBtn" onclick="saveInventoryAdjustments()">💾 儲存全部</button>
+            <button type="button" class="btn-secondary" onclick="closeInventoryAdjustment()">取消</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="eq-modal-overlay no-print" id="inventoryReservationOverlay" onclick="if(event.target===this) closeInventoryReservationDetails()">
@@ -762,7 +787,7 @@
             <div class="form-grid">
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
-                <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" onchange="onOrderItemCodeChange(this)"></div>
+                <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" oninput="onOrderItemCodeInput(this)" onchange="onOrderItemCodeChange(this)"></div>
                 <div><label>品名</label><input type="text" id="orderItemName"></div>
                 <div><label>廠牌</label>
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
@@ -866,11 +891,11 @@
     <div class="eq-modal-overlay" id="poModalOverlay" onclick="if(event.target===this) closePurchaseOrderModal()">
         <div class="eq-modal-box" style="max-width:820px;">
             <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;">
-                <h3 style="margin:0;">產生訂購單</h3>
+                <h3 id="poModalTitle" style="margin:0;">產生訂購單</h3>
                 <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">✕ 關閉</button>
             </div>
-            <div class="no-print" style="font-size:12px;color:#666;margin:6px 0;">
-                單價欄位預設帶入你在業務訂單填的「含稅成本」，這裡還可以再手動調整；抬頭請填要下單的廠商名稱。
+            <div id="poModalHint" class="no-print" style="font-size:12px;color:#666;margin:6px 0;">
+                單價預設帶入成本，可再手動調整；抬頭請填要下單的廠商名稱。
             </div>
             <div class="sub-nav no-print" style="padding:0;background:none;margin-bottom:14px;">
                 <div class="sub-tab active" id="po-sub-yushin" onclick="switchPoCompany('yushin', this)">又鑫 (YS)</div>
@@ -896,6 +921,9 @@
                 </div>
                 <div style="margin:4px 0;"><label>單號：</label><span id="poNo"></span></div>
 
+                <div class="no-print" style="margin:8px 0;">
+                    <button type="button" id="poAddStockItemBtn" class="btn-secondary hidden" onclick="addDirectStockPoItem()">＋ 新增備貨品項</button>
+                </div>
                 <table id="poItemsTable" style="width:100%;margin-top:8px;border-collapse:collapse;">
                     <thead>
                         <tr>
