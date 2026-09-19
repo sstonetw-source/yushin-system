@@ -1813,10 +1813,17 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
         if (!cleanName) return;
         if (!includeMaintenance && normalizeBrandLookupKey(cleanName) === normalizeBrandLookupKey('維修')) return;
 
-        const key = normalizeBrandLookupKey(cleanName);
-        const existing = entries.get(key) || {
+        // Brand Master 先載入；後續價目表／舊設定若只是 master alias，
+        // 直接歸到 canonical entry，不再產生第二個看似不同的廠牌。
+        const cleanKey = normalizeBrandLookupKey(cleanName);
+        const aliasOwner = [...entries.values()].find(entry =>
+            (entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === cleanKey)
+        );
+        const canonicalName = aliasOwner?.name || cleanName;
+        const key = normalizeBrandLookupKey(canonicalName);
+        const existing = entries.get(key) || aliasOwner || {
             id: '',
-            name: cleanName,
+            name: canonicalName,
             aliases: [],
             isKeyBrand: false,
             companies: [],
@@ -1901,9 +1908,13 @@ async function upsertBrandMaster(name, patch = {}) {
     const current = brandMasterCache.find(item => normalizeBrandLookupKey(item.name) === normalizeBrandLookupKey(canonicalName));
     const payload = {
         name: current?.name || canonicalName,
-        aliases: dedupeBrandsCaseInsensitive([...(current?.aliases || []), ...(patch.aliases || [])]),
+        aliases: patch.replaceAliases
+            ? dedupeBrandsCaseInsensitive(patch.aliases || [])
+            : dedupeBrandsCaseInsensitive([...(current?.aliases || []), ...(patch.aliases || [])]),
         isKeyBrand: patch.isKeyBrand ?? current?.isKeyBrand ?? false,
-        companies: [...new Set([...(current?.companies || []), ...(patch.companies || [])])],
+        companies: patch.replaceCompanies
+            ? [...new Set(patch.companies || [])]
+            : [...new Set([...(current?.companies || []), ...(patch.companies || [])])],
         active: patch.active ?? current?.active ?? true,
         updatedAt: new Date().toISOString()
     };
@@ -1924,7 +1935,7 @@ async function syncLegacyBrandSettingsToMaster() {
         );
         const isKeyBrand = keyStatisticBrands.some(brand => normalizeBrandLookupKey(resolveBrandName(brand)) === normalizeBrandLookupKey(canonical));
         const aliases = keyStatisticBrandAliases[canonical] || keyStatisticBrandAliases[name] || [];
-        await upsertBrandMaster(canonical, { companies, isKeyBrand, aliases });
+        await upsertBrandMaster(canonical, { companies, isKeyBrand, aliases, replaceCompanies: true, replaceAliases: true });
     }
 }
 
