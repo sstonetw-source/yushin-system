@@ -9315,7 +9315,12 @@ window.downloadDatabaseBackup = async function() {
 
     const button = document.getElementById('databaseBackupBtn');
     const status = document.getElementById('databaseBackupStatus');
-    const collections = ['quotes', 'orders', 'purchaseOrders', 'equipment', 'users', 'settings', 'brands', 'products', 'productCosts'];
+    const collections = [
+        'quotes', 'forecasts', 'orders', 'purchaseOrders', 'equipment', 'users', 'settings',
+        'brands', 'products', 'productCosts', 'customers', 'salesCodes',
+        'suppliers', 'brandSupplierMappings', 'warehouses', 'warehouseStocks',
+        'inventory', 'inventoryReservations', 'pendingInventoryItems', 'inventoryMovements'
+    ];
     button.disabled = true;
     button.innerText = '正在整理備份…';
     status.innerText = '讀取雲端資料中，請不要關閉頁面。';
