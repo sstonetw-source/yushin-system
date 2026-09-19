@@ -795,3 +795,48 @@ test('quote product lookup tolerates harmless item-code punctuation only when un
     assert.match(s, /normalizeItemCodeLoose/);
     assert.match(s, /candidates\.length === 1/);
 });
+
+
+test('order item-code autofill waits for Product Master and fills sale/cost fields', () => {
+    const start = appSource.indexOf('window.onOrderItemCodeChange');
+    const end = appSource.indexOf('function loadClientHistory', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /await ensurePriceListLoaded/);
+    assert.match(s, /findPriceItemByCodeValue/);
+    assert.match(s, /orderItemName/);
+    assert.match(s, /orderUnitPrice/);
+    assert.match(s, /orderCostPrice/);
+    assert.match(s, /_orderModalProductId/);
+    assert.match(s, /onOrderItemCodeInput/);
+});
+
+test('direct stock purchase uses the formal PO modal and supports batch items', () => {
+    const start = appSource.indexOf('window.openDirectStockPurchase');
+    const end = appSource.indexOf('window.openPurchaseOrderModal', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /poDirectStockMode = true/);
+    assert.match(s, /addDirectPoItem/);
+    assert.match(s, /generateNextPoNumber/);
+    assert.match(s, /poModalOverlay/);
+    assert.match(appSource, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
+});
+
+test('PO receiving is a batch modal with partial quantity lot and expiry', () => {
+    assert.match(indexSource, /id="poReceiptBatchOverlay"/);
+    assert.match(indexSource, /id="poReceiptBatchBody"/);
+    assert.match(appSource, /window\.savePoReceiptBatch/);
+    assert.match(appSource, /receiveSinglePoLine/);
+    assert.match(appSource, /lotNo/);
+    assert.match(appSource, /expiryDate/);
+});
+
+test('manual inventory changes support batch rows instead of browser prompts', () => {
+    assert.match(indexSource, /id="inventoryAdjustmentOverlay"/);
+    assert.match(indexSource, /id="inventoryAdjustmentRows"/);
+    assert.match(appSource, /window\.addInventoryAdjustmentRow/);
+    assert.match(appSource, /window\.saveInventoryAdjustmentBatch/);
+    const start = appSource.indexOf('window.openInventoryAdjustment');
+    const end = appSource.indexOf('function inventoryProductKey', start);
+    const s = appSource.slice(start, end);
+    assert.doesNotMatch(s, /prompt\('貨號'/);
+});
