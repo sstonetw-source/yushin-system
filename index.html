@@ -108,6 +108,14 @@
             <option value="stage5">Stage 5</option>
         </select>
 
+        <select id="forecastPeriodFilter" onchange="renderForecastList()">
+            <option value="this-month">本月</option>
+            <option value="last-month">上月</option>
+            <option value="this-quarter">本季</option>
+            <option value="this-year" selected>今年</option>
+            <option value="last-year">去年</option>
+            <option value="all">全部期間</option>
+        </select>
         <button class="btn-secondary" onclick="loadForecasts(true)">重新整理</button>
     </div>
 
@@ -164,7 +172,8 @@
         >
 
         <label>廠牌 *</label>
-        <select id="forecastBrand"></select>
+        <input id="forecastBrand" list="forecastBrandList" autocomplete="off" placeholder="選擇既有廠牌或自行輸入">
+        <datalist id="forecastBrandList"></datalist>
 
         <label>產品／品項 *</label>
         <input
@@ -369,10 +378,24 @@
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
       <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 庫存異動</button></div>
-      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
-      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>On Hand</th><th>Reserved</th><th>Available</th><th>Incoming</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、廠牌、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
+      <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
+
+      <h3>待建檔品項</h3>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>在途數量</th><th>供應商</th><th>狀態</th></tr></thead><tbody id="pendingInventoryBody"></tbody></table></div>
+      <div class="empty-hint" id="pendingInventoryEmptyHint" style="display:none;">目前沒有待建檔品項。</div>
+
       <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>貨號</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
+    </div>
+
+    <div class="eq-modal-overlay no-print" id="inventoryReservationOverlay" onclick="if(event.target===this) closeInventoryReservationDetails()">
+      <div class="eq-modal-box" style="max-width:980px;">
+        <h3 id="inventoryReservationTitle">已占用訂單</h3>
+        <div class="table-wrap"><table><thead><tr><th>訂單</th><th>客戶</th><th>貨號</th><th>品名</th><th>占用數量</th><th>業務</th><th>訂單日期</th></tr></thead><tbody id="inventoryReservationBody"></tbody></table></div>
+        <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeInventoryReservationDetails()">關閉</button></div>
+      </div>
     </div>
     <!-- ============ 估價單系統 ============ -->
     <div id="quote-system" class="content-section active">
@@ -450,6 +473,9 @@
         <div id="myQuotesPanel" style="display:none;">
             <div class="toolbar no-print">
                 <input type="text" id="myQuoteSearch" placeholder="搜尋單號 / 抬頭 / 客戶 / 廠牌 / 品項" style="width:260px;" oninput="renderMyQuotesList()">
+                <select id="myQuotePeriodFilter" onchange="renderMyQuotesList()">
+                    <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
+                </select>
                 <button class="btn-secondary" onclick="loadMyQuotesFromCloud()">🔄 重新整理</button>
             </div>
             <table class="admin-users-table">
@@ -675,6 +701,9 @@
         <div id="poListPanel" style="display:none;">
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
+                <select id="poPeriodFilter" onchange="renderPoList()">
+                    <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
+                </select>
                 <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
                 <button onclick="openDirectStockPurchase()">＋ 原廠備貨採購</button>
             </div>
@@ -695,11 +724,11 @@
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
                 <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" onchange="onOrderItemCodeChange(this)"></div>
+                <div><label>品名</label><input type="text" id="orderItemName"></div>
                 <div><label>廠牌</label>
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
                     <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
                 </div>
-                <div><label>品名</label><input type="text" id="orderItemName"></div>
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
                 <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
                 <div><label>總價</label><input type="number" id="orderTotalPrice" value="0" readonly style="background:#f5f5f5;"></div>
