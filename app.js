@@ -4984,6 +4984,8 @@ window.updateDirectPoText = function(idx, field, value) {
 function updatePoModeUI() {
     const addBtn = document.getElementById('poAddStockItemBtn');
     const hint = document.getElementById('poModeHint');
+    const brandList = document.getElementById('poBrandList');
+    if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
     if (addBtn) addBtn.style.display = poDirectStockMode ? '' : 'none';
     if (hint) hint.textContent = poDirectStockMode
         ? '原廠備貨採購：可一次加入多個品項；完成後會正式產生訂購單並列入在途庫存。'
@@ -5028,6 +5030,7 @@ window.openPurchaseOrderModal = function() {
         alert('品項已讀取，但目前三間公司的代理廠牌設定都不允許這些品項。請先到管理後台調整代理廠牌，或確認訂單廠牌是否正確。');
         return;
     }
+    updatePoModeUI();
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
