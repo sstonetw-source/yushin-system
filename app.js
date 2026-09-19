@@ -65,6 +65,9 @@ let appInitialized = false;  // 避免每次登入狀態變化都重複初始化
 let pendingTab = null;
 let salesListLoadPromise = null;
 let priceListLoadPromise = null;
+let productMasterLoadPromise = null;
+let productMasterCache = [];
+let quickProductTarget = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
 const DEFAULT_LIST_LIMIT = 50;
@@ -1904,8 +1907,9 @@ function loadPriceListFromCloud() {
         refreshPriceDatalists();
         renderKeyStatisticBrands();
     }).catch(() => {});
-    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(result => {
-        // 四個來源都完成後再統一刷新一次，避免載入順序造成不同模組看到不同廠牌清單。
+    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(async result => {
+        // 正式 Product Master 以 products 集合為優先；舊 settings/prices 暫時保留做過渡來源。
+        await loadProductMasterOverlay();
         refreshPriceDatalists();
         renderKeyStatisticBrands();
         renderCompanyAgencyBrandSettings();
@@ -2324,9 +2328,12 @@ window.onOrderItemCodeChange = async function(input) {
     const match = findPriceItemByCodeValue(value);
     if (!match) {
         input.dataset.autofillStatus = 'not-found';
+        setOrderCostFieldForProduct(null);
+        showQuickProductButton(input, 'order');
         return;
     }
 
+    clearQuickProductButton(input);
     input.dataset.autofillStatus = 'matched';
     input.value = match.model || value;
     window._orderModalProductId = match.productId || stableProductId(match);
@@ -2349,8 +2356,7 @@ window.onOrderItemCodeChange = async function(input) {
     input.dataset.productLine = match.productLine || '';
     input.dataset.productType = match.productType || '';
 
-    const costInput = document.getElementById('orderCostPrice');
-    if (costInput && match.cost !== undefined && match.cost !== null && String(match.cost).trim() !== '') costInput.value = match.cost;
+    await applyOrderProductCost(match);
 };
 
 let orderItemCodeTimer = null;
@@ -2453,9 +2459,11 @@ window.onItemModelChange = async function(input) {
     const match = findPriceItemByCodeValue(value);
     if (!match) {
         input.dataset.autofillStatus = 'not-found';
+        showQuickProductButton(input, 'quote');
         return;
     }
 
+    clearQuickProductButton(input);
     input.dataset.autofillStatus = 'matched';
     applyQuoteProductMatch(input.closest('tr'), match);
 };
@@ -6370,6 +6378,7 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderUnitPrice').value = 0;
     document.getElementById('orderTotalPrice').value = 0;
     document.getElementById('orderCostPrice').value = '';
+    setOrderCostFieldForProduct(null);
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
 
@@ -6385,7 +6394,9 @@ window.openOrderModal = function(source = null) {
         document.getElementById('orderQty').value = source.qty || 1;
         document.getElementById('orderUnit').value = source.unit || '';
         document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
-        document.getElementById('orderCostPrice').value = source.costPrice ?? '';
+        if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
+            document.getElementById('orderCostPrice').value = source.costPrice ?? '';
+        }
         if (source.brand) {
             selectBrandInDropdown(document.getElementById('orderBrand'), source.brand);
             onOrderBrandSelectChange();
@@ -6528,7 +6539,14 @@ window.saveNewOrder = function() {
         invoiceDate: ''
     };
     const costInputVal = document.getElementById('orderCostPrice').value;
-    if (costInputVal !== '') data.costPrice = parseFloat(costInputVal);
+    const selectedProduct = findPriceItemForOrder(data);
+    const canSalesUseCost = currentUserRole === 'sales'
+        && selectedProduct
+        && authorizationTypeForProduct(selectedProduct) === 'NON_AUTHORIZED';
+    if ((currentUserRole === 'admin' || currentUserRole === 'purchaser' || canSalesUseCost) && costInputVal !== '') {
+        data.costPrice = parseFloat(costInputVal);
+        if (canSalesUseCost) data.costSource = 'sales_manual_or_visible_non_authorized';
+    }
 
     if (!data.orderDate || !data.itemName) {
         alert('請至少填寫訂單日期與品名');
@@ -6543,6 +6561,7 @@ window.saveNewOrder = function() {
     const priceMatch = findPriceItemForOrder(data);
     data.productLine = (priceMatch && priceMatch.productLine) || '';
     data.productType = (priceMatch && priceMatch.productType) || '';
+    data.authorizationType = priceMatch ? authorizationTypeForProduct(priceMatch) : '';
     if (priceMatch) {
         data.productId = priceMatch.productId || stableProductId(priceMatch);
         data.unit = data.unit || priceMatch.unit || '';
@@ -7660,6 +7679,291 @@ function normalizeProductMasterItem(item) {
 function normalizeProductMasterList(items) {
     return (items || []).map(normalizeProductMasterItem);
 }
+
+function brandMasterEntryForName(value) {
+    const key = normalizeBrandLookupKey(resolveBrandName(value));
+    return getUnifiedBrandEntries(true).find(entry => normalizeBrandLookupKey(entry.name) === key) || null;
+}
+
+function isBrandAuthorizedForCurrentCompany(value) {
+    const brand = resolveBrandName(value);
+    if (!brand) return false;
+    const company = currentCompany || 'yushin';
+    const entry = brandMasterEntryForName(brand);
+    if (entry && Array.isArray(entry.companies) && entry.companies.includes(company)) return true;
+    return (companyAgencyBrands[company] || []).some(name => normalizeBrandLookupKey(name) === normalizeBrandLookupKey(brand));
+}
+
+function authorizationTypeForProduct(item) {
+    const saved = String(item?.authorizationType || '').trim().toUpperCase();
+    if (saved === 'AUTHORIZED' || saved === 'NON_AUTHORIZED') return saved;
+    return isBrandAuthorizedForCurrentCompany(item?.brand || item?.brandName || '') ? 'AUTHORIZED' : 'NON_AUTHORIZED';
+}
+
+function productMasterDocToPriceItem(doc) {
+    const data = doc.data ? doc.data() : doc;
+    return normalizeProductMasterItem({
+        productId: data.productId || doc.id || '',
+        brandId: data.brandId || '',
+        brand: data.brandName || data.brand || '',
+        model: data.manufacturerPartNo || data.sku || '',
+        sku: data.manufacturerPartNo || data.sku || '',
+        nameCn: data.productName || data.nameCn || '',
+        nameEn: data.nameEn || '',
+        productLine: data.productLine || '',
+        productType: data.category || data.productType || '',
+        authorizationType: data.authorizationType || '',
+        spec: data.specification || data.spec || '',
+        unit: data.unit || '',
+        price: data.listPrice ?? data.price ?? 0,
+        supplier: data.supplier || '',
+        status: data.status || 'ACTIVE',
+        active: data.status !== 'INACTIVE'
+    });
+}
+
+async function loadProductMasterOverlay() {
+    if (productMasterLoadPromise) return productMasterLoadPromise;
+    productMasterLoadPromise = db.collection('products').limit(500).get().then(snapshot => {
+        productMasterCache = snapshot.docs
+            .map(productMasterDocToPriceItem)
+            .filter(item => item.status !== 'INACTIVE' && item.active !== false);
+        const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
+        productMasterCache.forEach(item => merged.set(item.productId || stableProductId(item), item));
+        priceList = [...merged.values()];
+        return productMasterCache;
+    }).catch(err => {
+        console.warn('Product Master 載入失敗，暫時沿用舊價目表：', err);
+        productMasterLoadPromise = null;
+        return [];
+    });
+    return productMasterLoadPromise;
+}
+
+async function loadVisibleProductCost(item) {
+    const productId = item?.productId || stableProductId(item || {});
+    if (!productId) return null;
+    const authType = authorizationTypeForProduct(item);
+    if (currentUserRole === 'sales' && authType === 'AUTHORIZED') return null;
+    try {
+        const doc = await db.collection('productCosts').doc(productId).get();
+        if (!doc.exists) return null;
+        const data = doc.data() || {};
+        if (currentUserRole === 'sales' && data.salesVisible !== true) return null;
+        const value = data.standardCost;
+        return value === undefined || value === null || String(value).trim() === '' ? null : Number(value);
+    } catch (_) {
+        return null;
+    }
+}
+
+function setOrderCostFieldForProduct(item) {
+    const wrap = document.getElementById('orderCostFieldWrap');
+    const input = document.getElementById('orderCostPrice');
+    if (!wrap || !input) return;
+    const privileged = currentUserRole === 'admin' || currentUserRole === 'purchaser';
+    const salesCanSee = currentUserRole === 'sales' && item && authorizationTypeForProduct(item) === 'NON_AUTHORIZED';
+    wrap.style.display = (privileged || salesCanSee) ? '' : 'none';
+    if (!privileged && !salesCanSee) input.value = '';
+}
+
+async function applyOrderProductCost(item) {
+    setOrderCostFieldForProduct(item);
+    const input = document.getElementById('orderCostPrice');
+    if (!input) return;
+    const allowed = currentUserRole === 'admin' || currentUserRole === 'purchaser'
+        || (currentUserRole === 'sales' && authorizationTypeForProduct(item) === 'NON_AUTHORIZED');
+    if (!allowed) {
+        input.value = '';
+        return;
+    }
+    const secureCost = await loadVisibleProductCost(item);
+    if (secureCost !== null && Number.isFinite(secureCost)) {
+        input.value = secureCost;
+        return;
+    }
+    // 過渡期：非代理產品舊價目表尚未移到 productCosts 前，維持原本可輸入/可查看的工作流程。
+    if (authorizationTypeForProduct(item) === 'NON_AUTHORIZED'
+        && item.cost !== undefined && item.cost !== null && String(item.cost).trim() !== '') {
+        input.value = item.cost;
+    } else {
+        input.value = '';
+    }
+}
+
+function clearQuickProductButton(input) {
+    const next = input?.parentElement?.querySelector?.('.quick-product-create-btn');
+    if (next) next.remove();
+}
+
+function showQuickProductButton(input, mode) {
+    if (!input || !input.parentElement) return;
+    clearQuickProductButton(input);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-secondary quick-product-create-btn';
+    button.style.marginTop = '4px';
+    button.style.width = '100%';
+    button.textContent = '＋ 快速新增產品';
+    button.onclick = () => openQuickProductCreate(mode, input);
+    input.parentElement.appendChild(button);
+}
+
+function ensureQuickProductModal() {
+    let overlay = document.getElementById('quickProductOverlay');
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'quickProductOverlay';
+    overlay.className = 'eq-modal-overlay no-print';
+    overlay.innerHTML = `
+      <div class="eq-modal-box" style="max-width:620px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <h3 style="margin:0;">快速新增產品</h3>
+          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">✕ 關閉</button>
+        </div>
+        <div style="font-size:12px;color:#666;margin:8px 0 14px;">只填銷售當下需要的資料，其餘欄位可由採購或管理員後補。</div>
+        <div class="form-grid">
+          <div><label>廠牌</label><input id="quickProductBrand" type="text" list="quickProductBrandList" autocomplete="off"><datalist id="quickProductBrandList"></datalist></div>
+          <div><label>貨號</label><input id="quickProductCode" type="text" autocomplete="off"></div>
+          <div style="grid-column:1/-1;"><label>品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
+          <div><label>產品來源</label><select id="quickProductAuthorization" onchange="updateQuickProductCostVisibility()"><option value="AUTHORIZED">公司代理產品</option><option value="NON_AUTHORIZED">非代理產品</option></select></div>
+          <div><label>建議售價</label><input id="quickProductPrice" type="number" min="0"></div>
+          <div id="quickProductCostWrap"><label>成本</label><input id="quickProductCost" type="number" min="0" placeholder="沒有價目表時可自行輸入"></div>
+        </div>
+        <div style="margin-top:14px;text-align:right;">
+          <button type="button" id="saveQuickProductBtn" onclick="saveQuickProduct()">儲存並帶入</button>
+          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">取消</button>
+        </div>
+      </div>`;
+    overlay.onclick = event => { if (event.target === overlay) closeQuickProductCreate(); };
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+window.updateQuickProductCostVisibility = function() {
+    const type = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
+    const wrap = document.getElementById('quickProductCostWrap');
+    if (wrap) wrap.style.display = type === 'NON_AUTHORIZED' ? '' : 'none';
+    if (type === 'AUTHORIZED') {
+        const input = document.getElementById('quickProductCost');
+        if (input) input.value = '';
+    }
+};
+
+window.openQuickProductCreate = function(mode, input) {
+    const overlay = ensureQuickProductModal();
+    quickProductTarget = { mode, input, row: mode === 'quote' ? input.closest('tr') : null };
+    const brandList = document.getElementById('quickProductBrandList');
+    if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
+    const currentBrand = mode === 'quote'
+        ? quoteRowBrandValue(input.closest('tr'))
+        : getBrandFieldValue('orderBrand', 'orderBrandOther');
+    document.getElementById('quickProductBrand').value = currentBrand || '';
+    document.getElementById('quickProductCode').value = input.value.trim();
+    document.getElementById('quickProductName').value = mode === 'quote'
+        ? (input.closest('tr')?.querySelector('.item-cn')?.value || '')
+        : (document.getElementById('orderItemName')?.value || '');
+    document.getElementById('quickProductPrice').value = mode === 'quote'
+        ? (input.closest('tr')?.querySelector('.inc-price')?.value || '')
+        : (document.getElementById('orderUnitPrice')?.value || '');
+    document.getElementById('quickProductCost').value = mode === 'order'
+        ? (document.getElementById('orderCostPrice')?.value || '')
+        : '';
+    document.getElementById('quickProductAuthorization').value =
+        isBrandAuthorizedForCurrentCompany(currentBrand) ? 'AUTHORIZED' : 'NON_AUTHORIZED';
+    updateQuickProductCostVisibility();
+    overlay.classList.add('active');
+};
+
+window.closeQuickProductCreate = function() {
+    const overlay = document.getElementById('quickProductOverlay');
+    if (overlay) overlay.classList.remove('active');
+    quickProductTarget = null;
+};
+
+window.saveQuickProduct = async function() {
+    const brand = resolveBrandName(document.getElementById('quickProductBrand')?.value || '');
+    const code = String(document.getElementById('quickProductCode')?.value || '').trim();
+    const productName = String(document.getElementById('quickProductName')?.value || '').trim();
+    const authorizationType = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
+    const priceRaw = document.getElementById('quickProductPrice')?.value ?? '';
+    const costRaw = document.getElementById('quickProductCost')?.value ?? '';
+    if (!brand || !code || !productName || String(priceRaw).trim() === '') {
+        alert('請填寫廠牌、貨號、品名與建議售價。');
+        return;
+    }
+
+    const normalizedPartNo = normalizeItemCodeLoose(code);
+    const brandEntry = brandMasterEntryForName(brand);
+    const duplicateSnap = await db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get();
+    const duplicate = duplicateSnap.docs.find(doc => {
+        const data = doc.data() || {};
+        return normalizeBrandLookupKey(data.brandName || data.brand || '') === normalizeBrandLookupKey(brand);
+    });
+    if (duplicate) {
+        const existing = productMasterDocToPriceItem(duplicate);
+        alert('這個廠牌與貨號已存在，系統會直接使用現有產品。');
+        priceList = priceList.filter(item => (item.productId || stableProductId(item)) !== existing.productId).concat(existing);
+        refreshPriceDatalists();
+        if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, existing);
+        if (quickProductTarget?.mode === 'order') {
+            quickProductTarget.input.value = existing.model || code;
+            await onOrderItemCodeChange(quickProductTarget.input);
+        }
+        clearQuickProductButton(quickProductTarget?.input);
+        closeQuickProductCreate();
+        return;
+    }
+
+    const productId = stableProductId({ brand, model: code });
+    const now = new Date().toISOString();
+    const productDoc = {
+        productId,
+        brandId: brandEntry?.id || '',
+        brandName: brand,
+        manufacturerPartNo: code,
+        normalizedPartNo,
+        productName,
+        authorizationType,
+        listPrice: Number(priceRaw) || 0,
+        status: 'TEMPORARY',
+        createdAt: now,
+        createdBy: currentUser?.uid || '',
+        updatedAt: now,
+        updatedBy: currentUser?.uid || ''
+    };
+    const button = document.getElementById('saveQuickProductBtn');
+    if (button) { button.disabled = true; button.innerText = '儲存中…'; }
+    try {
+        await db.collection('products').doc(productId).set(productDoc, { merge: true });
+        if (authorizationType === 'NON_AUTHORIZED' && String(costRaw).trim() !== '') {
+            await db.collection('productCosts').doc(productId).set({
+                productId,
+                standardCost: Number(costRaw) || 0,
+                salesVisible: true,
+                source: 'quick_create',
+                updatedAt: now,
+                updatedBy: currentUser?.uid || ''
+            }, { merge: true });
+        }
+        const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
+        if (authorizationType === 'NON_AUTHORIZED' && String(costRaw).trim() !== '') item.cost = Number(costRaw) || 0;
+        priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
+        productMasterCache = productMasterCache.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
+        refreshPriceDatalists();
+        if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, item);
+        if (quickProductTarget?.mode === 'order') {
+            quickProductTarget.input.value = code;
+            await onOrderItemCodeChange(quickProductTarget.input);
+        }
+        clearQuickProductButton(quickProductTarget?.input);
+        closeQuickProductCreate();
+    } catch (err) {
+        alert('快速新增產品失敗：' + err.message);
+    } finally {
+        if (button) { button.disabled = false; button.innerText = '儲存並帶入'; }
+    }
+};
 
 function rebuildPriceItemLookup() {
     priceItemLookup = new Map();
