@@ -854,31 +854,23 @@ function populateForecastSalesFilter() {
 }
 
 function populateForecastBrandDropdown(selectedBrand = '') {
-    const select = document.getElementById('forecastBrand');
-    if (!select) return;
+    const input = document.getElementById('forecastBrand');
+    const list = document.getElementById('forecastBrandList');
+    if (!input || !list) return;
 
     const selected = normalizeForecastBrand(selectedBrand);
-    const brands = getPriceListBrands(false).slice();
+    const entries = getUnifiedBrandEntries(false)
+        .sort((x, y) => Number(y.isKeyBrand) - Number(x.isKeyBrand) || x.name.localeCompare(y.name, 'zh-Hant'));
 
-    if (
-        selected &&
-        !brands.some(brand => String(brand || '').trim().toLocaleLowerCase() === selected.toLocaleLowerCase())
-    ) {
-        brands.push(selected);
-    }
+    list.innerHTML = '';
+    entries.forEach(entry => {
+        const option = document.createElement('option');
+        option.value = entry.name;
+        option.label = entry.isKeyBrand ? '重點代理' : '廠牌';
+        list.appendChild(option);
+    });
 
-    select.innerHTML = '<option value="">請選擇廠牌</option>';
-
-    dedupeBrandsCaseInsensitive(brands)
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
-        .forEach(brand => {
-            const option = document.createElement('option');
-            option.value = brand;
-            option.textContent = brand;
-            select.appendChild(option);
-        });
-
-    select.value = selected || '';
+    input.value = selected || '';
 }
 
 window.loadForecasts = async function(reset = true) {
@@ -961,6 +953,7 @@ window.renderForecastList = function() {
     const brandFilter = document.getElementById('forecastBrandFilter')?.value || '';
     const salesFilter = document.getElementById('forecastSalesFilter')?.value || '';
     const stageFilter = document.getElementById('forecastStageFilter')?.value || '';
+    const periodFilter = document.getElementById('forecastPeriodFilter')?.value || 'this-year';
 
     body.innerHTML = '';
     let shown = 0;
@@ -983,6 +976,8 @@ window.renderForecastList = function() {
         if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
         if (salesFilter && salesName !== salesFilter) return;
         if (stageFilter && item.stage !== stageFilter) return;
+        // 進行中 Forecast 是目前 pipeline，跨年度持續顯示；Win/Lost 才依結案/更新時間套用統計期間。
+        if (item.status !== 'active' && !dateInUnifiedPeriod(item.closedAt || item.latestProgressAt || item.updatedAt || item.createdAt, periodFilter)) return;
 
         shown++;
 
@@ -1117,6 +1112,7 @@ window.saveForecast = async function() {
                 estimatedAmount,
                 stage,
                 status,
+                closedAt: status === 'active' ? null : now,
                 latestProgress,
                 latestProgressAt: now,
                 salesName: currentUserName || '',
@@ -1155,6 +1151,7 @@ window.saveForecast = async function() {
                 estimatedAmount,
                 stage,
                 status,
+                closedAt: status === 'active' ? null : (existing.closedAt || now),
                 updatedAt: now
             };
 
@@ -3023,6 +3020,7 @@ window.renderMyQuotesList = function() {
     const tbody = document.getElementById('myQuotesBody');
     const searchInput = document.getElementById('myQuoteSearch');
     const keyword = (searchInput.value || '').toLowerCase();
+    const periodFilter = document.getElementById('myQuotePeriodFilter')?.value || 'this-year';
     tbody.innerHTML = '';
     let shown = 0;
 
@@ -3034,6 +3032,7 @@ window.renderMyQuotesList = function() {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
+        if (!dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
         shown++;
 
         const tr = document.createElement('tr');
@@ -4103,12 +4102,15 @@ window.renderPoList = function() {
     const searchInput = document.getElementById('poListSearch');
     if (!tbody || !searchInput) return;
     const keyword = (searchInput.value || '').toLowerCase();
+    const periodFilter = document.getElementById('poPeriodFilter')?.value || 'this-year';
     tbody.innerHTML = '';
     let shown = 0;
 
     poListCache.forEach(po => {
         const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
+        // 未到貨 PO 屬於未完成狀態，跨期間保留；已完成 PO 依訂購日期套用統計期間。
+        if (poReceiptProgress(po).complete && !dateInUnifiedPeriod(po.poDate || po.createdAt, periodFilter)) return;
         shown++;
 
         const items = purchaseItemsFromSavedPo(po);
@@ -4986,6 +4988,36 @@ function deliveryActor() {
 function localDateString() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function normalizeBusinessDate(value) {
+    if (!value) return '';
+    const raw = String(value).trim().replace(/\//g, '-');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    return dateOnlyFromTimestamp(value);
+}
+
+function unifiedPeriodRange(key = 'this-year') {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (key === 'all') return { start: '', end: '' };
+    if (key === 'this-month') return { start: fmt(new Date(y, m, 1)), end: fmt(new Date(y, m + 1, 0)) };
+    if (key === 'last-month') return { start: fmt(new Date(y, m - 1, 1)), end: fmt(new Date(y, m, 0)) };
+    if (key === 'this-quarter') {
+        const qStart = Math.floor(m / 3) * 3;
+        return { start: fmt(new Date(y, qStart, 1)), end: fmt(new Date(y, qStart + 3, 0)) };
+    }
+    if (key === 'last-year') return { start: `${y - 1}-01-01`, end: `${y - 1}-12-31` };
+    return { start: `${y}-01-01`, end: `${y}-12-31` };
+}
+
+function dateInUnifiedPeriod(value, key = 'this-year') {
+    const date = normalizeBusinessDate(value);
+    const { start, end } = unifiedPeriodRange(key);
+    if (!start && !end) return true;
+    return !!date && (!start || date >= start) && (!end || date <= end);
 }
 
 window.openDeliveryModal = function(orderId) {
