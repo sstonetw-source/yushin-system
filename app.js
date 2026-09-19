@@ -4132,11 +4132,14 @@ window.saveInventoryAdjustmentBatch = async function() {
         await db.runTransaction(async tx=>{
           const invSnap=await tx.get(ref);
           const whSnap=whRef?await tx.get(whRef):null;
+          const otherWhRefs=warehouseMasterCache
+             .filter(w=>w.active!==false&&w.id!==row.warehouseId)
+             .map(w=>db.collection('warehouseStocks').doc(warehouseStockDocId(w.id,key)));
+          const otherWhSnaps=[];
+          for(const otherRef of otherWhRefs) otherWhSnaps.push(await tx.get(otherRef));
           const old=invSnap.exists?invSnap.data():{}, n=inventoryNumbers(old);
           const wh=inventoryNumbers(whSnap?.exists?whSnap.data():{});
-          const assignedOther=warehouseMasterCache
-             .filter(w=>w.id!==row.warehouseId)
-             .reduce((sum,w)=>sum+inventoryNumbers(warehouseStockCache.get(w.id+'||'+key)||{}).onHand,0);
+          const assignedOther=otherWhSnaps.reduce((sum,snap)=>sum+inventoryNumbers(snap.exists?snap.data():{}).onHand,0);
 
           if(type==='warehouse_allocation'){
              if(delta<0) throw new Error('既有庫存分配請輸入正數。');
