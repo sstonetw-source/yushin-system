@@ -645,10 +645,13 @@
         <div class="order-period-toolbar no-print">
             <label for="orderPeriodPreset">統計期間</label>
             <select id="orderPeriodPreset" onchange="changeOrderPeriod(this.value)">
-                <option value="this-year">今年</option>
+                <option value="this-month">本月</option>
+                <option value="last-month">上月</option>
+                <option value="this-quarter">本季</option>
+                <option value="this-year" selected>今年</option>
                 <option value="last-year">去年</option>
                 <option value="custom">自訂日期</option>
-                <option value="all">全部年度</option>
+                <option value="all">全部期間</option>
             </select>
             <div id="orderCustomPeriod" class="order-custom-period" style="display:none;">
                 <input type="date" id="orderPeriodStart" aria-label="訂單統計開始日期" onchange="renderOrdersList()">
@@ -1032,36 +1035,31 @@
             <div class="quote-load-more-row no-print"><button type="button" id="adminQuotesLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreAdminQuotes()">載入更多（每次 50 筆）</button></div>
         </div>
 
-        <!-- 人員異動交接：離職／轉調時，把某位業務名下的估價單、訂單、儀器整批改成掛在新業務名下 -->
+        <!-- 業務代號交接：交易資料歸屬在 salesCode，不重寫歷史業務姓名 -->
         <div id="admin-transfer" class="admin-panel" style="display:none;">
-            <div class="toolbar no-print" style="display:block;">
-                <span style="font-size:12px;color:#666;">
-                    用於人員離職或職務異動交接：把「原業務」名下的估價單／訂單／儀器紀錄，整批改成掛在「新業務」名下。
-                    執行前請先確認新業務已經是「業務名單」裡的正式帳號（有姓名與代號），否則對方登入後仍看不到轉移過去的資料。
-                    此動作會直接修改雲端資料，執行前請務必先按「查詢筆數」確認範圍。
-                </span>
-            </div>
-            <div class="form-grid" style="max-width:640px;margin-top:10px;">
-                <div>
-                    <label>原業務（資料轉出）</label>
-                    <select id="transferFromSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+            <div class="panel">
+                <h3 style="margin-top:0;">業務代號交接</h3>
+                <p style="font-size:13px;color:#555;line-height:1.7;">
+                    Forecast、估價單、訂單與儀器的資料歸屬以「業務代號」為核心。人員離職或交接時，
+                    不再逐筆把歷史資料改成新同仁姓名；只把該業務代號的目前負責人交給新同仁。
+                    系統會先替舊資料補上 salesCode，原 salesName、建立人與修改紀錄均保留。
+                </p>
+                <div class="form-grid" style="max-width:760px;margin-top:12px;">
+                    <div>
+                        <label>要交接的業務代號</label>
+                        <select id="transferFromSales" onchange="resetTransferPreview()"><option value="">請選擇業務代號</option></select>
+                    </div>
+                    <div>
+                        <label>接手同仁</label>
+                        <select id="transferToSales" onchange="resetTransferPreview()"><option value="">請選擇接手同仁</option></select>
+                    </div>
                 </div>
-                <div>
-                    <label>新業務（資料轉入）</label>
-                    <select id="transferToSales" onchange="resetTransferPreview()"><option value="">請選擇</option></select>
+                <div style="margin-top:12px;">
+                    <button onclick="previewSalesTransfer()">🔍 檢查交接內容</button>
+                    <button class="btn-danger" id="transferExecuteBtn" onclick="executeSalesTransfer()" style="display:none;">✅ 確認交接</button>
                 </div>
+                <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
             </div>
-            <div style="margin:12px 0;">
-                <label style="font-weight:bold;font-size:13px;">要一併轉移的資料範圍：</label><br>
-                <label style="font-weight:normal;font-size:13px;"><input type="checkbox" id="transferQuotes" checked onchange="resetTransferPreview()"> 估價單</label>
-                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferOrders" checked onchange="resetTransferPreview()"> 訂單</label>
-                <label style="font-weight:normal;font-size:13px;margin-left:16px;"><input type="checkbox" id="transferEquipment" checked onchange="resetTransferPreview()"> 儀器</label>
-            </div>
-            <div>
-                <button onclick="previewSalesTransfer()">🔍 查詢筆數</button>
-                <button class="btn-danger" id="transferExecuteBtn" onclick="executeSalesTransfer()" style="display:none;">✅ 確認執行轉移</button>
-            </div>
-            <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
         </div>
 
         <!-- 資料庫管理：備份、估算雲端資料量與清理舊資料 -->
