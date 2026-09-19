@@ -2380,7 +2380,7 @@ window.addQuoteRow = function(itemData = {}) {
             <div class="item-input-group">
                 <div class="field-row">
                     <label>貨號：</label>
-                    <input type="text" class="item-model" list="priceModelList" value="${itemData.model || ''}" onchange="onItemModelChange(this)">
+                    <input type="text" class="item-model" list="priceModelList" value="${itemData.model || ''}" oninput="onItemModelInput(this)" onchange="onItemModelChange(this)">
                 </div>
                 <div class="field-row">
                     <label>中文品名：</label>
@@ -2420,40 +2420,27 @@ window.addQuoteRow = function(itemData = {}) {
     calculateTotals();
 };
 
-window.onItemCnChange = function(input) {
-    const match = priceList.find(p => p.nameCn === input.value);
+window.onItemCnChange = async function(input) {
+    await ensurePriceListLoaded().catch(() => {});
+    const value = input.value.trim();
+    const match = priceList.find(p => String(p.nameCn || '').trim() === value);
     if (!match) return;
-    const row = input.closest('tr');
-    row.querySelector('.item-en').value = match.nameEn || '';
-    row.querySelector('.item-model').value = match.model || '';
-    row.querySelector('.item-brand').value = match.brand || '';
-    row.querySelector('.item-product-line').value = match.productLine || '';
-    row.querySelector('.item-product-type').value = match.productType || '';
-    row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
-    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
-    if (match.price) {
-        row.querySelector('.inc-price').value = match.price;
-        onIncPriceChange(row.querySelector('.inc-price'));
-    }
+    applyQuoteProductMatch(input.closest('tr'), match);
 };
 
-window.onItemModelChange = function(input) {
+window.onItemModelChange = async function(input) {
     const value = input.value.trim();
     if (!value) return;
-    const match = priceItemLookup.get(`code:${normalizeItemCode(value)}`);
-    if (!match) return;
-    const row = input.closest('tr');
-    row.querySelector('.item-en').value = match.nameEn || '';
-    row.querySelector('.item-cn').value = match.nameCn || '';
-    row.querySelector('.item-brand').value = match.brand || '';
-    row.querySelector('.item-product-line').value = match.productLine || '';
-    row.querySelector('.item-product-type').value = match.productType || '';
-    row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
-    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
-    if (match.price) {
-        row.querySelector('.inc-price').value = match.price;
-        onIncPriceChange(row.querySelector('.inc-price'));
+
+    await ensurePriceListLoaded().catch(() => {});
+    const match = findPriceItemByCodeValue(value);
+    if (!match) {
+        input.dataset.autofillStatus = 'not-found';
+        return;
     }
+
+    input.dataset.autofillStatus = 'matched';
+    applyQuoteProductMatch(input.closest('tr'), match);
 };
 
 window.onIncPriceChange = function(input) {
@@ -2488,7 +2475,7 @@ window.refreshAllItemPricesFromPriceList = function() {
         const cn = (cnInput.value || '').trim();
 
         // 優先用貨號比對（比較不會撞名），貨號比對不到才退而用中文品名比對
-        let match = model ? priceItemLookup.get(`code:${normalizeItemCode(model)}`) : null;
+        let match = model ? findPriceItemByCodeValue(model) : null;
         if (!match && cn) match = priceList.find(p => p.nameCn === cn);
 
         if (!match) {
@@ -7418,6 +7405,67 @@ function costAmount(order) {
 function normalizeItemCode(value) {
     return String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
 }
+
+function normalizeItemCodeLoose(value) {
+    return normalizeItemCode(value).replace(/[\-_.\/]+/g, '');
+}
+
+function findPriceItemByCodeValue(value) {
+    const normalized = normalizeItemCode(value);
+    if (!normalized) return null;
+
+    const direct = priceItemLookup.get(`code:${normalized}`);
+    if (direct) return direct;
+
+    const exact = priceList.find(item => normalizeItemCode(item.model) === normalized);
+    if (exact) return exact;
+
+    // 有些舊價目表貨號帶有空格、-、/ 或 .；只有在寬鬆比對結果唯一時才自動帶入，避免誤抓錯品項。
+    const loose = normalizeItemCodeLoose(value);
+    if (!loose) return null;
+    const candidates = priceList.filter(item => normalizeItemCodeLoose(item.model) === loose);
+    return candidates.length === 1 ? candidates[0] : null;
+}
+
+function applyQuoteProductMatch(row, match) {
+    if (!row || !match) return false;
+
+    row.querySelector('.item-en').value = match.nameEn || '';
+    row.querySelector('.item-cn').value = match.nameCn || '';
+    row.querySelector('.item-model').value = match.model || row.querySelector('.item-model').value || '';
+
+    const brandSelect = row.querySelector('.item-brand');
+    if (brandSelect && match.brand) {
+        selectBrandInDropdown(brandSelect, resolveBrandName(match.brand));
+        onQuoteBrandSelectChange(brandSelect);
+    }
+
+    row.querySelector('.item-product-line').value = match.productLine || '';
+    row.querySelector('.item-product-type').value = match.productType || '';
+    row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
+    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
+
+    const priceInput = row.querySelector('.inc-price');
+    if (priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') {
+        priceInput.value = match.price;
+        onIncPriceChange(priceInput);
+    } else {
+        calculateTotals();
+    }
+    return true;
+}
+
+let quoteModelInputTimer = null;
+window.onItemModelInput = function(input) {
+    clearTimeout(quoteModelInputTimer);
+    quoteModelInputTimer = setTimeout(async () => {
+        const value = input.value.trim();
+        if (!value) return;
+        await ensurePriceListLoaded().catch(() => {});
+        const match = findPriceItemByCodeValue(value);
+        if (match && input.value.trim() === value) applyQuoteProductMatch(input.closest('tr'), match);
+    }, 180);
+};
 
 function stableProductId(item) {
     const brand = String(item?.brand || '').trim().toLocaleLowerCase();
