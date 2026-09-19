@@ -190,7 +190,7 @@
             placeholder="例如：2500000"
         >
 
-        <div class="forecast-form-grid">
+        <div class="forecast-form-grid" id="forecastWorkflowSection">
             <div>
                 <label>Stage *</label>
                 <select id="forecastStage">
@@ -317,6 +317,42 @@
                 onclick="saveForecastProgress()"
             >
                 儲存進度
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Forecast 紀錄 -->
+<div
+    id="forecastHistoryOverlay"
+    class="modal-overlay"
+    onclick="if(event.target===this) closeForecastHistoryModal()"
+>
+    <div class="modal" style="max-width:980px;">
+        <h3 id="forecastHistoryTitle">Forecast 紀錄</h3>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>內容</th>
+                        <th>Stage</th>
+                        <th>狀態</th>
+                        <th>更新人</th>
+                    </tr>
+                </thead>
+                <tbody id="forecastHistoryBody"></tbody>
+            </table>
+        </div>
+
+        <div class="modal-actions">
+            <button
+                type="button"
+                class="btn-secondary"
+                onclick="closeForecastHistoryModal()"
+            >
+                關閉
             </button>
         </div>
     </div>
