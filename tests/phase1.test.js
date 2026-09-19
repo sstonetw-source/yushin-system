@@ -18,6 +18,9 @@ function loadPurchaseMapper() {
             ['code:a-1', { cost: 25 }],
             ['brand:acme:b-2', { cost: 40 }]
         ]),
+        purchaseCostCache: new Map(),
+        stableProductId: item => 'prd:' + String(item?.brand || '').toLowerCase() + ':' + String(item?.model || ''),
+        authorizationTypeForProduct: () => 'NON_AUTHORIZED',
         normalizeItemCode: value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase()
     };
     vm.createContext(context);
@@ -421,27 +424,30 @@ test('phase 5 inventory uses on-hand reserved available incoming and transaction
     assert.match(appSource, /available: onHand - reserved/);
     assert.match(appSource, /incoming/);
     assert.match(appSource, /collection\('inventoryMovements'\)/);
-    assert.match(appSource, /inventoryMovementRecord\('reserve'/);
-    assert.match(appSource, /inventoryMovementRecord\('ship'/);
+    assert.match(appSource, /inventoryMovementRecord\([\s\S]*?'reserve'/);
+    assert.match(appSource, /type:'ship'/);
 });
 
 test('phase 5 order creation reserves only available stock and records shortage', () => {
     const start=appSource.indexOf('async function reserveInventoryForNewOrder');
     const end=appSource.indexOf('function orderQuantity',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/Math\.min\(requested, stock\.available\)/);
+    assert.match(s,/Math\.min\(requested, warehouseStock\.available\)/);
     assert.match(s,/inventoryReservedQty/);
     assert.match(s,/inventoryShortageQty/);
     assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
 });
 
-test('phase 5 shipment consumes on-hand and releases reserved stock transactionally', () => {
-    const start=appSource.indexOf('function applyInventoryDeliveryInTransaction');
-    const end=appSource.indexOf('window.quickCompleteDelivery',start);
+test('phase 5 shipment consumes both aggregate and selected warehouse stock transactionally', () => {
+    const start=appSource.indexOf('async function applyInventoryDeliveryDeltaInTransaction');
+    const end=appSource.indexOf('function applyInventoryDeliveryInTransaction',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/stock\.onHand < deliveryQty/);
-    assert.match(s,/onHand: stock\.onHand - deliveryQty/);
-    assert.match(s,/reserved: Math\.max\(0, stock\.reserved - fromReserved\)/);
+    assert.match(s,/warehouseId/);
+    assert.match(s,/warehouseStocks/);
+    assert.match(s,/onHand:inv\.onHand-deltaQty/);
+    assert.match(s,/onHand:wh\.onHand-deltaQty/);
+    assert.match(s,/reserved:Math\.max\(0,inv\.reserved-fromReserved\)/);
+    assert.match(s,/type:'ship'/);
 });
 
 test('phase 5 cancelling and restoring orders adjusts reservations without deleting inventory history', () => {
@@ -450,7 +456,7 @@ test('phase 5 cancelling and restoring orders adjusts reservations without delet
     const s=appSource.slice(start,end);
     assert.match(s,/nextStatus === 'cancelled'/);
     assert.match(s,/nextStatus === 'normal'/);
-    assert.match(s,/inventoryMovementRecord\('release'/);
+    assert.match(s,/inventoryMovementRecord\([\s\S]*?'release'/);
     assert.doesNotMatch(s,/\.delete\(/);
 });
 
@@ -459,8 +465,9 @@ test('phase 6 purchase orders create incoming or pending items without increasin
     const start=appSource.indexOf('async function registerPurchaseIncoming');
     const end=appSource.indexOf('window.receivePurchaseOrder',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/incoming:\s*Math\.max\(0,\s*stock\.incoming\s*\+\s*delta\)/);
-    assert.doesNotMatch(s,/onHand:\s*stock\.onHand\s*\+/);
+    assert.match(s,/incoming:Math\.max\(0,inv\.incoming\+delta\)/);
+    assert.match(s,/warehouseStocks/);
+    assert.doesNotMatch(s,/onHand:inv\.onHand\+delta/);
     assert.match(s,/pendingInventoryItems/);
     assert.match(s,/purchase_incoming/);
 });
@@ -564,9 +571,9 @@ test('unknown order items do not create inventory before purchase receipt', () =
     const start = appSource.indexOf('async function reserveInventoryForNewOrder');
     const end = appSource.indexOf('function orderQuantity', start);
     const s = appSource.slice(start, end);
-    assert.match(s, /if \(!snap\.exists\)/);
-    assert.match(s, /inventoryShortageQty:\s*requested/);
-    assert.doesNotMatch(s, /if \(!snap\.exists\)[\s\S]*?tx\.set\(ref/);
+    assert.match(s, /warehouseSnap\?\.exists/);
+    assert.match(s, /const shortage = Math\.max\(0, requested - reservable\)/);
+    assert.doesNotMatch(s, /tx\.set\(warehouseRef[\s\S]*?onHand/);
 });
 
 test('period semantics are shared across Forecast Quote Order and PO', () => {
@@ -925,4 +932,46 @@ test('admin UI exposes Product Master migration preview before execution', () =>
     assert.match(indexSource, /id="productMasterMigrationBtn"/);
     assert.match(indexSource, /previewProductMasterMigration\(\)/);
     assert.match(indexSource, /runProductMasterMigration\(\)/);
+});
+
+
+test('Phase 2-6 completion integrates supplier mapping, warehouses and direct ship', () => {
+    assert.match(appSource, /db\.collection\('suppliers'\)/);
+    assert.match(appSource, /db\.collection\('brandSupplierMappings'\)/);
+    assert.match(appSource, /db\.collection\('warehouses'\)/);
+    assert.match(appSource, /db\.collection\('warehouseStocks'\)/);
+    assert.match(appSource, /function supplierForProduct/);
+    assert.match(appSource, /function defaultWarehouse/);
+    assert.match(appSource, /DIRECT_SHIP/);
+    assert.match(appSource, /WAREHOUSE/);
+});
+
+test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receiving', () => {
+    const reserveStart = appSource.indexOf('async function reserveInventoryForNewOrder');
+    const reserveEnd = appSource.indexOf('function orderQuantity', reserveStart);
+    const reserve = appSource.slice(reserveStart, reserveEnd);
+    assert.match(reserve, /fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'/);
+    assert.match(reserve, /inventoryReservedQty: 0/);
+    assert.match(reserve, /warehouseId: ''/);
+
+    const incomingStart = appSource.indexOf('async function registerPurchaseIncoming');
+    const incomingEnd = appSource.indexOf('window.receivePurchaseOrder', incomingStart);
+    const incoming = appSource.slice(incomingStart, incomingEnd);
+    assert.match(incoming, /filter\(item => \(item\.fulfillmentType \|\| 'WAREHOUSE'\) !== 'DIRECT_SHIP'\)/);
+});
+
+test('Phase 2-6 security rules cover supplier and warehouse master collections', () => {
+    assert.match(rulesSource, /match \/suppliers\/\{id\}/);
+    assert.match(rulesSource, /match \/brandSupplierMappings\/\{id\}/);
+    assert.match(rulesSource, /match \/warehouses\/\{id\}/);
+    assert.match(rulesSource, /match \/warehouseStocks\/\{id\}/);
+});
+
+test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership compatibility', () => {
+    assert.match(appSource, /function syncCustomerMaster/);
+    assert.match(appSource, /customerId/);
+    assert.match(appSource, /ownerUid/);
+    assert.match(appSource, /salesCode/);
+    assert.match(rulesSource, /match \/equipment\/\{id\}/);
+    assert.match(rulesSource, /ownBySalesCode/);
 });
