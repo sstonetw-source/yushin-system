@@ -811,6 +811,18 @@
                     <input type="number" id="orderCostPrice" step="0.01" placeholder="有貨號且價目表填了成本時會自動帶入">
                 </div>
                 <div>
+                    <label>履約方式</label>
+                    <select id="orderFulfillmentType" onchange="onOrderFulfillmentChange()">
+                        <option value="WAREHOUSE">倉庫出貨</option>
+                        <option value="DIRECT_SHIP">原廠直送客戶</option>
+                    </select>
+                </div>
+                <div id="orderWarehouseWrap">
+                    <label>出貨倉庫</label>
+                    <select id="orderWarehouse" onchange="refreshOrderWarehouseStock()"><option value="">請選擇倉庫</option></select>
+                </div>
+                <div id="orderWarehouseStockHint" style="grid-column:1/-1;font-size:12px;color:#666;"></div>
+                <div>
                     <label>交易方式</label>
                     <select id="orderTransactionType" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'">
                         <option value="">未選擇</option>
@@ -1077,6 +1089,32 @@
                 <p style="font-size:12px;color:#666;margin:6px 0;">勾選各分公司可開立估價單及產生訂購單的代理廠牌。未儲存任何設定前，為相容既有資料，暫時不限制廠牌。</p>
                 <div id="companyAgencyBrandSettings"></div>
                 <button style="margin-top:12px;" onclick="saveCompanyAgencyBrands()">💾 儲存分公司代理廠牌</button>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <strong>供應商與廠牌對應</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">設定「哪個廠牌／產品線向哪家公司下單」。建立訂購單時會自動帶入抬頭；產品線留白即為該廠牌預設供應商。</p>
+                <div class="form-grid">
+                    <div><label>供應商名稱</label><input id="supplierMasterName" type="text" placeholder="例如：台灣某某股份有限公司"></div>
+                    <div><label>訂購單抬頭</label><input id="supplierMasterHeader" type="text" placeholder="不填則同供應商名稱"></div>
+                    <div><label>廠牌</label><input id="supplierMappingBrand" type="text" list="poBrandList"></div>
+                    <div><label>產品線（選填）</label><input id="supplierMappingLine" type="text" placeholder="留白＝廠牌預設"></div>
+                </div>
+                <div style="margin-top:8px;"><button type="button" onclick="saveSupplierMapping()">💾 儲存供應商對應</button></div>
+                <div id="supplierMappingStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
+                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>訂購單抬頭</th><th>操作</th></tr></thead><tbody id="supplierMappingBody"></tbody></table></div>
+            </div>
+
+            <div class="panel" style="margin-top:16px;">
+                <strong>倉庫管理</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">建立公司實際倉庫。訂單可選倉庫出貨，或選原廠直送；原廠直送不會進入庫存。</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+                    <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：台北倉"></div>
+                    <label style="font-size:13px;"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫</label>
+                    <button type="button" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
+                </div>
+                <div id="warehouseMasterStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
+                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>倉庫</th><th>預設</th><th>狀態</th><th>操作</th></tr></thead><tbody id="warehouseMasterBody"></tbody></table></div>
             </div>
         </div>
 
