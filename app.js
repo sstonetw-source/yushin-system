@@ -5339,6 +5339,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
     const match = findPriceItemByCodeValue(value);
     poItems[idx].itemCode = String(value || '').trim();
     if (match) {
+        const secureCost = await loadVisibleProductCost(match);
         poItems[idx] = {
             ...poItems[idx],
             itemCode: match.model || value,
@@ -5346,7 +5347,9 @@ window.onDirectPoCodeChange = async function(idx, value) {
             productId: match.productId || stableProductId(match),
             brand: resolveBrandName(match.brand || ''),
             unit: match.unit || '',
-            unitPrice: Number(match.cost || 0),
+            unitPrice: secureCost !== null && Number.isFinite(secureCost)
+                ? secureCost
+                : (authorizationTypeForProduct(match) === 'NON_AUTHORIZED' ? Number(match.cost || 0) : 0),
             supplier: match.supplier || '',
             productLine: match.productLine || '',
             fulfillmentType: poItems[idx].fulfillmentType || 'WAREHOUSE',
