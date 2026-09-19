@@ -68,6 +68,45 @@ let priceListLoadPromise = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
 const DEFAULT_LIST_LIMIT = 50;
+const DEFAULT_CURRENCY = 'TWD';
+const DEFAULT_TAX_RATE = 0.05;
+const BUSINESS_STATUS = Object.freeze({
+    ACTIVE: 'active',
+    COMPLETED: 'completed',
+    CANCELLED: 'cancelled',
+    VOIDED: 'voided'
+});
+
+function parseMoney(value) {
+    const number = Number(String(value ?? '').replace(/,/g, '').trim());
+    return Number.isFinite(number) ? number : 0;
+}
+
+function grossAmountMetadata(grossValue, taxRate = DEFAULT_TAX_RATE, currency = DEFAULT_CURRENCY) {
+    const gross = Math.round(parseMoney(grossValue));
+    const net = Math.round(gross / (1 + taxRate));
+    return {
+        currency,
+        taxRate,
+        priceIncludesTax: true,
+        subtotalExTax: net,
+        taxAmount: gross - net,
+        totalIncTax: gross
+    };
+}
+
+function netAmountMetadata(netValue, taxRate = DEFAULT_TAX_RATE, currency = DEFAULT_CURRENCY) {
+    const net = Math.round(parseMoney(netValue));
+    const tax = Math.round(net * taxRate);
+    return {
+        currency,
+        taxRate,
+        priceIncludesTax: false,
+        subtotalExTax: net,
+        taxAmount: tax,
+        totalIncTax: net + tax
+    };
+}
 const XLSX_SCRIPT_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 let xlsxLoadPromise = null;
 
@@ -2696,6 +2735,8 @@ window.handleSaveAndPrint = function() {
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
         grandTotal: document.getElementById('grandTotal').innerText,
+        status: BUSINESS_STATUS.ACTIVE,
+        ...grossAmountMetadata(document.getElementById('grandTotal').innerText),
         items: []
     };
 
@@ -3267,6 +3308,8 @@ window.markQuoteAsDeal = function(quoteNo) {
                 qty: item.qty || '',
                 unitPrice: item.price || '',
                 totalPrice: item.subtotal || '',
+                status: BUSINESS_STATUS.ACTIVE,
+                ...grossAmountMetadata(item.subtotal || 0),
                 transactionType: '',
                 invoiceTitle: q.clientName || '',
                 quoteNo: quoteNo,
@@ -3298,6 +3341,7 @@ window.markQuoteAsDeal = function(quoteNo) {
         batch.update(db.collection('quotes').doc(quoteNo), {
             dealClosed: true,
             dealClosedAt: todayStr,
+            status: BUSINESS_STATUS.COMPLETED,
             linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
         });
 
@@ -3383,7 +3427,8 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
         // 所有來源訂單處理完成後，才解除估價單成交狀態
         await db.collection('quotes').doc(quoteNo).update({
             dealClosed: false,
-            dealClosedAt: null
+            dealClosedAt: null,
+            status: BUSINESS_STATUS.ACTIVE
         });
 
         alert('成交狀態已取消；相關訂單已保留並標記為取消，預留庫存已同步釋放。');
@@ -3703,8 +3748,12 @@ function returnedQuantity(order) {
 }
 
 function normalizedOrderStatus(order) {
-    // 舊版的「作廢」與「取消」意義重複；保留舊資料相容，但統一視為已取消。
-    return ['cancelled', 'voided'].includes(order?.orderStatus) ? 'cancelled' : 'normal';
+    // UI 將取消／作廢視為同一個「不可繼續履約」狀態；底層 status 仍保留 cancelled / voided 以利稽核。
+    const canonical = order?.status || '';
+    const legacy = order?.orderStatus || '';
+    if ([BUSINESS_STATUS.CANCELLED, BUSINESS_STATUS.VOIDED, 'cancelled', 'voided'].includes(canonical)
+        || ['cancelled', 'voided'].includes(legacy)) return 'cancelled';
+    return 'normal';
 }
 
 function orderLifecycleInfo(order) {
@@ -4455,6 +4504,8 @@ window.receivePurchaseOrder = async function(poId) {
                 itemCode: item.itemCode || '',
                 itemName: item.itemName || '',
                 brand: resolveBrandName(item.brand || ''),
+                unitCost: Number(item.unitPrice || 0),
+                currency: live.currency || DEFAULT_CURRENCY,
                 onHand: stock.onHand + qty,
                 reserved: stock.reserved + reserveFromReceipt,
                 incoming: Math.max(0, stock.incoming - qty),
@@ -4465,6 +4516,11 @@ window.receivePurchaseOrder = async function(poId) {
                 type: 'receipt',
                 qty,
                 productKey: key,
+                itemCode: item.itemCode || '',
+                itemName: item.itemName || '',
+                brand: resolveBrandName(item.brand || ''),
+                unitCost: Number(item.unitPrice || 0),
+                purchaseNetAmount: Number(item.unitPrice || 0) * qty,
                 sourceType: DOCUMENT_TYPES.PURCHASE_ORDER,
                 sourceId: poId,
                 receiptId,
@@ -4486,10 +4542,12 @@ window.receivePurchaseOrder = async function(poId) {
                 updatedAt: now
             }, { merge: true });
 
+            const receiptComplete = records.reduce((s, r) => s + Number(r.qty || 0), 0) >= liveItems.reduce((s, i) => s + Number(i.qty || 0), 0);
             tx.update(poRef, {
                 receiptRecords: records,
                 updatedAt: now,
-                receiptStatus: records.reduce((s, r) => s + Number(r.qty || 0), 0) >= liveItems.reduce((s, i) => s + Number(i.qty || 0), 0) ? 'received' : 'partial'
+                status: receiptComplete ? BUSINESS_STATUS.COMPLETED : BUSINESS_STATUS.ACTIVE,
+                receiptStatus: receiptComplete ? 'received' : 'partial'
             });
             saved = { id: poId, ...live, receiptRecords: records, updatedAt: now };
         });
@@ -4585,7 +4643,7 @@ window.openDirectStockPurchase = function() {
 
     const unit = match?.unit || (prompt('單位（可留白）', '') || '').trim();
     const supplier = match?.supplier || (prompt('供應商（可留白）', '') || '').trim();
-    const unitPrice = Number(match?.cost || prompt('含稅成本（可填 0 稍後修改）', '0') || 0);
+    const unitPrice = Number(match?.cost || prompt('未稅進貨單價（可填 0 稍後修改）', '0') || 0);
 
     poItems = [{
         orderId: '',
@@ -4799,13 +4857,16 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
+    const poNetTotal = poItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.unitPrice || 0)), 0);
     const poRecord = {
         poNo,
         company: poCurrentCompany,
         vendorName,
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
-        items: poItems.map(item => ({ ...item })),
+        status: BUSINESS_STATUS.ACTIVE,
+        items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
+        ...netAmountMetadata(poNetTotal),
         createdAt: new Date().toISOString(),
         ...linkedDocumentFields(orderIds.length === 1 ? DOCUMENT_TYPES.ORDER : '', orderIds.length === 1 ? orderIds[0] : '', orderIds.map(orderId => documentLink(DOCUMENT_TYPES.ORDER, orderId, 'source')))
     };
@@ -4991,7 +5052,10 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
             updates.orderedBy = order.orderedBy || actor;
             entries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: timestamp });
         }
-        if (field === 'isBilled') updates.invoiceDate = invoiceDate;
+        if (field === 'isBilled') {
+            updates.invoiceDate = invoiceDate;
+            updates.status = newValue ? BUSINESS_STATUS.COMPLETED : BUSINESS_STATUS.ACTIVE;
+        }
         if (field === 'isOrdered') updates.orderedBy = newValue ? actor : '';
         entries.push(logEntry);
         updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...entries);
@@ -5289,6 +5353,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             };
             await adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor);
             const updates = {
+                status: nextStatus === 'cancelled' ? BUSINESS_STATUS.CANCELLED : BUSINESS_STATUS.ACTIVE,
                 orderStatus: nextStatus,
                 orderStatusDate: date,
                 orderStatusReason: '',
@@ -6074,6 +6139,8 @@ window.saveNewOrder = function() {
         unit: document.getElementById('orderUnit').value.trim(),
         unitPrice: document.getElementById('orderUnitPrice').value,
         totalPrice: document.getElementById('orderTotalPrice').value,
+        status: BUSINESS_STATUS.ACTIVE,
+        ...grossAmountMetadata(document.getElementById('orderTotalPrice').value),
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
@@ -7066,12 +7133,25 @@ async function loadInventoryAnalysisSupport(start, end) {
     inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
 }
 function inventoryAnalysisTotals(start,end) {
-    let purchase=0;
-    inventoryAnalysisReceipts.forEach(r=>{const product=priceList.find(p=>(p.productId||stableProductId(p))===r.productKey);purchase+=Number(r.qty||0)*Number(product?.cost||0);});
-    const sales=salesStatisticsOrders.reduce((sum,o)=>{const x=calculateOrderStatsContribution(o,start,end);return sum+x.actualSales;},0);
-    let stockValue=0,incoming=0;
-    inventoryAnalysisStocks.forEach(s=>{const product=priceList.find(p=>(p.productId||stableProductId(p))===s.productKey);const n=inventoryNumbers(s);stockValue+=n.onHand*Number(product?.cost||0);incoming+=n.incoming*Number(product?.cost||0);});
-    return {purchase,sales,difference:sales-purchase,stockValue,incoming};
+    let purchase = 0;
+    inventoryAnalysisReceipts.forEach(receipt => {
+        const product = priceList.find(p => (p.productId || stableProductId(p)) === receipt.productKey);
+        const unitCost = Number(receipt.unitCost ?? product?.cost ?? 0);
+        purchase += Number(receipt.purchaseNetAmount ?? (Number(receipt.qty || 0) * unitCost));
+    });
+    const sales = salesStatisticsOrders.reduce((sum, order) => {
+        const contribution = calculateOrderStatsContribution(order, start, end);
+        return sum + contribution.actualSales;
+    }, 0);
+    let stockValue = 0, incoming = 0;
+    inventoryAnalysisStocks.forEach(stock => {
+        const product = priceList.find(p => (p.productId || stableProductId(p)) === stock.productKey);
+        const unitCost = Number(stock.unitCost ?? product?.cost ?? 0);
+        const numbers = inventoryNumbers(stock);
+        stockValue += numbers.onHand * unitCost;
+        incoming += numbers.incoming * unitCost;
+    });
+    return { purchase, sales, difference: sales - purchase, stockValue, incoming };
 }
 function renderInventoryAnalysisSummary(start,end){
     const t=inventoryAnalysisTotals(start,end),fmt=v=>Math.round(v).toLocaleString();
