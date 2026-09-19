@@ -4241,6 +4241,7 @@ function orderReservedQuantity(order) {
 }
 
 async function reserveInventoryForNewOrder(orderId, order) {
+    if (!warehouseMasterCache.length) await loadSupplierWarehouseMasters();
     const requested = orderQuantity(order);
     const productKey = inventoryProductKey(order);
     if (!requested || !productKey) return { reservedQty: 0, shortageQty: requested };
@@ -6983,6 +6984,9 @@ window.copyOrderAsNew = function(orderId) {
     document.getElementById('orderQty').value = source.qty || 1;
     document.getElementById('orderUnit').value = source.unit || '';
     document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
+    document.getElementById('orderFulfillmentType').value = source.fulfillmentType || 'WAREHOUSE';
+    populateOrderWarehouseOptions(source.warehouseId || '');
+    onOrderFulfillmentChange();
     if (source.totalPrice !== undefined && source.totalPrice !== null && String(source.totalPrice).trim() !== '') {
         document.getElementById('orderTotalPrice').value = String(source.totalPrice).replace(/,/g, '');
     } else {
