@@ -1073,12 +1073,15 @@ window.renderForecastList = function() {
                 ? 'forecast-status-lost'
                 : 'forecast-status-active';
 
-        const actions = canEditPage('forecast') ? `
-            <button type="button" class="btn-small" onclick="openForecastProgressModal('${escapeAttr(item.id)}')">＋進度</button>
-            <button type="button" class="btn-small btn-secondary" onclick="openForecastModal('${escapeAttr(item.id)}')">編輯</button>
-            <button type="button" class="btn-small btn-secondary" onclick="createQuoteFromForecast('${escapeAttr(item.id)}')">轉估價</button>
-            <button type="button" class="btn-small btn-secondary" onclick="createOrderFromForecast('${escapeAttr(item.id)}')">轉訂單</button>
-        ` : '';
+        const actions = `
+            <button type="button" class="btn-small btn-secondary" onclick="openForecastHistoryModal('${escapeAttr(item.id)}')">紀錄</button>
+            ${canEditPage('forecast') ? `
+                <button type="button" class="btn-small" onclick="openForecastProgressModal('${escapeAttr(item.id)}')">＋進度</button>
+                <button type="button" class="btn-small btn-secondary" onclick="openForecastModal('${escapeAttr(item.id)}')">編輯</button>
+                <button type="button" class="btn-small btn-secondary" onclick="createQuoteFromForecast('${escapeAttr(item.id)}')">轉估價</button>
+                <button type="button" class="btn-small btn-secondary" onclick="createOrderFromForecast('${escapeAttr(item.id)}')">轉訂單</button>
+            ` : ''}
+        `;
 
         row.innerHTML = `
             <td data-th="客戶">${escapeHtml(item.customerName || '')}</td>
@@ -1112,17 +1115,19 @@ window.openForecastModal = function(id = '') {
     document.getElementById('forecastStage').value = item?.stage || 'stage1';
     document.getElementById('forecastStatus').value = item?.status || 'active';
 
+    const workflowSection = document.getElementById('forecastWorkflowSection');
     const newProgressSection = document.getElementById('forecastNewProgressSection');
     const currentProgressSection = document.getElementById('forecastCurrentProgressSection');
     const progressInput = document.getElementById('forecastProgress');
-    const currentProgress = document.getElementById('forecastCurrentProgress');
 
     if (item) {
+        // 編輯只處理基本資料。Stage／狀態／最新進度統一由「＋進度」修改，避免兩個入口互相覆蓋。
+        if (workflowSection) workflowSection.style.display = 'none';
         if (newProgressSection) newProgressSection.style.display = 'none';
-        if (currentProgressSection) currentProgressSection.style.display = '';
-        if (currentProgress) currentProgress.textContent = item.latestProgress || '尚無進度';
+        if (currentProgressSection) currentProgressSection.style.display = 'none';
         if (progressInput) progressInput.value = '';
     } else {
+        if (workflowSection) workflowSection.style.display = '';
         if (newProgressSection) newProgressSection.style.display = '';
         if (currentProgressSection) currentProgressSection.style.display = 'none';
         if (progressInput) progressInput.value = '';
@@ -1161,10 +1166,10 @@ window.saveForecast = async function() {
         return;
     }
 
-    let stage = document.getElementById('forecastStage').value || 'stage1';
-    const status = document.getElementById('forecastStatus').value || 'active';
+    let stage = existing?.stage || document.getElementById('forecastStage').value || 'stage1';
+    const status = existing?.status || document.getElementById('forecastStatus').value || 'active';
 
-    if (status === 'won') {
+    if (!existing && status === 'won') {
         stage = 'stage5';
     }
 
@@ -1223,40 +1228,30 @@ window.saveForecast = async function() {
 
             forecastCache = [{ id: ref.id, ...record }, ...forecastCache];
         } else {
-            const oldStage = existing.stage || '';
-            const oldStatus = existing.status || 'active';
-
             const updateData = {
                 customerName,
                 customerId: syncCustomerMaster(customerName, { salesCode: existing.salesCode || currentUserCode || '' }),
                 brand,
                 productName,
                 estimatedAmount,
-                stage,
-                status,
-                closedAt: status === 'active' ? null : (existing.closedAt || now),
                 updatedAt: now
             };
 
             const batch = db.batch();
             batch.set(ref, updateData, { merge: true });
 
-            if (oldStage !== stage || oldStatus !== status) {
-                const changes = [];
+            const changes = [];
+            if ((existing.customerName || '') !== customerName) changes.push(`客戶：${existing.customerName || '－'} → ${customerName || '－'}`);
+            if ((existing.brand || '') !== brand) changes.push(`廠牌：${existing.brand || '－'} → ${brand || '－'}`);
+            if ((existing.productName || '') !== productName) changes.push(`品項：${existing.productName || '－'} → ${productName || '－'}`);
+            if (Number(existing.estimatedAmount || 0) !== estimatedAmount) changes.push(`金額：${Number(existing.estimatedAmount || 0).toLocaleString()} → ${estimatedAmount.toLocaleString()}`);
 
-                if (oldStage !== stage) {
-                    changes.push(`${forecastStageLabel(oldStage)} → ${forecastStageLabel(stage)}`);
-                }
-
-                if (oldStatus !== status) {
-                    changes.push(`${forecastStatusLabel(oldStatus)} → ${forecastStatusLabel(status)}`);
-                }
-
+            if (changes.length) {
                 batch.set(ref.collection('progress').doc(), {
                     text: `基本資料更新：${changes.join('；')}`,
                     displayText: `${forecastTodayLabel()} 基本資料更新：${changes.join('；')}`,
-                    stage,
-                    status,
+                    stage: existing.stage || 'stage1',
+                    status: existing.status || 'active',
                     isSystemEntry: true,
                     createdAt: now,
                     createdByUid: currentUser?.uid || '',
@@ -1427,6 +1422,40 @@ window.closeForecastStageInfo = function() {
     document.getElementById('forecastStageInfoOverlay')?.classList.remove('active');
 };
 
+window.openForecastHistoryModal = async function(id) {
+    const forecast = forecastCache.find(item => item.id === id);
+    const overlay = document.getElementById('forecastHistoryOverlay');
+    const body = document.getElementById('forecastHistoryBody');
+    const title = document.getElementById('forecastHistoryTitle');
+    if (!forecast || !overlay || !body) return;
+
+    if (title) title.textContent = `紀錄｜${forecast.customerName || ''}｜${forecast.productName || ''}`;
+    body.innerHTML = '<tr><td colspan="5">讀取中…</td></tr>';
+    overlay.classList.add('active');
+
+    try {
+        const snapshot = await db.collection('forecasts').doc(id).collection('progress')
+            .orderBy('createdAt', 'desc')
+            .limit(100)
+            .get();
+
+        const rows = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        body.innerHTML = rows.length ? rows.map(row => `<tr>
+            <td>${escapeHtml(dateOnlyFromTimestamp(row.createdAt) || '')}</td>
+            <td style="text-align:left;">${escapeHtml(row.displayText || row.text || '')}</td>
+            <td>${escapeHtml(forecastStageLabel(row.stage || forecast.stage || 'stage1'))}</td>
+            <td>${escapeHtml(forecastStatusLabel(row.status || forecast.status || 'active'))}</td>
+            <td>${escapeHtml(row.createdByName || '')}</td>
+        </tr>`).join('') : '<tr><td colspan="5" style="color:#888;">目前沒有更新紀錄。</td></tr>';
+    } catch (err) {
+        body.innerHTML = `<tr><td colspan="5">讀取失敗：${escapeHtml(err.message || String(err))}</td></tr>`;
+    }
+};
+
+window.closeForecastHistoryModal = function() {
+    document.getElementById('forecastHistoryOverlay')?.classList.remove('active');
+};
+
 function forecastProductMatch(item) {
     const key = String(item.productName || '').trim().toLocaleLowerCase();
 
@@ -1482,25 +1511,174 @@ window.createQuoteFromForecast = function(id) {
     window._pendingForecastQuoteLink = { forecastId: forecast.id };
 };
 
-window.createOrderFromForecast = function(id) {
+async function forecastOrderItems(forecast) {
+    if (Array.isArray(forecast.items) && forecast.items.length) return forecast.items;
+
+    // 舊 Forecast 由估價單建立時沒有保存 items；從來源估價單補抓，讓既有資料也能正確拆單。
+    if (forecast.sourceType === DOCUMENT_TYPES.QUOTE && forecast.sourceId) {
+        const quoteSnap = await db.collection('quotes').doc(forecast.sourceId).get();
+        const quote = quoteSnap.exists ? quoteSnap.data() : null;
+        if (Array.isArray(quote?.items) && quote.items.length) {
+            const items = quote.items.map(item => ({
+                nameCn: item.nameCn || '',
+                nameEn: item.nameEn || '',
+                model: item.model || '',
+                brand: resolveBrandName(item.brand || ''),
+                productId: item.productId || '',
+                productLine: item.productLine || '',
+                productType: item.productType || '',
+                spec: item.spec || '',
+                qty: Number(item.qty || 1),
+                unit: item.unit || '',
+                price: parseMoney(item.price),
+                subtotal: parseMoney(item.subtotal)
+            }));
+            // 背景補回 Forecast，之後不必每次重新讀估價單。
+            db.collection('forecasts').doc(forecast.id).set({ items }, { merge: true }).catch(() => {});
+            forecast.items = items;
+            return items;
+        }
+    }
+
+    const match = forecastProductMatch(forecast);
+    return [{
+        nameCn: match?.nameCn || forecast.productName || '',
+        nameEn: match?.nameEn || '',
+        model: match?.model || '',
+        brand: normalizeForecastBrand(forecast.brand || match?.brand || ''),
+        productId: match?.productId || forecast.productId || '',
+        productLine: match?.productLine || '',
+        productType: match?.productType || '',
+        spec: match?.spec || '',
+        qty: 1,
+        unit: match?.unit || '',
+        price: parseMoney(match?.price || forecast.estimatedAmount || 0),
+        subtotal: parseMoney(match?.price || forecast.estimatedAmount || 0)
+    }];
+}
+
+function forecastItemToOrderSource(forecast, item) {
+    const match = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: item.brand }) : null;
+    const qty = Number(item.qty || 1) || 1;
+    const unitPrice = parseMoney(item.price || match?.price || 0);
+    const totalPrice = parseMoney(item.subtotal || (unitPrice * qty));
+    return {
+        customerName: forecast.customerName || '',
+        itemName: item.nameCn || item.nameEn || item.model || forecast.productName || '',
+        itemCode: item.model || '',
+        brand: normalizeForecastBrand(item.brand || forecast.brand || match?.brand || ''),
+        qty,
+        unit: item.unit || match?.unit || '',
+        unitPrice,
+        totalPrice,
+        costPrice: parseMoney(match?.cost || 0) || '',
+        sourceType: DOCUMENT_TYPES.FORECAST,
+        sourceId: forecast.id,
+        productId: item.productId || match?.productId || '',
+        productLine: item.productLine || match?.productLine || '',
+        productType: item.productType || match?.productType || '',
+        spec: item.spec || match?.spec || '',
+        supplier: match?.supplier || ''
+    };
+}
+
+async function createForecastOrdersDirectly(forecast, items) {
+    const now = new Date().toISOString();
+    const orderDate = localDateString();
+    const batch = db.batch();
+    const createdOrders = [];
+    const links = [];
+
+    items.forEach(item => {
+        const source = forecastItemToOrderSource(forecast, item);
+        if (!source.itemName && !source.itemCode) return;
+
+        const orderRef = db.collection('orders').doc();
+        const orderData = {
+            orderDate,
+            createdAt: now,
+            company: currentCompany || 'yushin',
+            customerName: forecast.customerName || '',
+            customerId: forecast.customerId || customerIdForName(forecast.customerName || ''),
+            brand: source.brand,
+            itemCode: source.itemCode,
+            itemCodeKey: normalizeHistoryItemCode(source.itemCode),
+            itemName: source.itemName,
+            productId: source.productId || '',
+            productLine: source.productLine || '',
+            productType: source.productType || '',
+            spec: source.spec || '',
+            supplier: source.supplier || '',
+            qty: source.qty,
+            unit: source.unit || '',
+            unitPrice: source.unitPrice,
+            totalPrice: source.totalPrice,
+            costPrice: source.costPrice === '' ? null : source.costPrice,
+            status: BUSINESS_STATUS.ACTIVE,
+            ...grossAmountMetadata(source.totalPrice),
+            transactionType: '',
+            invoiceTitle: '',
+            quoteNo: '',
+            ...linkedDocumentFields(DOCUMENT_TYPES.FORECAST, forecast.id, [
+                documentLink(DOCUMENT_TYPES.FORECAST, forecast.id, 'source')
+            ]),
+            salesName: forecast.salesName || currentUserName || '',
+            salesCode: forecast.salesCode || currentUserCode || '',
+            ownerUid: forecast.ownerUid || currentUser?.uid || '',
+            isOrdered: false,
+            isArrived: false,
+            isDelivered: false,
+            isBilled: false,
+            invoiceDate: ''
+        };
+        batch.set(orderRef, orderData);
+        createdOrders.push({ id: orderRef.id, data: orderData });
+        links.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
+    });
+
+    if (!createdOrders.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
+
+    batch.set(db.collection('forecasts').doc(forecast.id), {
+        linkedDocuments: firebase.firestore.FieldValue.arrayUnion(...links),
+        updatedAt: now
+    }, { merge: true });
+
+    await batch.commit();
+    await Promise.all(createdOrders.map(entry => reserveInventoryForNewOrder(entry.id, entry.data)));
+
+    ordersCache = [
+        ...createdOrders.map(entry => ({ id: entry.id, ...entry.data })),
+        ...ordersCache.filter(order => !createdOrders.some(entry => entry.id === order.id))
+    ].sort((x, y) => String(y.orderDate || '').localeCompare(String(x.orderDate || '')));
+
+    return createdOrders;
+}
+
+window.createOrderFromForecast = async function(id) {
     const forecast = forecastCache.find(item => item.id === id);
     if (!forecast) return;
 
-    const match = forecastProductMatch(forecast);
+    try {
+        const items = await forecastOrderItems(forecast);
+        if (!items.length) {
+            alert('此 Forecast 沒有可帶入訂單的品項。');
+            return;
+        }
 
-    openOrderModal({
-        customerName: forecast.customerName || '',
-        itemName: match?.nameCn || forecast.productName || '',
-        itemCode: match?.model || '',
-        brand: normalizeForecastBrand(forecast.brand || match?.brand || ''),
-        unitPrice: match?.price || '',
-        totalPrice: match?.price || '',
-        sourceType: DOCUMENT_TYPES.FORECAST,
-        sourceId: forecast.id,
-        productId: match?.productId || forecast.productId || ''
-    });
+        if (items.length === 1) {
+            // 單品項仍開啟新增訂單視窗，讓使用者最後確認／補資料再儲存。
+            openOrderModal(forecastItemToOrderSource(forecast, items[0]));
+            return;
+        }
 
-    window._pendingForecastOrderLink = { forecastId: forecast.id };
+        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將拆成 ${items.length} 筆訂單。確定繼續？`)) return;
+        const created = await createForecastOrdersDirectly(forecast, items);
+        renderOrdersList();
+        alert(`已將 Forecast 的 ${created.length} 個品項拆成 ${created.length} 筆訂單。`);
+    } catch (err) {
+        console.error('Forecast 轉訂單失敗', err);
+        alert('Forecast 轉訂單失敗：' + err.message);
+    }
 };
 
 
@@ -3220,6 +3398,21 @@ window.createForecastFromQuote = async function(quoteNo) {
             customerId: q.customerId || syncCustomerMaster(forecastCustomerName, { salesCode: q.salesCode || salesCodeForName(q.salesName) }),
             brand,
             productName,
+            // Forecast 主列表維持一筆，但保留估價單每個品項的 snapshot，轉訂單時才能拆回多筆。
+            items: items.map(item => ({
+                nameCn: item.nameCn || '',
+                nameEn: item.nameEn || '',
+                model: item.model || '',
+                brand: resolveBrandName(item.brand || ''),
+                productId: item.productId || '',
+                productLine: item.productLine || '',
+                productType: item.productType || '',
+                spec: item.spec || '',
+                qty: Number(item.qty || 1),
+                unit: item.unit || '',
+                price: parseMoney(item.price),
+                subtotal: parseMoney(item.subtotal)
+            })),
             estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g, '')) || 0,
             stage,
             status,
@@ -6008,11 +6201,11 @@ window.deleteOrder = function(orderId) {
     }).catch(err => alert('刪除失敗：' + err.message));
 };
 
-window.openOrderModal = function() {
+window.openOrderModal = function(source = null) {
     populateOrderBrandDropdown();
     populateOrderCustomerSuggestions();
     const title = document.getElementById('orderModalTitle');
-    if (title) title.innerText = '新增訂單';
+    if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderUnit', 'orderInvoiceTitle'].forEach(id => {
@@ -6025,6 +6218,30 @@ window.openOrderModal = function() {
     document.getElementById('orderCostPrice').value = '';
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
+
+    window._orderModalSourceLink = source?.sourceType && source?.sourceId
+        ? { sourceType: source.sourceType, sourceId: source.sourceId }
+        : null;
+    window._orderModalProductId = source?.productId || '';
+
+    if (source) {
+        document.getElementById('orderCustomer').value = source.customerName || '';
+        document.getElementById('orderItemCode').value = source.itemCode || '';
+        document.getElementById('orderItemName').value = source.itemName || '';
+        document.getElementById('orderQty').value = source.qty || 1;
+        document.getElementById('orderUnit').value = source.unit || '';
+        document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
+        document.getElementById('orderCostPrice').value = source.costPrice ?? '';
+        if (source.brand) {
+            selectBrandInDropdown(document.getElementById('orderBrand'), source.brand);
+            onOrderBrandSelectChange();
+        }
+        const total = source.totalPrice !== undefined && source.totalPrice !== null && source.totalPrice !== ''
+            ? source.totalPrice
+            : (Number(source.qty || 1) * Number(source.unitPrice || 0));
+        document.getElementById('orderTotalPrice').value = total || 0;
+    }
+
     document.getElementById('orderModalOverlay').classList.add('active');
 };
 
