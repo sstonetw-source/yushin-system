@@ -890,3 +890,39 @@ test('Firestore rules separate product data from costs and protect authorized co
     assert.match(rulesSource, /authorizationType == 'NON_AUTHORIZED'/);
     assert.match(rulesSource, /allow update: if admin\(\) \|\| purchaser\(\)/);
 });
+
+
+test('Product Master migration safely moves legacy price data and sanitizes old cost fields', () => {
+    assert.match(appSource, /window\.previewProductMasterMigration/);
+    assert.match(appSource, /window\.runProductMasterMigration/);
+    assert.match(appSource, /function legacyPriceItemWithoutCost/);
+    assert.match(appSource, /function productMasterRecordFromLegacyItem/);
+    assert.match(appSource, /function legacyCostRecord/);
+    assert.match(appSource, /productMasterMigrationVersion: 2/);
+    assert.match(appSource, /productMasterMigratedAt/);
+    assert.match(appSource, /delete clean\.cost/);
+    assert.match(appSource, /db\.collection\('products'\)/);
+    assert.match(appSource, /db\.collection\('productCosts'\)/);
+});
+
+test('new Excel imports no longer persist costs into legacy settings price documents', () => {
+    const start = appSource.indexOf('async function savePriceBrandList');
+    const end = appSource.indexOf('let pendingPriceImportPreview', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /const publicItems = normalizedItems\.map\(legacyPriceItemWithoutCost\)/);
+    assert.match(source, /chunkPriceItems\(publicItems/);
+    assert.match(source, /syncImportedBrandToFormalProductMaster/);
+});
+
+test('database backup includes formal Product Master and cost collections', () => {
+    assert.match(appSource, /'products'/);
+    assert.match(appSource, /'productCosts'/);
+    assert.match(appSource, /'brands'/);
+});
+
+test('admin UI exposes Product Master migration preview before execution', () => {
+    assert.match(indexSource, /id="productMasterMigrationPreviewBtn"/);
+    assert.match(indexSource, /id="productMasterMigrationBtn"/);
+    assert.match(indexSource, /previewProductMasterMigration\(\)/);
+    assert.match(indexSource, /runProductMasterMigration\(\)/);
+});
