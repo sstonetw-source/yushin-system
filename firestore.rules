@@ -51,6 +51,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /suppliers/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || purchaser();
+      allow delete: if false;
+    }
+
+    match /brandSupplierMappings/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || purchaser();
+      allow delete: if false;
+    }
+
+    match /warehouses/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
     match /products/{id} {
       allow read: if signedIn();
       // 業務只可快速建立 TEMPORARY 產品，不能直接修改正式 Product Master。
@@ -127,6 +145,19 @@ service cloud.firestore {
       // 業務在訂單成立／送貨流程只能改動實體數量、占用數量、批號與更新時間，
       // 不能自行改產品身份、在途量或其他主檔欄位。
       allow update: if admin() || warehouse() || purchaser() || salesInventoryOperationalUpdate();
+      allow delete: if false;
+    }
+
+    // 分倉庫存：業務只能在訂單占用/送貨/退貨流程調整現有量與占用量。
+    match /warehouseStocks/{id} {
+      allow read: if admin() || purchaser() || warehouse() || sales();
+      allow create: if admin() || warehouse() || purchaser();
+      allow update: if admin() || warehouse() || purchaser()
+        || (sales()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['onHand', 'reserved', 'updatedAt'])
+          && request.resource.data.onHand >= 0
+          && request.resource.data.reserved >= 0);
       allow delete: if false;
     }
 
