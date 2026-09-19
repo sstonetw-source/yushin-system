@@ -6,6 +6,8 @@ const vm = require('node:vm');
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const rulesSource = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
 
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
@@ -578,4 +580,43 @@ test('permission routing includes Forecast and Inventory', () => {
     assert.match(s, /forecast-system/);
     assert.match(s, /inventory-system/);
     assert.match(appSource, /\['forecast', 'quote', 'orders', 'inventory', 'equipment'\]/);
+});
+
+
+test('shared Customer Master and order unit are persisted in the unified workflow', () => {
+    assert.match(appSource, /function customerIdForName/);
+    assert.match(appSource, /function syncCustomerMaster/);
+    assert.match(appSource, /customerId:/);
+    assert.match(appSource, /document\.getElementById\('orderUnit'\)/);
+    assert.match(indexSource, /id="orderUnit"/);
+});
+
+test('inventory UI exposes reservation and pending-item detail without duplicate HTML ids', () => {
+    assert.match(indexSource, /id="inventoryReservationOverlay"/);
+    assert.match(indexSource, /id="pendingInventoryBody"/);
+    const ids = [...indexSource.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+    const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+    assert.deepEqual([...new Set(duplicates)], []);
+});
+
+test('Firestore rules deny unspecified collections and enforce sales-code ownership', () => {
+    assert.match(rulesSource, /function ownBySalesCode/);
+    assert.match(rulesSource, /match \/forecasts\/\{forecastId\}\/progress\/\{progressId\}/);
+    assert.match(rulesSource, /salesInventoryOperationalUpdate/);
+    assert.match(rulesSource, /match \/\{document=\*\*\}/);
+    assert.match(rulesSource, /allow read, write: if false/);
+    assert.doesNotMatch(rulesSource, /match \/\{document=\*\*\}[\s\S]*allow read: if signedIn/);
+});
+
+test('all major product-entry screens put item code before downstream product fields', () => {
+    const orderCode = indexSource.indexOf('id="orderItemCode"');
+    const orderName = indexSource.indexOf('id="orderItemName"');
+    const orderBrand = indexSource.indexOf('id="orderBrand"');
+    assert.ok(orderCode >= 0 && orderName > orderCode && orderBrand > orderName);
+
+    const quoteRowStart = appSource.indexOf('window.addQuoteRow');
+    const quoteRowEnd = appSource.indexOf('window.deleteQuoteRow', quoteRowStart);
+    const quoteRow = appSource.slice(quoteRowStart, quoteRowEnd);
+    assert.ok(quoteRow.indexOf('class="item-model"') >= 0);
+    assert.ok(quoteRow.indexOf('class="item-model"') < quoteRow.indexOf('class="item-cn"'));
 });
