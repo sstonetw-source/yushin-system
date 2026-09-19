@@ -3974,28 +3974,85 @@ window.changeOrderPeriod = function(value) {
 };
 
 let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[], pendingInventoryCache=[];
+let warehouseStockCache = new Map();
 function expiryDays(date){if(!date)return null;return Math.ceil((new Date(date+'T23:59:59')-new Date())/86400000);}
 function lotStatus(lot){const d=expiryDays(lot.expiryDate);if(d===null)return '';if(d<0)return '已過期';if(d<=30)return '30天內';if(d<=60)return '60天內';if(d<=90)return '90天內';return '';}
 function fefoLots(stock){return [...(stock.lots||[])].filter(l=>Number(l.qty||0)>0).sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));}
+async function loadWarehouseStocksForInventoryPage() {
+    await loadSupplierWarehouseMasters();
+    const jobs = [];
+    inventoryCache.forEach(item => {
+        const productKey = item.productKey || item.productId || '';
+        if (!productKey) return;
+        warehouseMasterCache.forEach(warehouse => {
+            const cacheKey = warehouse.id + '||' + productKey;
+            jobs.push(db.collection('warehouseStocks').doc(warehouseStockDocId(warehouse.id,productKey)).get()
+                .then(doc => warehouseStockCache.set(cacheKey, doc.exists ? {id:doc.id,...doc.data()} : null))
+                .catch(() => warehouseStockCache.set(cacheKey,null)));
+        });
+    });
+    await Promise.all(jobs);
+}
+
 window.loadInventory=async function(reset=true){
- if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCache=[];inventoryCursor=null;inventoryHasMore=true;} inventoryLoading=true;
- try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const s=await q.get();if(!s.empty)inventoryCursor=s.docs[s.docs.length-1];s.forEach(d=>{const x={id:d.id,...d.data()};const i=inventoryCache.findIndex(v=>v.id===d.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});inventoryHasMore=s.size===DEFAULT_LIST_LIMIT;
+ if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCache=[];inventoryCursor=null;inventoryHasMore=true;warehouseStockCache=new Map();} inventoryLoading=true;
+ try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await q.get();if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];snap.forEach(d=>{const x={id:d.id,...d.data()};const i=inventoryCache.findIndex(v=>v.id===d.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
  const [m,pending]=await Promise.all([
  db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
  db.collection('pendingInventoryItems').where('status','==','pending-arrival').limit(100).get()
- ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
+ ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));
+ await loadWarehouseStocksForInventoryPage();
+ renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
-window.renderInventoryList=function(){const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';inventoryCache.forEach(x=>{const lots=fefoLots(x);const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(k&&!text.includes(k))return;const n=inventoryNumbers(x);const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');const reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails('${escapeAttr(x.productKey||x.id||'')}')">${n.reserved}</button>`:'0';body.insertAdjacentHTML('beforeend',`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="現有庫存">${n.onHand}</td><td data-th="已占用">${reserved}</td><td data-th="可用庫存">${n.available}</td><td data-th="在途">${n.incoming}</td><td data-th="批號／效期">${lotHtml}</td></tr>`);});};
-
+window.renderInventoryList=function(){
+ const body=document.getElementById('inventoryListBody');if(!body)return;
+ const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';
+ inventoryCache.forEach(x=>{
+   const lots=fefoLots(x);
+   const productKey=x.productKey||x.productId||'';
+   const warehouseRows=warehouseMasterCache.map(warehouse=>{
+      const stock=warehouseStockCache.get(warehouse.id+'||'+productKey);
+      const n=inventoryNumbers(stock||{});
+      return {warehouse,n};
+   });
+   const warehouseSearch=warehouseRows.map(row=>row.warehouse.warehouseName||'').join(' ');
+   const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();
+   if(k&&!text.includes(k))return;
+   const n=inventoryNumbers(x);
+   const assignedOnHand=warehouseRows.reduce((sum,row)=>sum+row.n.onHand,0);
+   const assignedReserved=warehouseRows.reduce((sum,row)=>sum+row.n.reserved,0);
+   const assignedIncoming=warehouseRows.reduce((sum,row)=>sum+row.n.incoming,0);
+   const unallocated=Math.max(0,n.onHand-assignedOnHand);
+   const warehouseHtml=[
+      ...warehouseRows.filter(row=>row.n.onHand||row.n.reserved||row.n.incoming).map(row=>
+         `<div><strong>${escapeHtml(row.warehouse.warehouseName||row.warehouse.id)}</strong>：現有 ${row.n.onHand}／占用 ${row.n.reserved}／可用 ${row.n.available}／在途 ${row.n.incoming}</div>`
+      ),
+      ...(unallocated>0?[ `<div style="color:#a65b00;">未分倉：${unallocated}</div>` ]:[])
+   ].join('') || '<span style="color:#888;">尚未分倉</span>';
+   const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');
+   const reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails('${escapeAttr(x.productKey||x.id||'')}')">${n.reserved}</button>`:'0';
+   body.insertAdjacentHTML('beforeend',`<tr>
+      <td data-th="貨號">${escapeHtml(x.itemCode||'')}</td>
+      <td data-th="品名">${escapeHtml(x.itemName||'')}</td>
+      <td data-th="廠牌">${escapeHtml(x.brand||'')}</td>
+      <td data-th="倉庫位置">${warehouseHtml}</td>
+      <td data-th="現有庫存">${n.onHand}</td>
+      <td data-th="已占用">${reserved}</td>
+      <td data-th="可用庫存">${n.available}</td>
+      <td data-th="在途">${n.incoming}</td>
+      <td data-th="批號／效期">${lotHtml}</td>
+   </tr>`);
+ });
+};
 window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;body.innerHTML=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`).join('');if(hint)hint.style.display=pendingInventoryCache.length?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
 
 window.openInventoryAdjustment = async function() {
     if (!canEditPage('inventory')) return;
-    await ensurePriceListLoaded().catch(() => {});
-    inventoryAdjustmentRows = [{ itemCode:'', itemName:'', brand:'', qty:0, lotNo:'', expiryDate:'' }];
+    await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
+    inventoryAdjustmentRows = [{ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, lotNo:'', expiryDate:'' }];
     document.getElementById('inventoryAdjustmentType').value = 'initial';
     renderInventoryAdjustmentRows();
     document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');
@@ -4006,13 +4063,13 @@ window.closeInventoryAdjustment = function() {
 };
 
 window.addInventoryAdjustmentRow = function() {
-    inventoryAdjustmentRows.push({ itemCode:'', itemName:'', brand:'', qty:0, lotNo:'', expiryDate:'' });
+    inventoryAdjustmentRows.push({ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, lotNo:'', expiryDate:'' });
     renderInventoryAdjustmentRows();
 };
 
 window.removeInventoryAdjustmentRow = function(idx) {
     inventoryAdjustmentRows.splice(idx,1);
-    if (!inventoryAdjustmentRows.length) inventoryAdjustmentRows.push({ itemCode:'', itemName:'', brand:'', qty:0, lotNo:'', expiryDate:'' });
+    if (!inventoryAdjustmentRows.length) inventoryAdjustmentRows.push({ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, lotNo:'', expiryDate:'' });
     renderInventoryAdjustmentRows();
 };
 
@@ -4037,22 +4094,28 @@ window.updateInventoryAdjustmentRow = function(idx, field, value) {
 function renderInventoryAdjustmentRows() {
     const body=document.getElementById('inventoryAdjustmentRows');
     if(!body)return;
+    const warehouseOptions=warehouseMasterCache.filter(w=>w.active!==false).map(w=>`<option value="${escapeAttr(w.id)}">${escapeHtml(w.warehouseName||w.id)}</option>`).join('');
     body.innerHTML=inventoryAdjustmentRows.map((row,idx)=>`
       <tr>
         <td><input type="text" list="priceModelList" value="${escapeAttr(row.itemCode||'')}" onchange="onInventoryAdjustmentCode(${idx},this.value)"></td>
         <td><input type="text" value="${escapeAttr(row.itemName||'')}" onchange="updateInventoryAdjustmentRow(${idx},'itemName',this.value)"></td>
         <td><input type="text" list="poBrandList" value="${escapeAttr(row.brand||'')}" onchange="updateInventoryAdjustmentRow(${idx},'brand',this.value)"></td>
+        <td><select onchange="updateInventoryAdjustmentRow(${idx},'warehouseId',this.value)"><option value="">請選倉庫</option>${warehouseOptions}</select></td>
         <td><input type="number" step="any" value="${row.qty||''}" onchange="updateInventoryAdjustmentRow(${idx},'qty',this.value)"></td>
         <td><input type="text" value="${escapeAttr(row.lotNo||'')}" onchange="updateInventoryAdjustmentRow(${idx},'lotNo',this.value)" placeholder="批號"></td>
         <td><input type="date" value="${escapeAttr(row.expiryDate||'')}" onchange="updateInventoryAdjustmentRow(${idx},'expiryDate',this.value)"></td>
         <td><button type="button" class="btn-small btn-danger" onclick="removeInventoryAdjustmentRow(${idx})">刪除</button></td>
       </tr>`).join('');
+    [...body.querySelectorAll('tr')].forEach((tr,idx)=>{
+      const select=tr.querySelector('select');
+      if(select&&inventoryAdjustmentRows[idx]?.warehouseId) select.value=inventoryAdjustmentRows[idx].warehouseId;
+    });
 }
-
 window.saveInventoryAdjustmentBatch = async function() {
     const type=document.getElementById('inventoryAdjustmentType').value;
     const rows=inventoryAdjustmentRows.filter(row=>row.itemCode&&Number(row.qty));
     if(!rows.length){alert('請至少輸入一筆貨號與數量。');return;}
+    if(warehouseMasterCache.length && rows.some(row=>!row.warehouseId)){alert('請為每筆庫存異動選擇倉庫。');return;}
     const actor=currentUserName||currentUser?.email||'';
     const button=document.getElementById('saveInventoryAdjustmentBatchBtn');
     if(button){button.disabled=true;button.textContent='儲存中…';}
@@ -4064,17 +4127,39 @@ window.saveInventoryAdjustmentBatch = async function() {
         if(type==='scrap') delta=-Math.abs(delta);
         const key=match.productId||stableProductId(match);
         const ref=db.collection('inventory').doc(encodeURIComponent(key));
+        const whRef=row.warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(row.warehouseId,key)):null;
         await db.runTransaction(async tx=>{
-          const s=await tx.get(ref), old=s.exists?s.data():{}, n=inventoryNumbers(old);
-          if(n.onHand+delta<0) throw new Error(`${row.itemCode} 異動後庫存不可小於 0`);
+          const invSnap=await tx.get(ref);
+          const whSnap=whRef?await tx.get(whRef):null;
+          const old=invSnap.exists?invSnap.data():{}, n=inventoryNumbers(old);
+          const wh=inventoryNumbers(whSnap?.exists?whSnap.data():{});
+          const assignedOther=warehouseMasterCache
+             .filter(w=>w.id!==row.warehouseId)
+             .reduce((sum,w)=>sum+inventoryNumbers(warehouseStockCache.get(w.id+'||'+key)||{}).onHand,0);
+
+          if(type==='warehouse_allocation'){
+             if(delta<0) throw new Error('既有庫存分配請輸入正數。');
+             const unallocated=Math.max(0,n.onHand-assignedOther-wh.onHand);
+             if(delta>unallocated) throw new Error(`${row.itemCode} 未分倉庫存只有 ${unallocated}，不可分配 ${delta}。`);
+          }else{
+             if(n.onHand+delta<0) throw new Error(`${row.itemCode} 異動後總庫存不可小於 0`);
+             if(wh.onHand+delta<0) throw new Error(`${row.itemCode} 異動後分倉庫存不可小於 0`);
+          }
+
           let lots=[...(old.lots||[])];
-          if(row.lotNo||row.expiryDate){
+          if(type!=='warehouse_allocation'&&(row.lotNo||row.expiryDate)){
             const li=lots.findIndex(l=>(l.lotNo||'')===row.lotNo&&(l.expiryDate||'')===row.expiryDate);
             if(li>=0) lots[li]={...lots[li],qty:Number(lots[li].qty||0)+delta};
             else lots.push({lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',qty:delta});
           }
-          tx.set(ref,{productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:new Date().toISOString()},{merge:true});
-          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',sourceType:'manual',sourceId:'',createdAt:new Date().toISOString(),createdBy:actor});
+          const now=new Date().toISOString();
+          if(type!=='warehouse_allocation'){
+            tx.set(ref,{productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now},{merge:true});
+          }
+          if(whRef){
+            tx.set(whRef,{warehouseId:row.warehouseId,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+          }
+          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
         });
       }
       closeInventoryAdjustment();
@@ -4083,7 +4168,6 @@ window.saveInventoryAdjustmentBatch = async function() {
     }catch(e){alert('庫存異動失敗：'+e.message);}
     finally{if(button){button.disabled=false;button.textContent='確認儲存';}}
 };
-
 function inventoryProductKey(record) {
     return String(record?.productId || (record?.itemCode ? `code:${normalizeHistoryItemCode(record.itemCode)}` : '')).trim();
 }
