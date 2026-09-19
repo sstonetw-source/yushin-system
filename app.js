@@ -331,7 +331,16 @@ function getDataScope(dataType, role = currentUserRole) {
     return roleDataScopes[role]?.[dataType] || 'none';
 }
 
-function belongsToCurrentUser(salesName, ownerUid) {
+function salesCodeForName(salesName) {
+    const normalizedName = stripPhoneSuffix(salesName || '');
+    if (!normalizedName) return '';
+    if (normalizedName === stripPhoneSuffix(currentUserName || '') && currentUserCode) return currentUserCode;
+    const match = salesList.find(person => stripPhoneSuffix(person.name || '') === normalizedName);
+    return String(match?.code || '').trim();
+}
+
+function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
+    if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
     if (!currentUserName) return false;
     return stripPhoneSuffix(salesName || '') === stripPhoneSuffix(currentUserName);
@@ -1111,6 +1120,7 @@ window.saveForecast = async function() {
                 latestProgress,
                 latestProgressAt: now,
                 salesName: currentUserName || '',
+                salesCode: currentUserCode || '',
                 ownerUid: currentUser?.uid || '',
                 productId: '',
                 createdAt: now,
@@ -1942,8 +1952,10 @@ function populateQuoteBrandDropdowns() {
 function quoteRowBrandValue(row) {
     const select = row.querySelector('.item-brand');
     if (!select) return '';
-    if (select.value !== '其他') return select.value.trim();
-    return (row.querySelector('.item-brand-other')?.value || '').trim();
+    const raw = select.value !== '其他'
+        ? select.value.trim()
+        : (row.querySelector('.item-brand-other')?.value || '').trim();
+    return resolveBrandName(raw);
 }
 
 window.onQuoteBrandSelectChange = function(select) {
@@ -1989,11 +2001,10 @@ window.onEqBrandSelectChange = function() {
 function getBrandFieldValue(selectId, otherInputId) {
     const select = document.getElementById(selectId);
     if (!select) return '';
-    if (select.value === '其他') {
-        const otherInput = document.getElementById(otherInputId);
-        return otherInput ? otherInput.value.trim() : '';
-    }
-    return select.value.trim();
+    const raw = select.value === '其他'
+        ? (document.getElementById(otherInputId)?.value || '').trim()
+        : select.value.trim();
+    return resolveBrandName(raw);
 }
 
 // 新增訂單時輸入「貨號」，依價格表帶出廠牌與品名
@@ -2359,7 +2370,8 @@ function collectCurrentQuoteRecord() {
     const record = {
         quoteNo: document.getElementById('quoteNo').value.trim(), company: currentCompany,
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
-        salesName, ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName) ? currentUser?.uid || '' : ''),
+        salesName, salesCode: selectedSales?.code || salesCodeForName(salesName),
+        ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName, '', selectedSales?.code || salesCodeForName(salesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
@@ -2581,7 +2593,8 @@ window.handleSaveAndPrint = function() {
         clientName: clientName,
         ordererName: ordererName,
         salesName: selectedSalesName,
-        ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName) ? currentUser?.uid || '' : ''),
+        salesCode: selectedSales?.code || salesCodeForName(selectedSalesName),
+        ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName, '', selectedSales?.code || salesCodeForName(selectedSalesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
@@ -3072,6 +3085,7 @@ window.createForecastFromQuote = async function(quoteNo) {
             latestProgress: displayProgress,
             latestProgressAt: now,
             salesName: q.salesName || currentUserName || '',
+            salesCode: q.salesCode || salesCodeForName(q.salesName) || currentUserCode || '',
             ownerUid: q.ownerUid || currentUser?.uid || '',
             createdAt: now,
             updatedAt: now,
@@ -3158,6 +3172,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                     documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')
                 ]),
                 salesName: stripPhoneSuffix(q.salesName),
+                salesCode: q.salesCode || salesCodeForName(q.salesName),
                 ownerUid: q.ownerUid || salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(q.salesName))?.uid || '',
                 isOrdered: false,
                 isArrived: false,
@@ -5605,6 +5620,7 @@ window.saveNewOrder = function() {
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
         productId: window._orderModalProductId || '',
         salesName: currentUserName || '',
+        salesCode: currentUserCode || '',
         ownerUid: currentUser?.uid || '',
         isOrdered: false,
         isArrived: false,
