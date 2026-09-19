@@ -1081,15 +1081,15 @@ window.renderForecastList = function() {
         ` : '';
 
         row.innerHTML = `
-            <td>${escapeHtml(item.customerName || '')}</td>
-            <td>${escapeHtml(brand || '')}</td>
-            <td>${escapeHtml(item.productName || '')}</td>
-            <td>${Number(item.estimatedAmount || 0).toLocaleString()}</td>
-            <td><span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span></td>
-            <td><span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span></td>
-            <td class="forecast-progress-cell">${escapeHtml(item.latestProgress || '')}</td>
-            <td>${escapeHtml(salesName)}</td>
-            <td class="no-print forecast-actions">${actions}</td>
+            <td data-th="客戶">${escapeHtml(item.customerName || '')}</td>
+            <td data-th="廠牌">${escapeHtml(brand || '')}</td>
+            <td data-th="產品／品項">${escapeHtml(item.productName || '')}</td>
+            <td data-th="預估金額">${Number(item.estimatedAmount || 0).toLocaleString()}</td>
+            <td data-th="Stage"><span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span></td>
+            <td data-th="狀態"><span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span></td>
+            <td data-th="最新進度" class="forecast-progress-cell">${escapeHtml(item.latestProgress || '')}</td>
+            <td data-th="業務">${escapeHtml(salesName)}</td>
+            <td data-th="操作" class="no-print forecast-actions">${actions}</td>
         `;
 
         body.appendChild(row);
@@ -3577,9 +3577,9 @@ window.loadInventory=async function(reset=true){
  ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
-window.renderInventoryList=function(){const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';inventoryCache.forEach(x=>{const lots=fefoLots(x);const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(k&&!text.includes(k))return;const n=inventoryNumbers(x);const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');const reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails('${escapeAttr(x.productKey||x.id||'')}')">${n.reserved}</button>`:'0';body.insertAdjacentHTML('beforeend',`<tr><td>${escapeHtml(x.itemCode||'')}</td><td>${escapeHtml(x.itemName||'')}</td><td>${escapeHtml(x.brand||'')}</td><td>${n.onHand}</td><td>${reserved}</td><td>${n.available}</td><td>${n.incoming}</td><td>${lotHtml}</td></tr>`);});};
+window.renderInventoryList=function(){const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';inventoryCache.forEach(x=>{const lots=fefoLots(x);const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(k&&!text.includes(k))return;const n=inventoryNumbers(x);const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');const reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails('${escapeAttr(x.productKey||x.id||'')}')">${n.reserved}</button>`:'0';body.insertAdjacentHTML('beforeend',`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="現有庫存">${n.onHand}</td><td data-th="已占用">${reserved}</td><td data-th="可用庫存">${n.available}</td><td data-th="在途">${n.incoming}</td><td data-th="批號／效期">${lotHtml}</td></tr>`);});};
 
-window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;body.innerHTML=pendingInventoryCache.map(x=>`<tr><td>${escapeHtml(x.itemCode||'')}</td><td>${escapeHtml(x.itemName||'')}</td><td>${escapeHtml(x.brand||'')}</td><td>${Number(x.incomingQty||0)}</td><td>${escapeHtml(x.supplier||'')}</td><td>待到貨／待建檔</td></tr>`).join('');if(hint)hint.style.display=pendingInventoryCache.length?'none':'block';};
+window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;body.innerHTML=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`).join('');if(hint)hint.style.display=pendingInventoryCache.length?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 window.openInventoryAdjustment=async function(){
  if(!canEditPage('inventory'))return;const code=prompt('貨號');if(!code)return;const match=priceItemLookup.get('code:'+normalizeItemCode(code));if(!match){alert('Product Master 找不到此貨號');return;}
@@ -4264,15 +4264,15 @@ window.renderPoList = function() {
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${escapeHtml(po.poNo || '')}</td>
-            <td>${escapeHtml(companyLabel)}</td>
-            <td>${escapeHtml(po.vendorName || '')}</td>
-            <td>${escapeHtml(po.buyerName || '')}</td>
-            <td>${escapeHtml(po.poDate || '')}</td>
-            <td>${items.length}</td>
-            <td>${grandTotal.toLocaleString()}</td>
-            <td>${(() => { const progress = poReceiptProgress(po); return progress.complete ? '已全部到貨' : progress.received > 0 ? '部分到貨 ' + progress.received + '/' + progress.ordered : '待到貨 0/' + progress.ordered; })()}</td>
-            <td class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button> <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button></td>
+            <td data-th="單號">${escapeHtml(po.poNo || '')}</td>
+            <td data-th="公司">${escapeHtml(companyLabel)}</td>
+            <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
+            <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
+            <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
+            <td data-th="品項數">${items.length}</td>
+            <td data-th="總計金額">${grandTotal.toLocaleString()}</td>
+            <td data-th="到貨進度">${(() => { const progress = poReceiptProgress(po); return progress.complete ? '已全部到貨' : progress.received > 0 ? '部分到貨 ' + progress.received + '/' + progress.ordered : '待到貨 0/' + progress.ordered; })()}</td>
+            <td data-th="操作" class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button> <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button></td>
         `;
         tbody.appendChild(tr);
     });
