@@ -107,6 +107,9 @@ const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', '
 const DEFAULT_STATISTIC_BRAND_ALIASES = { 'Bio-Rad': ['Biorad', 'Bio Rad', 'BIO-RAD'], 'Thermo': ['Thermo Fisher', 'Thermo Fisher Scientific'] };
 let companyAgencyBrands = { yushin: [], morningstar: [], 'MULTI-LIFE': [] };
 let companyAgencyBrandsConfigured = false;
+// Phase 1：Brand Master 為全系統正式廠牌來源；尚未完成舊資料移轉前，仍合併價目表／統計／分公司舊設定以保持相容。
+let brandMasterCache = [];
+let brandMasterLoadPromise = null;
 let hiddenBrands = [];       // 舊欄位，保留避免舊資料丟失，畫面已經不再使用黑名單模式
 
 // 印章圖片常數定義在 stamps-data.js（需在此檔案之前載入）。
@@ -762,12 +765,7 @@ function buildForecastProgressText(text, fallback = '立案') {
 }
 
 function normalizeForecastBrand(value) {
-    const input = String(value || '').trim();
-    if (!input) return '';
-    const exact = getPriceListBrands(false).find(
-        brand => String(brand || '').trim().toLocaleLowerCase() === input.toLocaleLowerCase()
-    );
-    return exact || input;
+    return resolveBrandName(value);
 }
 
 function populateForecastBrandFilter() {
@@ -1638,7 +1636,13 @@ function loadPriceListFromCloud() {
         refreshPriceDatalists();
         renderKeyStatisticBrands();
     }).catch(() => {});
-    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings()]);
+    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(result => {
+        // 四個來源都完成後再統一刷新一次，避免載入順序造成不同模組看到不同廠牌清單。
+        refreshPriceDatalists();
+        renderKeyStatisticBrands();
+        renderCompanyAgencyBrandSettings();
+        return result;
+    });
 }
 
 function loadCompanyAgencyBrandSettings() {
@@ -1719,11 +1723,9 @@ function refreshPriceDatalists() {
     populateQuoteBrandDropdowns();
 }
 
-// 廠牌下拉選單的正式廠牌全部來自價格表。
+// 舊函式名稱保留供既有模組呼叫；實際候選廠牌已統一由 Brand Master 相容層提供。
 function getPriceListBrands(includeMaintenance = false) {
-    const brands = dedupeBrandsCaseInsensitive(priceList.map(p => p.brand));
-    if (includeMaintenance && !brands.some(b => b.toLocaleLowerCase() === '維修')) brands.push('維修');
-    return brands.sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    return getUnifiedBrandNames(includeMaintenance);
 }
 
 function dedupeBrandsCaseInsensitive(brands) {
@@ -1734,6 +1736,106 @@ function dedupeBrandsCaseInsensitive(brands) {
         if (brand && !unique.has(key)) unique.set(key, brand);
     });
     return [...unique.values()];
+}
+
+function normalizeBrandLookupKey(value) {
+    return String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/[\s\-_]+/g, '');
+}
+
+function normalizeBrandMasterRecord(id, data = {}) {
+    const name = String(data.name || data.brand || id || '').trim();
+    return {
+        id: id || '',
+        name,
+        aliases: dedupeBrandsCaseInsensitive(data.aliases || []),
+        isKeyBrand: data.isKeyBrand === true,
+        companies: Array.isArray(data.companies) ? data.companies.filter(Boolean) : [],
+        active: data.active !== false
+    };
+}
+
+function getUnifiedBrandEntries(includeMaintenance = false) {
+    const entries = new Map();
+
+    const upsert = (name, patch = {}) => {
+        const cleanName = String(name || '').trim();
+        if (!cleanName) return;
+        if (!includeMaintenance && normalizeBrandLookupKey(cleanName) === normalizeBrandLookupKey('維修')) return;
+
+        const key = normalizeBrandLookupKey(cleanName);
+        const existing = entries.get(key) || {
+            id: '',
+            name: cleanName,
+            aliases: [],
+            isKeyBrand: false,
+            companies: [],
+            active: true
+        };
+
+        if (patch.id && !existing.id) existing.id = patch.id;
+        if (patch.name && patch.preferName) existing.name = String(patch.name).trim() || existing.name;
+        existing.aliases = dedupeBrandsCaseInsensitive([...(existing.aliases || []), ...(patch.aliases || [])])
+            .filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(existing.name));
+        existing.isKeyBrand = existing.isKeyBrand || patch.isKeyBrand === true;
+        existing.companies = [...new Set([...(existing.companies || []), ...(patch.companies || [])])];
+        if (patch.active === false) existing.active = false;
+        entries.set(key, existing);
+    };
+
+    // 正式 Brand Master 優先決定顯示名稱。
+    brandMasterCache.filter(item => item && item.active !== false).forEach(item => {
+        upsert(item.name, { ...item, preferName: true });
+    });
+
+    // 舊資料相容層：價目表、統計設定、分公司代理設定在完成移轉前仍納入候選品牌。
+    priceList.forEach(item => upsert(item.brand));
+    keyStatisticBrands.forEach(name => upsert(name, {
+        isKeyBrand: true,
+        aliases: keyStatisticBrandAliases[name] || []
+    }));
+    Object.entries(keyStatisticBrandAliases).forEach(([name, aliases]) => upsert(name, { aliases }));
+
+    ['yushin', 'morningstar', 'MULTI-LIFE'].forEach(company => {
+        (companyAgencyBrands[company] || []).forEach(name => {
+            if (name !== OTHER_BRAND_OPTION_KEY && name !== '其他') upsert(name, { companies: [company] });
+        });
+    });
+
+    if (includeMaintenance) upsert('維修');
+    return [...entries.values()]
+        .filter(item => item.active !== false)
+        .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hant'));
+}
+
+function getUnifiedBrandNames(includeMaintenance = false) {
+    return getUnifiedBrandEntries(includeMaintenance).map(item => item.name);
+}
+
+function resolveBrandName(value) {
+    const input = String(value || '').trim();
+    if (!input) return '';
+    const key = normalizeBrandLookupKey(input);
+
+    for (const entry of getUnifiedBrandEntries(true)) {
+        if (normalizeBrandLookupKey(entry.name) === key) return entry.name;
+        if ((entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)) return entry.name;
+    }
+    return input;
+}
+
+function loadBrandMaster() {
+    if (brandMasterLoadPromise) return brandMasterLoadPromise;
+    brandMasterLoadPromise = db.collection('brands').limit(500).get().then(snapshot => {
+        brandMasterCache = snapshot.docs
+            .map(doc => normalizeBrandMasterRecord(doc.id, doc.data()))
+            .filter(item => item.name && item.active !== false);
+        return brandMasterCache;
+    }).catch(err => {
+        console.warn('讀取 Brand Master 失敗，暫時沿用既有廠牌設定：', err);
+        brandMasterCache = [];
+        return brandMasterCache;
+    });
+    return brandMasterLoadPromise;
 }
 
 function normalizeThermoBrandList(brands) {
@@ -1747,7 +1849,7 @@ function includesBrandCaseInsensitive(brands, brand) {
     return (brands || []).some(value => String(value || '').trim().toLocaleLowerCase() === key);
 }
 
-// 廠牌管理的候選項目只來自價目表。
+// 價格表原始廠牌清單僅供價格資料管理使用；一般模組請改走 Brand Master 相容層。
 function getAllPriceListBrandsRaw() {
     return dedupeBrandsCaseInsensitive(priceList.map(p => p.brand))
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
@@ -6322,9 +6424,19 @@ function normalizeStatisticBrandKey(value) {
 
 function statisticBrandAliasLookup() {
     const lookup = new Map();
+    const masterEntries = getUnifiedBrandEntries(true);
     [...keyStatisticBrands, '維修'].forEach(brand => {
-        lookup.set(normalizeStatisticBrandKey(brand), brand);
-        (keyStatisticBrandAliases[brand] || []).forEach(alias => lookup.set(normalizeStatisticBrandKey(alias), brand));
+        const canonical = resolveBrandName(brand) || brand;
+        lookup.set(normalizeStatisticBrandKey(canonical), canonical);
+        lookup.set(normalizeStatisticBrandKey(brand), canonical);
+
+        const master = masterEntries.find(entry => normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(canonical));
+        const aliases = dedupeBrandsCaseInsensitive([
+            ...(keyStatisticBrandAliases[brand] || []),
+            ...(keyStatisticBrandAliases[canonical] || []),
+            ...(master?.aliases || [])
+        ]);
+        aliases.forEach(alias => lookup.set(normalizeStatisticBrandKey(alias), canonical));
     });
     return lookup;
 }
@@ -6390,7 +6502,7 @@ window.saveKeyStatisticBrands = function() {
 function renderCompanyAgencyBrandSettings() {
     const container = document.getElementById('companyAgencyBrandSettings');
     if (!container) return;
-    const brands = getAllPriceListBrandsRaw();
+    const brands = getUnifiedBrandNames(false);
     const companies = ['yushin', 'morningstar', 'MULTI-LIFE'];
     container.innerHTML = companies.map(company => {
         const info = companyData[company];
