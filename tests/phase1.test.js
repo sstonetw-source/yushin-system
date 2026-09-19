@@ -765,3 +765,33 @@ test('Forecast basic edits preserve Stage and status for the progress workflow',
     assert.match(s, /existing\?\.status/);
     assert.match(s, /基本資料更新/);
 });
+
+
+test('quote item-code auto-fill waits for Product Master and reacts while typing', () => {
+    assert.match(appSource, /function findPriceItemByCodeValue/);
+    assert.match(appSource, /function applyQuoteProductMatch/);
+    assert.match(appSource, /window\.onItemModelInput/);
+    assert.match(appSource, /await ensurePriceListLoaded\(\)/);
+    assert.match(appSource, /oninput="onItemModelInput\(this\)"/);
+});
+
+test('quote item-code auto-fill fills product identity brand and current price', () => {
+    const start = appSource.indexOf('function applyQuoteProductMatch');
+    const end = appSource.indexOf('let quoteModelInputTimer', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /item-en/);
+    assert.match(s, /item-cn/);
+    assert.match(s, /item-model/);
+    assert.match(s, /selectBrandInDropdown/);
+    assert.match(s, /item-product-id/);
+    assert.match(s, /inc-price/);
+    assert.match(s, /onIncPriceChange/);
+});
+
+test('quote product lookup tolerates harmless item-code punctuation only when unique', () => {
+    const start = appSource.indexOf('function findPriceItemByCodeValue');
+    const end = appSource.indexOf('function applyQuoteProductMatch', start);
+    const s = appSource.slice(start, end);
+    assert.match(s, /normalizeItemCodeLoose/);
+    assert.match(s, /candidates\.length === 1/);
+});
