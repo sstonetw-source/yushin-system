@@ -3080,7 +3080,7 @@ window.renderMyQuotesList = function() {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
-        if (!dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
+        if (q.dealClosed && !dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
         shown++;
 
         const tr = document.createElement('tr');
@@ -3152,7 +3152,7 @@ window.createForecastFromQuote = async function(quoteNo) {
             .join('、');
 
         const brands = dedupeBrandsCaseInsensitive(
-            items.map(item => item.brand).filter(Boolean)
+            items.map(item => resolveBrandName(item.brand)).filter(Boolean)
         );
 
         const brand = brands.length === 1 ? brands[0] : brands.join(' / ');
@@ -3162,13 +3162,16 @@ window.createForecastFromQuote = async function(quoteNo) {
 
         const ref = db.collection('forecasts').doc();
 
+        const forecastCustomerName = q.ordererName || q.clientName || '';
         const record = {
-            customerName: q.ordererName || q.clientName || '',
+            customerName: forecastCustomerName,
+            customerId: q.customerId || syncCustomerMaster(forecastCustomerName, { salesCode: q.salesCode || salesCodeForName(q.salesName) }),
             brand,
             productName,
             estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g, '')) || 0,
             stage,
             status,
+            closedAt: status === 'active' ? null : now,
             latestProgress: displayProgress,
             latestProgressAt: now,
             salesName: q.salesName || currentUserName || '',
@@ -3241,8 +3244,9 @@ window.markQuoteAsDeal = function(quoteNo) {
                 orderDate: todayStr,
                 createdAt: new Date().toISOString(),
                 company: q.company || '',
-                customerName: q.ordererName || '',
-                brand: item.brand || '',
+                customerName: q.ordererName || q.clientName || '',
+                customerId: q.customerId || customerIdForName(q.ordererName || q.clientName || ''),
+                brand: resolveBrandName(item.brand || ''),
                 productLine: item.productLine || '',
                 productType: item.productType || '',
                 productId: item.productId || '',
@@ -3268,7 +3272,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 invoiceDate: ''
             };
             // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
-            const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: item.brand }) : null;
+            const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: resolveBrandName(item.brand || '') }) : null;
             if (priceMatch) {
                 orderData.productId = orderData.productId || priceMatch.productId || stableProductId(priceMatch);
                 orderData.unit = priceMatch.unit || '';
