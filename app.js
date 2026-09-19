@@ -3556,6 +3556,7 @@ function inventoryReservationPayload(orderId, order, reservedQty, status = 'acti
         customerName: order.customerName || '',
         salesCode: order.salesCode || salesCodeForName(order.salesName),
         salesName: order.salesName || '',
+        orderDate: order.orderDate || '',
         quantity: Math.max(0, Number(reservedQty || 0)),
         status,
         updatedAt: new Date().toISOString()
@@ -3575,23 +3576,19 @@ window.openInventoryReservationDetails = async function(productKey) {
     if (title) title.innerText = '已占用訂單';
     overlay.classList.add('active');
     try {
-        const snapshot = await db.collection('orders').where('inventoryProductKey', '==', productKey).limit(100).get();
-        const rows = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-            .filter(order => normalizedOrderStatus(order) === 'normal')
-            .map(order => {
-                const reserved = Math.max(0, Number(order.inventoryReservedQty || 0) - deliveredQuantity(order));
-                return { ...order, _reserved: reserved };
-            })
-            .filter(order => order._reserved > 0)
+        const snapshot = await db.collection('inventoryReservations').where('productKey', '==', productKey).limit(100).get();
+        const rows = snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(item => item.status === 'active' && Number(item.quantity || 0) > 0)
             .sort((x, y) => String(y.orderDate || '').localeCompare(String(x.orderDate || '')));
-        body.innerHTML = rows.length ? rows.map(order => `<tr>
-            <td>${escapeHtml(order.id)}</td>
-            <td>${escapeHtml(order.customerName || '')}</td>
-            <td>${escapeHtml(order.itemCode || '')}</td>
-            <td>${escapeHtml(order.itemName || '')}</td>
-            <td>${order._reserved}</td>
-            <td>${escapeHtml(order.salesName || order.salesCode || '')}</td>
-            <td>${escapeHtml(order.orderDate || '')}</td>
+        body.innerHTML = rows.length ? rows.map(item => `<tr>
+            <td>${escapeHtml(item.orderNo || item.orderId || item.id)}</td>
+            <td>${escapeHtml(item.customerName || '')}</td>
+            <td>${escapeHtml(item.itemCode || '')}</td>
+            <td>${escapeHtml(item.itemName || '')}</td>
+            <td>${Number(item.quantity || 0)}</td>
+            <td>${escapeHtml(item.salesName || item.salesCode || '')}</td>
+            <td>${escapeHtml(item.orderDate || '')}</td>
         </tr>`).join('') : '<tr><td colspan="7" style="color:#888;">目前沒有有效占用訂單。</td></tr>';
     } catch (err) {
         body.innerHTML = `<tr><td colspan="7">讀取失敗：${escapeHtml(err.message || String(err))}</td></tr>`;
@@ -4280,14 +4277,25 @@ function poIncomingKey(item) {
 async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
     const previousItems = previousPo ? purchaseItemsFromSavedPo(previousPo) : [];
     const nextItems = purchaseItemsFromSavedPo(poRecord);
+
     await db.runTransaction(async tx => {
         const refs = new Map();
         [...previousItems, ...nextItems].forEach(item => {
             const key = poIncomingKey(item);
             if (key) refs.set(key, db.collection('inventory').doc(encodeURIComponent(key)));
         });
-        const snaps = new Map();
-        for (const [key, ref] of refs) snaps.set(key, await tx.get(ref));
+
+        // Firestore transaction 要求所有 reads 在 writes 之前完成。
+        const inventorySnaps = new Map();
+        const pendingSnaps = new Map();
+        for (const [key, ref] of refs) {
+            const invSnap = await tx.get(ref);
+            inventorySnaps.set(key, invSnap);
+            if (!invSnap.exists) {
+                const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
+                pendingSnaps.set(key, await tx.get(pendingRef));
+            }
+        }
 
         for (const [key, ref] of refs) {
             const oldQty = previousItems.filter(i => poIncomingKey(i) === key).reduce((s, i) => s + Number(i.qty || 0), 0);
@@ -4296,36 +4304,34 @@ async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
             if (!delta) continue;
 
             const sample = nextItems.find(i => poIncomingKey(i) === key) || previousItems.find(i => poIncomingKey(i) === key) || {};
-            const snap = snaps.get(key);
-            if (snap?.exists) {
-                const stock = inventoryNumbers(snap.data());
-                tx.set(ref, {
-                    productKey: key,
-                    productId: sample.productId || '',
-                    itemCode: sample.itemCode || '',
-                    itemName: sample.itemName || '',
-                    brand: resolveBrandName(sample.brand || ''),
-                    onHand: stock.onHand,
-                    reserved: stock.reserved,
+            const invSnap = inventorySnaps.get(key);
+
+            if (invSnap?.exists) {
+                const stock = inventoryNumbers(invSnap.data());
+                tx.update(ref, {
                     incoming: Math.max(0, stock.incoming + delta),
                     updatedAt: new Date().toISOString()
-                }, { merge: true });
+                });
             } else {
                 const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
-                tx.set(pendingRef, {
+                const pending = pendingSnaps.get(key);
+                const oldPendingQty = Number(pending?.exists ? pending.data().incomingQty : 0) || 0;
+                const sourceOrderIds = nextItems.filter(i => poIncomingKey(i) === key && i.orderId).map(i => i.orderId);
+                const payload = {
                     productKey: key,
                     productId: sample.productId || '',
                     itemCode: sample.itemCode || '',
                     itemName: sample.itemName || '',
                     brand: resolveBrandName(sample.brand || ''),
                     supplier: poRecord.vendorName || '',
-                    incomingQty: Math.max(0, newQty),
-                    status: 'pending-arrival',
+                    incomingQty: Math.max(0, oldPendingQty + delta),
+                    status: Math.max(0, oldPendingQty + delta) > 0 ? 'pending-arrival' : 'cancelled',
                     sourcePurchaseOrders: firebase.firestore.FieldValue.arrayUnion(poId),
-                    sourceOrderIds: firebase.firestore.FieldValue.arrayUnion(...nextItems.filter(i => poIncomingKey(i) === key && i.orderId).map(i => i.orderId)),
                     updatedAt: new Date().toISOString(),
-                    createdAt: new Date().toISOString()
-                }, { merge: true });
+                    createdAt: pending?.exists ? (pending.data().createdAt || new Date().toISOString()) : new Date().toISOString()
+                };
+                if (sourceOrderIds.length) payload.sourceOrderIds = firebase.firestore.FieldValue.arrayUnion(...sourceOrderIds);
+                tx.set(pendingRef, payload, { merge: true });
             }
 
             tx.set(db.collection('inventoryMovements').doc(), {
@@ -5161,22 +5167,59 @@ window.prepareOrderLifecycle = function(orderId, status) {
 };
 
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor) {
-    const invRef = inventoryRefFor(order); if (!invRef) return;
-    const snap = await transaction.get(invRef), stock = inventoryNumbers(snap.exists ? snap.data() : {});
+    const invRef = inventoryRefFor(order);
     const currentlyReserved = Math.max(0, Number(order.inventoryReservedQty || 0) - deliveredQuantity(order));
+
     if (nextStatus === 'cancelled') {
-        const release = Math.min(currentlyReserved, stock.reserved);
-        if (!release) return;
-        transaction.set(invRef, { reserved: Math.max(0, stock.reserved - release), updatedAt: new Date().toISOString() }, { merge: true });
-        transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release', -release, orderId, inventoryProductKey(order), actor, { reason: 'order_cancelled' }));
+        if (invRef) {
+            const snap = await transaction.get(invRef);
+            if (snap.exists) {
+                const stock = inventoryNumbers(snap.data());
+                const release = Math.min(currentlyReserved, stock.reserved);
+                if (release > 0) {
+                    transaction.update(invRef, { reserved: Math.max(0, stock.reserved - release), updatedAt: new Date().toISOString() });
+                    transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release', -release, orderId, inventoryProductKey(order), actor, { reason: 'order_cancelled' }));
+                }
+            }
+        }
+        transaction.update(db.collection('orders').doc(orderId), {
+            inventoryReservedQty: deliveredQuantity(order),
+            inventoryShortageQty: 0
+        });
         transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, 'released'), { merge: true });
-    } else if (nextStatus === 'normal') {
+        return;
+    }
+
+    if (nextStatus === 'normal') {
         const needed = Math.max(0, orderQuantity(order) - deliveredQuantity(order));
+        if (!invRef) {
+            transaction.update(db.collection('orders').doc(orderId), {
+                inventoryReservedQty: deliveredQuantity(order),
+                inventoryShortageQty: needed
+            });
+            transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'), { merge: true });
+            return;
+        }
+
+        const snap = await transaction.get(invRef);
+        if (!snap.exists) {
+            transaction.update(db.collection('orders').doc(orderId), {
+                inventoryReservedQty: deliveredQuantity(order),
+                inventoryShortageQty: needed
+            });
+            transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, needed > 0 ? 'shortage' : 'released'), { merge: true });
+            return;
+        }
+
+        const stock = inventoryNumbers(snap.data());
         const reserve = Math.min(needed, Math.max(0, stock.available));
-        transaction.set(invRef, { reserved: stock.reserved + reserve, updatedAt: new Date().toISOString() }, { merge: true });
+        transaction.update(invRef, { reserved: stock.reserved + reserve, updatedAt: new Date().toISOString() });
         if (reserve) transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('reserve', reserve, orderId, inventoryProductKey(order), actor, { reason: 'order_restored' }));
-        transaction.update(db.collection('orders').doc(orderId), { inventoryReservedQty: deliveredQuantity(order) + reserve, inventoryShortageQty: Math.max(0, needed - reserve) });
-        transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, reserve, reserve > 0 ? 'active' : 'shortage'), { merge: true });
+        transaction.update(db.collection('orders').doc(orderId), {
+            inventoryReservedQty: deliveredQuantity(order) + reserve,
+            inventoryShortageQty: Math.max(0, needed - reserve)
+        });
+        transaction.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, reserve, reserve > 0 ? 'active' : (needed > 0 ? 'shortage' : 'released')), { merge: true });
     }
 }
 
