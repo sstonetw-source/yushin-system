@@ -4157,51 +4157,73 @@ function orderReservedQuantity(order) {
 }
 
 async function reserveInventoryForNewOrder(orderId, order) {
-    const ref = inventoryRefFor(order);
     const requested = orderQuantity(order);
-    if (!ref || !requested) return { reservedQty: 0, shortageQty: requested };
-
     const productKey = inventoryProductKey(order);
+    if (!requested || !productKey) return { reservedQty: 0, shortageQty: requested };
+
+    // 原廠直送完全繞過庫存；不建立 reservation、不動 aggregate inventory。
+    if ((order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
+        await db.collection('orders').doc(orderId).set({
+            inventoryReservedQty: 0,
+            inventoryShortageQty: 0,
+            inventoryProductKey: productKey,
+            directShipQty: requested,
+            fulfillmentType: 'DIRECT_SHIP',
+            warehouseId: ''
+        }, { merge: true });
+        return { reservedQty: 0, shortageQty: 0, directShip: true };
+    }
+
+    const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
+    const aggregateRef = inventoryRefFor(order);
+    const warehouseRef = warehouseId
+        ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey))
+        : null;
     const actor = currentUserName || currentUser?.email || '';
     let result;
 
     await db.runTransaction(async tx => {
-        const snap = await tx.get(ref);
+        const aggregateSnap = aggregateRef ? await tx.get(aggregateRef) : null;
+        const warehouseSnap = warehouseRef ? await tx.get(warehouseRef) : null;
 
-        // 新產品在「訂單成立」時不建立正式 inventory 主檔。
-        // 先把整筆需求列為 shortage；等 PO 送出後進 pendingInventoryItems，到貨時才一鍵建檔。
-        if (!snap.exists) {
-            tx.update(db.collection('orders').doc(orderId), {
-                inventoryReservedQty: 0,
-                inventoryShortageQty: requested,
-                inventoryProductKey: productKey
+        // 有分倉資料時，庫存占用以指定倉庫為準；舊資料尚未分倉則不猜位置，整筆列 shortage。
+        const warehouseStock = warehouseSnap?.exists ? inventoryNumbers(warehouseSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
+        const aggregateStock = aggregateSnap?.exists ? inventoryNumbers(aggregateSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
+        const reservable = Math.max(0, Math.min(requested, warehouseStock.available));
+        const shortage = Math.max(0, requested - reservable);
+        const now = new Date().toISOString();
+
+        if (warehouseRef && warehouseSnap?.exists && reservable) {
+            tx.update(warehouseRef, {
+                reserved: warehouseStock.reserved + reservable,
+                updatedAt: now
             });
-            tx.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, 'shortage'), { merge: true });
-            result = { reservedQty: 0, shortageQty: requested };
-            return;
+        }
+        if (aggregateRef && aggregateSnap?.exists && reservable) {
+            tx.update(aggregateRef, {
+                reserved: aggregateStock.reserved + reservable,
+                updatedAt: now
+            });
         }
 
-        const stock = inventoryNumbers(snap.data());
-        const reservable = Math.max(0, Math.min(requested, stock.available));
-        const shortage = Math.max(0, requested - reservable);
-
-        tx.update(ref, {
-            reserved: stock.reserved + reservable,
-            updatedAt: new Date().toISOString()
-        });
-
         if (reservable) {
-            const movement = db.collection('inventoryMovements').doc();
-            tx.set(movement, inventoryMovementRecord('reserve', reservable, orderId, productKey, actor));
+            tx.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
+                'reserve', reservable, orderId, productKey, actor, { warehouseId, fulfillmentType:'WAREHOUSE' }
+            ));
         }
 
         tx.update(db.collection('orders').doc(orderId), {
             inventoryReservedQty: reservable,
             inventoryShortageQty: shortage,
-            inventoryProductKey: productKey
+            inventoryProductKey: productKey,
+            fulfillmentType: 'WAREHOUSE',
+            warehouseId
         });
-        tx.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, reservable, reservable > 0 ? 'active' : 'shortage'), { merge: true });
-        result = { reservedQty: reservable, shortageQty: shortage };
+        tx.set(reservationDocRef(orderId), {
+            ...inventoryReservationPayload(orderId, { ...order, warehouseId }, reservable, reservable > 0 ? 'active' : 'shortage'),
+            warehouseId
+        }, { merge: true });
+        result = { reservedQty: reservable, shortageQty: shortage, warehouseId };
     });
     return result;
 }
