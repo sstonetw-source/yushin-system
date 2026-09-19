@@ -3575,20 +3575,49 @@ function orderReservedQuantity(order) {
 }
 
 async function reserveInventoryForNewOrder(orderId, order) {
-    const ref = inventoryRefFor(order); if (!ref || !orderQuantity(order)) return { reservedQty: 0, shortageQty: orderQuantity(order) };
-    const productKey = inventoryProductKey(order), actor = currentUserName || currentUser?.email || '';
+    const ref = inventoryRefFor(order);
+    const requested = orderQuantity(order);
+    if (!ref || !requested) return { reservedQty: 0, shortageQty: requested };
+
+    const productKey = inventoryProductKey(order);
+    const actor = currentUserName || currentUser?.email || '';
     let result;
+
     await db.runTransaction(async tx => {
-        const snap = await tx.get(ref), stock = inventoryNumbers(snap.exists ? snap.data() : {});
-        const requested = orderQuantity(order);
+        const snap = await tx.get(ref);
+
+        // 新產品在「訂單成立」時不建立正式 inventory 主檔。
+        // 先把整筆需求列為 shortage；等 PO 送出後進 pendingInventoryItems，到貨時才一鍵建檔。
+        if (!snap.exists) {
+            tx.update(db.collection('orders').doc(orderId), {
+                inventoryReservedQty: 0,
+                inventoryShortageQty: requested,
+                inventoryProductKey: productKey
+            });
+            tx.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, 0, 'shortage'), { merge: true });
+            result = { reservedQty: 0, shortageQty: requested };
+            return;
+        }
+
+        const stock = inventoryNumbers(snap.data());
         const reservable = Math.max(0, Math.min(requested, stock.available));
         const shortage = Math.max(0, requested - reservable);
-        tx.set(ref, { productKey, productId: order.productId || '', itemCode: order.itemCode || '', itemName: order.itemName || '', onHand: stock.onHand, reserved: stock.reserved + reservable, incoming: stock.incoming, updatedAt: new Date().toISOString() }, { merge: true });
+
+        tx.update(ref, {
+            reserved: stock.reserved + reservable,
+            updatedAt: new Date().toISOString()
+        });
+
         if (reservable) {
             const movement = db.collection('inventoryMovements').doc();
             tx.set(movement, inventoryMovementRecord('reserve', reservable, orderId, productKey, actor));
         }
-        tx.update(db.collection('orders').doc(orderId), { inventoryReservedQty: reservable, inventoryShortageQty: shortage, inventoryProductKey: productKey });
+
+        tx.update(db.collection('orders').doc(orderId), {
+            inventoryReservedQty: reservable,
+            inventoryShortageQty: shortage,
+            inventoryProductKey: productKey
+        });
         tx.set(reservationDocRef(orderId), inventoryReservationPayload(orderId, order, reservable, reservable > 0 ? 'active' : 'shortage'), { merge: true });
         result = { reservedQty: reservable, shortageQty: shortage };
     });
