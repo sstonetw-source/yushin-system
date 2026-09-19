@@ -840,3 +840,52 @@ test('manual inventory changes support batch rows instead of browser prompts', (
     const s = appSource.slice(start, end);
     assert.doesNotMatch(s, /prompt\('貨號'/);
 });
+
+
+test('Product Master v2 overlays products on top of the legacy price list', () => {
+    assert.match(appSource, /function loadProductMasterOverlay/);
+    assert.match(appSource, /db\.collection\('products'\)\.limit\(500\)/);
+    assert.match(appSource, /await loadProductMasterOverlay\(\)/);
+    assert.match(appSource, /productMasterDocToPriceItem/);
+    assert.match(appSource, /const merged = new Map\(priceList/);
+});
+
+test('Product Master v2 keeps authorization separate from the legacy productType category', () => {
+    assert.match(appSource, /authorizationTypeForProduct/);
+    assert.match(appSource, /authorizationType/);
+    assert.match(appSource, /productType: data\.category \|\| data\.productType/);
+});
+
+test('quick product creation is temporary, duplicate-safe and can be used from quote or order', () => {
+    assert.match(appSource, /window\.openQuickProductCreate/);
+    assert.match(appSource, /window\.saveQuickProduct/);
+    assert.match(appSource, /status: 'TEMPORARY'/);
+    assert.match(appSource, /normalizedPartNo/);
+    assert.match(appSource, /where\('normalizedPartNo', '==', normalizedPartNo\)/);
+    assert.match(appSource, /showQuickProductButton\(input, 'quote'\)/);
+    assert.match(appSource, /showQuickProductButton\(input, 'order'\)/);
+});
+
+test('sales cost visibility depends on authorizationType and secure productCosts', () => {
+    assert.match(appSource, /function loadVisibleProductCost/);
+    assert.match(appSource, /currentUserRole === 'sales' && authType === 'AUTHORIZED'/);
+    assert.match(appSource, /db\.collection\('productCosts'\)\.doc\(productId\)/);
+    assert.match(appSource, /salesVisible !== true/);
+    assert.match(appSource, /applyOrderProductCost/);
+});
+
+test('sales can enter transaction cost only for non-authorized products', () => {
+    const start = appSource.indexOf('window.saveNewOrder');
+    const end = appSource.indexOf('function loadOrdersFromCloud', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /authorizationTypeForProduct\(selectedProduct\) === 'NON_AUTHORIZED'/);
+    assert.match(source, /sales_manual_or_visible_non_authorized/);
+});
+
+test('Firestore rules separate product data from costs and protect authorized costs', () => {
+    assert.match(rulesSource, /match \/productCosts\/\{id\}/);
+    assert.match(rulesSource, /sales\(\) && resource\.data\.salesVisible == true/);
+    assert.match(rulesSource, /status == 'TEMPORARY'/);
+    assert.match(rulesSource, /authorizationType == 'NON_AUTHORIZED'/);
+    assert.match(rulesSource, /allow update: if admin\(\) \|\| purchaser\(\)/);
+});
