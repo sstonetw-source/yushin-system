@@ -97,6 +97,7 @@ let equipmentLoadGeneration = 0;
 // 管理員後台狀態
 let allQuotesCache = [];
 let allUsersCache = [];
+let salesCodeMasterCache = [];
 let salesStatisticsOrders = [];
 let salesStatisticsLoadPromise = null;
 let inventoryAnalysisReceipts = [];
@@ -7583,9 +7584,19 @@ async function syncSalesCodeMasterFromUsers() {
     }
 }
 
+async function loadSalesCodeMaster() {
+    const snapshot = await db.collection('salesCodes').limit(500).get();
+    salesCodeMasterCache = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(item => item.active !== false)
+        .sort((x, y) => String(x.code || x.id).localeCompare(String(y.code || y.id), 'zh-Hant'));
+    return salesCodeMasterCache;
+}
+
 window.reloadSalesFromUsers = function() {
     return Promise.all([initSalesList(), loadAllUsersForAdmin()]).then(async () => {
         if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
+        await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
         renderAdminSalesTable();
         populateTransferDropdowns();
     });
@@ -7599,8 +7610,11 @@ function populateTransferDropdowns() {
 
     const codeValue = codeSelect.value;
     const userValue = userSelect.value;
+    const codeRows = salesCodeMasterCache.length
+        ? salesCodeMasterCache
+        : salesList.filter(s => s.code).map(s => ({ code: s.code, currentUserName: s.name, currentUserUid: s.uid }));
     codeSelect.innerHTML = '<option value="">請選擇業務代號</option>' +
-        salesList.filter(s => s.code).map(s => `<option value="${escapeAttr(s.code)}">${escapeHtml(s.code)}｜${escapeHtml(s.name || '')}</option>`).join('');
+        codeRows.map(s => `<option value="${escapeAttr(s.code || s.id)}">${escapeHtml(s.code || s.id)}｜${escapeHtml(s.currentUserName || '未指派')}</option>`).join('');
     userSelect.innerHTML = '<option value="">請選擇接手同仁</option>' +
         allUsersCache.filter(u => u.name).map(u => `<option value="${escapeAttr(u.uid)}">${escapeHtml(u.name)}｜${escapeHtml(u.email || u.uid)}</option>`).join('');
     if ([...codeSelect.options].some(o => o.value === codeValue)) codeSelect.value = codeValue;
@@ -7618,9 +7632,12 @@ window.resetTransferPreview = function() {
 function getTransferSelection() {
     const salesCode = document.getElementById('transferFromSales')?.value || '';
     const targetUid = document.getElementById('transferToSales')?.value || '';
-    const currentHolder = salesList.find(s => String(s.code) === String(salesCode)) || null;
+    const master = salesCodeMasterCache.find(item => String(item.code || item.id) === String(salesCode)) || null;
+    const currentHolder = master?.currentUserUid
+        ? allUsersCache.find(u => u.uid === master.currentUserUid) || { uid: master.currentUserUid, name: master.currentUserName || '', code: salesCode }
+        : salesList.find(s => String(s.code) === String(salesCode)) || null;
     const target = allUsersCache.find(u => u.uid === targetUid) || null;
-    return { salesCode, targetUid, currentHolder, target };
+    return { salesCode, targetUid, currentHolder, target, master };
 }
 
 async function countLegacyRecordsForSalesCode(person) {
@@ -7649,6 +7666,10 @@ window.previewSalesTransfer = async function() {
     }
     if (currentHolder?.uid === target.uid) {
         resultEl.innerText = '這位同仁目前已經是此業務代號的負責人。';
+        return;
+    }
+    if (target.code && String(target.code) !== String(salesCode)) {
+        resultEl.innerText = `接手同仁目前已有業務代號 ${target.code}。請先完成該代號的交接或解除後，再接手 ${salesCode}，避免同一帳號同時擁有兩個代號。`;
         return;
     }
 
