@@ -53,7 +53,35 @@ service cloud.firestore {
 
     match /products/{id} {
       allow read: if signedIn();
-      allow create, update: if admin() || purchaser() || warehouse();
+      // 業務只可快速建立 TEMPORARY 產品，不能直接修改正式 Product Master。
+      allow create: if admin() || purchaser() || warehouse()
+        || (sales()
+          && request.resource.data.status == 'TEMPORARY'
+          && request.resource.data.productId == id
+          && request.resource.data.brandName is string
+          && request.resource.data.manufacturerPartNo is string
+          && request.resource.data.normalizedPartNo is string
+          && request.resource.data.productName is string
+          && (request.resource.data.authorizationType == 'AUTHORIZED'
+            || request.resource.data.authorizationType == 'NON_AUTHORIZED'));
+      allow update: if admin() || purchaser() || warehouse();
+      allow delete: if false;
+    }
+
+    // 成本與產品主檔分離。代理產品成本不放在 products 文件內，
+    // sales 只有在該成本文件明確 salesVisible=true 時才能讀取。
+    match /productCosts/{id} {
+      allow read: if admin() || purchaser() || warehouse()
+        || (sales() && resource.data.salesVisible == true);
+      // 採購/管理員可維護正式成本；業務只可在快速建立「非代理 TEMPORARY 產品」時
+      // 新增一筆 salesVisible=true 的成本，不得更新既有成本。
+      allow create: if admin() || purchaser()
+        || (sales()
+          && request.resource.data.productId == id
+          && request.resource.data.salesVisible == true
+          && getAfter(/databases/$(database)/documents/products/$(id)).data.status == 'TEMPORARY'
+          && getAfter(/databases/$(database)/documents/products/$(id)).data.authorizationType == 'NON_AUTHORIZED');
+      allow update: if admin() || purchaser();
       allow delete: if false;
     }
 
