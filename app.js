@@ -5046,7 +5046,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         if (field === 'isOrdered' && !newValue && (order.isArrived || serverDelivery.delivered > 0)) throw new Error('已有到貨或送貨進度，不能取消訂貨。');
         if (field === 'isArrived' && !newValue && serverDelivery.delivered > 0) throw new Error('已有送貨進度，不能取消到貨。');
         const entries = [];
-        const updates = { [field]: newValue };
+        const updates = { [field]: newValue, updatedAt: timestamp };
         if (field === 'isArrived' && newValue && !order.isOrdered) {
             updates.isOrdered = true;
             updates.orderedBy = order.orderedBy || actor;
@@ -5099,7 +5099,7 @@ window.updateOrderInvoiceDate = function(orderId, value) {
     order.invoiceDate = value;
     order.fieldEditHistory = [...(order.fieldEditHistory || []), history];
     renderOrdersList();
-    db.collection('orders').doc(orderId).update({ invoiceDate: value, fieldEditHistory: firebase.firestore.FieldValue.arrayUnion(history) }).catch(err => {
+    db.collection('orders').doc(orderId).update({ invoiceDate: value, updatedAt: history.at, fieldEditHistory: firebase.firestore.FieldValue.arrayUnion(history) }).catch(err => {
         order.invoiceDate = previous;
         order.fieldEditHistory = (order.fieldEditHistory || []).filter(item => item !== history);
         renderOrdersList();
@@ -5357,6 +5357,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
                 orderStatus: nextStatus,
                 orderStatusDate: date,
                 orderStatusReason: '',
+                updatedAt: history.at,
                 orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(history)
             };
             transaction.update(ref, updates);
@@ -5594,7 +5595,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
                 ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
                 : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
-            const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -5713,7 +5714,7 @@ window.saveDeliveryRecord = async function() {
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
-            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             if (action === 'create') await applyInventoryDeliveryInTransaction(transaction, ref, order, qty, actor, orderId);
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -5748,7 +5749,7 @@ window.deleteDeliveryRecord = async function(recordId) {
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`刪除後的送貨數量會低於已登錄的退貨數量 ${alreadyReturned}，請先更正退貨紀錄。`);
             const history = { action: 'delete', recordId, before: removed, after: null, by: deliveryActor(), at: new Date().toISOString() };
-            const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -5771,7 +5772,7 @@ window.clearLegacyDelivery = async function() {
     if (returnedQuantity(order) > 0) { alert('這筆訂單已有退貨紀錄，請先更正或刪除退貨紀錄。'); return; }
     const history = { action: 'clear_legacy_estimate', before: { isDelivered: true, estimatedDate: order.orderDate || '' }, after: null, by: deliveryActor(), at: new Date().toISOString() };
     try {
-        await db.collection('orders').doc(order.id).update({ isDelivered: false, deliveredQty: 0, deliveryRecords: [], deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history) });
+        await db.collection('orders').doc(order.id).update({ isDelivered: false, deliveredQty: 0, deliveryRecords: [], deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now });
         order.isDelivered = false;
         order.deliveredQty = 0;
         order.deliveryRecords = [];
@@ -5916,7 +5917,7 @@ window.saveReturnRecord = async function() {
             const delivered = deliveredQuantity(order);
             if (totalReturned > delivered + 1e-9) throw new Error(`累計退貨數量 ${totalReturned} 超過已送貨數量 ${delivered}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
-            const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
         });
@@ -5950,7 +5951,7 @@ window.deleteReturnRecord = async function(recordId) {
             const next = records.filter(item => item.id !== recordId);
             const totalReturned = next.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const history = { action: 'delete', recordId, before: removed, after: null, by: deliveryActor(), at: new Date().toISOString() };
-            const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history) };
+            const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
         });
@@ -7086,6 +7087,14 @@ window.saveCompanyAgencyBrands = async function() {
     }
 };
 
+function salesStatisticsQueryWindow() {
+    const end = document.getElementById('salesStatsEnd')?.value || localDateString();
+    const currentQuarterStartMonth = Math.floor(new Date().getMonth() / 3) * 3;
+    const defaultStart = `${new Date().getFullYear()}-${String(currentQuarterStartMonth + 1).padStart(2, '0')}-01`;
+    const start = document.getElementById('salesStatsStart')?.value || defaultStart;
+    return { start, end };
+}
+
 // 管理員銷售統計以「訂單」為準，避免把尚未成交的估價單也算進營收。
 window.loadSalesStatistics = function() {
     if (currentUserRole !== 'admin') return Promise.resolve();
@@ -7094,14 +7103,35 @@ window.loadSalesStatistics = function() {
     const totalEl = document.getElementById('salesStatsSalesInc');
     if (totalEl) totalEl.innerText = '讀取中…';
 
-    // 統計只需要截至今天已成立的訂單；排除未來日期，避免直接無條件掃描 orders。
-    // 歷史訂單仍保留，因為舊訂單可能在本期才送貨或退貨，不能只依訂單日起日截斷。
-    salesStatisticsLoadPromise = db.collection('orders')
-        .where('orderDate', '<=', localDateString())
-        .get().then(snapshot => {
+    // 不掃描全部歷史訂單：只抓「本統計期間成立」、「本期間有異動」與「目前仍進行中」三群，
+    // 合併去重後再計算。這樣資料量隨年度增加時不會每次把全部舊訂單下載到瀏覽器。
+    const { start, end } = salesStatisticsQueryWindow();
+    const startIso = start + 'T00:00:00';
+    const endIso = end + 'T23:59:59';
+    const periodOrders = db.collection('orders')
+        .where('orderDate', '>=', start)
+        .where('orderDate', '<=', end)
+        .orderBy('orderDate', 'desc')
+        .limit(1500)
+        .get();
+    const activityOrders = db.collection('orders')
+        .where('updatedAt', '>=', startIso)
+        .where('updatedAt', '<=', endIso)
+        .orderBy('updatedAt', 'desc')
+        .limit(1500)
+        .get();
+    const openOrders = db.collection('orders')
+        .where('status', '==', BUSINESS_STATUS.ACTIVE)
+        .limit(1000)
+        .get();
+
+    salesStatisticsLoadPromise = Promise.all([periodOrders, activityOrders, openOrders]).then(([periodSnapshot, activitySnapshot, openSnapshot]) => {
         if (requestedRole !== currentUserRole) return;
-        salesStatisticsOrders = [];
-        snapshot.forEach(doc => salesStatisticsOrders.push({ id: doc.id, ...doc.data() }));
+        const records = new Map();
+        [periodSnapshot, activitySnapshot, openSnapshot].forEach(snapshot => {
+            snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
+        });
+        salesStatisticsOrders = [...records.values()];
         const startInput = document.getElementById('salesStatsStart');
         const endInput = document.getElementById('salesStatsEnd');
         if (startInput && endInput && !startInput.value && !endInput.value) {
@@ -7109,8 +7139,6 @@ window.loadSalesStatistics = function() {
             document.getElementById('salesStatsPeriod').value = currentQuarter;
             setSalesStatisticsPeriod(currentQuarter);
         } else {
-            const start=document.getElementById('salesStatsStart')?.value||localDateString().slice(0,4)+'-01-01';
-            const end=document.getElementById('salesStatsEnd')?.value||localDateString();
             loadInventoryAnalysisSupport(start,end).then(()=>renderSalesStatistics());
         }
     }).catch(err => {
