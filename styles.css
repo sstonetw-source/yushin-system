@@ -770,3 +770,43 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     vertical-align: middle;
     padding: 4px 2px;
 }
+
+
+/* ===== 系統統一：庫存／連動資訊 ===== */
+.inventory-summary-note {
+    margin: 8px 0 12px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    background: #f5f7f9;
+    color: #4b5964;
+    font-size: 12px;
+    line-height: 1.6;
+}
+.link-button {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: #0b63a4;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.inventory-reserved-link {
+    min-width: 28px;
+    font-weight: 700;
+}
+#pendingInventoryEmptyHint {
+    margin-bottom: 16px;
+}
+@media (max-width: 768px) {
+    #inventory-system .table-wrap,
+    #inventoryReservationOverlay .table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    #inventory-system table,
+    #inventoryReservationOverlay table {
+        min-width: 760px;
+    }
+}
