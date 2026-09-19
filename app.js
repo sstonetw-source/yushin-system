@@ -2072,6 +2072,8 @@ window.onOrderItemCodeChange = function(input) {
 
     const itemNameInput = document.getElementById('orderItemName');
     if (itemNameInput) itemNameInput.value = match.nameCn || match.nameEn || '';
+    const unitInput = document.getElementById('orderUnit');
+    if (unitInput) unitInput.value = match.unit || unitInput.value || '';
 
     // 產品線只隨訂單資料保存供後台統計，不額外出現在業務端的廠牌下拉選單。
     input.dataset.productLine = match.productLine || '';
@@ -5855,7 +5857,7 @@ window.openOrderModal = function() {
     if (title) title.innerText = '新增訂單';
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderInvoiceTitle'].forEach(id => {
+    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderUnit', 'orderInvoiceTitle'].forEach(id => {
         document.getElementById(id).value = '';
     });
     onOrderBrandSelectChange();
@@ -5935,6 +5937,7 @@ window.copyOrderAsNew = function(orderId) {
     if (source.brand) selectBrandInDropdown(document.getElementById('orderBrand'), source.brand);
     onOrderBrandSelectChange();
     document.getElementById('orderQty').value = source.qty || 1;
+    document.getElementById('orderUnit').value = source.unit || '';
     document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
     if (source.totalPrice !== undefined && source.totalPrice !== null && String(source.totalPrice).trim() !== '') {
         document.getElementById('orderTotalPrice').value = String(source.totalPrice).replace(/,/g, '');
@@ -5975,6 +5978,7 @@ window.saveNewOrder = function() {
         productLine: '',
         productType: '',
         qty: document.getElementById('orderQty').value,
+        unit: document.getElementById('orderUnit').value.trim(),
         unitPrice: document.getElementById('orderUnitPrice').value,
         totalPrice: document.getElementById('orderTotalPrice').value,
         transactionType: document.getElementById('orderTransactionType').value,
@@ -6008,7 +6012,7 @@ window.saveNewOrder = function() {
     data.productType = (priceMatch && priceMatch.productType) || '';
     if (priceMatch) {
         data.productId = priceMatch.productId || stableProductId(priceMatch);
-        data.unit = priceMatch.unit || '';
+        data.unit = data.unit || priceMatch.unit || '';
         data.supplier = priceMatch.supplier || '';
         data.spec = priceMatch.spec || '';
     }
