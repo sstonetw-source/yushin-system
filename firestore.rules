@@ -21,6 +21,13 @@ service cloud.firestore {
     function own(resourceData) {
       return signedIn() && (ownBySalesCode(resourceData) || resourceData.ownerUid == request.auth.uid);
     }
+    function salesInventoryOperationalUpdate() {
+      return sales()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['onHand', 'reserved', 'lots', 'updatedAt'])
+        && request.resource.data.onHand >= 0
+        && request.resource.data.reserved >= 0;
+    }
 
     match /users/{id} { allow read: if signedIn(); allow write: if admin(); }
     match /settings/{id} { allow read: if signedIn(); allow write: if admin(); }
@@ -87,7 +94,11 @@ service cloud.firestore {
 
     match /inventory/{id} {
       allow read: if signedIn();
-      allow create, update: if admin() || warehouse() || purchaser();
+      // 正式庫存建檔／採購入庫由採購、倉管、管理員負責。
+      allow create: if admin() || warehouse() || purchaser();
+      // 業務在訂單成立／送貨流程只能改動實體數量、占用數量、批號與更新時間，
+      // 不能自行改產品身份、在途量或其他主檔欄位。
+      allow update: if admin() || warehouse() || purchaser() || salesInventoryOperationalUpdate();
       allow delete: if false;
     }
 
