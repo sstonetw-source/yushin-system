@@ -4987,6 +4987,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         const liveItems = purchaseItemsFromSavedPo(live);
         const item = liveItems[itemIndex];
         if (!item) throw new Error('找不到品項');
+        if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') throw new Error('原廠直送品項不需入庫');
 
         const already = receivedQuantityForPoItem(live, itemIndex);
         const remaining = Math.max(0, Number(item.qty || 0) - already);
@@ -4994,31 +4995,36 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
 
         const key = poIncomingKey(item);
         if (!key) throw new Error(`${item.itemName || '品項'} 缺少貨號／Product ID`);
+        const warehouseId = item.warehouseId || defaultWarehouse()?.id || '';
 
         const invRef = db.collection('inventory').doc(encodeURIComponent(key));
-        const pendingRef = db.collection('pendingInventoryItems').doc(encodeURIComponent(key));
+        const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)) : null;
+        const pendingRef = db.collection('pendingInventoryItems').doc(warehouseId ? warehouseStockDocId(warehouseId,key) : encodeURIComponent(key));
+
         const invSnap = await tx.get(invRef);
+        const whSnap = whRef ? await tx.get(whRef) : null;
         const pendingSnap = await tx.get(pendingRef);
         const pendingIncoming = Number(pendingSnap.exists ? pendingSnap.data().incomingQty : 0) || 0;
         const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : { incoming: pendingIncoming });
+        const whStock = inventoryNumbers(whSnap?.exists ? whSnap.data() : { incoming: pendingIncoming });
 
         let sourceOrder = null;
-        let orderSnap = null;
         if (item.orderId) {
-            orderSnap = await tx.get(db.collection('orders').doc(item.orderId));
+            const orderSnap = await tx.get(db.collection('orders').doc(item.orderId));
             if (orderSnap.exists) sourceOrder = { id: orderSnap.id, ...orderSnap.data() };
         }
 
         let reserveFromReceipt = 0;
-        if (sourceOrder) {
+        if (sourceOrder && (sourceOrder.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP') {
             const shortage = Math.max(0, Number(sourceOrder.inventoryShortageQty || 0));
             reserveFromReceipt = Math.min(qty, shortage);
         }
 
         const record = {
-            id: receiptId, itemIndex, productKey:key, productId:item.productId||'',
+            id:receiptId, itemIndex, productKey:key, productId:item.productId||'',
             itemCode:item.itemCode||'', itemName:item.itemName||'', brand:resolveBrandName(item.brand||''),
-            qty, lotNo, expiryDate, date:localDateString(), createdAt:now, createdBy:actor
+            qty, lotNo, expiryDate, warehouseId, fulfillmentType:'WAREHOUSE',
+            date:localDateString(), createdAt:now, createdBy:actor
         };
         const records = [...(live.receiptRecords || []), record];
 
@@ -5036,23 +5042,37 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             incoming:Math.max(0,stock.incoming-qty), lots, updatedAt:now
         }, { merge:true });
 
+        if (whRef) {
+            tx.set(whRef, {
+                warehouseId, productKey:key, productId:item.productId||'', itemCode:item.itemCode||'',
+                itemName:item.itemName||'', brand:resolveBrandName(item.brand||''),
+                onHand:whStock.onHand+qty, reserved:whStock.reserved+reserveFromReceipt,
+                incoming:Math.max(0,whStock.incoming-qty), updatedAt:now
+            }, { merge:true });
+        }
+
         if (sourceOrder && reserveFromReceipt > 0) {
             const shortage = Math.max(0, Number(sourceOrder.inventoryShortageQty || 0));
             tx.update(db.collection('orders').doc(item.orderId), {
                 inventoryReservedQty:Number(sourceOrder.inventoryReservedQty||0)+reserveFromReceipt,
                 inventoryShortageQty:Math.max(0,shortage-reserveFromReceipt),
-                inventoryProductKey:key
+                inventoryProductKey:key,
+                warehouseId
             });
-            tx.set(reservationDocRef(item.orderId), inventoryReservationPayload(
-                item.orderId, sourceOrder,
-                Math.max(0,Number(sourceOrder.inventoryReservedQty||0)-deliveredQuantity(sourceOrder))+reserveFromReceipt,
-                'active'
-            ), { merge:true });
+            tx.set(reservationDocRef(item.orderId), {
+                ...inventoryReservationPayload(
+                    item.orderId, { ...sourceOrder, warehouseId },
+                    Math.max(0,Number(sourceOrder.inventoryReservedQty||0)-deliveredQuantity(sourceOrder))+reserveFromReceipt,
+                    'active'
+                ),
+                warehouseId
+            }, { merge:true });
         }
 
         tx.set(db.collection('inventoryMovements').doc(), {
             type:'receipt', qty, productKey:key, itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), lotNo, expiryDate, unitCost:Number(item.unitPrice||0),
+            brand:resolveBrandName(item.brand||''), lotNo, expiryDate, warehouseId,
+            fulfillmentType:'WAREHOUSE', unitCost:Number(item.unitPrice||0),
             purchaseNetAmount:Number(item.unitPrice||0)*qty, sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,
             sourceId:poId, receiptId, createdAt:now, createdBy:actor
         });
@@ -5060,12 +5080,15 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         const pendingRemaining=Math.max(0,pendingIncoming-qty);
         tx.set(pendingRef, {
             productKey:key, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), incomingQty:pendingRemaining,
+            brand:resolveBrandName(item.brand||''), warehouseId, incomingQty:pendingRemaining,
             status:pendingRemaining>0?'pending-arrival':'completed',
             completedAt:pendingRemaining>0?null:now, completedBy:pendingRemaining>0?'':actor, updatedAt:now
         }, { merge:true });
 
-        const receiptComplete = records.reduce((s,r)=>s+Number(r.qty||0),0) >= liveItems.reduce((s,i)=>s+Number(i.qty||0),0);
+        const warehouseItems = liveItems.filter(row => (row.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
+        const warehouseOrdered = warehouseItems.reduce((sum,row)=>sum+Number(row.qty||0),0);
+        const warehouseReceived = records.reduce((sum,row)=>sum+Number(row.qty||0),0);
+        const receiptComplete = warehouseOrdered > 0 && warehouseReceived >= warehouseOrdered;
         tx.update(poRef, {
             receiptRecords:records, updatedAt:now,
             status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,
