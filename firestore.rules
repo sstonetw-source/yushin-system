@@ -13,13 +13,101 @@ service cloud.firestore {
 
     match /users/{id} { allow read: if signedIn(); allow write: if admin(); }
     match /settings/{id} { allow read: if signedIn(); allow write: if admin(); }
-    match /quotes/{id} { allow read: if admin() || own(resource.data) || sales(); allow create: if admin() || sales(); allow update: if admin() || own(resource.data); allow delete: if false; }
-    match /forecasts/{id} { allow read: if admin() || own(resource.data) || sales(); allow create: if admin() || sales(); allow update: if admin() || own(resource.data); allow delete: if false; }
-    match /orders/{id} { allow read: if signedIn(); allow create: if admin() || sales(); allow update: if admin() || sales() || purchaser() || warehouse(); allow delete: if false; }
-    match /purchaseOrders/{id} { allow read: if signedIn(); allow create, update: if admin() || purchaser(); allow delete: if false; }
-    match /inventory/{id} { allow read: if signedIn(); allow create, update: if admin() || warehouse() || purchaser(); allow delete: if false; }
-    match /inventoryMovements/{id} { allow read: if signedIn(); allow create: if admin() || warehouse() || purchaser() || sales(); allow update, delete: if false; }
-    match /equipment/{id} { allow read: if signedIn(); allow create, update: if admin() || engineer(); allow delete: if false; }
-    match /{document=**} { allow read: if signedIn(); allow write: if admin(); }
+
+    // 全系統共用主檔：先建立安全邊界，後續模組逐步改為引用 stable ID。
+    match /brands/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /salesCodes/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /customers/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || sales();
+      allow delete: if false;
+    }
+
+    match /products/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || purchaser() || warehouse();
+      allow delete: if false;
+    }
+
+    match /quotes/{id} {
+      allow read: if admin() || own(resource.data) || sales();
+      allow create: if admin() || sales();
+      allow update: if admin() || own(resource.data);
+      allow delete: if false;
+    }
+
+    match /forecasts/{id} {
+      allow read: if admin() || own(resource.data) || sales();
+      allow create: if admin() || sales();
+      allow update: if admin() || own(resource.data);
+      allow delete: if false;
+    }
+
+    // Forecast 進度為 append-only 歷史；原本只有根文件規則，sales 寫 subcollection 會被拒絕。
+    match /forecasts/{forecastId}/progress/{progressId} {
+      allow read: if admin() || sales();
+      allow create: if admin() || sales();
+      allow update, delete: if false;
+    }
+
+    match /orders/{id} {
+      allow read: if signedIn();
+      allow create: if admin() || sales();
+      allow update: if admin() || sales() || purchaser() || warehouse();
+      allow delete: if false;
+    }
+
+    match /purchaseOrders/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || purchaser();
+      allow delete: if false;
+    }
+
+    match /inventory/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || warehouse() || purchaser();
+      allow delete: if false;
+    }
+
+    // 訂單成立後的庫存占用明細；以狀態更新取代刪除，保留可追溯性。
+    match /inventoryReservations/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || sales() || purchaser() || warehouse();
+      allow delete: if false;
+    }
+
+    // PO 已送出但尚未成為正式庫存主檔的新品項。
+    match /pendingInventoryItems/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || purchaser() || warehouse();
+      allow delete: if false;
+    }
+
+    match /inventoryMovements/{id} {
+      allow read: if signedIn();
+      allow create: if admin() || warehouse() || purchaser() || sales();
+      allow update, delete: if false;
+    }
+
+    match /equipment/{id} {
+      allow read: if signedIn();
+      allow create, update: if admin() || engineer();
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read: if signedIn();
+      allow write: if admin();
+    }
   }
 }
