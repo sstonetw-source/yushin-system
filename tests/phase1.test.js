@@ -132,7 +132,7 @@ test('document number generation reads only the newest matching document', () =>
     const poGenerator = appSource.slice(poStart, poEnd);
     assert.match(poGenerator, /orderBy\('poNo', 'desc'\)/);
     assert.match(poGenerator, /limit\(1\)/);
-    assert.match(appSource, /priceItemLookup\.get\(`code:\$\{normalizeItemCode\(value\)\}`\)/);
+    assert.match(appSource, /findPriceItemByCodeValue\(value\)/);
 });
 
 test('sales statistics uses a bounded cached query and ignores stale roles', () => {
@@ -482,9 +482,9 @@ test('phase 6 supports direct stock purchase independent of customer orders and 
     const end=appSource.indexOf('window.openPurchaseOrderModal',start);
     const s=appSource.slice(start,end);
     assert.match(s,/orderId:\s*''/);
-    assert.match(s,/priceItemLookup/);
-    assert.match(s,/Product Master 尚無此貨號/);
-    assert.match(s,/resolveBrandName/);
+    assert.match(s,/ensurePriceListLoaded/);
+    assert.match(s,/addDirectPoItem/);
+    assert.match(s,/poDirectStockMode = true/);
     assert.match(s,/generateNextPoNumber/);
 });
 
@@ -492,7 +492,7 @@ test('phase 6 supports direct stock purchase independent of customer orders and 
 test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustments',()=>{
  assert.match(appSource,/function fefoLots\(stock\)/);assert.match(appSource,/function lotStatus\(lot\)/);
  assert.match(appSource,/30天內/);assert.match(appSource,/60天內/);assert.match(appSource,/90天內/);
- assert.match(appSource,/inventoryMovements/);assert.match(appSource,/initial/);assert.match(appSource,/adjustment/);assert.match(appSource,/scrap/);
+ assert.match(appSource,/inventoryMovements/);assert.match(indexSource,/value="initial"/);assert.match(indexSource,/value="adjustment"/);assert.match(indexSource,/value="scrap"/);
  assert.match(appSource,/orderBy\('updatedAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
  assert.match(appSource,/orderBy\('createdAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
 });
@@ -658,8 +658,8 @@ test('phase 16 inventory analysis uses actual receipt cost snapshots before cata
     const source = appSource.slice(start, end);
     assert.match(source, /receipt\.unitCost/);
     assert.match(source, /receipt\.purchaseNetAmount/);
-    assert.match(appSource, /purchaseNetAmount: Number\(item\.unitPrice \|\| 0\) \* qty/);
-    assert.match(appSource, /unitCost: Number\(item\.unitPrice \|\| 0\)/);
+    assert.match(appSource, /purchaseNetAmount:\s*Number\(item\.unitPrice\|\|0\)\s*\*\s*qty|purchaseNetAmount:\s*Number\(item\.unitPrice \|\| 0\) \* qty/);
+    assert.match(appSource, /unitCost:\s*Number\(item\.unitPrice\|\|0\)|unitCost:\s*Number\(item\.unitPrice \|\| 0\)/);
 });
 
 test('phase 17 Forecast PO and Inventory provide mobile data labels and card layout', () => {
