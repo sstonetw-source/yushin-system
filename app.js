@@ -4841,6 +4841,20 @@ window.loadMorePurchaseOrders = function() {
     return loadPurchaseOrderPage(false);
 };
 
+function poReceiptLabel(po) {
+    const progress = poReceiptProgress(po);
+    if (progress.directShipOnly) return '原廠直送（不入庫）';
+    if (progress.complete) return '已全部到貨';
+    if (progress.received > 0) return '部分到貨 ' + progress.received + '/' + progress.ordered;
+    return '待到貨 0/' + progress.ordered;
+}
+
+function poActionHtml(po) {
+    const reprint = `<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`;
+    if (poReceiptProgress(po).directShipOnly) return reprint;
+    return reprint + ` <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button>`;
+}
+
 window.renderPoList = function() {
     const tbody = document.getElementById('poListBody');
     const searchInput = document.getElementById('poListSearch');
@@ -4872,8 +4886,8 @@ window.renderPoList = function() {
             <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
             <td data-th="品項數">${items.length}</td>
             <td data-th="總計金額">${grandTotal.toLocaleString()}</td>
-            <td data-th="到貨進度">${(() => { const progress = poReceiptProgress(po); return progress.complete ? '已全部到貨' : progress.received > 0 ? '部分到貨 ' + progress.received + '/' + progress.ordered : '待到貨 0/' + progress.ordered; })()}</td>
-            <td data-th="操作" class="no-print"><button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button> <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button></td>
+            <td data-th="到貨進度">${escapeHtml(poReceiptLabel(po))}</td>
+            <td data-th="操作" class="no-print">${poActionHtml(po)}</td>
         `;
         tbody.appendChild(tr);
     });
