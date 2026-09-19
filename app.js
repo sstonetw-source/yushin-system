@@ -144,6 +144,7 @@ let salesStatisticsOrders = [];
 let salesStatisticsLoadPromise = null;
 let inventoryAnalysisReceipts = [];
 let inventoryAnalysisStocks = [];
+let inventoryAnalysisDirectShipPurchaseOrders = [];
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
 const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman', 'Thermo'];
@@ -4933,10 +4934,13 @@ function receivedQuantityForPoItem(po, itemIndex) {
         .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
 }
 function poReceiptProgress(po) {
-    const items = purchaseItemsFromSavedPo(po);
-    const ordered = items.reduce((s,i)=>s+Number(i.qty||0),0);
-    const received = items.reduce((s,i,index)=>s+Math.min(Number(i.qty||0), receivedQuantityForPoItem(po,index)),0);
-    return { ordered, received, remaining: Math.max(0, ordered-received), complete: ordered>0 && received>=ordered };
+    const allItems = purchaseItemsFromSavedPo(po);
+    const warehouseRows = allItems.map((item,index)=>({item,index}))
+        .filter(row => (row.item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
+    if (!warehouseRows.length) return { ordered:0, received:0, remaining:0, complete:false, directShipOnly:allItems.length>0 };
+    const ordered = warehouseRows.reduce((s,row)=>s+Number(row.item.qty||0),0);
+    const received = warehouseRows.reduce((s,row)=>s+Math.min(Number(row.item.qty||0), receivedQuantityForPoItem(po,row.index)),0);
+    return { ordered, received, remaining:Math.max(0,ordered-received), complete:ordered>0&&received>=ordered, directShipOnly:false };
 }
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
@@ -8064,12 +8068,15 @@ window.loadSalesStatistics = function() {
 };
 
 async function loadInventoryAnalysisSupport(start, end) {
-    const [movements, stocks] = await Promise.all([
+    const [movements, stocks, purchaseOrders] = await Promise.all([
         db.collection('inventoryMovements').where('createdAt','>=',start+'T00:00:00').where('createdAt','<=',end+'T23:59:59').where('type','==','receipt').orderBy('createdAt','desc').limit(1000).get(),
-        db.collection('inventory').orderBy('updatedAt','desc').limit(1000).get()
+        db.collection('inventory').orderBy('updatedAt','desc').limit(1000).get(),
+        db.collection('purchaseOrders').where('poDate','>=',start).where('poDate','<=',end).orderBy('poDate','desc').limit(1000).get()
     ]);
     inventoryAnalysisReceipts = movements.docs.map(d=>({id:d.id,...d.data()}));
     inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
+    inventoryAnalysisDirectShipPurchaseOrders = purchaseOrders.docs.map(d=>({id:d.id,...d.data()}))
+        .filter(po=>purchaseItemsFromSavedPo(po).some(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'));
 }
 function inventoryAnalysisTotals(start,end) {
     let purchase = 0;
@@ -8077,6 +8084,12 @@ function inventoryAnalysisTotals(start,end) {
         const product = priceList.find(p => (p.productId || stableProductId(p)) === receipt.productKey);
         const unitCost = Number(receipt.unitCost ?? product?.cost ?? 0);
         purchase += Number(receipt.purchaseNetAmount ?? (Number(receipt.qty || 0) * unitCost));
+    });
+    // 原廠直送不產生 receipt，採購成本由 PO 直送品項直接計入。
+    inventoryAnalysisDirectShipPurchaseOrders.forEach(po => {
+        purchaseItemsFromSavedPo(po)
+            .filter(item => (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP')
+            .forEach(item => { purchase += Number(item.qty || 0) * Number(item.unitPrice || 0); });
     });
     const sales = salesStatisticsOrders.reduce((sum, order) => {
         const contribution = calculateOrderStatsContribution(order, start, end);
