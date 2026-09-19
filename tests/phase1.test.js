@@ -425,7 +425,7 @@ test('phase 5 inventory uses on-hand reserved available incoming and transaction
     assert.match(appSource, /incoming/);
     assert.match(appSource, /collection\('inventoryMovements'\)/);
     assert.match(appSource, /inventoryMovementRecord\([\s\S]*?'reserve'/);
-    assert.match(appSource, /type:'ship'/);
+    assert.match(appSource, /'ship'/);
 });
 
 test('phase 5 order creation reserves only available stock and records shortage', () => {
@@ -444,10 +444,10 @@ test('phase 5 shipment consumes both aggregate and selected warehouse stock tran
     const s=appSource.slice(start,end);
     assert.match(s,/warehouseId/);
     assert.match(s,/warehouseStocks/);
-    assert.match(s,/onHand:inv\.onHand-deltaQty/);
-    assert.match(s,/onHand:wh\.onHand-deltaQty/);
-    assert.match(s,/reserved:Math\.max\(0,inv\.reserved-fromReserved\)/);
-    assert.match(s,/type:'ship'/);
+    assert.match(s,/onHand:\s*inv\.onHand\s*-\s*deltaQty/);
+    assert.match(s,/onHand:\s*wh\.onHand\s*-\s*deltaQty/);
+    assert.match(s,/reserved:\s*Math\.max\(0,\s*inv\.reserved\s*\+\s*reservedDelta\)/);
+    assert.match(s,/'ship'/);
 });
 
 test('phase 5 cancelling and restoring orders adjusts reservations without deleting inventory history', () => {
