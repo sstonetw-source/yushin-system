@@ -4942,8 +4942,12 @@ window.receivePurchaseOrder = function(poId) {
         index,
         received: receivedQuantityForPoItem(po, index),
         remaining: Math.max(0, Number(item.qty || 0) - receivedQuantityForPoItem(po, index))
-    })).filter(row => row.remaining > 0);
-    if (!rows.length) { alert('這張訂購單已全部到貨。'); return; }
+    })).filter(row => (row.item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP' && row.remaining > 0);
+    if (!rows.length) {
+        const directOnly = items.length && items.every(item => (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP');
+        alert(directOnly ? '這張訂購單為原廠直送，不需執行入庫。' : '這張訂購單已全部到貨。');
+        return;
+    }
 
     poReceiptTargetId = poId;
     const body = document.getElementById('poReceiptBatchBody');
@@ -4953,7 +4957,7 @@ window.receivePurchaseOrder = function(poId) {
         <tr data-index="${row.index}">
             <td><input type="checkbox" class="po-receive-select" checked></td>
             <td>${escapeHtml(row.item.itemCode||'')}</td>
-            <td>${escapeHtml(row.item.itemName||'')}</td>
+            <td>${escapeHtml(row.item.itemName||'')}<div style="font-size:11px;color:#666;">${escapeHtml(warehouseMasterCache.find(w=>w.id===row.item.warehouseId)?.warehouseName || row.item.warehouseId || '')}</div></td>
             <td>${row.item.qty}</td>
             <td>${row.received}</td>
             <td>${row.remaining}</td>
