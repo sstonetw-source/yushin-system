@@ -2555,6 +2555,7 @@ window.onOrderItemCodeChange = async function(input) {
     input.dataset.productType = match.productType || '';
 
     await applyOrderProductCost(match);
+    await refreshOrderWarehouseStock();
 };
 
 let orderItemCodeTimer = null;
@@ -5119,6 +5120,9 @@ function purchaseItemsFromOrder(order) {
             brand,
             qty: Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1,
             unit: item.unit || order.unit || '',
+            productLine: item.productLine || order.productLine || '',
+            fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
+            warehouseId: item.warehouseId || order.warehouseId || '',
             unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0
         };
     }).filter(item => item.itemName || item.itemCode);
@@ -5136,13 +5140,14 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
 
 window.openDirectStockPurchase = async function() {
     if (!canEditPage('orders.po')) return;
-    await ensurePriceListLoaded().catch(() => {});
+    await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
     poDirectStockMode = true;
     poEditingId = null;
     poAllItems = [];
     poItems = [];
     populatePoVendorSuggestions();
     document.getElementById('poVendorName').value = '';
+    await autoFillPoSupplier(poItems);
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
     switchPoCompany(currentCompany || 'yushin', null, true);
@@ -5153,7 +5158,10 @@ window.openDirectStockPurchase = async function() {
 };
 
 function emptyDirectPoItem() {
-    return { orderId:'', itemName:'', itemCode:'', productId:'', brand:'', qty:1, unit:'', unitPrice:0, supplier:'' };
+    return {
+        orderId:'', itemName:'', itemCode:'', productId:'', brand:'', qty:1, unit:'', unitPrice:0, supplier:'',
+        productLine:'', fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
+    };
 }
 
 window.addDirectPoItem = function() {
@@ -5178,9 +5186,17 @@ window.onDirectPoCodeChange = async function(idx, value) {
             brand: resolveBrandName(match.brand || ''),
             unit: match.unit || '',
             unitPrice: Number(match.cost || 0),
-            supplier: match.supplier || ''
+            supplier: match.supplier || '',
+            productLine: match.productLine || '',
+            fulfillmentType: poItems[idx].fulfillmentType || 'WAREHOUSE',
+            warehouseId: poItems[idx].warehouseId || defaultWarehouse()?.id || ''
         };
-        if (!document.getElementById('poVendorName').value && match.supplier) document.getElementById('poVendorName').value = match.supplier;
+        const mappedSupplier = supplierForProduct(match.brand, match.productLine);
+        if (!document.getElementById('poVendorName').value && mappedSupplier) {
+            document.getElementById('poVendorName').value = mappedSupplier.purchaseHeaderName || mappedSupplier.supplierName || '';
+        } else if (!document.getElementById('poVendorName').value && match.supplier) {
+            document.getElementById('poVendorName').value = match.supplier;
+        }
     }
     poAllItems = poItems;
     renderPoItemsTable();
@@ -5204,8 +5220,22 @@ function updatePoModeUI() {
 }
 
 
-window.openPurchaseOrderModal = function() {
+async function autoFillPoSupplier(items) {
+    await loadSupplierWarehouseMasters();
+    const resolved = (items || []).map(item => supplierForProduct(item.brand, item.productLine)).filter(Boolean);
+    if (!resolved.length) return '';
+    const ids = [...new Set(resolved.map(item => item.id || item.supplierId))];
+    if (ids.length !== 1) return '';
+    const supplier = resolved[0];
+    const header = supplier.purchaseHeaderName || supplier.supplierName || '';
+    const input = document.getElementById('poVendorName');
+    if (input && header) input.value = header;
+    return header;
+}
+
+window.openPurchaseOrderModal = async function() {
     poDirectStockMode = false;
+    await loadSupplierWarehouseMasters();
     const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
     if (checked.length === 0) {
         alert('請先在業務訂單左邊勾選要放進訂購單的品項。');
@@ -6567,6 +6597,7 @@ window.deleteOrder = function(orderId) {
 
 window.openOrderModal = function(source = null) {
     ensurePriceListLoaded().catch(() => {});
+    loadSupplierWarehouseMasters().then(() => populateOrderWarehouseOptions(source?.warehouseId || ''));
     populateOrderBrandDropdown();
     populateOrderCustomerSuggestions();
     const title = document.getElementById('orderModalTitle');
@@ -6582,6 +6613,9 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderTotalPrice').value = 0;
     document.getElementById('orderCostPrice').value = '';
     setOrderCostFieldForProduct(null);
+    document.getElementById('orderFulfillmentType').value = source?.fulfillmentType || 'WAREHOUSE';
+    populateOrderWarehouseOptions(source?.warehouseId || '');
+    onOrderFulfillmentChange();
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
 
@@ -6609,7 +6643,10 @@ window.openOrderModal = function(source = null) {
             : (Number(source.qty || 1) * Number(source.unitPrice || 0));
         document.getElementById('orderTotalPrice').value = total || 0;
         const sourceMatch = source.itemCode ? findPriceItemForOrder({ itemCode: source.itemCode, brand: source.brand || '' }) : null;
-        if (sourceMatch) applyOrderProductCost(sourceMatch);
+        if (sourceMatch) {
+            applyOrderProductCost(sourceMatch);
+            refreshOrderWarehouseStock();
+        }
     }
 
     document.getElementById('orderModalOverlay').classList.add('active');
@@ -6723,6 +6760,10 @@ window.saveNewOrder = function() {
         itemName: document.getElementById('orderItemName').value.trim(),
         productLine: '',
         productType: '',
+        fulfillmentType: document.getElementById('orderFulfillmentType')?.value || 'WAREHOUSE',
+        warehouseId: document.getElementById('orderFulfillmentType')?.value === 'WAREHOUSE'
+            ? (document.getElementById('orderWarehouse')?.value || '')
+            : '',
         qty: document.getElementById('orderQty').value,
         unit: document.getElementById('orderUnit').value.trim(),
         unitPrice: document.getElementById('orderUnitPrice').value,
@@ -6755,6 +6796,10 @@ window.saveNewOrder = function() {
 
     if (!data.orderDate || !data.itemName) {
         alert('請至少填寫訂單日期與品名');
+        return;
+    }
+    if (data.fulfillmentType === 'WAREHOUSE' && warehouseMasterCache.length && !data.warehouseId) {
+        alert('請選擇出貨倉庫；若由原廠直接送客戶，請改選「原廠直送客戶」。');
         return;
     }
     if (document.getElementById('orderBrand').value === '其他' && !data.brand) {
@@ -7474,7 +7519,12 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'sales') ensureSalesListLoaded().then(reloadSalesFromUsers);
     if (tab === 'prices') loadPriceCatalogSummary();
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
-    if (tab === 'agencies') ensurePriceListLoaded().then(() => { renderKeyStatisticBrands(); renderCompanyAgencyBrandSettings(); });
+    if (tab === 'agencies') Promise.all([ensurePriceListLoaded(), loadSupplierWarehouseMasters()]).then(() => {
+        renderKeyStatisticBrands();
+        renderCompanyAgencyBrandSettings();
+        renderSupplierMappingAdmin();
+        renderWarehouseMasterAdmin();
+    });
     // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
     if (tab === 'statistics') ensurePriceListLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
     if (tab === 'quotes') loadAllQuotesFromCloud();
