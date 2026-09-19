@@ -317,7 +317,7 @@ test('new quotes and orders persist createdAt and normalized order item-code key
 });
 
 
-test('phase 2 product master extends the existing price catalog instead of creating a parallel product source', () => {
+test('phase 2 product master keeps the existing price catalog as a compatibility source and overlays formal products', () => {
     assert.match(appSource, /function stableProductId\(item\)/);
     assert.match(appSource, /function normalizeProductMasterItem\(item\)/);
     assert.match(appSource, /productId:/);
@@ -328,7 +328,8 @@ test('phase 2 product master extends the existing price catalog instead of creat
     assert.match(appSource, /unit:/);
     assert.match(appSource, /spec:/);
     assert.match(appSource, /normalizeProductMasterList\(imported/);
-    assert.doesNotMatch(appSource, /collection\(['"]products['"]\)/);
+    assert.match(appSource, /collection\('products'\)/);
+    assert.match(appSource, /舊 settings\/prices 暫時保留做過渡來源/);
 });
 
 
@@ -805,7 +806,7 @@ test('order item-code autofill waits for Product Master and fills sale/cost fiel
     assert.match(s, /findPriceItemByCodeValue/);
     assert.match(s, /orderItemName/);
     assert.match(s, /orderUnitPrice/);
-    assert.match(s, /orderCostPrice/);
+    assert.match(s, /applyOrderProductCost/);
     assert.match(s, /_orderModalProductId/);
     assert.match(s, /onOrderItemCodeInput/);
 });
