@@ -142,7 +142,12 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
     assert.match(loader, /if \(salesStatisticsLoadPromise\) return salesStatisticsLoadPromise/);
     assert.match(loader, /requestedRole !== currentUserRole/);
     assert.match(loader, /salesStatisticsLoadPromise = null/);
-    assert.match(loader, /where\('orderDate', '<=', localDateString\(\)\)/);
+    assert.match(loader, /where\('orderDate', '>=', start\)/);
+    assert.match(loader, /where\('orderDate', '<=', end\)/);
+    assert.match(loader, /where\('updatedAt', '>=', startIso\)/);
+    assert.match(loader, /where\('status', '==', BUSINESS_STATUS\.ACTIVE\)/);
+    assert.match(loader, /limit\(1500\)/);
+    assert.match(loader, /limit\(1000\)/);
     assert.doesNotMatch(loader, /collection\('orders'\)\.get\(\)/);
 });
 
@@ -170,7 +175,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     const order = { id: 'o1', isOrdered: true, isArrived: true, isBilled: false, statusHistory: [] };
     let updatePayload;
     const context = {
-        window: {}, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
+        window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
         canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => { throw new Error('billing must not depend on window.prompt'); }, alert: message => { throw new Error(message); },
@@ -204,7 +209,7 @@ test('failed billing write restores the previous state and unlocks the button', 
     const order = { id: 'o2', isOrdered: true, isArrived: true, isBilled: false, invoiceDate: '', statusHistory: [] };
     let alertMessage = '';
     const context = {
-        window: {}, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
+        window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
         canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => '2026-09-17', alert: message => { alertMessage = message; },
@@ -499,7 +504,7 @@ test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(ap
 test('phase 9 analysis separates actual receipts sales stock value incoming and purchase-sales difference',()=>{
  assert.match(appSource,/function inventoryAnalysisTotals\(start,end\)/);
  assert.match(appSource,/where\('type','==','receipt'\)/);
- assert.match(appSource,/difference:sales-purchase/);
+ assert.match(appSource,/difference:\s*sales\s*-\s*purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
  assert.match(appSource,/limit\(1000\)/);
 });
@@ -619,4 +624,86 @@ test('all major product-entry screens put item code before downstream product fi
     const quoteRow = appSource.slice(quoteRowStart, quoteRowEnd);
     assert.ok(quoteRow.indexOf('class="item-model"') >= 0);
     assert.ok(quoteRow.indexOf('class="item-model"') < quoteRow.indexOf('class="item-cn"'));
+});
+
+
+test('phase 14 canonical lifecycle statuses preserve cancellation semantics without hard delete', () => {
+    assert.match(appSource, /const BUSINESS_STATUS = Object\.freeze/);
+    assert.match(appSource, /ACTIVE: 'active'/);
+    assert.match(appSource, /COMPLETED: 'completed'/);
+    assert.match(appSource, /CANCELLED: 'cancelled'/);
+    assert.match(appSource, /VOIDED: 'voided'/);
+    const lifecycleStart = appSource.indexOf('window.quickSetOrderLifecycle =');
+    const lifecycleEnd = appSource.indexOf('window.toggleOrderProgressStatus', lifecycleStart);
+    const lifecycle = appSource.slice(lifecycleStart, lifecycleEnd);
+    assert.match(lifecycle, /status: nextStatus === 'cancelled' \? BUSINESS_STATUS\.CANCELLED : BUSINESS_STATUS\.ACTIVE/);
+    assert.doesNotMatch(lifecycle, /\.delete\(/);
+});
+
+test('phase 15 quotes orders and purchase orders persist explicit currency tax and tax-basis metadata', () => {
+    assert.match(appSource, /const DEFAULT_CURRENCY = 'TWD'/);
+    assert.match(appSource, /const DEFAULT_TAX_RATE = 0\.05/);
+    assert.match(appSource, /function grossAmountMetadata/);
+    assert.match(appSource, /function netAmountMetadata/);
+    assert.match(appSource, /priceIncludesTax: true/);
+    assert.match(appSource, /priceIncludesTax: false/);
+    assert.match(appSource, /subtotalExTax/);
+    assert.match(appSource, /taxAmount/);
+    assert.match(appSource, /totalIncTax/);
+});
+
+test('phase 16 inventory analysis uses actual receipt cost snapshots before catalog fallback', () => {
+    const start = appSource.indexOf('function inventoryAnalysisTotals');
+    const end = appSource.indexOf('function renderInventoryAnalysisSummary', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /receipt\.unitCost/);
+    assert.match(source, /receipt\.purchaseNetAmount/);
+    assert.match(appSource, /purchaseNetAmount: Number\(item\.unitPrice \|\| 0\) \* qty/);
+    assert.match(appSource, /unitCost: Number\(item\.unitPrice \|\| 0\)/);
+});
+
+test('phase 17 Forecast PO and Inventory provide mobile data labels and card layout', () => {
+    assert.match(appSource, /data-th="客戶"/);
+    assert.match(appSource, /data-th="到貨進度"/);
+    assert.match(appSource, /data-th="可用庫存"/);
+    assert.match(cssSource, /Phase 17：Forecast／採購／庫存手機版一致化/);
+    assert.match(cssSource, /#forecastTable td\[data-th\]::before/);
+    assert.match(cssSource, /#poListPanel table td\[data-th\]::before/);
+    assert.match(cssSource, /#inventory-system td\[data-th\]::before/);
+});
+
+test('phase 18 statistics avoid all-history downloads and important writes stamp updatedAt', () => {
+    const start = appSource.indexOf('window.loadSalesStatistics =');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const loader = appSource.slice(start, end);
+    assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
+    assert.match(loader, /\.limit\(1500\)/);
+    assert.match(loader, /\.limit\(1000\)/);
+    assert.doesNotMatch(loader, /db\.collection\('orders'\)\.get\(\)/);
+    assert.match(appSource, /updatedAt: timestamp/);
+    assert.match(appSource, /updatedAt: history\.at/);
+});
+
+test('phase 19 Firestore rules enforce role boundaries for PO inventory reservations and equipment', () => {
+    assert.match(rulesSource, /match \/purchaseOrders\/\{id\}/);
+    assert.match(rulesSource, /allow read: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
+    assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
+    assert.match(rulesSource, /sales\(\) && ownBySalesCode\(resource\.data\)/);
+    assert.match(rulesSource, /match \/equipment\/\{id\}/);
+    assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(sales\(\) && ownBySalesCode\(resource\.data\)\)/);
+    assert.match(rulesSource, /allow read, write: if false/);
+});
+
+test('phase 20 core workflow contracts are all represented in regression coverage', () => {
+    const required = [
+        'forecasts', 'quotes', 'orders', 'purchaseOrders', 'inventoryReservations',
+        'pendingInventoryItems', 'inventoryMovements', 'salesCodes', 'brands', 'customers'
+    ];
+    required.forEach(name => assert.match(appSource, new RegExp(name)));
+    assert.match(appSource, /reserveInventoryForNewOrder/);
+    assert.match(appSource, /registerPurchaseIncoming/);
+    assert.match(appSource, /receivePurchaseOrder/);
+    assert.match(appSource, /applyInventoryDeliveryInTransaction/);
+    assert.match(appSource, /syncLegacyBrandSettingsToMaster/);
+    assert.match(appSource, /executeSalesTransfer/);
 });
