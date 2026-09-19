@@ -158,6 +158,7 @@ let supplierMasterCache = [];
 let supplierMappingCache = [];
 let warehouseMasterCache = [];
 let supplierWarehouseLoadPromise = null;
+let purchaseCostCache = new Map();
 let hiddenBrands = [];       // 舊欄位，保留避免舊資料丟失，畫面已經不再使用黑名單模式
 
 // 印章圖片常數定義在 stamps-data.js（需在此檔案之前載入）。
@@ -1579,7 +1580,7 @@ function forecastItemToOrderSource(forecast, item) {
         unit: item.unit || match?.unit || '',
         unitPrice,
         totalPrice,
-        costPrice: parseMoney(match?.cost || 0) || '',
+        costPrice: safeEmbeddedOrderCost(match, match?.cost),
         sourceType: DOCUMENT_TYPES.FORECAST,
         sourceId: forecast.id,
         productId: item.productId || match?.productId || '',
@@ -3738,9 +3739,8 @@ window.markQuoteAsDeal = function(quoteNo) {
                 orderData.supplier = priceMatch.supplier || '';
                 orderData.spec = item.spec || priceMatch.spec || '';
                 orderData.authorizationType = authorizationTypeForProduct(priceMatch);
-                const canCarryCost = currentUserRole === 'admin' || currentUserRole === 'purchaser'
-                    || authorizationTypeForProduct(priceMatch) === 'NON_AUTHORIZED';
-                if (canCarryCost && priceMatch.cost !== undefined && priceMatch.cost !== null && String(priceMatch.cost).trim() !== '') {
+                if (authorizationTypeForProduct(priceMatch) === 'NON_AUTHORIZED'
+                    && priceMatch.cost !== undefined && priceMatch.cost !== null && String(priceMatch.cost).trim() !== '') {
                     orderData.costPrice = priceMatch.cost;
                 }
             }
@@ -5264,7 +5264,12 @@ function purchaseItemsFromOrder(order) {
             const normalizedBrand = String(brand || '').trim().toLocaleLowerCase();
             const priceMatch = (normalizedBrand && priceItemLookup.get(`brand:${normalizedBrand}:${normalizedCode}`))
                 || priceItemLookup.get(`code:${normalizedCode}`);
-            if (priceMatch) cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
+            const productId = item.productId || order.productId || priceMatch?.productId || (priceMatch ? stableProductId(priceMatch) : '');
+            const secureCost = productId ? purchaseCostCache.get(productId) : null;
+            if (secureCost !== undefined && secureCost !== null) cost = Number(secureCost);
+            else if (priceMatch && authorizationTypeForProduct(priceMatch) !== 'AUTHORIZED') {
+                cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
+            }
         }
         const parsedQty = parseFloat(qtyValue);
         return {
@@ -5407,6 +5412,8 @@ window.openPurchaseOrderModal = async function() {
     }
     poEditingId = null;
     populatePoVendorSuggestions();
+    await ensurePriceListLoaded().catch(() => {});
+    await preloadPurchaseCosts(selectedOrders);
     poAllItems = selectedOrders.flatMap(purchaseItemsFromOrder);
     if (!poAllItems.length) {
         alert('選取的訂單沒有可辨識的品項，請確認品名、貨號或 items 資料。');
@@ -6837,6 +6844,14 @@ window.deleteReturnRecord = async function(recordId) {
 window.updateOrderField = function(orderId, field, value) {
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
+    if (field === 'costPrice') {
+        const product = findPriceItemForOrder(o);
+        if (product && authorizationTypeForProduct(product) === 'AUTHORIZED') {
+            alert('代理產品成本請在採購單維護；不會寫入業務可讀的訂單文件。');
+            renderOrdersList();
+            return;
+        }
+    }
     const previousValue = o ? o[field] : undefined;
     if (String(previousValue ?? '') === String(value ?? '')) return;
     const labels = { costPrice: '修改單位成本', transactionType: '修改交易方式', invoiceTitle: '修改發票抬頭', remarks: '修改備註' };
@@ -7073,12 +7088,13 @@ window.saveNewOrder = function() {
     };
     const costInputVal = document.getElementById('orderCostPrice').value;
     const selectedProduct = findPriceItemForOrder(data);
-    const canSalesUseCost = currentUserRole === 'sales'
-        && selectedProduct
+    const nonAuthorizedCostAllowed = selectedProduct
         && authorizationTypeForProduct(selectedProduct) === 'NON_AUTHORIZED';
-    if ((currentUserRole === 'admin' || currentUserRole === 'purchaser' || canSalesUseCost) && costInputVal !== '') {
+    if (nonAuthorizedCostAllowed && costInputVal !== '') {
         data.costPrice = parseFloat(costInputVal);
-        if (canSalesUseCost) data.costSource = 'sales_manual_or_visible_non_authorized';
+        data.costSource = currentUserRole === 'sales'
+            ? 'sales_manual_or_visible_non_authorized'
+            : 'non_authorized_transaction_cost';
     }
 
     if (!data.orderDate || !data.itemName) {
@@ -8249,6 +8265,29 @@ function authorizationTypeForProduct(item) {
     const saved = String(item?.authorizationType || '').trim().toUpperCase();
     if (saved === 'AUTHORIZED' || saved === 'NON_AUTHORIZED') return saved;
     return isBrandAuthorizedForCurrentCompany(item?.brand || item?.brandName || '') ? 'AUTHORIZED' : 'NON_AUTHORIZED';
+}
+
+function safeEmbeddedOrderCost(item, rawCost) {
+    if (!item || authorizationTypeForProduct(item) === 'AUTHORIZED') return '';
+    const cost = Number(rawCost);
+    return Number.isFinite(cost) && cost >= 0 ? cost : '';
+}
+
+async function preloadPurchaseCosts(orders) {
+    purchaseCostCache = new Map();
+    const products = new Map();
+    (orders || []).forEach(order => {
+        purchaseItemsFromOrder(order).forEach(item => {
+            const match = findPriceItemForOrder({ itemCode:item.itemCode, brand:item.brand });
+            if (!match) return;
+            const id = match.productId || stableProductId(match);
+            if (id) products.set(id, match);
+        });
+    });
+    await Promise.all([...products.entries()].map(async ([id,item]) => {
+        const cost = await loadVisibleProductCost(item);
+        if (cost !== null && Number.isFinite(cost)) purchaseCostCache.set(id,cost);
+    }));
 }
 
 function productMasterDocToPriceItem(doc) {
