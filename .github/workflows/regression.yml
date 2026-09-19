@@ -17,3 +17,5 @@ jobs:
         run: node --check app.js
       - name: Regression tests
         run: node --test tests/phase1.test.js
+      - name: Validate Firestore rules
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "echo Firestore-rules-ok"
