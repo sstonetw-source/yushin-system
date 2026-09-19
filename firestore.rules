@@ -128,9 +128,9 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 未明確列出的集合一律拒絕，避免 catch-all 讓前面的角色/歸屬規則失效。
     match /{document=**} {
-      allow read: if signedIn();
-      allow write: if admin();
+      allow read, write: if false;
     }
   }
 }
