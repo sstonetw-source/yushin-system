@@ -3530,14 +3530,19 @@ window.markQuoteAsDeal = function(quoteNo) {
                 isBilled: false,
                 invoiceDate: ''
             };
-            // 價目表如果有登記這個貨號的成本，自動帶進這筆訂單的「含稅成本」，不用採購再手動查一次
+            // Product Master 關聯保留；成本依代理/非代理與角色處理，避免代理產品成本寫入業務可讀的訂單文件。
             const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: resolveBrandName(item.brand || '') }) : null;
             if (priceMatch) {
                 orderData.productId = orderData.productId || priceMatch.productId || stableProductId(priceMatch);
                 orderData.unit = priceMatch.unit || '';
                 orderData.supplier = priceMatch.supplier || '';
                 orderData.spec = item.spec || priceMatch.spec || '';
-                if (priceMatch.cost) orderData.costPrice = priceMatch.cost;
+                orderData.authorizationType = authorizationTypeForProduct(priceMatch);
+                const canCarryCost = currentUserRole === 'admin' || currentUserRole === 'purchaser'
+                    || authorizationTypeForProduct(priceMatch) === 'NON_AUTHORIZED';
+                if (canCarryCost && priceMatch.cost !== undefined && priceMatch.cost !== null && String(priceMatch.cost).trim() !== '') {
+                    orderData.costPrice = priceMatch.cost;
+                }
             }
             batch.set(orderRef, orderData);
             createdOrders.push({ id: orderRef.id, data: orderData });
@@ -6405,6 +6410,8 @@ window.openOrderModal = function(source = null) {
             ? source.totalPrice
             : (Number(source.qty || 1) * Number(source.unitPrice || 0));
         document.getElementById('orderTotalPrice').value = total || 0;
+        const sourceMatch = source.itemCode ? findPriceItemForOrder({ itemCode: source.itemCode, brand: source.brand || '' }) : null;
+        if (sourceMatch) applyOrderProductCost(sourceMatch);
     }
 
     document.getElementById('orderModalOverlay').classList.add('active');
@@ -7782,9 +7789,11 @@ async function applyOrderProductCost(item) {
         input.value = secureCost;
         return;
     }
-    // 過渡期：非代理產品舊價目表尚未移到 productCosts 前，維持原本可輸入/可查看的工作流程。
-    if (authorizationTypeForProduct(item) === 'NON_AUTHORIZED'
-        && item.cost !== undefined && item.cost !== null && String(item.cost).trim() !== '') {
+    // 過渡期：正式 productCosts 尚未補齊前，採購/管理員可沿用舊價目表成本；
+    // 業務只允許沿用非代理產品的舊成本。
+    const privileged = currentUserRole === 'admin' || currentUserRole === 'purchaser';
+    const legacyAllowed = privileged || authorizationTypeForProduct(item) === 'NON_AUTHORIZED';
+    if (legacyAllowed && item.cost !== undefined && item.cost !== null && String(item.cost).trim() !== '') {
         input.value = item.cost;
     } else {
         input.value = '';
