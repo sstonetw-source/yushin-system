@@ -339,6 +339,33 @@ function salesCodeForName(salesName) {
     return String(match?.code || '').trim();
 }
 
+function normalizeCustomerKey(value) {
+    return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function customerIdForName(value) {
+    const key = normalizeCustomerKey(value);
+    return key ? `cus:${encodeURIComponent(key).slice(0, 180)}` : '';
+}
+
+function syncCustomerMaster(customerName, extra = {}) {
+    const name = String(customerName || '').trim();
+    const customerId = customerIdForName(name);
+    if (!customerId || !currentUser) return customerId;
+
+    // 主交易不等待 Customer Master 寫入，避免新增估價／訂單被次要同步拖慢。
+    if (currentUserRole === 'admin' || currentUserRole === 'sales') {
+        db.collection('customers').doc(customerId).set({
+            customerId,
+            name,
+            active: true,
+            lastSalesCode: extra.salesCode || currentUserCode || '',
+            updatedAt: new Date().toISOString()
+        }, { merge: true }).catch(err => console.warn('Customer Master 同步失敗：', err));
+    }
+    return customerId;
+}
+
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
     if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
@@ -1121,6 +1148,7 @@ window.saveForecast = async function() {
 
             const record = {
                 customerName,
+                customerId: syncCustomerMaster(customerName, { salesCode: currentUserCode || '' }),
                 brand,
                 productName,
                 estimatedAmount,
@@ -1160,6 +1188,7 @@ window.saveForecast = async function() {
 
             const updateData = {
                 customerName,
+                customerId: syncCustomerMaster(customerName, { salesCode: existing.salesCode || currentUserCode || '' }),
                 brand,
                 productName,
                 estimatedAmount,
@@ -2645,8 +2674,8 @@ window.handleSaveAndPrint = function() {
         company: currentCompany,
         clientName: clientName,
         ordererName: ordererName,
+        customerId: syncCustomerMaster(ordererName || clientName, { salesCode: selectedSales?.code || salesCodeForName(selectedSalesName) }),
         salesName: selectedSalesName,
-        salesCode: salesCodeForName(selectedSalesName),
         salesCode: selectedSales?.code || salesCodeForName(selectedSalesName),
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName, '', selectedSales?.code || salesCodeForName(selectedSalesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
@@ -5971,6 +6000,7 @@ window.saveNewOrder = function() {
         createdAt: new Date().toISOString(),
         company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
+        customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
         brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
         itemCode: itemCode,
         itemCodeKey: normalizeHistoryItemCode(itemCode),
@@ -6007,6 +6037,7 @@ window.saveNewOrder = function() {
         return;
     }
 
+    data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode });
     const priceMatch = findPriceItemForOrder(data);
     data.productLine = (priceMatch && priceMatch.productLine) || '';
     data.productType = (priceMatch && priceMatch.productType) || '';
@@ -6363,10 +6394,12 @@ window.saveEquipmentFromModal = function() {
     const editId = document.getElementById('eqModalOverlay').dataset.editId;
     const data = {
         customerName: document.getElementById('eqCustomer').value.trim(),
+        customerId: customerIdForName(document.getElementById('eqCustomer').value.trim()),
         brand: getBrandFieldValue('eqBrand', 'eqBrandOther'),
         model: document.getElementById('eqModel').value.trim(),
         serialNo: document.getElementById('eqSerial').value.trim(),
         salesName: document.getElementById('eqSales').value.trim(),
+        salesCode: salesCodeForName(document.getElementById('eqSales').value.trim()),
         location: document.getElementById('eqLocation').value.trim(),
         installDate: document.getElementById('eqInstallDate').value,
         cycleMonths: parseInt(document.getElementById('eqCycle').value) || 12,
@@ -6384,6 +6417,7 @@ window.saveEquipmentFromModal = function() {
         return;
     }
 
+    data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode }) || data.customerId;
     const ref = editId ? db.collection('equipment').doc(editId) : db.collection('equipment').doc();
     const payload = editId ? data : { ...data, assetId: getNextAssetId(data.salesName), logs: [] };
 
