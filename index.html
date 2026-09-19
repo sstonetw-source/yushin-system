@@ -413,7 +413,7 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 庫存異動</button></div>
+      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 批量庫存異動</button></div>
       <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、廠牌、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
       <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
@@ -424,6 +424,40 @@
       <div class="empty-hint" id="pendingInventoryEmptyHint" style="display:none;">目前沒有待建檔品項。</div>
 
       <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>貨號</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
+    </div>
+
+    <div class="eq-modal-overlay no-print" id="inventoryAdjustmentOverlay" onclick="if(event.target===this) closeInventoryAdjustment()">
+      <div class="eq-modal-box" style="max-width:1100px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="margin:0;">批量庫存異動</h3>
+          <button type="button" class="btn-secondary" onclick="closeInventoryAdjustment()">✕ 關閉</button>
+        </div>
+        <div class="form-grid" style="margin-top:14px;">
+          <div>
+            <label>異動類型</label>
+            <select id="inventoryAdjustmentType">
+              <option value="initial">期初庫存／新增入庫</option>
+              <option value="adjustment">盤點調整</option>
+              <option value="return">退貨入庫</option>
+              <option value="scrap">報廢</option>
+            </select>
+          </div>
+        </div>
+        <div class="inventory-summary-note">可一次輸入多個品項；正數增加庫存，盤點調整可輸入負數。報廢請輸入正數，系統會自動扣除。</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
+            <tbody id="inventoryAdjustmentRows"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:space-between;">
+          <button type="button" class="btn-secondary" onclick="addInventoryAdjustmentRow()">＋ 新增品項</button>
+          <div>
+            <button type="button" id="saveInventoryAdjustmentBatchBtn" onclick="saveInventoryAdjustmentBatch()">確認儲存</button>
+            <button type="button" class="btn-secondary" onclick="closeInventoryAdjustment()">取消</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="eq-modal-overlay no-print" id="inventoryReservationOverlay" onclick="if(event.target===this) closeInventoryReservationDetails()">
@@ -762,7 +796,7 @@
             <div class="form-grid">
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
-                <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" onchange="onOrderItemCodeChange(this)"></div>
+                <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" oninput="onOrderItemCodeInput(this)" onchange="onOrderItemCodeChange(this)"></div>
                 <div><label>品名</label><input type="text" id="orderItemName"></div>
                 <div><label>廠牌</label>
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
@@ -869,8 +903,8 @@
                 <h3 style="margin:0;">產生訂購單</h3>
                 <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">✕ 關閉</button>
             </div>
-            <div class="no-print" style="font-size:12px;color:#666;margin:6px 0;">
-                單價欄位預設帶入你在業務訂單填的「含稅成本」，這裡還可以再手動調整；抬頭請填要下單的廠商名稱。
+            <div class="no-print" id="poModeHint" style="font-size:12px;color:#666;margin:6px 0;">
+                訂單採購：品項來自業務訂單，可調整採購數量與進貨單價。
             </div>
             <div class="sub-nav no-print" style="padding:0;background:none;margin-bottom:14px;">
                 <div class="sub-tab active" id="po-sub-yushin" onclick="switchPoCompany('yushin', this)">又鑫 (YS)</div>
@@ -896,6 +930,10 @@
                 </div>
                 <div style="margin:4px 0;"><label>單號：</label><span id="poNo"></span></div>
 
+                <div class="no-print" style="margin:8px 0;">
+                    <button type="button" id="poAddStockItemBtn" class="btn-secondary" style="display:none;" onclick="addDirectPoItem()">＋ 新增備貨品項</button>
+                    <datalist id="poBrandList"></datalist>
+                </div>
                 <table id="poItemsTable" style="width:100%;margin-top:8px;border-collapse:collapse;">
                     <thead>
                         <tr>
@@ -922,6 +960,27 @@
                 <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">🖨️ 產生訂購單／輸出 PDF</button>
             </div>
         </div>
+    </div>
+
+    <!-- 批量到貨入庫 -->
+    <div class="eq-modal-overlay no-print" id="poReceiptBatchOverlay" onclick="if(event.target===this) closePoReceiptBatch()">
+      <div class="eq-modal-box" style="max-width:1180px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h3 id="poReceiptBatchTitle" style="margin:0;">到貨入庫</h3>
+          <button type="button" class="btn-secondary" onclick="closePoReceiptBatch()">✕ 關閉</button>
+        </div>
+        <div class="inventory-summary-note">可一次勾選多個到貨品項，支援部分到貨、批號與效期。完成後會同步更新 PO 到貨進度、在途、現有庫存與來源訂單占用。</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>收貨</th><th>貨號</th><th>品名</th><th>訂購</th><th>已收</th><th>未收</th><th>本次到貨</th><th>批號</th><th>效期</th></tr></thead>
+            <tbody id="poReceiptBatchBody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:12px;text-align:right;">
+          <button type="button" id="savePoReceiptBatchBtn" onclick="savePoReceiptBatch()">確認入庫</button>
+          <button type="button" class="btn-secondary" onclick="closePoReceiptBatch()">取消</button>
+        </div>
+      </div>
     </div>
 
     <!-- ============ 管理員雲端後台 ============ -->
