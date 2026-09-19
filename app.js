@@ -351,6 +351,8 @@ function getActivePermissionPage() {
     if (!section) return '';
     if (section.id === 'quote-system') return document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'quote.my' : 'quote.create';
     if (section.id === 'order-system') return document.getElementById('poListPanel')?.style.display === 'block' ? 'orders.po' : 'orders.list';
+    if (section.id === 'forecast-system') return 'forecast';
+    if (section.id === 'inventory-system') return 'inventory';
     if (section.id === 'equipment-system') return 'equipment';
     if (section.id === 'admin-system') return 'admin';
     return '';
@@ -381,7 +383,7 @@ function updateReadonlyNotice() {
 }
 
 function firstAccessibleMainPage() {
-    return ['quote', 'orders', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
+    return ['forecast', 'quote', 'orders', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
 }
 
 function showLoginScreen() {
@@ -416,10 +418,10 @@ function showApp() {
 
     applyPermissionVisibility();
     const activeSection = document.querySelector('.content-section.active');
-    const activeMainKey = activeSection ? { 'quote-system':'quote', 'order-system':'orders', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
+    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
     if (activeMainKey && !canAccessPage(activeMainKey)) {
         const fallback = firstAccessibleMainPage();
-        const fallbackId = { quote:'quote-system', orders:'order-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
+        const fallbackId = { forecast:'forecast-system', quote:'quote-system', orders:'order-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
         if (fallbackId) {
             document.getElementById('noPermissionMessage')?.remove();
             setTimeout(() => actuallySwitchMainTab(fallbackId), 0);
@@ -459,8 +461,10 @@ function showApp() {
 }
 
 function initializePageData(mainKey) {
+    if (mainKey === 'forecast') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'orders') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(loadOrdersFromCloud);
+    if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => {
         populateEquipmentSalesDropdown();
         loadEquipmentFromCloud();
@@ -675,10 +679,19 @@ window.switchViewRole = function(role) {
     myQuotesPaginationState = null;
     ordersCache = [];
     orderPaginationState = null;
+    forecastCache = [];
+    forecastCursor = null;
+    forecastHasMore = true;
+    inventoryCache = [];
+    inventoryCursor = null;
+    inventoryHasMore = true;
+    pendingInventoryCache = [];
     equipmentList = [];
     const activeSection = document.querySelector('.content-section.active');
     if (activeSection?.id === 'order-system') renderOrdersList();
     if (activeSection?.id === 'quote-system' && document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
+    if (activeSection?.id === 'forecast-system') renderForecastList();
+    if (activeSection?.id === 'inventory-system') { renderInventoryList(); renderPendingInventoryItems(); }
     if (activeSection?.id === 'equipment-system') renderEquipmentList();
     showApp();
 
@@ -904,7 +917,8 @@ window.loadForecasts = async function(reset = true) {
         }
 
         if (!canViewAllData('forecast')) {
-            query = query.where('ownerUid', '==', currentUser?.uid || '');
+            if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
+            else query = query.where('ownerUid', '==', currentUser?.uid || '');
         }
 
         query = query.limit(DEFAULT_LIST_LIMIT);
@@ -2630,6 +2644,7 @@ window.handleSaveAndPrint = function() {
         clientName: clientName,
         ordererName: ordererName,
         salesName: selectedSalesName,
+        salesCode: salesCodeForName(selectedSalesName),
         salesCode: selectedSales?.code || salesCodeForName(selectedSalesName),
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName, '', selectedSales?.code || salesCodeForName(selectedSalesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
@@ -2929,6 +2944,7 @@ function createMyQuotesPaginationState() {
         // 全公司估價單直接由 Firestore 依日期分頁，不能先按公司／單號分組後才在前端重排。
         sources.push({ cursor: null, query: () => db.collection('quotes').orderBy('quoteDate', 'desc') });
     } else {
+        if (currentUserCode) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesCode', '==', currentUserCode).orderBy('quoteDate', 'desc') });
         if (currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('ownerUid', '==', currentUser.uid).orderBy('quoteDate', 'desc') });
         if (currentUserName) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesName', '>=', currentUserName).where('salesName', '<=', currentUserName + '\uf8ff').orderBy('quoteDate', 'desc') });
     }
@@ -3421,15 +3437,13 @@ function orderInvoiceDate(order) {
 }
 
 function orderPeriodRange() {
-    if (activeOrderPeriod === 'all') return { start: '', end: '' };
     if (activeOrderPeriod === 'custom') {
         return {
             start: document.getElementById('orderPeriodStart')?.value || '',
             end: document.getElementById('orderPeriodEnd')?.value || ''
         };
     }
-    const year = new Date().getFullYear() - (activeOrderPeriod === 'last-year' ? 1 : 0);
-    return { start: `${year}-01-01`, end: `${year}-12-31` };
+    return unifiedPeriodRange(activeOrderPeriod);
 }
 
 function dateInOrderPeriod(date) {
@@ -3445,7 +3459,7 @@ function orderMatchesWorkPeriod(order, category = orderWorkCategory(order)) {
 }
 
 window.changeOrderPeriod = function(value) {
-    activeOrderPeriod = ['this-year', 'last-year', 'custom', 'all'].includes(value) ? value : 'this-year';
+    activeOrderPeriod = ['this-month', 'last-month', 'this-quarter', 'this-year', 'last-year', 'custom', 'all'].includes(value) ? value : 'this-year';
     const custom = document.getElementById('orderCustomPeriod');
     if (custom) custom.style.display = activeOrderPeriod === 'custom' ? 'flex' : 'none';
     if (activeOrderPeriod === 'custom') {
@@ -3705,6 +3719,13 @@ function createOrderPaginationState() {
             query: () => db.collection('orders').orderBy('orderDate', 'desc')
         });
     } else {
+        if (currentUserCode) {
+            sources.push({
+                cursor: null,
+                exhausted: false,
+                query: () => db.collection('orders').where('salesCode', '==', currentUserCode)
+            });
+        }
         if (currentUser?.uid) {
             sources.push({
                 cursor: null,
@@ -3856,7 +3877,7 @@ async function runOrderHistoryItemCodeSearch(reset = true) {
         const records = new Map(orderHistorySearchResults.map(order => [order.id, order]));
         snapshot.forEach(doc => {
             const data = { id: doc.id, ...doc.data() };
-            if (canViewAllData('orders') || belongsToCurrentUser(data.salesName) || data.ownerUid === currentUser?.uid) records.set(doc.id, data);
+            if (canViewAllData('orders') || belongsToCurrentUser(data.salesName, data.ownerUid, data.salesCode)) records.set(doc.id, data);
         });
         orderHistorySearchResults = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         orderHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
@@ -4461,16 +4482,40 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
 
 window.openDirectStockPurchase = function() {
     if (!canEditPage('orders.po')) return;
-    const code = prompt('請輸入備貨產品貨號'); if (!code) return;
+    const code = (prompt('請輸入備貨產品貨號') || '').trim();
+    if (!code) return;
+
     const normalized = normalizeItemCode(code);
-    const match = priceItemLookup.get(`code:${normalized}`);
-    if (!match) { alert('Product Master 找不到此貨號，請先更新產品主檔。'); return; }
-    const qty = Number(prompt('請輸入備貨採購數量','1')); if (!qty || qty <= 0) return;
-    poItems = [{ orderId:'', itemName:match.nameCn||match.nameEn||'', itemCode:match.model||code, productId:match.productId||stableProductId(match), brand:match.brand||'', qty, unit:match.unit||'', unitPrice:Number(match.cost||0) }];
-    poAllItems = poItems; poEditingId = null;
+    const match = priceItemLookup.get(`code:${normalized}`) || null;
+
+    const itemName = match?.nameCn || match?.nameEn || (prompt('Product Master 尚無此貨號，請輸入品名') || '').trim();
+    if (!itemName) { alert('請輸入品名。'); return; }
+
+    const brand = resolveBrandName(match?.brand || (prompt('請輸入廠牌（可輸入新廠牌）') || '').trim());
+    if (!brand) { alert('請輸入廠牌。'); return; }
+
+    const qty = Number(prompt('請輸入備貨採購數量', '1'));
+    if (!qty || qty <= 0) return;
+
+    const unit = match?.unit || (prompt('單位（可留白）', '') || '').trim();
+    const supplier = match?.supplier || (prompt('供應商（可留白）', '') || '').trim();
+    const unitPrice = Number(match?.cost || prompt('含稅成本（可填 0 稍後修改）', '0') || 0);
+
+    poItems = [{
+        orderId: '',
+        itemName,
+        itemCode: match?.model || code,
+        productId: match?.productId || '',
+        brand,
+        qty,
+        unit,
+        unitPrice
+    }];
+    poAllItems = poItems;
+    poEditingId = null;
     switchPoCompany(currentCompany || 'yushin', null, true);
     populatePoVendorSuggestions();
-    document.getElementById('poVendorName').value = match.supplier || '';
+    document.getElementById('poVendorName').value = supplier;
     document.getElementById('poBuyerName').innerText = currentUserName || '';
     document.getElementById('poDate').value = localDateString();
     generateNextPoNumber();
@@ -6044,7 +6089,7 @@ window.loadEquipmentFromCloud = function() {
     if (canViewAllEquipment()) {
         query = query.orderBy('customerName');
     } else {
-        query = query.where('salesName', '==', currentUserName);
+        query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('salesName', '==', currentUserName);
     }
     query.get().then(snapshot => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
@@ -7457,29 +7502,45 @@ window.sendPasswordResetToUser = function(email) {
     });
 };
 
+async function syncSalesCodeMasterFromUsers() {
+    if (trueUserRole !== 'admin') return;
+    const now = new Date().toISOString();
+    for (const person of salesList.filter(item => item.code)) {
+        await db.collection('salesCodes').doc(String(person.code)).set({
+            code: String(person.code),
+            currentUserUid: person.uid || '',
+            currentUserName: person.name || '',
+            active: true,
+            updatedAt: now
+        }, { merge: true });
+    }
+}
+
 window.reloadSalesFromUsers = function() {
-    return Promise.all([initSalesList(), loadAllUsersForAdmin()]).then(renderAdminSalesTable);
+    return Promise.all([initSalesList(), loadAllUsersForAdmin()]).then(async () => {
+        if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
+        renderAdminSalesTable();
+        populateTransferDropdowns();
+    });
 };
 
-/* ---------- 人員異動交接：把某位業務名下的資料整批轉移給新業務 ---------- */
+/* ---------- 業務代號交接：資料歸屬維持 salesCode，只更換代號目前負責人 ---------- */
 function populateTransferDropdowns() {
-    const fromSelect = document.getElementById('transferFromSales');
-    const toSelect = document.getElementById('transferToSales');
-    if (!fromSelect || !toSelect) return;
+    const codeSelect = document.getElementById('transferFromSales');
+    const userSelect = document.getElementById('transferToSales');
+    if (!codeSelect || !userSelect) return;
 
-    const fromValue = fromSelect.value;
-    const toValue = toSelect.value;
-    const optionsHtml = '<option value="">請選擇</option>' +
-        salesList.filter(s => s.name).map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(s.name)}</option>`).join('');
-    fromSelect.innerHTML = optionsHtml;
-    toSelect.innerHTML = optionsHtml;
-    if (salesList.some(s => s.name === fromValue)) fromSelect.value = fromValue;
-    if (salesList.some(s => s.name === toValue)) toSelect.value = toValue;
-
+    const codeValue = codeSelect.value;
+    const userValue = userSelect.value;
+    codeSelect.innerHTML = '<option value="">請選擇業務代號</option>' +
+        salesList.filter(s => s.code).map(s => `<option value="${escapeAttr(s.code)}">${escapeHtml(s.code)}｜${escapeHtml(s.name || '')}</option>`).join('');
+    userSelect.innerHTML = '<option value="">請選擇接手同仁</option>' +
+        allUsersCache.filter(u => u.name).map(u => `<option value="${escapeAttr(u.uid)}">${escapeHtml(u.name)}｜${escapeHtml(u.email || u.uid)}</option>`).join('');
+    if ([...codeSelect.options].some(o => o.value === codeValue)) codeSelect.value = codeValue;
+    if ([...userSelect.options].some(o => o.value === userValue)) userSelect.value = userValue;
     resetTransferPreview();
 }
 
-// 選項或範圍勾選有變動時，先把「查詢筆數」的結果隱藏，避免用舊的筆數誤按執行
 window.resetTransferPreview = function() {
     const btn = document.getElementById('transferExecuteBtn');
     const result = document.getElementById('transferResult');
@@ -7488,92 +7549,126 @@ window.resetTransferPreview = function() {
 };
 
 function getTransferSelection() {
-    const fromName = document.getElementById('transferFromSales').value;
-    const toName = document.getElementById('transferToSales').value;
-    const scopes = [];
-    if (document.getElementById('transferQuotes').checked) scopes.push({ key: 'quotes', label: '估價單', collection: 'quotes' });
-    if (document.getElementById('transferOrders').checked) scopes.push({ key: 'orders', label: '訂單', collection: 'orders' });
-    if (document.getElementById('transferEquipment').checked) scopes.push({ key: 'equipment', label: '儀器', collection: 'equipment' });
-    return { fromName, toName, scopes };
+    const salesCode = document.getElementById('transferFromSales')?.value || '';
+    const targetUid = document.getElementById('transferToSales')?.value || '';
+    const currentHolder = salesList.find(s => String(s.code) === String(salesCode)) || null;
+    const target = allUsersCache.find(u => u.uid === targetUid) || null;
+    return { salesCode, targetUid, currentHolder, target };
 }
 
-window.previewSalesTransfer = function() {
-    const { fromName, toName, scopes } = getTransferSelection();
+async function countLegacyRecordsForSalesCode(person) {
+    if (!person?.name) return { quotes:0, orders:0, forecasts:0, equipment:0, total:0 };
+    const configs = [
+        ['quotes','quotes'], ['orders','orders'], ['forecasts','forecasts'], ['equipment','equipment']
+    ];
+    const counts = {};
+    await Promise.all(configs.map(async ([key, collection]) => {
+        const snap = await db.collection(collection).where('salesName', '==', person.name).get();
+        counts[key] = snap.docs.filter(doc => !doc.data().salesCode).length;
+    }));
+    counts.total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+    return counts;
+}
+
+window.previewSalesTransfer = async function() {
+    const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const executeBtn = document.getElementById('transferExecuteBtn');
     executeBtn.style.display = 'none';
 
-    if (!fromName || !toName) {
-        resultEl.innerText = '請先選擇原業務與新業務。';
+    if (!salesCode || !target) {
+        resultEl.innerText = '請先選擇要交接的業務代號與接手同仁。';
         return;
     }
-    if (fromName === toName) {
-        resultEl.innerText = '原業務與新業務不能是同一個人。';
-        return;
-    }
-    if (scopes.length === 0) {
-        resultEl.innerText = '請至少勾選一種要轉移的資料範圍。';
+    if (currentHolder?.uid === target.uid) {
+        resultEl.innerText = '這位同仁目前已經是此業務代號的負責人。';
         return;
     }
 
-    resultEl.innerText = '查詢中…';
-
-    Promise.all(scopes.map(s => db.collection(s.collection).where('salesName', '==', fromName).get()))
-        .then(snapshots => {
-            const counts = scopes.map((s, i) => ({ ...s, count: snapshots[i].size }));
-            const totalCount = counts.reduce((sum, c) => sum + c.count, 0);
-
-            if (totalCount === 0) {
-                resultEl.innerText = `「${fromName}」目前在勾選的範圍內沒有任何資料，不需要轉移。`;
-                return;
-            }
-
-            resultEl.innerText = `查詢結果（將把「${fromName}」轉移給「${toName}」）：\n` +
-                counts.map(c => `・${c.label}：${c.count} 筆`).join('\n') +
-                `\n共 ${totalCount} 筆。確認無誤後請按「確認執行轉移」。`;
-            executeBtn.style.display = '';
-        })
-        .catch(err => {
-            console.error(err);
-            resultEl.innerText = '查詢失敗：' + err.message;
-        });
+    resultEl.innerText = '檢查舊資料中…';
+    try {
+        const counts = await countLegacyRecordsForSalesCode(currentHolder);
+        resultEl.innerText =
+            `業務代號：${salesCode}\n目前負責人：${currentHolder?.name || '未指定'}\n接手同仁：${target.name}\n\n` +
+            `舊資料需要補上 salesCode：${counts.total} 筆\n` +
+            `・估價單 ${counts.quotes || 0}\n・訂單 ${counts.orders || 0}\n・Forecast ${counts.forecasts || 0}\n・儀器 ${counts.equipment || 0}\n\n` +
+            '交接後歷史 salesName/createdBy 不會被改寫；資料歸屬只改由此業務代號的現任負責人接手。';
+        executeBtn.style.display = '';
+    } catch (err) {
+        resultEl.innerText = '檢查失敗：' + err.message;
+    }
 };
 
-window.executeSalesTransfer = function() {
-    const { fromName, toName, scopes } = getTransferSelection();
+async function backfillSalesCodeForLegacyRecords(person, salesCode) {
+    if (!person?.name || !salesCode) return 0;
+    const collections = ['quotes','orders','forecasts','equipment'];
+    let total = 0;
+    for (const collection of collections) {
+        const snap = await db.collection(collection).where('salesName', '==', person.name).get();
+        const refs = snap.docs.filter(doc => !doc.data().salesCode).map(doc => doc.ref);
+        if (refs.length) {
+            await runFirestoreBatchUpdates(refs, { salesCode, ownershipMigratedAt: new Date().toISOString() });
+            total += refs.length;
+        }
+    }
+    return total;
+}
+
+window.executeSalesTransfer = async function() {
+    const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
-    if (!fromName || !toName || fromName === toName || scopes.length === 0) return;
+    const button = document.getElementById('transferExecuteBtn');
+    if (!salesCode || !target || !button) return;
 
-    if (!confirm(`確定要把「${fromName}」名下勾選的資料（${scopes.map(s => s.label).join('、')}）全部改成掛在「${toName}」名下嗎？\n這個動作會直接修改雲端資料，執行後無法一鍵復原，請確認已經按過「查詢筆數」核對過範圍。`)) return;
+    if (!confirm(`確定把業務代號「${salesCode}」交接給「${target.name}」嗎？\n歷史交易內容與原建立人不會改寫；此代號的新舊資料會改由接手同仁查看與管理。`)) return;
 
-    document.getElementById('transferExecuteBtn').disabled = true;
-    resultEl.innerText = '轉移中，請稍候…';
+    button.disabled = true;
+    resultEl.innerText = '交接中…';
+    try {
+        const migrated = await backfillSalesCodeForLegacyRecords(currentHolder, salesCode);
+        const now = new Date().toISOString();
+        const codeRef = db.collection('salesCodes').doc(String(salesCode));
+        const codeSnap = await codeRef.get();
+        const history = Array.isArray(codeSnap.data()?.handoffHistory) ? codeSnap.data().handoffHistory : [];
+        const entry = {
+            fromUid: currentHolder?.uid || '',
+            fromName: currentHolder?.name || '',
+            toUid: target.uid,
+            toName: target.name || '',
+            at: now,
+            byUid: currentUser?.uid || '',
+            byName: currentUserName || ''
+        };
 
-    Promise.all(scopes.map(s => db.collection(s.collection).where('salesName', '==', fromName).get()))
-        .then(snapshots => {
-            const updateChains = scopes.map((s, i) => {
-                const refs = snapshots[i].docs.map(d => d.ref);
-                return runFirestoreBatchUpdates(refs, { salesName: toName }).then(() => ({ label: s.label, count: refs.length }));
-            });
-            return Promise.all(updateChains);
-        })
-        .then(results => {
-            const totalCount = results.reduce((sum, r) => sum + r.count, 0);
-            resultEl.innerText = `轉移完成，共更新 ${totalCount} 筆：\n` +
-                results.map(r => `・${r.label}：${r.count} 筆`).join('\n');
-            document.getElementById('transferExecuteBtn').style.display = 'none';
-            document.getElementById('transferExecuteBtn').disabled = false;
+        const batch = db.batch();
+        batch.set(codeRef, {
+            code: String(salesCode),
+            currentUserUid: target.uid,
+            currentUserName: target.name || '',
+            active: true,
+            handoffHistory: [...history, entry],
+            updatedAt: now
+        }, { merge: true });
+        batch.set(db.collection('users').doc(target.uid), { code: String(salesCode), codeAssignedAt: now }, { merge: true });
+        if (currentHolder?.uid && currentHolder.uid !== target.uid) {
+            batch.set(db.collection('users').doc(currentHolder.uid), {
+                code: '',
+                previousSalesCode: String(salesCode),
+                codeHandedOffAt: now
+            }, { merge: true });
+        }
+        await batch.commit();
 
-            // 若其他分頁的資料快取已經載入過，順便刷新，避免畫面顯示轉移前的舊資料
-            if (typeof allQuotesCache !== 'undefined' && allQuotesCache.length) loadAllQuotesFromCloud();
-            if (typeof ordersCache !== 'undefined' && ordersCache.length) loadOrdersFromCloud();
-            if (typeof equipmentList !== 'undefined' && equipmentList.length) loadEquipmentFromCloud();
-        })
-        .catch(err => {
-            console.error(err);
-            resultEl.innerText = '轉移過程發生錯誤，部分資料可能已經轉移、部分尚未完成，請重新查詢筆數確認目前狀態：' + err.message;
-            document.getElementById('transferExecuteBtn').disabled = false;
-        });
+        resultEl.innerText = `交接完成。業務代號 ${salesCode} 現由 ${target.name} 負責；另補上 ${migrated} 筆舊資料的 salesCode。歷史姓名與操作紀錄均保留。`;
+        button.style.display = 'none';
+        button.disabled = false;
+        salesListLoadPromise = null;
+        await reloadSalesFromUsers();
+    } catch (err) {
+        console.error(err);
+        resultEl.innerText = '交接失敗：' + err.message;
+        button.disabled = false;
+    }
 };
 
 // 依 Firestore batch 500 筆上限，自動切批次執行文件更新
