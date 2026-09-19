@@ -87,13 +87,13 @@ service cloud.firestore {
     }
 
     match /purchaseOrders/{id} {
-      allow read: if signedIn();
+      allow read: if admin() || purchaser() || warehouse();
       allow create, update: if admin() || purchaser();
       allow delete: if false;
     }
 
     match /inventory/{id} {
-      allow read: if signedIn();
+      allow read: if admin() || purchaser() || warehouse() || sales();
       // 正式庫存建檔／採購入庫由採購、倉管、管理員負責。
       allow create: if admin() || warehouse() || purchaser();
       // 業務在訂單成立／送貨流程只能改動實體數量、占用數量、批號與更新時間，
@@ -104,27 +104,31 @@ service cloud.firestore {
 
     // 訂單成立後的庫存占用明細；以狀態更新取代刪除，保留可追溯性。
     match /inventoryReservations/{id} {
-      allow read: if signedIn();
-      allow create, update: if admin() || sales() || purchaser() || warehouse();
+      allow read: if admin() || purchaser() || warehouse() || (sales() && ownBySalesCode(resource.data));
+      allow create: if admin() || purchaser() || warehouse() || (sales() && ownBySalesCode(request.resource.data));
+      allow update: if admin() || purchaser() || warehouse()
+        || (sales() && ownBySalesCode(resource.data) && ownBySalesCode(request.resource.data));
       allow delete: if false;
     }
 
     // PO 已送出但尚未成為正式庫存主檔的新品項。
     match /pendingInventoryItems/{id} {
-      allow read: if signedIn();
+      allow read: if admin() || purchaser() || warehouse();
       allow create, update: if admin() || purchaser() || warehouse();
       allow delete: if false;
     }
 
     match /inventoryMovements/{id} {
-      allow read: if signedIn();
+      allow read: if admin() || warehouse() || purchaser() || sales();
       allow create: if admin() || warehouse() || purchaser() || sales();
       allow update, delete: if false;
     }
 
     match /equipment/{id} {
-      allow read: if signedIn();
-      allow create, update: if admin() || engineer();
+      allow read: if admin() || engineer() || (sales() && ownBySalesCode(resource.data));
+      allow create: if admin() || engineer() || (sales() && ownBySalesCode(request.resource.data));
+      allow update: if admin() || engineer()
+        || (sales() && ownBySalesCode(resource.data) && ownBySalesCode(request.resource.data));
       allow delete: if false;
     }
 
