@@ -6101,20 +6101,95 @@ function renderOrderStatusHistory(order) {
     tbody.innerHTML = entries.length ? entries.map(item => `<tr><td>${escapeHtml(formatOrderStatusTime(item.at))}</td><td>${escapeHtml(item.action || '')}</td><td>${escapeHtml(item.by || '')}</td><td>${escapeHtml(item.detail || '')}</td></tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚無操作紀錄。</td></tr>';
 }
 
-function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
+async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId) {
+    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0 };
+    const productKey = inventoryProductKey(order);
+    const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
     const invRef = inventoryRefFor(order);
-    if (!invRef || deliveryQty <= 0) return Promise.resolve(null);
-    return transaction.get(invRef).then(invSnap => {
-        const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : {});
-        const reservedForOrder = Number(order.inventoryReservedQty || 0);
-        const alreadyDelivered = deliveredQuantity(order);
-        const reservedRemaining = Math.max(0, reservedForOrder - alreadyDelivered);
-        const fromReserved = Math.min(deliveryQty, reservedRemaining);
-        if (stock.onHand < deliveryQty) throw new Error(`庫存不足：現有 ${stock.onHand}，本次需出貨 ${deliveryQty}。`);
-        transaction.set(invRef, { onHand: stock.onHand - deliveryQty, reserved: Math.max(0, stock.reserved - fromReserved), incoming: stock.incoming, updatedAt: new Date().toISOString() }, { merge: true });
-        const movement = db.collection('inventoryMovements').doc();
-        transaction.set(movement, inventoryMovementRecord('ship', -deliveryQty, sourceId, inventoryProductKey(order), actor, { reservedReleasedQty: fromReserved }));
-        return { fromReserved };
+    const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)) : null;
+    if (!invRef || !whRef) throw new Error('此訂單尚未指定有效倉庫，無法進行庫存出貨。');
+
+    const invSnap = await transaction.get(invRef);
+    const whSnap = await transaction.get(whRef);
+    if (!invSnap.exists || !whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
+
+    const inv = inventoryNumbers(invSnap.data());
+    const wh = inventoryNumbers(whSnap.data());
+    const initialReserved = Number(order.inventoryReservedQty || 0);
+    const oldDelivered = deliveredQuantity(order);
+    const newDelivered = Math.max(0, oldDelivered + deltaQty);
+    const oldReservedRemaining = Math.max(0, initialReserved - oldDelivered);
+    const newReservedRemaining = Math.max(0, initialReserved - newDelivered);
+    const reservedDelta = newReservedRemaining - oldReservedRemaining;
+    const now = new Date().toISOString();
+
+    if (deltaQty > 0) {
+        if (inv.onHand < deltaQty || wh.onHand < deltaQty) {
+            throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
+        }
+    } else {
+        // 取消/縮減送貨會把貨放回原出貨倉。
+        const restore = Math.abs(deltaQty);
+        if (inv.reserved + reservedDelta < 0 || wh.reserved + reservedDelta < 0) {
+            throw new Error('庫存占用狀態異常，無法還原送貨。');
+        }
+    }
+
+    transaction.set(invRef, {
+        onHand: inv.onHand - deltaQty,
+        reserved: Math.max(0, inv.reserved + reservedDelta),
+        incoming: inv.incoming,
+        updatedAt: now
+    }, { merge:true });
+    transaction.set(whRef, {
+        warehouseId, productKey,
+        onHand: wh.onHand - deltaQty,
+        reserved: Math.max(0, wh.reserved + reservedDelta),
+        incoming: wh.incoming,
+        updatedAt: now
+    }, { merge:true });
+
+    transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
+        deltaQty > 0 ? 'ship' : 'ship_reversal',
+        -deltaQty,
+        sourceId,
+        productKey,
+        actor,
+        { warehouseId, fulfillmentType:'WAREHOUSE', reservedDelta }
+    ));
+
+    transaction.set(reservationDocRef(sourceId), {
+        ...inventoryReservationPayload(sourceId, order, newReservedRemaining, newReservedRemaining > 0 ? 'active' : 'fulfilled'),
+        warehouseId
+    }, { merge:true });
+    return { reservedDelta };
+}
+
+function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
+    return applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryQty, actor, sourceId);
+}
+
+async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQty, actor, sourceId) {
+    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
+    const productKey = inventoryProductKey(order);
+    const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
+    const invRef = inventoryRefFor(order);
+    const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)) : null;
+    if (!invRef || !whRef) throw new Error('此訂單沒有可追蹤的出貨倉庫。');
+    const invSnap = await transaction.get(invRef);
+    const whSnap = await transaction.get(whRef);
+    if (!invSnap.exists || !whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
+    const inv=inventoryNumbers(invSnap.data()), wh=inventoryNumbers(whSnap.data());
+    if (deltaQty < 0 && (inv.onHand < Math.abs(deltaQty) || wh.onHand < Math.abs(deltaQty))) {
+        throw new Error('刪除／縮減退貨後會造成庫存小於 0。');
+    }
+    const now=new Date().toISOString();
+    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:inv.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+    transaction.set(db.collection('inventoryMovements').doc(),{
+        type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
+        fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
+        createdAt:now,createdBy:actor
     });
 }
 
@@ -6232,6 +6307,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
                 ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
                 : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
+            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId);
             const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -6350,9 +6426,11 @@ window.saveDeliveryRecord = async function() {
             if (totalDelivered > total + 1e-9) throw new Error(`累計送貨數量 ${totalDelivered} 超過訂購數量 ${total}。`);
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
-            const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
+            const action = previous ? 'edit' : 'create';
+            const history = { action, recordId: record.id, before: previous, after: record, by: actor, at: now };
             const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
-            if (action === 'create') await applyInventoryDeliveryInTransaction(transaction, ref, order, qty, actor, orderId);
+            const deliveryDelta = qty - Number(previous?.qty || 0);
+            if (deliveryDelta) await applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryDelta, actor, orderId);
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -6385,7 +6463,10 @@ window.deleteDeliveryRecord = async function(recordId) {
             const totalDelivered = next.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`刪除後的送貨數量會低於已登錄的退貨數量 ${alreadyReturned}，請先更正退貨紀錄。`);
-            const history = { action: 'delete', recordId, before: removed, after: null, by: deliveryActor(), at: new Date().toISOString() };
+            const actor = deliveryActor();
+            const now = new Date().toISOString();
+            const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
+            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId);
             const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -6407,7 +6488,8 @@ window.clearLegacyDelivery = async function() {
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     if (!order) return;
     if (returnedQuantity(order) > 0) { alert('這筆訂單已有退貨紀錄，請先更正或刪除退貨紀錄。'); return; }
-    const history = { action: 'clear_legacy_estimate', before: { isDelivered: true, estimatedDate: order.orderDate || '' }, after: null, by: deliveryActor(), at: new Date().toISOString() };
+    const now = new Date().toISOString();
+    const history = { action: 'clear_legacy_estimate', before: { isDelivered: true, estimatedDate: order.orderDate || '' }, after: null, by: deliveryActor(), at: now };
     try {
         await db.collection('orders').doc(order.id).update({ isDelivered: false, deliveredQty: 0, deliveryRecords: [], deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now });
         order.isDelivered = false;
@@ -6554,6 +6636,8 @@ window.saveReturnRecord = async function() {
             const delivered = deliveredQuantity(order);
             if (totalReturned > delivered + 1e-9) throw new Error(`累計退貨數量 ${totalReturned} 超過已送貨數量 ${delivered}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
+            const returnDelta = qty - Number(previous?.qty || 0);
+            if (returnDelta) await applyInventoryReturnDeltaInTransaction(transaction, order, returnDelta, actor, orderId);
             const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
@@ -6587,7 +6671,10 @@ window.deleteReturnRecord = async function(recordId) {
             if (!removed) throw new Error('找不到這筆退貨紀錄。');
             const next = records.filter(item => item.id !== recordId);
             const totalReturned = next.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-            const history = { action: 'delete', recordId, before: removed, after: null, by: deliveryActor(), at: new Date().toISOString() };
+            const actor = deliveryActor();
+            const now = new Date().toISOString();
+            const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
+            await applyInventoryReturnDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId);
             const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
