@@ -147,6 +147,14 @@ async function main() {
     await assertFails(deleteDoc(doc(admin, 'quotes', 'own-quote')));
     await assertFails(deleteDoc(doc(admin, 'equipment', 'own-equipment')));
 
+    // Warehouse master is intentionally admin-controlled.
+    await assertSucceeds(setDoc(doc(admin, 'warehouses', 'wh-admin-test'), {
+      warehouseId: 'wh-admin-test', warehouseName: 'Admin Warehouse', isDefault: true, active: true
+    }));
+    await assertFails(setDoc(doc(sales, 'warehouses', 'wh-sales-test'), {
+      warehouseId: 'wh-sales-test', warehouseName: 'Sales Warehouse', isDefault: false, active: true
+    }));
+
     await assertSucceeds(updateDoc(doc(purchaser, 'orders', 'own-order'), {
       purchaseOrderNo: 'PO-TEST'
     }));
