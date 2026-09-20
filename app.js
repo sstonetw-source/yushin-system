@@ -4108,6 +4108,21 @@ function addLotQuantity(lots, lotNo, expiryDate, qty) {
     else rows.push({ lotNo:normalizedLotNo, expiryDate:normalizedExpiry, qty:Number(qty || 0) });
     return rows.filter(lot => Number(lot.qty || 0) > 1e-9);
 }
+function adjustLotQuantity(lots, lotNo, expiryDate, delta) {
+    const rows = (lots || []).map(lot => ({ ...lot, qty:Number(lot.qty || 0) })).filter(lot => lot.qty > 0);
+    const normalizedLotNo = lotNo || 'UNTRACKED';
+    const normalizedExpiry = expiryDate || '';
+    const key = lotIdentity({ lotNo:normalizedLotNo, expiryDate:normalizedExpiry });
+    const index = rows.findIndex(lot => lotIdentity(lot) === key);
+    if (delta < 0) {
+        if (index < 0 || Number(rows[index].qty || 0) + Number(delta || 0) < -1e-9) {
+            throw new Error(`批號 ${normalizedLotNo} 的庫存不足，無法扣除 ${Math.abs(delta)}。`);
+        }
+    }
+    if (index >= 0) rows[index].qty = Number(rows[index].qty || 0) + Number(delta || 0);
+    else if (delta > 0) rows.push({ lotNo:normalizedLotNo, expiryDate:normalizedExpiry, qty:Number(delta || 0) });
+    return rows.filter(lot => Number(lot.qty || 0) > 1e-9);
+}
 function normalizeLotsToOnHand(stock = {}) {
     const onHand = Math.max(0, Number(stock.onHand || 0));
     let rows = fefoLots(stock).map(lot => ({ ...lot, qty:Number(lot.qty || 0) }));
@@ -4334,18 +4349,26 @@ window.saveInventoryAdjustmentBatch = async function() {
              if(wh.onHand+delta<0) throw new Error(`${row.itemCode} 異動後分倉庫存不可小於 0`);
           }
 
-          let lots=[...(old.lots||[])];
-          if(type!=='warehouse_allocation'&&(row.lotNo||row.expiryDate)){
-            const li=lots.findIndex(l=>(l.lotNo||'')===row.lotNo&&(l.expiryDate||'')===row.expiryDate);
-            if(li>=0) lots[li]={...lots[li],qty:Number(lots[li].qty||0)+delta};
-            else lots.push({lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',qty:delta});
+          let lots=normalizeLotsToOnHand({...old,onHand:n.onHand});
+          let whLots=normalizeLotsToOnHand({...(whSnap?.exists?whSnap.data():{}),onHand:wh.onHand});
+          if(type==='warehouse_allocation'){
+            whLots=addLotQuantity(whLots,'UNTRACKED','',delta);
+          }else if(row.lotNo||row.expiryDate){
+            lots=adjustLotQuantity(lots,row.lotNo||'UNTRACKED',row.expiryDate||'',delta);
+            whLots=adjustLotQuantity(whLots,row.lotNo||'UNTRACKED',row.expiryDate||'',delta);
+          }else if(delta>0){
+            lots=addLotQuantity(lots,'UNTRACKED','',delta);
+            whLots=addLotQuantity(whLots,'UNTRACKED','',delta);
+          }else if(delta<0){
+            lots=consumeLotsFefo({...old,onHand:n.onHand,lots},Math.abs(delta)).lots;
+            whLots=consumeLotsFefo({...(whSnap?.exists?whSnap.data():{}),onHand:wh.onHand,lots:whLots},Math.abs(delta)).lots;
           }
           const now=new Date().toISOString();
           if(type!=='warehouse_allocation'){
             tx.set(ref,{productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now},{merge:true});
           }
           if(whRef){
-            tx.set(whRef,{warehouseId:row.warehouseId,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+            tx.set(whRef,{warehouseId:row.warehouseId,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,lots:whLots,updatedAt:now},{merge:true});
           }
           tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
         });
@@ -5483,12 +5506,14 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         };
         const records = [...(live.receiptRecords || []), record];
 
-        const lots = [...(invSnap.exists ? (invSnap.data().lots || []) : [])];
-        if (lotNo || expiryDate) {
-            const lotIndex = lots.findIndex(l => (l.lotNo||'') === lotNo && (l.expiryDate||'') === expiryDate);
-            if (lotIndex >= 0) lots[lotIndex] = { ...lots[lotIndex], qty:Number(lots[lotIndex].qty||0)+qty };
-            else lots.push({ lotNo, expiryDate, qty });
-        }
+        const lots = addLotQuantity(
+            normalizeLotsToOnHand({ ...(invSnap.exists ? invSnap.data() : {}), onHand:stock.onHand }),
+            lotNo || 'UNTRACKED', expiryDate || '', qty
+        );
+        const whLots = addLotQuantity(
+            normalizeLotsToOnHand({ ...(whSnap?.exists ? whSnap.data() : {}), onHand:whStock.onHand }),
+            lotNo || 'UNTRACKED', expiryDate || '', qty
+        );
 
         tx.set(invRef, {
             productKey:key, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
@@ -5502,7 +5527,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
                 warehouseId, productKey:key, productId:item.productId||'', itemCode:item.itemCode||'',
                 itemName:item.itemName||'', brand:resolveBrandName(item.brand||''),
                 onHand:whStock.onHand+qty, reserved:whStock.reserved+reserveFromReceipt,
-                incoming:Math.max(0,whStock.incoming-qty), updatedAt:now
+                incoming:Math.max(0,whStock.incoming-qty), lots:whLots, updatedAt:now
             }, { merge:true });
         }
 
