@@ -1490,12 +1490,12 @@ window.openForecastHistoryModal = async function(id) {
     overlay.classList.add('active');
 
     try {
-        const snapshot = await db.collection('forecasts').doc(id).collection('progress')
-            .orderBy('createdAt', 'desc')
-            .limit(100)
-            .get();
+        const progressDocs = await readAllQueryPages(
+            () => db.collection('forecasts').doc(id).collection('progress').orderBy('createdAt', 'desc'),
+            100
+        );
 
-        const rows = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const rows = progressDocs.map(doc => ({ id: doc.id, ...doc.data() }));
         body.innerHTML = rows.length ? rows.map(row => `<tr>
             <td>${escapeHtml(dateOnlyFromTimestamp(row.createdAt) || '')}</td>
             <td style="text-align:left;">${escapeHtml(row.displayText || row.text || '')}</td>
@@ -2150,13 +2150,13 @@ function defaultWarehouse() {
 async function loadSupplierWarehouseMasters(force = false) {
     if (supplierWarehouseLoadPromise && !force) return supplierWarehouseLoadPromise;
     supplierWarehouseLoadPromise = Promise.all([
-        db.collection('suppliers').limit(500).get(),
-        db.collection('brandSupplierMappings').limit(1000).get(),
-        db.collection('warehouses').limit(50).get()
+        readAllQueryPages(() => db.collection('suppliers').orderBy(firebase.firestore.FieldPath.documentId()), 500),
+        readAllQueryPages(() => db.collection('brandSupplierMappings').orderBy(firebase.firestore.FieldPath.documentId()), 500),
+        readAllQueryPages(() => db.collection('warehouses').orderBy(firebase.firestore.FieldPath.documentId()), 200)
     ]).then(([suppliers, mappings, warehouses]) => {
-        supplierMasterCache = suppliers.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
-        supplierMappingCache = mappings.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
-        warehouseMasterCache = warehouses.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
+        supplierMasterCache = suppliers.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
+        supplierMappingCache = mappings.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
+        warehouseMasterCache = warehouses.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
         warehouseMasterCache.sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderSupplierMappingAdmin();
@@ -2342,8 +2342,11 @@ function resolveBrandName(value) {
 
 function loadBrandMaster() {
     if (brandMasterLoadPromise) return brandMasterLoadPromise;
-    brandMasterLoadPromise = db.collection('brands').limit(500).get().then(snapshot => {
-        brandMasterCache = snapshot.docs
+    brandMasterLoadPromise = readAllQueryPages(
+        () => db.collection('brands').orderBy(firebase.firestore.FieldPath.documentId()),
+        500
+    ).then(docs => {
+        brandMasterCache = docs
             .map(doc => normalizeBrandMasterRecord(doc.id, doc.data()))
             .filter(item => item.name && item.active !== false);
         return brandMasterCache;
@@ -4211,10 +4214,10 @@ async function loadWarehouseStocksForInventoryPage() {
 window.loadInventory=async function(reset=true){
  if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCache=[];inventoryCursor=null;inventoryHasMore=true;warehouseStockCache=new Map();} inventoryLoading=true;
  try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await q.get();if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];snap.forEach(d=>{const x={id:d.id,...d.data()};const i=inventoryCache.findIndex(v=>v.id===d.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
- const [m,pending]=await Promise.all([
+ const [m,pendingDocs]=await Promise.all([
  db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
- db.collection('pendingInventoryItems').where('status','==','pending-arrival').limit(100).get()
- ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));
+ readAllQueryPages(()=>db.collection('pendingInventoryItems').where('status','==','pending-arrival').orderBy(firebase.firestore.FieldPath.documentId()),200)
+ ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pendingDocs.map(d=>({id:d.id,...d.data()}));
  await loadWarehouseStocksForInventoryPage();
  renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
@@ -4438,8 +4441,11 @@ window.openInventoryReservationDetails = async function(productKey) {
     if (title) title.innerText = '已占用訂單';
     overlay.classList.add('active');
     try {
-        const snapshot = await db.collection('inventoryReservations').where('productKey', '==', productKey).limit(100).get();
-        const rows = snapshot.docs
+        const reservationDocs = await readAllQueryPages(
+            () => db.collection('inventoryReservations').where('productKey', '==', productKey).orderBy(firebase.firestore.FieldPath.documentId()),
+            200
+        );
+        const rows = reservationDocs
             .map(doc => ({ id: doc.id, ...doc.data() }))
             .filter(item => item.status === 'active' && Number(item.quantity || 0) > 0)
             .sort((x, y) => String(y.orderDate || '').localeCompare(String(x.orderDate || '')));
@@ -9541,8 +9547,11 @@ async function syncSalesCodeMasterFromUsers() {
 }
 
 async function loadSalesCodeMaster() {
-    const snapshot = await db.collection('salesCodes').limit(500).get();
-    salesCodeMasterCache = snapshot.docs
+    const docs = await readAllQueryPages(
+        () => db.collection('salesCodes').orderBy(firebase.firestore.FieldPath.documentId()),
+        500
+    );
+    salesCodeMasterCache = docs
         .map(doc => ({ id: doc.id, ...doc.data() }))
         .filter(item => item.active !== false)
         .sort((x, y) => String(x.code || x.id).localeCompare(String(y.code || y.id), 'zh-Hant'));
