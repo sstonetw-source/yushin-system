@@ -4532,12 +4532,14 @@ function isDeletableOrderDraft(order) {
 }
 
 function orderWorkCategory(order) {
-    const lifecycle = orderLifecycleInfo(order);
-    const delivery = deliveryProgressInfo(order);
-    if (lifecycle.status !== 'normal' || (lifecycle.returned > 0 && lifecycle.effectiveDelivered <= 0)) return 'closed';
-    if (delivery.state === 'complete') return order.isBilled ? 'complete' : 'billing';
-    if (delivery.delivered > 0 || order.isArrived) return 'delivery';
-    if (order.isOrdered) return 'arrival';
+    const lifecycle=orderLifecycleInfo(order);
+    const delivery=deliveryProgressInfo(order);
+    const purchase=purchaseProgressInfo(order);
+    const fulfillment=fulfillmentProgressInfo(order);
+    if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return 'closed';
+    if(delivery.state==='complete')return order.isBilled?'complete':'billing';
+    if(delivery.delivered>0||fulfillment.state==='ready'||fulfillment.state==='partial'||fulfillment.state==='direct')return 'delivery';
+    if(purchase.state==='ordered'||purchase.state==='partial')return 'arrival';
     return 'ordering';
 }
 
@@ -4558,7 +4560,7 @@ function renderOrderWorkCards(orders) {
     const container = document.getElementById('orderWorkCards');
     if (!container) return;
     const definitions = [
-        ['all', '全部'], ['ordering', '待訂貨'], ['arrival', '待到貨'], ['delivery', '待送貨'],
+        ['all', '全部'], ['ordering', '待採購'], ['arrival', '採購／到貨中'], ['delivery', '備貨／待送貨'],
         ['billing', '待報帳'], ['complete', '已完成'], ['closed', '異常／已關閉']
     ];
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
@@ -6748,11 +6750,13 @@ function renderDeliveryModal() {
     const locked = lifecycle.status !== 'normal';
     const syncing = pendingDeliveryOrderIds.has(order.id);
     const editableSteps = editable && !locked && !syncing;
+    const purchase=purchaseProgressInfo(order);
+    const fulfillment=fulfillmentProgressInfo(order);
     document.getElementById('orderWorkflowSteps').innerHTML = `
-        <button type="button" class="workflow-step ${order.isOrdered ? 'done' : ''}" ${editableSteps ? `onclick="toggleOrderProgressStatus('isOrdered', ${!order.isOrdered})"` : 'disabled'}><span>1</span>訂貨 ${order.isOrdered ? '✓' : ''}</button>
-        <button type="button" class="workflow-step ${order.isArrived ? 'done' : ''}" ${editableSteps ? `onclick="toggleOrderProgressStatus('isArrived', ${!order.isArrived})"` : 'disabled'}><span>2</span>到貨 ${order.isArrived ? '✓' : ''}</button>
-        <button type="button" class="workflow-step ${progress.state === 'complete' ? 'done' : progress.state === 'partial' ? 'partial' : ''}" ${editableSteps && progress.remaining > 0 ? 'onclick="quickCompleteDelivery()"' : 'disabled'}><span>3</span>${progress.state === 'partial' ? `送貨 ${progress.delivered}/${progress.total}` : '送貨'} ${progress.state === 'complete' ? '✓' : ''}</button>
-        <button type="button" class="workflow-step ${order.isBilled ? 'done' : ''}" ${editableSteps ? `onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"` : 'disabled'}><span>4</span>報帳 ${order.isBilled ? '✓' : ''}</button>`;
+        <button type="button" class="workflow-step ${['ordered','not_required','direct'].includes(purchase.state)?'done':purchase.state==='partial'?'partial':''}" disabled><span>1</span>${escapeHtml(purchase.label)}</button>
+        <button type="button" class="workflow-step ${['ready','direct'].includes(fulfillment.state)?'done':fulfillment.state==='partial'?'partial':''}" disabled><span>2</span>${escapeHtml(fulfillment.label)}</button>
+        <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
+        <button type="button" class="workflow-step ${order.isBilled?'done':''}" ${editableSteps?`onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"`:'disabled'}><span>4</span>${order.isBilled?'已報帳':'未報帳'}</button>`;
     const deliveryItems=normalizedOrderItems(order);
     const itemSummary=deliveryItems.map(item=>{
         const delivered=savedDeliveryRecords(order).filter(r=>!r.itemId||r.itemId===item.itemId).reduce((s,r)=>s+Number(r.qty||0),0);
