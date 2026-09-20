@@ -4093,6 +4093,76 @@ let warehouseStockCache = new Map();
 function expiryDays(date){if(!date)return null;return Math.ceil((new Date(date+'T23:59:59')-new Date())/86400000);}
 function lotStatus(lot){const d=expiryDays(lot.expiryDate);if(d===null)return '';if(d<0)return '已過期';if(d<=30)return '30天內';if(d<=60)return '60天內';if(d<=90)return '90天內';return '';}
 function fefoLots(stock){return [...(stock.lots||[])].filter(l=>Number(l.qty||0)>0).sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));}
+
+function lotIdentity(lot = {}) {
+    return `${lot.lotNo || ''}||${lot.expiryDate || ''}`;
+}
+function addLotQuantity(lots, lotNo, expiryDate, qty) {
+    const rows = (lots || []).map(lot => ({ ...lot, qty:Number(lot.qty || 0) })).filter(lot => lot.qty > 0);
+    if (!qty) return rows;
+    const normalizedLotNo = lotNo || 'UNTRACKED';
+    const normalizedExpiry = expiryDate || '';
+    const key = lotIdentity({ lotNo:normalizedLotNo, expiryDate:normalizedExpiry });
+    const index = rows.findIndex(lot => lotIdentity(lot) === key);
+    if (index >= 0) rows[index].qty = Number(rows[index].qty || 0) + Number(qty || 0);
+    else rows.push({ lotNo:normalizedLotNo, expiryDate:normalizedExpiry, qty:Number(qty || 0) });
+    return rows.filter(lot => Number(lot.qty || 0) > 1e-9);
+}
+function normalizeLotsToOnHand(stock = {}) {
+    const onHand = Math.max(0, Number(stock.onHand || 0));
+    let rows = fefoLots(stock).map(lot => ({ ...lot, qty:Number(lot.qty || 0) }));
+    let total = rows.reduce((sum, lot) => sum + Number(lot.qty || 0), 0);
+    // 舊版曾只扣 onHand、未扣 lot；視為過去已依 FEFO 出貨，先把最早效期的差額補扣掉。
+    let historicalConsumed = Math.max(0, total - onHand);
+    for (const lot of rows) {
+        if (historicalConsumed <= 1e-9) break;
+        const take = Math.min(Number(lot.qty || 0), historicalConsumed);
+        lot.qty -= take;
+        historicalConsumed -= take;
+    }
+    rows = rows.filter(lot => Number(lot.qty || 0) > 1e-9);
+    total = rows.reduce((sum, lot) => sum + Number(lot.qty || 0), 0);
+    if (total < onHand - 1e-9) rows = addLotQuantity(rows, 'UNTRACKED', '', onHand - total);
+    return rows;
+}
+function consumeLotsFefo(stock = {}, qty) {
+    const requested = Math.max(0, Number(qty || 0));
+    const rows = normalizeLotsToOnHand(stock);
+    const available = rows.reduce((sum, lot) => sum + Number(lot.qty || 0), 0);
+    if (requested > available + 1e-9) throw new Error(`批號庫存不足：可扣 ${available}，本次需 ${requested}。`);
+    let remaining = requested;
+    const allocations = [];
+    for (const lot of rows) {
+        if (remaining <= 1e-9) break;
+        const take = Math.min(Number(lot.qty || 0), remaining);
+        if (take <= 0) continue;
+        lot.qty -= take;
+        remaining -= take;
+        allocations.push({ lotNo:lot.lotNo || 'UNTRACKED', expiryDate:lot.expiryDate || '', qty:take });
+    }
+    return { lots:rows.filter(lot => Number(lot.qty || 0) > 1e-9), allocations };
+}
+function restoreLotAllocations(stock = {}, allocations = [], fallbackQty = 0) {
+    let rows = normalizeLotsToOnHand(stock);
+    const source = Array.isArray(allocations) && allocations.length
+        ? allocations
+        : [{ lotNo:'UNTRACKED', expiryDate:'', qty:Math.max(0, Number(fallbackQty || 0)) }];
+    source.forEach(item => { rows = addLotQuantity(rows, item.lotNo || 'UNTRACKED', item.expiryDate || '', Number(item.qty || 0)); });
+    return rows;
+}
+function splitLotAllocationsForRestore(allocations = [], qty = 0) {
+    const keep = (allocations || []).map(item => ({ ...item, qty:Number(item.qty || 0) })).filter(item => item.qty > 0);
+    const restore = [];
+    let remaining = Math.max(0, Number(qty || 0));
+    for (let i = keep.length - 1; i >= 0 && remaining > 1e-9; i -= 1) {
+        const take = Math.min(keep[i].qty, remaining);
+        restore.unshift({ lotNo:keep[i].lotNo || 'UNTRACKED', expiryDate:keep[i].expiryDate || '', qty:take });
+        keep[i].qty -= take;
+        remaining -= take;
+    }
+    if (remaining > 1e-9) restore.unshift({ lotNo:'UNTRACKED', expiryDate:'', qty:remaining });
+    return { keep:keep.filter(item => item.qty > 1e-9), restore };
+}
 async function loadWarehouseStocksForInventoryPage() {
     await loadSupplierWarehouseMasters();
     const jobs = [];
