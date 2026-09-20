@@ -1637,6 +1637,7 @@ async function createForecastOrdersDirectly(forecast, items) {
             isBilled: false,
             invoiceDate: ''
         };
+        ensureOrderItemCompatibility(orderData);
         orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
         batch.set(orderRef, orderData);
         createdOrders.push({ id: orderRef.id, data: orderData });
@@ -3840,7 +3841,8 @@ window.markQuoteAsDeal = function(quoteNo) {
                     orderData.costPrice = priceMatch.cost;
                 }
             }
-            orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
+            ensureOrderItemCompatibility(orderData);
+        orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
             batch.set(orderRef, orderData);
             createdOrders.push({ id: orderRef.id, data: orderData });
         });
@@ -4459,6 +4461,57 @@ async function reserveInventoryForNewOrder(orderId, order) {
         result = { reservedQty: reservable, shortageQty: shortage, warehouseId };
     });
     return result;
+}
+
+function legacyOrderItemFromOrder(order, index = 0) {
+    const item = {
+        itemId: String(order?.itemId || `item-${index + 1}`),
+        productId: order?.productId || '',
+        itemCode: order?.itemCode || '',
+        itemCodeKey: order?.itemCodeKey || normalizeHistoryItemCode(order?.itemCode || ''),
+        itemName: order?.itemName || '',
+        brand: resolveBrandName(order?.brand || ''),
+        productLine: order?.productLine || '',
+        productType: order?.productType || '',
+        spec: order?.spec || '',
+        supplier: order?.supplier || '',
+        qty: Number(order?.qty || 0),
+        unit: order?.unit || '',
+        unitPrice: parseMoney(order?.unitPrice || 0),
+        totalPrice: parseMoney(order?.totalPrice || 0),
+        fulfillmentType: order?.fulfillmentType || 'WAREHOUSE',
+        warehouseId: order?.warehouseId || ''
+    };
+    if (Object.prototype.hasOwnProperty.call(order || {}, 'costPrice')) item.costPrice = order.costPrice;
+    return item;
+}
+
+// Phase 1 相容層：舊訂單沒有 items 時，從既有單品欄位即時計算出一筆明細。
+// 目前仍保留所有 top-level 單品欄位，讓既有 PO／庫存／送貨流程完全不受影響。
+function normalizedOrderItems(order) {
+    if (Array.isArray(order?.items) && order.items.length) {
+        return order.items.map((item, index) => ({
+            ...item,
+            itemId: String(item.itemId || `item-${index + 1}`),
+            itemCodeKey: item.itemCodeKey || normalizeHistoryItemCode(item.itemCode || ''),
+            brand: resolveBrandName(item.brand || ''),
+            qty: Number(item.qty || 0),
+            unitPrice: parseMoney(item.unitPrice || 0),
+            totalPrice: parseMoney(item.totalPrice || 0),
+            fulfillmentType: item.fulfillmentType || 'WAREHOUSE',
+            warehouseId: item.fulfillmentType === 'DIRECT_SHIP' ? '' : (item.warehouseId || '')
+        }));
+    }
+    if (order?.itemCode || order?.itemName || order?.productId) return [legacyOrderItemFromOrder(order)];
+    return [];
+}
+
+function ensureOrderItemCompatibility(order) {
+    const items = normalizedOrderItems(order);
+    order.items = items;
+    order.orderSchemaVersion = 2;
+    order.itemCount = items.length;
+    return order;
 }
 
 function orderQuantity(order) {
@@ -7352,6 +7405,7 @@ window.saveNewOrder = function() {
         data.supplier = priceMatch.supplier || '';
         data.spec = priceMatch.spec || '';
     }
+    ensureOrderItemCompatibility(data);
     data.searchTokens = buildFullHistorySearchTokens('order', data);
 
     const saveButton = document.getElementById('saveNewOrderBtn');
