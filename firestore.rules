@@ -24,9 +24,12 @@ service cloud.firestore {
     function salesInventoryOperationalUpdate() {
       return sales()
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['onHand', 'reserved', 'lots', 'updatedAt'])
+          .hasOnly(['onHand', 'reserved', 'lots', 'lastMutationOrderId', 'updatedAt'])
         && request.resource.data.onHand >= 0
-        && request.resource.data.reserved >= 0;
+        && request.resource.data.reserved >= 0
+        && request.resource.data.lastMutationOrderId is string
+        && request.resource.data.lastMutationOrderId != ''
+        && own(getAfter(/databases/$(database)/documents/orders/$(request.resource.data.lastMutationOrderId)).data);
     }
     function purchaserOrderOperationalUpdate() {
       return purchaser()
@@ -122,15 +125,15 @@ service cloud.firestore {
 
     match /quotes/{id} {
       allow read: if admin() || purchaser() || own(resource.data);
-      allow create: if admin() || sales();
-      allow update: if admin() || own(resource.data);
+      allow create: if admin() || (sales() && own(request.resource.data));
+      allow update: if admin() || (own(resource.data) && own(request.resource.data));
       allow delete: if false;
     }
 
     match /forecasts/{id} {
       allow read: if admin() || own(resource.data);
-      allow create: if admin() || sales();
-      allow update: if admin() || own(resource.data);
+      allow create: if admin() || (sales() && own(request.resource.data));
+      allow update: if admin() || (own(resource.data) && own(request.resource.data));
       allow delete: if false;
     }
 
@@ -144,8 +147,10 @@ service cloud.firestore {
 
     match /orders/{id} {
       allow read: if admin() || purchaser() || warehouse() || own(resource.data);
-      allow create: if admin() || sales();
-      allow update: if admin() || own(resource.data) || purchaserOrderOperationalUpdate();
+      allow create: if admin() || (sales() && own(request.resource.data));
+      allow update: if admin()
+        || (own(resource.data) && own(request.resource.data))
+        || purchaserOrderOperationalUpdate();
       allow delete: if false;
     }
 
@@ -172,9 +177,12 @@ service cloud.firestore {
       allow update: if admin() || warehouse() || purchaser()
         || (sales()
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['onHand', 'reserved', 'lots', 'updatedAt'])
+            .hasOnly(['onHand', 'reserved', 'lots', 'lastMutationOrderId', 'updatedAt'])
           && request.resource.data.onHand >= 0
-          && request.resource.data.reserved >= 0);
+          && request.resource.data.reserved >= 0
+          && request.resource.data.lastMutationOrderId is string
+          && request.resource.data.lastMutationOrderId != ''
+          && own(getAfter(/databases/$(database)/documents/orders/$(request.resource.data.lastMutationOrderId)).data));
       allow delete: if false;
     }
 
