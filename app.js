@@ -4960,21 +4960,33 @@ function fullHistoryBaseTokens(type, record = {}) {
     const normalizedValues = fullHistorySearchValues(type, record)
         .map(normalizeFullHistorySearchValue)
         .filter(Boolean);
-    // 先保留每個欄位的完整值，避免多品項估價單後段欄位被前面欄位的 n-gram 吃掉配額。
+    // 完整值一定保留；n-gram 以每個欄位公平分配，並從字串前後交錯取樣，
+    // 避免長品名／規格只有前半段能搜尋。
     normalizedValues.forEach(value => tokens.add(value));
-    const MAX_BASE_TOKENS = 650;
-    const MAX_GRAMS_PER_VALUE = 36;
-    for (const normalized of normalizedValues) {
-        let addedForValue = 0;
-        const maxGram = Math.min(6, normalized.length);
-        for (let size = maxGram; size >= 1 && addedForValue < MAX_GRAMS_PER_VALUE; size -= 1) {
-            for (let i = 0; i + size <= normalized.length && addedForValue < MAX_GRAMS_PER_VALUE; i += 1) {
-                const before = tokens.size;
-                tokens.add(normalized.slice(i, i + size));
-                if (tokens.size > before) addedForValue += 1;
-                if (tokens.size >= MAX_BASE_TOKENS) return [...tokens];
+    const MAX_BASE_TOKENS = 1800;
+    const MAX_GRAMS_PER_VALUE = 140;
+    const addPositions = (normalized, size) => {
+        const count = normalized.length - size + 1;
+        if (count <= 0) return;
+        let left = 0, right = count - 1;
+        while (left <= right) {
+            const positions = left === right ? [left] : [left, right];
+            for (const position of positions) {
+                tokens.add(normalized.slice(position, position + size));
+                if (tokens.size >= MAX_BASE_TOKENS) return;
             }
+            left += 1;
+            right -= 1;
         }
+    };
+    for (const normalized of normalizedValues) {
+        const beforeValue = tokens.size;
+        const maxGram = Math.min(6, normalized.length);
+        for (let size = maxGram; size >= 1; size -= 1) {
+            addPositions(normalized, size);
+            if (tokens.size >= MAX_BASE_TOKENS || tokens.size - beforeValue >= MAX_GRAMS_PER_VALUE) break;
+        }
+        if (tokens.size >= MAX_BASE_TOKENS) break;
     }
     return [...tokens];
 }
@@ -7442,17 +7454,28 @@ window.deleteOrder = function(orderId) {
         prepareOrderLifecycle(orderId, 'cancelled');
         return;
     }
-    if (!confirm('確定要刪除這筆尚未進入流程的草稿訂單嗎？')) return;
+    if (!confirm('確定要捨棄這筆尚未進入流程的草稿訂單嗎？資料會保留為作廢紀錄。')) return;
     db.runTransaction(async transaction => {
         const ref = db.collection('orders').doc(orderId);
         const snapshot = await transaction.get(ref);
         if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-        if (!isDeletableOrderDraft(snapshot.data())) throw new Error('這筆訂單已有新的流程紀錄，不能刪除，請改用取消。');
-        transaction.delete(ref);
+        const live = snapshot.data();
+        if (!isDeletableOrderDraft(live)) throw new Error('這筆訂單已有新的流程紀錄，不能捨棄，請改用取消。');
+        const now = new Date().toISOString();
+        transaction.update(ref, {
+            status: BUSINESS_STATUS.VOIDED,
+            orderStatus: 'cancelled',
+            orderStatusDate: localDateString(),
+            orderStatusReason: 'draft_discarded',
+            active: false,
+            voidedAt: now,
+            voidedBy: currentUserName || currentUser?.email || '',
+            updatedAt: now
+        });
     }).then(() => {
         ordersCache = ordersCache.filter(item => item.id !== orderId);
         renderOrdersList();
-    }).catch(err => alert('刪除失敗：' + err.message));
+    }).catch(err => alert('捨棄草稿失敗：' + err.message));
 };
 
 window.openOrderModal = function(source = null) {
