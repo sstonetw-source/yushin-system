@@ -247,16 +247,20 @@ test('quote and order lists use global business-date ordering across companies',
 });
 
 
-test('full-history order item-code search stays indexed and paginated', () => {
-    assert.match(appSource, /where\('itemCodeKey', '==', keyword\)/);
+test('quote and order full-history search use backend tokens and remain paginated', () => {
+    assert.match(appSource, /function buildFullHistorySearchTokens/);
+    assert.match(appSource, /where\('searchTokens', 'array-contains', queryToken\)/);
     assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
     assert.match(appSource, /startAfter\(orderHistorySearchCursor\)/);
+    assert.match(appSource, /startAfter\(quoteHistorySearchCursor\)/);
     assert.match(appSource, /itemCodeKey: normalizeHistoryItemCode/);
-    const searchStart = appSource.indexOf('async function runOrderHistoryItemCodeSearch');
-    const searchEnd = appSource.indexOf('\n}\n\nwindow.searchAllOrderHistory', searchStart) + 2;
-    const searchSource = appSource.slice(searchStart, searchEnd);
-    assert.doesNotMatch(searchSource, /collection\('orders'\)\.get\(\)/);
-    assert.doesNotMatch(searchSource, /while\s*\(/);
+    assert.match(indexSource, /搜尋全部歷史：單號 \/ 抬頭 \/ 客戶 \/ 廠牌 \/ 品項/);
+    assert.match(indexSource, /搜尋全部歷史：客戶 \/ 廠牌 \/ 貨號 \/ 品名 \/ 單號/);
+    const orderStart = appSource.indexOf('async function runOrderHistorySearch');
+    const orderEnd = appSource.indexOf('\n}\n\nwindow.scheduleOrderHistorySearch', orderStart) + 2;
+    const orderSearch = appSource.slice(orderStart, orderEnd);
+    assert.doesNotMatch(orderSearch, /collection\('orders'\)\.get\(\)/);
+    assert.doesNotMatch(orderSearch, /while\s*\(/);
 });
 
 test('browser history restores internal pages without forcing Firestore reloads', () => {
@@ -287,14 +291,16 @@ test('quote print pagination measures rendered rows and keeps rows/footer intact
 });
 
 
-test('legacy order search-index migration is admin-only, batched and idempotent', () => {
+test('quote and order search-index migration is admin-only batched and idempotent', () => {
     const start = appSource.indexOf('window.backfillOrderSearchIndex =');
     const end = appSource.indexOf('\n};', start) + 3;
     const migration = appSource.slice(start, end);
     assert.match(migration, /trueUserRole !== 'admin'/);
     assert.match(migration, /currentUserRole !== 'admin'/);
+    assert.match(migration, /\['quotes','orders'\]/);
     assert.match(migration, /limit\(200\)/);
     assert.match(migration, /startAfter\(cursor\)/);
+    assert.match(migration, /buildFullHistorySearchTokens/);
     assert.match(migration, /data\.itemCodeKey !== normalized/);
     assert.match(migration, /batch\.update/);
     assert.doesNotMatch(migration, /collection\('orders'\)\.get\(\)/);
@@ -307,10 +313,13 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     const saveOrder = appSource.slice(saveOrderStart, saveOrderEnd);
     assert.match(saveOrder, /createdAt: new Date\(\)\.toISOString\(\)/);
     assert.match(saveOrder, /itemCodeKey: normalizeHistoryItemCode\(itemCode\)/);
+    assert.match(saveOrder, /buildFullHistorySearchTokens\('order', data\)/);
 
     const quoteStart = appSource.indexOf('window.handleSaveAndPrint =');
     const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
-    assert.match(appSource.slice(quoteStart, quoteEnd), /createdAt: new Date\(\)\.toISOString\(\)/);
+    const quoteSave = appSource.slice(quoteStart, quoteEnd);
+    assert.match(quoteSave, /createdAt: new Date\(\)\.toISOString\(\)/);
+    assert.match(quoteSave, /buildFullHistorySearchTokens\('quote', quoteData\)/);
 
     const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
