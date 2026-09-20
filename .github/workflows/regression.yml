@@ -22,5 +22,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Install Firestore rules test dependencies
+        run: npm install --no-save --no-package-lock @firebase/rules-unit-testing firebase
       - name: Validate Firestore rules
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "echo Firestore-rules-ok"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node tests/firestore-rules.test.js"
