@@ -6425,14 +6425,20 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const whSnap = whRef ? await transaction.get(whRef) : null;
         const inv = inventoryNumbers(invSnap?.exists ? invSnap.data() : {});
         const wh = inventoryNumbers(whSnap?.exists ? whSnap.data() : {});
-        const release = Math.min(currentlyReserved, wh.reserved || 0, inv.reserved || 0);
+        const aggregateRelease = Math.min(currentlyReserved, inv.reserved || 0);
+        const warehouseRelease = whRef && whSnap?.exists ? Math.min(aggregateRelease, wh.reserved || 0) : 0;
         const now = new Date().toISOString();
 
-        if (release > 0) {
-            if (invRef && invSnap?.exists) transaction.update(invRef,{reserved:Math.max(0,inv.reserved-release),updatedAt:now});
-            if (whRef && whSnap?.exists) transaction.update(whRef,{reserved:Math.max(0,wh.reserved-release),updatedAt:now});
+        if (aggregateRelease > 0) {
+            if (invRef && invSnap?.exists) transaction.update(invRef,{reserved:Math.max(0,inv.reserved-aggregateRelease),updatedAt:now});
+            if (warehouseRelease > 0) transaction.update(whRef,{reserved:Math.max(0,wh.reserved-warehouseRelease),updatedAt:now});
             transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
-                'release', -release, orderId, productKey, actor, { reason:'order_cancelled', warehouseId }
+                'release', -aggregateRelease, orderId, productKey, actor, {
+                    reason:'order_cancelled',
+                    warehouseId,
+                    warehouseRelease,
+                    legacyUnallocatedRelease: aggregateRelease - warehouseRelease
+                }
             ));
         }
 
