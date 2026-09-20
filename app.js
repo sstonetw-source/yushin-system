@@ -174,6 +174,9 @@ function ensureXlsxLoaded() {
 let equipmentList = [];
 let currentEquipmentId = null;
 let equipmentLoadGeneration = 0;
+let equipmentCursor = null;
+let equipmentHasMore = true;
+let equipmentLoading = false;
 
 // 管理員後台狀態
 let allQuotesCache = [];
@@ -7662,30 +7665,67 @@ function canViewAllEquipment() {
     return currentUserRole === 'admin' || currentUserRole === 'engineer';
 }
 
-window.loadEquipmentFromCloud = function() {
+function updateEquipmentLoadMoreButton() {
+    const button = document.getElementById('equipmentLoadMoreBtn');
+    if (!button) return;
+    button.style.display = equipmentHasMore ? '' : 'none';
+    button.disabled = equipmentLoading;
+    button.innerText = equipmentLoading ? '載入中…' : '載入更多（每次 50 筆）';
+}
+
+window.loadEquipmentFromCloud = async function(reset = true) {
+    if (equipmentLoading) return;
     const generation = ++equipmentLoadGeneration;
     const requestedRole = currentUserRole;
-    let query = db.collection('equipment');
-    if (canViewAllEquipment()) {
-        query = query.orderBy('customerName');
-    } else {
-        query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('ownerUid', '==', currentUser?.uid || '');
-    }
-    query.get().then(snapshot => {
-        if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
+    if (reset) {
         equipmentList = [];
-        snapshot.forEach(doc => {
-            equipmentList.push({ id: doc.id, ...doc.data() });
-        });
-        if (!canViewAllEquipment()) {
-            equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
+        equipmentCursor = null;
+        equipmentHasMore = true;
+    }
+    if (!equipmentHasMore) return;
+    equipmentLoading = true;
+    updateEquipmentLoadMoreButton();
+    try {
+        let query = db.collection('equipment');
+        if (canViewAllEquipment()) {
+            query = query.orderBy('customerName', 'asc');
+        } else if (currentUserCode) {
+            query = query.where('salesCode', '==', currentUserCode).orderBy('customerName', 'asc');
+        } else if (currentUser?.uid) {
+            query = query.where('ownerUid', '==', currentUser.uid).orderBy('customerName', 'asc');
+        } else {
+            equipmentList = [];
+            equipmentHasMore = false;
+            renderEquipmentList();
+            return;
         }
+        query = query.limit(DEFAULT_LIST_LIMIT);
+        if (equipmentCursor) query = query.startAfter(equipmentCursor);
+        const snapshot = await query.get();
+        if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
+        if (!snapshot.empty) equipmentCursor = snapshot.docs[snapshot.docs.length - 1];
+        const records = new Map(equipmentList.map(item => [item.id, item]));
+        snapshot.forEach(doc => records.set(doc.id, { id:doc.id, ...doc.data() }));
+        equipmentList = [...records.values()].sort((a,b)=>
+            String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant')
+            || String(a.assetId||'').localeCompare(String(b.assetId||''))
+        );
+        equipmentHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
         renderEquipmentList();
-    }).catch(err => {
+    } catch (err) {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         console.error(err);
-        alert('讀取儀器資料失敗，請確認 Firestore 權限設定。');
-    });
+        alert('讀取儀器資料失敗，請確認 Firestore 權限與索引設定。');
+    } finally {
+        if (generation === equipmentLoadGeneration) {
+            equipmentLoading = false;
+            updateEquipmentLoadMoreButton();
+        }
+    }
+};
+
+window.loadMoreEquipment = function() {
+    return window.loadEquipmentFromCloud(false);
 };
 
 function addMonths(dateStr, months) {
@@ -7697,6 +7737,7 @@ function addMonths(dateStr, months) {
 }
 
 function getEquipmentStatus(eq) {
+    if (eq.active === false || eq.status === 'INACTIVE') return { status: 'inactive', dueDate: null };
     if (eq.noMaintenance) return { status: 'none', dueDate: null };
 
     const baseDate = eq.lastServiceDate || eq.installDate;
@@ -7779,7 +7820,6 @@ function getNextAssetId(salesName) {
     const match = salesList.find(s => s.name === salesName);
     const code = (match && match.code) ? match.code : 'NA';
     const prefix = `EQ-${code}-`;
-
     let maxSeq = 0;
     equipmentList.forEach(eq => {
         if ((eq.assetId || '').startsWith(prefix)) {
@@ -7788,6 +7828,31 @@ function getNextAssetId(salesName) {
         }
     });
     return prefix + String(maxSeq + 1).padStart(5, '0');
+}
+
+async function getNextAssetIdFromCloud(salesName) {
+    const code = salesCodeForName(salesName) || 'NA';
+    const prefix = `EQ-${code}-`;
+    let query = db.collection('equipment');
+    if (code !== 'NA') {
+        query = query.where('salesCode', '==', code)
+            .where('assetId', '>=', prefix)
+            .where('assetId', '<=', prefix + '\uf8ff')
+            .orderBy('assetId', 'desc')
+            .limit(1);
+    } else if (currentUser?.uid) {
+        query = query.where('ownerUid', '==', currentUser.uid)
+            .where('assetId', '>=', prefix)
+            .where('assetId', '<=', prefix + '\uf8ff')
+            .orderBy('assetId', 'desc')
+            .limit(1);
+    } else {
+        return getNextAssetId(salesName);
+    }
+    const snapshot = await query.get();
+    const current = snapshot.empty ? '' : String(snapshot.docs[0].data().assetId || '');
+    const seq = current.startsWith(prefix) ? parseInt(current.slice(prefix.length), 10) || 0 : 0;
+    return prefix + String(seq + 1).padStart(5, '0');
 }
 
 // 型號輸入時，若價目表中有對應資料，自動帶入廠牌
@@ -7906,7 +7971,7 @@ function renderEquipmentLogTable(eq) {
     }
 }
 
-window.saveEquipmentFromModal = function() {
+window.saveEquipmentFromModal = async function() {
     const editId = document.getElementById('eqModalOverlay').dataset.editId;
     const data = {
         customerName: document.getElementById('eqCustomer').value.trim(),
@@ -7935,16 +8000,25 @@ window.saveEquipmentFromModal = function() {
 
     data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode }) || data.customerId;
     const ref = editId ? db.collection('equipment').doc(editId) : db.collection('equipment').doc();
-    const payload = editId ? data : { ...data, assetId: getNextAssetId(data.salesName), logs: [] };
-
-    ref.set(payload, { merge: true }).then(() => {
+    try {
+        const assetId = editId ? '' : await getNextAssetIdFromCloud(data.salesName);
+        const payload = editId ? data : {
+            ...data,
+            assetId,
+            ownerUid: currentUser?.uid || '',
+            active: true,
+            status: 'ACTIVE',
+            createdAt: new Date().toISOString(),
+            logs: []
+        };
+        await ref.set(payload, { merge: true });
         const savedId = editId || ref.id;
         rememberRecentCustomerName(data.customerName);
-        loadEquipmentFromCloudThenReopen(savedId);
+        await loadEquipmentFromCloudThenReopen(savedId);
         document.getElementById('eqSaveHint').innerText = '✓ 已儲存';
-    }).catch(err => {
+    } catch (err) {
         alert('儲存失敗：' + err.message);
-    });
+    }
 };
 
 window.toggleEquipmentActive = function(eqId, active) {
@@ -8032,22 +8106,24 @@ window.deleteEquipmentLog = function(eqId, logIndex) {
     });
 };
 
-function loadEquipmentFromCloudThenReopen(eqId) {
-    let query = db.collection('equipment');
-    if (canViewAllEquipment()) {
-        query = query.orderBy('customerName');
-    } else {
-        query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('ownerUid', '==', currentUser?.uid || '');
-    }
-    query.get().then(snapshot => {
-        equipmentList = [];
-        snapshot.forEach(doc => equipmentList.push({ id: doc.id, ...doc.data() }));
-        if (!canViewAllEquipment()) {
-            equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
-        }
+async function loadEquipmentFromCloudThenReopen(eqId) {
+    try {
+        const doc = await db.collection('equipment').doc(eqId).get();
+        if (!doc.exists) return;
+        const record = { id:doc.id, ...doc.data() };
+        const index = equipmentList.findIndex(item => item.id === eqId);
+        if (index >= 0) equipmentList[index] = record;
+        else equipmentList.unshift(record);
+        equipmentList.sort((a,b)=>
+            String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant')
+            || String(a.assetId||'').localeCompare(String(b.assetId||''))
+        );
         renderEquipmentList();
         openEquipmentModal(eqId);
-    });
+    } catch (err) {
+        console.error('重新讀取儀器失敗：', err);
+        await loadEquipmentFromCloud(true);
+    }
 }
 
 // 依 Firestore batch 500 筆上限，自動切批次執行「依儀器編號」更新／新增（不刪除任何既有資料）
@@ -8116,14 +8192,18 @@ window.handleEquipmentExcelUpload = async function(input) {
             };
 
             // 依權限範圍（一般業務只查自己名下的、管理員查全部）建立「儀器編號 -> 文件ID」比對索引
-            let existingQuery = db.collection('equipment');
-            if (!canViewAllEquipment()) {
-                existingQuery = currentUserCode
-                    ? existingQuery.where('salesCode', '==', currentUserCode)
-                    : existingQuery.where('ownerUid', '==', currentUser?.uid || '');
-            }
+            const existingQueryFactory = () => {
+                let query = db.collection('equipment');
+                if (!canViewAllEquipment()) {
+                    query = currentUserCode
+                        ? query.where('salesCode', '==', currentUserCode)
+                        : query.where('ownerUid', '==', currentUser?.uid || '');
+                }
+                return query.orderBy(firebase.firestore.FieldPath.documentId());
+            };
 
-            existingQuery.get().then(snapshot => {
+            readAllQueryPages(existingQueryFactory, 500).then(existingDocs => {
+                const snapshot = { docs: existingDocs, forEach: callback => existingDocs.forEach(callback) };
                 const idMap = new Map();
                 const maxSeqByPrefix = {}; // 各業務代號前綴各自獨立計算目前最大流水號
                 snapshot.forEach(doc => {
