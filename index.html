@@ -596,6 +596,7 @@
                 <option value="ok">正常</option>
                 <option value="none">免保養</option>
                 <option value="unknown">尚無紀錄</option>
+                <option value="inactive">已停用</option>
             </select>
             <button onclick="openEquipmentModal()">＋ 新增儀器</button>
             <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
@@ -615,6 +616,9 @@
             <tbody id="eqListBody"></tbody>
         </table>
         <div class="empty-hint" id="eqEmptyHint" style="display:none;">目前沒有儀器紀錄，點選「＋ 新增儀器」或「批量上傳 Excel」開始建立。</div>
+        <div class="no-print" style="margin-top:12px;text-align:center;">
+            <button type="button" class="btn-secondary" id="equipmentLoadMoreBtn" onclick="loadMoreEquipment()" style="display:none;">載入更多（每次 50 筆）</button>
+        </div>
     </div>
 
     <!-- 儀器編輯／保養紀錄彈出視窗：點列表項目直接彈出，不用捲動頁面 -->
@@ -673,7 +677,7 @@
             </div>
 
             <div class="eq-modal-close-row">
-                <button class="btn-danger" id="eqModalDeleteBtn" onclick="deleteEquipment(document.getElementById('eqModalOverlay').dataset.editId)" style="display:none;">🗑️ 刪除這台儀器</button>
+                <button class="btn-danger" id="eqModalDeleteBtn" onclick="deleteEquipment(document.getElementById('eqModalOverlay').dataset.editId)" style="display:none;">停用這台儀器</button>
                 <button class="btn-secondary" onclick="closeEquipmentModal()">關閉</button>
             </div>
         </div>
