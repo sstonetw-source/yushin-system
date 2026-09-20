@@ -39,6 +39,8 @@ service cloud.firestore {
     function salesInventoryMovementCreate() {
       return sales()
         && request.resource.data.sourceType == 'order'
+        && request.resource.data.sourceId is string
+        && own(getAfter(/databases/$(database)/documents/orders/$(request.resource.data.sourceId)).data)
         && request.resource.data.type in [
           'reserve', 'release', 'ship', 'ship_reversal', 'return_in', 'return_reversal'
         ];
