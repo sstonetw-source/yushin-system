@@ -2269,7 +2269,10 @@ window.saveWarehouseMaster = async function() {
         if (status) status.innerText = '倉庫已儲存。';
         const input=document.getElementById('warehouseMasterName'); if(input) input.value='';
     } catch (err) {
-        if (status) status.innerText = '儲存失敗：' + err.message;
+        const permissionDenied = err?.code === 'permission-denied' || /permission/i.test(String(err?.message || ''));
+        if (status) status.innerText = permissionDenied
+            ? '儲存失敗：正式 Firebase Security Rules 尚未套用 warehouses 寫入權限，或此登入帳號的 users 文件 role 不是 admin。請部署目前 firestore.rules 後再試。'
+            : '儲存失敗：' + err.message;
     }
 };
 
