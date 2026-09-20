@@ -4341,12 +4341,64 @@ window.renderInventoryList=function(){
 window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;body.innerHTML=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`).join('');if(hint)hint.style.display=pendingInventoryCache.length?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
+let inventoryAdjustmentMode = 'add';
+
+function configureInventoryAdjustmentMode(mode) {
+    inventoryAdjustmentMode = mode === 'item' ? 'item' : 'add';
+    const title = document.getElementById('inventoryAdjustmentTitle');
+    const typeSelect = document.getElementById('inventoryAdjustmentType');
+    const hint = document.getElementById('inventoryAdjustmentHint');
+    const addRowButton = document.getElementById('inventoryAdjustmentAddRowBtn');
+    if (inventoryAdjustmentMode === 'add') {
+        if (title) title.textContent = '新增庫存';
+        if (typeSelect) typeSelect.innerHTML = '<option value="initial">新增庫存</option>';
+        if (hint) hint.textContent = '可一次新增多個品項；請選擇倉庫並輸入實際新增數量，批號與效期可依需要填寫。';
+        if (addRowButton) addRowButton.style.display = '';
+    } else {
+        if (title) title.textContent = '調整庫存';
+        if (typeSelect) typeSelect.innerHTML = [
+            '<option value="decrease">減少庫存</option>',
+            '<option value="return">退貨入庫</option>',
+            '<option value="scrap">報廢</option>',
+            '<option value="adjustment">盤點調整</option>',
+            '<option value="warehouse_allocation">分配至倉庫（不改總量）</option>'
+        ].join('');
+        if (hint) hint.textContent = '此處只調整目前選取的品項。減少庫存／報廢請輸入正數；盤點調整可輸入正數或負數。';
+        if (addRowButton) addRowButton.style.display = 'none';
+    }
+}
 
 window.openInventoryAdjustment = async function() {
     if (!canEditPage('inventory')) return;
     await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
+    configureInventoryAdjustmentMode('add');
     inventoryAdjustmentRows = [{ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, lotNo:'', expiryDate:'' }];
-    document.getElementById('inventoryAdjustmentType').value = 'initial';
+    renderInventoryAdjustmentRows();
+    document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');
+};
+
+window.openInventoryItemAdjustment = async function(inventoryId) {
+    if (!canEditPage('inventory')) return;
+    const item = inventoryCache.find(row => row.id === inventoryId || row.productKey === inventoryId);
+    if (!item) { alert('找不到這個庫存品項，請重新整理後再試。'); return; }
+    await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
+    configureInventoryAdjustmentMode('item');
+    const productKey = item.productKey || item.productId || item.id || '';
+    const stockedWarehouses = warehouseMasterCache.map(warehouse => {
+        const stock = warehouseStockCache.get(warehouse.id + '||' + productKey);
+        return { warehouse, onHand:Number(stock?.onHand || 0) };
+    }).filter(row => row.onHand > 0);
+    const preferredWarehouse = stockedWarehouses.length === 1 ? stockedWarehouses[0].warehouse.id : (defaultWarehouse()?.id || '');
+    inventoryAdjustmentRows = [{
+        productId:item.productId || productKey,
+        itemCode:item.itemCode || '',
+        itemName:item.itemName || '',
+        brand:item.brand || '',
+        warehouseId:preferredWarehouse,
+        qty:0,
+        lotNo:'',
+        expiryDate:''
+    }];
     renderInventoryAdjustmentRows();
     document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');
 };
@@ -4356,6 +4408,7 @@ window.closeInventoryAdjustment = function() {
 };
 
 window.addInventoryAdjustmentRow = function() {
+    if (inventoryAdjustmentMode !== 'add') return;
     inventoryAdjustmentRows.push({ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, lotNo:'', expiryDate:'' });
     renderInventoryAdjustmentRows();
 };
