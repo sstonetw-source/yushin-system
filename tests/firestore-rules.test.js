@@ -83,6 +83,29 @@ async function main() {
     await assertSucceeds(getDoc(doc(warehouse, 'orders', 'other-order')));
     await assertFails(getDoc(doc(engineer, 'orders', 'own-order')));
 
+    // Ownership is enforced on create/update, not only on reads.
+    await assertSucceeds(setDoc(doc(sales, 'orders', 'sales-created-order'), {
+      salesCode: 'S01', ownerUid: 'sales1', status: 'active', orderDate: '2026-09-20'
+    }));
+    await assertFails(setDoc(doc(sales, 'orders', 'spoofed-order'), {
+      salesCode: 'S02', ownerUid: 'sales2', status: 'active', orderDate: '2026-09-20'
+    }));
+    await assertFails(updateDoc(doc(sales, 'orders', 'own-order'), {
+      salesCode: 'S02', ownerUid: 'sales2'
+    }));
+    await assertSucceeds(setDoc(doc(sales, 'quotes', 'sales-created-quote'), {
+      salesCode: 'S01', ownerUid: 'sales1', status: 'active'
+    }));
+    await assertFails(setDoc(doc(sales, 'quotes', 'spoofed-quote'), {
+      salesCode: 'S02', ownerUid: 'sales2', status: 'active'
+    }));
+    await assertSucceeds(setDoc(doc(sales, 'forecasts', 'sales-created-forecast'), {
+      salesCode: 'S01', ownerUid: 'sales1', status: 'active'
+    }));
+    await assertFails(setDoc(doc(sales, 'forecasts', 'spoofed-forecast'), {
+      salesCode: 'S02', ownerUid: 'sales2', status: 'active'
+    }));
+
     // Query-level checks: these mirror the real order list, export and full-history search shapes.
     await assertSucceeds(getDocs(query(
       collection(sales, 'orders'),
@@ -154,10 +177,33 @@ async function main() {
       onHand: 9,
       reserved: 1,
       lots: [],
+      lastMutationOrderId: 'own-order',
+      updatedAt: new Date().toISOString()
+    }));
+    await assertFails(updateDoc(doc(sales, 'warehouseStocks', 'wh1__prd1'), {
+      onHand: 8,
+      reserved: 1,
+      lots: [],
+      lastMutationOrderId: 'other-order',
       updatedAt: new Date().toISOString()
     }));
     await assertFails(updateDoc(doc(sales, 'warehouseStocks', 'wh1__prd1'), {
       incoming: 999
+    }));
+
+    await assertSucceeds(updateDoc(doc(sales, 'inventory', 'prd1'), {
+      onHand: 9,
+      reserved: 1,
+      lots: [],
+      lastMutationOrderId: 'own-order',
+      updatedAt: new Date().toISOString()
+    }));
+    await assertFails(updateDoc(doc(sales, 'inventory', 'prd1'), {
+      onHand: 8,
+      reserved: 1,
+      lots: [],
+      lastMutationOrderId: 'other-order',
+      updatedAt: new Date().toISOString()
     }));
 
     console.log('Firestore role/security rules tests passed.');
