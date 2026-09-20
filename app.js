@@ -6754,13 +6754,13 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             if (!total || remaining <= 0) throw new Error('這筆訂單已無尚未送貨數量。');
             const actor = deliveryActor();
             const now = new Date().toISOString();
-            const record = { id: deliveryRecordId(), date: today, qty: remaining, notes: '一鍵完成剩餘送貨', createdBy: actor, createdAt: now };
+            const allocation = await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
+            const record = { id: deliveryRecordId(), date: today, qty: remaining, notes: '一鍵完成剩餘送貨', createdBy: actor, createdAt: now, lotAllocations: allocation?.lotAllocations || [] };
             records.push(record);
             const history = { action: 'create', source: 'quick_complete', recordId: record.id, before: null, after: record, by: actor, at: now };
             const statusEntries = [];
             if (!order.isOrdered) statusEntries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: now });
             if (!order.isArrived) statusEntries.push({ field: 'isArrived', value: true, label: '已到貨', by: actor, at: now });
-            await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
             const updates = {
                 deliveryRecords: records, deliveredQty: total, isDelivered: true,
                 isOrdered: true, isArrived: true,
@@ -6827,7 +6827,8 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
                 ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
                 : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
-            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId);
+            const restoreAllocations = savedDeliveryRecords(order).flatMap(record => Array.isArray(record.lotAllocations) ? record.lotAllocations : []);
+            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId, restoreAllocations);
             const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -6936,21 +6937,43 @@ window.saveDeliveryRecord = async function() {
             const now = new Date().toISOString();
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
-            const record = previous
-                ? { ...previous, date, qty, notes, updatedBy: actor, updatedAt: now }
-                : { id: deliveryRecordId(), date, qty, notes, createdBy: actor, createdAt: now };
-            if (existingIndex >= 0) records[existingIndex] = record; else records.push(record);
-            const totalDelivered = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const total = orderQuantity(order);
             if (!total) throw new Error('訂購數量必須大於 0，才能登錄送貨。');
+
+            const otherDelivered = records
+                .filter((_, index) => index !== existingIndex)
+                .reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+            const totalDelivered = otherDelivered + qty;
             if (totalDelivered > total + 1e-9) throw new Error(`累計送貨數量 ${totalDelivered} 超過訂購數量 ${total}。`);
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
+
+            const deliveryDelta = qty - Number(previous?.qty || 0);
+            let lotAllocations = Array.isArray(previous?.lotAllocations)
+                ? previous.lotAllocations.map(item => ({ ...item, qty:Number(item.qty || 0) }))
+                : [];
+            if (deliveryDelta > 0) {
+                const allocation = await applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryDelta, actor, orderId);
+                lotAllocations = [...lotAllocations, ...(allocation?.lotAllocations || [])];
+            } else if (deliveryDelta < 0) {
+                const split = splitLotAllocationsForRestore(lotAllocations, Math.abs(deliveryDelta));
+                await applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryDelta, actor, orderId, split.restore);
+                lotAllocations = split.keep;
+            }
+
+            const record = previous
+                ? { ...previous, date, qty, notes, lotAllocations, updatedBy: actor, updatedAt: now }
+                : { id: deliveryRecordId(), date, qty, notes, lotAllocations, createdBy: actor, createdAt: now };
+            if (existingIndex >= 0) records[existingIndex] = record; else records.push(record);
             const action = previous ? 'edit' : 'create';
             const history = { action, recordId: record.id, before: previous, after: record, by: actor, at: now };
-            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
-            const deliveryDelta = qty - Number(previous?.qty || 0);
-            if (deliveryDelta) await applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryDelta, actor, orderId);
+            const updates = {
+                deliveryRecords: records,
+                deliveredQty: totalDelivered,
+                isDelivered: totalDelivered >= total,
+                deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history),
+                updatedAt: now
+            };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -6986,7 +7009,10 @@ window.deleteDeliveryRecord = async function(recordId) {
             const actor = deliveryActor();
             const now = new Date().toISOString();
             const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
-            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId);
+            await applyInventoryDeliveryDeltaInTransaction(
+                transaction, order, -Number(removed.qty || 0), actor, orderId,
+                Array.isArray(removed.lotAllocations) ? removed.lotAllocations : []
+            );
             const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
