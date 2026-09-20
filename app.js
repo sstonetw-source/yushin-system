@@ -7763,8 +7763,8 @@ function fmtDate(d) {
     return `${yyyy}/${mm}/${dd}`;
 }
 
-const statusLabel = { ok: '正常', soon: '即將到期', overdue: '已逾期', unknown: '尚無紀錄', none: '免保養' };
-const statusClass = { ok: 'status-ok', soon: 'status-soon', overdue: 'status-overdue', unknown: 'status-unknown', none: 'status-none' };
+const statusLabel = { ok: '正常', soon: '即將到期', overdue: '已逾期', unknown: '尚無紀錄', none: '免保養', inactive: '已停用' };
+const statusClass = { ok: 'status-ok', soon: 'status-soon', overdue: 'status-overdue', unknown: 'status-unknown', none: 'status-none', inactive: 'status-none' };
 
 window.renderEquipmentList = function() {
     const tbody = document.getElementById('eqListBody');
@@ -7796,7 +7796,7 @@ window.renderEquipmentList = function() {
             <td data-th="下次到期">${fmtDate(dueDate)}</td>
             <td data-th="狀態"><span class="status-badge ${statusClass[status]}">${statusLabel[status]}</span></td>
             <td class="no-print" data-th="操作">
-                <button type="button" class="btn-small" onclick="event.stopPropagation(); quickAddMaintenanceLog('${eq.id}')">🔧 保養</button>
+                <button type="button" class="btn-small" ${eq.active === false ? 'disabled' : ''} onclick="event.stopPropagation(); quickAddMaintenanceLog('${eq.id}')">🔧 保養</button>
                 <button type="button" class="${eq.active === false ? 'btn-small' : 'btn-danger'}" onclick="event.stopPropagation(); toggleEquipmentActive('${eq.id}', ${eq.active === false})">${eq.active === false ? '恢復' : '停用'}</button>
             </td>
         `;
