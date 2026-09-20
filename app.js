@@ -5506,22 +5506,27 @@ function purchaseItemsFromOrder(order) {
                 cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
             }
         }
-        const parsedQty = parseFloat(qtyValue);
+        const parsedQty=parseFloat(qtyValue);
+        const fullQty=Number.isFinite(parsedQty)&&parsedQty>0?parsedQty:1;
+        const procurementRequired=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
+            ? fullQty : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??fullQty));
+        const remainingPurchase=Math.max(0,procurementRequired-Number(item.purchaseOrderedQty||0));
         return {
             orderId: order.id,
             orderItemIndex: index,
+            itemId:item.itemId||`item-${index+1}`,
             itemName,
             itemCode,
             productId: item.productId || order.productId || '',
             brand,
-            qty: Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1,
+            qty: remainingPurchase,
             unit: item.unit || order.unit || '',
             productLine: item.productLine || order.productLine || '',
             fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
             warehouseId: item.warehouseId || order.warehouseId || '',
             unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0
         };
-    }).filter(item => item.itemName || item.itemCode);
+    }).filter(item => (item.itemName || item.itemCode) && Number(item.qty||0)>0);
 }
 
 function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
