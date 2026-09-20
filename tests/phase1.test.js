@@ -138,7 +138,7 @@ test('document number generation reads only the newest matching document', () =>
     assert.match(appSource, /findPriceItemByCodeValue\(value\)/);
 });
 
-test('sales statistics uses a bounded cached query and ignores stale roles', () => {
+test('sales statistics uses server-filtered paged queries and ignores stale roles', () => {
     const start = appSource.indexOf('window.loadSalesStatistics =');
     const end = appSource.indexOf('\n};', start) + 3;
     const loader = appSource.slice(start, end);
@@ -149,9 +149,9 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
     assert.match(loader, /where\('orderDate', '<=', end\)/);
     assert.match(loader, /where\('updatedAt', '>=', startIso\)/);
     assert.match(loader, /where\('status', '==', BUSINESS_STATUS\.ACTIVE\)/);
-    assert.match(loader, /limit\(1500\)/);
-    assert.match(loader, /limit\(1000\)/);
+    assert.match(loader, /readAllQueryPages/);
     assert.doesNotMatch(loader, /collection\('orders'\)\.get\(\)/);
+    assert.doesNotMatch(loader, /limit\(1500\)|limit\(1000\)/);
 });
 
 test('purchase modal chooses a company that does not silently filter every item', () => {
@@ -247,9 +247,13 @@ test('quote and order lists use global business-date ordering across companies',
 });
 
 
-test('quote and order full-history search use backend tokens and remain paginated', () => {
+test('quote and order full-history search use scoped backend tokens and remain paginated', () => {
     assert.match(appSource, /function buildFullHistorySearchTokens/);
-    assert.match(appSource, /where\('searchTokens', 'array-contains', queryToken\)/);
+    assert.match(appSource, /function fullHistorySearchQuery/);
+    assert.match(appSource, /where\('searchTokens', 'array-contains', token\)/);
+    assert.match(appSource, /where\('salesCode', '==', currentUserCode\)/);
+    assert.match(appSource, /where\('ownerUid', '==', currentUser\.uid\)/);
+    assert.match(appSource, /orderBy\(dateField, 'desc'\)/);
     assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
     assert.match(appSource, /startAfter\(orderHistorySearchCursor\)/);
     assert.match(appSource, /startAfter\(quoteHistorySearchCursor\)/);
@@ -378,8 +382,9 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
     const dealEnd = appSource.indexOf('window.unmarkQuoteAsDeal', dealStart);
     const deal = appSource.slice(dealStart, dealEnd);
     assert.match(deal, /DOCUMENT_TYPES\.QUOTE/);
-    assert.match(deal, /createdOrderLinks/);
-    assert.match(deal, /DOCUMENT_TYPES\.ORDER/);
+    assert.match(deal, /createOrderWithReservation/);
+    assert.match(deal, /sourceType: DOCUMENT_TYPES\.QUOTE/);
+    assert.match(deal, /conversionKey:/);
 
     const poStart = appSource.indexOf('window.printPurchaseOrder =');
     const poEnd = appSource.indexOf("window.addEventListener('afterprint'", poStart);
@@ -437,14 +442,19 @@ test('phase 5 inventory uses on-hand reserved available incoming and transaction
     assert.match(appSource, /'ship'/);
 });
 
-test('phase 5 order creation reserves only available stock and records shortage', () => {
-    const start=appSource.indexOf('async function reserveInventoryForNewOrder');
-    const end=appSource.indexOf('function orderQuantity',start);
+test('phase 5 order creation reserves only available stock and records shortage atomically', () => {
+    const start=appSource.indexOf('async function applyNewOrderReservationInTransaction');
+    const end=appSource.indexOf('async function createOrderWithReservation',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/Math\.min\(requested, warehouseStock\.available\)/);
+    assert.match(s,/Math\.min\(requested, warehouseStock\.available, aggregateStock\.available\)/);
     assert.match(s,/inventoryReservedQty/);
     assert.match(s,/inventoryShortageQty/);
-    assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
+    const createStart=appSource.indexOf('async function createOrderWithReservation');
+    const createEnd=appSource.indexOf('async function reserveInventoryForNewOrder',createStart);
+    const create=appSource.slice(createStart,createEnd);
+    assert.match(create,/db\.runTransaction/);
+    assert.match(create,/applyNewOrderReservationInTransaction/);
+    assert.match(create,/tx\.set\(orderRef, prepared\.orderData\)/);
 });
 
 test('phase 5 shipment consumes both aggregate and selected warehouse stock transactionally', () => {
@@ -523,16 +533,24 @@ test('phase 9 analysis separates actual receipts sales stock value incoming and 
  assert.match(appSource,/where\('type','==','receipt'\)/);
  assert.match(appSource,/difference:\s*sales\s*-\s*purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
- assert.match(appSource,/limit\(1000\)/);
+ assert.match(appSource,/readAllQueryPages/);
+ assert.doesNotMatch(appSource,/inventoryMovements[\s\S]{0,300}limit\(1000\)/);
 });
+
 test('phase 8 permission editor includes warehouse role',()=>{assert.match(appSource,/\['sales', 'purchaser', 'warehouse', 'engineer', 'admin'\]/);});
 
 
-test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=>{
- assert.match(appSource,/where\('type','==','receipt'\)/);
- assert.match(appSource,/inventoryMovements[\s\S]{0,300}limit\(1000\)/);
- assert.doesNotMatch(appSource,/collection\('inventoryMovements'\)\.get\(\)/);
+test('phase 10 keeps inventory analysis server-filtered and paged without silent truncation',()=>{
+ const start=appSource.indexOf('async function loadInventoryAnalysisSupport');
+ const end=appSource.indexOf('function inventoryAnalysisTotals',start);
+ const source=appSource.slice(start,end);
+ assert.match(source,/where\('type','==','receipt'\)/);
+ assert.match(source,/readAllQueryPages/);
+ assert.match(source,/where\('createdAt','>=',start\+'T00:00:00'\)/);
+ assert.doesNotMatch(source,/collection\('inventoryMovements'\)\.get\(\)/);
+ assert.doesNotMatch(source,/limit\(1000\)/);
 });
+
 test('phase 10 role model consistently documents warehouse',()=>{
  assert.match(appSource,/admin' \/ 'sales' \/ 'purchaser' \/ 'warehouse' \/ 'engineer'/);
 });
@@ -577,8 +595,8 @@ test('inventory reservation is traceable to occupying orders', () => {
 });
 
 test('unknown order items do not create inventory before purchase receipt', () => {
-    const start = appSource.indexOf('async function reserveInventoryForNewOrder');
-    const end = appSource.indexOf('function orderQuantity', start);
+    const start = appSource.indexOf('async function applyNewOrderReservationInTransaction');
+    const end = appSource.indexOf('async function createOrderWithReservation', start);
     const s = appSource.slice(start, end);
     assert.match(s, /warehouseSnap\?\.exists/);
     assert.match(s, /const shortage = Math\.max\(0, requested - reservable\)/);
@@ -689,13 +707,13 @@ test('phase 17 Forecast PO and Inventory provide mobile data labels and card lay
     assert.match(cssSource, /#inventory-system td\[data-th\]::before/);
 });
 
-test('phase 18 statistics avoid all-history downloads and important writes stamp updatedAt', () => {
+test('phase 18 statistics page complete filtered result sets and important writes stamp updatedAt', () => {
     const start = appSource.indexOf('window.loadSalesStatistics =');
     const end = appSource.indexOf('\n};', start) + 3;
     const loader = appSource.slice(start, end);
     assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
-    assert.match(loader, /\.limit\(1500\)/);
-    assert.match(loader, /\.limit\(1000\)/);
+    assert.match(loader, /readAllQueryPages/);
+    assert.doesNotMatch(loader, /\.limit\(1500\)|\.limit\(1000\)/);
     assert.doesNotMatch(loader, /db\.collection\('orders'\)\.get\(\)/);
     assert.match(appSource, /updatedAt: timestamp/);
     assert.match(appSource, /updatedAt: history\.at/);
@@ -707,7 +725,11 @@ test('phase 19 Firestore rules enforce role boundaries for PO inventory reservat
     assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
     assert.match(rulesSource, /sales\(\) && ownBySalesCode\(resource\.data\)/);
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
-    assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(sales\(\) && ownBySalesCode\(resource\.data\)\)/);
+    assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(sales\(\) && own\(resource\.data\)\)/);
+    const orderRulesStart = rulesSource.indexOf('match /orders/{id}');
+    const orderRulesEnd = rulesSource.indexOf('match /purchaseOrders/{id}', orderRulesStart);
+    const orderRules = rulesSource.slice(orderRulesStart, orderRulesEnd);
+    assert.doesNotMatch(orderRules, /engineer\(\)/);
     assert.match(rulesSource, /allow read, write: if false/);
 });
 
@@ -859,12 +881,15 @@ test('manual inventory changes support batch rows instead of browser prompts', (
 });
 
 
-test('Product Master v2 overlays products on top of the legacy price list', () => {
+test('Product Master v2 overlays all paged products on top of the legacy price list', () => {
     assert.match(appSource, /function loadProductMasterOverlay/);
-    assert.match(appSource, /db\.collection\('products'\)\.limit\(500\)/);
+    assert.match(appSource, /readAllQueryPages\([\s\S]*?collection\('products'\)/);
     assert.match(appSource, /await loadProductMasterOverlay\(\)/);
     assert.match(appSource, /productMasterDocToPriceItem/);
     assert.match(appSource, /const merged = new Map\(priceList/);
+    const start=appSource.indexOf('async function loadProductMasterOverlay');
+    const end=appSource.indexOf('async function loadVisibleProductCost',start);
+    assert.doesNotMatch(appSource.slice(start,end),/collection\('products'\)\.limit\(500\)/);
 });
 
 test('Product Master v2 keeps authorization separate from the legacy productType category', () => {
@@ -956,8 +981,8 @@ test('Phase 2-6 completion integrates supplier mapping, warehouses and direct sh
 });
 
 test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receiving', () => {
-    const reserveStart = appSource.indexOf('async function reserveInventoryForNewOrder');
-    const reserveEnd = appSource.indexOf('function orderQuantity', reserveStart);
+    const reserveStart = appSource.indexOf('async function applyNewOrderReservationInTransaction');
+    const reserveEnd = appSource.indexOf('async function createOrderWithReservation', reserveStart);
     const reserve = appSource.slice(reserveStart, reserveEnd);
     assert.match(reserve, /fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'/);
     assert.match(reserve, /inventoryReservedQty: 0/);
@@ -974,6 +999,49 @@ test('Phase 2-6 security rules cover supplier and warehouse master collections',
     assert.match(rulesSource, /match \/brandSupplierMappings\/\{id\}/);
     assert.match(rulesSource, /match \/warehouses\/\{id\}/);
     assert.match(rulesSource, /match \/warehouseStocks\/\{id\}/);
+});
+
+test('critical fix keeps role UI inside Firestore backend caps', () => {
+    assert.match(appSource, /const ROLE_BACKEND_PAGE_CAPS/);
+    assert.match(appSource, /engineer:[\s\S]*?orders:'none'/);
+    assert.match(appSource, /const ROLE_BACKEND_DATA_SCOPE_CAPS/);
+    assert.match(appSource, /function getDataScope/);
+});
+
+test('critical fix replaces business hard delete with void or inactive state', () => {
+    const quoteStart=appSource.indexOf('window.deleteQuoteFromAdmin');
+    const quoteEnd=appSource.indexOf('window.exportQuotesCSV',quoteStart);
+    assert.match(appSource.slice(quoteStart,quoteEnd),/BUSINESS_STATUS\.VOIDED/);
+    assert.doesNotMatch(appSource.slice(quoteStart,quoteEnd),/\.delete\(/);
+    const equipmentStart=appSource.indexOf('window.toggleEquipmentActive');
+    const equipmentEnd=appSource.indexOf('function equipmentLogRealIndex',equipmentStart);
+    assert.match(appSource.slice(equipmentStart,equipmentEnd),/active,/);
+    assert.doesNotMatch(appSource.slice(equipmentStart,equipmentEnd),/\.delete\(/);
+    assert.match(appSource,/async function runFirestoreBatchSoftVoid/);
+});
+
+test('critical fix makes source conversion retry-safe and reservation atomic', () => {
+    assert.match(appSource,/function conversionOrderDocId/);
+    assert.match(appSource,/async function createOrderWithReservation/);
+    assert.match(appSource,/inventoryReservationAppliedAt/);
+    assert.match(appSource,/conversionKey: `line-\$\{index\}`/);
+    assert.match(appSource,/tx\.set\(orderRef, prepared\.orderData\)/);
+});
+
+test('critical fix persists FEFO lot allocations through shipment and receipt', () => {
+    assert.match(appSource,/function consumeLotsFefo/);
+    assert.match(appSource,/lotAllocations/);
+    assert.match(appSource,/splitLotAllocationsForRestore/);
+    assert.match(appSource,/lots: whLots/);
+    assert.match(appSource,/type:'receipt'/);
+});
+
+test('critical fix paginates equipment and derives asset ids from cloud state', () => {
+    assert.match(appSource,/let equipmentCursor = null/);
+    assert.match(appSource,/window\.loadMoreEquipment/);
+    assert.match(indexSource,/id="equipmentLoadMoreBtn"/);
+    assert.match(appSource,/async function getNextAssetIdFromCloud/);
+    assert.match(appSource,/orderBy\('assetId', 'desc'\)/);
 });
 
 test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership compatibility', () => {
