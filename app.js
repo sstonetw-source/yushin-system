@@ -1062,7 +1062,7 @@ window.renderForecastList = function() {
             ${forecastStatusLabel(item.status)}
         `.toLocaleLowerCase();
 
-        if (keyword && !searchable.includes(keyword)) return;
+        if (!quoteHistorySearchActive && keyword && !searchable.includes(keyword)) return;
         if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
         if (salesFilter && salesName !== salesFilter) return;
         if (stageFilter && item.stage !== stageFilter) return;
@@ -1640,6 +1640,7 @@ async function createForecastOrdersDirectly(forecast, items) {
             isBilled: false,
             invoiceDate: ''
         };
+        orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
         batch.set(orderRef, orderData);
         createdOrders.push({ id: orderRef.id, data: orderData });
         links.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
@@ -3064,6 +3065,7 @@ window.printThreeQuotes = async function() {
     document.title = `${quoteData.quoteNo}-${quoteData.ordererName || quoteData.clientName || ''}-三家估價`;
     window._quoteOriginalTitle = originalTitle;
     requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+    quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
     db.collection('quotes').doc(quoteData.quoteNo).set(quoteData).catch(err => {
         console.error('儲存第一張正式估價單失敗：', err);
         alert('提醒：三頁列印內容不受影響，但第一張正式估價單存入雲端失敗，請稍後再試。');
@@ -3168,6 +3170,7 @@ window.handleSaveAndPrint = function() {
         });
     });
 
+    quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
     db.collection('quotes').doc(quoteNo).set(quoteData).then(() => {
         if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
             return db.collection('forecasts').doc(quoteData.sourceId).set({
@@ -3394,6 +3397,96 @@ let myQuotesCache = [];
 let myQuotesPaginationState = null;
 let myQuotesPageLoading = false;
 let myQuotesReloadRequested = false;
+let quoteHistorySearchActive = false;
+let quoteHistorySearchLoading = false;
+let quoteHistorySearchCursor = null;
+let quoteHistorySearchKeyword = '';
+let quoteHistorySearchResults = [];
+let quoteHistorySearchTimer = null;
+
+function updateQuoteHistorySearchUi(message = '') {
+    const status = document.getElementById('quoteHistorySearchStatus');
+    const more = document.getElementById('quoteHistorySearchMoreBtn');
+    if (status) status.innerText = message;
+    if (more) {
+        more.style.display = quoteHistorySearchActive && quoteHistorySearchCursor ? '' : 'none';
+        more.disabled = quoteHistorySearchLoading;
+    }
+}
+
+async function runQuoteHistorySearch(reset = true) {
+    const input = document.getElementById('myQuoteSearch');
+    const rawKeyword = input?.value || '';
+    const queryToken = fullHistoryQueryToken('quote', rawKeyword);
+    if (!normalizeFullHistorySearchValue(rawKeyword)) {
+        quoteHistorySearchActive = false;
+        quoteHistorySearchResults = [];
+        quoteHistorySearchCursor = null;
+        updateQuoteHistorySearchUi('');
+        renderMyQuotesList();
+        return;
+    }
+    if (!queryToken) {
+        updateQuoteHistorySearchUi('目前帳號缺少可用的資料歸屬資訊，無法進行全歷史搜尋。');
+        return;
+    }
+    if (quoteHistorySearchLoading) return;
+    quoteHistorySearchLoading = true;
+    if (reset || rawKeyword !== quoteHistorySearchKeyword) {
+        quoteHistorySearchKeyword = rawKeyword;
+        quoteHistorySearchResults = [];
+        quoteHistorySearchCursor = null;
+    }
+    updateQuoteHistorySearchUi('正在搜尋全部歷史估價單…');
+    try {
+        let query = db.collection('quotes').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
+        if (quoteHistorySearchCursor) query = query.startAfter(quoteHistorySearchCursor);
+        const snapshot = await query.get();
+        const records = new Map(quoteHistorySearchResults.map(record => [record.id, record]));
+        snapshot.forEach(doc => {
+            const data = { id: doc.id, ...doc.data() };
+            if (fullHistoryRecordMatches('quote', data, rawKeyword)) records.set(doc.id, data);
+        });
+        quoteHistorySearchResults = [...records.values()]
+            .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
+        quoteHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
+        quoteHistorySearchActive = true;
+        updateQuoteHistorySearchUi(`全歷史搜尋：已找到 ${quoteHistorySearchResults.length} 筆${quoteHistorySearchCursor ? '，可繼續載入' : ''}`);
+        renderMyQuotesList();
+    } catch (err) {
+        console.error('估價單全歷史搜尋失敗：', err);
+        quoteHistorySearchActive = false;
+        quoteHistorySearchCursor = null;
+        updateQuoteHistorySearchUi('全歷史搜尋索引尚未補齊，請管理員到資料庫管理執行搜尋索引補建。');
+        renderMyQuotesList();
+    } finally {
+        quoteHistorySearchLoading = false;
+        updateQuoteHistorySearchUi(document.getElementById('quoteHistorySearchStatus')?.innerText || '');
+    }
+}
+
+window.scheduleQuoteHistorySearch = function() {
+    clearTimeout(quoteHistorySearchTimer);
+    const keyword = document.getElementById('myQuoteSearch')?.value || '';
+    if (!normalizeFullHistorySearchValue(keyword)) return runQuoteHistorySearch(true);
+    quoteHistorySearchTimer = setTimeout(() => runQuoteHistorySearch(true), 350);
+};
+
+window.loadMoreQuoteHistorySearch = function() {
+    return runQuoteHistorySearch(false);
+};
+
+window.clearQuoteHistorySearch = function() {
+    clearTimeout(quoteHistorySearchTimer);
+    quoteHistorySearchActive = false;
+    quoteHistorySearchKeyword = '';
+    quoteHistorySearchResults = [];
+    quoteHistorySearchCursor = null;
+    const input = document.getElementById('myQuoteSearch');
+    if (input) input.value = '';
+    updateQuoteHistorySearchUi('');
+    renderMyQuotesList();
+};
 
 window.switchQuoteView = function(view, el, options = {}) {
     const pageKey = view === 'create' ? 'quote.create' : 'quote.my';
@@ -3519,7 +3612,8 @@ window.renderMyQuotesList = function() {
     const salesHeader = document.getElementById('myQuotesSalesHeader');
     if (salesHeader) salesHeader.style.display = isAdminViewingAll ? '' : 'none';
 
-    myQuotesCache.forEach(q => {
+    const visibleQuoteSource = quoteHistorySearchActive ? quoteHistorySearchResults : myQuotesCache;
+    visibleQuoteSource.forEach(q => {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
@@ -3746,6 +3840,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                     orderData.costPrice = priceMatch.cost;
                 }
             }
+            orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
             batch.set(orderRef, orderData);
             createdOrders.push({ id: orderRef.id, data: orderData });
         });
@@ -4553,20 +4648,15 @@ window.loadMoreOrders = function() {
 };
 
 /*
- * Phase 1B 全歷史搜尋
- * Firestore 本身不適合直接做任意「品名包含文字」搜尋。為避免每次搜尋掃完整個歷史集合，
- * 先提供可索引的「精確貨號」全歷史搜尋；一般文字仍搜尋目前已載入的 50 筆。
- * Phase 2 Product Master 建立 productId/search tokens 後，再把品名全歷史搜尋接到正式索引。
+ * 統一全歷史搜尋：估價單／訂單都使用 searchTokens 後端索引；
+ * 一般列表仍每次只載入 50 筆，搜尋結果也以 50 筆分頁。
  */
 let orderHistorySearchActive = false;
 let orderHistorySearchLoading = false;
 let orderHistorySearchCursor = null;
 let orderHistorySearchKeyword = '';
 let orderHistorySearchResults = [];
-
-function normalizeHistoryItemCode(value) {
-    return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
-}
+let orderHistorySearchTimer = null;
 
 function updateOrderHistorySearchUi(message = '') {
     const status = document.getElementById('orderHistorySearchStatus');
@@ -4578,11 +4668,11 @@ function updateOrderHistorySearchUi(message = '') {
     }
 }
 
-async function runOrderHistoryItemCodeSearch(reset = true) {
+async function runOrderHistorySearch(reset = true) {
     const input = document.getElementById('orderSearch');
     const rawKeyword = input?.value || '';
-    const keyword = normalizeHistoryItemCode(rawKeyword);
-    if (!keyword) {
+    const queryToken = fullHistoryQueryToken('order', rawKeyword);
+    if (!normalizeFullHistorySearchValue(rawKeyword)) {
         orderHistorySearchActive = false;
         orderHistorySearchResults = [];
         orderHistorySearchCursor = null;
@@ -4590,33 +4680,38 @@ async function runOrderHistoryItemCodeSearch(reset = true) {
         renderOrdersList();
         return;
     }
+    if (!queryToken) {
+        updateOrderHistorySearchUi('目前帳號缺少可用的資料歸屬資訊，無法進行全歷史搜尋。');
+        return;
+    }
     if (orderHistorySearchLoading) return;
     orderHistorySearchLoading = true;
-    if (reset || keyword !== orderHistorySearchKeyword) {
-        orderHistorySearchKeyword = keyword;
+    if (reset || rawKeyword !== orderHistorySearchKeyword) {
+        orderHistorySearchKeyword = rawKeyword;
         orderHistorySearchResults = [];
         orderHistorySearchCursor = null;
     }
     updateOrderHistorySearchUi('正在搜尋全部歷史訂單…');
     try {
-        let query = db.collection('orders').where('itemCodeKey', '==', keyword).orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT);
+        let query = db.collection('orders').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
         if (orderHistorySearchCursor) query = query.startAfter(orderHistorySearchCursor);
         const snapshot = await query.get();
-        const records = new Map(orderHistorySearchResults.map(order => [order.id, order]));
+        const records = new Map(orderHistorySearchResults.map(record => [record.id, record]));
         snapshot.forEach(doc => {
             const data = { id: doc.id, ...doc.data() };
-            if (canViewAllData('orders') || belongsToCurrentUser(data.salesName, data.ownerUid, data.salesCode)) records.set(doc.id, data);
+            if (fullHistoryRecordMatches('order', data, rawKeyword)) records.set(doc.id, data);
         });
-        orderHistorySearchResults = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
+        orderHistorySearchResults = [...records.values()]
+            .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
         orderHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
         orderHistorySearchActive = true;
-        updateOrderHistorySearchUi(`全歷史貨號搜尋：已找到 ${orderHistorySearchResults.length} 筆${orderHistorySearchCursor ? '，可繼續載入' : ''}`);
+        updateOrderHistorySearchUi(`全歷史搜尋：已找到 ${orderHistorySearchResults.length} 筆${orderHistorySearchCursor ? '，可繼續載入' : ''}`);
         renderOrdersList();
     } catch (err) {
-        console.error('全歷史貨號搜尋失敗：', err);
+        console.error('訂單全歷史搜尋失敗：', err);
         orderHistorySearchActive = false;
         orderHistorySearchCursor = null;
-        updateOrderHistorySearchUi('目前資料尚未建立全歷史搜尋索引；仍可搜尋已載入資料。');
+        updateOrderHistorySearchUi('全歷史搜尋索引尚未補齊，請管理員到資料庫管理執行搜尋索引補建。');
         renderOrdersList();
     } finally {
         orderHistorySearchLoading = false;
@@ -4624,15 +4719,17 @@ async function runOrderHistoryItemCodeSearch(reset = true) {
     }
 }
 
-window.searchAllOrderHistory = function() {
-    return runOrderHistoryItemCodeSearch(true);
+window.scheduleOrderHistorySearch = function() {
+    clearTimeout(orderHistorySearchTimer);
+    const keyword = document.getElementById('orderSearch')?.value || '';
+    if (!normalizeFullHistorySearchValue(keyword)) return runOrderHistorySearch(true);
+    orderHistorySearchTimer = setTimeout(() => runOrderHistorySearch(true), 350);
 };
 
-window.loadMoreOrderHistorySearch = function() {
-    return runOrderHistoryItemCodeSearch(false);
-};
-
+window.searchAllOrderHistory = function() { return runOrderHistorySearch(true); };
+window.loadMoreOrderHistorySearch = function() { return runOrderHistorySearch(false); };
 window.clearOrderHistorySearch = function() {
+    clearTimeout(orderHistorySearchTimer);
     orderHistorySearchActive = false;
     orderHistorySearchKeyword = '';
     orderHistorySearchResults = [];
@@ -4707,7 +4804,7 @@ window.renderOrdersList = function() {
     const visibleOrderSource = orderHistorySearchActive ? orderHistorySearchResults : ordersCache;
     const baseOrders = visibleOrderSource.filter(o => {
         const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''}`.toLowerCase();
-        if (keyword && !searchable.includes(keyword)) return false;
+        if (!orderHistorySearchActive && keyword && !searchable.includes(keyword)) return false;
         if (salesFilter && stripPhoneSuffix(o.salesName) !== salesFilter) return false;
         if (brandFilter && (o.brand || '') !== brandFilter) return false;
         return true;
@@ -7126,6 +7223,7 @@ window.saveNewOrder = function() {
         data.supplier = priceMatch.supplier || '';
         data.spec = priceMatch.spec || '';
     }
+    data.searchTokens = buildFullHistorySearchTokens('order', data);
 
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
@@ -9409,7 +9507,7 @@ window.downloadDatabaseBackup = async function() {
     }
 };
 
-/* ---------- Phase 1B：舊訂單搜尋索引補建 ---------- */
+/* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */
 let orderSearchIndexMigrationRunning = false;
 
 window.backfillOrderSearchIndex = async function() {
@@ -9418,44 +9516,51 @@ window.backfillOrderSearchIndex = async function() {
         return;
     }
     if (orderSearchIndexMigrationRunning) return;
-    if (!confirm('這會逐批檢查舊訂單，僅為缺少 itemCodeKey 的文件補上標準化貨號，不會修改訂單內容或狀態。確定執行嗎？')) return;
+    if (!confirm('這會逐批檢查舊估價單與訂單，只補建全歷史搜尋索引；不會修改金額、狀態或流程紀錄。確定執行嗎？')) return;
 
     const button = document.getElementById('orderSearchIndexMigrationBtn');
     const status = document.getElementById('orderSearchIndexMigrationStatus');
     orderSearchIndexMigrationRunning = true;
     if (button) button.disabled = true;
-    let cursor = null;
-    let scanned = 0;
-    let updated = 0;
+    let scanned = 0, updated = 0;
     try {
-        while (true) {
-            let query = db.collection('orders').orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
-            if (cursor) query = query.startAfter(cursor);
-            const snapshot = await query.get();
-            if (snapshot.empty) break;
-
-            let batch = db.batch();
-            let batchWrites = 0;
-            snapshot.docs.forEach(doc => {
-                const data = doc.data() || {};
-                const sourceCode = data.itemCode || data.productCode || data.model || '';
-                const normalized = normalizeHistoryItemCode(sourceCode);
-                scanned += 1;
-                if (normalized && data.itemCodeKey !== normalized) {
-                    batch.update(doc.ref, { itemCodeKey: normalized });
-                    batchWrites += 1;
-                    updated += 1;
-                }
-            });
-            if (batchWrites) await batch.commit();
-            cursor = snapshot.docs[snapshot.docs.length - 1];
-            if (status) status.innerText = `已檢查 ${scanned} 筆，補建 ${updated} 筆搜尋索引…`;
-            if (snapshot.size < 200) break;
+        for (const collectionName of ['quotes','orders']) {
+            let cursor = null;
+            while (true) {
+                let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
+                if (cursor) query = query.startAfter(cursor);
+                const snapshot = await query.get();
+                if (snapshot.empty) break;
+                const batch = db.batch();
+                let writes = 0;
+                snapshot.docs.forEach(doc => {
+                    const data = doc.data() || {};
+                    const type = collectionName === 'quotes' ? 'quote' : 'order';
+                    const searchTokens = buildFullHistorySearchTokens(type, { id: doc.id, ...data });
+                    const update = {};
+                    if (JSON.stringify(data.searchTokens || []) !== JSON.stringify(searchTokens)) update.searchTokens = searchTokens;
+                    if (collectionName === 'orders') {
+                        const sourceCode = data.itemCode || data.productCode || data.model || '';
+                        const normalized = normalizeHistoryItemCode(sourceCode);
+                        if (normalized && data.itemCodeKey !== normalized) update.itemCodeKey = normalized;
+                    }
+                    scanned += 1;
+                    if (Object.keys(update).length) {
+                        batch.update(doc.ref, update);
+                        writes += 1;
+                        updated += 1;
+                    }
+                });
+                if (writes) await batch.commit();
+                cursor = snapshot.docs[snapshot.docs.length - 1];
+                if (status) status.innerText = `${collectionName === 'quotes' ? '估價單' : '訂單'}：已檢查 ${scanned} 筆，更新 ${updated} 筆搜尋索引…`;
+                if (snapshot.size < 200) break;
+            }
         }
-        if (status) status.innerText = `完成：共檢查 ${scanned} 筆舊訂單，補建／修正 ${updated} 筆貨號搜尋索引。`;
+        if (status) status.innerText = `完成：共檢查 ${scanned} 筆估價單／訂單，建立或修正 ${updated} 筆全歷史搜尋索引。`;
     } catch (err) {
-        console.error('舊訂單搜尋索引補建失敗：', err);
-        if (status) status.innerText = `補建中斷：已檢查 ${scanned} 筆、更新 ${updated} 筆。可稍後重新執行，已完成的資料不會重複修改。`;
+        console.error('全歷史搜尋索引補建失敗：', err);
+        if (status) status.innerText = `補建中斷：已檢查 ${scanned} 筆、更新 ${updated} 筆。可重新執行，已完成資料不會重複修改。`;
         alert('搜尋索引補建未完成，請確認 Firestore 權限與網路連線後再試。');
     } finally {
         orderSearchIndexMigrationRunning = false;
