@@ -105,6 +105,20 @@ const BUSINESS_STATUS = Object.freeze({
     VOIDED: 'voided'
 });
 
+async function readAllQueryPages(queryFactory, pageSize = 500) {
+    const docs = [];
+    let cursor = null;
+    while (true) {
+        let query = queryFactory().limit(pageSize);
+        if (cursor) query = query.startAfter(cursor);
+        const snapshot = await query.get();
+        docs.push(...snapshot.docs);
+        if (snapshot.size < pageSize) break;
+        cursor = snapshot.docs[snapshot.docs.length - 1];
+    }
+    return docs;
+}
+
 function parseMoney(value) {
     const number = Number(String(value ?? '').replace(/,/g, '').trim());
     return Number.isFinite(number) ? number : 0;
@@ -8489,33 +8503,27 @@ window.loadSalesStatistics = function() {
     const totalEl = document.getElementById('salesStatsSalesInc');
     if (totalEl) totalEl.innerText = '讀取中…';
 
-    // 不掃描全部歷史訂單：只抓「本統計期間成立」、「本期間有異動」與「目前仍進行中」三群，
-    // 合併去重後再計算。這樣資料量隨年度增加時不會每次把全部舊訂單下載到瀏覽器。
     const { start, end } = salesStatisticsQueryWindow();
     const startIso = start + 'T00:00:00';
     const endIso = end + 'T23:59:59';
-    const periodOrders = db.collection('orders')
+
+    const periodOrders = readAllQueryPages(() => db.collection('orders')
         .where('orderDate', '>=', start)
         .where('orderDate', '<=', end)
-        .orderBy('orderDate', 'desc')
-        .limit(1500)
-        .get();
-    const activityOrders = db.collection('orders')
+        .orderBy('orderDate', 'desc'), 500);
+    const activityOrders = readAllQueryPages(() => db.collection('orders')
         .where('updatedAt', '>=', startIso)
         .where('updatedAt', '<=', endIso)
-        .orderBy('updatedAt', 'desc')
-        .limit(1500)
-        .get();
-    const openOrders = db.collection('orders')
+        .orderBy('updatedAt', 'desc'), 500);
+    const openOrders = readAllQueryPages(() => db.collection('orders')
         .where('status', '==', BUSINESS_STATUS.ACTIVE)
-        .limit(1000)
-        .get();
+        .orderBy(firebase.firestore.FieldPath.documentId()), 500);
 
-    salesStatisticsLoadPromise = Promise.all([periodOrders, activityOrders, openOrders]).then(([periodSnapshot, activitySnapshot, openSnapshot]) => {
+    salesStatisticsLoadPromise = Promise.all([periodOrders, activityOrders, openOrders]).then(([periodDocs, activityDocs, openDocs]) => {
         if (requestedRole !== currentUserRole) return;
         const records = new Map();
-        [periodSnapshot, activitySnapshot, openSnapshot].forEach(snapshot => {
-            snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
+        [periodDocs, activityDocs, openDocs].forEach(docs => {
+            docs.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
         });
         salesStatisticsOrders = [...records.values()];
         const startInput = document.getElementById('salesStatsStart');
@@ -8539,16 +8547,25 @@ window.loadSalesStatistics = function() {
 };
 
 async function loadInventoryAnalysisSupport(start, end) {
-    const [movements, stocks, purchaseOrders] = await Promise.all([
-        db.collection('inventoryMovements').where('createdAt','>=',start+'T00:00:00').where('createdAt','<=',end+'T23:59:59').where('type','==','receipt').orderBy('createdAt','desc').limit(1000).get(),
-        db.collection('inventory').orderBy('updatedAt','desc').limit(1000).get(),
-        db.collection('purchaseOrders').where('poDate','>=',start).where('poDate','<=',end).orderBy('poDate','desc').limit(1000).get()
+    const [movementDocs, stockDocs, purchaseOrderDocs] = await Promise.all([
+        readAllQueryPages(() => db.collection('inventoryMovements')
+            .where('createdAt','>=',start+'T00:00:00')
+            .where('createdAt','<=',end+'T23:59:59')
+            .where('type','==','receipt')
+            .orderBy('createdAt','desc'), 500),
+        readAllQueryPages(() => db.collection('inventory')
+            .orderBy(firebase.firestore.FieldPath.documentId()), 500),
+        readAllQueryPages(() => db.collection('purchaseOrders')
+            .where('poDate','>=',start)
+            .where('poDate','<=',end)
+            .orderBy('poDate','desc'), 500)
     ]);
-    inventoryAnalysisReceipts = movements.docs.map(d=>({id:d.id,...d.data()}));
-    inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
-    inventoryAnalysisDirectShipPurchaseOrders = purchaseOrders.docs.map(d=>({id:d.id,...d.data()}))
+    inventoryAnalysisReceipts = movementDocs.map(d=>({id:d.id,...d.data()}));
+    inventoryAnalysisStocks = stockDocs.map(d=>({id:d.id,...d.data()}));
+    inventoryAnalysisDirectShipPurchaseOrders = purchaseOrderDocs.map(d=>({id:d.id,...d.data()}))
         .filter(po=>purchaseItemsFromSavedPo(po).some(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'));
 }
+
 function inventoryAnalysisTotals(start,end) {
     let purchase = 0;
     inventoryAnalysisReceipts.forEach(receipt => {
@@ -8752,8 +8769,11 @@ function productMasterDocToPriceItem(doc) {
 
 async function loadProductMasterOverlay() {
     if (productMasterLoadPromise) return productMasterLoadPromise;
-    productMasterLoadPromise = db.collection('products').limit(500).get().then(snapshot => {
-        productMasterCache = snapshot.docs
+    productMasterLoadPromise = readAllQueryPages(
+        () => db.collection('products').orderBy(firebase.firestore.FieldPath.documentId()),
+        500
+    ).then(docs => {
+        productMasterCache = docs
             .map(productMasterDocToPriceItem)
             .filter(item => item.status !== 'INACTIVE' && item.active !== false);
         const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
