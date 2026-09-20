@@ -4160,9 +4160,12 @@ function normalizeLotsToOnHand(stock = {}) {
     if (total < onHand - 1e-9) rows = addLotQuantity(rows, 'UNTRACKED', '', onHand - total);
     return rows;
 }
-function consumeLotsFefo(stock = {}, qty) {
+function consumeLotRowsFefo(lots = [], qty = 0) {
+    const rows = [...lots]
+        .map(lot => ({ ...lot, qty:Number(lot.qty || 0) }))
+        .filter(lot => lot.qty > 0)
+        .sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));
     const requested = Math.max(0, Number(qty || 0));
-    const rows = normalizeLotsToOnHand(stock);
     const available = rows.reduce((sum, lot) => sum + Number(lot.qty || 0), 0);
     if (requested > available + 1e-9) throw new Error(`批號庫存不足：可扣 ${available}，本次需 ${requested}。`);
     let remaining = requested;
@@ -4176,6 +4179,29 @@ function consumeLotsFefo(stock = {}, qty) {
         allocations.push({ lotNo:lot.lotNo || 'UNTRACKED', expiryDate:lot.expiryDate || '', qty:take });
     }
     return { lots:rows.filter(lot => Number(lot.qty || 0) > 1e-9), allocations };
+}
+function consumeLotsFefo(stock = {}, qty) {
+    return consumeLotRowsFefo(normalizeLotsToOnHand(stock), qty);
+}
+function consumeLotsByAllocations(stock = {}, allocations = [], fallbackQty = 0) {
+    let rows = normalizeLotsToOnHand(stock);
+    let fallback = Math.max(0, Number(fallbackQty || 0));
+    if (Array.isArray(allocations) && allocations.length) fallback = 0;
+    for (const allocation of (allocations || [])) {
+        let needed = Math.max(0, Number(allocation.qty || 0));
+        if (!needed) continue;
+        const key = lotIdentity({ lotNo:allocation.lotNo || 'UNTRACKED', expiryDate:allocation.expiryDate || '' });
+        const index = rows.findIndex(lot => lotIdentity(lot) === key);
+        if (index >= 0) {
+            const take = Math.min(Number(rows[index].qty || 0), needed);
+            rows[index].qty -= take;
+            needed -= take;
+        }
+        fallback += needed;
+    }
+    rows = rows.filter(lot => Number(lot.qty || 0) > 1e-9);
+    if (fallback > 1e-9) rows = consumeLotRowsFefo(rows, fallback).lots;
+    return rows;
 }
 function restoreLotAllocations(stock = {}, allocations = [], fallbackQty = 0) {
     let rows = normalizeLotsToOnHand(stock);
@@ -4380,8 +4406,9 @@ window.saveInventoryAdjustmentBatch = async function() {
             lots=addLotQuantity(lots,'UNTRACKED','',delta);
             whLots=addLotQuantity(whLots,'UNTRACKED','',delta);
           }else if(delta<0){
-            lots=consumeLotsFefo({...old,onHand:n.onHand,lots},Math.abs(delta)).lots;
-            whLots=consumeLotsFefo({...(whSnap?.exists?whSnap.data():{}),onHand:wh.onHand,lots:whLots},Math.abs(delta)).lots;
+            const whResult=consumeLotsFefo({...(whSnap?.exists?whSnap.data():{}),onHand:wh.onHand,lots:whLots},Math.abs(delta));
+            whLots=whResult.lots;
+            lots=consumeLotsByAllocations({...old,onHand:n.onHand,lots},whResult.allocations,Math.abs(delta));
           }
           const now=new Date().toISOString();
           if(type!=='warehouse_allocation'){
@@ -6693,10 +6720,9 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
             throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
         }
         const warehouseLotResult = consumeLotsFefo({ ...whData, onHand:wh.onHand }, deltaQty);
-        const aggregateLotResult = consumeLotsFefo({ ...invData, onHand:inv.onHand }, deltaQty);
         whLots = warehouseLotResult.lots;
-        invLots = aggregateLotResult.lots;
         lotAllocations = warehouseLotResult.allocations;
+        invLots = consumeLotsByAllocations({ ...invData, onHand:inv.onHand }, lotAllocations, deltaQty);
     } else {
         if (inv.reserved + reservedDelta < 0 || wh.reserved + reservedDelta < 0) {
             throw new Error('庫存占用狀態異常，無法還原送貨。');
