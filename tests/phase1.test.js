@@ -1069,6 +1069,17 @@ test('critical fix gives long history fields balanced token coverage', () => {
     assert.match(source,/\[left, right\]/);
 });
 
+test('equipment asset id creation is transaction-safe under concurrent saves', () => {
+    const start=appSource.indexOf('async function createEquipmentWithUniqueAssetId');
+    const end=appSource.indexOf('window.onEqNoMaintenanceChange',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/for \(let attempt = 0; attempt < 5/);
+    assert.match(source,/db\.runTransaction/);
+    assert.match(source,/transaction\.get\(ref\)/);
+    assert.match(source,/if \(existing\.exists\) return/);
+    assert.match(source,/db\.collection\('equipment'\)\.doc\(assetId\)/);
+});
+
 test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership compatibility', () => {
     assert.match(appSource, /function syncCustomerMaster/);
     assert.match(appSource, /customerId/);
