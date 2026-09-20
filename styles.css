@@ -914,3 +914,49 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         box-sizing: border-box;
     }
 }
+
+
+/* 全部估價單：操作按鈕維持同一列，手機版也不要放大成滿版按鈕。 */
+.quote-list-actions {
+    white-space: nowrap;
+}
+.quote-list-action-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 5px;
+}
+.quote-list-action-row .btn-small,
+.quote-list-action-row button {
+    width: auto !important;
+    min-width: 0;
+    min-height: 32px;
+    margin: 0 !important;
+    padding: 5px 9px !important;
+    font-size: 12px !important;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+@media screen and (max-width: 640px) {
+    #myQuotesBody .quote-list-actions {
+        display: block;
+        width: 100%;
+        padding-top: 10px;
+    }
+    #myQuotesBody .quote-list-actions::before {
+        display: none;
+    }
+    #myQuotesBody .quote-list-action-row {
+        width: 100%;
+        gap: 5px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+    }
+    #myQuotesBody .quote-list-action-row button {
+        flex: 1 0 auto;
+        min-height: 34px;
+        padding: 6px 10px !important;
+        font-size: 12px !important;
+    }
+}
