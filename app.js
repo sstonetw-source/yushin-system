@@ -42,6 +42,31 @@ let trueUserRole = null;     // 真正登入帳號的身份；只有這個是 ad
 let mustChangePassword = false;  // 管理員要求這個帳號下次登入必須先改密碼
 const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', warehouse: '倉管', engineer: '工程師' };
 const PERMISSION_LEVELS = { none: 0, view: 1, edit: 2 };
+// Firestore Rules 是最後安全邊界；後台可調整權限，但不能超過各角色的後端最高權限。
+const ROLE_BACKEND_PAGE_CAPS = Object.freeze({
+    sales: {
+        forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit',
+        orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'view', equipment:'edit', admin:'none'
+    },
+    purchaser: {
+        forecast:'none', quote:'view', 'quote.create':'none', 'quote.my':'view',
+        orders:'edit', 'orders.list':'view', 'orders.po':'edit', inventory:'edit', equipment:'none', admin:'none'
+    },
+    warehouse: {
+        forecast:'none', quote:'none', 'quote.create':'none', 'quote.my':'none',
+        orders:'view', 'orders.list':'view', 'orders.po':'view', inventory:'edit', equipment:'none', admin:'none'
+    },
+    engineer: {
+        forecast:'none', quote:'none', 'quote.create':'none', 'quote.my':'none',
+        orders:'none', 'orders.list':'none', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none'
+    }
+});
+const ROLE_BACKEND_DATA_SCOPE_CAPS = Object.freeze({
+    sales: { quotes:'own', orders:'own' },
+    purchaser: { quotes:'all', orders:'all' },
+    warehouse: { quotes:'none', orders:'all' },
+    engineer: { quotes:'none', orders:'none' }
+});
 const PERMISSION_PAGES = [
     { key: 'forecast', label: '📈 Forecast', system: true },
     { key: 'quote', label: '📄 估價單系統', system: true },
@@ -358,9 +383,13 @@ function getPagePermission(pageKey, role = currentUserRole) {
     if (role === 'admin') return 'edit';
     const direct = rolePermissions[role]?.[pageKey] || 'none';
     const parentKey = pageKey.includes('.') ? pageKey.split('.')[0] : '';
-    if (!parentKey) return direct;
-    const parent = rolePermissions[role]?.[parentKey] || 'none';
-    return PERMISSION_LEVELS[parent] < PERMISSION_LEVELS[direct] ? parent : direct;
+    const configured = parentKey
+        ? (PERMISSION_LEVELS[rolePermissions[role]?.[parentKey] || 'none'] < PERMISSION_LEVELS[direct]
+            ? (rolePermissions[role]?.[parentKey] || 'none')
+            : direct)
+        : direct;
+    const backendCap = ROLE_BACKEND_PAGE_CAPS[role]?.[pageKey] || 'none';
+    return PERMISSION_LEVELS[configured] <= PERMISSION_LEVELS[backendCap] ? configured : backendCap;
 }
 
 function canAccessPage(pageKey) {
@@ -371,13 +400,17 @@ function canEditPage(pageKey) {
     return getPagePermission(pageKey) === 'edit';
 }
 
-function canViewAllData(dataType, role = currentUserRole) {
-    return role === 'admin' || roleDataScopes[role]?.[dataType] === 'all';
-}
-
 function getDataScope(dataType, role = currentUserRole) {
     if (role === 'admin') return 'all';
-    return roleDataScopes[role]?.[dataType] || 'none';
+    const configured = roleDataScopes[role]?.[dataType] || 'none';
+    const backendCap = ROLE_BACKEND_DATA_SCOPE_CAPS[role]?.[dataType] || 'none';
+    if (backendCap === 'none' || configured === 'none') return 'none';
+    if (backendCap === 'own') return 'own';
+    return configured === 'all' ? 'all' : 'own';
+}
+
+function canViewAllData(dataType, role = currentUserRole) {
+    return getDataScope(dataType, role) === 'all';
 }
 
 function salesCodeForName(salesName) {
@@ -3439,7 +3472,9 @@ async function runQuoteHistorySearch(reset = true) {
     }
     updateQuoteHistorySearchUi('正在搜尋全部歷史估價單…');
     try {
-        let query = db.collection('quotes').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
+        let query = fullHistorySearchQuery('quotes', 'quote', rawKeyword, 'quoteDate');
+        if (!query) throw new Error('目前帳號缺少可用的資料歸屬資訊。');
+        query = query.limit(DEFAULT_LIST_LIMIT);
         if (quoteHistorySearchCursor) query = query.startAfter(quoteHistorySearchCursor);
         const snapshot = await query.get();
         const records = new Map(quoteHistorySearchResults.map(record => [record.id, record]));
@@ -4676,15 +4711,21 @@ function fullHistorySearchValues(type, record = {}) {
 
 function fullHistoryBaseTokens(type, record = {}) {
     const tokens = new Set();
-    const MAX_BASE_TOKENS = 180;
-    for (const raw of fullHistorySearchValues(type, record)) {
-        const normalized = normalizeFullHistorySearchValue(raw);
-        if (!normalized) continue;
-        tokens.add(normalized);
+    const normalizedValues = fullHistorySearchValues(type, record)
+        .map(normalizeFullHistorySearchValue)
+        .filter(Boolean);
+    // 先保留每個欄位的完整值，避免多品項估價單後段欄位被前面欄位的 n-gram 吃掉配額。
+    normalizedValues.forEach(value => tokens.add(value));
+    const MAX_BASE_TOKENS = 650;
+    const MAX_GRAMS_PER_VALUE = 36;
+    for (const normalized of normalizedValues) {
+        let addedForValue = 0;
         const maxGram = Math.min(6, normalized.length);
-        for (let size = 1; size <= maxGram; size += 1) {
-            for (let i = 0; i + size <= normalized.length; i += 1) {
+        for (let size = maxGram; size >= 1 && addedForValue < MAX_GRAMS_PER_VALUE; size -= 1) {
+            for (let i = 0; i + size <= normalized.length && addedForValue < MAX_GRAMS_PER_VALUE; i += 1) {
+                const before = tokens.size;
                 tokens.add(normalized.slice(i, i + size));
+                if (tokens.size > before) addedForValue += 1;
                 if (tokens.size >= MAX_BASE_TOKENS) return [...tokens];
             }
         }
@@ -4693,17 +4734,7 @@ function fullHistoryBaseTokens(type, record = {}) {
 }
 
 function buildFullHistorySearchTokens(type, record = {}) {
-    const base = fullHistoryBaseTokens(type, record);
-    const tokens = new Set(base);
-    const salesCode = String(record.salesCode || '').trim();
-    const ownerUid = String(record.ownerUid || '').trim();
-    const salesName = normalizeFullHistorySearchValue(record.salesName || '');
-    base.forEach(token => {
-        if (salesCode) tokens.add(`sc:${salesCode}:${token}`);
-        if (ownerUid) tokens.add(`uid:${ownerUid}:${token}`);
-        if (salesName) tokens.add(`sn:${salesName}:${token}`);
-    });
-    return [...tokens].slice(0, 700);
+    return fullHistoryBaseTokens(type, record);
 }
 
 function fullHistoryServerToken(keyword) {
@@ -4716,10 +4747,22 @@ function fullHistoryQueryToken(type, keyword) {
     if (!token) return '';
     const canViewAll = type === 'quote' ? canViewAllData('quotes') : canViewAllData('orders');
     if (canViewAll) return token;
-    if (currentUserCode) return `sc:${currentUserCode}:${token}`;
-    if (currentUser?.uid) return `uid:${currentUser.uid}:${token}`;
-    if (currentUserName) return `sn:${normalizeFullHistorySearchValue(currentUserName)}:${token}`;
+    if (currentUserCode || currentUser?.uid) return token;
     return '';
+}
+
+function fullHistorySearchQuery(collectionName, type, keyword, dateField) {
+    const token = fullHistoryServerToken(keyword);
+    if (!token) return null;
+    let query = db.collection(collectionName).where('searchTokens', 'array-contains', token);
+    const scopeKey = type === 'quote' ? 'quotes' : 'orders';
+    if (!canViewAllData(scopeKey)) {
+        if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
+        else if (currentUser?.uid) query = query.where('ownerUid', '==', currentUser.uid);
+        else return null;
+    }
+    if (dateField) query = query.orderBy(dateField, 'desc');
+    return query;
 }
 
 function fullHistoryRecordMatches(type, record, keyword) {
@@ -4775,7 +4818,9 @@ async function runOrderHistorySearch(reset = true) {
     }
     updateOrderHistorySearchUi('正在搜尋全部歷史訂單…');
     try {
-        let query = db.collection('orders').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
+        let query = fullHistorySearchQuery('orders', 'order', rawKeyword, 'orderDate');
+        if (!query) throw new Error('目前帳號缺少可用的資料歸屬資訊。');
+        query = query.limit(DEFAULT_LIST_LIMIT);
         if (orderHistorySearchCursor) query = query.startAfter(orderHistorySearchCursor);
         const snapshot = await query.get();
         const records = new Map(orderHistorySearchResults.map(record => [record.id, record]));
@@ -7353,9 +7398,19 @@ window.exportOrdersByDate = async function() {
 
     // Firestore 不支援同時對兩個不同欄位做範圍查詢，日期區間已經用掉唯一的範圍條件，
     // 所以業務姓名這邊改成撈出區間內全部訂單後，在前端依身分過濾（同時比對新舊兩種業務欄位格式）
-    db.collection('orders')
+    let exportQuery = db.collection('orders');
+    if (!canViewAllData('orders')) {
+        if (currentUserCode) exportQuery = exportQuery.where('salesCode', '==', currentUserCode);
+        else if (currentUser?.uid) exportQuery = exportQuery.where('ownerUid', '==', currentUser.uid);
+        else {
+            alert('目前帳號缺少可用的資料歸屬資訊，無法匯出訂單。');
+            return;
+        }
+    }
+    exportQuery
         .where('orderDate', '>=', start)
         .where('orderDate', '<=', end)
+        .orderBy('orderDate', 'asc')
         .get().then(async snapshot => {
             const rows = [];
             snapshot.forEach(doc => {
@@ -7402,7 +7457,7 @@ window.exportOrdersByDate = async function() {
    ========================================================= */
 // 儀器管理系統的查看權限：業務只能看到自己名下的儀器，管理員／工程師／採購可看到全部
 function canViewAllEquipment() {
-    return currentUserRole === 'admin' || currentUserRole === 'engineer' || currentUserRole === 'purchaser';
+    return currentUserRole === 'admin' || currentUserRole === 'engineer';
 }
 
 window.loadEquipmentFromCloud = function() {
@@ -7412,7 +7467,7 @@ window.loadEquipmentFromCloud = function() {
     if (canViewAllEquipment()) {
         query = query.orderBy('customerName');
     } else {
-        query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('salesName', '==', currentUserName);
+        query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('ownerUid', '==', currentUser?.uid || '');
     }
     query.get().then(snapshot => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
@@ -7499,7 +7554,7 @@ window.renderEquipmentList = function() {
             <td data-th="狀態"><span class="status-badge ${statusClass[status]}">${statusLabel[status]}</span></td>
             <td class="no-print" data-th="操作">
                 <button type="button" class="btn-small" onclick="event.stopPropagation(); quickAddMaintenanceLog('${eq.id}')">🔧 保養</button>
-                <button type="button" class="btn-danger" onclick="event.stopPropagation(); deleteEquipment('${eq.id}')">刪除</button>
+                <button type="button" class="${eq.active === false ? 'btn-small' : 'btn-danger'}" onclick="event.stopPropagation(); toggleEquipmentActive('${eq.id}', ${eq.active === false})">${eq.active === false ? '恢復' : '停用'}</button>
             </td>
         `;
         tbody.appendChild(tr);
@@ -7690,15 +7745,26 @@ window.saveEquipmentFromModal = function() {
     });
 };
 
-window.deleteEquipment = function(eqId) {
-    if (!confirm('確定要刪除這台儀器的所有紀錄嗎？此動作無法復原。')) return;
-    db.collection('equipment').doc(eqId).delete().then(() => {
+window.toggleEquipmentActive = function(eqId, active) {
+    const action = active ? '恢復' : '停用';
+    if (!confirm(`確定要${action}這台儀器嗎？維修與保養歷史會完整保留。`)) return;
+    const now = new Date().toISOString();
+    db.collection('equipment').doc(eqId).update({
+        active,
+        status: active ? 'ACTIVE' : 'INACTIVE',
+        updatedAt: now,
+        ...(active
+            ? { reactivatedAt: now, reactivatedBy: currentUserName || currentUser?.email || '' }
+            : { deactivatedAt: now, deactivatedBy: currentUserName || currentUser?.email || '' })
+    }).then(() => {
         loadEquipmentFromCloud();
         closeEquipmentModal();
     }).catch(err => {
-        alert('刪除失敗：' + err.message);
+        alert(`${action}失敗：` + err.message);
     });
 };
+// 舊按鈕／書籤相容：不再永久刪除。
+window.deleteEquipment = function(eqId) { return window.toggleEquipmentActive(eqId, false); };
 
 function equipmentLogRealIndex(eq, log) {
     return (eq.logs || []).indexOf(log);
@@ -7769,7 +7835,7 @@ function loadEquipmentFromCloudThenReopen(eqId) {
     if (canViewAllEquipment()) {
         query = query.orderBy('customerName');
     } else {
-        query = query.where('salesName', '==', currentUserName);
+        query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('ownerUid', '==', currentUser?.uid || '');
     }
     query.get().then(snapshot => {
         equipmentList = [];
@@ -7849,6 +7915,11 @@ window.handleEquipmentExcelUpload = async function(input) {
 
             // 依權限範圍（一般業務只查自己名下的、管理員查全部）建立「儀器編號 -> 文件ID」比對索引
             let existingQuery = db.collection('equipment');
+            if (!canViewAllEquipment()) {
+                existingQuery = currentUserCode
+                    ? existingQuery.where('salesCode', '==', currentUserCode)
+                    : existingQuery.where('ownerUid', '==', currentUser?.uid || '');
+            }
 
             existingQuery.get().then(snapshot => {
                 const idMap = new Map();
@@ -9460,22 +9531,45 @@ function runFirestoreBatchUpdates(refs, updateData) {
     return chain;
 }
 
-// 依 Firestore batch 500 筆上限，自動切批次執行文件刪除
-function runFirestoreBatchDeletes(refs) {
-    const CHUNK = 450;
-    const chunks = [];
-    for (let i = 0; i < refs.length; i += CHUNK) {
-        chunks.push(refs.slice(i, i + CHUNK));
-    }
-    let chain = Promise.resolve();
-    chunks.forEach(chunk => {
-        chain = chain.then(() => {
+// 重要商務資料一律作廢，不永久刪除；訂單需同時釋放庫存占用。
+async function runFirestoreBatchSoftVoid(refs, collectionKey) {
+    const actor = currentUserName || currentUser?.email || '';
+    const now = new Date().toISOString();
+    if (collectionKey === 'quotes') {
+        const CHUNK = 400;
+        for (let i = 0; i < refs.length; i += CHUNK) {
             const batch = db.batch();
-            chunk.forEach(ref => batch.delete(ref));
-            return batch.commit();
-        });
-    });
-    return chain;
+            refs.slice(i, i + CHUNK).forEach(ref => batch.update(ref, {
+                status: BUSINESS_STATUS.VOIDED,
+                active: false,
+                voidedAt: now,
+                voidedBy: actor,
+                updatedAt: now
+            }));
+            await batch.commit();
+        }
+        return;
+    }
+    if (collectionKey === 'orders') {
+        for (const ref of refs) {
+            await db.runTransaction(async transaction => {
+                const snap = await transaction.get(ref);
+                if (!snap.exists) return;
+                const order = snap.data();
+                if (order.status === BUSINESS_STATUS.VOIDED) return;
+                await adjustInventoryReservationForLifecycle(transaction, ref.id, order, 'cancelled', actor);
+                transaction.update(ref, {
+                    status: BUSINESS_STATUS.VOIDED,
+                    orderStatus: 'cancelled',
+                    orderStatusDate: localDateString(),
+                    active: false,
+                    voidedAt: now,
+                    voidedBy: actor,
+                    updatedAt: now
+                });
+            });
+        }
+    }
 }
 
 /* ---------- 資料庫用量估算 ---------- */
@@ -9725,8 +9819,8 @@ window.previewDataCleanup = function() {
             return;
         }
         resultEl.innerText = `${startStr} 至 ${endStr} 範圍內共有 ${refs.length} 筆${CLEANUP_LABEL[collectionKey]}資料。\n` +
-            `這個動作會直接從雲端刪除，無法復原，建議先自行匯出備份。\n` +
-            `確認要刪除的話，請在下方輸入「確定刪除」解鎖按鈕。`;
+            `這個動作會將資料批次標記為作廢，不會永久刪除；訂單的庫存占用也會同步釋放。\n` +
+            `確認要作廢的話，請在下方輸入「確定刪除」解鎖按鈕。`;
         document.getElementById('cleanupConfirmArea').style.display = 'block';
         document.getElementById('cleanupConfirmInput').value = '';
         document.getElementById('cleanupExecuteBtn').disabled = true;
@@ -9744,21 +9838,21 @@ window.executeDataCleanup = function() {
     const endStr = document.getElementById('cleanupEndDate').value;
     const resultEl = document.getElementById('cleanupResult');
 
-    if (!confirm(`最後確認：即將刪除 ${startStr} 至 ${endStr} 範圍內的所有${CLEANUP_LABEL[collectionKey]}資料，這個動作無法復原，確定要繼續嗎？`)) return;
+    if (!confirm(`最後確認：即將把 ${startStr} 至 ${endStr} 範圍內的所有${CLEANUP_LABEL[collectionKey]}資料標記為作廢，資料仍會保留可追溯，確定要繼續嗎？`)) return;
 
     document.getElementById('cleanupExecuteBtn').disabled = true;
-    resultEl.innerText = '刪除中，請稍候…';
+    resultEl.innerText = '作廢處理中，請稍候…';
 
     getMatchingCleanupDocs().then(refs => {
-        return runFirestoreBatchDeletes(refs).then(() => refs.length);
+        return runFirestoreBatchSoftVoid(refs, collectionKey).then(() => refs.length);
     }).then(count => {
-        resultEl.innerText = `已刪除 ${count} 筆${CLEANUP_LABEL[collectionKey]}資料。`;
+        resultEl.innerText = `已作廢 ${count} 筆${CLEANUP_LABEL[collectionKey]}資料。`;
         document.getElementById('cleanupConfirmArea').style.display = 'none';
 
         if (collectionKey === 'quotes' && typeof allQuotesCache !== 'undefined' && allQuotesCache.length) loadAllQuotesFromCloud();
         if (collectionKey === 'orders' && typeof ordersCache !== 'undefined' && ordersCache.length) loadOrdersFromCloud();
     }).catch(err => {
-        resultEl.innerText = '刪除過程發生錯誤，部分資料可能已刪除、部分尚未完成，請重新查詢筆數確認目前狀態：' + err.message;
+        resultEl.innerText = '作廢處理發生錯誤，部分資料可能已完成、部分尚未完成，請重新查詢確認目前狀態：' + err.message;
         document.getElementById('cleanupExecuteBtn').disabled = false;
     });
 };
@@ -10407,7 +10501,7 @@ window.renderAdminQuotesList = function() {
             <td class="no-print">
                 <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${q.quoteNo}')">載入</button>
                 <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
-                <button type="button" class="btn-danger" onclick="deleteQuoteFromAdmin('${q.quoteNo}')">刪除</button>
+                <button type="button" class="btn-danger" onclick="deleteQuoteFromAdmin('${q.quoteNo}')" ${q.status === BUSINESS_STATUS.VOIDED ? 'disabled' : ''}>${q.status === BUSINESS_STATUS.VOIDED ? '已作廢' : '作廢'}</button>
             </td>
         `;
         tbody.appendChild(tr);
@@ -10421,11 +10515,18 @@ window.openQuoteFromAdmin = function(quoteNo) {
 };
 
 window.deleteQuoteFromAdmin = function(quoteNo) {
-    if (!confirm(`確定要刪除估價單 ${quoteNo} 嗎？此動作無法復原。`)) return;
-    db.collection('quotes').doc(quoteNo).delete().then(() => {
+    if (!confirm(`確定要作廢估價單 ${quoteNo} 嗎？資料會保留，之後仍可追溯。`)) return;
+    const now = new Date().toISOString();
+    db.collection('quotes').doc(quoteNo).update({
+        status: BUSINESS_STATUS.VOIDED,
+        active: false,
+        voidedAt: now,
+        voidedBy: currentUserName || currentUser?.email || '',
+        updatedAt: now
+    }).then(() => {
         loadAllQuotesFromCloud();
     }).catch(err => {
-        alert('刪除失敗：' + err.message);
+        alert('作廢失敗：' + err.message);
     });
 };
 
