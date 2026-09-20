@@ -965,15 +965,12 @@ function populateForecastSalesFilter() {
     const current = select.value;
     const names = new Set();
 
-    salesList.forEach(person => {
-        const name = stripPhoneSuffix(person.name || '');
-        if (name) names.add(name);
-    });
-
-    forecastCache.forEach(item => {
-        const name = stripPhoneSuffix(item.salesName || '');
-        if (name) names.add(name);
-    });
+    salesList
+        .filter(person => person.role === 'sales' && person.disabled !== true)
+        .forEach(person => {
+            const name = stripPhoneSuffix(person.name || '');
+            if (name) names.add(name);
+        });
 
     select.disabled = false;
     select.innerHTML = '<option value="">全部業務</option>';
@@ -1742,7 +1739,7 @@ function initSalesList() {
         snapshot.forEach(doc => {
             const d = doc.data();
             if (d.name && d.code) {
-                list.push({ uid: doc.id, code: d.code, name: d.name, phone: d.phone || '', role: d.role || 'sales' });
+                list.push({ uid: doc.id, code: d.code, name: d.name, phone: d.phone || '', role: d.role || 'sales', disabled: !!d.disabled });
             }
         });
 
