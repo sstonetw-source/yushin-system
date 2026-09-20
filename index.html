@@ -413,10 +413,10 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 批量庫存異動</button></div>
+      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment()">＋ 新增庫存</button></div>
       <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、廠牌、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
-      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th><th>操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
 
       <h3>待建檔品項</h3>
@@ -429,22 +429,18 @@
     <div class="eq-modal-overlay no-print" id="inventoryAdjustmentOverlay" onclick="if(event.target===this) closeInventoryAdjustment()">
       <div class="eq-modal-box" style="max-width:1100px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <h3 style="margin:0;">批量庫存異動</h3>
+          <h3 id="inventoryAdjustmentTitle" style="margin:0;">新增庫存</h3>
           <button type="button" class="btn-secondary" onclick="closeInventoryAdjustment()">✕ 關閉</button>
         </div>
         <div class="form-grid" style="margin-top:14px;">
           <div>
             <label>異動類型</label>
             <select id="inventoryAdjustmentType">
-              <option value="initial">期初庫存／新增入庫</option>
-              <option value="warehouse_allocation">既有庫存分配至倉庫（不改總量）</option>
-              <option value="adjustment">盤點調整</option>
-              <option value="return">退貨入庫</option>
-              <option value="scrap">報廢</option>
+              <option value="initial">新增庫存</option>
             </select>
           </div>
         </div>
-        <div class="inventory-summary-note">可一次輸入多個品項；正數增加庫存，盤點調整可輸入負數。報廢請輸入正數，系統會自動扣除。</div>
+        <div class="inventory-summary-note" id="inventoryAdjustmentHint">可一次新增多個品項；請選擇倉庫並輸入實際新增數量，批號與效期可依需要填寫。</div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫</th><th>數量</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
@@ -452,7 +448,7 @@
           </table>
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;justify-content:space-between;">
-          <button type="button" class="btn-secondary" onclick="addInventoryAdjustmentRow()">＋ 新增品項</button>
+          <button type="button" class="btn-secondary" id="inventoryAdjustmentAddRowBtn" onclick="addInventoryAdjustmentRow()">＋ 新增品項</button>
           <div>
             <button type="button" id="saveInventoryAdjustmentBatchBtn" onclick="saveInventoryAdjustmentBatch()">確認儲存</button>
             <button type="button" class="btn-secondary" onclick="closeInventoryAdjustment()">取消</button>
