@@ -4224,6 +4224,56 @@ function splitLotAllocationsForRestore(allocations = [], qty = 0) {
     if (remaining > 1e-9) restore.unshift({ lotNo:'UNTRACKED', expiryDate:'', qty:remaining });
     return { keep:keep.filter(item => item.qty > 1e-9), restore };
 }
+function recordLotAllocations(record = {}) {
+    if (Array.isArray(record.lotAllocations) && record.lotAllocations.length) {
+        return record.lotAllocations
+            .map(item => ({ lotNo:item.lotNo || 'UNTRACKED', expiryDate:item.expiryDate || '', qty:Number(item.qty || 0) }))
+            .filter(item => item.qty > 0);
+    }
+    const qty = Math.max(0, Number(record.qty || 0));
+    return qty ? [{ lotNo:'UNTRACKED', expiryDate:'', qty }] : [];
+}
+function availableDeliveryLotAllocationsForReturn(order) {
+    const delivered = savedDeliveryRecords(order).flatMap(recordLotAllocations);
+    const usedByLot = new Map();
+    savedReturnRecords(order).flatMap(recordLotAllocations).forEach(item => {
+        const key = lotIdentity(item);
+        usedByLot.set(key, (usedByLot.get(key) || 0) + Number(item.qty || 0));
+    });
+    const available = [];
+    delivered.forEach(item => {
+        const key = lotIdentity(item);
+        const alreadyUsed = usedByLot.get(key) || 0;
+        const consumed = Math.min(alreadyUsed, Number(item.qty || 0));
+        if (consumed) usedByLot.set(key, alreadyUsed - consumed);
+        const remaining = Number(item.qty || 0) - consumed;
+        if (remaining > 1e-9) available.push({ ...item, qty:remaining });
+    });
+    return available;
+}
+function takeLotAllocations(allocations = [], qty = 0) {
+    let remaining = Math.max(0, Number(qty || 0));
+    const taken = [];
+    for (const item of allocations) {
+        if (remaining <= 1e-9) break;
+        const amount = Math.min(Math.max(0, Number(item.qty || 0)), remaining);
+        if (!amount) continue;
+        taken.push({ lotNo:item.lotNo || 'UNTRACKED', expiryDate:item.expiryDate || '', qty:amount });
+        remaining -= amount;
+    }
+    if (remaining > 1e-9) throw new Error('找不到足夠的已送貨批號可供退貨，請先確認送貨紀錄。');
+    return taken;
+}
+function consumeLotsByAllocationsStrict(stock = {}, allocations = [], fallbackQty = 0) {
+    let rows = normalizeLotsToOnHand(stock);
+    const source = Array.isArray(allocations) && allocations.length
+        ? allocations
+        : [{ lotNo:'UNTRACKED', expiryDate:'', qty:Math.max(0, Number(fallbackQty || 0)) }];
+    source.forEach(item => {
+        rows = adjustLotQuantity(rows, item.lotNo || 'UNTRACKED', item.expiryDate || '', -Math.max(0, Number(item.qty || 0)));
+    });
+    return rows;
+}
 async function loadWarehouseStocksForInventoryPage() {
     await loadSupplierWarehouseMasters();
     const jobs = [];
@@ -6769,8 +6819,8 @@ function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliv
     return applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryQty, actor, sourceId);
 }
 
-async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQty, actor, sourceId) {
-    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
+async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, lotAllocations = []) {
+    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { lotAllocations:[] };
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
     const invRef = inventoryRefFor(order);
@@ -6779,18 +6829,38 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const invSnap = await transaction.get(invRef);
     const whSnap = await transaction.get(whRef);
     if (!invSnap.exists || !whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
-    const inv=inventoryNumbers(invSnap.data()), wh=inventoryNumbers(whSnap.data());
-    if (deltaQty < 0 && (inv.onHand < Math.abs(deltaQty) || wh.onHand < Math.abs(deltaQty))) {
-        throw new Error('刪除／縮減退貨後會造成庫存小於 0。');
-    }
+    const invData=invSnap.data(), whData=whSnap.data();
+    const inv=inventoryNumbers(invData), wh=inventoryNumbers(whData);
     const now=new Date().toISOString();
-    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:inv.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
-    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+    let invLots, whLots;
+    const normalizedAllocations = Array.isArray(lotAllocations) ? lotAllocations : [];
+
+    if (deltaQty > 0) {
+        whLots = restoreLotAllocations({ ...whData, onHand:wh.onHand }, normalizedAllocations, deltaQty);
+        invLots = restoreLotAllocations({ ...invData, onHand:inv.onHand }, normalizedAllocations, deltaQty);
+    } else {
+        const removeQty = Math.abs(deltaQty);
+        if (inv.onHand < removeQty || wh.onHand < removeQty) {
+            throw new Error('刪除／縮減退貨後會造成庫存小於 0。');
+        }
+        if (normalizedAllocations.length) {
+            whLots = consumeLotsByAllocationsStrict({ ...whData, onHand:wh.onHand }, normalizedAllocations, removeQty);
+            invLots = consumeLotsByAllocationsStrict({ ...invData, onHand:inv.onHand }, normalizedAllocations, removeQty);
+        } else {
+            const whResult = consumeLotsFefo({ ...whData, onHand:wh.onHand }, removeQty);
+            whLots = whResult.lots;
+            invLots = consumeLotsByAllocations({ ...invData, onHand:inv.onHand }, whResult.allocations, removeQty);
+        }
+    }
+
+    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:inv.reserved,incoming:inv.incoming,lots:invLots,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:wh.reserved,incoming:wh.incoming,lots:whLots,updatedAt:now},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
-        createdAt:now,createdBy:actor
+        lotAllocations:normalizedAllocations,createdAt:now,createdBy:actor
     });
+    return { lotAllocations:normalizedAllocations };
 }
 
 window.quickCompleteDelivery = async function(orderIdOverride) {
@@ -7256,14 +7326,30 @@ window.saveReturnRecord = async function() {
             const now = new Date().toISOString();
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
-            const record = previous ? { ...previous, date, qty, reason, updatedBy: actor, updatedAt: now } : { id: lifecycleRecordId(), date, qty, reason, createdBy: actor, createdAt: now };
-            if (existingIndex >= 0) records[existingIndex] = record; else records.push(record);
-            const totalReturned = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+            const otherReturned = records
+                .filter((_, index) => index !== existingIndex)
+                .reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+            const totalReturned = otherReturned + qty;
             const delivered = deliveredQuantity(order);
             if (totalReturned > delivered + 1e-9) throw new Error(`累計退貨數量 ${totalReturned} 超過已送貨數量 ${delivered}。`);
-            const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
+
             const returnDelta = qty - Number(previous?.qty || 0);
-            if (returnDelta) await applyInventoryReturnDeltaInTransaction(transaction, order, returnDelta, actor, orderId);
+            let lotAllocations = recordLotAllocations(previous || {});
+            if (returnDelta > 0) {
+                const newAllocations = takeLotAllocations(availableDeliveryLotAllocationsForReturn(order), returnDelta);
+                await applyInventoryReturnDeltaInTransaction(transaction, order, returnDelta, actor, orderId, newAllocations);
+                lotAllocations = [...lotAllocations, ...newAllocations];
+            } else if (returnDelta < 0) {
+                const split = splitLotAllocationsForRestore(lotAllocations, Math.abs(returnDelta));
+                await applyInventoryReturnDeltaInTransaction(transaction, order, returnDelta, actor, orderId, split.restore);
+                lotAllocations = split.keep;
+            }
+
+            const record = previous
+                ? { ...previous, date, qty, reason, lotAllocations, updatedBy:actor, updatedAt:now }
+                : { id:lifecycleRecordId(), date, qty, reason, lotAllocations, createdBy:actor, createdAt:now };
+            if (existingIndex >= 0) records[existingIndex] = record; else records.push(record);
+            const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
             const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
@@ -7300,7 +7386,10 @@ window.deleteReturnRecord = async function(recordId) {
             const actor = deliveryActor();
             const now = new Date().toISOString();
             const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
-            await applyInventoryReturnDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId);
+            await applyInventoryReturnDeltaInTransaction(
+                transaction, order, -Number(removed.qty || 0), actor, orderId,
+                recordLotAllocations(removed)
+            );
             const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
