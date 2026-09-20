@@ -1044,6 +1044,31 @@ test('critical fix paginates equipment and derives asset ids from cloud state', 
     assert.match(appSource,/orderBy\('assetId', 'desc'\)/);
 });
 
+test('critical fix does not hard-delete order drafts and preserves equipment service logs', () => {
+    const orderStart=appSource.indexOf('window.deleteOrder =');
+    const orderEnd=appSource.indexOf('window.openOrderModal',orderStart);
+    const orderDelete=appSource.slice(orderStart,orderEnd);
+    assert.match(orderDelete,/BUSINESS_STATUS\.VOIDED/);
+    assert.doesNotMatch(orderDelete,/transaction\.delete\(/);
+
+    const logStart=appSource.indexOf('window.toggleEquipmentLogVoid');
+    const logEnd=appSource.indexOf('function loadEquipmentFromCloudThenReopen',logStart);
+    const logVoid=appSource.slice(logStart,logEnd);
+    assert.match(logVoid,/voidedAt/);
+    assert.match(logVoid,/voidedBy/);
+    assert.doesNotMatch(logVoid,/filter\(\(_, idx\) => idx !== logIndex\)/);
+});
+
+test('critical fix gives long history fields balanced token coverage', () => {
+    const start=appSource.indexOf('function fullHistoryBaseTokens');
+    const end=appSource.indexOf('function buildFullHistorySearchTokens',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/MAX_BASE_TOKENS = 1800/);
+    assert.match(source,/MAX_GRAMS_PER_VALUE = 140/);
+    assert.match(source,/let left = 0, right = count - 1/);
+    assert.match(source,/\[left, right\]/);
+});
+
 test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership compatibility', () => {
     assert.match(appSource, /function syncCustomerMaster/);
     assert.match(appSource, /customerId/);
