@@ -4320,9 +4320,9 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     const requested=Math.max(0,Number(item.qty||0));
     const productKey=inventoryProductKey(item);
     const itemId=String(item.itemId||`item-${itemIndex+1}`);
-    if(!requested||!productKey)return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:requested,inventoryProductKey:productKey};
+    if(!requested||!productKey)return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:requested,purchaseRequiredQty:Number(item.purchaseRequiredQty??requested),inventoryProductKey:productKey};
     if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
-        return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:0,inventoryProductKey:productKey,directShipQty:requested,warehouseId:''};
+        return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:0,purchaseRequiredQty:requested,inventoryProductKey:productKey,directShipQty:requested,warehouseId:''};
     }
     const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
     const aggregateRef=inventoryRefFor(item);
@@ -4349,7 +4349,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
             orderDate:order.orderDate||'',quantity:reservable,shortageQty:shortage,
             status:reservable>0?'active':'shortage',warehouseId,updatedAt:now
         },{merge:true});
-        result={...item,itemId,inventoryReservedQty:reservable,inventoryShortageQty:shortage,inventoryProductKey:productKey,warehouseId};
+        result={...item,itemId,inventoryReservedQty:reservable,inventoryShortageQty:shortage,purchaseRequiredQty:Number(item.purchaseRequiredQty??shortage),inventoryProductKey:productKey,warehouseId};
     });
     return result;
 }
@@ -4492,8 +4492,8 @@ function purchaseProgressInfo(order) {
     const direct=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP');
     const warehouse=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
     if(items.length&&direct.length===items.length)return {state:'direct',label:'原廠直送'};
-    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.qty||0)-Number(item.inventoryReservedQty||0)),0);
-    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.qty||0)-Number(item.inventoryReservedQty||0)),Number(item.purchaseOrderedQty||0)),0);
+    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0)),0);
+    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0)),Number(item.purchaseOrderedQty||0)),0);
     if(required<=0)return {state:'not_required',label:'無需採購'};
     if(ordered>=required)return {state:'ordered',label:`已訂貨 ${ordered}/${required}`};
     if(ordered>0)return {state:'partial',label:`部分訂貨 ${ordered}/${required}`};
@@ -5642,11 +5642,11 @@ window.openPurchaseOrderModal = async function() {
     }
 
     const selectedOrders = checked.map(cb => ordersCache.find(x => x.id === cb.dataset.orderId)).filter(Boolean);
-    const alreadyAssigned = selectedOrders.filter(order => order.purchaseOrderNo);
-    if (alreadyAssigned.length) {
-        alert(`有 ${alreadyAssigned.length} 筆訂單已經建立訂購單，請重新整理後再選擇。`);
-        renderOrdersList();
-        return;
+    const fullyPurchased=selectedOrders.filter(order=>{
+        const info=purchaseProgressInfo(order);return info.state==='ordered'||info.state==='not_required';
+    });
+    if(fullyPurchased.length===selectedOrders.length){
+        alert('選取的訂單已完成所需採購，沒有待採購數量。');return;
     }
     poEditingId = null;
     populatePoVendorSuggestions();
@@ -5874,10 +5874,6 @@ window.printPurchaseOrder = async function() {
             const orderSnapshots = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
             previousPoForIncoming = poSnapshot.exists ? { id: poDocumentId, ...poSnapshot.data() } : null;
             if (poSnapshot.exists && !poEditingId) throw new Error(`訂購單號 ${poNo} 已存在，請關閉視窗後重新產生單號。`);
-            const conflicts = orderSnapshots
-                .filter(snapshot => snapshot.exists && snapshot.data().purchaseOrderNo && snapshot.data().purchaseOrderNo !== poNo)
-                .map(snapshot => snapshot.data().itemName || snapshot.id);
-            if (conflicts.length) throw new Error(`以下訂單已被建立訂購單：${conflicts.join('、')}`);
             transaction.set(poRef, poRecord);
             orderSnapshots.forEach((snapshot, index) => {
                 if (snapshot.exists) {
@@ -5886,13 +5882,15 @@ window.printPurchaseOrder = async function() {
                     const nextItems=normalizedOrderItems(orderData).map((item,itemIndex)=>{
                         const matches=orderedLines.filter(line=>Number(line.orderItemIndex)===itemIndex);
                         const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
-                        return orderedQty>0?{...item,purchaseOrderNo:poNo,purchaseOrderedQty:orderedQty}:item;
+                        const cumulative=Number(item.purchaseOrderedQty||0)+orderedQty;
+                        return orderedQty>0?{...item,purchaseOrderNo:poNo,purchaseOrderNos:[...new Set([...(item.purchaseOrderNos||[]),poNo])],purchaseOrderedQty:cumulative}:item;
                     });
                     const totalNeeded=nextItems.reduce((sum,item)=>sum+Number(item.qty||0),0);
                     const totalOrdered=nextItems.reduce((sum,item)=>sum+Math.min(Number(item.qty||0),Number(item.purchaseOrderedQty||0)),0);
                     transaction.update(orderRefs[index], {
                         items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,
                         purchaseOrderNo: poNo,
+                        purchaseOrderNos:[...new Set([...(orderData.purchaseOrderNos||[]),poNo])],
                         purchaseOrderedQty:totalOrdered,
                         purchaseStatus:totalOrdered<=0?'pending':totalOrdered<totalNeeded?'partial':'ordered',
                         linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'created')])
