@@ -28,6 +28,21 @@ service cloud.firestore {
         && request.resource.data.onHand >= 0
         && request.resource.data.reserved >= 0;
     }
+    function purchaserOrderOperationalUpdate() {
+      return purchaser()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'purchaseOrderNo', 'linkedDocuments', 'isOrdered', 'orderedBy', 'statusHistory',
+          'inventoryReservedQty', 'inventoryShortageQty', 'inventoryProductKey',
+          'warehouseId', 'updatedAt'
+        ]);
+    }
+    function salesInventoryMovementCreate() {
+      return sales()
+        && request.resource.data.sourceType == 'order'
+        && request.resource.data.type in [
+          'reserve', 'release', 'ship', 'ship_reversal', 'return_in', 'return_reversal'
+        ];
+    }
 
     match /users/{id} { allow read: if signedIn(); allow write: if admin(); }
     match /settings/{id} { allow read: if signedIn(); allow write: if admin(); }
@@ -126,9 +141,9 @@ service cloud.firestore {
     }
 
     match /orders/{id} {
-      allow read: if admin() || purchaser() || warehouse() || engineer() || own(resource.data);
+      allow read: if admin() || purchaser() || warehouse() || own(resource.data);
       allow create: if admin() || sales();
-      allow update: if admin() || purchaser() || warehouse() || own(resource.data);
+      allow update: if admin() || own(resource.data) || purchaserOrderOperationalUpdate();
       allow delete: if false;
     }
 
@@ -179,15 +194,15 @@ service cloud.firestore {
 
     match /inventoryMovements/{id} {
       allow read: if admin() || warehouse() || purchaser() || sales();
-      allow create: if admin() || warehouse() || purchaser() || sales();
+      allow create: if admin() || warehouse() || purchaser() || salesInventoryMovementCreate();
       allow update, delete: if false;
     }
 
     match /equipment/{id} {
-      allow read: if admin() || engineer() || (sales() && ownBySalesCode(resource.data));
-      allow create: if admin() || engineer() || (sales() && ownBySalesCode(request.resource.data));
+      allow read: if admin() || engineer() || (sales() && own(resource.data));
+      allow create: if admin() || engineer() || (sales() && own(request.resource.data));
       allow update: if admin() || engineer()
-        || (sales() && ownBySalesCode(resource.data) && ownBySalesCode(request.resource.data));
+        || (sales() && own(resource.data) && own(request.resource.data));
       allow delete: if false;
     }
 
