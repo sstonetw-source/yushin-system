@@ -170,7 +170,7 @@ service cloud.firestore {
       allow update: if admin() || warehouse() || purchaser()
         || (sales()
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['onHand', 'reserved', 'updatedAt'])
+            .hasOnly(['onHand', 'reserved', 'lots', 'updatedAt'])
           && request.resource.data.onHand >= 0
           && request.resource.data.reserved >= 0);
       allow delete: if false;
