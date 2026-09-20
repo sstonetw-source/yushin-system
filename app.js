@@ -1627,15 +1627,12 @@ function forecastItemToOrderSource(forecast, item) {
 async function createForecastOrdersDirectly(forecast, items) {
     const now = new Date().toISOString();
     const orderDate = localDateString();
-    const batch = db.batch();
     const createdOrders = [];
-    const links = [];
 
-    items.forEach(item => {
+    for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
         const source = forecastItemToOrderSource(forecast, item);
-        if (!source.itemName && !source.itemCode) return;
-
-        const orderRef = db.collection('orders').doc();
+        if (!source.itemName && !source.itemCode) continue;
         const orderData = {
             orderDate,
             createdAt: now,
@@ -1674,26 +1671,19 @@ async function createForecastOrdersDirectly(forecast, items) {
             invoiceDate: ''
         };
         orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
-        batch.set(orderRef, orderData);
-        createdOrders.push({ id: orderRef.id, data: orderData });
-        links.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
-    });
+        const created = await createOrderWithReservation(orderData, {
+            sourceType: DOCUMENT_TYPES.FORECAST,
+            sourceId: forecast.id,
+            conversionKey: `line-${index}`
+        });
+        createdOrders.push(created);
+    }
 
     if (!createdOrders.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
-
-    batch.set(db.collection('forecasts').doc(forecast.id), {
-        linkedDocuments: firebase.firestore.FieldValue.arrayUnion(...links),
-        updatedAt: now
-    }, { merge: true });
-
-    await batch.commit();
-    await Promise.all(createdOrders.map(entry => reserveInventoryForNewOrder(entry.id, entry.data)));
-
     ordersCache = [
         ...createdOrders.map(entry => ({ id: entry.id, ...entry.data })),
         ...ordersCache.filter(order => !createdOrders.some(entry => entry.id === order.id))
     ].sort((x, y) => String(y.orderDate || '').localeCompare(String(x.orderDate || '')));
-
     return createdOrders;
 }
 
@@ -4376,77 +4366,146 @@ function orderReservedQuantity(order) {
     return Math.max(0, orderQuantity(order) - deliveredQuantity(order));
 }
 
-async function reserveInventoryForNewOrder(orderId, order) {
-    if (!warehouseMasterCache.length) await loadSupplierWarehouseMasters();
+function conversionOrderDocId(sourceType, sourceId, conversionKey) {
+    if (!sourceType || !sourceId || !conversionKey) return '';
+    return `conv_${encodeURIComponent(sourceType)}_${encodeURIComponent(sourceId)}_${encodeURIComponent(conversionKey)}`;
+}
+
+function sourceDocumentRef(sourceType, sourceId) {
+    if (sourceType === DOCUMENT_TYPES.FORECAST) return db.collection('forecasts').doc(sourceId);
+    if (sourceType === DOCUMENT_TYPES.QUOTE) return db.collection('quotes').doc(sourceId);
+    return null;
+}
+
+async function applyNewOrderReservationInTransaction(tx, orderRef, order) {
     const requested = orderQuantity(order);
     const productKey = inventoryProductKey(order);
-    if (!requested || !productKey) return { reservedQty: 0, shortageQty: requested };
+    const directShip = (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
+    const warehouseId = directShip ? '' : (order.warehouseId || defaultWarehouse()?.id || '');
+    const actor = currentUserName || currentUser?.email || '';
 
-    // 原廠直送完全繞過庫存；不建立 reservation、不動 aggregate inventory。
-    if ((order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
-        await db.collection('orders').doc(orderId).set({
-            inventoryReservedQty: 0,
-            inventoryShortageQty: 0,
-            inventoryProductKey: productKey,
-            directShipQty: requested,
-            fulfillmentType: 'DIRECT_SHIP',
-            warehouseId: ''
-        }, { merge: true });
-        return { reservedQty: 0, shortageQty: 0, directShip: true };
+    if (!requested || !productKey) {
+        return {
+            orderData: {
+                ...order,
+                inventoryReservedQty: 0,
+                inventoryShortageQty: requested,
+                inventoryProductKey: productKey,
+                warehouseId
+            },
+            reservation: { reservedQty: 0, shortageQty: requested, warehouseId }
+        };
     }
 
-    const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
+    if (directShip) {
+        return {
+            orderData: {
+                ...order,
+                inventoryReservedQty: 0,
+                inventoryShortageQty: 0,
+                inventoryProductKey: productKey,
+                directShipQty: requested,
+                fulfillmentType: 'DIRECT_SHIP',
+                warehouseId: ''
+            },
+            reservation: { reservedQty: 0, shortageQty: 0, directShip: true, warehouseId: '' }
+        };
+    }
+
     const aggregateRef = inventoryRefFor(order);
     const warehouseRef = warehouseId
         ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey))
         : null;
-    const actor = currentUserName || currentUser?.email || '';
-    let result;
+    const aggregateSnap = aggregateRef ? await tx.get(aggregateRef) : null;
+    const warehouseSnap = warehouseRef ? await tx.get(warehouseRef) : null;
+    const warehouseStock = warehouseSnap?.exists ? inventoryNumbers(warehouseSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
+    const aggregateStock = aggregateSnap?.exists ? inventoryNumbers(aggregateSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
+    const reservable = Math.max(0, Math.min(requested, warehouseStock.available, aggregateStock.available));
+    const shortage = Math.max(0, requested - reservable);
+    const now = new Date().toISOString();
+
+    if (warehouseRef && warehouseSnap?.exists && reservable) {
+        tx.update(warehouseRef, { reserved: warehouseStock.reserved + reservable, updatedAt: now });
+    }
+    if (aggregateRef && aggregateSnap?.exists && reservable) {
+        tx.update(aggregateRef, { reserved: aggregateStock.reserved + reservable, updatedAt: now });
+    }
+    if (reservable) {
+        tx.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
+            'reserve', reservable, orderRef.id, productKey, actor, { warehouseId, fulfillmentType:'WAREHOUSE' }
+        ));
+    }
+
+    const orderData = {
+        ...order,
+        inventoryReservedQty: reservable,
+        inventoryShortageQty: shortage,
+        inventoryProductKey: productKey,
+        fulfillmentType: 'WAREHOUSE',
+        warehouseId
+    };
+    tx.set(reservationDocRef(orderRef.id), {
+        ...inventoryReservationPayload(orderRef.id, orderData, reservable, reservable > 0 ? 'active' : 'shortage'),
+        warehouseId
+    }, { merge: true });
+    return { orderData, reservation: { reservedQty: reservable, shortageQty: shortage, warehouseId } };
+}
+
+async function createOrderWithReservation(order, options = {}) {
+    if (!warehouseMasterCache.length) await loadSupplierWarehouseMasters();
+    const sourceType = options.sourceType || order.sourceType || '';
+    const sourceId = String(options.sourceId || order.sourceId || '');
+    const conversionKey = String(options.conversionKey || '');
+    const deterministicId = conversionOrderDocId(sourceType, sourceId, conversionKey);
+    const orderRef = deterministicId ? db.collection('orders').doc(deterministicId) : db.collection('orders').doc();
+    let result = null;
 
     await db.runTransaction(async tx => {
-        const aggregateSnap = aggregateRef ? await tx.get(aggregateRef) : null;
-        const warehouseSnap = warehouseRef ? await tx.get(warehouseRef) : null;
-
-        // 有分倉資料時，庫存占用以指定倉庫為準；舊資料尚未分倉則不猜位置，整筆列 shortage。
-        const warehouseStock = warehouseSnap?.exists ? inventoryNumbers(warehouseSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
-        const aggregateStock = aggregateSnap?.exists ? inventoryNumbers(aggregateSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
-        const reservable = Math.max(0, Math.min(requested, warehouseStock.available));
-        const shortage = Math.max(0, requested - reservable);
-        const now = new Date().toISOString();
-
-        if (warehouseRef && warehouseSnap?.exists && reservable) {
-            tx.update(warehouseRef, {
-                reserved: warehouseStock.reserved + reservable,
-                updatedAt: now
-            });
-        }
-        if (aggregateRef && aggregateSnap?.exists && reservable) {
-            tx.update(aggregateRef, {
-                reserved: aggregateStock.reserved + reservable,
-                updatedAt: now
-            });
+        const existingOrder = deterministicId ? await tx.get(orderRef) : null;
+        if (existingOrder?.exists) {
+            result = { id: orderRef.id, data: existingOrder.data(), existing: true };
+            return;
         }
 
-        if (reservable) {
-            tx.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
-                'reserve', reservable, orderId, productKey, actor, { warehouseId, fulfillmentType:'WAREHOUSE' }
-            ));
-        }
+        const sourceRef = sourceDocumentRef(sourceType, sourceId);
+        const sourceSnap = sourceRef ? await tx.get(sourceRef) : null;
+        const prepared = await applyNewOrderReservationInTransaction(tx, orderRef, order);
+        tx.set(orderRef, prepared.orderData);
 
-        tx.update(db.collection('orders').doc(orderId), {
-            inventoryReservedQty: reservable,
-            inventoryShortageQty: shortage,
-            inventoryProductKey: productKey,
-            fulfillmentType: 'WAREHOUSE',
-            warehouseId
-        });
-        tx.set(reservationDocRef(orderId), {
-            ...inventoryReservationPayload(orderId, { ...order, warehouseId }, reservable, reservable > 0 ? 'active' : 'shortage'),
-            warehouseId
-        }, { merge: true });
-        result = { reservedQty: reservable, shortageQty: shortage, warehouseId };
+        if (sourceRef && sourceSnap?.exists) {
+            tx.set(sourceRef, {
+                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created')),
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        }
+        result = { id: orderRef.id, data: prepared.orderData, reservation: prepared.reservation, existing: false };
     });
     return result;
+}
+
+async function reserveInventoryForNewOrder(orderId, order) {
+    if (!warehouseMasterCache.length) await loadSupplierWarehouseMasters();
+    const orderRef = db.collection('orders').doc(orderId);
+    let reservation = { reservedQty: 0, shortageQty: orderQuantity(order) };
+    await db.runTransaction(async tx => {
+        const liveSnap = await tx.get(orderRef);
+        if (!liveSnap.exists) throw new Error('找不到剛建立的訂單。');
+        const live = liveSnap.data();
+        const existingReservation = await tx.get(reservationDocRef(orderId));
+        if (existingReservation.exists && ['active','shortage','fulfilled','direct_ship'].includes(existingReservation.data()?.status)) {
+            reservation = {
+                reservedQty: Number(live.inventoryReservedQty || 0),
+                shortageQty: Number(live.inventoryShortageQty || 0),
+                warehouseId: live.warehouseId || '',
+                existing: true
+            };
+            return;
+        }
+        const prepared = await applyNewOrderReservationInTransaction(tx, orderRef, { ...order, ...live });
+        tx.set(orderRef, prepared.orderData, { merge: true });
+        reservation = prepared.reservation;
+    });
+    return reservation;
 }
 
 function orderQuantity(order) {
@@ -7355,24 +7414,18 @@ window.saveNewOrder = function() {
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
-    db.collection('orders').add(data).then(async docRef => {
-        const reservation = await reserveInventoryForNewOrder(docRef.id, data);
-        data.inventoryReservedQty = reservation.reservedQty;
-        data.inventoryShortageQty = reservation.shortageQty;
-        data.inventoryProductKey = inventoryProductKey(data);
-        rememberRecentCustomerName(data.customerName);
-        if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
-            db.collection('forecasts').doc(data.sourceId).set({
-                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, docRef.id, 'created')),
-                updatedAt: new Date().toISOString()
-            }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
-        }
+    const sourceType = data.sourceType || '';
+    const sourceId = data.sourceId || '';
+    const conversionKey = sourceType === DOCUMENT_TYPES.FORECAST && sourceId ? 'single' : '';
+    createOrderWithReservation(data, { sourceType, sourceId, conversionKey }).then(created => {
+        const saved = created.data;
+        rememberRecentCustomerName(saved.customerName);
         window._orderModalSourceLink = null; window._orderModalProductId = '';
         closeOrderModal();
-        // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
-        ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
+        ordersCache = [{ id: created.id, ...saved }, ...ordersCache.filter(order => order.id !== created.id)]
             .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
         renderOrdersList();
+        if (created.existing) alert('這個 Forecast 已經建立過訂單，已載入既有訂單，未重複新增。');
     }).catch(err => {
         alert('新增失敗：' + err.message);
     }).finally(() => {
