@@ -4647,6 +4647,88 @@ window.loadMoreOrders = function() {
     return loadOrderPage(false);
 };
 
+function normalizeFullHistorySearchValue(value) {
+    return String(value || '')
+        .normalize('NFKC')
+        .toLocaleLowerCase()
+        .replace(/[\s\-_.\/\\,，。:：;；()（）\[\]{}]+/g, '');
+}
+
+function normalizeHistoryItemCode(value) {
+    return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function fullHistorySearchValues(type, record = {}) {
+    if (type === 'quote') {
+        return [
+            record.quoteNo, record.clientName, record.ordererName, record.salesName,
+            ...(Array.isArray(record.items) ? record.items.flatMap(item => [
+                item.brand, item.model, item.nameCn, item.nameEn, item.spec
+            ]) : [])
+        ];
+    }
+    return [
+        record.id, record.orderNo, record.quoteNo, record.customerName, record.brand,
+        record.itemCode, record.itemName, record.salesName, record.purchaseOrderNo,
+        record.invoiceTitle, record.productLine, record.spec
+    ];
+}
+
+function fullHistoryBaseTokens(type, record = {}) {
+    const tokens = new Set();
+    const MAX_BASE_TOKENS = 180;
+    for (const raw of fullHistorySearchValues(type, record)) {
+        const normalized = normalizeFullHistorySearchValue(raw);
+        if (!normalized) continue;
+        tokens.add(normalized);
+        const maxGram = Math.min(6, normalized.length);
+        for (let size = 1; size <= maxGram; size += 1) {
+            for (let i = 0; i + size <= normalized.length; i += 1) {
+                tokens.add(normalized.slice(i, i + size));
+                if (tokens.size >= MAX_BASE_TOKENS) return [...tokens];
+            }
+        }
+    }
+    return [...tokens];
+}
+
+function buildFullHistorySearchTokens(type, record = {}) {
+    const base = fullHistoryBaseTokens(type, record);
+    const tokens = new Set(base);
+    const salesCode = String(record.salesCode || '').trim();
+    const ownerUid = String(record.ownerUid || '').trim();
+    const salesName = normalizeFullHistorySearchValue(record.salesName || '');
+    base.forEach(token => {
+        if (salesCode) tokens.add(`sc:${salesCode}:${token}`);
+        if (ownerUid) tokens.add(`uid:${ownerUid}:${token}`);
+        if (salesName) tokens.add(`sn:${salesName}:${token}`);
+    });
+    return [...tokens].slice(0, 700);
+}
+
+function fullHistoryServerToken(keyword) {
+    const normalized = normalizeFullHistorySearchValue(keyword);
+    return normalized.length > 6 ? normalized.slice(0, 6) : normalized;
+}
+
+function fullHistoryQueryToken(type, keyword) {
+    const token = fullHistoryServerToken(keyword);
+    if (!token) return '';
+    const canViewAll = type === 'quote' ? canViewAllData('quotes') : canViewAllData('orders');
+    if (canViewAll) return token;
+    if (currentUserCode) return `sc:${currentUserCode}:${token}`;
+    if (currentUser?.uid) return `uid:${currentUser.uid}:${token}`;
+    if (currentUserName) return `sn:${normalizeFullHistorySearchValue(currentUserName)}:${token}`;
+    return '';
+}
+
+function fullHistoryRecordMatches(type, record, keyword) {
+    const needle = normalizeFullHistorySearchValue(keyword);
+    if (!needle) return true;
+    return fullHistorySearchValues(type, record)
+        .some(value => normalizeFullHistorySearchValue(value).includes(needle));
+}
+
 /*
  * 統一全歷史搜尋：估價單／訂單都使用 searchTokens 後端索引；
  * 一般列表仍每次只載入 50 筆，搜尋結果也以 50 筆分頁。
