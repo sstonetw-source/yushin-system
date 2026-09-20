@@ -915,15 +915,12 @@ function populateForecastSalesFilter() {
     const current = select.value;
     const names = new Set();
 
-    salesList.forEach(person => {
-        const name = stripPhoneSuffix(person.name || '');
-        if (name) names.add(name);
-    });
-
-    forecastCache.forEach(item => {
-        const name = stripPhoneSuffix(item.salesName || '');
-        if (name) names.add(name);
-    });
+    salesList
+        .filter(person => String(person.role || 'sales').toLowerCase() === 'sales')
+        .forEach(person => {
+            const name = stripPhoneSuffix(person.name || '');
+            if (name) names.add(name);
+        });
 
     select.disabled = false;
     select.innerHTML = '<option value="">全部業務</option>';
@@ -2210,10 +2207,13 @@ window.disableSupplierMapping = async function(id) {
 };
 
 window.saveWarehouseMaster = async function() {
-    if (trueUserRole !== 'admin') return;
+    const status = document.getElementById('warehouseMasterStatus');
+    if (trueUserRole !== 'admin' && currentUserRole !== 'admin') {
+        if (status) status.innerText = '只有管理員可以新增或修改倉庫。';
+        return;
+    }
     const name = String(document.getElementById('warehouseMasterName')?.value || '').trim();
     const makeDefault = !!document.getElementById('warehouseMasterDefault')?.checked;
-    const status = document.getElementById('warehouseMasterStatus');
     if (!name) { if (status) status.innerText = '請輸入倉庫名稱。'; return; }
     try {
         const id = stableMasterId('wh', name);
@@ -4140,6 +4140,15 @@ window.renderInventoryList=function(){
       <td data-th="可用庫存">${n.available}</td>
       <td data-th="在途">${n.incoming}</td>
       <td data-th="批號／效期">${lotHtml}</td>
+      <td data-th="操作" class="no-print">
+        ${canEditPage('inventory') ? `
+          <div class="inventory-row-actions">
+            <button type="button" class="btn-small" onclick="openInventoryItemAdjustment('decrease','${escapeAttr(x.id)}')">減庫存</button>
+            <button type="button" class="btn-small btn-secondary" onclick="openInventoryItemAdjustment('return','${escapeAttr(x.id)}')">退貨</button>
+            <button type="button" class="btn-small btn-danger" onclick="openInventoryItemAdjustment('scrap','${escapeAttr(x.id)}')">報廢</button>
+            <button type="button" class="btn-small btn-secondary" onclick="openInventoryItemAdjustment('warehouse_allocation','${escapeAttr(x.id)}')">分倉</button>
+          </div>` : '僅可查看'}
+      </td>
    </tr>`);
  });
 };
@@ -4147,16 +4156,54 @@ window.renderPendingInventoryItems=function(){const body=document.getElementById
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
 
-window.openInventoryAdjustment = async function() {
+window.openInventoryAdjustment = async function(type = 'initial', item = null) {
     if (!canEditPage('inventory')) return;
     await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
-    inventoryAdjustmentRows = [{ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, lotNo:'', expiryDate:'' }];
-    document.getElementById('inventoryAdjustmentType').value = 'initial';
+    const selectedType = type || 'initial';
+    const source = item || null;
+    inventoryAdjustmentRows = [{
+        itemCode: source?.itemCode || '',
+        itemName: source?.itemName || '',
+        brand: source?.brand || '',
+        productId: source?.productId || source?.productKey || '',
+        warehouseId: defaultWarehouse()?.id || '',
+        qty: 0,
+        lotNo: '',
+        expiryDate: ''
+    }];
+    const typeSelect = document.getElementById('inventoryAdjustmentType');
+    if (typeSelect) {
+        typeSelect.value = selectedType;
+        typeSelect.disabled = true;
+    }
+    const title = document.getElementById('inventoryAdjustmentTitle');
+    if (title) {
+        title.innerText = ({
+            initial: '新增庫存',
+            decrease: '減庫存',
+            return: '退貨入庫',
+            scrap: '報廢',
+            warehouse_allocation: '分配至倉庫'
+        })[selectedType] || '庫存異動';
+    }
+    const addRowBtn = document.getElementById('inventoryAddRowBtn');
+    if (addRowBtn) addRowBtn.style.display = selectedType === 'initial' ? '' : 'none';
     renderInventoryAdjustmentRows();
     document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');
 };
 
+window.openInventoryItemAdjustment = function(type, inventoryId) {
+    const item = inventoryCache.find(entry => entry.id === inventoryId);
+    if (!item) {
+        alert('找不到這個庫存品項，請重新整理後再試。');
+        return;
+    }
+    openInventoryAdjustment(type, item);
+};
+
 window.closeInventoryAdjustment = function() {
+    const typeSelect = document.getElementById('inventoryAdjustmentType');
+    if (typeSelect) typeSelect.disabled = false;
     document.getElementById('inventoryAdjustmentOverlay')?.classList.remove('active');
 };
 
@@ -4222,7 +4269,7 @@ window.saveInventoryAdjustmentBatch = async function() {
         const match=findPriceItemByCodeValue(row.itemCode);
         if(!match) throw new Error(`Product Master 找不到貨號 ${row.itemCode}`);
         let delta=Number(row.qty||0);
-        if(type==='scrap') delta=-Math.abs(delta);
+        if(type==='scrap' || type==='decrease') delta=-Math.abs(delta);
         const key=match.productId||stableProductId(match);
         const ref=db.collection('inventory').doc(encodeURIComponent(key));
         const whRef=row.warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(row.warehouseId,key)):null;
