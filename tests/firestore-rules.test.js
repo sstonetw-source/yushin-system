@@ -6,7 +6,12 @@ const {
 } = require('@firebase/rules-unit-testing');
 const {
   doc,
+  collection,
+  query,
+  where,
+  orderBy,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc
@@ -36,10 +41,12 @@ async function main() {
 
         setDoc(doc(db, 'orders', 'own-order'), {
           salesCode: 'S01', ownerUid: 'sales1', status: 'active',
+          orderDate: '2026-09-20', searchTokens: ['roche', 'abc123'],
           totalPrice: 100, linkedDocuments: []
         }),
         setDoc(doc(db, 'orders', 'other-order'), {
           salesCode: 'S02', ownerUid: 'sales2', status: 'active',
+          orderDate: '2026-09-20', searchTokens: ['roche', 'xyz999'],
           totalPrice: 200, linkedDocuments: []
         }),
         setDoc(doc(db, 'quotes', 'own-quote'), {
@@ -49,10 +56,10 @@ async function main() {
           salesCode: 'S02', ownerUid: 'sales2', status: 'active'
         }),
         setDoc(doc(db, 'equipment', 'own-equipment'), {
-          salesCode: 'S01', ownerUid: 'sales1', active: true
+          salesCode: 'S01', ownerUid: 'sales1', customerName: 'Customer A', assetId: 'EQ-S01-00001', active: true
         }),
         setDoc(doc(db, 'equipment', 'other-equipment'), {
-          salesCode: 'S02', ownerUid: 'sales2', active: true
+          salesCode: 'S02', ownerUid: 'sales2', customerName: 'Customer B', assetId: 'EQ-S02-00001', active: true
         }),
         setDoc(doc(db, 'inventory', 'prd1'), {
           onHand: 10, reserved: 2, incoming: 0, lots: []
@@ -76,6 +83,26 @@ async function main() {
     await assertSucceeds(getDoc(doc(warehouse, 'orders', 'other-order')));
     await assertFails(getDoc(doc(engineer, 'orders', 'own-order')));
 
+    // Query-level checks: these mirror the real order list, export and full-history search shapes.
+    await assertSucceeds(getDocs(query(
+      collection(sales, 'orders'),
+      where('salesCode', '==', 'S01'),
+      where('orderDate', '>=', '2026-09-01'),
+      where('orderDate', '<=', '2026-09-30'),
+      orderBy('orderDate', 'desc')
+    )));
+    await assertSucceeds(getDocs(query(
+      collection(sales, 'orders'),
+      where('salesCode', '==', 'S01'),
+      where('searchTokens', 'array-contains', 'roche'),
+      orderBy('orderDate', 'desc')
+    )));
+    await assertFails(getDocs(query(
+      collection(sales, 'orders'),
+      where('searchTokens', 'array-contains', 'roche'),
+      orderBy('orderDate', 'desc')
+    )));
+
     await assertSucceeds(getDoc(doc(purchaser, 'quotes', 'other-quote')));
     await assertFails(getDoc(doc(warehouse, 'quotes', 'other-quote')));
     await assertFails(getDoc(doc(engineer, 'quotes', 'other-quote')));
@@ -84,6 +111,15 @@ async function main() {
     await assertFails(getDoc(doc(sales, 'equipment', 'other-equipment')));
     await assertSucceeds(getDoc(doc(engineer, 'equipment', 'other-equipment')));
     await assertFails(getDoc(doc(purchaser, 'equipment', 'other-equipment')));
+    await assertSucceeds(getDocs(query(
+      collection(sales, 'equipment'),
+      where('salesCode', '==', 'S01'),
+      orderBy('customerName', 'asc')
+    )));
+    await assertFails(getDocs(query(
+      collection(sales, 'equipment'),
+      orderBy('customerName', 'asc')
+    )));
 
     await assertFails(deleteDoc(doc(admin, 'quotes', 'own-quote')));
     await assertFails(deleteDoc(doc(admin, 'equipment', 'own-equipment')));
