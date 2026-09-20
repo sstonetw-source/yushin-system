@@ -1036,6 +1036,32 @@ test('critical fix persists FEFO lot allocations through shipment and receipt', 
     assert.match(appSource,/type:'receipt'/);
 });
 
+test('inventory uses one add-stock entry and item-row adjustments for reductions returns and scrap', () => {
+    assert.match(indexSource, /onclick="openInventoryAdjustment\(\)">＋ 新增庫存<\/button>/);
+    assert.match(indexSource, /<th>操作<\/th>/);
+    assert.match(appSource, /window\.openInventoryItemAdjustment/);
+    assert.match(appSource, /<option value="decrease">減少庫存<\/option>/);
+    assert.match(appSource, /<option value="return">退貨入庫<\/option>/);
+    assert.match(appSource, /<option value="scrap">報廢<\/option>/);
+    assert.match(appSource, /if\(type==='decrease' \|\| type==='scrap'\) delta=-Math\.abs\(delta\)/);
+});
+
+test('Forecast sales filter lists active sales-role users only', () => {
+    const start=appSource.indexOf('function populateForecastSalesFilter');
+    const end=appSource.indexOf('function populateForecastBrandFilter', start) > start
+        ? appSource.indexOf('function populateForecastBrandFilter', start)
+        : appSource.indexOf('window.openForecastModal', start);
+    const source=appSource.slice(start, end > start ? end : start + 3000);
+    assert.match(source, /person\.role === 'sales'/);
+    assert.match(source, /person\.disabled !== true/);
+    assert.doesNotMatch(source, /forecastCache\.forEach\(item => \{[\s\S]*names\.add/);
+});
+
+test('warehouse master remains admin-controlled in Firestore rules', () => {
+    assert.match(rulesSource, /match \/warehouses\/\{id\}/);
+    assert.match(rulesSource, /allow create, update: if admin\(\)/);
+});
+
 test('critical fix paginates equipment and derives asset ids from cloud state', () => {
     assert.match(appSource,/let equipmentCursor = null/);
     assert.match(appSource,/window\.loadMoreEquipment/);
