@@ -4487,15 +4487,40 @@ function orderLifecycleInfo(order) {
     return { status, label: '正常', css: 'normal', delivered, returned, effectiveDelivered };
 }
 
+function purchaseProgressInfo(order) {
+    const items=normalizedOrderItems(order);
+    const direct=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP');
+    const warehouse=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+    if(items.length&&direct.length===items.length)return {state:'direct',label:'原廠直送'};
+    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.qty||0)-Number(item.inventoryReservedQty||0)),0);
+    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.qty||0)-Number(item.inventoryReservedQty||0)),Number(item.purchaseOrderedQty||0)),0);
+    if(required<=0)return {state:'not_required',label:'無需採購'};
+    if(ordered>=required)return {state:'ordered',label:`已訂貨 ${ordered}/${required}`};
+    if(ordered>0)return {state:'partial',label:`部分訂貨 ${ordered}/${required}`};
+    return {state:'pending',label:`待採購 ${required}`};
+}
+
+function fulfillmentProgressInfo(order) {
+    const items=normalizedOrderItems(order).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+    const total=items.reduce((s,item)=>s+Number(item.qty||0),0);
+    const ready=items.reduce((s,item)=>s+Math.min(Number(item.qty||0),Number(item.inventoryReservedQty||0)),0);
+    if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0};
+    if(total>0&&ready>=total)return {state:'ready',label:`可出貨 ${ready}/${total}`,total,ready};
+    if(ready>0)return {state:'partial',label:`部分備貨 ${ready}/${total}`,total,ready};
+    return {state:'pending',label:`待備貨 0/${total}`,total,ready};
+}
+
 function orderProgressInfo(order) {
-    const lifecycle = orderLifecycleInfo(order);
-    const delivery = deliveryProgressInfo(order);
-    if (lifecycle.status !== 'normal' || lifecycle.returned > 0) return { label: lifecycle.label, css: lifecycle.css === 'returned' ? 'partial' : 'invalid' };
-    if (delivery.delivered > 0 && delivery.state === 'partial') return { label: `部分送貨 ${delivery.delivered}/${delivery.total}`, css: 'partial' };
-    if (delivery.state === 'complete') return order.isBilled ? { label: '已完成', css: 'complete' } : { label: '已送貨・待報帳', css: 'active' };
-    if (order.isArrived) return { label: '已到貨・待送貨', css: 'active' };
-    if (order.isOrdered) return { label: '已訂貨・待到貨', css: 'active' };
-    return { label: '待訂貨', css: 'pending' };
+    const lifecycle=orderLifecycleInfo(order);
+    const delivery=deliveryProgressInfo(order);
+    const purchase=purchaseProgressInfo(order);
+    const fulfillment=fulfillmentProgressInfo(order);
+    if(lifecycle.status!=='normal'||lifecycle.returned>0)return {label:lifecycle.label,css:lifecycle.css==='returned'?'partial':'invalid'};
+    if(delivery.delivered>0&&delivery.state==='partial')return {label:`部分送貨 ${delivery.delivered}/${delivery.total}`,css:'partial'};
+    if(delivery.state==='complete')return order.isBilled?{label:'已完成',css:'complete'}:{label:'已送貨・待報帳',css:'active'};
+    if(fulfillment.state==='ready')return {label:fulfillment.label,css:'active'};
+    if(fulfillment.state==='partial')return {label:fulfillment.label,css:'partial'};
+    return {label:purchase.label,css:purchase.state==='partial'?'partial':'pending'};
 }
 
 function isDeletableOrderDraft(order) {
@@ -5847,8 +5872,19 @@ window.printPurchaseOrder = async function() {
             orderSnapshots.forEach((snapshot, index) => {
                 if (snapshot.exists) {
                     const orderData = snapshot.data();
+                    const orderedLines=poItems.filter(item=>item.orderId===snapshot.id);
+                    const nextItems=normalizedOrderItems(orderData).map((item,itemIndex)=>{
+                        const matches=orderedLines.filter(line=>Number(line.orderItemIndex)===itemIndex);
+                        const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
+                        return orderedQty>0?{...item,purchaseOrderNo:poNo,purchaseOrderedQty:orderedQty}:item;
+                    });
+                    const totalNeeded=nextItems.reduce((sum,item)=>sum+Number(item.qty||0),0);
+                    const totalOrdered=nextItems.reduce((sum,item)=>sum+Math.min(Number(item.qty||0),Number(item.purchaseOrderedQty||0)),0);
                     transaction.update(orderRefs[index], {
+                        items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,
                         purchaseOrderNo: poNo,
+                        purchaseOrderedQty:totalOrdered,
+                        purchaseStatus:totalOrdered<=0?'pending':totalOrdered<totalNeeded?'partial':'ordered',
                         linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'created')])
                     });
                 }
