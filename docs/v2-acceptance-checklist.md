@@ -1,0 +1,55 @@
+# V2 驗收清單
+
+## 自動測試
+- [ ] legacy single-item order 仍可讀
+- [ ] multi-item order 每 item 有 stable itemId
+- [ ] 訂20/available8 => reserved8 + shortage12
+- [ ] shortage 可分 purchaser/self-order
+- [ ] self-order 有 internal order number + cost + supplier
+- [ ] stock replenishment receipt 不建立 customer dispatch task
+- [ ] partial receipt 立即補 reservation
+- [ ] reserved qty 進 purchaser 待打單
+- [ ] purchaser 已打單 qty 才成為可出貨
+- [ ] partial delivery 只扣該 item/qty
+- [ ] delivery 扣 onHand/reserved
+- [ ] FEFO for expiry-managed lots
+- [ ] FIFO for no-expiry lots
+- [ ] delivery 保存 lot allocations / COGS
+- [ ] cancel/restore 不重複 reserve/release
+- [ ] return item/qty 正確
+- [ ] billing 可 true <-> false，留 audit
+- [ ] duplicate click 不重複寫入
+- [ ] engineer 可建立/管理自己的 Forecast/Quote/Order
+- [ ] engineer 有 salesCode/業績歸屬
+- [ ] purchaser 協助建單必須指定 responsible sales
+- [ ] sales/engineer 無未授權成本讀取
+- [ ] sales/engineer 無進銷存分析權限
+- [ ] product search 使用 bounded query
+- [ ] order/quote list pagination
+- [ ] dashboard 不掃全部歷史
+- [ ] price import preview before commit
+- [ ] quote number generator unchanged
+
+## 人工驗收
+- [ ] Desktop Chrome/Safari
+- [ ] iPhone Safari
+- [ ] Admin
+- [ ] Sales
+- [ ] Engineer（商務 + 工程）
+- [ ] Purchaser
+- [ ] Warehouse
+- [ ] 現貨全數
+- [ ] 部分現貨
+- [ ] purchaser ordering
+- [ ] sales/engineer self-order
+- [ ] partial receipt
+- [ ] partial dispatch paperwork
+- [ ] partial delivery
+- [ ] stock replenishment no customer
+- [ ] multi-item mixed sourcing
+- [ ] cancel/void/restore/return
+- [ ] low stock/safety stock
+- [ ] batch cost/COGS
+- [ ] company existing shipping system handoff
+- [ ] long operation shows progress/loading
+- [ ] Firestore permission-denied UX
