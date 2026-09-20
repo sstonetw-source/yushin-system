@@ -3547,11 +3547,13 @@ window.renderMyQuotesList = function() {
             <td>${escapeHtml(q.quoteDate || '')}</td>
             <td>${escapeHtml(q.grandTotal || '')}</td>
             <td>${statusCell}</td>
-            <td class="no-print">
-                <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${q.quoteNo}')">載入</button>
-                <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
-                ${canEditPage('forecast') ? `<button type="button" class="btn-small btn-secondary" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">Forecast</button>` : ''}
-                ${actionBtn}
+            <td class="no-print quote-list-actions">
+                <div class="quote-list-action-row">
+                    <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${q.quoteNo}')">載入</button>
+                    <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
+                    ${canEditPage('forecast') ? `<button type="button" class="btn-small btn-secondary" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">Forecast</button>` : ''}
+                    ${actionBtn}
+                </div>
             </td>
         `;
         tbody.appendChild(tr);
