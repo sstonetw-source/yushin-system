@@ -6559,9 +6559,13 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         { warehouseId, fulfillmentType:'WAREHOUSE', reservedDelta }
     ));
 
-    transaction.set(reservationDocRef(sourceId), {
+    const deliveryItemId=order.itemId||'';
+    const deliveryReservationRef=deliveryItemId
+        ? db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`)
+        : reservationDocRef(sourceId);
+    transaction.set(deliveryReservationRef, {
         ...inventoryReservationPayload(sourceId, order, newReservedRemaining, newReservedRemaining > 0 ? 'active' : 'fulfilled'),
-        warehouseId
+        itemId:deliveryItemId,warehouseId
     }, { merge:true });
     return { reservedDelta };
 }
@@ -6749,10 +6753,28 @@ function renderDeliveryModal() {
         <button type="button" class="workflow-step ${order.isArrived ? 'done' : ''}" ${editableSteps ? `onclick="toggleOrderProgressStatus('isArrived', ${!order.isArrived})"` : 'disabled'}><span>2</span>到貨 ${order.isArrived ? '✓' : ''}</button>
         <button type="button" class="workflow-step ${progress.state === 'complete' ? 'done' : progress.state === 'partial' ? 'partial' : ''}" ${editableSteps && progress.remaining > 0 ? 'onclick="quickCompleteDelivery()"' : 'disabled'}><span>3</span>${progress.state === 'partial' ? `送貨 ${progress.delivered}/${progress.total}` : '送貨'} ${progress.state === 'complete' ? '✓' : ''}</button>
         <button type="button" class="workflow-step ${order.isBilled ? 'done' : ''}" ${editableSteps ? `onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"` : 'disabled'}><span>4</span>報帳 ${order.isBilled ? '✓' : ''}</button>`;
-    document.getElementById('deliveryOrderSummary').innerHTML = `
-        <strong>${escapeHtml(order.itemName || '未命名品項')}</strong>（${escapeHtml(order.itemCode || '無貨號')}）<br>
-        訂購數量：${progress.total}　累計已送：${progress.delivered}　尚未送貨：${progress.remaining}
+    const deliveryItems=normalizedOrderItems(order);
+    const itemSummary=deliveryItems.map(item=>{
+        const delivered=savedDeliveryRecords(order).filter(r=>!r.itemId||r.itemId===item.itemId).reduce((s,r)=>s+Number(r.qty||0),0);
+        return `<div><strong>${escapeHtml(item.itemName||'未命名品項')}</strong>（${escapeHtml(item.itemCode||'無貨號')}） ${delivered}/${Number(item.qty||0)}</div>`;
+    }).join('');
+    document.getElementById('deliveryOrderSummary').innerHTML = itemSummary + `
+        <div style="margin-top:6px;">整張訂單：${progress.delivered}/${progress.total}</div>
         ${progress.isLegacyEstimated ? '<br><span class="delivery-estimated">這是舊版「已送貨」資料，日期暫以訂單日期推估。</span>' : ''}`;
+    const deliveryForm=document.getElementById('deliveryFormPanel');
+    if(deliveryForm&&deliveryItems.length>1){
+        let select=document.getElementById('deliveryItemId');
+        if(!select){
+            select=document.createElement('select');select.id='deliveryItemId';select.style.marginBottom='8px';
+            deliveryForm.insertBefore(select,deliveryForm.firstChild);
+        }
+        const current=select.value;
+        select.innerHTML=deliveryItems.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||'')} ${escapeHtml(item.itemName||'')}</option>`).join('');
+        if(deliveryItems.some(item=>item.itemId===current))select.value=current;
+        select.style.display='';
+    }else{
+        const select=document.getElementById('deliveryItemId');if(select)select.style.display='none';
+    }
     renderOrderStatusHistory(order);
 
     const tbody = document.getElementById('deliveryRecordsBody');
@@ -6762,7 +6784,7 @@ function renderDeliveryModal() {
     if (records.length) {
         tbody.innerHTML = records.map(record => `<tr>
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
-            <td>${escapeHtml(record.notes || '')}</td>
+            <td>${record.itemId ? escapeHtml(normalizedOrderItems(order).find(item=>item.itemId===record.itemId)?.itemName||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
             <td>${editable ? `<button type="button" class="btn-small" onclick="editDeliveryRecord('${escapeAttr(record.id)}')">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord('${escapeAttr(record.id)}')">刪除</button>` : '僅可查看'}</td>
         </tr>`).join('');
@@ -6817,9 +6839,15 @@ window.saveDeliveryRecord = async function() {
             const now = new Date().toISOString();
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
+            const orderItems=normalizedOrderItems(order);
+            const requestedItemId=document.getElementById('deliveryItemId')?.value||orderItems[0]?.itemId||'item-1';
+            const targetItem=orderItems.find(item=>item.itemId===requestedItemId)||orderItems[0];
+            if(!targetItem)throw new Error('找不到送貨品項。');
+            const itemOtherDelivered=records.filter(r=>r.id!==editId&&(!r.itemId&&orderItems.length===1||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
+            if(itemOtherDelivered+qty>Number(targetItem.qty||0)+1e-9)throw new Error(`${targetItem.itemName||'品項'} 累計送貨數量超過訂購數量。`);
             const record = previous
-                ? { ...previous, date, qty, notes, updatedBy: actor, updatedAt: now }
-                : { id: deliveryRecordId(), date, qty, notes, createdBy: actor, createdAt: now };
+                ? { ...previous, itemId:targetItem.itemId, date, qty, notes, updatedBy: actor, updatedAt: now }
+                : { id: deliveryRecordId(), itemId:targetItem.itemId, date, qty, notes, createdBy: actor, createdAt: now };
             if (existingIndex >= 0) records[existingIndex] = record; else records.push(record);
             const totalDelivered = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const total = orderQuantity(order);
@@ -6831,7 +6859,11 @@ window.saveDeliveryRecord = async function() {
             const history = { action, recordId: record.id, before: previous, after: record, by: actor, at: now };
             const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             const deliveryDelta = qty - Number(previous?.qty || 0);
-            if (deliveryDelta) await applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryDelta, actor, orderId);
+            if(deliveryDelta){
+                const itemRecords=records.filter(r=>r.itemId===targetItem.itemId);
+                const itemOrder={...order,...targetItem,qty:Number(targetItem.qty||0),inventoryReservedQty:Number(targetItem.inventoryReservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
+                await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId);
+            }
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
