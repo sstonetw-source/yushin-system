@@ -8103,12 +8103,16 @@ function renderEquipmentLogTable(eq) {
     } else {
         logs.forEach((log) => {
             const tr = document.createElement('tr');
+            if (log.voided) tr.style.opacity = '0.55';
+            const voidInfo = log.voided
+                ? `<div style="font-size:10px;color:#777;">已作廢 ${escapeHtml(formatOrderStatusTime(log.voidedAt) || '')}／${escapeHtml(log.voidedBy || '')}</div>`
+                : '';
             tr.innerHTML = `
                 <td>${fmtDate(log.date)}</td>
-                <td>${escapeHtml(log.type || '')}</td>
+                <td>${escapeHtml(log.type || '')}${log.voided ? '（已作廢）' : ''}</td>
                 <td>${escapeHtml(log.tech || '')}</td>
-                <td style="text-align:left;">${escapeHtml(log.desc || '')}</td>
-                <td class="no-print"><button type="button" class="btn-danger" onclick="deleteEquipmentLog('${eq.id}', ${equipmentLogRealIndex(eq, log)})">刪除</button></td>
+                <td style="text-align:left;">${escapeHtml(log.desc || '')}${voidInfo}</td>
+                <td class="no-print"><button type="button" class="${log.voided ? 'btn-small' : 'btn-danger'}" onclick="toggleEquipmentLogVoid('${eq.id}', ${equipmentLogRealIndex(eq, log)}, ${log.voided ? 'false' : 'true'})">${log.voided ? '恢復' : '作廢'}</button></td>
             `;
             logBody.appendChild(tr);
         });
@@ -8238,16 +8242,31 @@ window.quickAddMaintenanceLog = function(eqId) {
     });
 };
 
-window.deleteEquipmentLog = function(eqId, logIndex) {
-    if (!confirm('確定要刪除這筆紀錄嗎？')) return;
+window.toggleEquipmentLogVoid = function(eqId, logIndex, voided) {
+    const action = voided ? '作廢' : '恢復';
+    if (!confirm(`確定要${action}這筆維修／保養紀錄嗎？紀錄內容會保留供追溯。`)) return;
     const eq = equipmentList.find(e => e.id === eqId);
-    if (!eq) return;
-    const updatedLogs = (eq.logs || []).filter((_, idx) => idx !== logIndex);
-    db.collection('equipment').doc(eqId).update({ logs: updatedLogs }).then(() => {
+    if (!eq || !(eq.logs || [])[logIndex]) return;
+    const now = new Date().toISOString();
+    const updatedLogs = (eq.logs || []).map((log, idx) => idx === logIndex
+        ? {
+            ...log,
+            voided,
+            ...(voided
+                ? { voidedAt:now, voidedBy:currentUserName || currentUser?.email || '' }
+                : { restoredAt:now, restoredBy:currentUserName || currentUser?.email || '' })
+        }
+        : log
+    );
+    db.collection('equipment').doc(eqId).update({ logs: updatedLogs, updatedAt:now }).then(() => {
         loadEquipmentFromCloudThenReopen(eqId);
     }).catch(err => {
-        alert('刪除失敗：' + err.message);
+        alert(`${action}失敗：` + err.message);
     });
+};
+// 舊事件名稱保留相容，但行為改為作廢。
+window.deleteEquipmentLog = function(eqId, logIndex) {
+    return window.toggleEquipmentLogVoid(eqId, logIndex, true);
 };
 
 async function loadEquipmentFromCloudThenReopen(eqId) {
