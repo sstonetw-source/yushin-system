@@ -1591,75 +1591,43 @@ function forecastItemToOrderSource(forecast, item) {
 async function createForecastOrdersDirectly(forecast, items) {
     const now = new Date().toISOString();
     const orderDate = localDateString();
-    const batch = db.batch();
-    const createdOrders = [];
-    const links = [];
-
-    items.forEach(item => {
+    const normalizedItems = items.map((item, index) => {
         const source = forecastItemToOrderSource(forecast, item);
-        if (!source.itemName && !source.itemCode) return;
+        return { ...legacyOrderItemFromOrder(source, index), itemId:`item-${index + 1}` };
+    }).filter(item => item.itemName || item.itemCode);
+    if (!normalizedItems.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
 
-        const orderRef = db.collection('orders').doc();
-        const orderData = {
-            orderDate,
-            createdAt: now,
-            company: currentCompany || 'yushin',
-            customerName: forecast.customerName || '',
-            customerId: forecast.customerId || customerIdForName(forecast.customerName || ''),
-            brand: source.brand,
-            itemCode: source.itemCode,
-            itemCodeKey: normalizeHistoryItemCode(source.itemCode),
-            itemName: source.itemName,
-            productId: source.productId || '',
-            productLine: source.productLine || '',
-            productType: source.productType || '',
-            spec: source.spec || '',
-            supplier: source.supplier || '',
-            qty: source.qty,
-            unit: source.unit || '',
-            unitPrice: source.unitPrice,
-            totalPrice: source.totalPrice,
-            costPrice: source.costPrice === '' ? null : source.costPrice,
-            status: BUSINESS_STATUS.ACTIVE,
-            ...grossAmountMetadata(source.totalPrice),
-            transactionType: '',
-            invoiceTitle: '',
-            quoteNo: '',
-            ...linkedDocumentFields(DOCUMENT_TYPES.FORECAST, forecast.id, [
-                documentLink(DOCUMENT_TYPES.FORECAST, forecast.id, 'source')
-            ]),
-            salesName: forecast.salesName || currentUserName || '',
-            salesCode: forecast.salesCode || currentUserCode || '',
-            ownerUid: forecast.ownerUid || currentUser?.uid || '',
-            isOrdered: false,
-            isArrived: false,
-            isDelivered: false,
-            isBilled: false,
-            invoiceDate: ''
-        };
-        ensureOrderItemCompatibility(orderData);
-        orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
-        batch.set(orderRef, orderData);
-        createdOrders.push({ id: orderRef.id, data: orderData });
-        links.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
-    });
+    const first = normalizedItems[0];
+    const totalPrice = normalizedItems.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
+    const orderRef = db.collection('orders').doc();
+    const orderData = {
+        orderDate, createdAt:now, company:currentCompany || 'yushin',
+        customerName:forecast.customerName || '',
+        customerId:forecast.customerId || customerIdForName(forecast.customerName || ''),
+        ...first,
+        qty:first.qty, unitPrice:first.unitPrice, totalPrice,
+        items:normalizedItems, itemCount:normalizedItems.length, orderSchemaVersion:2,
+        status:BUSINESS_STATUS.ACTIVE, ...grossAmountMetadata(totalPrice),
+        transactionType:'', invoiceTitle:'', quoteNo:'',
+        ...linkedDocumentFields(DOCUMENT_TYPES.FORECAST, forecast.id, [documentLink(DOCUMENT_TYPES.FORECAST, forecast.id, 'source')]),
+        salesName:forecast.salesName || currentUserName || '',
+        salesCode:forecast.salesCode || currentUserCode || '',
+        ownerUid:forecast.ownerUid || currentUser?.uid || '',
+        isOrdered:false, isArrived:false, isDelivered:false, isBilled:false, invoiceDate:''
+    };
+    orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
 
-    if (!createdOrders.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
-
-    batch.set(db.collection('forecasts').doc(forecast.id), {
-        linkedDocuments: firebase.firestore.FieldValue.arrayUnion(...links),
-        updatedAt: now
-    }, { merge: true });
-
+    const batch=db.batch();
+    batch.set(orderRef,orderData);
+    batch.set(db.collection('forecasts').doc(forecast.id),{
+        linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')),
+        updatedAt:now
+    },{merge:true});
     await batch.commit();
-    await Promise.all(createdOrders.map(entry => reserveInventoryForNewOrder(entry.id, entry.data)));
-
-    ordersCache = [
-        ...createdOrders.map(entry => ({ id: entry.id, ...entry.data })),
-        ...ordersCache.filter(order => !createdOrders.some(entry => entry.id === order.id))
-    ].sort((x, y) => String(y.orderDate || '').localeCompare(String(x.orderDate || '')));
-
-    return createdOrders;
+    await reserveInventoryForNewOrder(orderRef.id,orderData);
+    ordersCache=[{id:orderRef.id,...orderData},...ordersCache.filter(order=>order.id!==orderRef.id)]
+        .sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
+    return [{id:orderRef.id,data:orderData}];
 }
 
 window.createOrderFromForecast = async function(id) {
@@ -1679,10 +1647,10 @@ window.createOrderFromForecast = async function(id) {
             return;
         }
 
-        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將拆成 ${items.length} 筆訂單。確定繼續？`)) return;
-        const created = await createForecastOrdersDirectly(forecast, items);
+        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
+        await createForecastOrdersDirectly(forecast, items);
         renderOrdersList();
-        alert(`已將 Forecast 的 ${created.length} 個品項拆成 ${created.length} 筆訂單。`);
+        alert(`已將 Forecast 的 ${items.length} 個品項建立為 1 張訂單。`);
     } catch (err) {
         console.error('Forecast 轉訂單失敗', err);
         alert('Forecast 轉訂單失敗：' + err.message);
