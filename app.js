@@ -3795,30 +3795,25 @@ window.createForecastFromQuote = async function(quoteNo) {
     }
 };
 
-window.markQuoteAsDeal = function(quoteNo) {
+window.markQuoteAsDeal = async function(quoteNo) {
     if (!confirm(`確定要將估價單 ${quoteNo} 標記為成交嗎？裡面的品項會自動匯入訂單管理系統。`)) return;
 
-    db.collection('quotes').doc(quoteNo).get().then(doc => {
-        if (!doc.exists) {
-            alert('找不到這張估價單');
-            return;
-        }
+    try {
+        const doc = await db.collection('quotes').doc(quoteNo).get();
+        if (!doc.exists) throw new Error('找不到這張估價單');
         const q = doc.data();
         if (q.dealClosed) {
             alert('這張估價單已經標記過成交了。');
             return;
         }
 
-        const today = new Date();
-        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-        const batch = db.batch();
-        const createdOrderLinks = [];
+        const todayStr = localDateString();
         const createdOrders = [];
-        (q.items || []).forEach(item => {
-            if (!item.nameCn && !item.nameEn && !item.model) return;
-            const orderRef = db.collection('orders').doc();
-            createdOrderLinks.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
+        const items = (q.items || []).filter(item => item.nameCn || item.nameEn || item.model);
+        if (!items.length) throw new Error('估價單沒有可轉成訂單的品項。');
+
+        for (let index = 0; index < items.length; index += 1) {
+            const item = items[index];
             const orderData = {
                 orderDate: todayStr,
                 createdAt: new Date().toISOString(),
@@ -3839,7 +3834,7 @@ window.markQuoteAsDeal = function(quoteNo) {
                 ...grossAmountMetadata(item.subtotal || 0),
                 transactionType: '',
                 invoiceTitle: q.clientName || '',
-                quoteNo: quoteNo,
+                quoteNo,
                 ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE, quoteNo, [
                     documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')
                 ]),
@@ -3852,7 +3847,6 @@ window.markQuoteAsDeal = function(quoteNo) {
                 isBilled: false,
                 invoiceDate: ''
             };
-            // Product Master 關聯保留；成本依代理/非代理與角色處理，避免代理產品成本寫入業務可讀的訂單文件。
             const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: resolveBrandName(item.brand || '') }) : null;
             if (priceMatch) {
                 orderData.productId = orderData.productId || priceMatch.productId || stableProductId(priceMatch);
@@ -3866,27 +3860,25 @@ window.markQuoteAsDeal = function(quoteNo) {
                 }
             }
             orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
-            batch.set(orderRef, orderData);
-            createdOrders.push({ id: orderRef.id, data: orderData });
-        });
+            const created = await createOrderWithReservation(orderData, {
+                sourceType: DOCUMENT_TYPES.QUOTE,
+                sourceId: quoteNo,
+                conversionKey: `line-${index}`
+            });
+            createdOrders.push(created);
+        }
 
-        batch.update(db.collection('quotes').doc(quoteNo), {
+        await db.collection('quotes').doc(quoteNo).update({
             dealClosed: true,
             dealClosedAt: todayStr,
             status: BUSINESS_STATUS.COMPLETED,
-            linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
+            updatedAt: new Date().toISOString()
         });
-
-        batch.commit().then(async () => {
-            await Promise.all(createdOrders.map(entry => reserveInventoryForNewOrder(entry.id, entry.data)));
-            alert('已標記成交，品項已匯入訂單管理系統並完成可用庫存保留。');
-            loadMyQuotesFromCloud();
-        }).catch(err => {
-            alert('匯入失敗：' + err.message);
-        });
-    }).catch(err => {
-        alert('讀取估價單失敗：' + err.message);
-    });
+        alert(`已標記成交，${createdOrders.length} 個品項已匯入訂單並同步完成庫存占用。`);
+        loadMyQuotesFromCloud();
+    } catch (err) {
+        alert('匯入失敗：' + err.message);
+    }
 };
 
 window.unmarkQuoteAsDeal = async function(quoteNo) {
