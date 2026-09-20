@@ -4612,10 +4612,10 @@ async function applyNewOrderReservationInTransaction(tx, orderRef, order) {
     const now = new Date().toISOString();
 
     if (warehouseRef && warehouseSnap?.exists && reservable) {
-        tx.update(warehouseRef, { reserved: warehouseStock.reserved + reservable, updatedAt: now });
+        tx.update(warehouseRef, { reserved: warehouseStock.reserved + reservable, lastMutationOrderId: orderRef.id, updatedAt: now });
     }
     if (aggregateRef && aggregateSnap?.exists && reservable) {
-        tx.update(aggregateRef, { reserved: aggregateStock.reserved + reservable, updatedAt: now });
+        tx.update(aggregateRef, { reserved: aggregateStock.reserved + reservable, lastMutationOrderId: orderRef.id, updatedAt: now });
     }
     if (reservable) {
         tx.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
@@ -6519,8 +6519,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const now = new Date().toISOString();
 
         if (aggregateRelease > 0) {
-            if (invRef && invSnap?.exists) transaction.update(invRef,{reserved:Math.max(0,inv.reserved-aggregateRelease),updatedAt:now});
-            if (warehouseRelease > 0) transaction.update(whRef,{reserved:Math.max(0,wh.reserved-warehouseRelease),updatedAt:now});
+            if (invRef && invSnap?.exists) transaction.update(invRef,{reserved:Math.max(0,inv.reserved-aggregateRelease),lastMutationOrderId:orderId,updatedAt:now});
+            if (warehouseRelease > 0) transaction.update(whRef,{reserved:Math.max(0,wh.reserved-warehouseRelease),lastMutationOrderId:orderId,updatedAt:now});
             transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
                 'release', -aggregateRelease, orderId, productKey, actor, {
                     reason:'order_cancelled',
@@ -6575,8 +6575,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const reserve = Math.min(needed, Math.max(0, wh.available), Math.max(0, inv.available));
         const now = new Date().toISOString();
         if (reserve) {
-            transaction.update(invRef,{reserved:inv.reserved+reserve,updatedAt:now});
-            transaction.update(whRef,{reserved:wh.reserved+reserve,updatedAt:now});
+            transaction.update(invRef,{reserved:inv.reserved+reserve,lastMutationOrderId:orderId,updatedAt:now});
+            transaction.update(whRef,{reserved:wh.reserved+reserve,lastMutationOrderId:orderId,updatedAt:now});
             transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
                 'reserve', reserve, orderId, productKey, actor, { reason:'order_restored', warehouseId }
             ));
@@ -6800,6 +6800,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         reserved: Math.max(0, inv.reserved + reservedDelta),
         incoming: inv.incoming,
         lots: invLots,
+        lastMutationOrderId: sourceId,
         updatedAt: now
     }, { merge:true });
     transaction.set(whRef, {
@@ -6808,6 +6809,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         reserved: Math.max(0, wh.reserved + reservedDelta),
         incoming: wh.incoming,
         lots: whLots,
+        lastMutationOrderId: sourceId,
         updatedAt: now
     }, { merge:true });
 
@@ -6865,8 +6867,8 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
         }
     }
 
-    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:inv.reserved,incoming:inv.incoming,lots:invLots,updatedAt:now},{merge:true});
-    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:wh.reserved,incoming:wh.incoming,lots:whLots,updatedAt:now},{merge:true});
+    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:inv.reserved,incoming:inv.incoming,lots:invLots,lastMutationOrderId:sourceId,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:wh.reserved,incoming:wh.incoming,lots:whLots,lastMutationOrderId:sourceId,updatedAt:now},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
