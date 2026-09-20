@@ -4391,7 +4391,8 @@ async function applyNewOrderReservationInTransaction(tx, orderRef, order) {
                 inventoryReservedQty: 0,
                 inventoryShortageQty: requested,
                 inventoryProductKey: productKey,
-                warehouseId
+                warehouseId,
+                inventoryReservationAppliedAt: new Date().toISOString()
             },
             reservation: { reservedQty: 0, shortageQty: requested, warehouseId }
         };
@@ -4406,7 +4407,8 @@ async function applyNewOrderReservationInTransaction(tx, orderRef, order) {
                 inventoryProductKey: productKey,
                 directShipQty: requested,
                 fulfillmentType: 'DIRECT_SHIP',
-                warehouseId: ''
+                warehouseId: '',
+                inventoryReservationAppliedAt: new Date().toISOString()
             },
             reservation: { reservedQty: 0, shortageQty: 0, directShip: true, warehouseId: '' }
         };
@@ -4442,7 +4444,8 @@ async function applyNewOrderReservationInTransaction(tx, orderRef, order) {
         inventoryShortageQty: shortage,
         inventoryProductKey: productKey,
         fulfillmentType: 'WAREHOUSE',
-        warehouseId
+        warehouseId,
+        inventoryReservationAppliedAt: now
     };
     tx.set(reservationDocRef(orderRef.id), {
         ...inventoryReservationPayload(orderRef.id, orderData, reservable, reservable > 0 ? 'active' : 'shortage'),
@@ -4491,8 +4494,7 @@ async function reserveInventoryForNewOrder(orderId, order) {
         const liveSnap = await tx.get(orderRef);
         if (!liveSnap.exists) throw new Error('找不到剛建立的訂單。');
         const live = liveSnap.data();
-        const existingReservation = await tx.get(reservationDocRef(orderId));
-        if (existingReservation.exists && ['active','shortage','fulfilled','direct_ship'].includes(existingReservation.data()?.status)) {
+        if (live.inventoryReservationAppliedAt) {
             reservation = {
                 reservedQty: Number(live.inventoryReservedQty || 0),
                 shortageQty: Number(live.inventoryShortageQty || 0),
