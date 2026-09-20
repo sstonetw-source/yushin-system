@@ -4353,11 +4353,13 @@ function configureInventoryAdjustmentMode(mode) {
     const typeSelect = document.getElementById('inventoryAdjustmentType');
     const hint = document.getElementById('inventoryAdjustmentHint');
     const addRowButton = document.getElementById('inventoryAdjustmentAddRowBtn');
+    const typeWrap = document.getElementById('inventoryAdjustmentTypeWrap');
     if (inventoryAdjustmentMode === 'add') {
         if (title) title.textContent = '新增庫存';
         if (typeSelect) typeSelect.innerHTML = '<option value="initial">新增庫存</option>';
         if (hint) hint.textContent = '可一次新增多個品項；請選擇倉庫並輸入實際新增數量，批號與效期可依需要填寫。';
         if (addRowButton) addRowButton.style.display = '';
+        if (typeWrap) typeWrap.style.display = 'none';
     } else {
         if (title) title.textContent = '調整庫存';
         if (typeSelect) typeSelect.innerHTML = [
@@ -4369,6 +4371,7 @@ function configureInventoryAdjustmentMode(mode) {
         ].join('');
         if (hint) hint.textContent = '此處只調整目前選取的品項。減少庫存／報廢請輸入正數；盤點調整可輸入正數或負數。';
         if (addRowButton) addRowButton.style.display = 'none';
+        if (typeWrap) typeWrap.style.display = '';
     }
 }
 
@@ -4472,7 +4475,10 @@ window.saveInventoryAdjustmentBatch = async function() {
     if(button){button.disabled=true;button.textContent='儲存中…';}
     try{
       for(const row of rows){
-        const match=findPriceItemByCodeValue(row.itemCode);
+        const priceMatch=findPriceItemByCodeValue(row.itemCode);
+        const match=priceMatch || (row.productId ? {
+          productId:row.productId, model:row.itemCode, nameCn:row.itemName, nameEn:'', brand:row.brand
+        } : null);
         if(!match) throw new Error(`Product Master 找不到貨號 ${row.itemCode}`);
         let delta=Number(row.qty||0);
         if(type==='initial' || type==='return' || type==='warehouse_allocation') delta=Math.abs(delta);
