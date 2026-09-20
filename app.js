@@ -8001,6 +8001,33 @@ async function getNextAssetIdFromCloud(salesName) {
     return prefix + String(seq + 1).padStart(5, '0');
 }
 
+async function createEquipmentWithUniqueAssetId(data) {
+    // 新紀錄直接用 assetId 當 document id；若同時有人搶到同一號，Firestore transaction
+    // 只會讓其中一筆成功，另一筆重新讀取最大號再試，避免分頁後或多人同時操作撞號。
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        const assetId = await getNextAssetIdFromCloud(data.salesName);
+        const ref = db.collection('equipment').doc(assetId);
+        let created = false;
+        await db.runTransaction(async transaction => {
+            const existing = await transaction.get(ref);
+            if (existing.exists) return;
+            transaction.set(ref, {
+                ...data,
+                assetId,
+                ownerUid: currentUser?.uid || '',
+                active: true,
+                status: 'ACTIVE',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                logs: []
+            });
+            created = true;
+        });
+        if (created) return ref.id;
+    }
+    throw new Error('儀器編號同時被其他人使用，請再按一次儲存。');
+}
+
 // 型號輸入時，若價目表中有對應資料，自動帶入廠牌
 // 保養週期勾選「免保養」時，週期輸入框變成不可用（畫面上直接顯示「免保養」的意思），
 // 狀態計算與到期提醒也會直接略過，不會再出現「即將到期／已逾期」
@@ -8149,20 +8176,14 @@ window.saveEquipmentFromModal = async function() {
     }
 
     data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode }) || data.customerId;
-    const ref = editId ? db.collection('equipment').doc(editId) : db.collection('equipment').doc();
     try {
-        const assetId = editId ? '' : await getNextAssetIdFromCloud(data.salesName);
-        const payload = editId ? data : {
-            ...data,
-            assetId,
-            ownerUid: currentUser?.uid || '',
-            active: true,
-            status: 'ACTIVE',
-            createdAt: new Date().toISOString(),
-            logs: []
-        };
-        await ref.set(payload, { merge: true });
-        const savedId = editId || ref.id;
+        let savedId;
+        if (editId) {
+            await db.collection('equipment').doc(editId).set(data, { merge: true });
+            savedId = editId;
+        } else {
+            savedId = await createEquipmentWithUniqueAssetId(data);
+        }
         rememberRecentCustomerName(data.customerName);
         await loadEquipmentFromCloudThenReopen(savedId);
         document.getElementById('eqSaveHint').innerText = '✓ 已儲存';
