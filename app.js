@@ -4335,6 +4335,7 @@ window.renderInventoryList=function(){
       <td data-th="可用庫存">${n.available}</td>
       <td data-th="在途">${n.incoming}</td>
       <td data-th="批號／效期">${lotHtml}</td>
+      <td data-th="操作">${canEditPage('inventory') ? `<button type="button" class="btn-small btn-secondary" onclick="openInventoryItemAdjustment('${escapeAttr(x.id||x.productKey||'')}')">調整</button>` : '－'}</td>
    </tr>`);
  });
 };
@@ -4441,16 +4442,17 @@ function renderInventoryAdjustmentRows() {
     const body=document.getElementById('inventoryAdjustmentRows');
     if(!body)return;
     const warehouseOptions=warehouseMasterCache.filter(w=>w.active!==false).map(w=>`<option value="${escapeAttr(w.id)}">${escapeHtml(w.warehouseName||w.id)}</option>`).join('');
+    const identityLocked = inventoryAdjustmentMode === 'item';
     body.innerHTML=inventoryAdjustmentRows.map((row,idx)=>`
       <tr>
-        <td><input type="text" list="priceModelList" value="${escapeAttr(row.itemCode||'')}" onchange="onInventoryAdjustmentCode(${idx},this.value)"></td>
-        <td><input type="text" value="${escapeAttr(row.itemName||'')}" onchange="updateInventoryAdjustmentRow(${idx},'itemName',this.value)"></td>
-        <td><input type="text" list="poBrandList" value="${escapeAttr(row.brand||'')}" onchange="updateInventoryAdjustmentRow(${idx},'brand',this.value)"></td>
+        <td><input type="text" list="priceModelList" value="${escapeAttr(row.itemCode||'')}" onchange="onInventoryAdjustmentCode(${idx},this.value)" ${identityLocked?'disabled':''}></td>
+        <td><input type="text" value="${escapeAttr(row.itemName||'')}" onchange="updateInventoryAdjustmentRow(${idx},'itemName',this.value)" ${identityLocked?'disabled':''}></td>
+        <td><input type="text" list="poBrandList" value="${escapeAttr(row.brand||'')}" onchange="updateInventoryAdjustmentRow(${idx},'brand',this.value)" ${identityLocked?'disabled':''}></td>
         <td><select onchange="updateInventoryAdjustmentRow(${idx},'warehouseId',this.value)"><option value="">請選倉庫</option>${warehouseOptions}</select></td>
         <td><input type="number" step="any" value="${row.qty||''}" onchange="updateInventoryAdjustmentRow(${idx},'qty',this.value)"></td>
         <td><input type="text" value="${escapeAttr(row.lotNo||'')}" onchange="updateInventoryAdjustmentRow(${idx},'lotNo',this.value)" placeholder="批號"></td>
         <td><input type="date" value="${escapeAttr(row.expiryDate||'')}" onchange="updateInventoryAdjustmentRow(${idx},'expiryDate',this.value)"></td>
-        <td><button type="button" class="btn-small btn-danger" onclick="removeInventoryAdjustmentRow(${idx})">刪除</button></td>
+        <td>${identityLocked ? '<span style="color:#888;">目前品項</span>' : `<button type="button" class="btn-small btn-danger" onclick="removeInventoryAdjustmentRow(${idx})">刪除</button>`}</td>
       </tr>`).join('');
     [...body.querySelectorAll('tr')].forEach((tr,idx)=>{
       const select=tr.querySelector('select');
@@ -4470,7 +4472,8 @@ window.saveInventoryAdjustmentBatch = async function() {
         const match=findPriceItemByCodeValue(row.itemCode);
         if(!match) throw new Error(`Product Master 找不到貨號 ${row.itemCode}`);
         let delta=Number(row.qty||0);
-        if(type==='scrap') delta=-Math.abs(delta);
+        if(type==='initial' || type==='return' || type==='warehouse_allocation') delta=Math.abs(delta);
+        if(type==='decrease' || type==='scrap') delta=-Math.abs(delta);
         const key=match.productId||stableProductId(match);
         const ref=db.collection('inventory').doc(encodeURIComponent(key));
         const whRef=row.warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(row.warehouseId,key)):null;
