@@ -5345,14 +5345,17 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             if (orderSnap.exists) sourceOrder = { id: orderSnap.id, ...orderSnap.data() };
         }
 
-        let reserveFromReceipt = 0;
-        if (sourceOrder && (sourceOrder.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP') {
-            const shortage = Math.max(0, Number(sourceOrder.inventoryShortageQty || 0));
-            reserveFromReceipt = Math.min(qty, shortage);
+        let reserveFromReceipt=0;
+        let sourceOrderItems=sourceOrder?normalizedOrderItems(sourceOrder):[];
+        const sourceItemIndex=Number(item.orderItemIndex||0);
+        const sourceItem=sourceOrderItems[sourceItemIndex]||null;
+        if(sourceItem&&(sourceItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
+            const shortage=Math.max(0,Number(sourceItem.inventoryShortageQty||0));
+            reserveFromReceipt=Math.min(qty,shortage);
         }
 
         const record = {
-            id:receiptId, itemIndex, productKey:key, productId:item.productId||'',
+            id:receiptId, itemIndex, orderId:item.orderId||'', orderItemIndex:Number(item.orderItemIndex||0), productKey:key, productId:item.productId||'',
             itemCode:item.itemCode||'', itemName:item.itemName||'', brand:resolveBrandName(item.brand||''),
             qty, lotNo, expiryDate, warehouseId, fulfillmentType:'WAREHOUSE',
             date:localDateString(), createdAt:now, createdBy:actor
@@ -5382,22 +5385,27 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             }, { merge:true });
         }
 
-        if (sourceOrder && reserveFromReceipt > 0) {
-            const shortage = Math.max(0, Number(sourceOrder.inventoryShortageQty || 0));
-            tx.update(db.collection('orders').doc(item.orderId), {
-                inventoryReservedQty:Number(sourceOrder.inventoryReservedQty||0)+reserveFromReceipt,
-                inventoryShortageQty:Math.max(0,shortage-reserveFromReceipt),
-                inventoryProductKey:key,
-                warehouseId
+        if(sourceOrder&&sourceItem&&reserveFromReceipt>0){
+            const itemShortage=Math.max(0,Number(sourceItem.inventoryShortageQty||0));
+            const nextSourceItems=sourceOrderItems.map((row,index)=>index===sourceItemIndex?{
+                ...row,inventoryReservedQty:Number(row.inventoryReservedQty||0)+reserveFromReceipt,
+                inventoryShortageQty:Math.max(0,itemShortage-reserveFromReceipt),inventoryProductKey:key,warehouseId
+            }:row);
+            const totalReserved=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryReservedQty||0),0);
+            const totalShortage=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryShortageQty||0),0);
+            tx.update(db.collection('orders').doc(item.orderId),{
+                items:nextSourceItems,itemCount:nextSourceItems.length,orderSchemaVersion:2,
+                inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage
             });
-            tx.set(reservationDocRef(item.orderId), {
-                ...inventoryReservationPayload(
-                    item.orderId, { ...sourceOrder, warehouseId },
-                    Math.max(0,Number(sourceOrder.inventoryReservedQty||0)-deliveredQuantity(sourceOrder))+reserveFromReceipt,
-                    'active'
-                ),
-                warehouseId
-            }, { merge:true });
+            const sourceItemId=String(sourceItem.itemId||`item-${sourceItemIndex+1}`);
+            tx.set(db.collection('inventoryReservations').doc(`${item.orderId}__${sourceItemId}`),{
+                orderId:item.orderId,itemId:sourceItemId,orderNo:sourceOrder.orderNo||sourceOrder.quoteNo||item.orderId,
+                productKey:key,itemCode:sourceItem.itemCode||'',itemName:sourceItem.itemName||'',
+                customerName:sourceOrder.customerName||'',salesCode:sourceOrder.salesCode||'',
+                salesName:sourceOrder.salesName||'',orderDate:sourceOrder.orderDate||'',
+                quantity:Number(sourceItem.inventoryReservedQty||0)+reserveFromReceipt,
+                shortageQty:Math.max(0,itemShortage-reserveFromReceipt),status:'active',warehouseId,updatedAt:now
+            },{merge:true});
         }
 
         tx.set(db.collection('inventoryMovements').doc(), {
