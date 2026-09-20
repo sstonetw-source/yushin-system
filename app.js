@@ -3739,99 +3739,57 @@ window.createForecastFromQuote = async function(quoteNo) {
     }
 };
 
-window.markQuoteAsDeal = function(quoteNo) {
-    if (!confirm(`確定要將估價單 ${quoteNo} 標記為成交嗎？裡面的品項會自動匯入訂單管理系統。`)) return;
-
-    db.collection('quotes').doc(quoteNo).get().then(doc => {
-        if (!doc.exists) {
-            alert('找不到這張估價單');
-            return;
-        }
-        const q = doc.data();
-        if (q.dealClosed) {
-            alert('這張估價單已經標記過成交了。');
-            return;
-        }
-
-        const today = new Date();
-        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-        const batch = db.batch();
-        const createdOrderLinks = [];
-        const createdOrders = [];
-        (q.items || []).forEach(item => {
-            if (!item.nameCn && !item.nameEn && !item.model) return;
-            const orderRef = db.collection('orders').doc();
-            createdOrderLinks.push(documentLink(DOCUMENT_TYPES.ORDER, orderRef.id, 'created'));
-            const orderData = {
-                orderDate: todayStr,
-                createdAt: new Date().toISOString(),
-                company: q.company || '',
-                customerName: q.ordererName || q.clientName || '',
-                customerId: q.customerId || customerIdForName(q.ordererName || q.clientName || ''),
-                brand: resolveBrandName(item.brand || ''),
-                productLine: item.productLine || '',
-                productType: item.productType || '',
-                productId: item.productId || '',
-                itemCode: item.model || '',
-                itemCodeKey: normalizeHistoryItemCode(item.model || ''),
-                itemName: item.nameCn || item.nameEn || '',
-                qty: item.qty || '',
-                unitPrice: item.price || '',
-                totalPrice: item.subtotal || '',
-                status: BUSINESS_STATUS.ACTIVE,
-                ...grossAmountMetadata(item.subtotal || 0),
-                transactionType: '',
-                invoiceTitle: q.clientName || '',
-                quoteNo: quoteNo,
-                ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE, quoteNo, [
-                    documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'source')
-                ]),
-                salesName: stripPhoneSuffix(q.salesName),
-                salesCode: q.salesCode || salesCodeForName(q.salesName),
-                ownerUid: q.ownerUid || salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(q.salesName))?.uid || '',
-                isOrdered: false,
-                isArrived: false,
-                isDelivered: false,
-                isBilled: false,
-                invoiceDate: ''
+window.markQuoteAsDeal = async function(quoteNo) {
+    if (!confirm(`確定要將估價單 ${quoteNo} 標記為成交嗎？所有品項會建立為同一張訂單。`)) return;
+    try {
+        const doc=await db.collection('quotes').doc(quoteNo).get();
+        if(!doc.exists) throw new Error('找不到這張估價單');
+        const q=doc.data();
+        if(q.dealClosed){alert('這張估價單已經標記過成交了。');return;}
+        const sourceItems=(q.items||[]).filter(item=>item.nameCn||item.nameEn||item.model);
+        if(!sourceItems.length) throw new Error('估價單沒有可建立訂單的品項。');
+        const items=sourceItems.map((item,index)=>{
+            const brand=resolveBrandName(item.brand||'');
+            const priceMatch=item.model?findPriceItemForOrder({itemCode:item.model,brand}):null;
+            const row={
+                itemId:`item-${index+1}`, productId:item.productId||priceMatch?.productId||(priceMatch?stableProductId(priceMatch):''),
+                itemCode:item.model||'', itemCodeKey:normalizeHistoryItemCode(item.model||''),
+                itemName:item.nameCn||item.nameEn||'', brand, productLine:item.productLine||priceMatch?.productLine||'',
+                productType:item.productType||priceMatch?.productType||'', spec:item.spec||priceMatch?.spec||'',
+                supplier:priceMatch?.supplier||'', qty:Number(item.qty||1), unit:item.unit||priceMatch?.unit||'',
+                unitPrice:parseMoney(item.price||0), totalPrice:parseMoney(item.subtotal||0),
+                fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id||''
             };
-            // Product Master 關聯保留；成本依代理/非代理與角色處理，避免代理產品成本寫入業務可讀的訂單文件。
-            const priceMatch = item.model ? findPriceItemForOrder({ itemCode: item.model, brand: resolveBrandName(item.brand || '') }) : null;
-            if (priceMatch) {
-                orderData.productId = orderData.productId || priceMatch.productId || stableProductId(priceMatch);
-                orderData.unit = priceMatch.unit || '';
-                orderData.supplier = priceMatch.supplier || '';
-                orderData.spec = item.spec || priceMatch.spec || '';
-                orderData.authorizationType = authorizationTypeForProduct(priceMatch);
-                if (authorizationTypeForProduct(priceMatch) === 'NON_AUTHORIZED'
-                    && priceMatch.cost !== undefined && priceMatch.cost !== null && String(priceMatch.cost).trim() !== '') {
-                    orderData.costPrice = priceMatch.cost;
-                }
-            }
-            ensureOrderItemCompatibility(orderData);
-        orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
-            batch.set(orderRef, orderData);
-            createdOrders.push({ id: orderRef.id, data: orderData });
+            if(priceMatch&&authorizationTypeForProduct(priceMatch)==='NON_AUTHORIZED'&&priceMatch.cost!==undefined) row.costPrice=priceMatch.cost;
+            return row;
         });
-
-        batch.update(db.collection('quotes').doc(quoteNo), {
-            dealClosed: true,
-            dealClosedAt: todayStr,
-            status: BUSINESS_STATUS.COMPLETED,
-            linkedDocuments: normalizeDocumentLinks([...(q.linkedDocuments || []), ...createdOrderLinks])
+        const first=items[0], totalPrice=items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0);
+        const orderRef=db.collection('orders').doc();
+        const todayStr=localDateString();
+        const orderData={
+            orderDate:todayStr,createdAt:new Date().toISOString(),company:q.company||'',
+            customerName:q.ordererName||q.clientName||'',customerId:q.customerId||customerIdForName(q.ordererName||q.clientName||''),
+            ...first,qty:first.qty,unitPrice:first.unitPrice,totalPrice,
+            items,itemCount:items.length,orderSchemaVersion:2,status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(totalPrice),
+            transactionType:'',invoiceTitle:q.clientName||'',quoteNo,
+            ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE,quoteNo,[documentLink(DOCUMENT_TYPES.QUOTE,quoteNo,'source')]),
+            salesName:stripPhoneSuffix(q.salesName),salesCode:q.salesCode||salesCodeForName(q.salesName),
+            ownerUid:q.ownerUid||salesList.find(s=>stripPhoneSuffix(s.name)===stripPhoneSuffix(q.salesName))?.uid||'',
+            isOrdered:false,isArrived:false,isDelivered:false,isBilled:false,invoiceDate:''
+        };
+        orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
+        const batch=db.batch();
+        batch.set(orderRef,orderData);
+        batch.update(db.collection('quotes').doc(quoteNo),{
+            dealClosed:true,dealClosedAt:todayStr,status:BUSINESS_STATUS.COMPLETED,
+            linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')])
         });
-
-        batch.commit().then(async () => {
-            await Promise.all(createdOrders.map(entry => reserveInventoryForNewOrder(entry.id, entry.data)));
-            alert('已標記成交，品項已匯入訂單管理系統並完成可用庫存保留。');
-            loadMyQuotesFromCloud();
-        }).catch(err => {
-            alert('匯入失敗：' + err.message);
-        });
-    }).catch(err => {
-        alert('讀取估價單失敗：' + err.message);
-    });
+        await batch.commit();
+        await reserveInventoryForNewOrder(orderRef.id,orderData);
+        ordersCache=[{id:orderRef.id,...orderData},...ordersCache.filter(o=>o.id!==orderRef.id)];
+        alert(`已標記成交，${items.length} 個品項已建立為 1 張訂單並執行庫存保留。`);
+        loadMyQuotesFromCloud();
+    } catch(err){alert('匯入失敗：'+err.message);}
 };
 
 window.unmarkQuoteAsDeal = async function(quoteNo) {
