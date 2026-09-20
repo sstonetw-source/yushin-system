@@ -537,7 +537,10 @@
         <!-- 我的估價單：只列出目前登入者自己名下的估價單 -->
         <div id="myQuotesPanel" style="display:none;">
             <div class="toolbar no-print">
-                <input type="text" id="myQuoteSearch" placeholder="搜尋單號 / 抬頭 / 客戶 / 廠牌 / 品項" style="width:260px;" oninput="renderMyQuotesList()">
+                <input type="text" id="myQuoteSearch" placeholder="搜尋全部歷史：單號 / 抬頭 / 客戶 / 廠牌 / 品項" style="width:260px;" oninput="scheduleQuoteHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();scheduleQuoteHistorySearch();}">
+                <button type="button" class="btn-secondary" onclick="clearQuoteHistorySearch()">清除搜尋</button>
+                <span id="quoteHistorySearchStatus" style="font-size:12px;color:#666;"></span>
+                <button type="button" id="quoteHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreQuoteHistorySearch()">載入更多搜尋結果</button>
                 <select id="myQuotePeriodFilter" onchange="renderMyQuotesList()">
                     <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
                 </select>
@@ -685,8 +688,7 @@
 
         <div id="orderListPanel">
         <div class="toolbar no-print order-primary-toolbar">
-            <input type="text" id="orderSearch" placeholder="搜尋客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="if(orderHistorySearchActive){orderHistorySearchActive=false;orderHistorySearchResults=[];} renderOrdersList()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
-            <button type="button" class="btn-secondary" onclick="searchAllOrderHistory()">🔎 全歷史貨號</button>
+            <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
             <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
             <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
             <button type="button" id="orderHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrderHistorySearch()">載入更多搜尋結果</button>
@@ -1214,11 +1216,11 @@
                 <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
-            <h4 style="margin-top:28px;">舊訂單搜尋索引</h4>
+            <h4 style="margin-top:28px;">估價單／訂單全歷史搜尋索引</h4>
             <div class="toolbar no-print" style="display:block;">
-                <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正舊訂單貨號索引</button>
+                <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正全歷史搜尋索引</button>
                 <span style="font-size:12px;color:#666;">
-                    供「全歷史貨號搜尋」使用。系統每次只讀取 200 筆並分批寫入，只補上缺少或不一致的 itemCodeKey；不會改變訂單金額、狀態或其他商業資料。通常只需在升級後執行一次。
+                    供估價單與訂單的完整歷史搜尋使用。系統每次只讀取 200 筆並分批寫入 searchTokens；訂單同時保留標準化貨號 itemCodeKey。只新增搜尋索引，不會修改金額、狀態或流程紀錄。升級後執行一次即可，重複執行也安全。
                 </span>
                 <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
