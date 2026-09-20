@@ -4316,77 +4316,68 @@ function orderReservedQuantity(order) {
     return Math.max(0, orderQuantity(order) - deliveredQuantity(order));
 }
 
-async function reserveInventoryForNewOrder(orderId, order) {
-    if (!warehouseMasterCache.length) await loadSupplierWarehouseMasters();
-    const requested = orderQuantity(order);
-    const productKey = inventoryProductKey(order);
-    if (!requested || !productKey) return { reservedQty: 0, shortageQty: requested };
-
-    // 原廠直送完全繞過庫存；不建立 reservation、不動 aggregate inventory。
-    if ((order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
-        await db.collection('orders').doc(orderId).set({
-            inventoryReservedQty: 0,
-            inventoryShortageQty: 0,
-            inventoryProductKey: productKey,
-            directShipQty: requested,
-            fulfillmentType: 'DIRECT_SHIP',
-            warehouseId: ''
-        }, { merge: true });
-        return { reservedQty: 0, shortageQty: 0, directShip: true };
+async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
+    const requested=Math.max(0,Number(item.qty||0));
+    const productKey=inventoryProductKey(item);
+    const itemId=String(item.itemId||`item-${itemIndex+1}`);
+    if(!requested||!productKey)return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:requested,inventoryProductKey:productKey};
+    if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
+        return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:0,inventoryProductKey:productKey,directShipQty:requested,warehouseId:''};
     }
-
-    const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
-    const aggregateRef = inventoryRefFor(order);
-    const warehouseRef = warehouseId
-        ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey))
-        : null;
-    const actor = currentUserName || currentUser?.email || '';
-    let result;
-
-    await db.runTransaction(async tx => {
-        const aggregateSnap = aggregateRef ? await tx.get(aggregateRef) : null;
-        const warehouseSnap = warehouseRef ? await tx.get(warehouseRef) : null;
-
-        // 有分倉資料時，庫存占用以指定倉庫為準；舊資料尚未分倉則不猜位置，整筆列 shortage。
-        const warehouseStock = warehouseSnap?.exists ? inventoryNumbers(warehouseSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
-        const aggregateStock = aggregateSnap?.exists ? inventoryNumbers(aggregateSnap.data()) : { onHand:0, reserved:0, available:0, incoming:0 };
-        const reservable = Math.max(0, Math.min(requested, warehouseStock.available));
-        const shortage = Math.max(0, requested - reservable);
-        const now = new Date().toISOString();
-
-        if (warehouseRef && warehouseSnap?.exists && reservable) {
-            tx.update(warehouseRef, {
-                reserved: warehouseStock.reserved + reservable,
-                updatedAt: now
-            });
+    const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
+    const aggregateRef=inventoryRefFor(item);
+    const warehouseRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
+    const actor=currentUserName||currentUser?.email||'';
+    let result={...item,itemId,inventoryReservedQty:0,inventoryShortageQty:requested,inventoryProductKey:productKey,warehouseId};
+    await db.runTransaction(async tx=>{
+        const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
+        const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
+        const aggregate=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{});
+        const warehouse=inventoryNumbers(warehouseSnap?.exists?warehouseSnap.data():{});
+        const reservable=Math.max(0,Math.min(requested,warehouse.available,aggregate.available));
+        const shortage=Math.max(0,requested-reservable);
+        const now=new Date().toISOString();
+        if(reservable){
+            if(aggregateRef&&aggregateSnap?.exists)tx.update(aggregateRef,{reserved:aggregate.reserved+reservable,updatedAt:now});
+            if(warehouseRef&&warehouseSnap?.exists)tx.update(warehouseRef,{reserved:warehouse.reserved+reservable,updatedAt:now});
+            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve',reservable,orderId,productKey,actor,{warehouseId,itemId,fulfillmentType:'WAREHOUSE'}));
         }
-        if (aggregateRef && aggregateSnap?.exists && reservable) {
-            tx.update(aggregateRef, {
-                reserved: aggregateStock.reserved + reservable,
-                updatedAt: now
-            });
-        }
-
-        if (reservable) {
-            tx.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
-                'reserve', reservable, orderId, productKey, actor, { warehouseId, fulfillmentType:'WAREHOUSE' }
-            ));
-        }
-
-        tx.update(db.collection('orders').doc(orderId), {
-            inventoryReservedQty: reservable,
-            inventoryShortageQty: shortage,
-            inventoryProductKey: productKey,
-            fulfillmentType: 'WAREHOUSE',
-            warehouseId
-        });
-        tx.set(reservationDocRef(orderId), {
-            ...inventoryReservationPayload(orderId, { ...order, warehouseId }, reservable, reservable > 0 ? 'active' : 'shortage'),
-            warehouseId
-        }, { merge: true });
-        result = { reservedQty: reservable, shortageQty: shortage, warehouseId };
+        tx.set(db.collection('inventoryReservations').doc(`${orderId}__${itemId}`),{
+            orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
+            itemCode:item.itemCode||'',itemName:item.itemName||'',customerName:order.customerName||'',
+            salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',
+            orderDate:order.orderDate||'',quantity:reservable,shortageQty:shortage,
+            status:reservable>0?'active':'shortage',warehouseId,updatedAt:now
+        },{merge:true});
+        result={...item,itemId,inventoryReservedQty:reservable,inventoryShortageQty:shortage,inventoryProductKey:productKey,warehouseId};
     });
     return result;
+}
+
+async function reserveInventoryForNewOrder(orderId, order) {
+    if(!warehouseMasterCache.length)await loadSupplierWarehouseMasters();
+    const items=normalizedOrderItems(order);
+    if(items.length<=1){
+        const item=await reserveSingleOrderItem(orderId,order,items[0]||legacyOrderItemFromOrder(order),0);
+        const updates={
+            items:[item],itemCount:1,orderSchemaVersion:2,
+            inventoryReservedQty:Number(item.inventoryReservedQty||0),
+            inventoryShortageQty:Number(item.inventoryShortageQty||0),
+            inventoryProductKey:item.inventoryProductKey||'',
+            fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:item.warehouseId||''
+        };
+        await db.collection('orders').doc(orderId).set(updates,{merge:true});
+        Object.assign(order,updates);
+        return {reservedQty:updates.inventoryReservedQty,shortageQty:updates.inventoryShortageQty,items:[item]};
+    }
+    const reservedItems=[];
+    for(let i=0;i<items.length;i++) reservedItems.push(await reserveSingleOrderItem(orderId,order,items[i],i));
+    const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.inventoryReservedQty||0),0);
+    const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.inventoryShortageQty||0),0);
+    const updates={items:reservedItems,itemCount:reservedItems.length,orderSchemaVersion:2,inventoryReservedQty:reservedQty,inventoryShortageQty:shortageQty};
+    await db.collection('orders').doc(orderId).set(updates,{merge:true});
+    Object.assign(order,updates);
+    return {reservedQty,shortageQty,items:reservedItems};
 }
 
 function legacyOrderItemFromOrder(order, index = 0) {
@@ -4441,8 +4432,10 @@ function ensureOrderItemCompatibility(order) {
 }
 
 function orderQuantity(order) {
-    const qty = parseFloat(order?.qty);
-    return Number.isFinite(qty) && qty > 0 ? qty : 0;
+    const items=normalizedOrderItems(order);
+    if(items.length>1)return items.reduce((sum,item)=>sum+Math.max(0,Number(item.qty||0)),0);
+    const qty=parseFloat(order?.qty ?? items[0]?.qty);
+    return Number.isFinite(qty)&&qty>0?qty:0;
 }
 
 function savedDeliveryRecords(order) {
