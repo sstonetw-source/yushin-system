@@ -4531,15 +4531,20 @@ function purchaseProgressInfo(order) {
 
 function fulfillmentProgressInfo(order) {
     const items=normalizedOrderItems(order).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+    const records=savedDeliveryRecords(order);
     const total=items.reduce((s,item)=>s+Number(item.orderedQty||item.qty||0),0);
     const ready=items.reduce((s,item)=>s+Math.min(Number(item.orderedQty||item.qty||0),Number(item.reservedQty??item.inventoryReservedQty??0)),0);
     const prepared=items.reduce((s,item)=>s+Math.min(Number(item.orderedQty||item.qty||0),Number(item.dispatchPreparedQty||0)),0);
-    const delivered=items.reduce((s,item)=>s+Number(item.deliveredQty||0),0);
+    const delivered=items.reduce((sum,item)=>{
+        const itemDelivered=records.filter(r=>(r.itemId||items.length===1&&item.itemId)===item.itemId).reduce((s,r)=>s+Number(r.qty||0),0);
+        return sum+itemDelivered;
+    },0);
     const shippable=Math.max(0,prepared-delivered);
-    if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,shippable:0};
-    if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,shippable};
-    if(ready>0)return {state:ready>=total?'pending_dispatch':'partial_dispatch',label:`待打單 ${Math.max(0,ready-prepared)}/${total}`,total,ready,prepared,shippable};
-    return {state:'pending',label:`待備貨 0/${total}`,total,ready,prepared,shippable};
+    const pendingDispatch=Math.max(0,ready-prepared);
+    if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
+    if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
+    if(pendingDispatch>0)return {state:ready>=total?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
+    return {state:'pending',label:`待備貨 0/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
 }
 
 function orderProgressInfo(order) {
@@ -6645,6 +6650,21 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     if (normalizedOrderStatus(cachedOrder) !== 'normal') { alert('已取消的訂單不能送貨。'); return; }
     if (cachedProgress.state === 'complete') return quickCancelAllDelivery(orderId);
     if (cachedProgress.remaining <= 0) return;
+    const fulfillment=fulfillmentProgressInfo(cachedOrder);
+    const warehouseItems=normalizedOrderItems(cachedOrder).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+    if (warehouseItems.length > 1) {
+        alert('多品項訂單請逐品項登錄送貨，避免扣錯庫存。');
+        openDeliveryModal(orderId);
+        openPartialDeliveryForm();
+        return;
+    }
+    if (warehouseItems.length && fulfillment.shippable < cachedProgress.remaining) {
+        alert(fulfillment.shippable > 0
+            ? `目前只有 ${fulfillment.shippable} 個已完成打單可出貨，請使用分批送貨。`
+            : '目前尚未完成打單，不能送貨。');
+        if (fulfillment.shippable > 0) { openDeliveryModal(orderId); openPartialDeliveryForm(); }
+        return;
+    }
     const today = localDateString();
     const optimisticBefore = {
         deliveryRecords: savedDeliveryRecords(cachedOrder).slice(), deliveredQty: cachedOrder.deliveredQty,
@@ -6884,8 +6904,12 @@ window.saveDeliveryRecord = async function() {
             const requestedItemId=document.getElementById('deliveryItemId')?.value||orderItems[0]?.itemId||'item-1';
             const targetItem=orderItems.find(item=>item.itemId===requestedItemId)||orderItems[0];
             if(!targetItem)throw new Error('找不到送貨品項。');
-            const itemOtherDelivered=records.filter(r=>r.id!==editId&&(!r.itemId&&orderItems.length===1||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
+            const itemOtherDelivered=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
             if(itemOtherDelivered+qty>Number(targetItem.qty||0)+1e-9)throw new Error(`${targetItem.itemName||'品項'} 累計送貨數量超過訂購數量。`);
+            if((targetItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
+                const preparedQty=Number(targetItem.dispatchPreparedQty||0);
+                if(itemOtherDelivered+qty>preparedQty+1e-9)throw new Error(`${targetItem.itemName||'品項'} 目前已打單可出貨數量只有 ${Math.max(0,preparedQty-itemOtherDelivered)}。`);
+            }
             const record = previous
                 ? { ...previous, itemId:targetItem.itemId, date, qty, notes, updatedBy: actor, updatedAt: now }
                 : { id: deliveryRecordId(), itemId:targetItem.itemId, date, qty, notes, createdBy: actor, createdAt: now };
