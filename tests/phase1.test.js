@@ -1094,3 +1094,11 @@ test('V2 backup and storage audit include fulfillment and protected cost collect
     assert.match(appSource, /受保護批次成本/);
     assert.match(appSource, /供應／訂貨紀錄/);
 });
+
+
+test('V2 admin UI documents safe migration-before-rules deployment order', () => {
+    assert.match(indexSource, /下載完整資料庫備份/);
+    assert.match(indexSource, /庫存成本隔離，直到顯示 0/);
+    assert.match(indexSource, /再部署新版 Firestore Rules \/ Indexes/);
+    assert.match(indexSource, /不要先部署新版 Rules/);
+});
