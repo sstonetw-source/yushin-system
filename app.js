@@ -8070,7 +8070,9 @@ window.loadEquipmentFromCloud = function() {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         equipmentList = [];
         snapshot.forEach(doc => {
-            equipmentList.push({ id: doc.id, ...doc.data() });
+            const data = doc.data() || {};
+            if (data.active === false) return;
+            equipmentList.push({ id: doc.id, ...data });
         });
         if (!canViewAllEquipment()) {
             equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
@@ -8343,12 +8345,22 @@ window.saveEquipmentFromModal = function() {
 };
 
 window.deleteEquipment = function(eqId) {
-    if (!confirm('確定要刪除這台儀器的所有紀錄嗎？此動作無法復原。')) return;
-    db.collection('equipment').doc(eqId).delete().then(() => {
-        loadEquipmentFromCloud();
+    const eq = equipmentList.find(item => item.id === eqId);
+    if (!eq) return;
+    if (!confirm('確定要停用這台儀器嗎？既有維修／保養紀錄會保留，可由管理員後續恢復。')) return;
+    const now = new Date().toISOString();
+    db.collection('equipment').doc(eqId).set({
+        active:false,
+        disabledAt:now,
+        disabledByUid:currentUser?.uid || '',
+        disabledBy:currentUserName || currentUser?.email || '',
+        updatedAt:now
+    }, { merge:true }).then(() => {
+        equipmentList = equipmentList.filter(item => item.id !== eqId);
+        renderEquipmentList();
         closeEquipmentModal();
     }).catch(err => {
-        alert('刪除失敗：' + err.message);
+        alert('停用失敗：' + err.message);
     });
 };
 
