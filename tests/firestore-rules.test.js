@@ -168,6 +168,7 @@ test('operational lot is readable but embedded lot cost is denied to business ro
   await seed('inventoryLots/legacyCostLot', { productId:'p1', productKey:'p1', warehouseId:'w1', remainingQty:5, unitCost:100 });
   await assertSucceeds(getDoc(doc(db('sales1'), 'inventoryLots/publicLot')));
   await assertFails(getDoc(doc(db('sales1'), 'inventoryLots/legacyCostLot')));
+  await assertSucceeds(getDoc(doc(db('admin'), 'inventoryLots/legacyCostLot')));
 });
 
 test('lot cost is physically protected from sales engineer and warehouse', async () => {
@@ -208,6 +209,8 @@ test('shared stock documents reject embedded cost fields', async () => {
   await seed('warehouseStocks/legacyCost', { onHand:2, reserved:0, unitCost:100 });
   await assertFails(getDoc(doc(db('sales1'), 'inventory/legacyCost')));
   await assertFails(getDoc(doc(db('sales1'), 'warehouseStocks/legacyCost')));
+  await assertSucceeds(getDoc(doc(db('admin'), 'inventory/legacyCost')));
+  await assertSucceeds(getDoc(doc(db('admin'), 'warehouseStocks/legacyCost')));
   await assertFails(setDoc(doc(db('wh1'), 'inventory/newCost'), { onHand:1, reserved:0, unitCost:50 }));
   await assertFails(setDoc(doc(db('wh1'), 'warehouseStocks/newCost'), { onHand:1, reserved:0, cost:50 }));
 });
