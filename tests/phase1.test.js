@@ -464,7 +464,7 @@ test('phase 5 cancelling and restoring orders adjusts reservations without delet
     const end=appSource.indexOf('window.quickSetOrderLifecycle',start);
     const s=appSource.slice(start,end);
     assert.match(s,/nextStatus === 'cancelled'/);
-    assert.match(s,/nextStatus === 'normal'/);
+    assert.match(s,/order_restored/);
     assert.match(s,/inventoryMovementRecord\([\s\S]*?'release'/);
     assert.doesNotMatch(s,/\.delete\(/);
 });
