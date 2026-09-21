@@ -30,7 +30,7 @@ test.after(async () => {
 
 test.beforeEach(async () => {
   await env.clearFirestore();
-  await seed('users/admin', { role:'admin', active:true, salesCode:'ADM' });
+  await seed('users/admin', { role:'admin', email:'admin@admin.com', name:'admin', salesCode:'ADM' });
   await seed('users/sales1', { role:'sales', active:true, salesCode:'S01', productLineIds:['roche'] });
   await seed('users/sales2', { role:'sales', active:true, salesCode:'S02', productLineIds:[] });
   await seed('users/eng1', { role:'engineer', active:true, salesCode:'E01', productLineIds:['thermo'] });
@@ -237,4 +237,14 @@ test('warehouse purchase order update is limited to receipt workflow fields', as
 test('signed-in user can bootstrap-read own user profile', async () => {
   await assertSucceeds(getDoc(doc(db('sales1'), 'users/sales1')));
   await assertFails(getDoc(doc(db('unknown-user'), 'users/sales1')));
+});
+
+
+test('admin without active field can read core production collections', async () => {
+  await seed('forecasts/f-admin', { ownerUid:'sales1', salesCode:'S01', status:'進行中' });
+  await seed('orders/o-admin', { ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-21' });
+  await seed('inventory/i-admin', { onHand:1, reserved:0 });
+  await assertSucceeds(getDoc(doc(db('admin'), 'forecasts/f-admin')));
+  await assertSucceeds(getDoc(doc(db('admin'), 'orders/o-admin')));
+  await assertSucceeds(getDoc(doc(db('admin'), 'inventory/i-admin')));
 });
