@@ -4566,19 +4566,16 @@ function purchaseProgressInfo(order) {
 
 function fulfillmentProgressInfo(order) {
     const items=normalizedOrderItems(order).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
-    const records=savedDeliveryRecords(order);
     const total=items.reduce((s,item)=>s+Number(item.orderedQty||item.qty||0),0);
-    const ready=items.reduce((s,item)=>s+Math.min(Number(item.orderedQty||item.qty||0),Number(item.reservedQty??item.inventoryReservedQty??0)),0);
-    const prepared=items.reduce((s,item)=>s+Math.min(Number(item.orderedQty||item.qty||0),Number(item.dispatchPreparedQty||0)),0);
-    const delivered=items.reduce((sum,item)=>{
-        const itemDelivered=records.filter(r=>(r.itemId||items.length===1&&item.itemId)===item.itemId).reduce((s,r)=>s+Number(r.qty||0),0);
-        return sum+itemDelivered;
-    },0);
-    const shippable=Math.max(0,prepared-delivered);
-    const pendingDispatch=Math.max(0,ready-prepared);
+    const states=items.map(item=>itemDispatchState(order,item));
+    const ready=states.reduce((s,state)=>s+state.reserved,0);
+    const prepared=states.reduce((s,state)=>s+state.prepared,0);
+    const delivered=states.reduce((s,state)=>s+state.delivered,0);
+    const shippable=states.reduce((s,state)=>s+state.shippable,0);
+    const pendingDispatch=states.reduce((s,state)=>s+state.pending,0);
     if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
     if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
-    if(pendingDispatch>0)return {state:ready>=total?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
+    if(pendingDispatch>0)return {state:ready>=Math.max(0,total-delivered)?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     return {state:'pending',label:`待備貨 0/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
 }
 
