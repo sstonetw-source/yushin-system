@@ -4351,10 +4351,10 @@ window.openInventoryReservationDetails = async function(productKey) {
     if (title) title.innerText = '已占用訂單';
     overlay.classList.add('active');
     try {
-        const snapshot = await db.collection('inventoryReservations').where('productKey', '==', productKey).limit(100).get();
+        const snapshot = await db.collection('inventoryReservations').where('productKey', '==', productKey).where('status','==','active').limit(100).get();
         const rows = snapshot.docs
             .map(doc => ({ id: doc.id, ...doc.data() }))
-            .filter(item => item.status === 'active' && Number(item.quantity || 0) > 0)
+            .filter(item => Number(item.quantity || 0) > 0)
             .sort((x, y) => String(y.orderDate || '').localeCompare(String(x.orderDate || '')));
         body.innerHTML = rows.length ? rows.map(item => `<tr>
             <td>${escapeHtml(item.orderNo || item.orderId || item.id)}</td>
