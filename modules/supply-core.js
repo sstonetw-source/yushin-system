@@ -90,5 +90,11 @@
     }
     return result;
   }
-  return {TYPES,normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,sortLotsForIssue,allocateLots,reverseLotAllocations,allocationsAfterReversal};
+  function availableReturnAllocations(deliveries=[],returns=[]){
+    let allocations=[];
+    for(const delivery of deliveries)allocations.push(...(Array.isArray(delivery.lotAllocations)?delivery.lotAllocations:[]));
+    for(const returned of returns)allocations=allocationsAfterReversal(allocations,Array.isArray(returned.lotAllocations)?returned.lotAllocations:[]);
+    return allocations;
+  }
+  return {TYPES,normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,sortLotsForIssue,allocateLots,reverseLotAllocations,allocationsAfterReversal,availableReturnAllocations};
 });
