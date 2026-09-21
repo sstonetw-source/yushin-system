@@ -144,3 +144,20 @@ test('purchaser order mutation is limited to dispatch items and updatedAt', asyn
     customerName:'Changed'
   }));
 });
+
+test('purchaser cannot mutate forecasts as a dispatch workaround', async () => {
+  await seed('forecasts/f1', { ownerUid:'sales1', salesCode:'S01', status:'進行中' });
+  await assertFails(updateDoc(doc(db('buyer1'), 'forecasts/f1'), { status:'win' }));
+});
+
+test('warehouse can update receipt-driven order quantities but not commercial fields', async () => {
+  await seed('orders/receipt1', {
+    ownerUid:'sales1', salesCode:'S01', customerName:'A',
+    items:[{ itemId:'i1', qty:5, reservedQty:0, shortageQty:5 }]
+  });
+  await assertSucceeds(updateDoc(doc(db('wh1'), 'orders/receipt1'), {
+    items:[{ itemId:'i1', qty:5, reservedQty:2, shortageQty:3 }],
+    itemCount:1, orderSchemaVersion:2, updatedAt:'2026-09-21T00:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'orders/receipt1'), { customerName:'Changed' }));
+});
