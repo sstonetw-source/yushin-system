@@ -232,3 +232,9 @@ test('warehouse purchase order update is limited to receipt workflow fields', as
     items:[{ itemCode:'A', qty:999, unitPrice:1 }]
   }));
 });
+
+
+test('signed-in user can bootstrap-read own user profile', async () => {
+  await assertSucceeds(getDoc(doc(db('sales1'), 'users/sales1')));
+  await assertFails(getDoc(doc(db('unknown-user'), 'users/sales1')));
+});
