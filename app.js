@@ -2207,13 +2207,17 @@ window.disableSupplierMapping = async function(id) {
 
 window.saveWarehouseMaster = async function() {
     const status = document.getElementById('warehouseMasterStatus');
-    if (trueUserRole !== 'admin' && currentUserRole !== 'admin') {
+    const button = document.querySelector('[onclick="saveWarehouseMaster()"]');
+    if (trueUserRole !== 'admin') {
         if (status) status.innerText = '只有管理員可以新增或修改倉庫。';
         return;
     }
     const name = String(document.getElementById('warehouseMasterName')?.value || '').trim();
     const makeDefault = !!document.getElementById('warehouseMasterDefault')?.checked;
     if (!name) { if (status) status.innerText = '請輸入倉庫名稱。'; return; }
+    if (button?.disabled) return;
+    if (button) button.disabled = true;
+    if (status) status.innerText = '儲存中…';
     try {
         const id = stableMasterId('wh', name);
         const now = new Date().toISOString();
@@ -2231,7 +2235,10 @@ window.saveWarehouseMaster = async function() {
         if (status) status.innerText = '倉庫已儲存。';
         const input=document.getElementById('warehouseMasterName'); if(input) input.value='';
     } catch (err) {
-        if (status) status.innerText = '儲存失敗：' + err.message;
+        console.error('儲存倉庫失敗：', err);
+        if (status) status.innerText = '儲存失敗：' + (err.code === 'permission-denied' ? 'Firestore 權限不足，請確認目前帳號為管理員並已部署最新 Rules。' : err.message);
+    } finally {
+        if (button) button.disabled = false;
     }
 };
 
