@@ -76,7 +76,7 @@ test('engineer self-order is allowed but formal purchase order is denied', async
 });
 
 test('business owner can perform only scoped fulfillment stock updates', async () => {
-  await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1', unitCost:100 });
+  await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1' });
   await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { reserved:3 }));
   await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { safetyStock:4 }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { productId:'hijack' }));
@@ -200,4 +200,32 @@ test('business owner can read own self-order but not formal supply order cost re
   await seed('supplyOrders/formal1', { type:'PURCHASING_PO', ownerUid:'sales1', salesCode:'S01', unitCost:80 });
   await assertSucceeds(getDoc(doc(db('sales1'), 'supplyOrders/self1')));
   await assertFails(getDoc(doc(db('sales1'), 'supplyOrders/formal1')));
+});
+
+
+test('shared stock documents reject embedded cost fields', async () => {
+  await seed('inventory/legacyCost', { onHand:2, reserved:0, unitCost:100 });
+  await seed('warehouseStocks/legacyCost', { onHand:2, reserved:0, unitCost:100 });
+  await assertFails(getDoc(doc(db('sales1'), 'inventory/legacyCost')));
+  await assertFails(getDoc(doc(db('sales1'), 'warehouseStocks/legacyCost')));
+  await assertFails(setDoc(doc(db('wh1'), 'inventory/newCost'), { onHand:1, reserved:0, unitCost:50 }));
+  await assertFails(setDoc(doc(db('wh1'), 'warehouseStocks/newCost'), { onHand:1, reserved:0, cost:50 }));
+});
+
+test('warehouse purchase order update is limited to receipt workflow fields', async () => {
+  await seed('purchaseOrders/po-receive', {
+    poNo:'PO-1', vendorName:'Vendor', items:[{ itemCode:'A', qty:5, unitPrice:100 }],
+    status:'active', receiptStatus:'pending', receiptRecords:[]
+  });
+  await assertSucceeds(updateDoc(doc(db('wh1'), 'purchaseOrders/po-receive'), {
+    receiptRecords:[{ itemIndex:0, qty:2 }],
+    receiptStatus:'partial',
+    updatedAt:'2026-09-21T00:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'purchaseOrders/po-receive'), {
+    vendorName:'Changed'
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'purchaseOrders/po-receive'), {
+    items:[{ itemCode:'A', qty:999, unitPrice:1 }]
+  }));
 });
