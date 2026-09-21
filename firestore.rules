@@ -52,6 +52,13 @@ service cloud.firestore {
       return admin() || purchaser() || warehouse();
     }
 
+    function warehousePurchaseReceiptUpdate() {
+      return warehouse()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'receiptRecords', 'receiptStatus', 'status', 'updatedAt'
+        ]);
+    }
+
     function canManageEquipment() {
       return admin() || engineer();
     }
@@ -268,7 +275,8 @@ service cloud.firestore {
     // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
     match /purchaseOrders/{id} {
       allow read: if admin() || purchaser() || warehouse();
-      allow create, update: if canPurchase();
+      allow create: if canPurchase();
+      allow update: if canPurchase() || warehousePurchaseReceiptUpdate();
       allow delete: if false;
     }
 
