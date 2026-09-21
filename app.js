@@ -4605,6 +4605,107 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
     finally{pendingDispatchOrderIds.delete(key);renderOrdersList();if(currentDeliveryOrderId===orderId)renderDeliveryModal();}
 };
 
+
+function canBusinessSelfOrder() {
+    return ['admin','sales','engineer'].includes(currentUserRole);
+}
+
+function selfOrderActionHtml(order) {
+    if (!canBusinessSelfOrder() || normalizedOrderStatus(order) !== 'normal') return '';
+    return normalizedOrderItems(order)
+        .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
+        .map(item => {
+            const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
+            const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+            const remaining=Math.max(0,required-ordered);
+            return {item,remaining};
+        })
+        .filter(row=>row.remaining>0)
+        .map(({item,remaining})=>`<button type="button" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">自行訂貨：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${remaining}</button>`)
+        .join('');
+}
+
+window.openSelfOrderModal = function(orderId,itemId) {
+    const order=ordersCache.find(row=>row.id===orderId);
+    const item=normalizedOrderItems(order||{}).find(row=>row.itemId===itemId);
+    if(!order||!item||!canBusinessSelfOrder())return;
+    const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
+    const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+    const remaining=Math.max(0,required-ordered);
+    if(remaining<=0){alert('此品項目前沒有尚未訂貨的缺貨數量。');return;}
+    document.getElementById('selfOrderOrderId').value=orderId;
+    document.getElementById('selfOrderItemId').value=itemId;
+    document.getElementById('selfOrderSupplier').value=item.supplier||'';
+    document.getElementById('selfOrderQty').value=remaining;
+    document.getElementById('selfOrderQty').max=remaining;
+    document.getElementById('selfOrderUnitCost').value=item.costPrice??'';
+    document.getElementById('selfOrderDate').value=localDateString();
+    document.getElementById('selfOrderNotes').value='';
+    document.getElementById('selfOrderStatus').innerText=`尚缺 ${remaining}；自行訂貨後會進入待入庫。`;
+    document.getElementById('selfOrderItemSummary').innerHTML=`<strong>${escapeHtml(item.itemCode||'')}</strong> ${escapeHtml(item.itemName||'')}<br><span style="color:#666;">客戶：${escapeHtml(order.customerName||'')}</span>`;
+    document.getElementById('selfOrderOverlay').classList.add('active');
+};
+
+window.closeSelfOrderModal = function() {
+    document.getElementById('selfOrderOverlay')?.classList.remove('active');
+};
+
+window.saveSelfOrder = async function() {
+    if(!canBusinessSelfOrder())return;
+    const orderId=document.getElementById('selfOrderOrderId').value;
+    const itemId=document.getElementById('selfOrderItemId').value;
+    const supplier=document.getElementById('selfOrderSupplier').value.trim();
+    const qty=Number(document.getElementById('selfOrderQty').value||0);
+    const unitCost=Number(document.getElementById('selfOrderUnitCost').value||0);
+    const orderDate=document.getElementById('selfOrderDate').value||localDateString();
+    const notes=document.getElementById('selfOrderNotes').value.trim();
+    if(!supplier||qty<=0||unitCost<=0){alert('請填寫供應商、訂貨數量與大於 0 的實際單位成本。');return;}
+    const button=document.getElementById('saveSelfOrderBtn');
+    if(button.disabled)return;
+    button.disabled=true;button.innerText='建立中…';
+    try{
+        let savedOrder,internalNo='';
+        await db.runTransaction(async tx=>{
+            const orderRef=db.collection('orders').doc(orderId);
+            const snap=await tx.get(orderRef);
+            if(!snap.exists)throw new Error('找不到訂單。');
+            const order=snap.data();
+            if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
+            const items=normalizedOrderItems(order);
+            const index=items.findIndex(row=>row.itemId===itemId);
+            if(index<0)throw new Error('找不到訂單品項。');
+            const item=items[index];
+            const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
+            const already=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+            const remaining=Math.max(0,required-already);
+            if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
+            const supplyRef=db.collection('supplyOrders').doc();
+            internalNo=`SO-${orderDate.replace(/-/g,'')}-${supplyRef.id.slice(0,6).toUpperCase()}`;
+            const now=new Date().toISOString();
+            const record={
+                type:'SALES_SELF_ORDER',internalNo,status:'ORDERED',orderId,itemId,
+                ownerUid:order.ownerUid||currentUser?.uid||'',salesCode:order.salesCode||currentUserCode||'',
+                customerName:order.customerName||'',productId:item.productId||'',productKey:inventoryProductKey(item),
+                itemCode:item.itemCode||'',itemName:item.itemName||'',brand:item.brand||'',
+                qty,receivedQty:0,supplier,unitCost,orderDate,notes,
+                warehouseId:item.warehouseId||defaultWarehouse()?.id||'',
+                createdAt:now,createdByUid:currentUser?.uid||'',createdBy:deliveryActor(),createdByRole:currentUserRole
+            };
+            const validation=window.YushinSupply?.validate(record);
+            if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
+            tx.set(supplyRef,record);
+            items[index]={...item,supplyOrderedQty:already+qty,purchaseOrderedQty:already+qty,selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])]};
+            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now});
+            savedOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+        });
+        const index=ordersCache.findIndex(row=>row.id===orderId);
+        if(index>=0)ordersCache[index]={id:orderId,...savedOrder};
+        closeSelfOrderModal();renderOrdersList();
+        alert(`自行訂貨已建立：${internalNo}`);
+    }catch(err){alert('自行訂貨失敗：'+err.message);}
+    finally{button.disabled=false;button.innerText='確認自行訂貨';}
+};
+
 function orderProgressInfo(order) {
     const lifecycle=orderLifecycleInfo(order);
     const delivery=deliveryProgressInfo(order);
@@ -5096,6 +5197,7 @@ window.renderOrdersList = function() {
                             <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>`
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
+                            ${selfOrderActionHtml(o)}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                         </div>
