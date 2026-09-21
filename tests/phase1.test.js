@@ -1054,3 +1054,13 @@ test('quick delivery no longer synthesizes legacy ordered or arrived states', ()
   assert.doesNotMatch(block, /updates\s*=\s*\{[^}]*isOrdered:\s*true/s);
   assert.doesNotMatch(block, /updates\s*=\s*\{[^}]*isArrived:\s*true/s);
 });
+
+test('equipment removal uses soft disable and never Firestore delete', () => {
+  const app = fs.readFileSync('app.js', 'utf8');
+  const start = app.indexOf('window.deleteEquipment = function');
+  const end = app.indexOf('function equipmentLogRealIndex', start);
+  const block = app.slice(start, end);
+  assert.match(block, /active:false/);
+  assert.match(block, /disabledAt/);
+  assert.doesNotMatch(block, /\.delete\s*\(/);
+});
