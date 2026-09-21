@@ -1003,3 +1003,11 @@ test('V2 returns restore and reverse exact delivery lots', () => {
     assert.match(appSource, /previousReturnRecord/);
     assert.match(appSource, /lotAllocations,cogs/);
 });
+
+test('V2 manual orders and copies preserve multiple items', () => {
+    assert.match(indexSource, /addCurrentOrderItemToDraft/);
+    assert.match(appSource, /let newOrderDraftItems/);
+    assert.match(appSource, /const items=\[\.\.\.newOrderDraftItems/);
+    assert.match(appSource, /normalizedOrderItems\(source\)\.map\(normalizeNewOrderItem\)/);
+    assert.match(appSource, /itemCount:items\.length,orderSchemaVersion:2/);
+});
