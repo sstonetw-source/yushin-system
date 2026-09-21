@@ -7578,11 +7578,47 @@ window.deleteOrder = function(orderId) {
     }).catch(err => alert('刪除失敗：' + err.message));
 };
 
+let newOrderDraftItems = [];
+
+function normalizeNewOrderItem(item = {}) {
+    const match=findPriceItemForOrder(item);
+    const qty=Math.max(0,Number(item.qty||0));
+    const unitPrice=Number(item.unitPrice||0);
+    return {
+        ...item,itemId:item.itemId||`item-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+        itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
+        brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unit:String(item.unit||'').trim(),unitPrice,totalPrice:qty*unitPrice,
+        productId:item.productId||match?.productId||stableProductId(match||item),productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
+        authorizationType:match?authorizationTypeForProduct(match):(item.authorizationType||''),supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
+        fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||'')
+    };
+}
+
+function currentOrderModalItem() {
+    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unit:document.getElementById('orderUnit').value,unitPrice:document.getElementById('orderUnitPrice').value,fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const cost=document.getElementById('orderCostPrice').value;if(cost!=='')item.costPrice=Number(cost);
+    return normalizeNewOrderItem(item);
+}
+
+function renderNewOrderDraftItems(){
+    const body=document.getElementById('newOrderItemsBody'),wrap=document.getElementById('newOrderItemsWrap');if(!body||!wrap)return;
+    wrap.style.display=newOrderDraftItems.length?'':'none';
+    body.innerHTML=newOrderDraftItems.map((item,index)=>`<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td>${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td><button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`).join('');
+}
+window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();};
+window.addCurrentOrderItemToDraft=function(){
+    const item=currentOrderModalItem();if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
+    if(item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId){alert('請為目前品項選擇出貨倉庫。');return;}
+    newOrderDraftItems.push(item);renderNewOrderDraftItems();
+    ['orderItemCode','orderItemName','orderUnit'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
+};
+
 window.openOrderModal = function(source = null) {
     ensurePriceListLoaded().catch(() => {});
     loadSupplierWarehouseMasters().then(() => populateOrderWarehouseOptions(source?.warehouseId || ''));
     populateOrderBrandDropdown();
     populateOrderCustomerSuggestions();
+    newOrderDraftItems=[];renderNewOrderDraftItems();
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
@@ -7697,15 +7733,18 @@ window.copyOrderAsNew = function(orderId) {
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = '複製成新訂單';
     document.getElementById('orderCustomer').value = source.customerName || '';
-    document.getElementById('orderItemCode').value = source.itemCode || '';
-    document.getElementById('orderItemName').value = source.itemName || '';
-    if (source.brand) selectBrandInDropdown(document.getElementById('orderBrand'), source.brand);
+    const copiedItems=normalizedOrderItems(source).map(normalizeNewOrderItem);
+    const first=copiedItems[0]||normalizeNewOrderItem(source);
+    newOrderDraftItems=copiedItems.slice(1);renderNewOrderDraftItems();
+    document.getElementById('orderItemCode').value = first.itemCode || '';
+    document.getElementById('orderItemName').value = first.itemName || '';
+    if (first.brand) selectBrandInDropdown(document.getElementById('orderBrand'), first.brand);
     onOrderBrandSelectChange();
-    document.getElementById('orderQty').value = source.qty || 1;
-    document.getElementById('orderUnit').value = source.unit || '';
-    document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
-    document.getElementById('orderFulfillmentType').value = source.fulfillmentType || 'WAREHOUSE';
-    populateOrderWarehouseOptions(source.warehouseId || '');
+    document.getElementById('orderQty').value = first.qty || 1;
+    document.getElementById('orderUnit').value = first.unit || '';
+    document.getElementById('orderUnitPrice').value = first.unitPrice || 0;
+    document.getElementById('orderFulfillmentType').value = first.fulfillmentType || 'WAREHOUSE';
+    populateOrderWarehouseOptions(first.warehouseId || '');
     onOrderFulfillmentChange();
     if (source.totalPrice !== undefined && source.totalPrice !== null && String(source.totalPrice).trim() !== '') {
         document.getElementById('orderTotalPrice').value = String(source.totalPrice).replace(/,/g, '');
@@ -7733,29 +7772,29 @@ let newOrderSaveInProgress = false;
 
 window.saveNewOrder = function() {
     if (newOrderSaveInProgress) return;
-    const itemCode = document.getElementById('orderItemCode').value.trim();
+    const currentItem=currentOrderModalItem();
+    const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])];
+    if(!items.length){alert('請至少輸入一個訂單品項。');return;}
+    if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
+    if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
+    const firstItem=items[0];
+    const itemCode = firstItem.itemCode;
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
         createdAt: new Date().toISOString(),
         company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
         customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
-        brand: getBrandFieldValue('orderBrand', 'orderBrandOther'),
+        brand: firstItem.brand,
         itemCode: itemCode,
         itemCodeKey: normalizeHistoryItemCode(itemCode),
-        itemName: document.getElementById('orderItemName').value.trim(),
+        itemName: firstItem.itemName,
         productLine: '',
         productType: '',
-        fulfillmentType: document.getElementById('orderFulfillmentType')?.value || 'WAREHOUSE',
-        warehouseId: document.getElementById('orderFulfillmentType')?.value === 'WAREHOUSE'
-            ? (document.getElementById('orderWarehouse')?.value || '')
-            : '',
-        qty: document.getElementById('orderQty').value,
-        unit: document.getElementById('orderUnit').value.trim(),
-        unitPrice: document.getElementById('orderUnitPrice').value,
-        totalPrice: document.getElementById('orderTotalPrice').value,
+        fulfillmentType:firstItem.fulfillmentType,warehouseId:firstItem.warehouseId||'',qty:firstItem.qty,unit:firstItem.unit,unitPrice:firstItem.unitPrice,
+        totalPrice:items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0),items,itemCount:items.length,orderSchemaVersion:2,
         status: BUSINESS_STATUS.ACTIVE,
-        ...grossAmountMetadata(document.getElementById('orderTotalPrice').value),
+        ...grossAmountMetadata(items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0)),
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: '',
