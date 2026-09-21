@@ -10396,10 +10396,17 @@ window.downloadDatabaseBackup = async function() {
             data[collections[index]] = snapshot.docs.map(doc => ({ id: doc.id, path:doc.ref.path, data: backupSerializableValue(doc.data()) }));
             documentCount += snapshot.size;
         });
-        // Forecast progress is a nested subcollection and is not included by reading the parent collection.
-        const forecastProgress = await db.collectionGroup('progress').get();
-        data.forecastProgress = forecastProgress.docs.map(doc => ({ id:doc.id, path:doc.ref.path, data:backupSerializableValue(doc.data()) }));
-        documentCount += forecastProgress.size;
+        // Read Forecast progress through each authorized parent path. A collection-group query
+        // cannot safely prove the parent-specific Firestore rule for every possible progress path.
+        data.forecastProgress = [];
+        const forecastSnapshot = snapshots[collections.indexOf('forecasts')];
+        for (const forecastDoc of (forecastSnapshot?.docs || [])) {
+            const progressSnapshot = await forecastDoc.ref.collection('progress').get();
+            progressSnapshot.docs.forEach(doc => {
+                data.forecastProgress.push({ id:doc.id, path:doc.ref.path, data:backupSerializableValue(doc.data()) });
+            });
+            documentCount += progressSnapshot.size;
+        }
         const createdAt = new Date();
         const backup = {
             format: 'yu-shing-firestore-backup',
