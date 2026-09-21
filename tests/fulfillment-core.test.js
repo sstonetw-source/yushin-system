@@ -36,3 +36,9 @@ test('business supply status derives from quantities',()=>{
  assert.equal(f.supplyStatus({qty:5,reservedQty:0,supplyOrderedQty:5}).label,'已訂貨');
  assert.equal(f.supplyStatus({qty:5,reservedQty:0}).label,'未訂貨');
 });
+
+test('delivered prepared quantity no longer blocks next reserved quantity from dispatch',()=>{
+ const x={qty:20,reservedQty:3,dispatchPreparedQty:5,deliveredQty:5};
+ assert.equal(f.pendingDispatchQty(x),3);
+ assert.equal(f.shippableQty(x),0);
+});
