@@ -146,6 +146,7 @@ let inventoryAnalysisReceipts = [];
 let inventoryAnalysisStocks = [];
 let inventoryAnalysisLots = [];
 let inventoryAnalysisLotCosts = new Map();
+let inventoryAnalysisPurchaseOrders = [];
 let inventoryAnalysisDirectShipPurchaseOrders = [];
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
@@ -8982,7 +8983,8 @@ async function loadInventoryAnalysisSupport(start, end) {
     inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
     inventoryAnalysisLots = lots.docs.map(d=>({id:d.id,...d.data()}));
     inventoryAnalysisLotCosts = new Map(lotCosts.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
-    inventoryAnalysisDirectShipPurchaseOrders = purchaseOrders.docs.map(d=>({id:d.id,...d.data()}))
+    inventoryAnalysisPurchaseOrders = purchaseOrders.docs.map(d=>({id:d.id,...d.data()}));
+    inventoryAnalysisDirectShipPurchaseOrders = inventoryAnalysisPurchaseOrders
         .filter(po=>purchaseItemsFromSavedPo(po).some(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'));
 }
 function inventoryAnalysisTotals(start,end) {
@@ -9005,8 +9007,15 @@ function inventoryAnalysisTotals(start,end) {
         const lotCost = inventoryAnalysisLotCosts.get(lot.id);
         return sum + Number(lot.remainingQty || 0) * Number(lotCost?.unitCost || 0);
     }, 0);
-    // incoming 尚未形成 lot，因此只在有受保護成本來源時才估值；避免回退讀公開 inventory 成本。
-    const incoming = 0;
+    // 尚未到貨的正式採購仍可直接用受權限保護的 PO 單價估值，不把成本複製到公開 inventory。
+    const incoming = inventoryAnalysisPurchaseOrders.reduce((sum, po) => {
+        return sum + purchaseItemsFromSavedPo(po)
+            .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
+            .reduce((itemSum, item, index) => {
+                const remaining = Math.max(0, Number(item.qty || 0) - receivedQuantityForPoItem(po, index));
+                return itemSum + remaining * Number(item.unitPrice || 0);
+            }, 0);
+    }, 0);
     return { purchase, sales, difference: sales - purchase, stockValue, incoming };
 }
 function renderInventoryAnalysisSummary(start,end){
