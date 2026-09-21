@@ -53,3 +53,9 @@ This branch received concurrent V2 commits during implementation. Always refetch
 - Fixed return create/edit/delete to resolve the exact Order Item and validate against that item's delivered quantity.
 - Removed an accidental purchaser-update clause from Forecast rules; dispatch permissions remain on Orders only.
 - Added Rules regression coverage for Forecast isolation and warehouse receipt-scoped Order updates.
+
+## 2026-09-21 cost-security audit
+- Release blocker found during final audit: authoritative `inventoryLots` documents contain `unitCost` while the collection is readable by all active users.
+- Hiding cost in the UI is insufficient because Firestore document reads expose all fields.
+- Do **not** mark cost authorization acceptance complete until lot operational fields and protected lot cost are separated (or COGS is moved to a trusted backend).
+- Current branch remains suitable for continued preview/testing, but this blocker must be resolved before merging to `main`.
