@@ -10729,6 +10729,57 @@ window.runProductMasterMigration = async function() {
     }
 };
 
+
+async function readCollectionForMigration(name, pageSize = 300) {
+    const rows = [];
+    let cursor = null;
+    while (true) {
+        let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(pageSize);
+        if (cursor) query = query.startAfter(cursor);
+        const snap = await query.get();
+        if (snap.empty) break;
+        snap.docs.forEach(doc => rows.push({ ref:doc.ref, id:doc.id, data:doc.data() || {} }));
+        cursor = snap.docs[snap.docs.length - 1];
+        if (snap.size < pageSize) break;
+    }
+    return rows;
+}
+function inventoryCostMigrationPlan(lots, inventory, receipts, movements) {
+    return {
+        legacyLots: lots.filter(row => row.data.unitCost !== undefined),
+        legacyInventory: inventory.filter(row => row.data.unitCost !== undefined || (Array.isArray(row.data.lots) && row.data.lots.some(lot => lot && lot.unitCost !== undefined))),
+        legacyReceipts: receipts.filter(row => row.data.unitCost !== undefined || row.data.purchaseNetAmount !== undefined),
+        legacyMovements: movements.filter(row => row.data.unitCost !== undefined || row.data.purchaseNetAmount !== undefined || row.data.cogs !== undefined)
+    };
+}
+window.previewInventoryCostMigration = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行庫存成本隔離。');
+    const status=document.getElementById('inventoryCostMigrationStatus'), runButton=document.getElementById('inventoryCostMigrationBtn'), previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
+    if(previewButton)previewButton.disabled=true;if(runButton)runButton.disabled=true;if(status)status.innerText='正在分頁掃描舊庫存成本欄位…';
+    try{
+        const [lots,inventory,receipts,movements]=await Promise.all(['inventoryLots','inventory','receipts','inventoryMovements'].map(readCollectionForMigration));
+        const plan=inventoryCostMigrationPlan(lots,inventory,receipts,movements);window._inventoryCostMigrationPlan=plan;
+        const total=plan.legacyLots.length+plan.legacyInventory.length+plan.legacyReceipts.length+plan.legacyMovements.length;
+        if(status)status.innerText=`預覽完成：批次成本 ${plan.legacyLots.length}、庫存文件 ${plan.legacyInventory.length}、收貨 ${plan.legacyReceipts.length}、異動 ${plan.legacyMovements.length}。\n`+(total?'請先執行「庫存成本隔離」，完成後再部署新版 Firestore Rules。':'沒有發現舊成本欄位，可直接進行新版 Rules 驗證。');
+        if(runButton)runButton.disabled=total===0;
+    }catch(err){console.error('庫存成本隔離預覽失敗：',err);if(status)status.innerText='預覽失敗：'+(err.message||err);}
+    finally{if(previewButton)previewButton.disabled=false;}
+};
+window.runInventoryCostMigration = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行庫存成本隔離。');
+    const plan=window._inventoryCostMigrationPlan;if(!plan)return alert('請先按「預覽庫存成本隔離」。');
+    if(!confirm('確定執行庫存成本隔離？\n\n舊 inventoryLots 成本會搬到 inventoryLotCosts；公開庫存、收貨與異動文件中的成本欄位會移除。此步驟應在部署新版 Firestore Rules 前完成。'))return;
+    const status=document.getElementById('inventoryCostMigrationStatus'),runButton=document.getElementById('inventoryCostMigrationBtn'),previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
+    if(runButton)runButton.disabled=true;if(previewButton)previewButton.disabled=true;
+    const del=firebase.firestore.FieldValue.delete(),ops=[],now=new Date().toISOString(),by=currentUser?.uid||'';
+    plan.legacyLots.forEach(row=>{const d=row.data;ops.push(batch=>batch.set(db.collection('inventoryLotCosts').doc(row.id),{lotId:row.id,productKey:d.productKey||'',productId:d.productId||'',warehouseId:d.warehouseId||'',unitCost:Number(d.unitCost||0),sourceType:d.sourceType||'LEGACY_MIGRATION',sourceId:d.sourceId||'',migratedAt:now,migratedBy:by},{merge:true}));ops.push(batch=>batch.update(row.ref,{unitCost:del,costMigratedAt:now}));});
+    plan.legacyInventory.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(Array.isArray(row.data.lots))patch.lots=row.data.lots.map(lot=>{if(!lot||typeof lot!=='object')return lot;const {unitCost,...rest}=lot;return rest;});ops.push(batch=>batch.update(row.ref,patch));});
+    plan.legacyReceipts.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.purchaseNetAmount!==undefined)patch.purchaseNetAmount=del;ops.push(batch=>batch.update(row.ref,patch));});
+    plan.legacyMovements.forEach(row=>{const patch={costSanitizedAt:now,costPending:true};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.purchaseNetAmount!==undefined)patch.purchaseNetAmount=del;if(row.data.cogs!==undefined)patch.cogs=del;ops.push(batch=>batch.update(row.ref,patch));});
+    try{if(status)status.innerText=`正在隔離 ${ops.length} 筆寫入，請不要關閉頁面…`;await commitMigrationBatch(ops);window._inventoryCostMigrationPlan=null;if(status)status.innerText='庫存成本隔離完成。正在重新檢查…';await window.previewInventoryCostMigration();}
+    catch(err){console.error('庫存成本隔離失敗：',err);if(status)status.innerText='隔離中斷：'+(err.message||err)+'。流程可重複執行。';if(runButton)runButton.disabled=false;}
+    finally{if(previewButton)previewButton.disabled=false;}
+};
 /* ---------- 價格表管理 ---------- */
 function formatPriceCatalogTime(value) {
     if (!value) return '舊資料未記錄';
