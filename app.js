@@ -7112,9 +7112,10 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     if (cachedProgress.state === 'complete') return quickCancelAllDelivery(orderId);
     if (cachedProgress.remaining <= 0) return;
     const fulfillment=fulfillmentProgressInfo(cachedOrder);
-    const warehouseItems=normalizedOrderItems(cachedOrder).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
-    if (warehouseItems.length > 1) {
-        alert('多品項訂單請逐品項登錄送貨，避免扣錯庫存。');
+    const allItems=normalizedOrderItems(cachedOrder);
+    const warehouseItems=allItems.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+    if (allItems.length > 1) {
+        alert('多品項訂單請逐品項登錄送貨，確保送貨與退貨都能追蹤到正確品項。');
         openDeliveryModal(orderId);
         openPartialDeliveryForm();
         return;
