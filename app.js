@@ -4540,7 +4540,7 @@ function fulfillmentProgressInfo(order) {
         return sum+itemDelivered;
     },0);
     const shippable=Math.max(0,prepared-delivered);
-    const pendingDispatch=Math.max(0,ready-shippable);
+    const pendingDispatch=Math.max(0,ready-prepared);
     if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
     if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     if(pendingDispatch>0)return {state:ready>=total?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
@@ -5016,50 +5016,6 @@ function populatePurchaserOrderFilters() {
 }
 
 
-window.markOrderDispatchPrepared = async function(orderId) {
-    if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return;
-    const cached = ordersCache.find(order => order.id === orderId);
-    if (!cached || normalizedOrderStatus(cached) !== 'normal') return;
-    const key = `${orderId}:dispatch`;
-    if (pendingOrderStatusKeys.has(key)) return;
-    pendingOrderStatusKeys.add(key);
-    renderOrdersList();
-    try {
-        let savedOrder;
-        await db.runTransaction(async transaction => {
-            const ref = db.collection('orders').doc(orderId);
-            const snapshot = await transaction.get(ref);
-            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-            const order = snapshot.data();
-            const items = normalizedOrderItems(order);
-            const preparedLines = [];
-            const nextItems = items.map(item => {
-                if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return item;
-                const pending = window.YushinFulfillment.pendingDispatchQty(item);
-                if (pending <= 0) return item;
-                preparedLines.push({ itemId:item.itemId, qty:pending });
-                return window.YushinFulfillment.prepareDispatch(item, pending);
-            });
-            if (!preparedLines.length) throw new Error('目前沒有待打單數量。');
-            const now = new Date().toISOString();
-            transaction.set(db.collection('dispatchRecords').doc(), {
-                orderId, ownerUid:order.ownerUid||'', salesCode:order.salesCode||'',
-                lines:preparedLines, qty:preparedLines.reduce((sum,line)=>sum+line.qty,0),
-                createdAt:now, createdByUid:currentUser?.uid||'', createdBy:deliveryActor()
-            });
-            transaction.update(ref,{items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,updatedAt:now});
-            savedOrder={...order,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,updatedAt:now};
-        });
-        const index=ordersCache.findIndex(order=>order.id===orderId);
-        if(index>=0)ordersCache[index]={id:orderId,...savedOrder};
-    } catch(err) {
-        alert('標記已打單失敗：'+err.message);
-    } finally {
-        pendingOrderStatusKeys.delete(key);
-        renderOrdersList();
-    }
-};
-
 window.renderOrdersList = function() {
     const tbody = document.getElementById('ordersBody');
     const searchInput = document.getElementById('orderSearch');
@@ -5127,7 +5083,6 @@ window.renderOrdersList = function() {
                 <div class="order-compact-actions">
                     <span class="order-progress-badge">${escapeHtml(purchaseProgressInfo(o).label)}</span>
                     <span class="order-progress-badge">${escapeHtml(fulfillmentProgressInfo(o).label)}</span>
-                    ${canGeneratePo && ['pending_dispatch','partial_dispatch'].includes(fulfillmentProgressInfo(o).state) ? `<button type="button" class="btn-small btn-secondary" onclick="markOrderDispatchPrepared('${o.id}')" ${pendingOrderStatusKeys.has(`${o.id}:dispatch`)?'disabled':''}>${pendingOrderStatusKeys.has(`${o.id}:dispatch`)?'處理中…':'已打單'}</button>` : ''}
                     ${!canGeneratePo ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
                     <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已報帳' : '報帳'}</button>
                     <details class="order-more-menu">
