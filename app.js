@@ -4295,9 +4295,10 @@ window.saveInventoryAdjustmentBatch = async function() {
           if(type==='initial'&&delta>0){
             const lotRef=db.collection('inventoryLots').doc();
             authoritativeLotId=lotRef.id;
-            tx.set(lotRef,{productKey:key,productId:key,warehouseId:row.warehouseId||'',lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',receivedQty:delta,remainingQty:delta,unitCost:Number(row.unitCost||0),sourceType:'INITIAL_STOCK',sourceId:'',receivedAt:now,createdBy:actor});
+            tx.set(lotRef,{productKey:key,productId:key,warehouseId:row.warehouseId||'',lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',receivedQty:delta,remainingQty:delta,sourceType:'INITIAL_STOCK',sourceId:'',receivedAt:now,createdBy:actor});
+            tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey:key,productId:key,warehouseId:row.warehouseId||'',unitCost:Number(row.unitCost||0),sourceType:'INITIAL_STOCK',sourceId:'',createdAt:now,createdBy:actor});
           }
-          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',lotId:authoritativeLotId,unitCost:Number(row.unitCost||0),sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
+          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',lotId:authoritativeLotId,sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
         });
       }
       closeInventoryAdjustment();
@@ -5623,16 +5624,17 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             }
         }
         const embeddedLots=[...(invSnap.exists?(invSnap.data().lots||[]):[])];
-        const embeddedIndex=embeddedLots.findIndex(l=>(l.lotNo||'')===lotNo&&(l.expiryDate||'')===expiryDate&&Number(l.unitCost||0)===Number(supply.unitCost||0));
+        const embeddedIndex=embeddedLots.findIndex(l=>(l.lotNo||'')===lotNo&&(l.expiryDate||'')===expiryDate);
         if(embeddedIndex>=0)embeddedLots[embeddedIndex]={...embeddedLots[embeddedIndex],qty:Number(embeddedLots[embeddedIndex].qty||0)+qty};
-        else embeddedLots.push({lotNo,expiryDate,qty,unitCost:Number(supply.unitCost||0),receivedAt:now,sourceSupplyId:supplyId});
+        else embeddedLots.push({lotNo,expiryDate,qty,receivedAt:now,sourceSupplyId:supplyId});
         tx.set(invRef,{productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:inv.incoming,lots:embeddedLots,updatedAt:now},{merge:true});
         if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:wh.incoming,updatedAt:now},{merge:true});
         const lotRef=db.collection('inventoryLots').doc();
-        tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,unitCost:Number(supply.unitCost||0),supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
+        tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
+        tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
         const receiptRef=db.collection('receipts').doc();
-        tx.set(receiptRef,{supplyOrderId:supplyId,orderId:supply.orderId||'',itemId:supply.itemId||'',productKey,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,unitCost:Number(supply.unitCost||0),createdAt:now,createdBy:actor});
-        tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:receiptRef.id,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
+        tx.set(receiptRef,{supplyOrderId:supplyId,orderId:supply.orderId||'',itemId:supply.itemId||'',productKey,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor});
+        tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:receiptRef.id,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
         const receivedQty=Number(supply.receivedQty||0)+qty;
         tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
     });
@@ -5752,7 +5754,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
 
         tx.set(invRef, {
             productKey:key, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), unitCost:Number(item.unitPrice||0), currency:live.currency||DEFAULT_CURRENCY,
+            brand:resolveBrandName(item.brand||''), currency:live.currency||DEFAULT_CURRENCY,
             onHand:stock.onHand+qty, reserved:stock.reserved+reserveFromReceipt,
             incoming:Math.max(0,stock.incoming-qty), lots, updatedAt:now
         }, { merge:true });
@@ -5793,20 +5795,24 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{
             productKey:key,productId:item.productId||'',warehouseId,lotNo,expiryDate,
-            receivedQty:qty,remainingQty:qty,unitCost:Number(item.unitPrice||0),
+            receivedQty:qty,remainingQty:qty,
             supplier:live.vendorName||'',sourceType:'PURCHASE_ORDER',sourceId:poId,
             orderId:item.orderId||'',itemId:sourceItem?.itemId||'',receivedAt:now
+        });
+        tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{
+            lotId:lotRef.id,productKey:key,productId:item.productId||'',warehouseId,
+            unitCost:Number(item.unitPrice||0),currency:live.currency||DEFAULT_CURRENCY,
+            sourceType:'PURCHASE_ORDER',sourceId:poId,createdAt:now,createdBy:actor
         });
         tx.set(db.collection('receipts').doc(receiptId),{
             purchaseOrderId:poId,orderId:item.orderId||'',itemId:sourceItem?.itemId||'',
             productKey:key,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,
-            unitCost:Number(item.unitPrice||0),createdAt:now,createdBy:actor
+            createdAt:now,createdBy:actor
         });
         tx.set(db.collection('inventoryMovements').doc(), {
             type:'receipt', qty, productKey:key, itemCode:item.itemCode||'', itemName:item.itemName||'',
             brand:resolveBrandName(item.brand||''), lotNo, expiryDate, warehouseId, lotId:lotRef.id,
-            fulfillmentType:'WAREHOUSE', unitCost:Number(item.unitPrice||0),
-            purchaseNetAmount:Number(item.unitPrice||0)*qty, sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,
+            fulfillmentType:'WAREHOUSE', sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,
             sourceId:poId, receiptId, createdAt:now, createdBy:actor,
             ownerUid:sourceOrder?.ownerUid||'',salesCode:sourceOrder?.salesCode||''
         });
@@ -6969,7 +6975,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         const lotQuery=await transaction.get(db.collection('inventoryLots').where('productKey','==',productKey).where('warehouseId','==',warehouseId));
         const lotDocs=lotQuery.docs.map(doc=>({id:doc.id,...doc.data()})).filter(l=>Number(l.remainingQty||0)>0);
         if(!lotDocs.length)throw new Error('此庫存尚未建立批次成本資料，請先完成入庫／期初庫存批次建檔後再送貨。');
-        const allocation=window.YushinSupply.allocateLots(lotDocs,deltaQty);
+        const allocation=window.YushinSupply.allocateLots(lotDocs.map(lot=>({...lot,unitCost:0})),deltaQty);
         lotAllocations=allocation.allocations;cogs=allocation.totalCost;
         lotAllocations.forEach(row=>{
             const lot=lotDocs.find(x=>x.id===row.lotId);
@@ -6992,7 +6998,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     transaction.set(invRef,{onHand:inv.onHand-deltaQty,reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand-deltaQty,reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
-        warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,cogs,
+        warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     }));
 
@@ -7046,7 +7052,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
-        createdAt:now,createdBy:actor,lotAllocations,cogs,
+        createdAt:now,createdBy:actor,lotAllocations,costPending:true,
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     });
     return {lotAllocations,cogs};
