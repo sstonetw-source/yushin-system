@@ -46,3 +46,10 @@ This branch received concurrent V2 commits during implementation. Always refetch
 - Warehouse delivery is blocked when no authoritative lot-cost record exists, preventing untraceable COGS.
 - Added composite lot lookup index and FEFO/FIFO/COGS tests.
 - Exact lot restoration, formal PO -> supplyOrders normalization and initial-stock lot creation are now implemented and covered by regression tests.
+
+## 2026-09-21 chat continuation
+- Audited Work-mode changes rather than replaying them.
+- Fixed multi-item delivery deletion to reverse the removed item's product/warehouse/lot instead of top-level order product.
+- Fixed return create/edit/delete to resolve the exact Order Item and validate against that item's delivered quantity.
+- Removed an accidental purchaser-update clause from Forecast rules; dispatch permissions remain on Orders only.
+- Added Rules regression coverage for Forecast isolation and warehouse receipt-scoped Order updates.
