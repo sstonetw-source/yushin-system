@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const f = require('../v2-fulfillment-core.js');
+const f = require('../modules/fulfillment-core.js');
 
 test('reserve 20 with 8 available => reserved 8 shortage 12', () => {
   const x=f.reserveFromAvailable({orderedQty:20},8);
