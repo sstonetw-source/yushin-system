@@ -4124,6 +4124,7 @@ window.openInventoryAdjustment = async function(type = 'initial', item = null) {
         productId: source?.productId || source?.productKey || '',
         warehouseId: defaultWarehouse()?.id || '',
         qty: 0,
+        unitCost: 0,
         lotNo: '',
         expiryDate: ''
     }];
@@ -4164,7 +4165,7 @@ window.closeInventoryAdjustment = function() {
 };
 
 window.addInventoryAdjustmentRow = function() {
-    inventoryAdjustmentRows.push({ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, lotNo:'', expiryDate:'' });
+    inventoryAdjustmentRows.push({ itemCode:'', itemName:'', brand:'', warehouseId:defaultWarehouse()?.id||'', qty:0, unitCost:0, lotNo:'', expiryDate:'' });
     renderInventoryAdjustmentRows();
 };
 
@@ -4189,7 +4190,7 @@ window.onInventoryAdjustmentCode = async function(idx, value) {
 
 window.updateInventoryAdjustmentRow = function(idx, field, value) {
     if (!inventoryAdjustmentRows[idx]) return;
-    inventoryAdjustmentRows[idx][field] = field === 'qty' ? Number(value||0) : String(value||'').trim();
+    inventoryAdjustmentRows[idx][field] = ['qty','unitCost'].includes(field) ? Number(value||0) : String(value||'').trim();
 };
 
 function renderInventoryAdjustmentRows() {
@@ -4203,6 +4204,7 @@ function renderInventoryAdjustmentRows() {
         <td><input type="text" list="poBrandList" value="${escapeAttr(row.brand||'')}" onchange="updateInventoryAdjustmentRow(${idx},'brand',this.value)"></td>
         <td><select onchange="updateInventoryAdjustmentRow(${idx},'warehouseId',this.value)"><option value="">請選倉庫</option>${warehouseOptions}</select></td>
         <td><input type="number" step="any" value="${row.qty||''}" onchange="updateInventoryAdjustmentRow(${idx},'qty',this.value)"></td>
+        <td><input type="number" min="0" step="any" value="${row.unitCost||''}" onchange="updateInventoryAdjustmentRow(${idx},'unitCost',this.value)" placeholder="必填"></td>
         <td><input type="text" value="${escapeAttr(row.lotNo||'')}" onchange="updateInventoryAdjustmentRow(${idx},'lotNo',this.value)" placeholder="批號"></td>
         <td><input type="date" value="${escapeAttr(row.expiryDate||'')}" onchange="updateInventoryAdjustmentRow(${idx},'expiryDate',this.value)"></td>
         <td><button type="button" class="btn-small btn-danger" onclick="removeInventoryAdjustmentRow(${idx})">刪除</button></td>
@@ -4217,6 +4219,7 @@ window.saveInventoryAdjustmentBatch = async function() {
     const rows=inventoryAdjustmentRows.filter(row=>row.itemCode&&Number(row.qty));
     if(!rows.length){alert('請至少輸入一筆貨號與數量。');return;}
     if(warehouseMasterCache.length && rows.some(row=>!row.warehouseId)){alert('請為每筆庫存異動選擇倉庫。');return;}
+    if(type==='initial'&&rows.some(row=>!Number.isFinite(Number(row.unitCost))||Number(row.unitCost)<0)){alert('期初庫存請填寫每筆實際單位成本。');return;}
     const actor=currentUserName||currentUser?.email||'';
     const button=document.getElementById('saveInventoryAdjustmentBatchBtn');
     if(button){button.disabled=true;button.textContent='儲存中…';}
@@ -4263,7 +4266,13 @@ window.saveInventoryAdjustmentBatch = async function() {
           if(whRef){
             tx.set(whRef,{warehouseId:row.warehouseId,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
           }
-          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
+          let authoritativeLotId='';
+          if(type==='initial'&&delta>0){
+            const lotRef=db.collection('inventoryLots').doc();
+            authoritativeLotId=lotRef.id;
+            tx.set(lotRef,{productKey:key,productId:key,warehouseId:row.warehouseId||'',lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',receivedQty:delta,remainingQty:delta,unitCost:Number(row.unitCost||0),sourceType:'INITIAL_STOCK',sourceId:'',receivedAt:now,createdBy:actor});
+          }
+          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',lotId:authoritativeLotId,unitCost:Number(row.unitCost||0),sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
         });
       }
       closeInventoryAdjustment();
@@ -5612,6 +5621,8 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         const item = liveItems[itemIndex];
         if (!item) throw new Error('找不到品項');
         if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') throw new Error('原廠直送品項不需入庫');
+        const formalSupplyRef=db.collection('supplyOrders').doc(formalSupplyOrderId(poId,itemIndex));
+        const formalSupplySnap=await tx.get(formalSupplyRef);
 
         const already = receivedQuantityForPoItem(live, itemIndex);
         const remaining = Math.max(0, Number(item.qty || 0) - already);
@@ -5722,6 +5733,11 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             sourceId:poId, receiptId, createdAt:now, createdBy:actor,
             ownerUid:sourceOrder?.ownerUid||'',salesCode:sourceOrder?.salesCode||''
         });
+        if(formalSupplySnap.exists){
+            const formalSupply=formalSupplySnap.data();
+            const formalReceived=Number(formalSupply.receivedQty||0)+qty;
+            tx.update(formalSupplyRef,{receivedQty:formalReceived,status:formalReceived>=Number(formalSupply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
+        }
 
         const pendingRemaining=Math.max(0,pendingIncoming-qty);
         tx.set(pendingRef, {
@@ -6126,6 +6142,10 @@ function recalcPoTotals() {
     document.getElementById('poGrandTotal').innerText = grandTotal.toLocaleString();
 }
 
+function formalSupplyOrderId(purchaseOrderId, itemIndex) {
+    return `po-${encodeURIComponent(String(purchaseOrderId||''))}-${Number(itemIndex||0)}`;
+}
+
 window.printPurchaseOrder = async function() {
     if (poSaveInProgress) return;
     if (poItems.length === 0) {
@@ -6190,6 +6210,18 @@ window.printPurchaseOrder = async function() {
             previousPoForIncoming = poSnapshot.exists ? { id: poDocumentId, ...poSnapshot.data() } : null;
             if (poSnapshot.exists && !poEditingId) throw new Error(`訂購單號 ${poNo} 已存在，請關閉視窗後重新產生單號。`);
             transaction.set(poRef, poRecord);
+            poRecord.items.forEach((item,itemIndex)=>{
+                const supplyRef=db.collection('supplyOrders').doc(formalSupplyOrderId(poDocumentId,itemIndex));
+                const previousReceived=Number(previousPoForIncoming?.receiptRecords?.filter(row=>Number(row.itemIndex)===itemIndex).reduce((sum,row)=>sum+Number(row.qty||0),0)||0);
+                transaction.set(supplyRef,{
+                    type:'PURCHASING_PO',purchaseOrderId:poDocumentId,purchaseOrderNo:poNo,itemIndex,
+                    orderId:item.orderId||'',itemId:item.itemId||'',orderItemIndex:Number(item.orderItemIndex||0),
+                    productKey:poIncomingKey(item),productId:item.productId||'',itemCode:item.itemCode||'',itemName:item.itemName||'',brand:resolveBrandName(item.brand||''),
+                    supplier:vendorName,qty:Number(item.qty||0),receivedQty:previousReceived,unitCost:Number(item.unitPrice||0),warehouseId:item.warehouseId||defaultWarehouse()?.id||'',
+                    status:previousReceived>=Number(item.qty||0)?'RECEIVED':previousReceived>0?'PARTIAL_RECEIPT':'ORDERED',
+                    ownerUid:item.ownerUid||'',salesCode:item.salesCode||'',createdAt:previousPoForIncoming?.createdAt||poRecord.createdAt,updatedAt:new Date().toISOString()
+                },{merge:true});
+            });
             orderSnapshots.forEach((snapshot, index) => {
                 if (snapshot.exists) {
                     const orderData = snapshot.data();
@@ -6877,8 +6909,8 @@ function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliv
     return applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryQty, actor, sourceId);
 }
 
-async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQty, actor, sourceId) {
-    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
+async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, previousReturnRecord) {
+    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return {lotAllocations:[],cogs:0};
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
     const invRef = inventoryRefFor(order);
@@ -6892,13 +6924,35 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
         throw new Error('刪除／縮減退貨後會造成庫存小於 0。');
     }
     const now=new Date().toISOString();
+    let lotAllocations=[],cogs=0;
+    if(deltaQty>0){
+        const available=window.YushinSupply.availableReturnAllocations(savedDeliveryRecords(order),savedReturnRecords(order));
+        const plan=window.YushinSupply.reverseLotAllocations([{qty:available.reduce((sum,row)=>sum+Number(row.qty||0),0),lotAllocations:available}],deltaQty);
+        lotAllocations=plan.allocations;cogs=plan.totalCost;
+        for(const row of lotAllocations){
+            const lotRef=db.collection('inventoryLots').doc(row.lotId);
+            const lotSnap=await transaction.get(lotRef);
+            if(!lotSnap.exists)throw new Error(`找不到原出貨批次 ${row.lotNo||row.lotId}，無法辦理退貨。`);
+            transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)+row.qty,updatedAt:now});
+        }
+    }else{
+        const plan=window.YushinSupply.reverseLotAllocations(previousReturnRecord?[previousReturnRecord]:[],Math.abs(deltaQty));
+        lotAllocations=plan.allocations.map(row=>({...row,qty:-row.qty,cost:-row.cost}));cogs=-plan.totalCost;
+        for(const row of plan.allocations){
+            const lotRef=db.collection('inventoryLots').doc(row.lotId);
+            const lotSnap=await transaction.get(lotRef);
+            if(!lotSnap.exists||Number(lotSnap.data().remainingQty||0)<row.qty)throw new Error(`批次 ${row.lotNo||row.lotId} 庫存不足，無法刪除／縮減退貨。`);
+            transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)-row.qty,updatedAt:now});
+        }
+    }
     transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:inv.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
-        createdAt:now,createdBy:actor
+        createdAt:now,createdBy:actor,lotAllocations,cogs
     });
+    return {lotAllocations,cogs};
 }
 
 window.quickCompleteDelivery = async function(orderIdOverride) {
@@ -7411,7 +7465,17 @@ window.saveReturnRecord = async function() {
             if (totalReturned > delivered + 1e-9) throw new Error(`累計退貨數量 ${totalReturned} 超過已送貨數量 ${delivered}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
             const returnDelta = qty - Number(previous?.qty || 0);
-            if (returnDelta) await applyInventoryReturnDeltaInTransaction(transaction, order, returnDelta, actor, orderId);
+            if (returnDelta){
+                const inventoryResult=await applyInventoryReturnDeltaInTransaction(transaction, order, returnDelta, actor, orderId, previous);
+                if(returnDelta>0){
+                    record.lotAllocations=[...(previous?.lotAllocations||[]),...(inventoryResult.lotAllocations||[])];
+                }else if(previous){
+                    const reversed=(inventoryResult.lotAllocations||[]).map(row=>({...row,qty:Math.abs(Number(row.qty||0))}));
+                    record.lotAllocations=window.YushinSupply.allocationsAfterReversal(previous.lotAllocations||[],reversed);
+                }
+                record.cogs=record.lotAllocations.reduce((sum,row)=>sum+Number(row.cost??(Number(row.qty||0)*Number(row.unitCost||0))),0);
+                if(existingIndex>=0)records[existingIndex]=record;else records[records.length-1]=record;
+            }
             const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
@@ -7448,7 +7512,7 @@ window.deleteReturnRecord = async function(recordId) {
             const actor = deliveryActor();
             const now = new Date().toISOString();
             const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
-            await applyInventoryReturnDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId);
+            await applyInventoryReturnDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId, removed);
             const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
