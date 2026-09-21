@@ -885,7 +885,7 @@ test('quick product creation is temporary, duplicate-safe and can be used from q
 
 test('sales cost visibility depends on authorizationType and secure productCosts', () => {
     assert.match(appSource, /function loadVisibleProductCost/);
-    assert.match(appSource, /\['sales','engineer'\]\.includes\(currentUserRole\).*authType === 'AUTHORIZED'/);
+    assert.match(appSource, /hasBusinessCapability\(\) && authType === 'AUTHORIZED'/);
     assert.match(appSource, /db\.collection\('productCosts'\)\.doc\(productId\)/);
     assert.match(appSource, /salesVisible !== true/);
     assert.match(appSource, /applyOrderProductCost/);
@@ -960,8 +960,8 @@ test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receivi
     const reserveEnd = appSource.indexOf('async function reserveInventoryForNewOrder', reserveStart);
     const reserve = appSource.slice(reserveStart, reserveEnd);
     assert.match(reserve, /fulfillmentType\|\|'WAREHOUSE'\)===\'DIRECT_SHIP\'/);
-    assert.match(reserve, /inventoryReservedQty\\s*:\\s*0/);
-    assert.match(reserve, /warehouseId\\s*:\\s*''/);
+    assert.match(reserve, /inventoryReservedQty\s*:\s*0/);
+    assert.match(reserve, /warehouseId\s*:\s*''/);
 
     const incomingStart = appSource.indexOf('async function registerPurchaseIncoming');
     const incomingEnd = appSource.indexOf('window.receivePurchaseOrder', incomingStart);
