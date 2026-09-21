@@ -306,7 +306,7 @@ service cloud.firestore {
 
     match /inventory/{id} {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
-      allow read: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
+      allow read: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
       allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if ((canReceiveInventory() && nonNegativeInventory(request.resource.data))
@@ -316,7 +316,7 @@ service cloud.firestore {
     }
 
     match /warehouseStocks/{id} {
-      allow read: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
+      allow read: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
       allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if ((canReceiveInventory() && nonNegativeInventory(request.resource.data))
@@ -335,7 +335,7 @@ service cloud.firestore {
 
     match /inventoryLots/{id} {
       // Operational lot data is readable for fulfillment, but cost must never live here.
-      allow read: if active() && !('unitCost' in resource.data);
+      allow read: if admin() || (active() && !('unitCost' in resource.data));
       allow create: if canReceiveInventory() && !('unitCost' in request.resource.data);
       allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate())
         && !('unitCost' in request.resource.data);
