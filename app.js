@@ -6965,7 +6965,10 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             const statusEntries = [];
             if (!order.isOrdered) statusEntries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: now });
             if (!order.isArrived) statusEntries.push({ field: 'isArrived', value: true, label: '已到貨', by: actor, at: now });
-            await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
+            const inventoryResult=await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
+            record.lotAllocations=inventoryResult?.lotAllocations||[];
+            record.cogs=Number(inventoryResult?.cogs||0);
+            records[records.length-1]=record;
             const updates = {
                 deliveryRecords: records, deliveredQty: total, isDelivered: true,
                 isOrdered: true, isArrived: true,
@@ -7188,7 +7191,14 @@ window.saveDeliveryRecord = async function() {
             if(deliveryDelta){
                 const itemRecords=records.filter(r=>r.itemId===targetItem.itemId);
                 const itemOrder={...order,...targetItem,qty:Number(targetItem.qty||0),inventoryReservedQty:Number(targetItem.inventoryReservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
-                await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId);
+                const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId);
+                if(deliveryDelta>0){
+                    record.lotAllocations=inventoryResult.lotAllocations||[];
+                    record.cogs=Number(inventoryResult.cogs||0);
+                    const recordIndex=records.findIndex(r=>r.id===record.id);
+                    if(recordIndex>=0)records[recordIndex]=record;
+                    updates.deliveryRecords=records;
+                }
             }
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
