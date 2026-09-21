@@ -8,6 +8,7 @@ const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
 const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const rulesSource = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
+const firestoreIndexes = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'firestore.indexes.json'), 'utf8'));
 
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
@@ -1220,4 +1221,17 @@ test('database backup covers governed master, audit, delivery and Forecast progr
   assert.match(appSource,/forecastDoc\.ref\.collection\('progress'\)/);
   assert.match(appSource,/data\.forecastProgress/);
   assert.match(appSource,/path:doc\.ref\.path/);
+});
+
+test('Forecast list queries have production composite indexes for every ownership path', () => {
+  const forecastIndexes = firestoreIndexes.indexes
+    .filter(index => index.collectionGroup === 'forecasts')
+    .map(index => index.fields.map(field => `${field.fieldPath}:${field.order}`).join(','));
+
+  assert.ok(forecastIndexes.includes('status:ASCENDING,updatedAt:DESCENDING'),
+    'admin Forecast status query requires a status + updatedAt composite index');
+  assert.ok(forecastIndexes.includes('salesCode:ASCENDING,status:ASCENDING,updatedAt:DESCENDING'),
+    'salesCode-owned Forecast query requires its composite index');
+  assert.ok(forecastIndexes.includes('ownerUid:ASCENDING,status:ASCENDING,updatedAt:DESCENDING'),
+    'legacy ownerUid-owned Forecast query requires its composite index');
 });
