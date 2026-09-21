@@ -6936,7 +6936,11 @@ function renderOrderStatusHistory(order) {
     const tbody = document.getElementById('orderStatusHistoryBody');
     if (!tbody) return;
     const orderedBy = document.getElementById('orderStatusOrderedBy');
-    if (orderedBy) orderedBy.innerText = `訂購人：${order.orderedBy || '－'}`;
+    if (orderedBy) {
+        const purchase = purchaseProgressInfo(order);
+        const fulfillment = fulfillmentProgressInfo(order);
+        orderedBy.innerText = `採購：${purchase.label}｜履約：${fulfillment.label}`;
+    }
     const entries = [];
     (order.statusHistory || []).forEach(item => entries.push({ at: item.at, action: item.label || '進度變更', by: item.by, detail: '' }));
     (order.deliveryHistory || []).forEach(item => {
@@ -6956,13 +6960,11 @@ function renderOrderStatusHistory(order) {
         entries.push({ at: item.at, action: statusLabels[after.status] || '訂單狀態變更', by: item.by, detail: `${after.date || ''}${after.reason ? `／${after.reason}` : ''}` });
     });
     (order.fieldEditHistory || []).forEach(item => entries.push({ at: item.at, action: item.label || '修改資料', by: item.by, detail: `${item.before ?? '－'} → ${item.after ?? '－'}` }));
-    const statusFields = [
-        ['isOrdered', '訂貨'], ['isArrived', '到貨'], ['isBilled', '報帳']
-    ];
-    statusFields.forEach(([field, label]) => {
-        const hasRecord = (order.statusHistory || []).some(item => item.field === field);
-        if (order[field] && !hasRecord) entries.push({ at: order.orderDate || '', action: `${label}（歷史推估）`, by: '舊資料未記錄', detail: '依目前訂單狀態推估，日期暫用訂單日期' });
-    });
+    // V2 採購／到貨狀態由 PO、receipt、reservation 與 dispatch qty 推導。
+    // isOrdered / isArrived 僅保留舊資料相容，不再顯示成目前流程真相。
+    if (order.isBilled && !(order.statusHistory || []).some(item => item.field === 'isBilled')) {
+        entries.push({ at: orderInvoiceDate(order) || order.orderDate || '', action: '報帳（歷史推估）', by: '舊資料未記錄', detail: '依目前報帳狀態推估' });
+    }
     if (order.isDelivered && !savedDeliveryRecords(order).length && !(order.deliveryHistory || []).length) {
         entries.push({ at: order.orderDate || '', action: '送貨（歷史推估）', by: '舊資料未記錄', detail: '依目前訂單狀態推估，日期暫用訂單日期' });
     }
