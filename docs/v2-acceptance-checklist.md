@@ -22,7 +22,7 @@
 - [x] engineer 可建立/管理自己的 Forecast/Quote/Order
 - [x] engineer 有 salesCode/業績歸屬
 - [x] purchaser 協助建單必須指定 responsible sales
-- [x] sales/engineer 無未授權成本讀取
+- [ ] sales/engineer 無未授權成本讀取 — **Release blocker**：`inventoryLots.unitCost` 目前仍可由 active 使用者讀取；Firestore 無法做欄位級 read masking，必須在 main 前將 lot operational data 與 lot cost data 分離，或改由可信後端執行成本/COGS 計算。
 - [x] sales/engineer 無進銷存分析權限
 - [x] product search 使用 bounded query
 - [x] order/quote list pagination
