@@ -4540,12 +4540,70 @@ function fulfillmentProgressInfo(order) {
         return sum+itemDelivered;
     },0);
     const shippable=Math.max(0,prepared-delivered);
-    const pendingDispatch=Math.max(0,ready-prepared);
+    const pendingDispatch=Math.max(0,ready-shippable);
     if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
     if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     if(pendingDispatch>0)return {state:ready>=total?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     return {state:'pending',label:`待備貨 0/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
 }
+
+const pendingDispatchOrderIds = new Set();
+
+function itemDispatchState(order, item) {
+    const orderItems=normalizedOrderItems(order);
+    const delivered=savedDeliveryRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===item.itemId))
+        .reduce((sum,r)=>sum+Number(r.qty||0),0);
+    const reserved=Number(item.reservedQty??item.inventoryReservedQty??0);
+    const prepared=Number(item.dispatchPreparedQty||0);
+    const shippable=Math.max(0,prepared-delivered);
+    return { delivered, reserved, prepared, shippable, pending:Math.max(0,reserved-shippable) };
+}
+
+function dispatchActionHtml(order) {
+    if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return '';
+    if (normalizedOrderStatus(order) !== 'normal') return '';
+    return normalizedOrderItems(order)
+        .filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')
+        .map(item=>({item,state:itemDispatchState(order,item)}))
+        .filter(x=>x.state.pending>0)
+        .map(({item,state})=>`<button type="button" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')" ${pendingDispatchOrderIds.has(order.id+'__'+item.itemId)?'disabled':''}>待打單：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</button>`)
+        .join('');
+}
+
+window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
+    if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return;
+    const key=orderId+'__'+itemId;
+    if(pendingDispatchOrderIds.has(key))return;
+    pendingDispatchOrderIds.add(key);renderOrdersList();
+    try{
+        let saved;
+        await db.runTransaction(async tx=>{
+            const ref=db.collection('orders').doc(orderId);
+            const snap=await tx.get(ref);
+            if(!snap.exists)throw new Error('找不到訂單。');
+            const order=snap.data();
+            if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能打單。');
+            const items=normalizedOrderItems(order);
+            const index=items.findIndex(item=>item.itemId===itemId);
+            if(index<0)throw new Error('找不到訂單品項。');
+            const item=items[index],state=itemDispatchState(order,item);
+            if(state.pending<=0)throw new Error('此品項目前沒有待打單數量。');
+            const now=new Date().toISOString(),actor=deliveryActor();
+            items[index]={...item,dispatchPreparedQty:state.prepared+state.pending};
+            const dispatchRef=db.collection('dispatchRecords').doc();
+            tx.set(dispatchRef,{
+                orderId,itemId,qty:state.pending,ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',
+                customerName:order.customerName||'',itemCode:item.itemCode||'',itemName:item.itemName||'',
+                preparedByUid:currentUser?.uid||'',preparedBy:actor,createdAt:now
+            });
+            tx.update(ref,{items,updatedAt:now});
+            saved={...order,items,updatedAt:now};
+        });
+        const idx=ordersCache.findIndex(o=>o.id===orderId);
+        if(idx>=0)ordersCache[idx]={id:orderId,...saved};
+    }catch(err){alert('標記已打單失敗：'+err.message);}
+    finally{pendingDispatchOrderIds.delete(key);renderOrdersList();if(currentDeliveryOrderId===orderId)renderDeliveryModal();}
+};
 
 function orderProgressInfo(order) {
     const lifecycle=orderLifecycleInfo(order);
@@ -5026,6 +5084,7 @@ window.renderOrdersList = function() {
                             <button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>
                             <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>`
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
+                            ${dispatchActionHtml(o)}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                         </div>
