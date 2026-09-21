@@ -584,7 +584,14 @@ function ensureSalesListLoaded() {
 }
 
 function ensurePriceListLoaded() {
-    if (!priceListLoadPromise) priceListLoadPromise = loadPriceListFromCloud();
+    if (!priceListLoadPromise) {
+        priceListLoadPromise = loadPriceListFromCloud().catch(err => {
+            // First-load failures must be retryable; never leave the app stuck with a rejected cached promise.
+            priceListLoadPromise = null;
+            console.error('Product Master 載入失敗：', err);
+            throw err;
+        });
+    }
     return priceListLoadPromise;
 }
 
@@ -1909,7 +1916,12 @@ function loadPriceListFromCloud() {
         priceList = normalizeProductMasterList(meta.list || []);
         refreshPriceDatalists();
         renderKeyStatisticBrands();
-    }).catch(() => {});
+    }).catch(err => {
+        console.warn('舊價目表載入失敗，將繼續嘗試正式 Product Master：', err);
+        priceList = [];
+        refreshPriceDatalists();
+        return null;
+    });
     return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(async result => {
         // 正式 Product Master 以 products 集合為優先；舊 settings/prices 暫時保留做過渡來源。
         await loadProductMasterOverlay();
