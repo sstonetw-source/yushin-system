@@ -1182,3 +1182,26 @@ test('legacy cost migration sanitizes delivery and return allocations embedded i
     assert.match(appSource, /deliveryRecords:\(row\.data\.deliveryRecords\|\|\[\]\)\.map\(sanitizeRecord\)/);
     assert.match(appSource, /returnRecords:\(row\.data\.returnRecords\|\|\[\]\)\.map\(sanitizeRecord\)/);
 });
+
+
+test('cancel and restore reservations are item-aware', () => {
+  const start=appSource.indexOf('async function adjustInventoryReservationForLifecycle');
+  const end=appSource.indexOf('window.quickSetOrderLifecycle',start);
+  const source=appSource.slice(start,end);
+  assert.match(source,/const items = normalizedOrderItems\(order\)/);
+  assert.match(source,/order_cancelled/);
+  assert.match(source,/order_restored/);
+  assert.match(source,/stockStates = new Map/);
+  assert.match(source,/transaction\.set\(reservationDocRef\(orderId\)/);
+  assert.match(source,/items:nextItems,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage/);
+});
+
+test('delivery and return deletes reject duplicate submissions and cancelled orders can return delivered goods', () => {
+  const ds=appSource.slice(appSource.indexOf('window.deleteDeliveryRecord'),appSource.indexOf('window.clearLegacyDelivery'));
+  assert.match(ds,/pendingDeliveryOrderIds\.has\(orderId\)/);
+  assert.match(ds,/pendingDeliveryOrderIds\.delete\(orderId\)/);
+  const rs=appSource.slice(appSource.indexOf('window.deleteReturnRecord'),appSource.indexOf('window.updateOrderField'));
+  assert.match(rs,/pendingReturnOrderIds\.has\(orderId\)/);
+  assert.match(rs,/pendingReturnOrderIds\.delete\(orderId\)/);
+  assert.match(appSource,/已取消訂單仍可能有取消前已實際送出的商品/);
+});
