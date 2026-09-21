@@ -5732,6 +5732,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         const key = poIncomingKey(item);
         if (!key) throw new Error(`${item.itemName || '品項'} 缺少貨號／Product ID`);
         const warehouseId = item.warehouseId || defaultWarehouse()?.id || '';
+        if (!warehouseId) throw new Error(`${item.itemCode || item.itemName || '品項'} 尚未指定入庫倉庫，請先建立／指定倉庫。`);
 
         const invRef = db.collection('inventory').doc(encodeURIComponent(key));
         const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)) : null;
@@ -5889,19 +5890,27 @@ window.savePoReceiptBatch = async function() {
     if (!poId || !entries.length) { alert('請至少勾選一個到貨品項並輸入數量。'); return; }
 
     if (button) { button.disabled=true; button.textContent='入庫中…'; }
+    let completed = 0;
     try {
         if(poId.startsWith('supply:')){
             const supplyId=poId.slice(7);
-            for(const entry of entries)await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate);
+            for(const entry of entries){ await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate); completed++; }
         }else{
-            for (const entry of entries) await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate);
+            for (const entry of entries){ await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate); completed++; }
         }
         await loadMyPurchaseOrders();
         if (canAccessPage('inventory')) await loadInventory(true);
         closePoReceiptBatch();
-        alert(`已完成 ${entries.length} 個品項的批量到貨入庫。`);
+        alert(`已完成 ${completed} 個品項的批量到貨入庫。`);
     } catch (err) {
-        alert('批量到貨入庫失敗：'+err.message);
+        await loadMyPurchaseOrders().catch(()=>{});
+        if (canAccessPage('inventory')) await loadInventory(true).catch(()=>{});
+        if (completed > 0) {
+            closePoReceiptBatch();
+            alert(`已成功入庫 ${completed} 個品項；後續品項中斷：${err.message}\n已成功的資料不會重複入庫，請重新開啟訂購單處理剩餘數量。`);
+        } else {
+            alert('批量到貨入庫失敗：'+err.message);
+        }
     } finally {
         if (button) { button.disabled=false; button.textContent='確認入庫'; }
     }
