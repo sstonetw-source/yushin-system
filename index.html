@@ -1057,25 +1057,6 @@
 
         <!-- Product Master：正式資料存 products / productCosts；舊 settings/prices 暫時作相容來源。 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
-            <div class="panel no-print" style="margin-bottom:14px;">
-                <strong>Product Master v2 遷移</strong>
-                <p style="font-size:12px;color:#666;line-height:1.7;margin:6px 0 10px;">
-                    將目前舊價目表安全遷移至正式 products / productCosts。遷移不會修改歷史估價與訂單；
-                    舊價目表會保留產品與售價，但移除成本欄位，避免業務從舊 settings 文件讀到代理產品成本。
-                </p>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button type="button" class="btn-secondary" id="productMasterMigrationPreviewBtn" onclick="previewProductMasterMigration()">🔎 預覽遷移</button>
-                    <button type="button" id="productMasterMigrationBtn" onclick="runProductMasterMigration()" disabled>⬆️ 執行安全遷移</button>
-                    <button type="button" class="btn-secondary" id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">🔎 預覽庫存成本隔離</button>
-                    <button type="button" id="inventoryCostMigrationBtn" onclick="runInventoryCostMigration()" disabled>🔐 執行庫存成本隔離</button>
-                </div>
-                <div id="productMasterMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
-                <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
-                <div style="margin-top:10px;padding:10px 12px;background:#fff8e1;border-radius:6px;font-size:12px;line-height:1.7;color:#6b5200;">
-                    <strong>V2 部署順序：</strong>① 下載完整資料庫備份 → ② 部署 PR #30 的 Firestore Rules / Indexes → ③ 以管理員執行 Product Master v2 遷移 → ④ 執行庫存成本隔離，直到顯示 0 → ⑤ 完成五角色驗收。<br>
-                    新版 Rules 只保留管理員對舊成本欄位的遷移讀取權；業務／工程師等角色會立即被阻擋，因此可安全先部署 Rules 再搬移舊資料。
-                </div>
-            </div>
             <div class="toolbar no-print">
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
