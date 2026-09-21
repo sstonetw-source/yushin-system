@@ -1098,9 +1098,9 @@ test('V2 backup and storage audit include fulfillment and protected cost collect
 
 test('V2 admin UI documents safe migration-before-rules deployment order', () => {
     assert.match(indexSource, /下載完整資料庫備份/);
+    assert.match(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
     assert.match(indexSource, /庫存成本隔離，直到顯示 0/);
-    assert.match(indexSource, /再部署新版 Firestore Rules \/ Indexes/);
-    assert.match(indexSource, /不要先部署新版 Rules/);
+    assert.match(indexSource, /可安全先部署 Rules 再搬移舊資料/);
 });
 
 
