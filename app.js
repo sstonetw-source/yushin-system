@@ -5582,54 +5582,6 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
     return {allocatedQty,unallocatedQty:Math.max(0,remaining-allocatedQty)};
 }
 
-async function allocateReceivedStockToShortages(productKey,warehouseId,availableQty,sourceId='') {
-    let remaining=Math.max(0,Number(availableQty||0));
-    if(!remaining||!productKey||!warehouseId||!window.YushinReservation)return {allocatedQty:0,remainingQty:remaining};
-    // Bound the candidate set. Shortage reservations are small operational rows; never load order history.
-    const snap=await db.collection('inventoryReservations').where('productKey','==',productKey).limit(100).get();
-    const candidates=snap.docs.map(doc=>({id:doc.id,...doc.data()}))
-        .filter(row=>row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0&&row.status!=='cancelled');
-    const plan=window.YushinReservation.planShortageAllocation(candidates,remaining);
-    let allocatedQty=0;
-    for(const allocation of plan.allocations){
-        await db.runTransaction(async tx=>{
-            const reservationRef=db.collection('inventoryReservations').doc(allocation.reservationId);
-            const reservationSnap=await tx.get(reservationRef);
-            if(!reservationSnap.exists)return;
-            const reservation=reservationSnap.data();
-            const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
-            const qty=Math.min(Number(allocation.qty||0),liveShortage);
-            if(!qty)return;
-            const orderRef=db.collection('orders').doc(reservation.orderId);
-            const orderSnap=await tx.get(orderRef);
-            if(!orderSnap.exists)return;
-            const order=orderSnap.data(),items=normalizedOrderItems(order);
-            const itemIndex=items.findIndex(item=>item.itemId===reservation.itemId);
-            if(itemIndex<0)return;
-            const item=items[itemIndex];
-            const nextReserved=Number(item.reservedQty??item.inventoryReservedQty??0)+qty;
-            const nextShortage=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??liveShortage)-qty);
-            items[itemIndex]={...item,reservedQty:nextReserved,inventoryReservedQty:nextReserved,shortageQty:nextShortage,inventoryShortageQty:nextShortage,purchaseRequiredQty:nextShortage};
-            const totalReserved=items.reduce((sum,row)=>sum+Number(row.reservedQty??row.inventoryReservedQty??0),0);
-            const totalShortage=items.reduce((sum,row)=>sum+Number(row.shortageQty??row.inventoryShortageQty??0),0);
-            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:new Date().toISOString()});
-            tx.set(reservationRef,{quantity:Number(reservation.quantity||0)+qty,shortageQty:Math.max(0,liveShortage-qty),status:'active',updatedAt:new Date().toISOString()},{merge:true});
-            const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
-            const whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
-            const invSnap=await tx.get(invRef),whSnap=await tx.get(whRef);
-            if(!invSnap.exists||!whSnap.exists)throw new Error('入庫後找不到庫存資料，無法自動補預留。');
-            const inv=inventoryNumbers(invSnap.data()),wh=inventoryNumbers(whSnap.data());
-            if(inv.available<qty||wh.available<qty)throw new Error('可用庫存已被其他作業占用，停止自動補預留。');
-            const now=new Date().toISOString();
-            tx.update(invRef,{reserved:inv.reserved+qty,updatedAt:now});
-            tx.update(whRef,{reserved:wh.reserved+qty,updatedAt:now});
-            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',qty,reservation.orderId,productKey,deliveryActor(),{warehouseId,itemId:reservation.itemId,receiptSourceId:sourceId,fulfillmentType:'WAREHOUSE'}));
-        });
-        allocatedQty+=Number(allocation.qty||0);
-    }
-    return {allocatedQty,remainingQty:Math.max(0,remaining-allocatedQty)};
-}
-
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
     const now=new Date().toISOString(),actor=deliveryActor();
     let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',reservedForSource=0;
