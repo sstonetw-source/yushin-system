@@ -311,6 +311,20 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "inventoryReservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "productKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
