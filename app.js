@@ -1690,7 +1690,7 @@ window.createOrderFromForecast = async function(id) {
    ========================================================= */
 // 業務名單來源改為 users 集合（與登入帳號綁定，name/code/phone/role 皆存在同一份文件）
 function initSalesList() {
-    return db.collection('users').get().then(snapshot => {
+    return db.collection('users').limit(500).get().then(snapshot => {
         const list = [];
         snapshot.forEach(doc => {
             const d = doc.data();
@@ -7972,9 +7972,10 @@ window.loadEquipmentFromCloud = function() {
     const requestedRole = currentUserRole;
     let query = db.collection('equipment');
     if (canViewAllEquipment()) {
-        query = query.orderBy('customerName');
+        query = query.orderBy('customerName').limit(DEFAULT_LIST_LIMIT);
     } else {
         query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('salesName', '==', currentUserName);
+        query = query.limit(DEFAULT_LIST_LIMIT);
     }
     query.get().then(snapshot => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
@@ -8327,11 +8328,24 @@ window.deleteEquipmentLog = function(eqId, logIndex) {
 };
 
 function loadEquipmentFromCloudThenReopen(eqId) {
+    // Editing a record must not reload the entire equipment history.
+    db.collection('equipment').doc(eqId).get().then(snapshot => {
+        if (!snapshot.exists) throw new Error('找不到儀器資料。');
+        const saved={ id:snapshot.id, ...snapshot.data() };
+        const index=equipmentList.findIndex(item=>item.id===eqId);
+        if(index>=0)equipmentList[index]=saved; else equipmentList.unshift(saved);
+        renderEquipmentList();
+        openEquipmentModal(eqId);
+        return null;
+    }).catch(err => {
+        alert('重新載入儀器失敗：'+err.message);
+    });
+    return;
     let query = db.collection('equipment');
     if (canViewAllEquipment()) {
-        query = query.orderBy('customerName');
+        query = query.orderBy('customerName').limit(DEFAULT_LIST_LIMIT);
     } else {
-        query = query.where('salesName', '==', currentUserName);
+        query = query.where('salesName', '==', currentUserName).limit(DEFAULT_LIST_LIMIT);
     }
     query.get().then(snapshot => {
         equipmentList = [];
