@@ -1205,3 +1205,10 @@ test('delivery and return deletes reject duplicate submissions and cancelled ord
   assert.match(rs,/pendingReturnOrderIds\.delete\(orderId\)/);
   assert.match(appSource,/已取消訂單仍可能有取消前已實際送出的商品/);
 });
+
+
+test('legacy cost migration also sanitizes aggregate and warehouse stock cost fields', () => {
+  assert.match(appSource,/legacyWarehouseStocks/);
+  assert.match(appSource,/warehouseStocks/);
+  assert.match(appSource,/costSanitizedAt/);
+});
