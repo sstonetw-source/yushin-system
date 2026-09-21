@@ -84,8 +84,7 @@
     return normalizeItem({
       ...x,
       deliveredQty: x.deliveredQty + applied,
-      reservedQty: Math.max(0, x.reservedQty - applied),
-      dispatchPreparedQty: Math.max(0, x.dispatchPreparedQty - applied)
+      reservedQty: Math.max(0, x.reservedQty - applied)
     });
   }
 
