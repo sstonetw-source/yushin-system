@@ -69,3 +69,17 @@ This branch received concurrent V2 commits during implementation. Always refetch
 - Historical COGS is reproducible by joining immutable delivery/return `lotAllocations` to protected `inventoryLotCosts`, without exposing cost to fulfillment users.
 - Firestore emulator coverage proves sales/engineer/warehouse cannot read protected lot cost while admin/purchaser can; warehouse can create receipt cost without reading it back.
 - CI run #393 passed syntax, regression, and Firestore Rules emulator after the isolation architecture landed. A later run validates historical COGS reconstruction.
+
+
+## 2026-09-21 fulfillment hardening pass
+- Batch receipt now reports partial commits accurately and refreshes PO/inventory before retry; missing warehouse blocks receipt.
+- Every multi-item order, including direct ship, must use item-level delivery so later return/reversal has an unambiguous item.
+- Delivery save/delete and return save/delete use duplicate-submit guards.
+- Cancelled orders may still accept returns against goods physically delivered before cancellation.
+- Cancel/restore reservation handling was rewritten item-by-item, retires legacy order-level reservation docs, and aggregates repeated product/warehouse stock state to avoid overwrite when two order lines share stock.
+- Warehouse receipt permissions now match UI: warehouse can update only PO receipt workflow fields, not supplier/items/pricing.
+- Shared inventory/warehouse stock/lot documents reject embedded cost; admin retains read access to legacy cost-bearing documents solely so the post-Rules migration can sanitize them.
+- Corrected Firebase bootstrap sequence: full backup -> deploy migration-compatible Rules/Indexes -> admin migrations -> cost preview zero -> five-role acceptance.
+- Legacy cost migration now also sanitizes warehouse stock and embedded order delivery/return allocation cost fields.
+- Full backup coverage now matches governed collections and includes nested Forecast progress.
+- CI #471 passed JavaScript syntax, 140 Node regression tests, and Firestore Rules emulator after these changes.
