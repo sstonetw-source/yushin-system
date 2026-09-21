@@ -1128,3 +1128,23 @@ test('formal purchase order automatically derives ordered progress on linked ord
     assert.match(appSource, /function purchaseProgressInfo/);
     assert.match(appSource, /已訂貨 \$\{ordered\}\/\$\{required\}/);
 });
+
+
+test('V2 order history presents derived purchase and fulfillment progress instead of legacy ordered/arrived truth', () => {
+    const start = appSource.indexOf('function renderOrderStatusHistory');
+    const end = appSource.indexOf('async function applyInventoryDeliveryDeltaInTransaction', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /purchaseProgressInfo\(order\)/);
+    assert.match(source, /fulfillmentProgressInfo\(order\)/);
+    assert.doesNotMatch(source, /\['isOrdered', '訂貨'\], \['isArrived', '到貨'\]/);
+});
+
+test('stock replenishment always uses a valid warehouse PO path', () => {
+    const start = appSource.indexOf('window.printPurchaseOrder');
+    const end = appSource.indexOf('window.closePurchaseOrderModal', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /原廠備貨是公司庫存採購，不能設定為原廠直送/);
+    assert.match(source, /原廠備貨必須指定入庫倉庫/);
+    assert.match(source, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
+    assert.match(source, /db\.collection\('supplyOrders'\)/);
+});
