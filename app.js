@@ -6558,9 +6558,9 @@ function renderOrderStatusLog(order) {
     const latest = {};
     (order.statusHistory || []).forEach(entry => { latest[entry.field] = entry; });
     const fields = [
-        ['isOrdered', '訂貨'],
-        ['isArrived', '到貨'],
-        ['isDelivered', '送貨'],
+        // V2 sourcing / receipt / dispatch / delivery are derived from transactional records.
+        // Keep legacy statusHistory readable, but do not present old manual 訂貨／到貨 toggles as current truth.
+        ['isDelivered', '舊版送貨紀錄'],
         ['isBilled', '報帳']
     ];
     const lines = fields.map(([field, label]) => {
