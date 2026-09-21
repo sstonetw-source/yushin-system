@@ -4320,9 +4320,9 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     const requested=Math.max(0,Number(item.qty||0));
     const productKey=inventoryProductKey(item);
     const itemId=String(item.itemId||`item-${itemIndex+1}`);
-    if(!requested||!productKey)return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:requested,purchaseRequiredQty:Number(item.purchaseRequiredQty??requested),inventoryProductKey:productKey};
+    if(!requested||!productKey)return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:requested,inventoryShortageQty:requested,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey};
     if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
-        return {...item,itemId,inventoryReservedQty:0,inventoryShortageQty:0,purchaseRequiredQty:requested,inventoryProductKey:productKey,directShipQty:requested,warehouseId:''};
+        return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:0,inventoryShortageQty:0,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,directShipQty:requested,warehouseId:''};
     }
     const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
     const aggregateRef=inventoryRefFor(item);
@@ -4349,7 +4349,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
             orderDate:order.orderDate||'',quantity:reservable,shortageQty:shortage,
             status:reservable>0?'active':'shortage',warehouseId,updatedAt:now
         },{merge:true});
-        result={...item,itemId,inventoryReservedQty:reservable,inventoryShortageQty:shortage,purchaseRequiredQty:Number(item.purchaseRequiredQty??shortage),inventoryProductKey:productKey,warehouseId};
+        result={...item,itemId,orderedQty:requested,reservedQty:reservable,inventoryReservedQty:reservable,shortageQty:shortage,inventoryShortageQty:shortage,purchaseRequiredQty:shortage,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,warehouseId};
     });
     return result;
 }
@@ -4406,21 +4406,23 @@ function legacyOrderItemFromOrder(order, index = 0) {
 // Phase 1 相容層：舊訂單沒有 items 時，從既有單品欄位即時計算出一筆明細。
 // 目前仍保留所有 top-level 單品欄位，讓既有 PO／庫存／送貨流程完全不受影響。
 function normalizedOrderItems(order) {
-    if (Array.isArray(order?.items) && order.items.length) {
-        return order.items.map((item, index) => ({
+    const source = Array.isArray(order?.items) && order.items.length
+        ? order.items
+        : (order?.itemCode || order?.itemName || order?.productId ? [legacyOrderItemFromOrder(order)] : []);
+    return source.map((item, index) => {
+        const base = {
             ...item,
             itemId: String(item.itemId || `item-${index + 1}`),
             itemCodeKey: item.itemCodeKey || normalizeHistoryItemCode(item.itemCode || ''),
             brand: resolveBrandName(item.brand || ''),
-            qty: Number(item.qty || 0),
+            qty: Number(item.qty || item.orderedQty || 0),
             unitPrice: parseMoney(item.unitPrice || 0),
             totalPrice: parseMoney(item.totalPrice || 0),
             fulfillmentType: item.fulfillmentType || 'WAREHOUSE',
             warehouseId: item.fulfillmentType === 'DIRECT_SHIP' ? '' : (item.warehouseId || '')
-        }));
-    }
-    if (order?.itemCode || order?.itemName || order?.productId) return [legacyOrderItemFromOrder(order)];
-    return [];
+        };
+        return window.YushinFulfillment ? window.YushinFulfillment.normalizeItem(base, index) : base;
+    });
 }
 
 function ensureOrderItemCompatibility(order) {
@@ -4502,12 +4504,15 @@ function purchaseProgressInfo(order) {
 
 function fulfillmentProgressInfo(order) {
     const items=normalizedOrderItems(order).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
-    const total=items.reduce((s,item)=>s+Number(item.qty||0),0);
-    const ready=items.reduce((s,item)=>s+Math.min(Number(item.qty||0),Number(item.inventoryReservedQty||0)),0);
-    if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0};
-    if(total>0&&ready>=total)return {state:'ready',label:`可出貨 ${ready}/${total}`,total,ready};
-    if(ready>0)return {state:'partial',label:`部分備貨 ${ready}/${total}`,total,ready};
-    return {state:'pending',label:`待備貨 0/${total}`,total,ready};
+    const total=items.reduce((s,item)=>s+Number(item.orderedQty||item.qty||0),0);
+    const ready=items.reduce((s,item)=>s+Math.min(Number(item.orderedQty||item.qty||0),Number(item.reservedQty??item.inventoryReservedQty??0)),0);
+    const prepared=items.reduce((s,item)=>s+Math.min(Number(item.orderedQty||item.qty||0),Number(item.dispatchPreparedQty||0)),0);
+    const delivered=items.reduce((s,item)=>s+Number(item.deliveredQty||0),0);
+    const shippable=Math.max(0,prepared-delivered);
+    if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,shippable:0};
+    if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,shippable};
+    if(ready>0)return {state:ready>=total?'pending_dispatch':'partial_dispatch',label:`待打單 ${Math.max(0,ready-prepared)}/${total}`,total,ready,prepared,shippable};
+    return {state:'pending',label:`待備貨 0/${total}`,total,ready,prepared,shippable};
 }
 
 function orderProgressInfo(order) {
@@ -4518,8 +4523,9 @@ function orderProgressInfo(order) {
     if(lifecycle.status!=='normal'||lifecycle.returned>0)return {label:lifecycle.label,css:lifecycle.css==='returned'?'partial':'invalid'};
     if(delivery.delivered>0&&delivery.state==='partial')return {label:`部分送貨 ${delivery.delivered}/${delivery.total}`,css:'partial'};
     if(delivery.state==='complete')return order.isBilled?{label:'已完成',css:'complete'}:{label:'已送貨・待報帳',css:'active'};
-    if(fulfillment.state==='ready')return {label:fulfillment.label,css:'active'};
-    if(fulfillment.state==='partial')return {label:fulfillment.label,css:'partial'};
+    if(fulfillment.state==='shippable')return {label:fulfillment.label,css:'active'};
+    if(fulfillment.state==='pending_dispatch')return {label:fulfillment.label,css:'pending'};
+    if(fulfillment.state==='partial_dispatch')return {label:fulfillment.label,css:'partial'};
     return {label:purchase.label,css:purchase.state==='partial'?'partial':'pending'};
 }
 
@@ -4538,7 +4544,8 @@ function orderWorkCategory(order) {
     const fulfillment=fulfillmentProgressInfo(order);
     if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return 'closed';
     if(delivery.state==='complete')return order.isBilled?'complete':'billing';
-    if(delivery.delivered>0||fulfillment.state==='ready'||fulfillment.state==='partial'||fulfillment.state==='direct')return 'delivery';
+    if(delivery.delivered>0||fulfillment.state==='shippable'||fulfillment.state==='direct')return 'delivery';
+    if(fulfillment.state==='pending_dispatch'||fulfillment.state==='partial_dispatch')return 'dispatch';
     if(purchase.state==='ordered'||purchase.state==='partial')return 'arrival';
     return 'ordering';
 }
