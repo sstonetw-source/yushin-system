@@ -9,7 +9,33 @@
     const type=Object.values(TYPES).includes(record.type)?record.type:TYPES.PURCHASING_PO;
     const qty=n(record.qty);
     const receivedQty=Math.min(qty,n(record.receivedQty));
-    return {...record,type,qty,receivedQty,remainingQty:Math.max(0,qty-receivedQty),status:receivedQty>=qty&&qty>0?'RECEIVED':receivedQty>0?'PARTIAL_RECEIPT':record.status||'ORDERED'};
+    function allocateLots(lots = [], qty = 0) {
+    let remaining = positive(qty);
+    const ordered = sortLotsForIssue(lots);
+    const allocations = [];
+    for (const lot of ordered) {
+      if (remaining <= 0) break;
+      const available = positive(lot.remainingQty ?? lot.qty);
+      if (!available) continue;
+      const take = Math.min(available, remaining);
+      allocations.push({
+        lotId: lot.id || '',
+        lotNo: lot.lotNo || '',
+        expiryDate: lot.expiryDate || '',
+        qty: take,
+        unitCost: positive(lot.unitCost),
+        cost: take * positive(lot.unitCost)
+      });
+      remaining -= take;
+    }
+    if (remaining > 0) throw new Error('批次庫存不足');
+    return {
+      allocations,
+      totalCost: allocations.reduce((sum, row) => sum + row.cost, 0)
+    };
+  }
+
+  return {...record,type,qty,receivedQty,remainingQty:Math.max(0,qty-receivedQty),status:receivedQty>=qty&&qty>0?'RECEIVED':receivedQty>0?'PARTIAL_RECEIPT':record.status||'ORDERED'};
   }
   function validate(record={}){
     const x=normalize(record),errors=[];
