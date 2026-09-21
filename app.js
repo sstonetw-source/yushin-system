@@ -5540,6 +5540,11 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
     const snap=await db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==','shortage').limit(50).get();
     const candidates=snap.docs.map(doc=>({id:doc.id,...doc.data()}))
         .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0);
+    // A reservation can become partially active while still having shortage; include it in later refill passes.
+    const activeSnap=await db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==','active').limit(50).get();
+    activeSnap.docs.map(doc=>({id:doc.id,...doc.data()})).forEach(row=>{
+        if(row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0&&!candidates.some(x=>x.id===row.id))candidates.push(row);
+    });
     const plan=window.YushinReservation.allocateReceiptToShortages(candidates,remaining);
     let allocatedQty=0;
     for(const allocation of plan.allocations){
