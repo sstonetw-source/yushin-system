@@ -210,9 +210,7 @@ service cloud.firestore {
       allow read: if admin() || owns(resource.data);
       allow create: if (admin() || businessOwner()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
-        || purchaserOrderWorkflowUpdate()
-        || warehouseOrderWorkflowUpdate();
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner());
       allow delete: if false;
     }
 
@@ -231,7 +229,9 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner());
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
+        || purchaserOrderWorkflowUpdate()
+        || warehouseOrderWorkflowUpdate();
       allow delete: if false;
     }
 
