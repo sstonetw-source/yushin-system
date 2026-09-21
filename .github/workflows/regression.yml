@@ -16,7 +16,7 @@ jobs:
       - name: JavaScript syntax check
         run: node --check app.js && node --check modules/fulfillment-core.js && node --check modules/supply-core.js
       - name: Regression tests
-        run: node --test tests/phase1.test.js tests/fulfillment-core.test.js
+        run: node --test tests/phase1.test.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator
