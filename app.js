@@ -4657,7 +4657,7 @@ function renderOrderWorkCards(orders) {
     const container = document.getElementById('orderWorkCards');
     if (!container) return;
     const definitions = [
-        ['all', '全部'], ['ordering', '待採購'], ['arrival', '採購／到貨中'], ['delivery', '備貨／待送貨'],
+        ['all', '全部'], ['ordering', '待採購'], ['arrival', '採購／到貨中'], ['dispatch', '待打單'], ['delivery', '可出貨／待送貨'],
         ['billing', '待報帳'], ['complete', '已完成'], ['closed', '異常／已關閉']
     ];
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
@@ -4813,7 +4813,11 @@ function fullHistorySearchValues(type, record = {}) {
     return [
         record.id, record.orderNo, record.quoteNo, record.customerName, record.brand,
         record.itemCode, record.itemName, record.salesName, record.purchaseOrderNo,
-        record.invoiceTitle, record.productLine, record.spec
+        record.invoiceTitle, record.productLine, record.spec,
+        ...(Array.isArray(record.items) ? record.items.flatMap(item => [
+            item.itemId, item.brand, item.itemCode, item.itemName, item.productLine,
+            item.productType, item.spec, ...(Array.isArray(item.purchaseOrderNos) ? item.purchaseOrderNos : [])
+        ]) : [])
     ];
 }
 
@@ -4997,7 +5001,10 @@ function populatePurchaserOrderFilters() {
     const brandValue = brandSelect.value;
     const sales = [...new Set(ordersCache.map(o => stripPhoneSuffix(o.salesName)).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    const brands = [...new Set(ordersCache.map(o => (o.brand || '').trim()).filter(Boolean))]
+    const brands = [...new Set(ordersCache.flatMap(o => [
+        (o.brand || '').trim(),
+        ...normalizedOrderItems(o).map(item => (item.brand || '').trim())
+    ]).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 
     salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
@@ -5007,6 +5014,51 @@ function populatePurchaserOrderFilters() {
     if (sales.includes(salesValue)) salesSelect.value = salesValue;
     if (brands.includes(brandValue)) brandSelect.value = brandValue;
 }
+
+
+window.markOrderDispatchPrepared = async function(orderId) {
+    if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return;
+    const cached = ordersCache.find(order => order.id === orderId);
+    if (!cached || normalizedOrderStatus(cached) !== 'normal') return;
+    const key = `${orderId}:dispatch`;
+    if (pendingOrderStatusKeys.has(key)) return;
+    pendingOrderStatusKeys.add(key);
+    renderOrdersList();
+    try {
+        let savedOrder;
+        await db.runTransaction(async transaction => {
+            const ref = db.collection('orders').doc(orderId);
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
+            const order = snapshot.data();
+            const items = normalizedOrderItems(order);
+            const preparedLines = [];
+            const nextItems = items.map(item => {
+                if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return item;
+                const pending = window.YushinFulfillment.pendingDispatchQty(item);
+                if (pending <= 0) return item;
+                preparedLines.push({ itemId:item.itemId, qty:pending });
+                return window.YushinFulfillment.prepareDispatch(item, pending);
+            });
+            if (!preparedLines.length) throw new Error('目前沒有待打單數量。');
+            const now = new Date().toISOString();
+            transaction.set(db.collection('dispatchRecords').doc(), {
+                orderId, ownerUid:order.ownerUid||'', salesCode:order.salesCode||'',
+                lines:preparedLines, qty:preparedLines.reduce((sum,line)=>sum+line.qty,0),
+                createdAt:now, createdByUid:currentUser?.uid||'', createdBy:deliveryActor()
+            });
+            transaction.update(ref,{items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,updatedAt:now});
+            savedOrder={...order,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,updatedAt:now};
+        });
+        const index=ordersCache.findIndex(order=>order.id===orderId);
+        if(index>=0)ordersCache[index]={id:orderId,...savedOrder};
+    } catch(err) {
+        alert('標記已打單失敗：'+err.message);
+    } finally {
+        pendingOrderStatusKeys.delete(key);
+        renderOrdersList();
+    }
+};
 
 window.renderOrdersList = function() {
     const tbody = document.getElementById('ordersBody');
@@ -5028,10 +5080,13 @@ window.renderOrdersList = function() {
 
     const visibleOrderSource = orderHistorySearchActive ? orderHistorySearchResults : ordersCache;
     const baseOrders = visibleOrderSource.filter(o => {
-        const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''}`.toLowerCase();
+        const itemSearchable = normalizedOrderItems(o).flatMap(item => [
+            item.brand, item.itemCode, item.itemName, item.productLine, item.productType, item.spec
+        ]).join(' ');
+        const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''} ${itemSearchable}`.toLowerCase();
         if (!orderHistorySearchActive && keyword && !searchable.includes(keyword)) return false;
         if (salesFilter && stripPhoneSuffix(o.salesName) !== salesFilter) return false;
-        if (brandFilter && (o.brand || '') !== brandFilter) return false;
+        if (brandFilter && !normalizedOrderItems(o).some(item => (item.brand || '') === brandFilter) && (o.brand || '') !== brandFilter) return false;
         return true;
     });
     renderOrderWorkCards(baseOrders);
@@ -5053,7 +5108,7 @@ window.renderOrdersList = function() {
             <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory('${escapeAttr(o.customerName)}')">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell"><strong>${escapeHtml(o.itemName || '－')}</strong><small>${escapeHtml(o.brand || '未分類')}${o.itemCode ? `・${escapeHtml(o.itemCode)}` : ''}</small></td>
+            <td data-th="產品資訊" class="order-product-cell">${normalizedOrderItems(o).map((item,index)=>`<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)} ${escapeHtml(item.unit||'')}</small></div>`).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
             ${canGeneratePo ? `
             <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" value="${o.costPrice != null ? o.costPrice : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
@@ -5070,9 +5125,10 @@ window.renderOrdersList = function() {
             <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
                 <div class="order-compact-actions">
-                    <button type="button" class="btn-small ${o.isOrdered ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isOrdered', ${!o.isOrdered})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isOrdered`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isOrdered`) ? '儲存中…' : o.isOrdered ? '已訂貨' : '訂貨'}</button>
-                    <button type="button" class="btn-small ${o.isArrived ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isArrived', ${!o.isArrived})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isArrived`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isArrived`) ? '儲存中…' : o.isArrived ? '已到貨' : '到貨'}</button>
-                    <button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : deliveryProgressInfo(o).state === 'partial' ? `送貨 ${deliveryProgressInfo(o).delivered}/${deliveryProgressInfo(o).total}` : '送貨'}</button>
+                    <span class="order-progress-badge">${escapeHtml(purchaseProgressInfo(o).label)}</span>
+                    <span class="order-progress-badge">${escapeHtml(fulfillmentProgressInfo(o).label)}</span>
+                    ${canGeneratePo && ['pending_dispatch','partial_dispatch'].includes(fulfillmentProgressInfo(o).state) ? `<button type="button" class="btn-small btn-secondary" onclick="markOrderDispatchPrepared('${o.id}')" ${pendingOrderStatusKeys.has(`${o.id}:dispatch`)?'disabled':''}>${pendingOrderStatusKeys.has(`${o.id}:dispatch`)?'處理中…':'已打單'}</button>` : ''}
+                    ${!canGeneratePo ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
                     <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已報帳' : '報帳'}</button>
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
