@@ -7316,7 +7316,12 @@ window.deleteDeliveryRecord = async function(recordId) {
             const actor = deliveryActor();
             const now = new Date().toISOString();
             const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
-            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId, [removed]);
+            const orderItems=normalizedOrderItems(order);
+            const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
+            if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
+            const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
+            const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty??targetItem.inventoryReservedQty??0),inventoryReservedQty:Number(targetItem.reservedQty??targetItem.inventoryReservedQty??0),deliveryRecords:itemRecords,isDelivered:false};
+            await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
             const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -7480,7 +7485,18 @@ window.saveReturnRecord = async function() {
             const now = new Date().toISOString();
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
-            const record = previous ? { ...previous, date, qty, reason, updatedBy: actor, updatedAt: now } : { id: lifecycleRecordId(), date, qty, reason, createdBy: actor, createdAt: now };
+            const orderItems=normalizedOrderItems(order);
+            const deliveredByItem=new Map();
+            savedDeliveryRecords(order).forEach(row=>{
+                const id=row.itemId || (orderItems.length===1?orderItems[0]?.itemId:'');
+                if(id)deliveredByItem.set(id,Number(deliveredByItem.get(id)||0)+Number(row.qty||0));
+            });
+            const requestedItemId=previous?.itemId || (orderItems.length===1?orderItems[0]?.itemId:'');
+            const targetItem=orderItems.find(item=>item.itemId===requestedItemId) || (orderItems.length===1?orderItems[0]:null);
+            if(!targetItem)throw new Error('多品項訂單的退貨必須指定原送貨品項。');
+            const otherReturned=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((sum,row)=>sum+Number(row.qty||0),0);
+            if(otherReturned+qty>Number(deliveredByItem.get(targetItem.itemId)||0)+1e-9)throw new Error(`${targetItem.itemName||'品項'} 退貨數量超過該品項已送貨數量。`);
+            const record = previous ? { ...previous, itemId:targetItem.itemId, date, qty, reason, updatedBy: actor, updatedAt: now } : { id: lifecycleRecordId(), itemId:targetItem.itemId, date, qty, reason, createdBy: actor, createdAt: now };
             if (existingIndex >= 0) records[existingIndex] = record; else records.push(record);
             const totalReturned = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const delivered = deliveredQuantity(order);
@@ -7488,7 +7504,10 @@ window.saveReturnRecord = async function() {
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
             const returnDelta = qty - Number(previous?.qty || 0);
             if (returnDelta){
-                const inventoryResult=await applyInventoryReturnDeltaInTransaction(transaction, order, returnDelta, actor, orderId, previous);
+                const itemDeliveries=savedDeliveryRecords(order).filter(row=>((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
+                const itemReturns=savedReturnRecords(order).filter(row=>row.id!==editId&&((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
+                const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),deliveryRecords:itemDeliveries,returnRecords:itemReturns};
+                const inventoryResult=await applyInventoryReturnDeltaInTransaction(transaction, itemOrder, returnDelta, actor, orderId, previous);
                 if(returnDelta>0){
                     record.lotAllocations=[...(previous?.lotAllocations||[]),...(inventoryResult.lotAllocations||[])];
                 }else if(previous){
@@ -7534,7 +7553,13 @@ window.deleteReturnRecord = async function(recordId) {
             const actor = deliveryActor();
             const now = new Date().toISOString();
             const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
-            await applyInventoryReturnDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId, removed);
+            const orderItems=normalizedOrderItems(order);
+            const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
+            if(!targetItem)throw new Error('找不到原退貨品項，無法安全還原庫存。');
+            const itemDeliveries=savedDeliveryRecords(order).filter(row=>((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
+            const itemReturns=records.filter(row=>row.id!==recordId&&((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
+            const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),deliveryRecords:itemDeliveries,returnRecords:itemReturns};
+            await applyInventoryReturnDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, removed);
             const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
