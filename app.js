@@ -6364,6 +6364,10 @@ function resetQuoteFormForNextOne() {
 // 先在畫面上立即反應（樂觀更新），不用等雲端回應才變色，感覺上會快很多；
 // 如果雲端寫入失敗，才把狀態復原並提示錯誤
 window.toggleOrderStatus = function(orderId, field, newValue) {
+    if (field !== 'isBilled') {
+        alert('訂貨、到貨與送貨狀態已由 V2 採購／入庫／打單流程自動管理。');
+        return;
+    }
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
     const pendingKey = `${orderId}:${field}`;
@@ -6527,7 +6531,7 @@ window.showCustomerOrderHistory = function(customerName) {
         <div class="customer-summary-card"><span>最近估價</span><strong>${escapeHtml(quotes[0] ? `${quotes[0].quoteNo || '－'}／${quotes[0].quoteDate || '－'}` : '－')}</strong></div>`;
     const tbody = document.getElementById('customerOrderHistoryBody');
     tbody.innerHTML = orders.length ? orders.slice(0, 20).map(order => `
-        <tr><td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.brand || '')}</td><td>${escapeHtml(order.itemCode || '')}</td><td>${escapeHtml(order.itemName || '')}</td><td>${escapeHtml(String(order.qty || ''))}</td><td>${escapeHtml(String(order.totalPrice || ''))}</td><td>${order.isDelivered ? '已送貨' : order.isArrived ? '已到貨' : order.isOrdered ? '已訂貨' : '未訂貨'}</td></tr>
+        <tr><td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.brand || '')}</td><td>${escapeHtml(order.itemCode || '')}</td><td>${escapeHtml(order.itemName || '')}</td><td>${escapeHtml(String(order.qty || ''))}</td><td>${escapeHtml(String(order.totalPrice || ''))}</td><td>${deliveryProgressInfo(order).delivered>0 ? (deliveryProgressInfo(order).state==='complete'?'已送貨':'部分送貨') : fulfillmentProgressInfo(order).shippable>0 ? '可出貨' : fulfillmentProgressInfo(order).pendingDispatch>0 ? '待打單' : purchaseProgressInfo(order).label}</td></tr>
     `).join('') : '<tr><td colspan="7" style="color:#888;">目前沒有採購紀錄。</td></tr>';
     const quoteTbody = document.getElementById('customerQuoteHistoryBody');
     quoteTbody.innerHTML = quoteItems.length ? quoteItems.slice(0, 20).map(({ quote, item }) => `
@@ -7010,17 +7014,13 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     const today = localDateString();
     const optimisticBefore = {
         deliveryRecords: savedDeliveryRecords(cachedOrder).slice(), deliveredQty: cachedOrder.deliveredQty,
-        isDelivered: cachedOrder.isDelivered, isOrdered: cachedOrder.isOrdered, isArrived: cachedOrder.isArrived,
-        orderedBy: cachedOrder.orderedBy, statusHistory: [...(cachedOrder.statusHistory || [])]
+        isDelivered: cachedOrder.isDelivered, statusHistory: [...(cachedOrder.statusHistory || [])]
     };
     const optimisticActor = deliveryActor();
     const optimisticAt = new Date().toISOString();
     cachedOrder.deliveryRecords = [...optimisticBefore.deliveryRecords, { id: `pending-${Date.now()}`, date: today, qty: cachedProgress.remaining, notes: '一鍵完成剩餘送貨', createdBy: optimisticActor, createdAt: optimisticAt }];
     cachedOrder.deliveredQty = cachedProgress.total;
     cachedOrder.isDelivered = true;
-    cachedOrder.isOrdered = true;
-    cachedOrder.isArrived = true;
-    cachedOrder.orderedBy = cachedOrder.orderedBy || optimisticActor;
     pendingDeliveryOrderIds.add(orderId);
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
@@ -7044,16 +7044,12 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             records.push(record);
             const history = { action: 'create', source: 'quick_complete', recordId: record.id, before: null, after: record, by: actor, at: now };
             const statusEntries = [];
-            if (!order.isOrdered) statusEntries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: now });
-            if (!order.isArrived) statusEntries.push({ field: 'isArrived', value: true, label: '已到貨', by: actor, at: now });
             const inventoryResult=await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
             record.lotAllocations=inventoryResult?.lotAllocations||[];
             record.cogs=Number(inventoryResult?.cogs||0);
             records[records.length-1]=record;
             const updates = {
                 deliveryRecords: records, deliveredQty: total, isDelivered: true,
-                isOrdered: true, isArrived: true,
-                orderedBy: order.orderedBy || actor,
                 deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history)
             };
             if (statusEntries.length) updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...statusEntries);
@@ -7077,9 +7073,6 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
         cachedOrder.deliveryRecords = optimisticBefore.deliveryRecords;
         cachedOrder.deliveredQty = optimisticBefore.deliveredQty;
         cachedOrder.isDelivered = optimisticBefore.isDelivered;
-        cachedOrder.isOrdered = optimisticBefore.isOrdered;
-        cachedOrder.isArrived = optimisticBefore.isArrived;
-        cachedOrder.orderedBy = optimisticBefore.orderedBy;
         cachedOrder.statusHistory = optimisticBefore.statusHistory;
         pendingDeliveryOrderIds.delete(orderId);
         renderOrdersList();
