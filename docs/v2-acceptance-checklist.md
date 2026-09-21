@@ -59,7 +59,7 @@
 
 ## Deployment gate added 2026-09-21
 - [x] 完整備份清單包含 V2 fulfillment 與 protected cost collections
-- [x] 管理員介面明示「備份 → Product Master 遷移 → 庫存成本隔離至 0 → Rules/Indexes」順序
+- [x] 管理員介面明示 bootstrap-safe「備份 → Rules/Indexes → Product Master 遷移 → 庫存成本隔離至 0 → 五角色驗收」順序
 - [x] V2 查詢所需 inventoryReservations / inventoryLots / inventoryMovements / supplyOrders 索引已在 firestore.indexes.json
+- [ ] 部署 PR #30 的 firestore.rules / firestore.indexes.json（新版 Rules 保留 admin-only legacy migration read）
 - [ ] 在 Firebase 專案執行舊資料成本隔離並重新預覽為 0
-- [ ] 部署 PR #30 的 firestore.rules / firestore.indexes.json
