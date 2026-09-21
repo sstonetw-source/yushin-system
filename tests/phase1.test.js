@@ -1212,3 +1212,11 @@ test('legacy cost migration also sanitizes aggregate and warehouse stock cost fi
   assert.match(appSource,/warehouseStocks/);
   assert.match(appSource,/costSanitizedAt/);
 });
+
+
+test('database backup covers governed master, audit, delivery and Forecast progress data', () => {
+  for (const name of ['productLines','priceHistory','deliveries','auditLogs']) assert.match(appSource,new RegExp("'"+name+"'"));
+  assert.match(appSource,/collectionGroup\('progress'\)/);
+  assert.match(appSource,/data\.forecastProgress/);
+  assert.match(appSource,/path:doc\.ref\.path/);
+});
