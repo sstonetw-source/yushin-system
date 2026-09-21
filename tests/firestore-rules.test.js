@@ -78,15 +78,31 @@ test('engineer self-order is allowed but formal purchase order is denied', async
 test('business owner can perform only scoped fulfillment stock updates', async () => {
   await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1', unitCost:100 });
   await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { reserved:3 }));
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { safetyStock:4 }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { productId:'hijack' }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { unitCost:1 }));
   await assertSucceeds(updateDoc(doc(db('wh1'), 'inventory/p1'), { reserved:3 }));
+});
+
+test('business owner can change only remaining quantity on an inventory lot', async () => {
+  await seed('inventoryLots/lot1', { productId:'p1', remainingQty:5, unitCost:100 });
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), {
+    remainingQty:4, updatedAt:'2026-09-21T00:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), { unitCost:1 }));
+  await assertFails(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), { remainingQty:-1 }));
 });
 
 test('assigned product-line owner can read protected cost; unassigned cannot', async () => {
   await seed('productCosts/c1', { productId:'p1', productLineId:'roche', unitCost:100 });
   await assertSucceeds(getDoc(doc(db('sales1'), 'productCosts/c1')));
   await assertFails(getDoc(doc(db('sales2'), 'productCosts/c1')));
+});
+
+test('legacy productLine remains compatible with assigned product-line authorization', async () => {
+  await seed('productCosts/c2', { productId:'p2', productLine:'roche', unitCost:200 });
+  await assertSucceeds(getDoc(doc(db('sales1'), 'productCosts/c2')));
+  await assertFails(getDoc(doc(db('sales2'), 'productCosts/c2')));
 });
 
 test('only purchaser/admin can create dispatch paperwork record', async () => {

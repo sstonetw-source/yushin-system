@@ -106,12 +106,16 @@ service cloud.firestore {
         && sameCommercialOwner();
     }
 
+    function productLineKey(data) {
+      return data.get('productLineId', data.get('productLine', ''));
+    }
+
     function assignedProductLine(data) {
       return admin() ||
         (businessOwner()
           && userDoc().data.productLineIds is list
-          && data.productLineId != null
-          && userDoc().data.productLineIds.hasAny([data.productLineId]));
+          && productLineKey(data) != ''
+          && userDoc().data.productLineIds.hasAny([productLineKey(data)]));
     }
 
     function nonNegativeInventory(data) {
@@ -123,9 +127,17 @@ service cloud.firestore {
     function businessInventoryOperationalUpdate() {
       return businessOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'onHand', 'reserved', 'lots', 'updatedAt'
+          'onHand', 'reserved', 'lots', 'safetyStock', 'updatedAt'
         ])
         && nonNegativeInventory(request.resource.data);
+    }
+
+    function businessInventoryLotOperationalUpdate() {
+      return businessOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'remainingQty', 'updatedAt'
+        ])
+        && request.resource.data.remainingQty >= 0;
     }
 
     function businessWarehouseStockOperationalUpdate() {
@@ -205,7 +217,7 @@ service cloud.firestore {
         || (assignedProductLine(resource.data)
           && assignedProductLine(request.resource.data)
           && request.resource.data.productId == resource.data.productId
-          && request.resource.data.productLineId == resource.data.productLineId);
+          && productLineKey(request.resource.data) == productLineKey(resource.data));
       allow delete: if false;
     }
 
@@ -313,7 +325,8 @@ service cloud.firestore {
 
     match /inventoryLots/{id} {
       allow read: if active();
-      allow create, update: if canReceiveInventory();
+      allow create: if canReceiveInventory();
+      allow update: if canReceiveInventory() || businessInventoryLotOperationalUpdate();
       allow delete: if false;
     }
 

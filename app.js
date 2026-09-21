@@ -4059,7 +4059,6 @@ window.loadInventory=async function(reset=true){
  renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
-
 window.searchBusinessProducts=async function(){
  const input=document.getElementById('businessProductSearch'),status=document.getElementById('businessProductSearchStatus'),wrap=document.getElementById('businessProductSearchResults'),body=document.getElementById('businessProductSearchBody');
  const raw=String(input?.value||'').trim();if(raw.length<2){alert('請至少輸入 2 個字或完整貨號。');return;}
@@ -4078,7 +4077,6 @@ window.searchBusinessProducts=async function(){
  }catch(err){if(status)status.textContent='查詢失敗';alert('產品查詢失敗：'+err.message);}
  finally{if(input)input.disabled=false;}
 };
-
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;
  const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';
@@ -4129,14 +4127,12 @@ window.renderInventoryList=function(){
    </tr>`);
  });
 };
-
 window.setInventorySafetyStock=async function(inventoryId){
  if(!canEditPage('inventory'))return;const item=inventoryCache.find(x=>x.id===inventoryId);if(!item)return;
  const raw=prompt(`設定 ${item.itemCode||item.itemName||'品項'} 的安全庫存`,String(Number(item.safetyStock||0)));if(raw===null)return;
  const safetyStock=Number(raw);if(!Number.isFinite(safetyStock)||safetyStock<0){alert('安全庫存必須是 0 以上數字。');return;}
  try{await db.collection('inventory').doc(inventoryId).update({safetyStock,updatedAt:new Date().toISOString()});item.safetyStock=safetyStock;renderInventoryList();}catch(err){alert('安全庫存更新失敗：'+err.message);}
 };
-
 window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;const legacy=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`);const supplies=pendingSupplyCache.map(x=>{const remaining=Math.max(0,Number(x.qty||0)-Number(x.receivedQty||0));return `<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${remaining}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態"><button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(x.internalNo||'自行訂貨')}・入庫</button></td></tr>`;});body.innerHTML=[...supplies,...legacy].join('');if(hint)hint.style.display=(pendingInventoryCache.length||pendingSupplyCache.length)?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
@@ -6927,7 +6923,10 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
 
     transaction.set(invRef,{onHand:inv.onHand-deltaQty,reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand-deltaQty,reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
-    transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,cogs}));
+    transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
+        warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,cogs,
+        ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
+    }));
 
     const deliveryItemId=order.itemId||'';
     const deliveryReservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
@@ -6979,7 +6978,8 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
-        createdAt:now,createdBy:actor,lotAllocations,cogs
+        createdAt:now,createdBy:actor,lotAllocations,cogs,
+        ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     });
     return {lotAllocations,cogs};
 }
@@ -9172,6 +9172,7 @@ function ensureQuickProductModal() {
           <div><label>廠牌</label><input id="quickProductBrand" type="text" list="quickProductBrandList" autocomplete="off"><datalist id="quickProductBrandList"></datalist></div>
           <div><label>貨號</label><input id="quickProductCode" type="text" autocomplete="off"></div>
           <div style="grid-column:1/-1;"><label>品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
+          <div><label>產品線</label><input id="quickProductLine" type="text" placeholder="例如 Roche"></div>
           <div><label>產品來源</label><select id="quickProductAuthorization" onchange="updateQuickProductCostVisibility()"><option value="AUTHORIZED">公司代理產品</option><option value="NON_AUTHORIZED">非代理產品</option></select></div>
           <div><label>建議售價</label><input id="quickProductPrice" type="number" min="0"></div>
           <div id="quickProductCostWrap"><label>成本</label><input id="quickProductCost" type="number" min="0" placeholder="沒有價目表時可自行輸入"></div>
@@ -9209,6 +9210,9 @@ window.openQuickProductCreate = function(mode, input) {
     document.getElementById('quickProductName').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-cn')?.value || '')
         : (document.getElementById('orderItemName')?.value || '');
+    document.getElementById('quickProductLine').value = mode === 'quote'
+        ? (input.closest('tr')?.querySelector('.item-product-line')?.value || '')
+        : (document.getElementById('orderProductLine')?.value || '');
     document.getElementById('quickProductPrice').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.inc-price')?.value || '')
         : (document.getElementById('orderUnitPrice')?.value || '');
@@ -9231,6 +9235,7 @@ window.saveQuickProduct = async function() {
     const brand = resolveBrandName(document.getElementById('quickProductBrand')?.value || '');
     const code = String(document.getElementById('quickProductCode')?.value || '').trim();
     const productName = String(document.getElementById('quickProductName')?.value || '').trim();
+    const productLine = String(document.getElementById('quickProductLine')?.value || '').trim();
     const authorizationType = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
     const priceRaw = document.getElementById('quickProductPrice')?.value ?? '';
     const costRaw = document.getElementById('quickProductCost')?.value ?? '';
@@ -9270,6 +9275,8 @@ window.saveQuickProduct = async function() {
         manufacturerPartNo: code,
         normalizedPartNo,
         productName,
+        productLine,
+        productLineId: productLine,
         authorizationType,
         listPrice: Number(priceRaw) || 0,
         status: 'TEMPORARY',
@@ -9285,6 +9292,7 @@ window.saveQuickProduct = async function() {
         if (authorizationType === 'NON_AUTHORIZED' && String(costRaw).trim() !== '') {
             await db.collection('productCosts').doc(productId).set({
                 productId,
+                productLineId: productLine,
                 standardCost: Number(costRaw) || 0,
                 salesVisible: true,
                 source: 'quick_create',
@@ -9769,7 +9777,6 @@ function loadAllUsersForAdmin() {
     });
 }
 
-
 let adminDashboardLoading=false;
 window.loadAdminDashboard=async function(){
  if(trueUserRole!=='admin'||adminDashboardLoading)return;adminDashboardLoading=true;
@@ -9822,7 +9829,6 @@ window.renderAdminSalesTable = function() {
         tbody.appendChild(tr);
     });
 };
-
 
 window.saveAdminUserCapabilities=async function(uid){
     if(trueUserRole!=='admin')return;
@@ -10395,6 +10401,7 @@ function productMasterRecordFromLegacyItem(item) {
         nameEn: normalized.nameEn || '',
         category: normalized.productType || '',
         productLine: normalized.productLine || '',
+        productLineId: normalized.productLine || '',
         specification: normalized.spec || '',
         unit: normalized.unit || '',
         listPrice: Number(normalized.price || 0),
@@ -10413,6 +10420,7 @@ function legacyCostRecord(item, productRecord) {
     if (!Number.isFinite(cost)) return null;
     return {
         productId: productRecord.productId,
+        productLineId: productRecord.productLineId || productRecord.productLine || '',
         standardCost: cost,
         salesVisible: productRecord.authorizationType === 'NON_AUTHORIZED',
         source: 'legacy_price_migration',
