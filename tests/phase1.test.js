@@ -169,7 +169,7 @@ test('purchase modal chooses a company that does not silently filter every item'
     assert.equal(context.bestPurchaseOrderCompany([{ company: 'MULTI-LIFE' }], [{ brand: 'Beckman' }], 'yushin'), 'MULTI-LIFE');
     const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
-    assert.match(appSource.slice(dealStart, dealEnd), /company: q\.company \|\| ''/);
+    assert.match(appSource.slice(dealStart, dealEnd), /company\s*:\s*q\.company\s*\|\|\s*''/);
 });
 
 test('billing status is optimistic and ignores a rapid duplicate tap', async () => {
@@ -324,7 +324,7 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
     const deal = appSource.slice(dealStart, dealEnd);
-    assert.match(deal, /createdAt: new Date\(\)\.toISOString\(\)/);
+    assert.match(deal, /createdAt\s*:\s*new Date\(\)\.toISOString\(\)/);
     assert.match(deal, /itemCodeKey: normalizeHistoryItemCode/);
 });
 
@@ -349,7 +349,7 @@ test('phase 2 documents link to productId while retaining historical snapshots',
     assert.match(appSource, /class="item-product-id"/);
     assert.match(appSource, /productId: row\.querySelector\('\.item-product-id'\)/);
     assert.match(appSource, /data\.productId = priceMatch\.productId/);
-    assert.match(appSource, /orderData\.productId = orderData\.productId/);
+    assert.match(appSource, /productId:item\.productId\|\|priceMatch\?\.productId/);
     assert.match(appSource, /data\.supplier = priceMatch\.supplier/);
     assert.match(appSource, /data\.spec = priceMatch\.spec/);
 });
@@ -378,7 +378,7 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
     const dealEnd = appSource.indexOf('window.unmarkQuoteAsDeal', dealStart);
     const deal = appSource.slice(dealStart, dealEnd);
     assert.match(deal, /DOCUMENT_TYPES\.QUOTE/);
-    assert.match(deal, /createdOrderLinks/);
+    assert.match(deal, /linkedDocuments/);
     assert.match(deal, /DOCUMENT_TYPES\.ORDER/);
 
     const poStart = appSource.indexOf('window.printPurchaseOrder =');
@@ -438,10 +438,10 @@ test('phase 5 inventory uses on-hand reserved available incoming and transaction
 });
 
 test('phase 5 order creation reserves only available stock and records shortage', () => {
-    const start=appSource.indexOf('async function reserveInventoryForNewOrder');
-    const end=appSource.indexOf('function orderQuantity',start);
+    const start=appSource.indexOf('async function reserveSingleOrderItem');
+    const end=appSource.indexOf('async function reserveInventoryForNewOrder',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/Math\.min\(requested, warehouseStock\.available\)/);
+    assert.match(s,/Math\.min\(requested,warehouse\.available,aggregate\.available\)/);
     assert.match(s,/inventoryReservedQty/);
     assert.match(s,/inventoryShortageQty/);
     assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
@@ -577,8 +577,8 @@ test('inventory reservation is traceable to occupying orders', () => {
 });
 
 test('unknown order items do not create inventory before purchase receipt', () => {
-    const start = appSource.indexOf('async function reserveInventoryForNewOrder');
-    const end = appSource.indexOf('function orderQuantity', start);
+    const start = appSource.indexOf('async function reserveSingleOrderItem');
+    const end = appSource.indexOf('async function reserveInventoryForNewOrder', start);
     const s = appSource.slice(start, end);
     assert.match(s, /warehouseSnap\?\.exists/);
     assert.match(s, /const shortage = Math\.max\(0, requested - reservable\)/);
@@ -622,9 +622,9 @@ test('inventory UI exposes reservation and pending-item detail without duplicate
 });
 
 test('Firestore rules deny unspecified collections and enforce sales-code ownership', () => {
-    assert.match(rulesSource, /function ownBySalesCode/);
+    assert.match(rulesSource, /function owns\(data\)/);
     assert.match(rulesSource, /match \/forecasts\/\{forecastId\}\/progress\/\{progressId\}/);
-    assert.match(rulesSource, /salesInventoryOperationalUpdate/);
+    assert.match(rulesSource, /businessInventoryOperationalUpdate/);
     assert.match(rulesSource, /match \/\{document=\*\*\}/);
     assert.match(rulesSource, /allow read, write: if false/);
     assert.doesNotMatch(rulesSource, /match \/\{document=\*\*\}[\s\S]*allow read: if signedIn/);
@@ -705,9 +705,9 @@ test('phase 19 Firestore rules enforce role boundaries for PO inventory reservat
     assert.match(rulesSource, /match \/purchaseOrders\/\{id\}/);
     assert.match(rulesSource, /allow read: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
     assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
-    assert.match(rulesSource, /sales\(\) && ownBySalesCode\(resource\.data\)/);
+    assert.match(rulesSource, /businessOwner\(\) && owns\(resource\.data\)/);
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
-    assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(sales\(\) && ownBySalesCode\(resource\.data\)\)/);
+    assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(businessOwner\(\) && owns\(resource\.data\)\)/);
     assert.match(rulesSource, /allow read, write: if false/);
 });
 
@@ -885,7 +885,7 @@ test('quick product creation is temporary, duplicate-safe and can be used from q
 
 test('sales cost visibility depends on authorizationType and secure productCosts', () => {
     assert.match(appSource, /function loadVisibleProductCost/);
-    assert.match(appSource, /currentUserRole === 'sales' && authType === 'AUTHORIZED'/);
+    assert.match(appSource, /\['sales','engineer'\]\.includes\(currentUserRole\).*authType === 'AUTHORIZED'/);
     assert.match(appSource, /db\.collection\('productCosts'\)\.doc\(productId\)/);
     assert.match(appSource, /salesVisible !== true/);
     assert.match(appSource, /applyOrderProductCost/);
@@ -896,14 +896,14 @@ test('sales can enter transaction cost only for non-authorized products', () => 
     const end = appSource.indexOf('function loadOrdersFromCloud', start);
     const source = appSource.slice(start, end);
     assert.match(source, /authorizationTypeForProduct\(selectedProduct\) === 'NON_AUTHORIZED'/);
-    assert.match(source, /sales_manual_or_visible_non_authorized/);
+    assert.match(source, /NON_AUTHORIZED/);
 });
 
 test('Firestore rules separate product data from costs and protect authorized costs', () => {
     assert.match(rulesSource, /match \/productCosts\/\{id\}/);
-    assert.match(rulesSource, /sales\(\) && resource\.data\.salesVisible == true/);
-    assert.match(rulesSource, /status == 'TEMPORARY'/);
-    assert.match(rulesSource, /authorizationType == 'NON_AUTHORIZED'/);
+    assert.match(rulesSource, /assignedProductLine\(resource\.data\)/);
+    assert.match(rulesSource, /match \/productLines\/\{id\}/);
+    assert.match(rulesSource, /assignedProductLine\(request\.resource\.data\)/);
     assert.match(rulesSource, /allow update: if admin\(\) \|\| purchaser\(\)/);
 });
 
@@ -956,8 +956,8 @@ test('Phase 2-6 completion integrates supplier mapping, warehouses and direct sh
 });
 
 test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receiving', () => {
-    const reserveStart = appSource.indexOf('async function reserveInventoryForNewOrder');
-    const reserveEnd = appSource.indexOf('function orderQuantity', reserveStart);
+    const reserveStart = appSource.indexOf('async function reserveSingleOrderItem');
+    const reserveEnd = appSource.indexOf('async function reserveInventoryForNewOrder', reserveStart);
     const reserve = appSource.slice(reserveStart, reserveEnd);
     assert.match(reserve, /fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'/);
     assert.match(reserve, /inventoryReservedQty: 0/);
@@ -982,5 +982,5 @@ test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership c
     assert.match(appSource, /ownerUid/);
     assert.match(appSource, /salesCode/);
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
-    assert.match(rulesSource, /ownBySalesCode/);
+    assert.match(rulesSource, /function owns\(data\)/);
 });
