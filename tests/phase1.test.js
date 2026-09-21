@@ -1085,3 +1085,12 @@ test('V2 historical COGS is reproducible from exact lot allocations and protecte
     assert.match(appSource, /protectedAllocationCost\(delivered\) - protectedAllocationCost\(returned\)/);
     assert.match(appSource, /grossProfit:sales-cogs/);
 });
+
+
+test('V2 backup and storage audit include fulfillment and protected cost collections', () => {
+    for (const name of ['inventoryLots','inventoryLotCosts','receipts','supplyOrders','dispatchRecords']) {
+        assert.match(appSource, new RegExp("'" + name + "'"));
+    }
+    assert.match(appSource, /受保護批次成本/);
+    assert.match(appSource, /供應／訂貨紀錄/);
+});
