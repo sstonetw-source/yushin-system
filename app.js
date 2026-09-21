@@ -4059,6 +4059,26 @@ window.loadInventory=async function(reset=true){
  renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
+
+window.searchBusinessProducts=async function(){
+ const input=document.getElementById('businessProductSearch'),status=document.getElementById('businessProductSearchStatus'),wrap=document.getElementById('businessProductSearchResults'),body=document.getElementById('businessProductSearchBody');
+ const raw=String(input?.value||'').trim();if(raw.length<2){alert('請至少輸入 2 個字或完整貨號。');return;}
+ if(status)status.textContent='查詢中…';if(input)input.disabled=true;
+ try{
+   const normalized=normalizeItemCodeLoose(raw);const end=raw+'\uf8ff';
+   const [codeSnap,nameSnap]=await Promise.all([
+     db.collection('products').where('normalizedPartNo','==',normalized).limit(25).get(),
+     db.collection('products').orderBy('productName').startAt(raw).endAt(end).limit(25).get().catch(()=>({docs:[]}))
+   ]);
+   const map=new Map();[...(codeSnap.docs||[]),...(nameSnap.docs||[])].forEach(doc=>map.set(doc.id,{id:doc.id,...doc.data()}));
+   const products=[...map.values()].slice(0,25);
+   const stockSnaps=await Promise.all(products.map(product=>db.collection('inventory').doc(encodeURIComponent(product.productId||product.id)).get()));
+   body.innerHTML=products.map((product,index)=>{const n=inventoryNumbers(stockSnaps[index]?.exists?stockSnaps[index].data():{});return `<tr><td>${escapeHtml(product.manufacturerPartNo||'')}</td><td>${escapeHtml(product.productName||'')}</td><td>${escapeHtml(product.brandName||'')}</td><td>${Number(product.listPrice||0).toLocaleString()}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td></tr>`;}).join('')||'<tr><td colspan="7">查無結果</td></tr>';
+   if(wrap)wrap.style.display='';if(status)status.textContent=`完成，共 ${products.length} 筆`;
+ }catch(err){if(status)status.textContent='查詢失敗';alert('產品查詢失敗：'+err.message);}
+ finally{if(input)input.disabled=false;}
+};
+
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;
  const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';
@@ -4094,6 +4114,7 @@ window.renderInventoryList=function(){
       <td data-th="現有庫存">${n.onHand}</td>
       <td data-th="已占用">${reserved}</td>
       <td data-th="可用庫存">${n.available}</td>
+      <td data-th="安全庫存"><button type="button" class="link-button ${n.available<Number(x.safetyStock||0)?'status-overdue':''}" onclick="setInventorySafetyStock('${escapeAttr(x.id)}')">${Number(x.safetyStock||0)}</button></td>
       <td data-th="在途">${n.incoming}</td>
       <td data-th="批號／效期">${lotHtml}</td>
       <td data-th="操作" class="no-print">
@@ -4108,6 +4129,14 @@ window.renderInventoryList=function(){
    </tr>`);
  });
 };
+
+window.setInventorySafetyStock=async function(inventoryId){
+ if(!canEditPage('inventory'))return;const item=inventoryCache.find(x=>x.id===inventoryId);if(!item)return;
+ const raw=prompt(`設定 ${item.itemCode||item.itemName||'品項'} 的安全庫存`,String(Number(item.safetyStock||0)));if(raw===null)return;
+ const safetyStock=Number(raw);if(!Number.isFinite(safetyStock)||safetyStock<0){alert('安全庫存必須是 0 以上數字。');return;}
+ try{await db.collection('inventory').doc(inventoryId).update({safetyStock,updatedAt:new Date().toISOString()});item.safetyStock=safetyStock;renderInventoryList();}catch(err){alert('安全庫存更新失敗：'+err.message);}
+};
+
 window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;const legacy=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`);const supplies=pendingSupplyCache.map(x=>{const remaining=Math.max(0,Number(x.qty||0)-Number(x.receivedQty||0));return `<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${remaining}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態"><button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(x.internalNo||'自行訂貨')}・入庫</button></td></tr>`;});body.innerHTML=[...supplies,...legacy].join('');if(hint)hint.style.display=(pendingInventoryCache.length||pendingSupplyCache.length)?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
@@ -9725,6 +9754,7 @@ function loadAllUsersForAdmin() {
                 phone: d.phone || '',
                 role: d.role || 'sales',
                 email: d.email || '',
+                productLineIds: Array.isArray(d.productLineIds) ? d.productLineIds : [],
                 disabled: !!d.disabled,
                 mustChangePassword: !!d.mustChangePassword
             });
@@ -9739,6 +9769,31 @@ function loadAllUsersForAdmin() {
     });
 }
 
+
+let adminDashboardLoading=false;
+window.loadAdminDashboard=async function(){
+ if(trueUserRole!=='admin'||adminDashboardLoading)return;adminDashboardLoading=true;
+ const status=document.getElementById('adminDashboardStatus'),cards=document.getElementById('adminDashboardCards');if(status)status.textContent='統計中…';
+ try{
+   const [ordersSnap,supplySnap,poSnap]=await Promise.all([
+     db.collection('orders').orderBy('updatedAt','desc').limit(100).get(),
+     db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(100).get(),
+     db.collection('purchaseOrders').orderBy('updatedAt','desc').limit(100).get()
+   ]);
+   const orders=ordersSnap.docs.map(doc=>({id:doc.id,...doc.data()})).filter(order=>normalizedOrderStatus(order)==='normal');
+   const items=orders.flatMap(order=>normalizedOrderItems(order));
+   const pendingOrder=items.reduce((sum,item)=>sum+Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??0)-Number(item.supplyOrderedQty||item.purchaseOrderedQty||0)),0);
+   const pendingDispatch=items.reduce((sum,item)=>sum+(window.YushinFulfillment?.pendingDispatchQty(item)||0),0);
+   const shippable=items.reduce((sum,item)=>sum+(window.YushinFulfillment?.shippableQty(item)||0),0);
+   const unbilled=orders.filter(order=>deliveredQuantity(order)>returnedQuantity(order)&&!order.isBilled).length;
+   const pendingReceipt=supplySnap.docs.reduce((sum,doc)=>sum+Math.max(0,Number(doc.data().qty||0)-Number(doc.data().receivedQty||0)),0);
+   const values=[['待訂貨數量',pendingOrder],['待入庫數量',pendingReceipt],['待打單數量',pendingDispatch],['可出貨數量',shippable],['已送貨未報帳',unbilled],['近期採購單',poSnap.size]];
+   if(cards)cards.innerHTML=values.map(([label,value])=>`<div class="forecast-summary-card"><span>${label}</span><strong>${value}</strong></div>`).join('');
+   if(status)status.textContent='以每類最多 100 筆待辦／近期資料即時計算，不掃描全部歷史。';
+ }catch(err){if(status)status.textContent='讀取失敗：'+err.message;}
+ finally{adminDashboardLoading=false;}
+};
+
 window.renderAdminSalesTable = function() {
     const tbody = document.getElementById('adminSalesBody');
     tbody.innerHTML = '';
@@ -9751,7 +9806,8 @@ window.renderAdminSalesTable = function() {
             <td data-label="姓名">${escapeHtml(u.name || '（尚未設定姓名）')}</td>
             <td data-label="電話">${escapeHtml(u.phone || '—')}</td>
             <td data-label="Email">${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
-            <td data-label="身份">${escapeHtml(roleLabel[u.role] || u.role || '業務')}</td>
+            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
+            <td data-label="負責產品線"><input id="adminUserLines-${escapeAttr(u.uid)}" value="${escapeAttr((u.productLineIds||[]).join(', '))}" placeholder="例如 Roche, Beckman"><button type="button" class="btn-small" onclick="saveAdminUserCapabilities('${escapeAttr(u.uid)}')">儲存</button></td>
             <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
                     ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
@@ -9765,6 +9821,17 @@ window.renderAdminSalesTable = function() {
         `;
         tbody.appendChild(tr);
     });
+};
+
+
+window.saveAdminUserCapabilities=async function(uid){
+    if(trueUserRole!=='admin')return;
+    const role=document.getElementById(`adminUserRole-${uid}`)?.value||'sales';
+    const productLineIds=String(document.getElementById(`adminUserLines-${uid}`)?.value||'').split(',').map(x=>x.trim()).filter(Boolean);
+    const button=null;
+    try{await db.collection('users').doc(uid).set({role,productLineIds,capabilities:role==='engineer'?['business','engineering']:role==='sales'?['business']:[],updatedAt:new Date().toISOString()},{merge:true});const user=allUsersCache.find(x=>x.uid===uid);if(user){user.role=role;user.productLineIds=productLineIds;}alert('人員角色與產品線已更新。');}
+    catch(err){alert('更新失敗：'+err.message);}
+    finally{if(button){button.disabled=false;button.textContent='儲存';}}
 };
 
 // 強制某帳號下次登入時必須先修改密碼才能使用系統。
