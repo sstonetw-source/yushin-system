@@ -85,7 +85,7 @@ test('business owner can perform only scoped fulfillment stock updates', async (
 });
 
 test('business owner can change only remaining quantity on an inventory lot', async () => {
-  await seed('inventoryLots/lot1', { productId:'p1', remainingQty:5, unitCost:100 });
+  await seed('inventoryLots/lot1', { productId:'p1', remainingQty:5 });
   await assertSucceeds(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), {
     remainingQty:4, updatedAt:'2026-09-21T00:00:00Z'
   }));
