@@ -64,7 +64,8 @@
 
   function pendingDispatchQty(item) {
     const x = normalizeItem(item);
-    return Math.max(0, x.reservedQty - x.dispatchPreparedQty);
+    const alreadyPreparedNotDelivered = Math.max(0, x.dispatchPreparedQty - x.deliveredQty);
+    return Math.max(0, x.reservedQty - alreadyPreparedNotDelivered);
   }
 
   function shippableQty(item) {
