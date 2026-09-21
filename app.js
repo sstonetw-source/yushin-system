@@ -10251,10 +10251,23 @@ window.calculateStorageUsage = function() {
 
     const collections = [
         { key: 'quotes', label: '估價單' },
+        { key: 'forecasts', label: 'Forecast' },
         { key: 'orders', label: '訂單' },
+        { key: 'purchaseOrders', label: '採購單' },
+        { key: 'supplyOrders', label: '供應／訂貨紀錄' },
+        { key: 'receipts', label: '收貨紀錄' },
+        { key: 'dispatchRecords', label: '出貨打單紀錄' },
+        { key: 'inventory', label: '庫存彙總' },
+        { key: 'inventoryLots', label: '庫存批次' },
+        { key: 'inventoryLotCosts', label: '受保護批次成本' },
+        { key: 'inventoryReservations', label: '庫存占用' },
+        { key: 'inventoryMovements', label: '庫存異動' },
+        { key: 'warehouseStocks', label: '分倉庫存' },
+        { key: 'products', label: 'Product Master' },
+        { key: 'productCosts', label: '受保護產品成本' },
         { key: 'equipment', label: '儀器' },
-        { key: 'users', label: '業務／使用者帳號' },
-        { key: 'settings', label: '價格表等系統設定' }
+        { key: 'users', label: '人員／使用者帳號' },
+        { key: 'settings', label: '系統設定' }
     ];
 
     Promise.all(collections.map(c => db.collection(c.key).get()))
