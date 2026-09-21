@@ -10843,7 +10843,7 @@ async function readCollectionForMigration(name, pageSize = 300) {
     return rows;
 }
 function recordContainsEmbeddedCost(record) {
-    return !!record && (record.cogs !== undefined || (Array.isArray(record.lotAllocations) && record.lotAllocations.some(row => row && (row.cost !== undefined || row.unitCost !== undefined)));
+    return !!record && (record.cogs !== undefined || (Array.isArray(record.lotAllocations) && record.lotAllocations.some(row => row && (row.cost !== undefined || row.unitCost !== undefined))));
 }
 function inventoryCostMigrationPlan(lots, inventory, receipts, movements, orders = [], warehouseStocks = []) {
     return {
