@@ -275,6 +275,10 @@ service cloud.firestore {
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.salesCode == salesCode());
       allow update: if admin() || purchaser()
+        || (warehouse()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'receivedQty', 'status', 'updatedAt'
+          ]))
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid
