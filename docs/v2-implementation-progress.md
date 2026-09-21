@@ -38,3 +38,12 @@ Base main: 7cf91049ac3dee5b24b9560241d941f24e648c6e
 
 ## Concurrency note
 This branch received concurrent V2 commits during implementation. Always refetch current blob SHA before every write and never force-update a stale file.
+
+## 2026-09-21 Phase A receipt / lot update
+- Formal PO receipt now creates authoritative inventoryLots + receipts with actual purchase unit cost.
+- Supply self-order receipt and formal PO receipt converge on Inventory Lot as valuation source.
+- Delivery transaction queries lots by productKey + warehouseId and allocates FEFO, FIFO fallback when no expiry.
+- Delivery record persists lotAllocations and actual COGS.
+- Warehouse delivery is blocked when no authoritative lot-cost record exists, preventing untraceable COGS.
+- Added composite lot lookup index and FEFO/FIFO/COGS tests.
+- Remaining high-priority integrity work: exact lot restoration for edited/deleted partial delivery and returns; formal PO -> supplyOrders normalization; initial-stock lot creation.
