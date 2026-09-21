@@ -1,0 +1,4 @@
+const test=require('node:test');const assert=require('node:assert/strict');const r=require('../modules/reservation-core.js');
+test('receipt fills oldest shortages first',()=>{const x=r.allocateReceiptToShortages([{orderId:'B',itemId:'b',orderDate:'2026-09-02',shortageQty:5},{orderId:'A',itemId:'a',orderDate:'2026-09-01',shortageQty:8}],10);assert.deepEqual(x.allocations.map(a=>[a.orderId,a.qty]),[['A',8],['B',2]]);assert.equal(x.unallocatedQty,0);});
+test('excess receipt remains free stock',()=>{const x=r.allocateReceiptToShortages([{orderId:'A',itemId:'a',orderDate:'2026-09-01',shortageQty:3}],10);assert.equal(x.allocatedQty,3);assert.equal(x.unallocatedQty,7);});
+test('partial receipt leaves later shortage untouched',()=>{const x=r.allocateReceiptToShortages([{orderId:'A',itemId:'a',orderDate:'2026-09-01',shortageQty:8},{orderId:'B',itemId:'b',orderDate:'2026-09-02',shortageQty:5}],5);assert.deepEqual(x.allocations.map(a=>[a.orderId,a.qty]),[['A',5]]);});
