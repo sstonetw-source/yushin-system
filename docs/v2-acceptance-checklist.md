@@ -22,7 +22,7 @@
 - [x] engineer 可建立/管理自己的 Forecast/Quote/Order
 - [x] engineer 有 salesCode/業績歸屬
 - [x] purchaser 協助建單必須指定 responsible sales
-- [ ] sales/engineer 無未授權成本讀取 — **Release blocker**：`inventoryLots.unitCost` 目前仍可由 active 使用者讀取；Firestore 無法做欄位級 read masking，必須在 main 前將 lot operational data 與 lot cost data 分離，或改由可信後端執行成本/COGS 計算。
+- [x] sales/engineer 無未授權成本讀取 — 已將 operational `inventoryLots` 與受保護 `inventoryLotCosts` 分離；Rules emulator 驗證 sales/engineer/warehouse 不可讀成本，歷史 COGS 由精確 lot allocations + protected costs 重建。部署前仍需先執行舊資料成本隔離。
 - [x] sales/engineer 無進銷存分析權限
 - [x] product search 使用 bounded query
 - [x] order/quote list pagination
@@ -55,3 +55,11 @@
 - [ ] company existing shipping system handoff
 - [ ] long operation shows progress/loading
 - [ ] Firestore permission-denied UX
+
+
+## Deployment gate added 2026-09-21
+- [x] 完整備份清單包含 V2 fulfillment 與 protected cost collections
+- [x] 管理員介面明示「備份 → Product Master 遷移 → 庫存成本隔離至 0 → Rules/Indexes」順序
+- [x] V2 查詢所需 inventoryReservations / inventoryLots / inventoryMovements / supplyOrders 索引已在 firestore.indexes.json
+- [ ] 在 Firebase 專案執行舊資料成本隔離並重新預覽為 0
+- [ ] 部署 PR #30 的 firestore.rules / firestore.indexes.json
