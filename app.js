@@ -6762,6 +6762,11 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     const nextItems = [];
     let totalReserved = 0;
     let totalShortage = 0;
+    const stockStates = new Map();
+    contexts.forEach(ctx => {
+        if (ctx.invRef && ctx.invSnap?.exists && !stockStates.has(ctx.invRef.path)) stockStates.set(ctx.invRef.path,{ref:ctx.invRef,...inventoryNumbers(ctx.invSnap.data())});
+        if (ctx.whRef && ctx.whSnap?.exists && !stockStates.has(ctx.whRef.path)) stockStates.set(ctx.whRef.path,{ref:ctx.whRef,...inventoryNumbers(ctx.whSnap.data())});
+    });
 
     for (const ctx of contexts) {
         const {item,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap} = ctx;
@@ -6782,14 +6787,14 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
             continue;
         }
 
-        const inv = inventoryNumbers(invSnap?.exists ? invSnap.data() : {});
-        const wh = inventoryNumbers(whSnap?.exists ? whSnap.data() : {});
+        const invState = invRef ? stockStates.get(invRef.path) : null;
+        const whState = whRef ? stockStates.get(whRef.path) : null;
         if (nextStatus === 'cancelled') {
             const reservedRemaining = Math.max(0, Number(item.inventoryReservedQty ?? item.reservedQty ?? 0) - delivered);
-            const release = Math.min(reservedRemaining, wh.reserved || 0, inv.reserved || 0);
+            const release = Math.min(reservedRemaining, whState?.reserved || 0, invState?.reserved || 0);
             if (release > 0) {
-                if (invRef && invSnap?.exists) transaction.update(invRef,{reserved:Math.max(0,inv.reserved-release),updatedAt:now});
-                if (whRef && whSnap?.exists) transaction.update(whRef,{reserved:Math.max(0,wh.reserved-release),updatedAt:now});
+                invState.reserved = Math.max(0, invState.reserved - release);
+                whState.reserved = Math.max(0, whState.reserved - release);
                 transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release',-release,orderId,productKey,actor,{reason:'order_cancelled',warehouseId,itemId}));
             }
             transaction.set(reservationRef,{
@@ -6804,11 +6809,11 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         }
 
         const needed = Math.max(0, ordered - delivered);
-        const reserve = invSnap?.exists && whSnap?.exists ? Math.min(needed,Math.max(0,wh.available),Math.max(0,inv.available)) : 0;
+        const reserve = invState && whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved),Math.max(0,invState.onHand-invState.reserved)) : 0;
         const shortage = Math.max(0, needed - reserve);
         if (reserve > 0) {
-            transaction.update(invRef,{reserved:inv.reserved+reserve,updatedAt:now});
-            transaction.update(whRef,{reserved:wh.reserved+reserve,updatedAt:now});
+            invState.reserved += reserve;
+            whState.reserved += reserve;
             transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve',reserve,orderId,productKey,actor,{reason:'order_restored',warehouseId,itemId}));
         }
         transaction.set(reservationRef,{
@@ -6823,6 +6828,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         totalShortage += shortage;
     }
 
+    stockStates.forEach(state => {
+        transaction.update(state.ref,{reserved:Math.max(0,state.reserved),updatedAt:now});
+    });
     transaction.set(reservationDocRef(orderId),{
         ...inventoryReservationPayload(orderId,order,0,'released'),shortageQty:0,updatedAt:now
     },{merge:true});
