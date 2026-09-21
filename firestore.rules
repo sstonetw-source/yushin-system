@@ -86,6 +86,26 @@ service cloud.firestore {
         && request.resource.data.salesCode == resource.data.salesCode;
     }
 
+    function purchaserOrderWorkflowUpdate() {
+      return purchaser()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items', 'itemCount', 'orderSchemaVersion',
+          'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
+          'linkedDocuments', 'updatedAt'
+        ])
+        && sameCommercialOwner();
+    }
+
+    function warehouseOrderWorkflowUpdate() {
+      return warehouse()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items', 'itemCount', 'orderSchemaVersion',
+          'inventoryReservedQty', 'inventoryShortageQty',
+          'receivedQty', 'updatedAt'
+        ])
+        && sameCommercialOwner();
+    }
+
     function assignedProductLine(data) {
       return admin() ||
         (businessOwner()
@@ -190,7 +210,9 @@ service cloud.firestore {
       allow read: if admin() || owns(resource.data);
       allow create: if (admin() || businessOwner()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner());
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
+        || purchaserOrderWorkflowUpdate()
+        || warehouseOrderWorkflowUpdate();
       allow delete: if false;
     }
 
