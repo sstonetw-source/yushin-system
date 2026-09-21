@@ -31,9 +31,9 @@ Base main: 7cf91049ac3dee5b24b9560241d941f24e648c6e
 ## Verification / release gates before main
 - Automated Node regression suite: 117/117 passed on 2026-09-21.
 - `node --check app.js`, core-module syntax checks and `git diff --check`: passed.
-- Firestore emulator test cases are present, including scoped lot updates, safety stock and legacy product-line compatibility. This workspace does not contain `@firebase/rules-unit-testing`, so the emulator suite must run in CI or a Firebase-equipped release workstation.
+- Firestore emulator test cases, including scoped lot updates, safety stock and legacy product-line compatibility, passed in GitHub Actions run #307 on 2026-09-21.
 - Full desktop/mobile five-role acceptance remains a deployment-environment task.
-- Deploy Rules/Indexes only after emulator and manual acceptance; do not merge main from this implementation session.
+- Deploy Rules/Indexes only after manual acceptance; do not merge main from this implementation session.
 
 ## Concurrency note
 This branch received concurrent V2 commits during implementation. Always refetch current blob SHA before every write and never force-update a stale file.

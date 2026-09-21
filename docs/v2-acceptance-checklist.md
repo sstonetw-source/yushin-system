@@ -19,18 +19,18 @@
 - [x] return item/qty 正確
 - [x] billing 可 true <-> false，留 audit
 - [x] duplicate click 不重複寫入
-- [x] engineer 可建立/管理自己的 Forecast/Quote/Order（Rules emulator 待 CI 執行）
+- [x] engineer 可建立/管理自己的 Forecast/Quote/Order
 - [x] engineer 有 salesCode/業績歸屬
-- [x] purchaser 協助建單必須指定 responsible sales（Rules emulator 待 CI 執行）
-- [x] sales/engineer 無未授權成本讀取（Rules emulator 待 CI 執行）
-- [x] sales/engineer 無進銷存分析權限（Rules emulator 待 CI 執行）
+- [x] purchaser 協助建單必須指定 responsible sales
+- [x] sales/engineer 無未授權成本讀取
+- [x] sales/engineer 無進銷存分析權限
 - [x] product search 使用 bounded query
 - [x] order/quote list pagination
 - [x] dashboard 不掃全部歷史
 - [x] price import preview before commit
 - [x] quote number generator unchanged
 
-自動化回歸於 2026-09-21 通過 117/117；Firestore emulator 測試程式已完成，但目前工作區缺少 `@firebase/rules-unit-testing`，需由 CI／發布環境補跑。
+自動化回歸於 2026-09-21 通過 117/117；Firestore Rules emulator 測試亦於 GitHub Actions run #307 通過。
 
 ## 人工驗收
 - [ ] Desktop Chrome/Safari
