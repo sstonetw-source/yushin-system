@@ -18,7 +18,8 @@ service cloud.firestore {
     }
 
     function active() {
-      return hasUser() && userDoc().data.active != false;
+      return hasUser()
+        && (!('active' in userDoc().data) || userDoc().data.active == true);
     }
 
     function role() {
