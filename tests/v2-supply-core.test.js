@@ -41,3 +41,9 @@ test('allocationsAfterReversal keeps the delivery record aligned for a later del
  );
  assert.deepEqual(remaining.map(x=>[x.lotId,x.qty,x.cost]),[['A',4,400]]);
 });
+
+test('availableReturnAllocations excludes lots already returned',()=>{
+ const deliveries=[{lotAllocations:[{lotId:'A',qty:5,unitCost:100,cost:500},{lotId:'B',qty:3,unitCost:120,cost:360}]}];
+ const returns=[{lotAllocations:[{lotId:'B',qty:2,unitCost:120,cost:240}]}];
+ assert.deepEqual(s.availableReturnAllocations(deliveries,returns).map(x=>[x.lotId,x.qty]),[['A',5],['B',1]]);
+});
