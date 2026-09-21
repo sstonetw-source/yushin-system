@@ -6818,7 +6818,7 @@ function renderOrderStatusHistory(order) {
 }
 
 async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId) {
-    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0 };
+    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0,lotAllocations:[],cogs:0 };
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
     const invRef = inventoryRefFor(order);
@@ -6829,62 +6829,52 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     const whSnap = await transaction.get(whRef);
     if (!invSnap.exists || !whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
 
-    const inv = inventoryNumbers(invSnap.data());
-    const wh = inventoryNumbers(whSnap.data());
-    const initialReserved = Number(order.inventoryReservedQty || 0);
-    const oldDelivered = deliveredQuantity(order);
+    const inv = inventoryNumbers(invSnap.data()), wh = inventoryNumbers(whSnap.data());
+    const initialReserved = Number(order.reservedQty ?? order.inventoryReservedQty ?? 0);
+    const oldDelivered = savedDeliveryRecords(order).reduce((sum,row)=>sum+Number(row.qty||0),0);
     const newDelivered = Math.max(0, oldDelivered + deltaQty);
     const oldReservedRemaining = Math.max(0, initialReserved - oldDelivered);
     const newReservedRemaining = Math.max(0, initialReserved - newDelivered);
     const reservedDelta = newReservedRemaining - oldReservedRemaining;
     const now = new Date().toISOString();
+    let lotAllocations=[],cogs=0;
 
     if (deltaQty > 0) {
-        if (inv.onHand < deltaQty || wh.onHand < deltaQty) {
-            throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
+        if (inv.onHand < deltaQty || wh.onHand < deltaQty) throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
+        const lotQuery=await transaction.get(db.collection('inventoryLots').where('productKey','==',productKey).where('warehouseId','==',warehouseId));
+        const lotDocs=lotQuery.docs.map(doc=>({id:doc.id,...doc.data()})).filter(l=>Number(l.remainingQty||0)>0);
+        if(lotDocs.length){
+            const allocation=window.YushinSupply.allocateLots(lotDocs,deltaQty);
+            lotAllocations=allocation.allocations;cogs=allocation.totalCost;
+            lotAllocations.forEach(row=>{
+                const lot=lotDocs.find(x=>x.id===row.lotId);
+                transaction.update(db.collection('inventoryLots').doc(row.lotId),{remainingQty:Number(lot.remainingQty||0)-row.qty,updatedAt:now});
+            });
         }
     } else {
-        // 取消/縮減送貨會把貨放回原出貨倉。
-        const restore = Math.abs(deltaQty);
-        if (inv.reserved + reservedDelta < 0 || wh.reserved + reservedDelta < 0) {
-            throw new Error('庫存占用狀態異常，無法還原送貨。');
+        // Reversal restores the exact lots from the delivery record when allocations are available.
+        const restoreQty=Math.abs(deltaQty);
+        const candidate=savedDeliveryRecords(order).slice().reverse().find(r=>Array.isArray(r.lotAllocations)&&r.lotAllocations.length&&Number(r.qty||0)>=restoreQty);
+        if(candidate){
+            lotAllocations=candidate.lotAllocations.map(row=>({...row,qty:-Math.min(Math.abs(Number(row.qty||0)),restoreQty)}));
+            for(const row of candidate.lotAllocations){
+                const lotRef=db.collection('inventoryLots').doc(row.lotId);
+                const lotSnap=await transaction.get(lotRef);
+                if(lotSnap.exists)transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)+Number(row.qty||0),updatedAt:now});
+            }
+            cogs=-Number(candidate.cogs||0);
         }
     }
 
-    transaction.set(invRef, {
-        onHand: inv.onHand - deltaQty,
-        reserved: Math.max(0, inv.reserved + reservedDelta),
-        incoming: inv.incoming,
-        updatedAt: now
-    }, { merge:true });
-    transaction.set(whRef, {
-        warehouseId, productKey,
-        onHand: wh.onHand - deltaQty,
-        reserved: Math.max(0, wh.reserved + reservedDelta),
-        incoming: wh.incoming,
-        updatedAt: now
-    }, { merge:true });
-
-    transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord(
-        deltaQty > 0 ? 'ship' : 'ship_reversal',
-        -deltaQty,
-        sourceId,
-        productKey,
-        actor,
-        { warehouseId, fulfillmentType:'WAREHOUSE', reservedDelta }
-    ));
+    transaction.set(invRef,{onHand:inv.onHand-deltaQty,reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand-deltaQty,reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
+    transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,cogs}));
 
     const deliveryItemId=order.itemId||'';
-    const deliveryReservationRef=deliveryItemId
-        ? db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`)
-        : reservationDocRef(sourceId);
-    transaction.set(deliveryReservationRef, {
-        ...inventoryReservationPayload(sourceId, order, newReservedRemaining, newReservedRemaining > 0 ? 'active' : 'fulfilled'),
-        itemId:deliveryItemId,warehouseId
-    }, { merge:true });
-    return { reservedDelta };
+    const deliveryReservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
+    transaction.set(deliveryReservationRef,{...inventoryReservationPayload(sourceId,order,newReservedRemaining,newReservedRemaining>0?'active':'fulfilled'),itemId:deliveryItemId,warehouseId},{merge:true});
+    return { reservedDelta,lotAllocations,cogs };
 }
-
 function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
     return applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryQty, actor, sourceId);
 }
