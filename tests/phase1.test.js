@@ -1035,3 +1035,22 @@ test('V2 dashboard and safety stock use bounded data', () => {
     assert.match(appSource, /setInventorySafetyStock/);
     assert.match(appSource, /safetyStock,updatedAt/);
 });
+
+test('V2 generic order status toggler only permits reversible billing state', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('window.toggleOrderStatus = function(orderId, field, newValue)');
+  assert.ok(start >= 0);
+  const block = source.slice(start, start + 700);
+  assert.match(block, /field !== 'isBilled'/);
+  assert.match(block, /V2 採購／入庫／打單流程自動管理/);
+});
+
+test('quick delivery no longer synthesizes legacy ordered or arrived states', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('window.quickCompleteDelivery = async function');
+  const end = source.indexOf('window.quickCancelAllDelivery = async function', start);
+  assert.ok(start >= 0 && end > start);
+  const block = source.slice(start, end);
+  assert.doesNotMatch(block, /updates\s*=\s*\{[^}]*isOrdered:\s*true/s);
+  assert.doesNotMatch(block, /updates\s*=\s*\{[^}]*isArrived:\s*true/s);
+});
