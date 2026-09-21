@@ -10380,10 +10380,10 @@ window.downloadDatabaseBackup = async function() {
     const status = document.getElementById('databaseBackupStatus');
     const collections = [
         'quotes', 'forecasts', 'orders', 'purchaseOrders', 'equipment', 'users', 'settings',
-        'brands', 'products', 'productCosts', 'customers', 'salesCodes',
+        'brands', 'productLines', 'products', 'productCosts', 'priceHistory', 'customers', 'salesCodes',
         'suppliers', 'brandSupplierMappings', 'warehouses', 'warehouseStocks',
         'inventory', 'inventoryLots', 'inventoryLotCosts', 'inventoryReservations',
-        'pendingInventoryItems', 'inventoryMovements', 'receipts', 'supplyOrders', 'dispatchRecords'
+        'pendingInventoryItems', 'inventoryMovements', 'receipts', 'supplyOrders', 'dispatchRecords', 'deliveries', 'auditLogs'
     ];
     button.disabled = true;
     button.innerText = '正在整理備份…';
@@ -10393,9 +10393,13 @@ window.downloadDatabaseBackup = async function() {
         const data = {};
         let documentCount = 0;
         snapshots.forEach((snapshot, index) => {
-            data[collections[index]] = snapshot.docs.map(doc => ({ id: doc.id, data: backupSerializableValue(doc.data()) }));
+            data[collections[index]] = snapshot.docs.map(doc => ({ id: doc.id, path:doc.ref.path, data: backupSerializableValue(doc.data()) }));
             documentCount += snapshot.size;
         });
+        // Forecast progress is a nested subcollection and is not included by reading the parent collection.
+        const forecastProgress = await db.collectionGroup('progress').get();
+        data.forecastProgress = forecastProgress.docs.map(doc => ({ id:doc.id, path:doc.ref.path, data:backupSerializableValue(doc.data()) }));
+        documentCount += forecastProgress.size;
         const createdAt = new Date();
         const backup = {
             format: 'yu-shing-firestore-backup',
