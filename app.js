@@ -6843,14 +6843,13 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         if (inv.onHand < deltaQty || wh.onHand < deltaQty) throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
         const lotQuery=await transaction.get(db.collection('inventoryLots').where('productKey','==',productKey).where('warehouseId','==',warehouseId));
         const lotDocs=lotQuery.docs.map(doc=>({id:doc.id,...doc.data()})).filter(l=>Number(l.remainingQty||0)>0);
-        if(lotDocs.length){
-            const allocation=window.YushinSupply.allocateLots(lotDocs,deltaQty);
-            lotAllocations=allocation.allocations;cogs=allocation.totalCost;
-            lotAllocations.forEach(row=>{
-                const lot=lotDocs.find(x=>x.id===row.lotId);
-                transaction.update(db.collection('inventoryLots').doc(row.lotId),{remainingQty:Number(lot.remainingQty||0)-row.qty,updatedAt:now});
-            });
-        }
+        if(!lotDocs.length)throw new Error('此庫存尚未建立批次成本資料，請先完成入庫／期初庫存批次建檔後再送貨。');
+        const allocation=window.YushinSupply.allocateLots(lotDocs,deltaQty);
+        lotAllocations=allocation.allocations;cogs=allocation.totalCost;
+        lotAllocations.forEach(row=>{
+            const lot=lotDocs.find(x=>x.id===row.lotId);
+            transaction.update(db.collection('inventoryLots').doc(row.lotId),{remainingQty:Number(lot.remainingQty||0)-row.qty,updatedAt:now});
+        });
     } else {
         // Reversal restores the exact lots from the delivery record when allocations are available.
         const restoreQty=Math.abs(deltaQty);
