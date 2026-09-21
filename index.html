@@ -1071,6 +1071,10 @@
                 </div>
                 <div id="productMasterMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
                 <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
+                <div style="margin-top:10px;padding:10px 12px;background:#fff8e1;border-radius:6px;font-size:12px;line-height:1.7;color:#6b5200;">
+                    <strong>V2 部署順序：</strong>① 下載完整資料庫備份 → ② 預覽並執行 Product Master v2 遷移 → ③ 預覽並執行庫存成本隔離，直到顯示 0 → ④ 再部署新版 Firestore Rules / Indexes。<br>
+                    不要先部署新版 Rules，否則仍含舊成本欄位的 inventoryLots 會依安全規則拒絕讀取。
+                </div>
             </div>
             <div class="toolbar no-print">
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
