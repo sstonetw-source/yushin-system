@@ -6817,7 +6817,7 @@ function renderOrderStatusHistory(order) {
     tbody.innerHTML = entries.length ? entries.map(item => `<tr><td>${escapeHtml(formatOrderStatusTime(item.at))}</td><td>${escapeHtml(item.action || '')}</td><td>${escapeHtml(item.by || '')}</td><td>${escapeHtml(item.detail || '')}</td></tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚無操作紀錄。</td></tr>';
 }
 
-async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId) {
+async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, reversalRecords) {
     if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0,lotAllocations:[],cogs:0 };
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
@@ -6851,18 +6851,17 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
             transaction.update(db.collection('inventoryLots').doc(row.lotId),{remainingQty:Number(lot.remainingQty||0)-row.qty,updatedAt:now});
         });
     } else {
-        // Reversal restores the exact lots from the delivery record when allocations are available.
         const restoreQty=Math.abs(deltaQty);
-        const candidate=savedDeliveryRecords(order).slice().reverse().find(r=>Array.isArray(r.lotAllocations)&&r.lotAllocations.length&&Number(r.qty||0)>=restoreQty);
-        if(candidate){
-            lotAllocations=candidate.lotAllocations.map(row=>({...row,qty:-Math.min(Math.abs(Number(row.qty||0)),restoreQty)}));
-            for(const row of candidate.lotAllocations){
-                const lotRef=db.collection('inventoryLots').doc(row.lotId);
-                const lotSnap=await transaction.get(lotRef);
-                if(lotSnap.exists)transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)+Number(row.qty||0),updatedAt:now});
-            }
-            cogs=-Number(candidate.cogs||0);
+        const sourceRecords=Array.isArray(reversalRecords)&&reversalRecords.length?reversalRecords:savedDeliveryRecords(order);
+        const reversal=window.YushinSupply.reverseLotAllocations(sourceRecords,restoreQty);
+        lotAllocations=reversal.allocations.map(row=>({...row,qty:-row.qty,cost:-row.cost}));
+        for(const row of reversal.allocations){
+            const lotRef=db.collection('inventoryLots').doc(row.lotId);
+            const lotSnap=await transaction.get(lotRef);
+            if(!lotSnap.exists)throw new Error(`找不到原出貨批次 ${row.lotNo||row.lotId}，無法安全還原庫存。`);
+            transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)+row.qty,updatedAt:now});
         }
+        cogs=-reversal.totalCost;
     }
 
     transaction.set(invRef,{onHand:inv.onHand-deltaQty,reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
@@ -7034,7 +7033,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
                 ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
                 : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
-            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId);
+            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
             const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -7190,10 +7189,17 @@ window.saveDeliveryRecord = async function() {
             if(deliveryDelta){
                 const itemRecords=records.filter(r=>r.itemId===targetItem.itemId);
                 const itemOrder={...order,...targetItem,qty:Number(targetItem.qty||0),inventoryReservedQty:Number(targetItem.inventoryReservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
-                const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId);
+                const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId,deliveryDelta<0&&previous?[previous]:null);
                 if(deliveryDelta>0){
                     record.lotAllocations=inventoryResult.lotAllocations||[];
                     record.cogs=Number(inventoryResult.cogs||0);
+                    const recordIndex=records.findIndex(r=>r.id===record.id);
+                    if(recordIndex>=0)records[recordIndex]=record;
+                    updates.deliveryRecords=records;
+                } else if(previous){
+                    const reversed=(inventoryResult.lotAllocations||[]).map(row=>({...row,qty:Math.abs(Number(row.qty||0))}));
+                    record.lotAllocations=window.YushinSupply.allocationsAfterReversal(previous.lotAllocations||[],reversed);
+                    record.cogs=record.lotAllocations.reduce((sum,row)=>sum+Number(row.cost??(Number(row.qty||0)*Number(row.unitCost||0))),0);
                     const recordIndex=records.findIndex(r=>r.id===record.id);
                     if(recordIndex>=0)records[recordIndex]=record;
                     updates.deliveryRecords=records;
@@ -7234,7 +7240,7 @@ window.deleteDeliveryRecord = async function(recordId) {
             const actor = deliveryActor();
             const now = new Date().toISOString();
             const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
-            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId);
+            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -Number(removed.qty || 0), actor, orderId, [removed]);
             const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
