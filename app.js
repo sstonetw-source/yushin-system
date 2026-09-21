@@ -10304,7 +10304,8 @@ window.downloadDatabaseBackup = async function() {
         'quotes', 'forecasts', 'orders', 'purchaseOrders', 'equipment', 'users', 'settings',
         'brands', 'products', 'productCosts', 'customers', 'salesCodes',
         'suppliers', 'brandSupplierMappings', 'warehouses', 'warehouseStocks',
-        'inventory', 'inventoryReservations', 'pendingInventoryItems', 'inventoryMovements'
+        'inventory', 'inventoryLots', 'inventoryLotCosts', 'inventoryReservations',
+        'pendingInventoryItems', 'inventoryMovements', 'receipts', 'supplyOrders', 'dispatchRecords'
     ];
     button.disabled = true;
     button.innerText = '正在整理備份…';
