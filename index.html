@@ -1282,6 +1282,26 @@
 
 
 
+    <div id="selfOrderOverlay" class="modal-overlay">
+        <div class="modal-box" style="max-width:560px;">
+            <div class="modal-header"><h3>自行訂貨</h3><button type="button" onclick="closeSelfOrderModal()">×</button></div>
+            <div class="modal-body">
+                <div id="selfOrderItemSummary" style="margin-bottom:12px;"></div>
+                <input type="hidden" id="selfOrderOrderId"><input type="hidden" id="selfOrderItemId">
+                <label>供應商<input id="selfOrderSupplier" type="text" placeholder="輸入供應商" style="width:100%;"></label>
+                <label>訂貨數量<input id="selfOrderQty" type="number" min="0" step="any" style="width:100%;"></label>
+                <label>實際單位成本<input id="selfOrderUnitCost" type="number" min="0" step="0.01" style="width:100%;"></label>
+                <label>訂貨日期<input id="selfOrderDate" type="date" style="width:100%;"></label>
+                <label>備註<textarea id="selfOrderNotes" rows="2" style="width:100%;"></textarea></label>
+                <div id="selfOrderStatus" style="margin-top:8px;color:#666;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeSelfOrderModal()">取消</button>
+                <button type="button" id="saveSelfOrderBtn" onclick="saveSelfOrder()">確認自行訂貨</button>
+            </div>
+        </div>
+    </div>
+
     <script src="modules/fulfillment-core.js"></script>
     <script src="modules/supply-core.js"></script>
     <script src="app.js"></script>
