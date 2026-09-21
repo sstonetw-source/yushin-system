@@ -23,3 +23,21 @@ test('allocateLots falls back to FIFO when expiry is absent',()=>{
  assert.equal(result.totalCost,70);
 });
 test('allocateLots refuses quantity beyond available lots',()=>assert.throws(()=>s.allocateLots([{id:'a',remainingQty:2}],3),/不足/));
+
+test('reverseLotAllocations restores only the edited delivery exact lots and cost',()=>{
+ const result=s.reverseLotAllocations([{id:'delivery-1',qty:8,lotAllocations:[
+  {lotId:'A',qty:5,unitCost:100},{lotId:'B',qty:3,unitCost:120}
+ ]}],4);
+ assert.deepEqual(result.allocations.map(x=>[x.lotId,x.qty]),[['B',3],['A',1]]);
+ assert.equal(result.totalCost,460);
+});
+test('reverseLotAllocations refuses an untraceable reversal',()=>{
+ assert.throws(()=>s.reverseLotAllocations([{qty:5,lotAllocations:[]}],5),/原始出貨批次/);
+});
+test('allocationsAfterReversal keeps the delivery record aligned for a later delete',()=>{
+ const remaining=s.allocationsAfterReversal(
+  [{lotId:'A',qty:5,unitCost:100,cost:500},{lotId:'B',qty:3,unitCost:120,cost:360}],
+  [{lotId:'B',qty:3},{lotId:'A',qty:1}]
+ );
+ assert.deepEqual(remaining.map(x=>[x.lotId,x.qty,x.cost]),[['A',4,400]]);
+});
