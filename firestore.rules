@@ -228,7 +228,12 @@ service cloud.firestore {
       allow read: if admin() || owns(resource.data);
       allow create: if (admin() || businessOwner()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner());
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
+        // Purchaser may only persist item-level dispatch preparation plus updatedAt.
+        // The immutable dispatchRecords collection provides the audit source.
+        || (purchaser()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items', 'updatedAt'])
+          && sameCommercialOwner());
       allow delete: if false;
     }
 
