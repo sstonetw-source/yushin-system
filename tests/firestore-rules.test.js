@@ -112,3 +112,17 @@ test('inventory movements and audit logs are immutable', async () => {
   }));
   await assertFails(updateDoc(doc(db('sales1'), 'auditLogs/a1'), { action:'OTHER' }));
 });
+
+test('purchaser order mutation is limited to dispatch items and updatedAt', async () => {
+  await seed('orders/dispatch1', {
+    ownerUid:'sales1', salesCode:'S01', customerName:'A',
+    items:[{ itemId:'i1', qty:5, dispatchPreparedQty:0 }]
+  });
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/dispatch1'), {
+    items:[{ itemId:'i1', qty:5, dispatchPreparedQty:5 }],
+    updatedAt:'2026-09-21T00:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/dispatch1'), {
+    customerName:'Changed'
+  }));
+});
