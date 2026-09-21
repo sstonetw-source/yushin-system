@@ -669,14 +669,14 @@ test('phase 15 quotes orders and purchase orders persist explicit currency tax a
     assert.match(appSource, /totalIncTax/);
 });
 
-test('phase 16 inventory analysis uses actual receipt cost snapshots before catalog fallback', () => {
+test('phase 16 inventory analysis uses protected lot costs without copying cost into operational inventory', () => {
     const start = appSource.indexOf('function inventoryAnalysisTotals');
     const end = appSource.indexOf('function renderInventoryAnalysisSummary', start);
     const source = appSource.slice(start, end);
-    assert.match(source, /receipt\.unitCost/);
-    assert.match(source, /receipt\.purchaseNetAmount/);
-    assert.match(appSource, /purchaseNetAmount:\s*Number\(item\.unitPrice\|\|0\)\s*\*\s*qty|purchaseNetAmount:\s*Number\(item\.unitPrice \|\| 0\) \* qty/);
-    assert.match(appSource, /unitCost:\s*Number\(item\.unitPrice\|\|0\)|unitCost:\s*Number\(item\.unitPrice \|\| 0\)/);
+    assert.match(appSource, /db\.collection\('inventoryLotCosts'\)\.limit\(1000\)/);
+    assert.match(source, /inventoryAnalysisLotCosts\.get\(receipt\.lotId\)/);
+    assert.match(source, /inventoryAnalysisLotCosts\.get\(lot\.id\)/);
+    assert.doesNotMatch(source, /receipt\.unitCost|receipt\.purchaseNetAmount|stock\.unitCost/);
 });
 
 test('phase 17 Forecast PO and Inventory provide mobile data labels and card layout', () => {
@@ -992,10 +992,12 @@ test('V2 formal purchase orders normalize supply lines and receipts update them'
     assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(formalSupplyOrderId/);
 });
 
-test('V2 initial stock creates authoritative cost lots', () => {
+test('V2 initial stock separates operational lot from protected cost', () => {
     assert.match(indexSource, /實際單位成本/);
     assert.match(appSource, /sourceType:'INITIAL_STOCK'/);
-    assert.match(appSource, /remainingQty:delta,unitCost:Number\(row\.unitCost/);
+    assert.match(appSource, /remainingQty:delta,sourceType:'INITIAL_STOCK'/);
+    assert.match(appSource, /inventoryLotCosts/);
+    assert.match(appSource, /unitCost:Number\(row\.unitCost/);
 });
 
 test('V2 returns restore and reverse exact delivery lots', () => {
