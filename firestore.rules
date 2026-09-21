@@ -156,7 +156,7 @@ service cloud.firestore {
     }
 
     match /users/{id} {
-      allow read: if active();
+      allow read: if signedIn() && (id == request.auth.uid || active());
       allow create, update: if admin();
       allow delete: if false;
     }
