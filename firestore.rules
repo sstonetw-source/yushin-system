@@ -118,6 +118,24 @@ service cloud.firestore {
       return data.onHand >= 0 && data.reserved >= 0;
     }
 
+    // Client-side delivery/reservation transactions need narrowly-scoped stock writes.
+    // Business owners cannot alter product identity, cost, incoming quantities or master data.
+    function businessInventoryOperationalUpdate() {
+      return businessOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'onHand', 'reserved', 'lots', 'updatedAt'
+        ])
+        && nonNegativeInventory(request.resource.data);
+    }
+
+    function businessWarehouseStockOperationalUpdate() {
+      return businessOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'onHand', 'reserved', 'updatedAt'
+        ])
+        && nonNegativeInventory(request.resource.data);
+    }
+
     match /users/{id} {
       allow read: if active();
       allow create, update: if admin();
@@ -263,14 +281,16 @@ service cloud.firestore {
     match /inventory/{id} {
       allow read: if active();
       allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data);
-      allow update: if canReceiveInventory() && nonNegativeInventory(request.resource.data);
+      allow update: if (canReceiveInventory() && nonNegativeInventory(request.resource.data))
+        || businessInventoryOperationalUpdate();
       allow delete: if false;
     }
 
     match /warehouseStocks/{id} {
       allow read: if active();
       allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data);
-      allow update: if canReceiveInventory() && nonNegativeInventory(request.resource.data);
+      allow update: if (canReceiveInventory() && nonNegativeInventory(request.resource.data))
+        || businessWarehouseStockOperationalUpdate();
       allow delete: if false;
     }
 
