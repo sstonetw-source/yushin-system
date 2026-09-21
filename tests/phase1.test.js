@@ -984,3 +984,22 @@ test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership c
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
     assert.match(rulesSource, /function owns\(data\)/);
 });
+
+test('V2 formal purchase orders normalize supply lines and receipts update them', () => {
+    assert.match(appSource, /function formalSupplyOrderId/);
+    assert.match(appSource, /type:'PURCHASING_PO',purchaseOrderId/);
+    assert.match(appSource, /formalSupplyReceived|formalReceived/);
+    assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(formalSupplyOrderId/);
+});
+
+test('V2 initial stock creates authoritative cost lots', () => {
+    assert.match(indexSource, /實際單位成本/);
+    assert.match(appSource, /sourceType:'INITIAL_STOCK'/);
+    assert.match(appSource, /remainingQty:delta,unitCost:Number\(row\.unitCost/);
+});
+
+test('V2 returns restore and reverse exact delivery lots', () => {
+    assert.match(appSource, /availableReturnAllocations/);
+    assert.match(appSource, /previousReturnRecord/);
+    assert.match(appSource, /lotAllocations,cogs/);
+});
