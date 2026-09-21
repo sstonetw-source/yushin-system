@@ -5837,6 +5837,16 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             receiptStatus:receiptComplete?'received':'partial'
         });
     });
+    // Formal PO replenishment / surplus stock follows the same FIFO shortage allocation as self-order receipts.
+    const postPoSnap=await db.collection('purchaseOrders').doc(poId).get();
+    const postPo=postPoSnap.data()||{};
+    const postItems=purchaseItemsFromSavedPo(postPo);
+    const postItem=postItems[itemIndex]||{};
+    const postKey=poIncomingKey(postItem);
+    const postWarehouse=postItem.warehouseId||defaultWarehouse()?.id||'';
+    const sourceReserved=postItem.orderId ? Math.min(Number(qty||0), Math.max(0, Number((normalizedOrderItems(ordersCache.find(o=>o.id===postItem.orderId)||{})[Number(postItem.orderItemIndex||0)]||{}).inventoryShortageQty||0))) : 0;
+    const freeQty=Math.max(0,Number(qty||0)-sourceReserved);
+    if(freeQty>0&&postKey&&postWarehouse)await allocateFreeReceiptStockToShortages(postKey,postWarehouse,freeQty,actor,postItem.orderId||'');
 }
 
 window.savePoReceiptBatch = async function() {
