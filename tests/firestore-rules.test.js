@@ -75,9 +75,11 @@ test('engineer self-order is allowed but formal purchase order is denied', async
   await assertFails(setDoc(doc(db('eng1'), 'purchaseOrders/p1'), { status:'ORDERED' }));
 });
 
-test('sales cannot directly mutate inventory', async () => {
-  await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1' });
-  await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { reserved:3 }));
+test('business owner can perform only scoped fulfillment stock updates', async () => {
+  await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1', unitCost:100 });
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { reserved:3 }));
+  await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { productId:'hijack' }));
+  await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { unitCost:1 }));
   await assertSucceeds(updateDoc(doc(db('wh1'), 'inventory/p1'), { reserved:3 }));
 });
 
