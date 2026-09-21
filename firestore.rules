@@ -275,7 +275,9 @@ service cloud.firestore {
     // Unified source/order evidence: PURCHASING_PO, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser() || warehouse()
-        || (businessOwner() && resource.data.ownerUid == request.auth.uid);
+        || (businessOwner()
+          && resource.data.type == 'SALES_SELF_ORDER'
+          && resource.data.ownerUid == request.auth.uid);
       allow create: if admin() || purchaser()
         || (businessOwner()
           && request.resource.data.type == 'SALES_SELF_ORDER'
@@ -330,7 +332,9 @@ service cloud.firestore {
     // Actual receipt/lot cost is physically separated from operational lot data.
     // Client-side fulfillment never requires this collection.
     match /inventoryLotCosts/{id} {
-      allow read, create, update: if admin() || purchaser();
+      allow read: if admin() || purchaser();
+      allow create: if canReceiveInventory();
+      allow update: if admin() || purchaser();
       allow delete: if false;
     }
 
