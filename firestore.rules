@@ -1,197 +1,417 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
-    function role() { return signedIn() ? userDoc().data.role : null; }
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUser() {
+      return signedIn() && exists(userPath());
+    }
+
+    function userDoc() {
+      return get(userPath());
+    }
+
+    function active() {
+      return hasUser()
+        && (!('active' in userDoc().data) || userDoc().data.active == true);
+    }
+
+    function role() {
+      return active() ? userDoc().data.role : null;
+    }
+
     function admin() { return role() == 'admin'; }
-    function purchaser() { return role() == 'purchaser'; }
-    function warehouse() { return role() == 'warehouse'; }
     function sales() { return role() == 'sales'; }
     function engineer() { return role() == 'engineer'; }
-    function currentSalesCode() { return signedIn() ? userDoc().data.code : null; }
-    function ownBySalesCode(resourceData) {
-      return signedIn()
-        && currentSalesCode() != null
-        && currentSalesCode() != ''
-        && resourceData.salesCode != null
-        && resourceData.salesCode == currentSalesCode();
-    }
-    // salesCode 是正式資料歸屬；ownerUid 僅保留給尚未補 salesCode 的舊資料相容。
-    function own(resourceData) {
-      return signedIn() && (ownBySalesCode(resourceData) || resourceData.ownerUid == request.auth.uid);
-    }
-    function salesInventoryOperationalUpdate() {
-      return sales()
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['onHand', 'reserved', 'lots', 'updatedAt'])
-        && request.resource.data.onHand >= 0
-        && request.resource.data.reserved >= 0;
+    function purchaser() { return role() == 'purchaser'; }
+    function warehouse() { return role() == 'warehouse'; }
+
+    // Engineer is a business role plus engineering capability.
+    function businessOwner() {
+      return sales() || engineer();
     }
 
-    match /users/{id} { allow read: if signedIn(); allow write: if admin(); }
-    match /settings/{id} { allow read: if signedIn(); allow write: if admin(); }
+    function businessAssistant() {
+      return purchaser();
+    }
 
-    // 全系統共用主檔：先建立安全邊界，後續模組逐步改為引用 stable ID。
+    function canCreateCommercialDoc() {
+      return admin() || businessOwner() || businessAssistant();
+    }
+
+    function canPurchase() {
+      return admin() || purchaser();
+    }
+
+    function canReceiveInventory() {
+      return admin() || purchaser() || warehouse();
+    }
+
+    function warehousePurchaseReceiptUpdate() {
+      return warehouse()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'receiptRecords', 'receiptStatus', 'status', 'updatedAt'
+        ]);
+    }
+
+    function canManageEquipment() {
+      return admin() || engineer();
+    }
+
+    function salesCode() {
+      return active() && userDoc().data.salesCode != null
+        ? userDoc().data.salesCode
+        : (active() && userDoc().data.code != null ? userDoc().data.code : null);
+    }
+
+    function owns(data) {
+      return active() && (
+        (data.ownerUid != null && data.ownerUid == request.auth.uid) ||
+        (salesCode() != null && data.salesCode != null && data.salesCode == salesCode())
+      );
+    }
+
+    function validOwnedCommercialCreate(data) {
+      return admin() ||
+        (businessOwner() &&
+          data.ownerUid == request.auth.uid &&
+          data.salesCode != null &&
+          data.salesCode == salesCode()) ||
+        (businessAssistant() &&
+          data.ownerUid != null &&
+          data.salesCode != null &&
+          data.ownerUid != request.auth.uid);
+    }
+
+    function sameCommercialOwner() {
+      return request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.salesCode == resource.data.salesCode;
+    }
+
+    function purchaserOrderWorkflowUpdate() {
+      return purchaser()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items', 'itemCount', 'orderSchemaVersion',
+          'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
+          'linkedDocuments', 'updatedAt'
+        ])
+        && sameCommercialOwner();
+    }
+
+    function warehouseOrderWorkflowUpdate() {
+      return warehouse()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items', 'itemCount', 'orderSchemaVersion',
+          'inventoryReservedQty', 'inventoryShortageQty',
+          'receivedQty', 'updatedAt'
+        ])
+        && sameCommercialOwner();
+    }
+
+    function productLineKey(data) {
+      return data.get('productLineId', data.get('productLine', ''));
+    }
+
+    function assignedProductLine(data) {
+      return admin() ||
+        (businessOwner()
+          && userDoc().data.productLineIds is list
+          && productLineKey(data) != ''
+          && userDoc().data.productLineIds.hasAny([productLineKey(data)]));
+    }
+
+    function nonNegativeInventory(data) {
+      return data.onHand >= 0 && data.reserved >= 0;
+    }
+
+    // Client-side delivery/reservation transactions need narrowly-scoped stock writes.
+    // Business owners cannot alter product identity, cost, incoming quantities or master data.
+    function businessInventoryOperationalUpdate() {
+      return businessOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'onHand', 'reserved', 'lots', 'safetyStock', 'updatedAt'
+        ])
+        && nonNegativeInventory(request.resource.data);
+    }
+
+    function businessInventoryLotOperationalUpdate() {
+      return businessOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'remainingQty', 'updatedAt'
+        ])
+        && request.resource.data.remainingQty >= 0;
+    }
+
+    function businessWarehouseStockOperationalUpdate() {
+      return businessOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'onHand', 'reserved', 'updatedAt'
+        ])
+        && nonNegativeInventory(request.resource.data);
+    }
+
+    match /users/{id} {
+      allow read: if signedIn() && (id == request.auth.uid || active());
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /settings/{id} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
     match /brands/{id} {
-      allow read: if signedIn();
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /productLines/{id} {
+      allow read: if active();
       allow create, update: if admin();
       allow delete: if false;
     }
 
     match /salesCodes/{id} {
-      allow read: if signedIn();
+      allow read: if active();
       allow create, update: if admin();
       allow delete: if false;
     }
 
     match /customers/{id} {
-      allow read: if signedIn();
-      allow create, update: if admin() || sales();
+      allow read: if active();
+      allow create, update: if admin() || businessOwner() || businessAssistant();
       allow delete: if false;
     }
 
     match /suppliers/{id} {
-      allow read: if signedIn();
-      allow create, update: if admin() || purchaser();
+      allow read: if active();
+      allow create, update: if canPurchase();
       allow delete: if false;
     }
 
     match /brandSupplierMappings/{id} {
-      allow read: if signedIn();
-      allow create, update: if admin() || purchaser();
+      allow read: if active();
+      allow create, update: if canPurchase();
       allow delete: if false;
     }
 
     match /warehouses/{id} {
-      allow read: if signedIn();
+      allow read: if active();
       allow create, update: if admin();
       allow delete: if false;
     }
 
+    // Searchable product master. Cost is intentionally stored separately.
     match /products/{id} {
-      allow read: if signedIn();
-      // 業務只可快速建立 TEMPORARY 產品，不能直接修改正式 Product Master。
-      allow create: if admin() || purchaser() || warehouse()
-        || (sales()
-          && request.resource.data.status == 'TEMPORARY'
-          && request.resource.data.productId == id
-          && request.resource.data.brandName is string
-          && request.resource.data.manufacturerPartNo is string
-          && request.resource.data.normalizedPartNo is string
-          && request.resource.data.productName is string
-          && (request.resource.data.authorizationType == 'AUTHORIZED'
-            || request.resource.data.authorizationType == 'NON_AUTHORIZED'));
-      allow update: if admin() || purchaser() || warehouse();
+      allow read: if active();
+      allow create, update: if admin() || purchaser() || assignedProductLine(request.resource.data);
       allow delete: if false;
     }
 
-    // 成本與產品主檔分離。代理產品成本不放在 products 文件內，
-    // sales 只有在該成本文件明確 salesVisible=true 時才能讀取。
+    // Protected cost data. Assigned business owners can maintain only their product lines.
     match /productCosts/{id} {
-      allow read: if admin() || purchaser() || warehouse()
-        || (sales() && resource.data.salesVisible == true);
-      // 採購/管理員可維護正式成本；業務只可在快速建立「非代理 TEMPORARY 產品」時
-      // 新增一筆 salesVisible=true 的成本，不得更新既有成本。
-      allow create: if admin() || purchaser()
-        || (sales()
-          && request.resource.data.productId == id
-          && request.resource.data.salesVisible == true
-          && get(/databases/$(database)/documents/products/$(id)).data.status == 'TEMPORARY'
-          && get(/databases/$(database)/documents/products/$(id)).data.authorizationType == 'NON_AUTHORIZED');
-      allow update: if admin() || purchaser();
+      allow read: if admin() || purchaser() || assignedProductLine(resource.data);
+      allow create: if admin() || purchaser() || assignedProductLine(request.resource.data);
+      allow update: if admin() || purchaser()
+        || (assignedProductLine(resource.data)
+          && assignedProductLine(request.resource.data)
+          && request.resource.data.productId == resource.data.productId
+          && productLineKey(request.resource.data) == productLineKey(resource.data));
       allow delete: if false;
+    }
+
+    match /priceHistory/{id} {
+      allow read: if admin() || purchaser() || assignedProductLine(resource.data);
+      allow create: if admin() || purchaser() || assignedProductLine(request.resource.data);
+      allow update, delete: if false;
     }
 
     match /quotes/{id} {
-      allow read: if admin() || purchaser() || own(resource.data);
-      allow create: if admin() || sales();
-      allow update: if admin() || own(resource.data);
+      allow read: if admin() || purchaser() || owns(resource.data);
+      allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
+      allow update: if admin()
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
+        || (purchaser() && sameCommercialOwner());
       allow delete: if false;
     }
 
     match /forecasts/{id} {
-      allow read: if admin() || own(resource.data);
-      allow create: if admin() || sales();
-      allow update: if admin() || own(resource.data);
+      allow read: if admin() || owns(resource.data);
+      allow create: if (admin() || businessOwner()) && validOwnedCommercialCreate(request.resource.data);
+      allow update: if admin()
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner());
       allow delete: if false;
     }
 
-    // Forecast 進度為 append-only 歷史，權限跟隨父 Forecast。
     match /forecasts/{forecastId}/progress/{progressId} {
-      allow read: if admin() || own(get(/databases/$(database)/documents/forecasts/$(forecastId)).data);
-      allow create: if admin()
-        || (sales() && own(getAfter(/databases/$(database)/documents/forecasts/$(forecastId)).data));
+      function parentForecast() {
+        return get(/databases/$(database)/documents/forecasts/$(forecastId));
+      }
+      allow read: if admin() || owns(parentForecast().data);
+      allow create: if admin() || (businessOwner() && owns(parentForecast().data));
       allow update, delete: if false;
     }
 
     match /orders/{id} {
-      allow read: if admin() || purchaser() || warehouse() || engineer() || own(resource.data);
-      allow create: if admin() || sales();
-      allow update: if admin() || purchaser() || warehouse() || own(resource.data);
+      allow read: if admin() || purchaser() || warehouse() || owns(resource.data);
+      allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
+      // Commercial owner edits commercial data; purchaser/warehouse must use scoped
+      // workflow collections below instead of broad order mutation.
+      allow update: if admin()
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
+        || purchaserOrderWorkflowUpdate()
+        || warehouseOrderWorkflowUpdate();
       allow delete: if false;
     }
 
+    // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
     match /purchaseOrders/{id} {
       allow read: if admin() || purchaser() || warehouse();
-      allow create, update: if admin() || purchaser();
+      allow create: if canPurchase();
+      allow update: if canPurchase() || warehousePurchaseReceiptUpdate();
+      allow delete: if false;
+    }
+
+    // Unified source/order evidence: PURCHASING_PO, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
+    match /supplyOrders/{id} {
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner()
+          && resource.data.type == 'SALES_SELF_ORDER'
+          && resource.data.ownerUid == request.auth.uid);
+      allow create: if admin() || purchaser()
+        || (businessOwner()
+          && request.resource.data.type == 'SALES_SELF_ORDER'
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.salesCode == salesCode());
+      allow update: if admin() || purchaser()
+        || (warehouse()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'receivedQty', 'status', 'updatedAt'
+          ]))
+        || (businessOwner()
+          && resource.data.type == 'SALES_SELF_ORDER'
+          && resource.data.ownerUid == request.auth.uid
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.type == resource.data.type);
       allow delete: if false;
     }
 
     match /inventory/{id} {
-      allow read: if admin() || purchaser() || warehouse() || sales();
-      // 正式庫存建檔／採購入庫由採購、倉管、管理員負責。
-      allow create: if admin() || warehouse() || purchaser();
-      // 業務在訂單成立／送貨流程只能改動實體數量、占用數量、批號與更新時間，
-      // 不能自行改產品身份、在途量或其他主檔欄位。
-      allow update: if admin() || warehouse() || purchaser() || salesInventoryOperationalUpdate();
+      // Aggregate operational stock is shared, but cost fields must never be embedded here.
+      allow read: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
+      allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data)
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
+      allow update: if ((canReceiveInventory() && nonNegativeInventory(request.resource.data))
+          || businessInventoryOperationalUpdate())
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }
 
-    // 分倉庫存：業務只能在訂單占用/送貨/退貨流程調整現有量與占用量。
     match /warehouseStocks/{id} {
-      allow read: if admin() || purchaser() || warehouse() || sales();
-      allow create: if admin() || warehouse() || purchaser();
-      allow update: if admin() || warehouse() || purchaser()
-        || (sales()
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['onHand', 'reserved', 'updatedAt'])
-          && request.resource.data.onHand >= 0
-          && request.resource.data.reserved >= 0);
+      allow read: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
+      allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data)
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
+      allow update: if ((canReceiveInventory() && nonNegativeInventory(request.resource.data))
+          || businessWarehouseStockOperationalUpdate())
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }
 
-    // 訂單成立後的庫存占用明細；以狀態更新取代刪除，保留可追溯性。
     match /inventoryReservations/{id} {
-      allow read: if admin() || purchaser() || warehouse() || (sales() && ownBySalesCode(resource.data));
-      allow create: if admin() || purchaser() || warehouse() || (sales() && ownBySalesCode(request.resource.data));
-      allow update: if admin() || purchaser() || warehouse()
-        || (sales() && ownBySalesCode(resource.data) && ownBySalesCode(request.resource.data));
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
+      allow create, update: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(request.resource.data));
       allow delete: if false;
     }
 
-    // PO 已送出但尚未成為正式庫存主檔的新品項。
+    match /inventoryLots/{id} {
+      // Operational lot data is readable for fulfillment, but cost must never live here.
+      allow read: if admin() || (active() && !('unitCost' in resource.data));
+      allow create: if canReceiveInventory() && !('unitCost' in request.resource.data);
+      allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate())
+        && !('unitCost' in request.resource.data);
+      allow delete: if false;
+    }
+
+    // Actual receipt/lot cost is physically separated from operational lot data.
+    // Client-side fulfillment never requires this collection.
+    match /inventoryLotCosts/{id} {
+      allow read: if admin() || purchaser();
+      allow create: if canReceiveInventory();
+      allow update: if admin() || purchaser();
+      allow delete: if false;
+    }
+
+    match /receipts/{id} {
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
+      allow create: if canReceiveInventory()
+        && !('unitCost' in request.resource.data)
+        && !('purchaseNetAmount' in request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // Purchaser records completion of the company's existing shipping paperwork.
+    match /dispatchRecords/{id} {
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
+      allow create: if admin() || purchaser();
+      allow update, delete: if false;
+    }
+
+    // Physical delivery is recorded by the responsible business owner.
+    match /deliveries/{id} {
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
+      allow create: if admin()
+        || (businessOwner() && owns(request.resource.data));
+      allow update, delete: if false;
+    }
+
     match /pendingInventoryItems/{id} {
       allow read: if admin() || purchaser() || warehouse();
       allow create, update: if admin() || purchaser() || warehouse();
       allow delete: if false;
     }
 
+    // Immutable stock ledger.
     match /inventoryMovements/{id} {
-      allow read: if admin() || warehouse() || purchaser() || sales();
-      allow create: if admin() || warehouse() || purchaser() || sales();
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
+      allow create: if (admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(request.resource.data)))
+        && !('unitCost' in request.resource.data)
+        && !('purchaseNetAmount' in request.resource.data)
+        && !('cogs' in request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // Immutable operational audit trail.
+    match /auditLogs/{id} {
+      allow read: if admin() || (active() && resource.data.actorUid == request.auth.uid);
+      allow create: if active() && request.resource.data.actorUid == request.auth.uid;
       allow update, delete: if false;
     }
 
     match /equipment/{id} {
-      allow read: if admin() || engineer() || (sales() && ownBySalesCode(resource.data));
-      allow create: if admin() || engineer() || (sales() && ownBySalesCode(request.resource.data));
+      allow read: if admin() || engineer() || (businessOwner() && owns(resource.data));
+      allow create: if admin() || engineer()
+        || (sales() && owns(request.resource.data));
       allow update: if admin() || engineer()
-        || (sales() && ownBySalesCode(resource.data) && ownBySalesCode(request.resource.data));
+        || (sales() && owns(resource.data) && owns(request.resource.data));
       allow delete: if false;
     }
 
-    // 未明確列出的集合一律拒絕，避免 catch-all 讓前面的角色/歸屬規則失效。
     match /{document=**} {
       allow read, write: if false;
     }

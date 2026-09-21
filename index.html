@@ -414,9 +414,11 @@
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
       <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment('initial')">＋ 新增庫存</button></div>
-      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋貨號、品名、廠牌、批號" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
+      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋已載入庫存" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
+      <div class="toolbar no-print"><input id="businessProductSearch" type="search" placeholder="查貨號或品名（伺服器查詢，最多 25 筆）"><button type="button" onclick="searchBusinessProducts()">查產品／售價／庫存</button><span id="businessProductSearchStatus"></span></div>
+      <div id="businessProductSearchResults" class="table-wrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table></div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
-      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>在途</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>安全庫存</th><th>在途</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
 
       <h3>待建檔品項</h3>
@@ -448,7 +450,7 @@
         <div class="inventory-summary-note">可一次輸入多個品項；正數增加庫存，盤點調整可輸入負數。報廢請輸入正數，系統會自動扣除。</div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫</th><th>數量</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
+            <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫</th><th>數量</th><th>實際單位成本</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
             <tbody id="inventoryAdjustmentRows"></tbody>
           </table>
         </div>
@@ -831,6 +833,13 @@
                 </div>
                 <div><label>抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
             </div>
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+                <button type="button" class="btn-secondary" onclick="addCurrentOrderItemToDraft()">＋ 加入下一品項</button>
+                <span style="font-size:12px;color:#666;">已加入的品項會列在下方；按儲存時也會包含目前表單中的品項。</span>
+            </div>
+            <div class="table-wrap" id="newOrderItemsWrap" style="display:none;margin-top:10px;">
+                <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>單價</th><th>履約</th><th>操作</th></tr></thead><tbody id="newOrderItemsBody"></tbody></table>
+            </div>
             <div style="margin-top:10px;">
                 <button id="saveNewOrderBtn" onclick="saveNewOrder()">💾 儲存</button>
                 <button class="btn-secondary" onclick="closeOrderModal()">取消</button>
@@ -1008,12 +1017,17 @@
 
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
+            <div class="panel" style="margin-bottom:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="margin:0;">工作儀表板</h3><button type="button" class="btn-secondary" onclick="loadAdminDashboard()">重新整理</button></div>
+                <div id="adminDashboardCards" class="forecast-summary-grid" style="margin-top:12px;"></div>
+                <div id="adminDashboardStatus" style="font-size:12px;color:#666;"></div>
+            </div>
             <div class="toolbar no-print">
                 <button class="btn-secondary" onclick="reloadSalesFromUsers()">🔄 重新整理</button>
                 <span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span>
             </div>
             <table>
-                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>密碼</th><th>帳號 UID</th></tr></thead>
+                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>負責產品線</th><th>密碼</th><th>帳號 UID</th></tr></thead>
                 <tbody id="adminSalesBody"></tbody>
             </table>
         </div>
@@ -1052,8 +1066,15 @@
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="productMasterMigrationPreviewBtn" onclick="previewProductMasterMigration()">🔎 預覽遷移</button>
                     <button type="button" id="productMasterMigrationBtn" onclick="runProductMasterMigration()" disabled>⬆️ 執行安全遷移</button>
+                    <button type="button" class="btn-secondary" id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">🔎 預覽庫存成本隔離</button>
+                    <button type="button" id="inventoryCostMigrationBtn" onclick="runInventoryCostMigration()" disabled>🔐 執行庫存成本隔離</button>
                 </div>
                 <div id="productMasterMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
+                <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
+                <div style="margin-top:10px;padding:10px 12px;background:#fff8e1;border-radius:6px;font-size:12px;line-height:1.7;color:#6b5200;">
+                    <strong>V2 部署順序：</strong>① 下載完整資料庫備份 → ② 部署 PR #30 的 Firestore Rules / Indexes → ③ 以管理員執行 Product Master v2 遷移 → ④ 執行庫存成本隔離，直到顯示 0 → ⑤ 完成五角色驗收。<br>
+                    新版 Rules 只保留管理員對舊成本欄位的遷移讀取權；業務／工程師等角色會立即被阻擋，因此可安全先部署 Rules 再搬移舊資料。
+                </div>
             </div>
             <div class="toolbar no-print">
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
@@ -1282,6 +1303,29 @@
 
 
 
+    <div id="selfOrderOverlay" class="modal-overlay">
+        <div class="modal-box" style="max-width:560px;">
+            <div class="modal-header"><h3>自行訂貨</h3><button type="button" onclick="closeSelfOrderModal()">×</button></div>
+            <div class="modal-body">
+                <div id="selfOrderItemSummary" style="margin-bottom:12px;"></div>
+                <input type="hidden" id="selfOrderOrderId"><input type="hidden" id="selfOrderItemId">
+                <label>供應商<input id="selfOrderSupplier" type="text" placeholder="輸入供應商" style="width:100%;"></label>
+                <label>訂貨數量<input id="selfOrderQty" type="number" min="0" step="any" style="width:100%;"></label>
+                <label>實際單位成本<input id="selfOrderUnitCost" type="number" min="0" step="0.01" style="width:100%;"></label>
+                <label>訂貨日期<input id="selfOrderDate" type="date" style="width:100%;"></label>
+                <label>備註<textarea id="selfOrderNotes" rows="2" style="width:100%;"></textarea></label>
+                <div id="selfOrderStatus" style="margin-top:8px;color:#666;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeSelfOrderModal()">取消</button>
+                <button type="button" id="saveSelfOrderBtn" onclick="saveSelfOrder()">確認自行訂貨</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="modules/fulfillment-core.js"></script>
+    <script src="modules/supply-core.js"></script>
+    <script src="modules/reservation-core.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
