@@ -1011,3 +1011,27 @@ test('V2 manual orders and copies preserve multiple items', () => {
     assert.match(appSource, /normalizedOrderItems\(source\)\.map\(normalizeNewOrderItem\)/);
     assert.match(appSource, /itemCount:items\.length,orderSchemaVersion:2/);
 });
+
+test('V2 product lookup is server bounded and shows sale and inventory quantities', () => {
+    assert.match(indexSource, /searchBusinessProducts/);
+    const start=appSource.indexOf('window.searchBusinessProducts');
+    const end=appSource.indexOf('window.renderInventoryList',start);
+    const source=appSource.slice(start,end);
+    assert.match(source, /where\('normalizedPartNo','==',normalized\)\.limit\(25\)/);
+    assert.match(source, /orderBy\('productName'\).*limit\(25\)/s);
+    assert.doesNotMatch(source, /db\.collection\('products'\)\.get\(\)/);
+});
+
+test('V2 personnel UI stores role capabilities and product line responsibility', () => {
+    assert.match(indexSource, /負責產品線/);
+    assert.match(appSource, /saveAdminUserCapabilities/);
+    assert.match(appSource, /productLineIds,capabilities/);
+});
+
+test('V2 dashboard and safety stock use bounded data', () => {
+    assert.match(indexSource, /adminDashboardCards/);
+    assert.match(appSource, /window\.loadAdminDashboard/);
+    assert.match(appSource, /limit\(100\)/);
+    assert.match(appSource, /setInventorySafetyStock/);
+    assert.match(appSource, /safetyStock,updatedAt/);
+});
