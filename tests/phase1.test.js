@@ -1148,3 +1148,37 @@ test('stock replenishment always uses a valid warehouse PO path', () => {
     assert.match(source, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
     assert.match(source, /db\.collection\('supplyOrders'\)/);
 });
+
+
+test('batch receipt reports partial success and requires a warehouse', () => {
+    assert.match(appSource, /尚未指定入庫倉庫/);
+    assert.match(appSource, /let completed = 0/);
+    assert.match(appSource, /已成功入庫 \$\{completed\} 個品項/);
+    assert.match(appSource, /已成功的資料不會重複入庫/);
+});
+
+test('partial delivery save blocks duplicate taps', () => {
+    const start = appSource.indexOf('window.saveDeliveryRecord');
+    const end = appSource.indexOf('window.deleteDeliveryRecord', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /pendingDeliveryOrderIds\.has\(orderId\)/);
+    assert.match(source, /pendingDeliveryOrderIds\.add\(orderId\)/);
+    assert.match(source, /儲存中…/);
+    assert.match(source, /pendingDeliveryOrderIds\.delete\(orderId\)/);
+});
+
+test('all multi-item orders require item-level delivery even when direct ship', () => {
+    const start = appSource.indexOf('window.quickCompleteDelivery');
+    const end = appSource.indexOf('window.quickCancelAllDelivery', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /const allItems=normalizedOrderItems\(cachedOrder\)/);
+    assert.match(source, /if \(allItems\.length > 1\)/);
+    assert.match(source, /確保送貨與退貨都能追蹤到正確品項/);
+});
+
+test('legacy cost migration sanitizes delivery and return allocations embedded in orders', () => {
+    assert.match(appSource, /function recordContainsEmbeddedCost/);
+    assert.match(appSource, /legacyOrders: orders\.filter/);
+    assert.match(appSource, /deliveryRecords:\(row\.data\.deliveryRecords\|\|\[\]\)\.map\(sanitizeRecord\)/);
+    assert.match(appSource, /returnRecords:\(row\.data\.returnRecords\|\|\[\]\)\.map\(sanitizeRecord\)/);
+});
