@@ -15,5 +15,9 @@
    }
    return {allocations,allocatedQty:n(availableQty)-remaining,remainingQty:remaining};
  }
- return {planShortageAllocation};
+ function allocateReceiptToShortages(reservations=[],availableQty=0){
+   const plan=planShortageAllocation(reservations,availableQty);
+   return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
+ }
+ return {planShortageAllocation,allocateReceiptToShortages};
 });
