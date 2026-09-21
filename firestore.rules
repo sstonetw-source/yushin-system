@@ -319,16 +319,27 @@ service cloud.firestore {
     }
 
     match /inventoryLots/{id} {
-      allow read: if active();
-      allow create: if canReceiveInventory();
-      allow update: if canReceiveInventory() || businessInventoryLotOperationalUpdate();
+      // Operational lot data is readable for fulfillment, but cost must never live here.
+      allow read: if active() && !('unitCost' in resource.data);
+      allow create: if canReceiveInventory() && !('unitCost' in request.resource.data);
+      allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate())
+        && !('unitCost' in request.resource.data);
+      allow delete: if false;
+    }
+
+    // Actual receipt/lot cost is physically separated from operational lot data.
+    // Client-side fulfillment never requires this collection.
+    match /inventoryLotCosts/{id} {
+      allow read, create, update: if admin() || purchaser();
       allow delete: if false;
     }
 
     match /receipts/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if canReceiveInventory();
+      allow create: if canReceiveInventory()
+        && !('unitCost' in request.resource.data)
+        && !('purchaseNetAmount' in request.resource.data);
       allow update, delete: if false;
     }
 
@@ -359,8 +370,11 @@ service cloud.firestore {
     match /inventoryMovements/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(request.resource.data));
+      allow create: if (admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(request.resource.data)))
+        && !('unitCost' in request.resource.data)
+        && !('purchaseNetAmount' in request.resource.data)
+        && !('cogs' in request.resource.data);
       allow update, delete: if false;
     }
 
