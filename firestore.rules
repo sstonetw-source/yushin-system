@@ -318,7 +318,8 @@ service cloud.firestore {
     }
 
     match /receipts/{id} {
-      allow read: if admin() || purchaser() || warehouse();
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
       allow create: if canReceiveInventory();
       allow update, delete: if false;
     }
