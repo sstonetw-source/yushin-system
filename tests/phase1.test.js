@@ -1066,3 +1066,13 @@ test('equipment removal uses soft disable and never Firestore delete', () => {
   assert.match(block, /disabledAt/);
   assert.doesNotMatch(block, /\.delete\s*\(/);
 });
+
+
+test('V2 legacy inventory cost migration is paginated and moves cost out of operational collections', () => {
+    assert.match(appSource, /function readCollectionForMigration/);
+    assert.match(appSource, /FieldPath\.documentId\(\)/);
+    assert.match(appSource, /inventoryLotCosts/);
+    assert.match(appSource, /FieldValue\.delete\(\)/);
+    assert.match(indexSource, /預覽庫存成本隔離/);
+    assert.match(indexSource, /執行庫存成本隔離/);
+});
