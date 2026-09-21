@@ -7428,6 +7428,9 @@ window.deleteDeliveryRecord = async function(recordId) {
     if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
     if (!confirm('確定要刪除這筆送貨紀錄嗎？異動軌跡仍會保留。')) return;
     const orderId = currentDeliveryOrderId;
+    if (!orderId || pendingDeliveryOrderIds.has(orderId)) return;
+    pendingDeliveryOrderIds.add(orderId);
+    renderOrdersList();
     try {
         let savedOrder;
         await db.runTransaction(async transaction => {
@@ -7463,6 +7466,9 @@ window.deleteDeliveryRecord = async function(recordId) {
         renderOrdersList();
     } catch (err) {
         alert('刪除失敗：' + err.message);
+    } finally {
+        pendingDeliveryOrderIds.delete(orderId);
+        renderOrdersList();
     }
 };
 
@@ -7610,7 +7616,7 @@ window.saveReturnRecord = async function() {
             const records = savedReturnRecords(order).slice();
             const existingIndex = records.findIndex(item => item.id === editId);
             if (editId && existingIndex < 0) throw new Error('這筆退貨紀錄已被其他人修改或刪除，請重新開啟後再試。');
-            if (normalizedOrderStatus(order) !== 'normal' && existingIndex < 0) throw new Error('已取消的訂單不能新增退貨紀錄。');
+            // 已取消訂單仍可能有取消前已實際送出的商品；允許針對既有送貨辦理退貨，數量仍受逐品項已送貨量限制。
             const now = new Date().toISOString();
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
@@ -7667,6 +7673,8 @@ window.deleteReturnRecord = async function(recordId) {
     if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
     if (!confirm('確定要刪除這筆退貨紀錄嗎？異動軌跡仍會保留。')) return;
     const orderId = currentLifecycleOrderId;
+    if (!orderId || pendingReturnOrderIds.has(orderId)) return;
+    pendingReturnOrderIds.add(orderId);
     try {
         let savedOrder;
         await db.runTransaction(async transaction => {
@@ -7699,6 +7707,7 @@ window.deleteReturnRecord = async function(recordId) {
         renderOrderLifecycleModal();
         renderOrdersList();
     } catch (err) { alert('刪除失敗：' + err.message); }
+    finally { pendingReturnOrderIds.delete(orderId); }
 };
 
 window.updateOrderField = function(orderId, field, value) {
