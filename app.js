@@ -5701,12 +5701,26 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             },{merge:true});
         }
 
+        // V2 authoritative receipt cost lives in Inventory Lot, not Product Master / moving average.
+        const lotRef=db.collection('inventoryLots').doc();
+        tx.set(lotRef,{
+            productKey:key,productId:item.productId||'',warehouseId,lotNo,expiryDate,
+            receivedQty:qty,remainingQty:qty,unitCost:Number(item.unitPrice||0),
+            supplier:live.vendorName||'',sourceType:'PURCHASE_ORDER',sourceId:poId,
+            orderId:item.orderId||'',itemId:sourceItem?.itemId||'',receivedAt:now
+        });
+        tx.set(db.collection('receipts').doc(receiptId),{
+            purchaseOrderId:poId,orderId:item.orderId||'',itemId:sourceItem?.itemId||'',
+            productKey:key,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,
+            unitCost:Number(item.unitPrice||0),createdAt:now,createdBy:actor
+        });
         tx.set(db.collection('inventoryMovements').doc(), {
             type:'receipt', qty, productKey:key, itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), lotNo, expiryDate, warehouseId,
+            brand:resolveBrandName(item.brand||''), lotNo, expiryDate, warehouseId, lotId:lotRef.id,
             fulfillmentType:'WAREHOUSE', unitCost:Number(item.unitPrice||0),
             purchaseNetAmount:Number(item.unitPrice||0)*qty, sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,
-            sourceId:poId, receiptId, createdAt:now, createdBy:actor
+            sourceId:poId, receiptId, createdAt:now, createdBy:actor,
+            ownerUid:sourceOrder?.ownerUid||'',salesCode:sourceOrder?.salesCode||''
         });
 
         const pendingRemaining=Math.max(0,pendingIncoming-qty);
