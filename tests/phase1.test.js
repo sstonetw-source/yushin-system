@@ -1102,3 +1102,29 @@ test('V2 admin UI documents safe migration-before-rules deployment order', () =>
     assert.match(indexSource, /再部署新版 Firestore Rules \/ Indexes/);
     assert.match(indexSource, /不要先部署新版 Rules/);
 });
+
+
+test('warehouse master save has immediate feedback and duplicate-submit guard', () => {
+    const start = appSource.indexOf('window.saveWarehouseMaster');
+    const end = appSource.indexOf('window.disableWarehouseMaster', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /button\.disabled = true/);
+    assert.match(source, /儲存中/);
+    assert.match(source, /permission-denied/);
+    assert.match(source, /button\.disabled = false/);
+});
+
+test('Product Master first load failure clears cached promise so next action can retry', () => {
+    const start = appSource.indexOf('function ensurePriceListLoaded');
+    const end = appSource.indexOf('function ensureClientHistoryLoaded', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /priceListLoadPromise = null/);
+    assert.match(source, /Product Master 載入失敗/);
+});
+
+test('formal purchase order automatically derives ordered progress on linked order items', () => {
+    assert.match(appSource, /purchaseOrderedQty:cumulative/);
+    assert.match(appSource, /purchaseStatus:totalOrdered<=0\?'pending':totalOrdered<totalNeeded\?'partial':'ordered'/);
+    assert.match(appSource, /function purchaseProgressInfo/);
+    assert.match(appSource, /已訂貨 \$\{ordered\}\/\$\{required\}/);
+});
