@@ -57,5 +57,38 @@
     if(remaining>0)throw new Error('批次庫存不足');
     return {allocations,totalCost:allocations.reduce((s,row)=>s+row.cost,0)};
   }
-  return {TYPES,normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,sortLotsForIssue,allocateLots};
+  function reverseLotAllocations(records=[],qty=0){
+    let remaining=n(qty);const allocations=[];
+    for(const record of [...records].reverse()){
+      if(remaining<=0)break;
+      const recordQty=n(record.qty);
+      const rows=Array.isArray(record.lotAllocations)?record.lotAllocations:[];
+      const available=Math.min(recordQty,rows.reduce((sum,row)=>sum+n(row.qty),0));
+      let take=Math.min(available,remaining);
+      for(const row of [...rows].reverse()){
+        if(take<=0)break;
+        const restored=Math.min(n(row.qty),take);
+        if(!restored)continue;
+        const unitCost=n(row.unitCost);
+        allocations.push({lotId:row.lotId||'',lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',qty:restored,unitCost,cost:restored*unitCost});
+        take-=restored;remaining-=restored;
+      }
+    }
+    if(remaining>0)throw new Error('找不到足夠的原始出貨批次，無法安全還原庫存');
+    return {allocations,totalCost:allocations.reduce((sum,row)=>sum+row.cost,0)};
+  }
+  function allocationsAfterReversal(allocations=[],reversed=[]){
+    const remainingByLot=new Map();
+    for(const row of reversed)remainingByLot.set(row.lotId,n(remainingByLot.get(row.lotId))+n(row.qty));
+    const result=[];
+    for(const row of allocations){
+      const restoreLeft=n(remainingByLot.get(row.lotId));
+      const removed=Math.min(n(row.qty),restoreLeft);
+      remainingByLot.set(row.lotId,Math.max(0,restoreLeft-removed));
+      const qty=n(row.qty)-removed;
+      if(qty>0){const unitCost=n(row.unitCost);result.push({...row,qty,unitCost,cost:qty*unitCost});}
+    }
+    return result;
+  }
+  return {TYPES,normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,sortLotsForIssue,allocateLots,reverseLotAllocations,allocationsAfterReversal};
 });
