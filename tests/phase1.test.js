@@ -1076,3 +1076,12 @@ test('V2 legacy inventory cost migration is paginated and moves cost out of oper
     assert.match(indexSource, /預覽庫存成本隔離/);
     assert.match(indexSource, /執行庫存成本隔離/);
 });
+
+
+test('V2 historical COGS is reproducible from exact lot allocations and protected costs', () => {
+    assert.match(appSource, /function protectedAllocationCost/);
+    assert.match(appSource, /inventoryAnalysisLotCosts\.get\(allocation\.lotId\)/);
+    assert.match(appSource, /function protectedHistoricalCogs/);
+    assert.match(appSource, /protectedAllocationCost\(delivered\) - protectedAllocationCost\(returned\)/);
+    assert.match(appSource, /grossProfit:sales-cogs/);
+});
