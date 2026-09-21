@@ -161,3 +161,43 @@ test('warehouse can update receipt-driven order quantities but not commercial fi
   }));
   await assertFails(updateDoc(doc(db('wh1'), 'orders/receipt1'), { customerName:'Changed' }));
 });
+
+
+test('operational lot is readable but embedded lot cost is denied to business roles', async () => {
+  await seed('inventoryLots/publicLot', { productId:'p1', productKey:'p1', warehouseId:'w1', remainingQty:5 });
+  await seed('inventoryLots/legacyCostLot', { productId:'p1', productKey:'p1', warehouseId:'w1', remainingQty:5, unitCost:100 });
+  await assertSucceeds(getDoc(doc(db('sales1'), 'inventoryLots/publicLot')));
+  await assertFails(getDoc(doc(db('sales1'), 'inventoryLots/legacyCostLot')));
+});
+
+test('lot cost is physically protected from sales engineer and warehouse', async () => {
+  await seed('inventoryLotCosts/lot1', { lotId:'lot1', productId:'p1', unitCost:100 });
+  await assertSucceeds(getDoc(doc(db('admin'), 'inventoryLotCosts/lot1')));
+  await assertSucceeds(getDoc(doc(db('buyer1'), 'inventoryLotCosts/lot1')));
+  await assertFails(getDoc(doc(db('sales1'), 'inventoryLotCosts/lot1')));
+  await assertFails(getDoc(doc(db('eng1'), 'inventoryLotCosts/lot1')));
+  await assertFails(getDoc(doc(db('wh1'), 'inventoryLotCosts/lot1')));
+});
+
+test('warehouse can create protected lot cost during receipt without being able to read it back', async () => {
+  await assertSucceeds(setDoc(doc(db('wh1'), 'inventoryLotCosts/newLot'), {
+    lotId:'newLot', productId:'p1', unitCost:120
+  }));
+  await assertFails(getDoc(doc(db('wh1'), 'inventoryLotCosts/newLot')));
+});
+
+test('operational receipt and movement reject embedded cost fields', async () => {
+  await assertFails(setDoc(doc(db('wh1'), 'receipts/r-cost'), {
+    productKey:'p1', qty:1, unitCost:100
+  }));
+  await assertFails(setDoc(doc(db('wh1'), 'inventoryMovements/m-cost'), {
+    productKey:'p1', qty:1, type:'receipt', unitCost:100
+  }));
+});
+
+test('business owner can read own self-order but not formal supply order cost record', async () => {
+  await seed('supplyOrders/self1', { type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', unitCost:100 });
+  await seed('supplyOrders/formal1', { type:'PURCHASING_PO', ownerUid:'sales1', salesCode:'S01', unitCost:80 });
+  await assertSucceeds(getDoc(doc(db('sales1'), 'supplyOrders/self1')));
+  await assertFails(getDoc(doc(db('sales1'), 'supplyOrders/formal1')));
+});
