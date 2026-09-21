@@ -5533,6 +5533,50 @@ window.receiveSupplyOrder = function(supplyId) {
     document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
 };
 
+async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='') {
+    let remaining=Math.max(0,Number(maxQty||0));
+    if(!remaining||!productKey||!warehouseId||!window.YushinReservation)return {allocatedQty:0,unallocatedQty:remaining};
+    // Bounded query: only shortage reservations for this product are candidates.
+    const snap=await db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==','shortage').limit(50).get();
+    const candidates=snap.docs.map(doc=>({id:doc.id,...doc.data()}))
+        .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0);
+    const plan=window.YushinReservation.allocateReceiptToShortages(candidates,remaining);
+    let allocatedQty=0;
+    for(const allocation of plan.allocations){
+        const qty=Number(allocation.qty||0);
+        if(!qty)continue;
+        await db.runTransaction(async tx=>{
+            const orderRef=db.collection('orders').doc(allocation.orderId);
+            const reservationRef=db.collection('inventoryReservations').doc(allocation.id);
+            const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
+            const whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
+            const [orderSnap,resSnap,invSnap,whSnap]=await Promise.all([tx.get(orderRef),tx.get(reservationRef),tx.get(invRef),tx.get(whRef)]);
+            if(!orderSnap.exists||!resSnap.exists||!invSnap.exists||!whSnap.exists)return;
+            const reservation=resSnap.data();
+            const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
+            const inv=inventoryNumbers(invSnap.data()),wh=inventoryNumbers(whSnap.data());
+            const take=Math.min(qty,liveShortage,Math.max(0,inv.available),Math.max(0,wh.available));
+            if(take<=0)return;
+            const order={id:orderSnap.id,...orderSnap.data()},items=normalizedOrderItems(order);
+            const index=items.findIndex(item=>item.itemId===reservation.itemId);
+            if(index<0)return;
+            const item=items[index],oldReserved=Number(item.reservedQty??item.inventoryReservedQty??0);
+            const oldShortage=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??liveShortage));
+            items[index]={...item,reservedQty:oldReserved+take,inventoryReservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take),inventoryShortageQty:Math.max(0,oldShortage-take)};
+            const totalReserved=items.reduce((s,row)=>s+Number(row.reservedQty??row.inventoryReservedQty??0),0);
+            const totalShortage=items.reduce((s,row)=>s+Number(row.shortageQty??row.inventoryShortageQty??0),0);
+            const now=new Date().toISOString();
+            tx.update(orderRef,{items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now});
+            tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
+            tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
+            tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
+            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,allocation.orderId,productKey,actor,{warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE'}));
+            allocatedQty+=take;
+        });
+    }
+    return {allocatedQty,unallocatedQty:Math.max(0,remaining-allocatedQty)};
+}
+
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
     const now=new Date().toISOString(),actor=deliveryActor();
     await db.runTransaction(async tx=>{
@@ -5588,6 +5632,16 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         const receivedQty=Number(supply.receivedQty||0)+qty;
         tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
     });
+    // Replenishment / excess receipt stock automatically serves oldest outstanding shortages.
+    // Stock already reserved to the source order is excluded from this second allocation pass.
+    const freeQty=Math.max(0,Number(qty||0));
+    await allocateFreeReceiptStockToShortages(
+        (await db.collection('supplyOrders').doc(supplyId).get()).data()?.productKey
+            || (await db.collection('supplyOrders').doc(supplyId).get()).data()?.productId
+            || '',
+        (await db.collection('supplyOrders').doc(supplyId).get()).data()?.warehouseId || defaultWarehouse()?.id || '',
+        freeQty,actor,(await db.collection('supplyOrders').doc(supplyId).get()).data()?.orderId || ''
+    );
 }
 
 window.receivePurchaseOrder = function(poId) {
