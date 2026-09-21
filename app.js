@@ -371,6 +371,33 @@ function canEditPage(pageKey) {
     return getPagePermission(pageKey) === 'edit';
 }
 
+// V2 capabilities: role names are mapped once here instead of scattering role === 'sales'
+// checks throughout commercial workflows. Firestore Rules mirror these boundaries.
+function hasBusinessCapability(role = currentUserRole) {
+    return role === 'admin' || role === 'sales' || role === 'engineer';
+}
+function canCreateQuoteCapability(role = currentUserRole) {
+    return hasBusinessCapability(role) || role === 'purchaser';
+}
+function canCreateOrderCapability(role = currentUserRole) {
+    return hasBusinessCapability(role) || role === 'purchaser';
+}
+function canCreateForecastCapability(role = currentUserRole) {
+    return hasBusinessCapability(role);
+}
+function canSelfOrderCapability(role = currentUserRole) {
+    return hasBusinessCapability(role);
+}
+function canCreatePurchaseOrderCapability(role = currentUserRole) {
+    return role === 'admin' || role === 'purchaser';
+}
+function canReceiveInventoryCapability(role = currentUserRole) {
+    return role === 'admin' || role === 'purchaser' || role === 'warehouse';
+}
+function canManageEquipmentCapability(role = currentUserRole) {
+    return role === 'admin' || role === 'engineer';
+}
+
 function canViewAllData(dataType, role = currentUserRole) {
     return role === 'admin' || roleDataScopes[role]?.[dataType] === 'all';
 }
@@ -403,7 +430,7 @@ function syncCustomerMaster(customerName, extra = {}) {
     if (!customerId || !currentUser) return customerId;
 
     // 主交易不等待 Customer Master 寫入，避免新增估價／訂單被次要同步拖慢。
-    if (currentUserRole === 'admin' || currentUserRole === 'sales') {
+    if (hasBusinessCapability()) {
         db.collection('customers').doc(customerId).set({
             customerId,
             name,
@@ -7385,8 +7412,8 @@ window.saveNewOrder = function() {
         && authorizationTypeForProduct(selectedProduct) === 'NON_AUTHORIZED';
     if (nonAuthorizedCostAllowed && costInputVal !== '') {
         data.costPrice = parseFloat(costInputVal);
-        data.costSource = currentUserRole === 'sales'
-            ? 'sales_manual_or_visible_non_authorized'
+        data.costSource = hasBusinessCapability()
+            ? 'business_manual_or_visible_non_authorized'
             : 'non_authorized_transaction_cost';
     }
 
@@ -8629,12 +8656,12 @@ async function loadVisibleProductCost(item) {
     const productId = item?.productId || stableProductId(item || {});
     if (!productId) return null;
     const authType = authorizationTypeForProduct(item);
-    if (currentUserRole === 'sales' && authType === 'AUTHORIZED') return null;
+    if (hasBusinessCapability() && authType === 'AUTHORIZED') return null;
     try {
         const doc = await db.collection('productCosts').doc(productId).get();
         if (!doc.exists) return null;
         const data = doc.data() || {};
-        if (currentUserRole === 'sales' && data.salesVisible !== true) return null;
+        if (hasBusinessCapability() && data.salesVisible !== true) return null;
         const value = data.standardCost;
         return value === undefined || value === null || String(value).trim() === '' ? null : Number(value);
     } catch (_) {
@@ -8647,7 +8674,7 @@ function setOrderCostFieldForProduct(item) {
     const input = document.getElementById('orderCostPrice');
     if (!wrap || !input) return;
     const privileged = currentUserRole === 'admin' || currentUserRole === 'purchaser';
-    const salesCanSee = currentUserRole === 'sales' && item && authorizationTypeForProduct(item) === 'NON_AUTHORIZED';
+    const salesCanSee = hasBusinessCapability() && item && authorizationTypeForProduct(item) === 'NON_AUTHORIZED';
     wrap.style.display = (privileged || salesCanSee) ? '' : 'none';
     if (!privileged && !salesCanSee) input.value = '';
 }
@@ -8657,7 +8684,7 @@ async function applyOrderProductCost(item) {
     const input = document.getElementById('orderCostPrice');
     if (!input) return;
     const allowed = currentUserRole === 'admin' || currentUserRole === 'purchaser'
-        || (currentUserRole === 'sales' && authorizationTypeForProduct(item) === 'NON_AUTHORIZED');
+        || (hasBusinessCapability() && authorizationTypeForProduct(item) === 'NON_AUTHORIZED');
     if (!allowed) {
         input.value = '';
         return;
