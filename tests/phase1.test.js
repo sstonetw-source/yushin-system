@@ -325,7 +325,7 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
     const deal = appSource.slice(dealStart, dealEnd);
     assert.match(deal, /createdAt\s*:\s*new Date\(\)\.toISOString\(\)/);
-    assert.match(deal, /itemCodeKey: normalizeHistoryItemCode/);
+    assert.match(deal, /itemCodeKey:\s*normalizeHistoryItemCode/);
 });
 
 
@@ -581,7 +581,7 @@ test('unknown order items do not create inventory before purchase receipt', () =
     const end = appSource.indexOf('async function reserveInventoryForNewOrder', start);
     const s = appSource.slice(start, end);
     assert.match(s, /warehouseSnap\?\.exists/);
-    assert.match(s, /const shortage = Math\.max\(0, requested - reservable\)/);
+    assert.match(s, /const shortage\s*=\s*Math\.max\(0,\s*requested\s*-\s*reservable\)/);
     assert.doesNotMatch(s, /tx\.set\(warehouseRef[\s\S]*?onHand/);
 });
 
@@ -959,7 +959,7 @@ test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receivi
     const reserveStart = appSource.indexOf('async function reserveSingleOrderItem');
     const reserveEnd = appSource.indexOf('async function reserveInventoryForNewOrder', reserveStart);
     const reserve = appSource.slice(reserveStart, reserveEnd);
-    assert.match(reserve, /fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'/);
+    assert.match(reserve, /fulfillmentType\|\|'WAREHOUSE'\)===\'DIRECT_SHIP\'/);
     assert.match(reserve, /inventoryReservedQty: 0/);
     assert.match(reserve, /warehouseId: ''/);
 
