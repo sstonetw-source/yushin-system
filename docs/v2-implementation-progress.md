@@ -59,3 +59,13 @@ This branch received concurrent V2 commits during implementation. Always refetch
 - Hiding cost in the UI is insufficient because Firestore document reads expose all fields.
 - Do **not** mark cost authorization acceptance complete until lot operational fields and protected lot cost are separated (or COGS is moved to a trusted backend).
 - Current branch remains suitable for continued preview/testing, but this blocker must be resolved before merging to `main`.
+
+
+## 2026-09-21 lot-cost isolation (#31)
+- Split operational `inventoryLots` from protected `inventoryLotCosts`; new lot/receipt/movement writes no longer duplicate unit cost or COGS into business-readable operational collections.
+- Formal purchasing cost is no longer readable merely because a sales/engineer user owns the customer order; own `SALES_SELF_ORDER` remains readable to its owner.
+- Added admin-only paginated legacy cost-isolation migration UI. Run it before deploying the stricter Rules, then re-preview until legacy exposed-cost count is zero.
+- Inventory analysis now joins operational lots/receipts to protected lot costs for purchase and stock valuation; incoming valuation remains derived from protected purchase orders.
+- Historical COGS is reproducible by joining immutable delivery/return `lotAllocations` to protected `inventoryLotCosts`, without exposing cost to fulfillment users.
+- Firestore emulator coverage proves sales/engineer/warehouse cannot read protected lot cost while admin/purchaser can; warehouse can create receipt cost without reading it back.
+- CI run #393 passed syntax, regression, and Firestore Rules emulator after the isolation architecture landed. A later run validates historical COGS reconstruction.
