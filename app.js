@@ -144,6 +144,8 @@ let salesStatisticsOrders = [];
 let salesStatisticsLoadPromise = null;
 let inventoryAnalysisReceipts = [];
 let inventoryAnalysisStocks = [];
+let inventoryAnalysisLots = [];
+let inventoryAnalysisLotCosts = new Map();
 let inventoryAnalysisDirectShipPurchaseOrders = [];
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
@@ -8969,22 +8971,25 @@ window.loadSalesStatistics = function() {
 };
 
 async function loadInventoryAnalysisSupport(start, end) {
-    const [movements, stocks, purchaseOrders] = await Promise.all([
+    const [movements, stocks, lots, lotCosts, purchaseOrders] = await Promise.all([
         db.collection('inventoryMovements').where('createdAt','>=',start+'T00:00:00').where('createdAt','<=',end+'T23:59:59').where('type','==','receipt').orderBy('createdAt','desc').limit(1000).get(),
         db.collection('inventory').orderBy('updatedAt','desc').limit(1000).get(),
+        db.collection('inventoryLots').limit(1000).get(),
+        db.collection('inventoryLotCosts').limit(1000).get(),
         db.collection('purchaseOrders').where('poDate','>=',start).where('poDate','<=',end).orderBy('poDate','desc').limit(1000).get()
     ]);
     inventoryAnalysisReceipts = movements.docs.map(d=>({id:d.id,...d.data()}));
     inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
+    inventoryAnalysisLots = lots.docs.map(d=>({id:d.id,...d.data()}));
+    inventoryAnalysisLotCosts = new Map(lotCosts.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
     inventoryAnalysisDirectShipPurchaseOrders = purchaseOrders.docs.map(d=>({id:d.id,...d.data()}))
         .filter(po=>purchaseItemsFromSavedPo(po).some(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'));
 }
 function inventoryAnalysisTotals(start,end) {
     let purchase = 0;
     inventoryAnalysisReceipts.forEach(receipt => {
-        const product = priceList.find(p => (p.productId || stableProductId(p)) === receipt.productKey);
-        const unitCost = Number(receipt.unitCost ?? product?.cost ?? 0);
-        purchase += Number(receipt.purchaseNetAmount ?? (Number(receipt.qty || 0) * unitCost));
+        const lotCost = inventoryAnalysisLotCosts.get(receipt.lotId);
+        purchase += Number(receipt.qty || 0) * Number(lotCost?.unitCost || 0);
     });
     // 原廠直送不產生 receipt，採購成本由 PO 直送品項直接計入。
     inventoryAnalysisDirectShipPurchaseOrders.forEach(po => {
@@ -8996,14 +9001,12 @@ function inventoryAnalysisTotals(start,end) {
         const contribution = calculateOrderStatsContribution(order, start, end);
         return sum + contribution.actualSales;
     }, 0);
-    let stockValue = 0, incoming = 0;
-    inventoryAnalysisStocks.forEach(stock => {
-        const product = priceList.find(p => (p.productId || stableProductId(p)) === stock.productKey);
-        const unitCost = Number(stock.unitCost ?? product?.cost ?? 0);
-        const numbers = inventoryNumbers(stock);
-        stockValue += numbers.onHand * unitCost;
-        incoming += numbers.incoming * unitCost;
-    });
+    const stockValue = inventoryAnalysisLots.reduce((sum, lot) => {
+        const lotCost = inventoryAnalysisLotCosts.get(lot.id);
+        return sum + Number(lot.remainingQty || 0) * Number(lotCost?.unitCost || 0);
+    }, 0);
+    // incoming 尚未形成 lot，因此只在有受保護成本來源時才估值；避免回退讀公開 inventory 成本。
+    const incoming = 0;
     return { purchase, sales, difference: sales - purchase, stockValue, incoming };
 }
 function renderInventoryAnalysisSummary(start,end){
