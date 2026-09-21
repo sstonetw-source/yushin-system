@@ -38,3 +38,22 @@ Do not merge PR #26. Re-implement/cherry-pick concepts only after comparison wit
 
 ## Legacy compatibility rule
 Do not mass-delete root item fields or booleans in Phase A. New logic should use normalized items while keeping old records readable. Migration/backfill occurs only after core tests are green.
+
+
+## 2026-09-21 branch re-audit
+The table above is the original baseline, not the remaining-work list. PR #30 now implements the major V2 targets: multi-item order/copy, item reservations, formal/self/replenishment supply, partial receipt, dispatch gate, item delivery, exact lot reversal/return, bounded search, product-line authorization, engineer business capability, protected lot-cost analytics, dashboard, and expanded regression/rules tests.
+
+Additional hardening completed after the baseline:
+- legacy `isOrdered/isArrived` no longer presented as V2 workflow truth;
+- Product Master first-load failures are retryable;
+- warehouse creation has immediate feedback and permission-denied diagnostics;
+- stock replenishment must use a warehouse PO path;
+- partial batch receipt reports committed rows accurately instead of implying an atomic rollback;
+- all multi-item orders require item-level delivery, including direct-ship orders;
+- cancel/restore reservations are item-aware and aggregate repeated product/warehouse stock safely;
+- delivery/return mutations have duplicate-submit guards; returns remain possible for goods delivered before cancellation;
+- shared operational stock and lot documents reject embedded cost; admin retains migration-only access to legacy cost-bearing docs;
+- legacy migration sanitizes inventory, warehouse stock, lots, receipts, movements, and embedded delivery/return allocation costs;
+- backup now includes all governed top-level collections plus Forecast progress subcollections.
+
+Remaining external gates are Firebase deployment/migration and manual desktop/mobile five-role acceptance. Do not merge main until those are complete.
