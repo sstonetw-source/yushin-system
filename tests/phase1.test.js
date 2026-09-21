@@ -960,8 +960,8 @@ test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receivi
     const reserveEnd = appSource.indexOf('async function reserveInventoryForNewOrder', reserveStart);
     const reserve = appSource.slice(reserveStart, reserveEnd);
     assert.match(reserve, /fulfillmentType\|\|'WAREHOUSE'\)===\'DIRECT_SHIP\'/);
-    assert.match(reserve, /inventoryReservedQty: 0/);
-    assert.match(reserve, /warehouseId: ''/);
+    assert.match(reserve, /inventoryReservedQty\\s*:\\s*0/);
+    assert.match(reserve, /warehouseId\\s*:\\s*''/);
 
     const incomingStart = appSource.indexOf('async function registerPurchaseIncoming');
     const incomingEnd = appSource.indexOf('window.receivePurchaseOrder', incomingStart);
