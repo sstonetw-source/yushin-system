@@ -1066,8 +1066,11 @@
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="productMasterMigrationPreviewBtn" onclick="previewProductMasterMigration()">🔎 預覽遷移</button>
                     <button type="button" id="productMasterMigrationBtn" onclick="runProductMasterMigration()" disabled>⬆️ 執行安全遷移</button>
+                    <button type="button" class="btn-secondary" id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">🔎 預覽庫存成本隔離</button>
+                    <button type="button" id="inventoryCostMigrationBtn" onclick="runInventoryCostMigration()" disabled>🔐 執行庫存成本隔離</button>
                 </div>
                 <div id="productMasterMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
+                <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:12px;white-space:pre-line;color:#555;"></div>
             </div>
             <div class="toolbar no-print">
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
