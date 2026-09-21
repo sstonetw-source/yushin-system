@@ -6269,6 +6269,18 @@ window.printPurchaseOrder = async function() {
         alert('目前沒有任何品項，請先選取或不要刪光所有品項。');
         return;
     }
+    if (poItems.some(item => !Number.isFinite(Number(item.qty)) || Number(item.qty) <= 0)) {
+        alert('每個採購品項的數量都必須大於 0。');
+        return;
+    }
+    if (poDirectStockMode && poItems.some(item => (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP')) {
+        alert('原廠備貨是公司庫存採購，不能設定為原廠直送。');
+        return;
+    }
+    if (poDirectStockMode && poItems.some(item => !String(item.warehouseId || defaultWarehouse()?.id || '').trim())) {
+        alert('原廠備貨必須指定入庫倉庫，請先建立或選擇倉庫。');
+        return;
+    }
     const invalidIdentityItems = poItems.filter(item => !String(item.itemCode||'').trim() || !String(item.itemName||'').trim() || !String(item.brand||'').trim());
     if (invalidIdentityItems.length) {
         alert('請完成每個採購品項的貨號、品名與廠牌。');
