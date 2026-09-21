@@ -831,6 +831,13 @@
                 </div>
                 <div><label>抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
             </div>
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+                <button type="button" class="btn-secondary" onclick="addCurrentOrderItemToDraft()">＋ 加入下一品項</button>
+                <span style="font-size:12px;color:#666;">已加入的品項會列在下方；按儲存時也會包含目前表單中的品項。</span>
+            </div>
+            <div class="table-wrap" id="newOrderItemsWrap" style="display:none;margin-top:10px;">
+                <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>單價</th><th>履約</th><th>操作</th></tr></thead><tbody id="newOrderItemsBody"></tbody></table>
+            </div>
             <div style="margin-top:10px;">
                 <button id="saveNewOrderBtn" onclick="saveNewOrder()">💾 儲存</button>
                 <button class="btn-secondary" onclick="closeOrderModal()">取消</button>
