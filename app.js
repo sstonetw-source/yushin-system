@@ -7338,6 +7338,10 @@ window.saveDeliveryRecord = async function() {
         alert('請填寫送貨日期與大於 0 的送貨數量。');
         return;
     }
+    if (pendingDeliveryOrderIds.has(orderId)) return;
+    const saveButton = document.querySelector('[onclick="saveDeliveryRecord()"]');
+    pendingDeliveryOrderIds.add(orderId);
+    if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
         let savedOrder;
         await db.runTransaction(async transaction => {
@@ -7407,6 +7411,9 @@ window.saveDeliveryRecord = async function() {
         renderOrdersList();
     } catch (err) {
         alert('送貨紀錄儲存失敗：' + err.message);
+    } finally {
+        pendingDeliveryOrderIds.delete(orderId);
+        if (saveButton) { saveButton.disabled = false; saveButton.textContent = '💾 儲存送貨紀錄'; }
     }
 };
 
