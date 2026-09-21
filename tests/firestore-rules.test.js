@@ -6,7 +6,7 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { doc, getDoc, setDoc, updateDoc } = require('firebase/firestore');
+const { collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } = require('firebase/firestore');
 
 let env;
 const projectId = 'demo-yushin';
@@ -247,4 +247,18 @@ test('admin without active field can read core production collections', async ()
   await assertSucceeds(getDoc(doc(db('admin'), 'forecasts/f-admin')));
   await assertSucceeds(getDoc(doc(db('admin'), 'orders/o-admin')));
   await assertSucceeds(getDoc(doc(db('admin'), 'inventory/i-admin')));
+});
+
+
+test('admin without active field can run the exact Forecast list query', async () => {
+  await seed('forecasts/f-query', {
+    ownerUid:'sales1', salesCode:'S01', status:'active', updatedAt:'2026-09-21T14:00:00Z'
+  });
+  const q = query(
+    collection(db('admin'), 'forecasts'),
+    orderBy('updatedAt', 'desc'),
+    where('status', '==', 'active'),
+    limit(50)
+  );
+  await assertSucceeds(getDocs(q));
 });
