@@ -8987,6 +8987,24 @@ async function loadInventoryAnalysisSupport(start, end) {
     inventoryAnalysisDirectShipPurchaseOrders = inventoryAnalysisPurchaseOrders
         .filter(po=>purchaseItemsFromSavedPo(po).some(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'));
 }
+function protectedAllocationCost(records) {
+    return (Array.isArray(records) ? records : []).reduce((sum, record) => {
+        return sum + (Array.isArray(record.lotAllocations) ? record.lotAllocations : []).reduce((allocationSum, allocation) => {
+            const lotCost = inventoryAnalysisLotCosts.get(allocation.lotId);
+            return allocationSum + Number(allocation.qty || 0) * Number(lotCost?.unitCost || 0);
+        }, 0);
+    }, 0);
+}
+
+function protectedHistoricalCogs(start, end) {
+    return salesStatisticsOrders.reduce((sum, order) => {
+        if (normalizedOrderStatus(order) !== 'normal') return sum;
+        const delivered = savedDeliveryRecords(order).filter(record => dateInStatsRange(record.date, start, end));
+        const returned = savedReturnRecords(order).filter(record => dateInStatsRange(record.date, start, end));
+        return sum + protectedAllocationCost(delivered) - protectedAllocationCost(returned);
+    }, 0);
+}
+
 function inventoryAnalysisTotals(start,end) {
     let purchase = 0;
     inventoryAnalysisReceipts.forEach(receipt => {
@@ -9016,7 +9034,8 @@ function inventoryAnalysisTotals(start,end) {
                 return itemSum + remaining * Number(item.unitPrice || 0);
             }, 0);
     }, 0);
-    return { purchase, sales, difference: sales - purchase, stockValue, incoming };
+    const cogs = protectedHistoricalCogs(start, end);
+    return { purchase, sales, difference: sales - purchase, stockValue, incoming, cogs, grossProfit:sales-cogs };
 }
 function renderInventoryAnalysisSummary(start,end){
     const t=inventoryAnalysisTotals(start,end),fmt=v=>Math.round(v).toLocaleString();
