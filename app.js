@@ -72,6 +72,7 @@ let quickProductTarget = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
 const DEFAULT_LIST_LIMIT = 50;
+const FIRESTORE_READ_TIMEOUT_MS = 15000;
 const DEFAULT_CURRENCY = 'TWD';
 const DEFAULT_TAX_RATE = 0.05;
 const BUSINESS_STATUS = Object.freeze({
@@ -80,6 +81,18 @@ const BUSINESS_STATUS = Object.freeze({
     CANCELLED: 'cancelled',
     VOIDED: 'voided'
 });
+
+function firestoreReadWithTimeout(readPromise, label = '資料') {
+    let timeoutId;
+    const timeoutPromise = new Promise((resolve, reject) => {
+        timeoutId = setTimeout(() => {
+            const error = new Error(`${label}讀取逾時，請重新整理後再試。`);
+            error.code = 'firestore-read-timeout';
+            reject(error);
+        }, FIRESTORE_READ_TIMEOUT_MS);
+    });
+    return Promise.race([readPromise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
 
 function parseMoney(value) {
     const number = Number(String(value ?? '').replace(/,/g, '').trim());
@@ -798,6 +811,46 @@ window.addEventListener('popstate', event => {
     } finally {
         restoringBrowserNavigation = false;
     }
+});
+
+let appBackgroundedAt = 0;
+let appResumeTimer = null;
+
+function recoverVisibleAppAfterResume() {
+    if (document.visibilityState === 'hidden' || !appBackgroundedAt) return;
+    const backgroundDuration = Date.now() - appBackgroundedAt;
+    appBackgroundedAt = 0;
+    clearTimeout(appResumeTimer);
+    appResumeTimer = setTimeout(() => {
+        const appContainer = document.getElementById('appContainer');
+        if (currentUser && appContainer) {
+            // 觸發一次很短的合成層重繪，修復部分 iOS Safari 從背景回來只顯示白色快照的情況。
+            appContainer.classList.remove('resume-repaint');
+            void appContainer.offsetHeight;
+            appContainer.classList.add('resume-repaint');
+            setTimeout(() => appContainer.classList.remove('resume-repaint'), 180);
+        }
+
+        const activeSection = document.querySelector('.content-section.active');
+        const orderListVisible = activeSection?.id === 'order-system'
+            && document.getElementById('orderListPanel')?.style.display !== 'none';
+        if (currentUser && orderListVisible && (orderPageLoading || backgroundDuration >= 5000)) {
+            loadOrderPage(true, { force: true, silent: true });
+        }
+    }, 80);
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        appBackgroundedAt = Date.now();
+    } else {
+        recoverVisibleAppAfterResume();
+    }
+});
+
+window.addEventListener('pageshow', event => {
+    if (event.persisted && !appBackgroundedAt) appBackgroundedAt = Date.now() - 5000;
+    recoverVisibleAppAfterResume();
 });
 
 // 「檢視身份」切換：只是把畫面上用來判斷權限/欄位的 currentUserRole 換成別的角色，
@@ -3959,6 +4012,8 @@ let activeOrderPeriod = 'this-year';
 let orderPaginationState = null;
 let orderPageLoading = false;
 let orderReloadRequested = false;
+let orderLoadGeneration = 0;
+let orderLoadErrorMessage = '';
 
 function dateOnlyFromTimestamp(value) {
     if (!value) return '';
@@ -4889,15 +4944,22 @@ function updateOrderLoadMoreButton() {
     const button = document.getElementById('orderLoadMoreBtn');
     if (!button) return;
     const hasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-    button.style.display = hasMore ? '' : 'none';
+    button.style.display = (hasMore || !!orderLoadErrorMessage) ? '' : 'none';
     button.disabled = orderPageLoading;
-    button.innerText = orderPageLoading ? '載入中…' : '載入更多（每次 50 筆）';
+    button.innerText = orderPageLoading ? '載入中…' : orderLoadErrorMessage || '載入更多（每次 50 筆）';
 }
 
-async function loadOrderPage(reset) {
+async function loadOrderPage(reset, options = {}) {
     if (orderPageLoading) {
-        if (reset) orderReloadRequested = true;
-        return;
+        if (!options.force) {
+            if (reset) orderReloadRequested = true;
+            return;
+        }
+        // iOS 切到背景時，Firestore 的舊 Promise 可能永遠不完成。讓舊代次失效，
+        // 新查詢可以立即開始；舊 Promise 之後即使回來也不能覆蓋新畫面。
+        orderLoadGeneration++;
+        orderPageLoading = false;
+        orderReloadRequested = false;
     }
     if (getDataScope('orders') === 'none') {
         ordersCache = [];
@@ -4908,12 +4970,14 @@ async function loadOrderPage(reset) {
     }
     if (reset || !orderPaginationState) {
         orderPaginationState = createOrderPaginationState();
-        ordersCache = [];
     }
+    const generation = ++orderLoadGeneration;
     orderPageLoading = true;
+    orderLoadErrorMessage = '';
     const requestedRole = currentUserRole;
     updateOrderLoadMoreButton();
-    const records = new Map(ordersCache.map(order => [order.id, order]));
+    // 重新整理期間保留舊畫面，避免慢網路時先清空成整頁白色。
+    const records = new Map((reset ? [] : ordersCache).map(order => [order.id, order]));
     let remainingReads = DEFAULT_LIST_LIMIT;
     try {
         while (remainingReads > 0 && orderPaginationState.sourceIndex < orderPaginationState.sources.length) {
@@ -4921,7 +4985,8 @@ async function loadOrderPage(reset) {
             const requested = remainingReads;
             let query = source.query().limit(requested);
             if (source.cursor) query = query.startAfter(source.cursor);
-            const snapshot = await query.get();
+            const snapshot = await firestoreReadWithTimeout(query.get(), '訂單');
+            if (generation !== orderLoadGeneration) return;
             if (requestedRole !== currentUserRole) {
                 orderReloadRequested = true;
                 return;
@@ -4937,14 +5002,24 @@ async function loadOrderPage(reset) {
                 orderPaginationState.sourceIndex++;
             }
         }
-        ordersCache.sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
-        renderOrdersList();
-    } catch (err) {
-        console.error("讀取訂單失敗：", err);
+        if (generation !== orderLoadGeneration) return;
         ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         renderOrdersList();
-        alert('讀取訂單資料失敗，請確認 Firestore 權限設定。');
+    } catch (err) {
+        if (generation !== orderLoadGeneration) return;
+        console.error("讀取訂單失敗：", err);
+        if (records.size) {
+            ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
+        }
+        renderOrdersList();
+        if (err?.code === 'firestore-read-timeout') {
+            orderLoadErrorMessage = '連線逾時，點此重試';
+        } else {
+            orderLoadErrorMessage = '讀取失敗，點此重試';
+            if (!options.silent) alert('讀取訂單資料失敗，請確認網路或 Firestore 權限設定。');
+        }
     } finally {
+        if (generation !== orderLoadGeneration) return;
         orderPageLoading = false;
         updateOrderLoadMoreButton();
         if (orderReloadRequested) {

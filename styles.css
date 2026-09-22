@@ -1,4 +1,6 @@
 body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 0; }
+@keyframes resume-repaint-frame { from { opacity: .999; } to { opacity: 1; } }
+#appContainer.resume-repaint { animation: resume-repaint-frame .12s linear; }
 .nav-tabs { background: #003366; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; align-items: center; }
 .nav-tab { color: #fff; padding: 10px 20px; cursor: pointer; border-radius: 5px 5px 0 0; margin-right: 5px; background: #002244; }
 .nav-tab.active { background: #fff; color: #003366; font-weight: bold; }

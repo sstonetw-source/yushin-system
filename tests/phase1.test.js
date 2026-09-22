@@ -89,6 +89,19 @@ test('order refresh stays paginated and status writes have an in-flight guard', 
     assert.doesNotMatch(roleSwitch, /loadMyQuotesFromCloud\(\)|loadOrdersFromCloud\(\)|loadEquipmentFromCloud\(\)/);
 });
 
+test('order loading recovers from suspended mobile reads without blanking cached rows', () => {
+    assert.match(appSource, /FIRESTORE_READ_TIMEOUT_MS/);
+    assert.match(appSource, /firestoreReadWithTimeout\(query\.get\(\), '訂單'\)/);
+    assert.match(appSource, /orderLoadGeneration/);
+    assert.match(appSource, /loadOrderPage\(true, \{ force: true, silent: true \}\)/);
+    assert.match(appSource, /document\.addEventListener\('visibilitychange'/);
+    assert.match(appSource, /window\.addEventListener\('pageshow'/);
+    assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
+    assert.match(cssSource, /#appContainer\.resume-repaint/);
+    assert.match(indexSource, /styles\.css\?v=20260922-5/);
+    assert.match(indexSource, /app\.js\?v=20260922-5/);
+});
+
 test('agency settings do not trigger a full orders statistics query', () => {
     const switchStart = appSource.indexOf('window.switchAdminTab =');
     const switchEnd = appSource.indexOf('\n};', switchStart) + 3;
@@ -1269,7 +1282,7 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
 });
 
 test('production HTML cache-busts local application assets after main deployments', () => {
-  assert.match(indexSource,/styles\.css\?v=20260922-4/);
-  assert.match(indexSource,/app\.js\?v=20260922-4/);
+  assert.match(indexSource,/styles\.css\?v=20260922-5/);
+  assert.match(indexSource,/app\.js\?v=20260922-5/);
   assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-4/);
 });
