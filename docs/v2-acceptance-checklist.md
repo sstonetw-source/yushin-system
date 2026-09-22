@@ -22,15 +22,16 @@
 - [x] engineer 可建立/管理自己的 Forecast/Quote/Order
 - [x] engineer 有 salesCode/業績歸屬
 - [x] purchaser 協助建單必須指定 responsible sales
-- [x] sales/engineer 無未授權成本讀取 — 已將 operational `inventoryLots` 與受保護 `inventoryLotCosts` 分離；Rules emulator 驗證 sales/engineer/warehouse 不可讀成本，歷史 COGS 由精確 lot allocations + protected costs 重建。部署前仍需先執行舊資料成本隔離。
+- [x] sales/engineer 無未授權成本讀取 — operational `inventoryLots` 與受保護 `inventoryLotCosts` 已分離；Rules emulator 驗證 sales/engineer/warehouse 不可讀成本，歷史 COGS 由精確 lot allocations + protected costs 重建。正式 Rules 已部署；舊資料成本隔離仍列為資料清理 gate。
 - [x] sales/engineer 無進銷存分析權限
 - [x] product search 使用 bounded query
 - [x] order/quote list pagination
 - [x] dashboard 不掃全部歷史
 - [x] price import preview before commit
 - [x] quote number generator unchanged
+- [x] Forecast admin / salesCode / ownerUid 三種正式查詢皆有 composite index
 
-自動化回歸於 2026-09-21 通過 117/117；Firestore Rules emulator 測試亦於 GitHub Actions run #307 通過。
+截至 2026-09-22，PR #32 合併前最新 Node regression 為 **142/142 通過**；Firestore Rules emulator 亦已在 GitHub Actions 通過。PR #32 已合併至 main（merge commit `7f6df3b`）。
 
 ## 人工驗收
 - [ ] Desktop Chrome/Safari
@@ -56,12 +57,13 @@
 - [ ] long operation shows progress/loading
 - [ ] Firestore permission-denied UX
 
-
-## Deployment gate added 2026-09-21
+## Deployment gate
 - [x] 完整備份清單包含 V2 fulfillment 與 protected cost collections
-- [x] 管理員介面明示 bootstrap-safe「備份 → Rules/Indexes → Product Master 遷移 → 庫存成本隔離至 0 → 五角色驗收」順序
 - [x] V2 查詢所需 inventoryReservations / inventoryLots / inventoryMovements / supplyOrders 索引已在 firestore.indexes.json
-- [x] Firestore indexes 已部署至 `yu-shing-company`，並於 2026-09-21 重新列出確認 Forecast 三種清單查詢與 inventoryReservations 索引存在
-- [ ] 正式資料備份：使用者於 2026-09-21 決定免費方案不建立 managed backup，接受正式資料無快照可直接還原的風險
+- [x] Forecast admin / salesCode / legacy ownerUid 複合索引已納入 main
+- [x] Firestore indexes 已部署至 `yu-shing-company`，並於 2026-09-21 確認正式環境索引存在
 - [x] PR #30 的 firestore.rules 已部署至 `yu-shing-company`（新版 Rules 保留 admin-only legacy migration read）
+- [x] PR #32 已於 2026-09-22 合併 main
+- [ ] 正式資料備份：使用者於 2026-09-21 決定免費方案不建立 managed backup，接受正式資料無快照可直接還原的風險
 - [ ] 在 Firebase 專案執行舊資料成本隔離並重新預覽為 0
+- [ ] 完成 Desktop / iPhone × 五角色人工驗收
