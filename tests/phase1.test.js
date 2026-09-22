@@ -1267,3 +1267,9 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
   assert.match(preview,/\.map\(name => readCollectionForMigration\(name\)\)/);
   assert.doesNotMatch(preview,/\.map\(readCollectionForMigration\)/);
 });
+
+test('production HTML cache-busts local application assets after main deployments', () => {
+  assert.match(indexSource,/styles\.css\?v=20260922-4/);
+  assert.match(indexSource,/app\.js\?v=20260922-4/);
+  assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-4/);
+});
