@@ -89,5 +89,6 @@ This branch received concurrent V2 commits during implementation. Always refetch
 - Added per-user local order drafts that survive modal close and page refresh, and clear only after a successful order save.
 - Regression coverage increased from 142 to 144 tests.
 - Added an admin-only read-only legacy-cost audit; it reports migration counts without exposing an execution button.
+- Fixed the audit's collection mapper so Firestore always receives the intended positive page size instead of `limit(0)`.
 - Full backup coverage now matches governed collections and includes nested Forecast progress.
 - CI #471 passed JavaScript syntax, 140 Node regression tests, and Firestore Rules emulator after these changes.
