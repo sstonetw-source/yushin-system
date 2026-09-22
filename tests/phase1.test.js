@@ -1254,3 +1254,10 @@ test('new order drafts are per-user, restorable and cleared only after successfu
   const saveEnd=appSource.indexOf('// 匯出指定日期區間',saveStart);
   assert.match(appSource.slice(saveStart,saveEnd),/clearSavedOrderDraft\(\{ silent:true \}\)/);
 });
+
+test('admin storage exposes a read-only legacy-cost audit without an execution button', () => {
+  assert.match(indexSource,/id="inventoryCostMigrationPreviewBtn"/);
+  assert.match(indexSource,/onclick="previewInventoryCostMigration\(\)"/);
+  assert.match(indexSource,/只讀取並統計舊庫存/);
+  assert.doesNotMatch(indexSource,/onclick="runInventoryCostMigration\(\)"/);
+});

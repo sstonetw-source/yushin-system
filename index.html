@@ -1249,6 +1249,15 @@
                 <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
+            <h4 style="margin-top:28px;">舊成本資料安全檢查</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">檢查舊成本資料</button>
+                <span style="font-size:12px;color:#666;">
+                    只讀取並統計舊庫存、分倉、收貨、異動與訂單內是否仍含成本欄位；不會修改或刪除任何資料。
+                </span>
+                <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
+            </div>
+
             <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button onclick="calculateStorageUsage()">🔄 計算目前用量</button>
