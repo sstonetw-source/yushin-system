@@ -10585,6 +10585,8 @@ window.downloadDatabaseBackup = async function() {
 
 /* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */
 let orderSearchIndexMigrationRunning = false;
+let orderSearchIndexAwaitingConfirmation = false;
+let orderSearchIndexConfirmationTimer = null;
 
 window.backfillOrderSearchIndex = async function() {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
@@ -10592,12 +10594,25 @@ window.backfillOrderSearchIndex = async function() {
         return;
     }
     if (orderSearchIndexMigrationRunning) return;
-    if (!confirm('這會逐批檢查舊估價單與訂單，只補建全歷史搜尋索引；不會修改金額、狀態或流程紀錄。確定執行嗎？')) return;
-
     const button = document.getElementById('orderSearchIndexMigrationBtn');
     const status = document.getElementById('orderSearchIndexMigrationStatus');
+    if (!orderSearchIndexAwaitingConfirmation) {
+        orderSearchIndexAwaitingConfirmation = true;
+        if (status) status.innerText = '這會逐批檢查舊估價單與訂單，只補建搜尋索引，不修改金額、狀態或流程。請在 10 秒內再按一次確認開始。';
+        if (button) button.innerText = '確認開始補建';
+        clearTimeout(orderSearchIndexConfirmationTimer);
+        orderSearchIndexConfirmationTimer = setTimeout(() => {
+            if (orderSearchIndexMigrationRunning) return;
+            orderSearchIndexAwaitingConfirmation = false;
+            if (button) button.innerText = '建立／修正全歷史搜尋索引';
+            if (status?.innerText.includes('請在 10 秒內')) status.innerText = '已取消：未在時間內再次確認。';
+        }, 10000);
+        return;
+    }
+    orderSearchIndexAwaitingConfirmation = false;
+    clearTimeout(orderSearchIndexConfirmationTimer);
     orderSearchIndexMigrationRunning = true;
-    if (button) button.disabled = true;
+    if (button) { button.disabled = true; button.innerText = '補建中…'; }
     let scanned = 0, updated = 0;
     try {
         for (const collectionName of ['quotes','orders']) {
@@ -10640,7 +10655,7 @@ window.backfillOrderSearchIndex = async function() {
         alert('搜尋索引補建未完成，請確認 Firestore 權限與網路連線後再試。');
     } finally {
         orderSearchIndexMigrationRunning = false;
-        if (button) button.disabled = false;
+        if (button) { button.disabled = false; button.innerText = '建立／修正全歷史搜尋索引'; }
     }
 };
 
