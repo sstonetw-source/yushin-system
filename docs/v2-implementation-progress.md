@@ -81,5 +81,12 @@ This branch received concurrent V2 commits during implementation. Always refetch
 - Shared inventory/warehouse stock/lot documents reject embedded cost; admin retains read access to legacy cost-bearing documents solely so the post-Rules migration can sanitize them.
 - Corrected Firebase bootstrap sequence: full backup -> deploy migration-compatible Rules/Indexes -> admin migrations -> cost preview zero -> five-role acceptance.
 - Legacy cost migration now also sanitizes warehouse stock and embedded order delivery/return allocation cost fields.
+
+## 2026-09-22 order quick-start completion
+
+- Added recent-order templates directly in the new-order modal.
+- Added customer frequent-item suggestions derived from the bounded order cache.
+- Added per-user local order drafts that survive modal close and page refresh, and clear only after a successful order save.
+- Regression coverage increased from 142 to 144 tests.
 - Full backup coverage now matches governed collections and includes nested Forecast progress.
 - CI #471 passed JavaScript syntax, 140 Node regression tests, and Firestore Rules emulator after these changes.
