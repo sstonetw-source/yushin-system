@@ -1233,3 +1233,24 @@ test('Forecast list queries have production composite indexes for every ownershi
   assert.ok(forecastIndexes.includes('ownerUid:ASCENDING,status:ASCENDING,updatedAt:DESCENDING'),
     'legacy ownerUid-owned Forecast query requires its composite index');
 });
+
+test('new order modal provides recent-order and customer frequent-item shortcuts', () => {
+  assert.match(indexSource,/id="orderRecentTemplateSelect"/);
+  assert.match(indexSource,/onclick="loadSelectedRecentOrder\(\)"/);
+  assert.match(indexSource,/id="orderFrequentItemSelect"/);
+  assert.match(indexSource,/onclick="loadSelectedFrequentItem\(\)"/);
+  assert.match(appSource,/function recentOrderCandidates\(\)/);
+  assert.match(appSource,/function refreshOrderFrequentItemOptions\(\)/);
+  assert.match(appSource,/customerNameKey\(order\.customerName\)===customer/);
+});
+
+test('new order drafts are per-user, restorable and cleared only after successful save', () => {
+  assert.match(appSource,/ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2'/);
+  assert.match(appSource,/currentUser\?\.uid \|\| 'anonymous'/);
+  assert.match(appSource,/function collectOrderDraft\(\)/);
+  assert.match(appSource,/window\.restoreSavedOrderDraft=function/);
+  assert.match(appSource,/window\.clearSavedOrderDraft=function/);
+  const saveStart=appSource.indexOf('window.saveNewOrder');
+  const saveEnd=appSource.indexOf('// 匯出指定日期區間',saveStart);
+  assert.match(appSource.slice(saveStart,saveEnd),/clearSavedOrderDraft\(\{ silent:true \}\)/);
+});

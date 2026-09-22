@@ -399,6 +399,18 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .price-catalog-table { max-width:760px; }
 .price-catalog-table td { padding:10px; font-size:13px; }
 
+.order-quick-start { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:10px; margin-bottom:12px; padding:10px; border:1px solid #d8e1ea; border-radius:6px; background:#f7f9fb; }
+.order-quick-start label { display:block; margin-bottom:4px; font-size:12px; font-weight:bold; }
+.order-quick-start-row { display:flex; gap:6px; }
+.order-quick-start-row select { min-width:0; flex:1; }
+.order-draft-tools { grid-column:1/-1; display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; color:#666; }
+.order-draft-tools span { margin-right:auto; }
+@media (max-width:700px) {
+    .order-quick-start { grid-template-columns:1fr; }
+    .order-quick-start-row { align-items:stretch; }
+    .order-quick-start-row button { min-height:44px; }
+}
+
 @media print {
     html, body { color-scheme: light; }
     .no-print, button, .sub-nav, .nav-tabs { display: none !important; }

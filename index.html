@@ -793,6 +793,27 @@
     <div class="eq-modal-overlay no-print" id="orderModalOverlay" onclick="if(event.target===this) closeOrderModal()">
         <div class="eq-modal-box">
             <h3 id="orderModalTitle">新增訂單</h3>
+            <div class="order-quick-start">
+                <div>
+                    <label for="orderRecentTemplateSelect">最近訂單</label>
+                    <div class="order-quick-start-row">
+                        <select id="orderRecentTemplateSelect"><option value="">目前沒有可用的最近訂單</option></select>
+                        <button type="button" class="btn-secondary" onclick="loadSelectedRecentOrder()">帶入</button>
+                    </div>
+                </div>
+                <div>
+                    <label for="orderFrequentItemSelect">客戶常購品項</label>
+                    <div class="order-quick-start-row">
+                        <select id="orderFrequentItemSelect"><option value="">請先輸入客戶名稱</option></select>
+                        <button type="button" class="btn-secondary" onclick="loadSelectedFrequentItem()">帶入</button>
+                    </div>
+                </div>
+                <div class="order-draft-tools">
+                    <span id="orderDraftStatus">尚無暫存草稿</span>
+                    <button type="button" id="restoreOrderDraftBtn" class="btn-secondary" onclick="restoreSavedOrderDraft()" disabled>恢復草稿</button>
+                    <button type="button" id="clearOrderDraftBtn" class="btn-secondary" onclick="clearSavedOrderDraft()" disabled>清除草稿</button>
+                </div>
+            </div>
             <div class="form-grid">
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>

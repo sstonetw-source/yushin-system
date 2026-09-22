@@ -30,6 +30,7 @@ firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err =
 
 let currentCompany = 'yushin';
 let restoringQuoteDraft = false;  // 還原本機草稿的過程中，暫停「重新產生單號」之類的副作用，避免蓋掉草稿裡存的資料
+let restoringOrderDraft = false;
 let salesList = [
     { name: "預設業務", code: "01", phone: "0912345678" }
 ];
@@ -301,6 +302,24 @@ window.addEventListener('DOMContentLoaded', () => {
         };
         quoteCreatePanel.addEventListener('input', scheduleDraftSave);
         quoteCreatePanel.addEventListener('change', scheduleDraftSave);
+    }
+
+    // 新增訂單也採本機自動暫存。依 Firebase UID 分開儲存，避免共用電腦時
+    // 不同使用者看到彼此尚未送出的草稿。
+    const orderModal = document.getElementById('orderModalOverlay');
+    if (orderModal) {
+        let orderDraftSaveTimer = null;
+        const scheduleOrderDraftSave = event => {
+            if (restoringOrderDraft || !orderModal.classList.contains('active')) return;
+            if (event?.target?.closest('.order-draft-tools')) return;
+            clearTimeout(orderDraftSaveTimer);
+            orderDraftSaveTimer = setTimeout(saveOrderDraft, 400);
+        };
+        orderModal.addEventListener('input', scheduleOrderDraftSave);
+        orderModal.addEventListener('change', event => {
+            scheduleOrderDraftSave(event);
+            if (event.target?.id === 'orderCustomer') refreshOrderFrequentItemOptions();
+        });
     }
 
     // 監控登入狀態：未登入顯示登入畫面，登入後依角色初始化系統
@@ -7764,6 +7783,127 @@ window.deleteOrder = function(orderId) {
 };
 
 let newOrderDraftItems = [];
+const ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2';
+let orderFrequentItemTemplates = [];
+
+function orderDraftStorageKey() {
+    return `${ORDER_DRAFT_STORAGE_PREFIX}:${currentUser?.uid || 'anonymous'}`;
+}
+
+function orderDraftFieldValue(id) {
+    return document.getElementById(id)?.value ?? '';
+}
+
+function collectOrderDraft() {
+    return {
+        savedAt:new Date().toISOString(),
+        date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
+        itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),
+        brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
+        unit:orderDraftFieldValue('orderUnit'),unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
+        fulfillmentType:orderDraftFieldValue('orderFulfillmentType')||'WAREHOUSE',warehouseId:orderDraftFieldValue('orderWarehouse'),
+        transactionType:orderDraftFieldValue('orderTransactionType'),invoiceTitle:orderDraftFieldValue('orderInvoiceTitle'),
+        productId:window._orderModalProductId||'',items:newOrderDraftItems
+    };
+}
+
+function readOrderDraft() {
+    try {
+        const value=JSON.parse(localStorage.getItem(orderDraftStorageKey())||'null');
+        return value&&typeof value==='object'?value:null;
+    } catch (_) { return null; }
+}
+
+function updateOrderDraftStatus() {
+    const draft=readOrderDraft();
+    const status=document.getElementById('orderDraftStatus');
+    const restore=document.getElementById('restoreOrderDraftBtn');
+    const clear=document.getElementById('clearOrderDraftBtn');
+    if(status)status.innerText=draft?.savedAt?`草稿已暫存：${new Date(draft.savedAt).toLocaleString('zh-TW')}`:'尚無暫存草稿';
+    if(restore)restore.disabled=!draft;
+    if(clear)clear.disabled=!draft;
+}
+
+function saveOrderDraft() {
+    if(restoringOrderDraft||!document.getElementById('orderModalOverlay')?.classList.contains('active'))return;
+    try { localStorage.setItem(orderDraftStorageKey(),JSON.stringify(collectOrderDraft())); updateOrderDraftStatus(); }
+    catch (err) { console.warn('暫存訂單草稿失敗：',err); }
+}
+
+window.clearSavedOrderDraft=function(options={}){
+    localStorage.removeItem(orderDraftStorageKey());
+    updateOrderDraftStatus();
+    if(!options.silent)alert('訂單草稿已清除。');
+};
+
+function setOrderModalItem(item={}) {
+    const normalized=normalizeNewOrderItem(item);
+    document.getElementById('orderItemCode').value=normalized.itemCode||'';
+    document.getElementById('orderItemName').value=normalized.itemName||'';
+    if(normalized.brand)selectBrandInDropdown(document.getElementById('orderBrand'),normalized.brand);
+    else document.getElementById('orderBrand').value='';
+    onOrderBrandSelectChange();
+    document.getElementById('orderQty').value=normalized.qty||1;
+    document.getElementById('orderUnit').value=normalized.unit||'';
+    document.getElementById('orderUnitPrice').value=normalized.unitPrice||0;
+    document.getElementById('orderTotalPrice').value=normalized.totalPrice||0;
+    document.getElementById('orderCostPrice').value=normalized.costPrice??'';
+    document.getElementById('orderFulfillmentType').value=normalized.fulfillmentType||'WAREHOUSE';
+    populateOrderWarehouseOptions(normalized.warehouseId||'');
+    onOrderFulfillmentChange();
+    window._orderModalProductId=normalized.productId||'';
+    const product=findPriceItemForOrder(normalized);if(product)applyOrderProductCost(product);
+    refreshOrderWarehouseStock();
+}
+
+window.restoreSavedOrderDraft=function(){
+    const draft=readOrderDraft();if(!draft){updateOrderDraftStatus();return;}
+    restoringOrderDraft=true;
+    try {
+        document.getElementById('orderDateInput').value=draft.date||'';
+        document.getElementById('orderCustomer').value=draft.customerName||'';
+        setOrderModalItem(draft);
+        document.getElementById('orderTransactionType').value=draft.transactionType||'';
+        const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';invoice.disabled=draft.transactionType!=='直';
+        newOrderDraftItems=Array.isArray(draft.items)?draft.items.map(normalizeNewOrderItem):[];
+        renderNewOrderDraftItems();refreshOrderFrequentItemOptions();
+        const title=document.getElementById('orderModalTitle');if(title)title.innerText='新增訂單（已恢復草稿）';
+    } finally { restoringOrderDraft=false;updateOrderDraftStatus(); }
+};
+
+function recentOrderCandidates(){
+    return [...ordersCache].filter(order=>normalizedOrderStatus(order)==='normal')
+        .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id')).slice(0,10);
+}
+
+function refreshOrderRecentOptions(){
+    const select=document.getElementById('orderRecentTemplateSelect');if(!select)return;
+    const rows=recentOrderCandidates();
+    select.innerHTML=rows.length?'<option value="">選擇一筆最近訂單</option>':'<option value="">目前沒有可用的最近訂單</option>';
+    rows.forEach(order=>{const option=document.createElement('option');option.value=order.id;option.textContent=`${order.orderDate||''}｜${order.customerName||'未填客戶'}｜${normalizedOrderItems(order).map(item=>item.itemName||item.itemCode).filter(Boolean).join('、')}`;select.appendChild(option);});
+}
+
+window.loadSelectedRecentOrder=function(){
+    const id=document.getElementById('orderRecentTemplateSelect')?.value;if(!id){alert('請先選擇一筆最近訂單。');return;}
+    copyOrderAsNew(id);saveOrderDraft();
+};
+
+function refreshOrderFrequentItemOptions(){
+    const select=document.getElementById('orderFrequentItemSelect');if(!select)return;
+    const customer=customerNameKey(orderDraftFieldValue('orderCustomer'));
+    const counts=new Map();
+    if(customer)ordersCache.filter(order=>customerNameKey(order.customerName)===customer&&normalizedOrderStatus(order)==='normal').forEach(order=>{
+        normalizedOrderItems(order).forEach(item=>{const normalized=normalizeNewOrderItem(item);const key=normalized.productId||`${normalized.brand}|${normalizeHistoryItemCode(normalized.itemCode)}|${normalized.itemName}`;const existing=counts.get(key)||{item:normalized,count:0,lastDate:''};existing.count+=1;if((order.orderDate||'')>=existing.lastDate){existing.item=normalized;existing.lastDate=order.orderDate||'';}counts.set(key,existing);});
+    });
+    orderFrequentItemTemplates=[...counts.values()].sort((a,b)=>b.count-a.count||b.lastDate.localeCompare(a.lastDate)).slice(0,20);
+    select.innerHTML=customer?(orderFrequentItemTemplates.length?'<option value="">選擇常購品項</option>':'<option value="">目前載入資料中沒有此客戶的歷史品項</option>'):'<option value="">請先輸入客戶名稱</option>';
+    orderFrequentItemTemplates.forEach((entry,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${entry.item.itemCode||'無貨號'}｜${entry.item.itemName||''}（${entry.count} 次）`;select.appendChild(option);});
+}
+
+window.loadSelectedFrequentItem=function(){
+    const value=document.getElementById('orderFrequentItemSelect')?.value;if(value===''||!orderFrequentItemTemplates[Number(value)]){alert('請先選擇一個常購品項。');return;}
+    setOrderModalItem(orderFrequentItemTemplates[Number(value)].item);saveOrderDraft();
+};
 
 function normalizeNewOrderItem(item = {}) {
     const match=findPriceItemForOrder(item);
@@ -7790,12 +7930,12 @@ function renderNewOrderDraftItems(){
     wrap.style.display=newOrderDraftItems.length?'':'none';
     body.innerHTML=newOrderDraftItems.map((item,index)=>`<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td>${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td><button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`).join('');
 }
-window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();};
+window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();saveOrderDraft();};
 window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
     if(item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId){alert('請為目前品項選擇出貨倉庫。');return;}
     newOrderDraftItems.push(item);renderNewOrderDraftItems();
-    ['orderItemCode','orderItemName','orderUnit'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
+    ['orderItemCode','orderItemName','orderUnit'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
 };
 
 window.openOrderModal = function(source = null) {
@@ -7822,6 +7962,9 @@ window.openOrderModal = function(source = null) {
     onOrderFulfillmentChange();
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
+    refreshOrderRecentOptions();
+    refreshOrderFrequentItemOptions();
+    updateOrderDraftStatus();
 
     window._orderModalSourceLink = source?.sourceType && source?.sourceId
         ? { sourceType: source.sourceType, sourceId: source.sourceId }
@@ -7941,6 +8084,8 @@ window.copyOrderAsNew = function(orderId) {
     const invoiceInput = document.getElementById('orderInvoiceTitle');
     invoiceInput.value = source.invoiceTitle || '';
     invoiceInput.disabled = transactionType !== '直';
+    refreshOrderFrequentItemOptions();
+    saveOrderDraft();
 };
 
 window.closeOrderModal = function() {
@@ -8041,6 +8186,7 @@ window.saveNewOrder = function() {
         data.inventoryShortageQty = reservation.shortageQty;
         data.inventoryProductKey = inventoryProductKey(data);
         rememberRecentCustomerName(data.customerName);
+        clearSavedOrderDraft({ silent:true });
         if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
             db.collection('forecasts').doc(data.sourceId).set({
                 linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, docRef.id, 'created')),
