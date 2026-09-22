@@ -61,5 +61,7 @@
 - [x] 完整備份清單包含 V2 fulfillment 與 protected cost collections
 - [x] 管理員介面明示 bootstrap-safe「備份 → Rules/Indexes → Product Master 遷移 → 庫存成本隔離至 0 → 五角色驗收」順序
 - [x] V2 查詢所需 inventoryReservations / inventoryLots / inventoryMovements / supplyOrders 索引已在 firestore.indexes.json
-- [ ] 部署 PR #30 的 firestore.rules / firestore.indexes.json（新版 Rules 保留 admin-only legacy migration read）
+- [x] Firestore indexes 已部署至 `yu-shing-company`，並於 2026-09-21 重新列出確認 Forecast 三種清單查詢與 inventoryReservations 索引存在
+- [ ] 正式資料備份：使用者於 2026-09-21 決定免費方案不建立 managed backup，接受正式資料無快照可直接還原的風險
+- [x] PR #30 的 firestore.rules 已部署至 `yu-shing-company`（新版 Rules 保留 admin-only legacy migration read）
 - [ ] 在 Firebase 專案執行舊資料成本隔離並重新預覽為 0

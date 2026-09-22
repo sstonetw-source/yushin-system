@@ -8,6 +8,7 @@ const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
 const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const rulesSource = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
+const firestoreIndexes = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'firestore.indexes.json'), 'utf8'));
 
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
@@ -936,11 +937,10 @@ test('database backup includes formal Product Master and cost collections', () =
     assert.match(appSource, /'brands'/);
 });
 
-test('admin UI exposes Product Master migration preview before execution', () => {
-    assert.match(indexSource, /id="productMasterMigrationPreviewBtn"/);
-    assert.match(indexSource, /id="productMasterMigrationBtn"/);
-    assert.match(indexSource, /previewProductMasterMigration\(\)/);
-    assert.match(indexSource, /runProductMasterMigration\(\)/);
+test('Product Master admin UI uses direct Excel upload without the legacy migration panel', () => {
+    assert.doesNotMatch(indexSource, /Product Master v2 遷移/);
+    assert.doesNotMatch(indexSource, /id="productMasterMigrationPreviewBtn"/);
+    assert.match(indexSource, /上傳 Excel 更新 Product Master/);
 });
 
 
@@ -1073,8 +1073,8 @@ test('V2 legacy inventory cost migration is paginated and moves cost out of oper
     assert.match(appSource, /FieldPath\.documentId\(\)/);
     assert.match(appSource, /inventoryLotCosts/);
     assert.match(appSource, /FieldValue\.delete\(\)/);
-    assert.match(indexSource, /預覽庫存成本隔離/);
-    assert.match(indexSource, /執行庫存成本隔離/);
+    assert.doesNotMatch(indexSource, /預覽庫存成本隔離/);
+    assert.doesNotMatch(indexSource, /執行庫存成本隔離/);
 });
 
 
@@ -1096,11 +1096,10 @@ test('V2 backup and storage audit include fulfillment and protected cost collect
 });
 
 
-test('V2 admin UI documents safe migration-before-rules deployment order', () => {
-    assert.match(indexSource, /下載完整資料庫備份/);
-    assert.match(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
-    assert.match(indexSource, /庫存成本隔離，直到顯示 0/);
-    assert.match(indexSource, /可安全先部署 Rules 再搬移舊資料/);
+test('V2 admin UI no longer exposes the legacy migration deployment panel', () => {
+    assert.doesNotMatch(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
+    assert.doesNotMatch(indexSource, /庫存成本隔離，直到顯示 0/);
+    assert.match(indexSource, /上傳 Excel 更新 Product Master/);
 });
 
 
@@ -1220,4 +1219,17 @@ test('database backup covers governed master, audit, delivery and Forecast progr
   assert.match(appSource,/forecastDoc\.ref\.collection\('progress'\)/);
   assert.match(appSource,/data\.forecastProgress/);
   assert.match(appSource,/path:doc\.ref\.path/);
+});
+
+test('Forecast list queries have production composite indexes for every ownership path', () => {
+  const forecastIndexes = firestoreIndexes.indexes
+    .filter(index => index.collectionGroup === 'forecasts')
+    .map(index => index.fields.map(field => `${field.fieldPath}:${field.order}`).join(','));
+
+  assert.ok(forecastIndexes.includes('status:ASCENDING,updatedAt:DESCENDING'),
+    'admin Forecast status query requires a status + updatedAt composite index');
+  assert.ok(forecastIndexes.includes('salesCode:ASCENDING,status:ASCENDING,updatedAt:DESCENDING'),
+    'salesCode-owned Forecast query requires its composite index');
+  assert.ok(forecastIndexes.includes('ownerUid:ASCENDING,status:ASCENDING,updatedAt:DESCENDING'),
+    'legacy ownerUid-owned Forecast query requires its composite index');
 });
