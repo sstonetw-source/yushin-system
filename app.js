@@ -11017,7 +11017,12 @@ window.previewInventoryCostMigration = async function() {
     const status=document.getElementById('inventoryCostMigrationStatus'), runButton=document.getElementById('inventoryCostMigrationBtn'), previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
     if(previewButton)previewButton.disabled=true;if(runButton)runButton.disabled=true;if(status)status.innerText='正在分頁掃描舊庫存成本欄位…';
     try{
-        const [lots,inventory,receipts,movements,orders,warehouseStocks]=await Promise.all(['inventoryLots','inventory','receipts','inventoryMovements','orders','warehouseStocks'].map(readCollectionForMigration));
+        // Array.map 會額外傳入 index；不可直接把 readCollectionForMigration 當 callback，
+        // 否則第一個集合會把 index 0 誤當 pageSize，造成 Firestore limit(0) 失敗。
+        const [lots,inventory,receipts,movements,orders,warehouseStocks]=await Promise.all(
+            ['inventoryLots','inventory','receipts','inventoryMovements','orders','warehouseStocks']
+                .map(name => readCollectionForMigration(name))
+        );
         const plan=inventoryCostMigrationPlan(lots,inventory,receipts,movements,orders,warehouseStocks);window._inventoryCostMigrationPlan=plan;
         const total=plan.legacyLots.length+plan.legacyInventory.length+plan.legacyWarehouseStocks.length+plan.legacyReceipts.length+plan.legacyMovements.length+plan.legacyOrders.length;
         if(status)status.innerText=`預覽完成：批次成本 ${plan.legacyLots.length}、庫存文件 ${plan.legacyInventory.length}、分倉成本 ${plan.legacyWarehouseStocks.length}、收貨 ${plan.legacyReceipts.length}、異動 ${plan.legacyMovements.length}、舊訂單成本 ${plan.legacyOrders.length}。\n`+(total?'請先執行「庫存成本隔離」，完成後再部署新版 Firestore Rules。':'沒有發現舊成本欄位，可直接進行新版 Rules 驗證。');

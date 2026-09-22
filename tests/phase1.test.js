@@ -1260,4 +1260,7 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
   assert.match(indexSource,/onclick="previewInventoryCostMigration\(\)"/);
   assert.match(indexSource,/只讀取並統計舊庫存/);
   assert.doesNotMatch(indexSource,/onclick="runInventoryCostMigration\(\)"/);
+  const preview=appSource.slice(appSource.indexOf('window.previewInventoryCostMigration'),appSource.indexOf('window.runInventoryCostMigration'));
+  assert.match(preview,/\.map\(name => readCollectionForMigration\(name\)\)/);
+  assert.doesNotMatch(preview,/\.map\(readCollectionForMigration\)/);
 });
