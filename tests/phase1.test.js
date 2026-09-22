@@ -304,6 +304,9 @@ test('quote and order search-index migration is admin-only batched and idempoten
     assert.match(migration, /buildFullHistorySearchTokens/);
     assert.match(migration, /data\.itemCodeKey !== normalized/);
     assert.match(migration, /batch\.update/);
+    assert.match(migration, /orderSearchIndexAwaitingConfirmation/);
+    assert.match(migration, /請在 10 秒內再按一次確認開始/);
+    assert.doesNotMatch(migration, /confirm\(/);
     assert.doesNotMatch(migration, /collection\('orders'\)\.get\(\)/);
 });
 
