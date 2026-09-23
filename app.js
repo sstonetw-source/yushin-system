@@ -4873,22 +4873,37 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
     const aggregateRef=inventoryRefFor(item);
     const warehouseRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
+    const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
     const actor=currentUserName||currentUser?.email||'';
     let result={...item,itemId,inventoryReservedQty:0,inventoryShortageQty:requested,inventoryProductKey:productKey,warehouseId};
     await db.runTransaction(async tx=>{
         const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
         const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
+        const reservationSnap=await tx.get(reservationRef);
         const aggregate=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{});
         const warehouse=inventoryNumbers(warehouseSnap?.exists?warehouseSnap.data():{});
-        const reservable=Math.max(0,Math.min(requested,warehouse.available,aggregate.available));
+        const existing=reservationSnap.exists?reservationSnap.data():{};
+        const existingQty=Math.max(0,Number(existing.quantity||0));
+        const existingSameStock=existing.productKey===productKey&&(existing.warehouseId||'')===warehouseId;
+        const preservedQty=existingSameStock?Math.min(existingQty,requested):0;
+        const additionalNeeded=Math.max(0,requested-preservedQty);
+        const additionalReservable=Math.max(0,Math.min(additionalNeeded,warehouse.available,aggregate.available));
+        const reservable=preservedQty+additionalReservable;
         const shortage=Math.max(0,requested-reservable);
         const now=new Date().toISOString();
-        if(reservable){
-            if(aggregateRef&&aggregateSnap?.exists)tx.update(aggregateRef,{reserved:aggregate.reserved+reservable,updatedAt:now});
-            if(warehouseRef&&warehouseSnap?.exists)tx.update(warehouseRef,{reserved:warehouse.reserved+reservable,updatedAt:now});
-            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve',reservable,orderId,productKey,actor,{warehouseId,itemId,fulfillmentType:'WAREHOUSE'}));
+        if(existingQty>preservedQty){
+            const release=existingQty-preservedQty;
+            if(aggregateRef&&aggregateSnap?.exists)tx.update(aggregateRef,{reserved:Math.max(0,aggregate.reserved-release)+additionalReservable,updatedAt:now});
+            if(warehouseRef&&warehouseSnap?.exists)tx.update(warehouseRef,{reserved:Math.max(0,warehouse.reserved-release)+additionalReservable,updatedAt:now});
+            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('release',-release,orderId,productKey,actor,{reason:'reservation_reconcile',warehouseId,itemId,fulfillmentType:'WAREHOUSE'}));
+        }else if(additionalReservable){
+            if(aggregateRef&&aggregateSnap?.exists)tx.update(aggregateRef,{reserved:aggregate.reserved+additionalReservable,updatedAt:now});
+            if(warehouseRef&&warehouseSnap?.exists)tx.update(warehouseRef,{reserved:warehouse.reserved+additionalReservable,updatedAt:now});
         }
-        tx.set(db.collection('inventoryReservations').doc(`${orderId}__${itemId}`),{
+        if(additionalReservable){
+            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve',additionalReservable,orderId,productKey,actor,{warehouseId,itemId,fulfillmentType:'WAREHOUSE'}));
+        }
+        tx.set(reservationRef,{
             orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
             itemCode:item.itemCode||'',itemName:item.itemName||'',customerName:order.customerName||'',
             salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',
@@ -4899,7 +4914,6 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     });
     return result;
 }
-
 async function reserveInventoryForNewOrder(orderId, order) {
     if(!warehouseMasterCache.length)await loadSupplierWarehouseMasters();
     const items=normalizedOrderItems(order);
