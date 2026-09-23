@@ -9465,7 +9465,7 @@ window.switchAdminTab = function(tab, el) {
     document.querySelectorAll('.admin-panel').forEach(p => p.style.display = 'none');
     document.getElementById(`admin-${tab}`).style.display = 'block';
 
-    if (tab === 'sales') ensureSalesListLoaded().then(reloadSalesFromUsers);
+    if (tab === 'sales') reloadSalesFromUsers();
     if (tab === 'prices') loadPriceCatalogSummary();
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
     if (tab === 'agencies') Promise.all([loadBrandMaster(), loadSupplierWarehouseMasters()]).then(() => {
@@ -10806,11 +10806,32 @@ async function loadSalesCodeMaster() {
 }
 
 window.reloadSalesFromUsers = function() {
-    return Promise.all([initSalesList(), loadAllUsersForAdmin()]).then(async () => {
+    return readCollectionInBatches('users').then(async rows => {
+        salesList = rows
+            .filter(d => d.name && d.code)
+            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', active:d.active !== false }))
+            .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||'')));
+
+        allUsersCache = rows.map(d => ({
+            uid:d.id, code:d.code || '', name:d.name || '', phone:d.phone || '',
+            role:d.role || 'sales', email:d.email || '', disabled:!!d.disabled,
+            mustChangePassword:!!d.mustChangePassword
+        })).sort((a,b)=>{
+            if (a.name && !b.name) return -1;
+            if (!a.name && b.name) return 1;
+            return String(a.code||'').localeCompare(String(b.code||'')) || a.uid.localeCompare(b.uid);
+        });
+
+        populateSalesDropdown();
+        populateEquipmentSalesDropdown();
         if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
         await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
         renderAdminSalesTable();
         populateTransferDropdowns();
+    }).catch(err => {
+        console.error('重新載入人員資料失敗：', err);
+        allUsersCache = [];
+        renderAdminSalesTable();
     });
 };
 
