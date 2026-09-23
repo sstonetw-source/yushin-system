@@ -3811,8 +3811,7 @@ window.copyQuoteAsNew = async function(quoteNo) {
         alert('您目前沒有建立估價單的權限。');
         return;
     }
-    let source = myQuotesCache.find(quote => quote.quoteNo === quoteNo)
-        || allQuotesCache.find(quote => quote.quoteNo === quoteNo);
+    let source = myQuotesCache.find(quote => quote.quoteNo === quoteNo);
     try {
         if (!source) {
             const snapshot = await db.collection('quotes').doc(quoteNo).get();
@@ -4123,7 +4122,7 @@ window.createForecastFromQuote = async function(quoteNo) {
     }
 
     try {
-        const cached = myQuotesCache.find(q => q.quoteNo === quoteNo) || allQuotesCache.find(q => q.quoteNo === quoteNo);
+        const cached = myQuotesCache.find(q => q.quoteNo === quoteNo);
         const q = cached || (await db.collection('quotes').doc(quoteNo).get()).data();
 
         if (!q) {
@@ -7207,7 +7206,7 @@ window.showCustomerOrderHistory = function(customerName) {
     const orders = ordersCache.filter(order => String(order.customerName || '').trim().toLocaleLowerCase('zh-TW') === customerKey)
         .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
     const quoteMap = new Map();
-    [...myQuotesCache, ...allQuotesCache].forEach(quote => {
+    myQuotesCache.forEach(quote => {
         const names = [quote.ordererName, quote.clientName].map(value => String(value || '').trim().toLocaleLowerCase('zh-TW'));
         if (names.includes(customerKey)) quoteMap.set(quote.id || quote.quoteNo, quote);
     });
@@ -8593,8 +8592,6 @@ function populateOrderCustomerSuggestions() {
         ...equipmentList.map(equipment => equipment.customerName),
         ...myQuotesCache.map(quote => quote.clientName),
         ...myQuotesCache.map(quote => quote.ordererName),
-        ...allQuotesCache.map(quote => quote.clientName),
-        ...allQuotesCache.map(quote => quote.ordererName),
         ...[...document.querySelectorAll('#clientList option')].map(option => option.value)
     ];
     names.forEach(value => {
