@@ -115,6 +115,12 @@ test('product management uses server search without exposing protected cost data
     assert.match(appSource, /window\.addProductManagementToOrder/);
 });
 
+test('inventory product lookup debounces server search', () => {
+    assert.match(indexSource, /id="businessProductSearch"[^>]+oninput="queueBusinessProductSearch\(\)"/);
+    assert.match(appSource, /businessProductSearchTimer=setTimeout\(\(\)=>searchBusinessProducts\(\),400\)/);
+    assert.match(appSource, /db\.collection\('products'\).*limit\(25\)/s);
+});
+
 test('product management debounces full Product Master search', () => {
     assert.match(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(appSource, /productManagementSearchTimer = setTimeout\(\(\) => searchProductManagement\(\), 400\)/);

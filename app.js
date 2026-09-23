@@ -4488,7 +4488,15 @@ window.loadInventory=async function(reset=true){
  renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
+let businessProductSearchTimer = null;
+window.queueBusinessProductSearch=function(){
+ clearTimeout(businessProductSearchTimer);
+ const input=document.getElementById('businessProductSearch'),raw=String(input?.value||'').trim();
+ if(raw.length<2){const status=document.getElementById('businessProductSearchStatus');if(status)status.textContent=raw.length?'再輸入 1 個字即可搜尋。':'';return;}
+ businessProductSearchTimer=setTimeout(()=>searchBusinessProducts(),400);
+};
 window.searchBusinessProducts=async function(){
+ clearTimeout(businessProductSearchTimer);
  const input=document.getElementById('businessProductSearch'),status=document.getElementById('businessProductSearchStatus'),wrap=document.getElementById('businessProductSearchResults'),body=document.getElementById('businessProductSearchBody');
  const raw=String(input?.value||'').trim();if(raw.length<2){alert('請至少輸入 2 個字或完整貨號。');return;}
  if(status)status.textContent='查詢中…';if(input)input.disabled=true;
