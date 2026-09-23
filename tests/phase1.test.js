@@ -115,6 +115,14 @@ test('product management uses server search without exposing protected cost data
     assert.match(appSource, /window\.addProductManagementToOrder/);
 });
 
+test('low-stock inventory can hand off to formal replenishment purchase flow', () => {
+    assert.match(appSource, /openInventoryReplenishment/);
+    assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && canEditPage\('orders\.po'\)/);
+    assert.match(appSource, /poDirectStockMode = true/);
+    assert.match(appSource, /suggestedQty = Math\.max\(1, safetyStock - stock\.available\)/);
+    assert.match(appSource, /generateNextPoNumber\(\)/);
+});
+
 test('purchase workspace shows waiting days only for open warehouse receipts', () => {
     assert.match(indexSource, />等待天數</);
     assert.match(appSource, /function poWaitingDays\(po\)/);
