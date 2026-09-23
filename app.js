@@ -10129,7 +10129,6 @@ function ensureQuickProductModal() {
           <div style="grid-column:1/-1;"><label>中文品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
           <div style="grid-column:1/-1;"><label>英文品名</label><input id="quickProductNameEn" type="text" autocomplete="off"></div>
           <div><label>規格</label><input id="quickProductSpec" type="text" autocomplete="off"></div>
-          <div><label>單位</label><input id="quickProductUnit" type="text" autocomplete="off"></div>
           <div><label>產品線</label><input id="quickProductLine" type="text" placeholder="例如 Roche"></div>
           <div><label>產品來源</label><select id="quickProductAuthorization" onchange="updateQuickProductCostVisibility()"><option value="AUTHORIZED">公司代理產品</option><option value="NON_AUTHORIZED">非代理產品</option></select></div>
           <div><label>建議售價</label><input id="quickProductPrice" type="number" min="0"></div>
@@ -10147,7 +10146,7 @@ function ensureQuickProductModal() {
     return overlay;
 }
 
-const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Unit', 'Line', 'Authorization', 'Price', 'Cost'];
+const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Line', 'Authorization', 'Price', 'Cost'];
 function quickProductDraftKey() {
     return currentUser?.uid ? `quick-product-draft:${currentUser.uid}` : '';
 }
@@ -10196,9 +10195,6 @@ window.openQuickProductCreate = function(mode, input) {
     document.getElementById('quickProductSpec').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-spec')?.value || '')
         : (document.getElementById('orderSpec')?.value || '');
-    document.getElementById('quickProductUnit').value = mode === 'quote'
-        ? ''
-        : (document.getElementById('orderUnit')?.value || '');
     document.getElementById('quickProductLine').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-product-line')?.value || '')
         : (document.getElementById('orderProductLine')?.value || '');
@@ -10236,7 +10232,6 @@ window.saveQuickProduct = async function() {
     const productName = String(document.getElementById('quickProductName')?.value || '').trim();
     const productNameEn = String(document.getElementById('quickProductNameEn')?.value || '').trim();
     const specification = String(document.getElementById('quickProductSpec')?.value || '').trim();
-    const unit = String(document.getElementById('quickProductUnit')?.value || '').trim();
     const productLine = String(document.getElementById('quickProductLine')?.value || '').trim();
     const authorizationType = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
     const priceRaw = document.getElementById('quickProductPrice')?.value ?? '';
@@ -10280,7 +10275,6 @@ window.saveQuickProduct = async function() {
         productName,
         nameEn: productNameEn,
         specification,
-        unit,
         productLine,
         productLineId: productLine,
         authorizationType,
