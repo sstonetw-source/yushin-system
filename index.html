@@ -1140,6 +1140,7 @@
                 <select id="salesStatsBrandFilter" onchange="renderSalesStatistics()"><option value="">全部廠牌</option></select>
                 <select id="salesStatsTypeFilter" onchange="renderSalesStatistics()"><option value="">全部類型</option></select>
                 <select id="salesStatsLineFilter" onchange="renderSalesStatistics()"><option value="">全部產品線</option></select>
+                <button type="button" id="toggleSalesStatsSensitiveBtn" class="btn-secondary" onclick="toggleSalesStatsSensitive()">🙈 隱藏成本／毛利</button>
                 <button type="button" onclick="exportSalesStatisticsExcel()">⬇️ 匯出季報 Excel</button>
                 <button class="btn-secondary" onclick="loadSalesStatistics()">🔄 重新整理</button>
                 <span style="font-size:12px;color:#666;">實際送貨依送貨日期計算，退貨依退貨日期負數沖銷；待出貨為截至迄日的未交餘額。</span>
@@ -1150,8 +1151,8 @@
                 <div class="sales-stat-card sales-stat-card-total"><span>總金額</span><strong id="salesStatsTotalSales">NT$ 0</strong><small id="salesStatsTotalDetail"></small></div>
             </div>
             <div class="panel" style="overflow-x:auto;">
-                <table style="margin:0;"><thead><tr><th>總銷售額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>成本未填</th><th>歷史推估</th></tr></thead>
-                <tbody><tr><td id="salesStatsSalesInc">NT$ 0</td><td id="salesStatsCostInc">NT$ 0</td><td id="salesStatsProfit">NT$ 0</td><td id="salesStatsProfitRate">－</td><td><button type="button" id="salesStatsMissingCost" class="missing-cost-trigger" onclick="openMissingCostOrders()" disabled>0 筆</button></td><td id="salesStatsEstimated">NT$ 0／0 筆</td></tr></tbody></table>
+                <table style="margin:0;"><thead><tr><th>總銷售額</th><th class="sensitive-stat">總成本</th><th class="sensitive-stat">毛利</th><th class="sensitive-stat">毛利率</th><th>成本未填</th><th>歷史推估</th></tr></thead>
+                <tbody><tr><td id="salesStatsSalesInc">NT$ 0</td><td id="salesStatsCostInc" class="sensitive-stat">NT$ 0</td><td id="salesStatsProfit" class="sensitive-stat">NT$ 0</td><td id="salesStatsProfitRate" class="sensitive-stat">－</td><td><button type="button" id="salesStatsMissingCost" class="missing-cost-trigger" onclick="openMissingCostOrders()" disabled>0 筆</button></td><td id="salesStatsEstimated">NT$ 0／0 筆</td></tr></tbody></table>
                 <span id="salesStatsOrderCount" style="display:block;margin-top:8px;color:#666;font-size:13px;"></span>
             </div>
             <div class="sales-stat-tables">
