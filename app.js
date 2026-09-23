@@ -642,7 +642,7 @@ function initializePageData(mainKey) {
         ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
         loadOrdersFromCloud();
     }
-    if (mainKey === 'orders.po') switchPurchasingView(canCreatePurchaseOrderCapability() ? 'pending' : 'arrival');
+    if (mainKey === 'orders.po') switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
     if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') ensureSalesListLoaded().then(() => {
         populateEquipmentSalesDropdown();
@@ -5846,15 +5846,15 @@ let pendingPurchaseError = '';
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['pending', 'arrival', 'history'].includes(view)) return;
-    if (view === 'pending' && !canCreatePurchaseOrderCapability()) return;
+    if (!['ordering', 'receiving', 'shipping'].includes(view)) return;
+    if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
-    const pendingTab = document.getElementById('purchase-sub-pending');
-    if (pendingTab) pendingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const orderingTab = document.getElementById('purchase-sub-ordering');
+    if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchasing-system > .sub-nav .sub-tab').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-sub-${view}`))));
-    document.getElementById('purchasePendingPanel').style.display = view === 'pending' ? '' : 'none';
-    document.getElementById('poListPanel').style.display = view === 'pending' ? 'none' : '';
-    if (view === 'pending') loadPendingPurchaseOrders(true);
+    document.getElementById('purchasePendingPanel').style.display = view === 'ordering' ? '' : 'none';
+    document.getElementById('poListPanel').style.display = view === 'ordering' ? 'none' : '';
+    if (view === 'ordering') loadPendingPurchaseOrders(true);
     else if (poListCache.length) renderPoList();
     else loadMyPurchaseOrders();
 };
@@ -10711,6 +10711,16 @@ function buildSalesStatisticsReport() {
         total, byBrand, bySales, byType, byLine, byTransaction, details
     };
 }
+
+let salesStatsCostsVisible = true;
+window.toggleSalesStatsCostVisibility = function() {
+    salesStatsCostsVisible = !salesStatsCostsVisible;
+    document.querySelectorAll('#admin-statistics .sales-cost-sensitive').forEach(el => {
+        el.style.display = salesStatsCostsVisible ? '' : 'none';
+    });
+    const btn = document.getElementById('salesStatsCostVisibilityBtn');
+    if (btn) btn.textContent = salesStatsCostsVisible ? '🙈 隱藏成本／毛利' : '👁 顯示成本／毛利';
+};
 
 window.renderSalesStatistics = function() {
     const _analysisStart=document.getElementById('salesStatsStart')?.value||localDateString().slice(0,4)+'-01-01';
