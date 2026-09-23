@@ -2050,21 +2050,14 @@ window.createOrderFromForecast = async function(id) {
    ========================================================= */
 // 業務名單來源改為 users 集合（與登入帳號綁定，name/code/phone/role 皆存在同一份文件）
 function initSalesList() {
-    return db.collection('users').limit(500).get().then(snapshot => {
-        const list = [];
-        snapshot.forEach(doc => {
-            const d = doc.data();
-            if (d.name && d.code) {
-                list.push({ uid: doc.id, code: d.code, name: d.name, phone: d.phone || '', role: d.role || 'sales', active: d.active !== false });
-            }
-        });
-
-        if (list.length > 0) {
-            list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
-            salesList = list;
-            populateSalesDropdown();
-            populateEquipmentSalesDropdown();
-        }
+    return readCollectionInBatches('users').then(rows => {
+        const list = rows
+            .filter(d => d.name && d.code)
+            .map(d => ({ uid: d.id, code: d.code, name: d.name, phone: d.phone || '', role: d.role || 'sales', active: d.active !== false }));
+        list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+        salesList = list;
+        populateSalesDropdown();
+        populateEquipmentSalesDropdown();
     }).catch(err => {
         console.error('讀取 users 人員名單失敗：', err);
         salesList = [];
@@ -2477,12 +2470,12 @@ function defaultWarehouse() {
 async function loadSupplierWarehouseMasters(force = false) {
     if (supplierWarehouseLoadPromise && !force) return supplierWarehouseLoadPromise;
     supplierWarehouseLoadPromise = Promise.all([
-        db.collection('suppliers').limit(500).get(),
-        db.collection('brandSupplierMappings').limit(1000).get(),
+        readCollectionInBatches('suppliers'),
+        readCollectionInBatches('brandSupplierMappings'),
         db.collection('warehouses').limit(50).get()
     ]).then(([suppliers, mappings, warehouses]) => {
-        supplierMasterCache = suppliers.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
-        supplierMappingCache = mappings.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
+        supplierMasterCache = suppliers.filter(item => item.active !== false);
+        supplierMappingCache = mappings.filter(item => item.active !== false);
         warehouseMasterCache = warehouses.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
         warehouseMasterCache.sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
@@ -2679,9 +2672,9 @@ function resolveBrandName(value) {
 
 function loadBrandMaster() {
     if (brandMasterLoadPromise) return brandMasterLoadPromise;
-    brandMasterLoadPromise = db.collection('brands').limit(500).get().then(snapshot => {
-        brandMasterCache = snapshot.docs
-            .map(doc => normalizeBrandMasterRecord(doc.id, doc.data()))
+    brandMasterLoadPromise = readCollectionInBatches('brands').then(rows => {
+        brandMasterCache = rows
+            .map(row => normalizeBrandMasterRecord(row.id, row))
             .filter(item => item.name && item.active !== false);
         return brandMasterCache;
     }).catch(err => {
@@ -10809,9 +10802,8 @@ async function syncSalesCodeMasterFromUsers() {
 }
 
 async function loadSalesCodeMaster() {
-    const snapshot = await db.collection('salesCodes').limit(500).get();
-    salesCodeMasterCache = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
+    const rows = await readCollectionInBatches('salesCodes');
+    salesCodeMasterCache = rows
         .filter(item => item.active !== false)
         .sort((x, y) => String(x.code || x.id).localeCompare(String(y.code || y.id), 'zh-Hant'));
     return salesCodeMasterCache;
