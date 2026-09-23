@@ -40,6 +40,14 @@ if (!firebase.apps.length) {
 }
 const db = firebase.firestore();
 
+if (APP_ENVIRONMENT === 'preview') {
+    document.documentElement.dataset.appEnvironment = 'preview';
+    window.addEventListener('DOMContentLoaded', () => {
+        const banner = document.getElementById('previewEnvironmentBanner');
+        if (banner) banner.hidden = false;
+    });
+}
+
 // 登入一次之後，不用每次重新輸入帳號密碼：明確指定用「LOCAL」持久化方式，
 // 登入狀態會存在瀏覽器本機，關掉分頁、關掉瀏覽器、甚至重開手機，只要沒有登出，
 // 下次打開網址還是會自動維持登入狀態（不用再輸入一次帳號密碼）
