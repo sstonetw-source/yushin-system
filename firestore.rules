@@ -77,18 +77,26 @@ service cloud.firestore {
       );
     }
 
+    function validSalesOwner(data) {
+      return data.ownerUid != null
+        && data.salesCode != null
+        && exists(/databases/$(database)/documents/users/$(data.ownerUid))
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales'
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
+          'salesCode',
+          get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
+        ) == data.salesCode;
+    }
+
     function validOwnedCommercialCreate(data) {
       return admin() ||
         (sales() &&
           data.ownerUid == request.auth.uid &&
           data.salesCode != null &&
           data.salesCode == salesCode()) ||
-        (engineer() &&
-          data.ownerUid != null &&
-          data.salesCode != null) ||
+        (engineer() && validSalesOwner(data)) ||
         (businessAssistant() &&
-          data.ownerUid != null &&
-          data.salesCode != null &&
+          validSalesOwner(data) &&
           data.ownerUid != request.auth.uid);
     }
 
@@ -101,7 +109,12 @@ service cloud.firestore {
     // remain editable; once present, normal workflow edits cannot rewrite it.
     function preservesCreator() {
       return resource.data.get('createdByUid', '') == ''
-        || (
+        ? (
+          request.resource.data.get('createdByUid', '') == ''
+          && request.resource.data.get('createdByName', '') == ''
+          && request.resource.data.get('createdByRole', '') == ''
+        )
+        : (
           request.resource.data.get('createdByUid', '') == resource.data.get('createdByUid', '')
           && request.resource.data.get('createdByName', '') == resource.data.get('createdByName', '')
           && request.resource.data.get('createdByRole', '') == resource.data.get('createdByRole', '')
