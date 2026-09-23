@@ -83,10 +83,20 @@ const PERMISSION_PAGES = [
     { key: 'equipment', label: '🔬 儀器管理系統', system: true },
     { key: 'admin', label: '⚙️ 管理員雲端後台', system: true }
 ];
-// 權限不在 HTML 內提供預設值，唯一來源是 Firestore settings/rolePermissions。
-// 管理員固定保留完整權限，避免誤設後無人能再進入後台修正。
-let rolePermissions = {};
-let roleDataScopes = {};
+// 固定角色權限：前端顯示/查詢與 Firestore Rules 使用同一角色邊界。
+// 不再從 settings/rolePermissions 動態載入，避免設定漂移，也減少登入時一次 Firestore 讀取。
+const rolePermissions = Object.freeze({
+    sales: Object.freeze({ forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none' }),
+    purchaser: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'edit', inventory:'edit', equipment:'none', admin:'none' }),
+    warehouse: Object.freeze({ forecast:'none', quote:'none', 'quote.create':'none', 'quote.my':'none', products:'view', orders:'view', 'orders.list':'view', 'orders.po':'view', inventory:'edit', equipment:'none', admin:'none' }),
+    engineer: Object.freeze({ forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none' })
+});
+const roleDataScopes = Object.freeze({
+    sales: Object.freeze({ quotes:'own', forecasts:'own', orders:'own', equipment:'own' }),
+    purchaser: Object.freeze({ quotes:'all', forecasts:'none', orders:'all', equipment:'none' }),
+    warehouse: Object.freeze({ quotes:'none', forecasts:'none', orders:'all', equipment:'none' }),
+    engineer: Object.freeze({ quotes:'own', forecasts:'own', orders:'own', equipment:'own' })
+});
 let currentUserName = '';    // 目前登入者自己的業務姓名（來自 users 集合）
 let currentUserPhone = '';   // 目前登入者自己的電話
 let currentUserCode = '';    // 目前登入者自己的業務代號
@@ -369,7 +379,7 @@ window.addEventListener('DOMContentLoaded', () => {
             currentUser = user;
             // User profile and role configuration are independent reads. Fetch together so
             // a returning user does not wait for two network round trips in sequence.
-            Promise.all([db.collection('users').doc(user.uid).get(), loadRolePermissions()]).then(([doc]) => {
+            db.collection('users').doc(user.uid).get().then(doc => {
                 if (firebase.auth().currentUser?.uid !== user.uid) return;
                 if (!doc.exists) throw new Error('找不到此 UID 對應的 users 文件');
                 const d = doc.data() || {};
@@ -410,30 +420,6 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-function loadRolePermissions() {
-    return db.collection('settings').doc('rolePermissions').get().then(doc => {
-        rolePermissions = {};
-        roleDataScopes = {};
-        if (!doc.exists) return;
-        rolePermissions = doc.exists ? (doc.data().roles || {}) : {};
-        roleDataScopes = doc.exists ? (doc.data().dataScopes || {}) : {};
-        // 新增產品管理頁時保持既有權限設定相容：只要原本可查看估價、訂單或庫存，
-        // 就先提供唯讀 Product Master。管理員日後可在身份權限中明確設定 products。
-        ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => {
-            const configured = rolePermissions[role] || {};
-            if (configured.products !== undefined) return;
-            const sourceLevels = ['quote', 'orders', 'inventory'].map(key => PERMISSION_LEVELS[configured[key] || 'none']);
-            if (Math.max(...sourceLevels) >= PERMISSION_LEVELS.view) {
-                rolePermissions[role] = { ...configured, products: 'view' };
-            }
-        });
-    }).catch(err => {
-        rolePermissions = {};
-        roleDataScopes = {};
-        console.warn('讀取身份權限設定失敗，將不授予任何非管理員權限：', err);
-    });
-}
 
 function getPagePermission(pageKey, role = currentUserRole) {
     if (role === 'admin') return 'edit';
@@ -9551,39 +9537,6 @@ function renderRolePermissions() {
         }).join('');
     }
 }
-
-window.saveRolePermissions = function() {
-    if (trueUserRole !== 'admin') return;
-    const next = JSON.parse(JSON.stringify(rolePermissions));
-    ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => { if (!next[role]) next[role] = {}; });
-    document.querySelectorAll('#rolePermissionsBody .permission-select:not([disabled])').forEach(select => {
-        next[select.dataset.role][select.dataset.page] = select.value;
-    });
-    const nextScopes = JSON.parse(JSON.stringify(roleDataScopes));
-    ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => { if (!nextScopes[role]) nextScopes[role] = {}; });
-    document.querySelectorAll('#roleDataScopesBody .data-scope-select:not([disabled])').forEach(select => {
-        nextScopes[select.dataset.role][select.dataset.type] = select.value;
-    });
-    // 主系統若禁止查看，其子分頁也一併禁止，避免留下無法進入的孤立設定。
-    ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => {
-        if (next[role].quote === 'none') { next[role]['quote.create'] = 'none'; next[role]['quote.my'] = 'none'; }
-        if (next[role].orders === 'none') { next[role]['orders.list'] = 'none'; next[role]['orders.po'] = 'none'; }
-    });
-    const status = document.getElementById('permissionSaveStatus');
-    if (status) status.innerText = '儲存中…';
-    db.collection('settings').doc('rolePermissions').set({ roles: next, dataScopes: nextScopes, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid }).then(() => {
-        rolePermissions = next;
-        roleDataScopes = nextScopes;
-        renderRolePermissions();
-        applyPermissionVisibility();
-        loadMyQuotesFromCloud();
-        loadOrdersFromCloud();
-        if (status) status.innerText = '已儲存';
-    }).catch(err => {
-        if (status) status.innerText = '';
-        alert('儲存權限設定失敗：' + err.message);
-    });
-};
 
 function renderKeyStatisticBrands() {
     const container = document.getElementById('keyStatisticBrands');
