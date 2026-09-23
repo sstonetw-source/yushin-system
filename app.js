@@ -1985,41 +1985,43 @@ async function createForecastOrdersDirectly(forecast, items) {
     const orderDate = localDateString();
     const normalizedItems = items.map((item, index) => {
         const source = forecastItemToOrderSource(forecast, item);
-        return { ...legacyOrderItemFromOrder(source, index), itemId:`item-${index + 1}` };
+        return { ...legacyOrderItemFromOrder(source, 0), itemId:'item-1', sourceItemIndex:index };
     }).filter(item => item.itemName || item.itemCode);
     if (!normalizedItems.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
 
-    const first = normalizedItems[0];
-    const totalPrice = normalizedItems.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
-    const orderRef = db.collection('orders').doc();
-    const orderData = {
-        orderDate, createdAt:now, ...commercialCreatorFields(), company:currentCompany || 'yushin',
-        customerName:forecast.customerName || '',
-        customerId:forecast.customerId || customerIdForName(forecast.customerName || ''),
-        ...first,
-        qty:first.qty, unitPrice:first.unitPrice, totalPrice,
-        items:normalizedItems, itemCount:normalizedItems.length, orderSchemaVersion:2,
-        status:BUSINESS_STATUS.ACTIVE, ...grossAmountMetadata(totalPrice),
-        transactionType:'', invoiceTitle:'', quoteNo:'',
-        ...linkedDocumentFields(DOCUMENT_TYPES.FORECAST, forecast.id, [documentLink(DOCUMENT_TYPES.FORECAST, forecast.id, 'source')]),
-        salesName:forecast.salesName || currentUserName || '',
-        salesCode:forecast.salesCode || currentUserCode || '',
-        ownerUid:forecast.ownerUid || currentUser?.uid || '',
-        isOrdered:false, isArrived:false, isDelivered:false, isBilled:false, invoiceDate:''
-    };
-    orderData.searchTokens = buildFullHistorySearchTokens('order', orderData);
-
     const batch=db.batch();
-    batch.set(orderRef,orderData);
-    batch.set(db.collection('forecasts').doc(forecast.id),{
-        linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')),
-        updatedAt:now
-    },{merge:true});
+    const created=[];
+    normalizedItems.forEach((item,index)=>{
+        const orderRef=db.collection('orders').doc();
+        const totalPrice=Number(item.totalPrice||0);
+        const orderData={
+            orderDate,createdAt:now,...commercialCreatorFields(),company:currentCompany||'yushin',
+            customerName:forecast.customerName||'',
+            customerId:forecast.customerId||customerIdForName(forecast.customerName||''),
+            ...item,qty:item.qty,unitPrice:item.unitPrice,totalPrice,
+            items:[item],itemCount:1,orderSchemaVersion:2,
+            status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(totalPrice),
+            transactionType:'',invoiceTitle:'',quoteNo:'',
+            ...linkedDocumentFields(DOCUMENT_TYPES.FORECAST,forecast.id,[documentLink(DOCUMENT_TYPES.FORECAST,forecast.id,'source')]),
+            sourceItemIndex:index,
+            salesName:forecast.salesName||currentUserName||'',
+            salesCode:forecast.salesCode||currentUserCode||'',
+            ownerUid:forecast.ownerUid||currentUser?.uid||'',
+            isOrdered:false,isArrived:false,isDelivered:false,isBilled:false,invoiceDate:''
+        };
+        orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
+        batch.set(orderRef,orderData);
+        batch.set(db.collection('forecasts').doc(forecast.id),{
+            linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')),
+            updatedAt:now
+        },{merge:true});
+        created.push({id:orderRef.id,data:orderData});
+    });
     await batch.commit();
-    await reserveInventoryForNewOrder(orderRef.id,orderData);
-    ordersCache=[{id:orderRef.id,...orderData},...ordersCache.filter(order=>order.id!==orderRef.id)]
+    for(const order of created) await reserveInventoryForNewOrder(order.id,order.data);
+    ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))]
         .sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
-    return [{id:orderRef.id,data:orderData}];
+    return created;
 }
 
 window.createOrderFromForecast = async function(id) {
@@ -2039,10 +2041,10 @@ window.createOrderFromForecast = async function(id) {
             return;
         }
 
-        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
+        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將拆成 ${items.length} 筆獨立訂單。確定繼續？`)) return;
         await createForecastOrdersDirectly(forecast, items);
         renderOrdersList();
-        alert(`已將 Forecast 的 ${items.length} 個品項建立為 1 張訂單。`);
+        alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單。`);
     } catch (err) {
         console.error('Forecast 轉訂單失敗', err);
         alert('Forecast 轉訂單失敗：' + err.message);
@@ -4181,7 +4183,6 @@ window.createForecastFromQuote = async function(quoteNo) {
 };
 
 window.markQuoteAsDeal = async function(quoteNo) {
-    if (!confirm(`確定要將估價單 ${quoteNo} 標記為成交嗎？所有品項會建立為同一張訂單。`)) return;
     try {
         const doc=await db.collection('quotes').doc(quoteNo).get();
         if(!doc.exists) throw new Error('找不到這張估價單');
@@ -4189,46 +4190,46 @@ window.markQuoteAsDeal = async function(quoteNo) {
         if(q.dealClosed){alert('這張估價單已經標記過成交了。');return;}
         const sourceItems=(q.items||[]).filter(item=>item.nameCn||item.nameEn||item.model);
         if(!sourceItems.length) throw new Error('估價單沒有可建立訂單的品項。');
-        const items=sourceItems.map((item,index)=>{
-            const brand=resolveBrandName(item.brand||'');
-            const priceMatch=item.model?findPriceItemForOrder({itemCode:item.model,brand}):null;
-            const row={
-                itemId:`item-${index+1}`, productId:item.productId||priceMatch?.productId||(priceMatch?stableProductId(priceMatch):''),
-                itemCode:item.model||'', itemCodeKey:normalizeHistoryItemCode(item.model||''),
-                itemName:item.nameCn||item.nameEn||'', brand, productLine:item.productLine||priceMatch?.productLine||'',
-                productType:item.productType||priceMatch?.productType||'', spec:item.spec||priceMatch?.spec||'',
-                supplier:priceMatch?.supplier||'', qty:Number(item.qty||1),
-                unitPrice:parseMoney(item.price||0), totalPrice:parseMoney(item.subtotal||0),
-                fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id||''
+        if(!confirm(`確定將估價單 ${quoteNo} 標記為成交嗎？${sourceItems.length} 個品項會拆成 ${sourceItems.length} 筆獨立訂單。`))return;
+
+        const now=new Date().toISOString(),todayStr=localDateString();
+        const batch=db.batch(),created=[];
+        sourceItems.forEach((sourceItem,index)=>{
+            const brand=resolveBrandName(sourceItem.brand||'');
+            const priceMatch=sourceItem.model?findPriceItemForOrder({itemCode:sourceItem.model,brand}):null;
+            const item={
+                itemId:'item-1',productId:sourceItem.productId||priceMatch?.productId||(priceMatch?stableProductId(priceMatch):''),
+                itemCode:sourceItem.model||'',itemCodeKey:normalizeHistoryItemCode(sourceItem.model||''),
+                itemName:sourceItem.nameCn||sourceItem.nameEn||'',itemNameEn:sourceItem.nameEn||'',brand,
+                productLine:sourceItem.productLine||priceMatch?.productLine||'',productType:sourceItem.productType||priceMatch?.productType||'',
+                spec:sourceItem.spec||priceMatch?.spec||'',supplier:priceMatch?.supplier||'',qty:Number(sourceItem.qty||1),
+                orderedQty:Number(sourceItem.qty||1),unitPrice:parseMoney(sourceItem.price||0),totalPrice:parseMoney(sourceItem.subtotal||0),
+                fulfillmentType:'WAREHOUSE',warehouseId:defaultWarehouse()?.id||'',procurementType:'PURCHASING_PO',sourceItemIndex:index
             };
-            if(priceMatch&&authorizationTypeForProduct(priceMatch)==='NON_AUTHORIZED'&&priceMatch.cost!==undefined) row.costPrice=priceMatch.cost;
-            return row;
+            if(priceMatch&&authorizationTypeForProduct(priceMatch)==='NON_AUTHORIZED'&&priceMatch.cost!==undefined)item.costPrice=priceMatch.cost;
+            const orderRef=db.collection('orders').doc();
+            const orderData={
+                orderDate:todayStr,createdAt:now,...commercialCreatorFields(),company:q.company||'',
+                customerName:q.ordererName||q.clientName||'',customerId:q.customerId||customerIdForName(q.ordererName||q.clientName||''),
+                ...item,items:[item],itemCount:1,orderSchemaVersion:2,status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(item.totalPrice),
+                transactionType:'',invoiceTitle:q.clientName||'',quoteNo,
+                ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE,quoteNo,[documentLink(DOCUMENT_TYPES.QUOTE,quoteNo,'source')]),
+                sourceItemIndex:index,salesName:stripPhoneSuffix(q.salesName),salesCode:q.salesCode||salesCodeForName(q.salesName),
+                ownerUid:q.ownerUid||salesList.find(s=>stripPhoneSuffix(s.name)===stripPhoneSuffix(q.salesName))?.uid||'',
+                isOrdered:false,isArrived:false,isDelivered:false,isBilled:false,invoiceDate:''
+            };
+            orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
+            batch.set(orderRef,orderData);
+            created.push({id:orderRef.id,data:orderData});
         });
-        const first=items[0], totalPrice=items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0);
-        const orderRef=db.collection('orders').doc();
-        const todayStr=localDateString();
-        const orderData={
-            orderDate:todayStr,createdAt:new Date().toISOString(),...commercialCreatorFields(),company:q.company||'',
-            customerName:q.ordererName||q.clientName||'',customerId:q.customerId||customerIdForName(q.ordererName||q.clientName||''),
-            ...first,qty:first.qty,unitPrice:first.unitPrice,totalPrice,
-            items,itemCount:items.length,orderSchemaVersion:2,status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(totalPrice),
-            transactionType:'',invoiceTitle:q.clientName||'',quoteNo,
-            ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE,quoteNo,[documentLink(DOCUMENT_TYPES.QUOTE,quoteNo,'source')]),
-            salesName:stripPhoneSuffix(q.salesName),salesCode:q.salesCode||salesCodeForName(q.salesName),
-            ownerUid:q.ownerUid||salesList.find(s=>stripPhoneSuffix(s.name)===stripPhoneSuffix(q.salesName))?.uid||'',
-            isOrdered:false,isArrived:false,isDelivered:false,isBilled:false,invoiceDate:''
-        };
-        orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
-        const batch=db.batch();
-        batch.set(orderRef,orderData);
         batch.update(db.collection('quotes').doc(quoteNo),{
             dealClosed:true,dealClosedAt:todayStr,status:BUSINESS_STATUS.COMPLETED,
-            linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')])
+            linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),...created.map(order=>documentLink(DOCUMENT_TYPES.ORDER,order.id,'created'))])
         });
         await batch.commit();
-        await reserveInventoryForNewOrder(orderRef.id,orderData);
-        ordersCache=[{id:orderRef.id,...orderData},...ordersCache.filter(o=>o.id!==orderRef.id)];
-        alert(`已標記成交，${items.length} 個品項已建立為 1 張訂單並執行庫存保留。`);
+        for(const order of created)await reserveInventoryForNewOrder(order.id,order.data);
+        ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache];
+        alert(`已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並分別執行庫存保留。`);
         loadMyQuotesFromCloud();
     } catch(err){alert('匯入失敗：'+err.message);}
 };
