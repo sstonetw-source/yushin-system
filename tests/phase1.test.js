@@ -115,6 +115,13 @@ test('product management uses server search without exposing protected cost data
     assert.match(appSource, /window\.addProductManagementToOrder/);
 });
 
+test('purchase workspace shows waiting days only for open warehouse receipts', () => {
+    assert.match(indexSource, />等待天數</);
+    assert.match(appSource, /function poWaitingDays\(po\)/);
+    assert.match(appSource, /progress\.complete \|\| progress\.directShipOnly/);
+    assert.match(appSource, /data-th="等待天數"/);
+});
+
 test('main navigation exposes focused order and purchasing workspaces', () => {
     assert.match(indexSource, /data-main-nav="orders"/);
     assert.match(indexSource, /data-main-nav="purchasing"/);
