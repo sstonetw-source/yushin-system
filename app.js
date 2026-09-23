@@ -639,7 +639,7 @@ function showApp() {
 }
 
 function initializePageData(mainKey) {
-    if (mainKey === 'forecast') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => loadForecasts(true));
+    if (mainKey === 'forecast') ensureSalesListLoaded().then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
     if (mainKey === 'orders') {
@@ -649,7 +649,7 @@ function initializePageData(mainKey) {
         loadOrdersFromCloud();
     }
     if (mainKey === 'inventory') loadInventory(true);
-    if (mainKey === 'equipment') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => {
+    if (mainKey === 'equipment') ensureSalesListLoaded().then(() => {
         populateEquipmentSalesDropdown();
         loadEquipmentFromCloud();
     });
@@ -681,7 +681,7 @@ function ensureClientHistoryLoaded() {
 function ensureQuoteFormInitialized() {
     if (quoteFormInitialized) return;
     quoteFormInitialized = true;
-    Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded(), ensureClientHistoryLoaded()]).finally(() => {
+    Promise.all([ensureSalesListLoaded(), ensureClientHistoryLoaded()]).finally(() => {
         const draft = loadQuoteDraft();
         if (draft) restoreQuoteDraft(draft);
         else {
@@ -1290,7 +1290,7 @@ window.loadForecasts = async function(reset = true) {
     }
 
     try {
-        await Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]);
+        await ensureSalesListLoaded();
 
         const status = document.getElementById('forecastStatusFilter')?.value || 'active';
 
@@ -3136,8 +3136,7 @@ window.addQuoteRow = function(itemData = {}) {
     calculateTotals();
 };
 
-window.onItemCnChange = async function(input) {
-    await ensurePriceListLoaded().catch(() => {});
+window.onItemCnChange = function(input) {
     const value = input.value.trim();
     const match = priceList.find(p => String(p.nameCn || '').trim() === value);
     if (!match) return;
