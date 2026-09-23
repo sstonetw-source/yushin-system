@@ -1059,9 +1059,7 @@
             <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
-            <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>
-            <div class="sub-tab" id="admin-sub-permissions" onclick="switchAdminTab('permissions', this)">🔐 身份權限</div>
-        </div>
+            <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>        </div>
 
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
@@ -1073,29 +1071,6 @@
                 <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>密碼</th><th>帳號 UID</th></tr></thead>
                 <tbody id="adminSalesBody"></tbody>
             </table>
-        </div>
-
-        <div id="admin-permissions" class="admin-panel" style="display:none;">
-            <div class="panel">
-                <h3>身份權限設定</h3>
-                <p style="font-size:13px;color:#555;line-height:1.7;">設定每個身份可看到的系統與分頁。選擇「僅查看」時可瀏覽與搜尋，但不能新增、修改、刪除或上傳資料。管理員固定擁有完整權限。</p>
-                <div style="overflow-x:auto;">
-                    <table class="permission-table">
-                        <thead><tr><th>系統／分頁</th><th>業務</th><th>採購</th><th>倉管</th><th>工程師</th><th>管理員</th></tr></thead>
-                        <tbody id="rolePermissionsBody"></tbody>
-                    </table>
-                </div>
-                <h3 style="margin-top:22px;">資料查看範圍</h3>
-                <p style="font-size:13px;color:#555;">分別決定各身份在清單中只能看到自己負責的資料，或能查看所有人資料。</p>
-                <div style="overflow-x:auto;">
-                    <table class="permission-table">
-                        <thead><tr><th>資料類型</th><th>業務</th><th>採購</th><th>倉管</th><th>工程師</th><th>管理員</th></tr></thead>
-                        <tbody id="roleDataScopesBody"></tbody>
-                    </table>
-                </div>
-                <button type="button" onclick="saveRolePermissions()">💾 儲存權限設定</button>
-                <span id="permissionSaveStatus" class="permission-save-status"></span>
-            </div>
         </div>
 
         <!-- Product Master：正式資料存 products / productCosts；舊 settings/prices 暫時作相容來源。 -->
