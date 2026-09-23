@@ -187,6 +187,12 @@ let currentEquipmentId = null;
 let equipmentLoadGeneration = 0;
 let equipmentCursor = null;
 let equipmentHasMore = false;
+let equipmentSearchActive = false;
+let equipmentSearchLoading = false;
+let equipmentSearchCursor = null;
+let equipmentSearchKeyword = '';
+let equipmentSearchResults = [];
+let equipmentSearchTimer = null;
 
 // 管理員後台狀態
 let allUsersCache = [];
@@ -4070,7 +4076,7 @@ window.renderMyQuotesList = function() {
     visibleQuoteSource.forEach(q => {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
-        if (keyword && !searchable.includes(keyword)) return;
+        if (!equipmentSearchActive && keyword && !searchable.includes(keyword)) return;
         if (q.dealClosed && !dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
         shown++;
 
@@ -8908,6 +8914,7 @@ window.loadEquipmentFromCloud = function(reset = true) {
 };
 
 window.loadMoreEquipment = function() {
+    if (equipmentSearchActive) return runEquipmentSearch(false);
     if (!equipmentHasMore || !equipmentCursor) return;
     loadEquipmentFromCloud(false);
 };
@@ -8949,6 +8956,72 @@ function fmtDate(d) {
 const statusLabel = { ok: '正常', soon: '即將到期', overdue: '已逾期', unknown: '尚無紀錄', none: '免保養' };
 const statusClass = { ok: 'status-ok', soon: 'status-soon', overdue: 'status-overdue', unknown: 'status-unknown', none: 'status-none' };
 
+async function runEquipmentSearch(reset = true) {
+    const input = document.getElementById('eqSearchInput');
+    const rawKeyword = input?.value || '';
+    const normalized = normalizeFullHistorySearchValue(rawKeyword);
+    const moreButton = document.getElementById('equipmentLoadMoreBtn');
+    if (!normalized) {
+        equipmentSearchActive = false;
+        equipmentSearchResults = [];
+        equipmentSearchCursor = null;
+        equipmentSearchKeyword = '';
+        if (moreButton) moreButton.style.display = equipmentHasMore ? '' : 'none';
+        renderEquipmentList();
+        return;
+    }
+    if (equipmentSearchLoading) return;
+    const queryToken = fullHistoryQueryToken('equipment', rawKeyword);
+    if (!queryToken) return;
+    equipmentSearchLoading = true;
+    if (reset || rawKeyword !== equipmentSearchKeyword) {
+        equipmentSearchKeyword = rawKeyword;
+        equipmentSearchResults = [];
+        equipmentSearchCursor = null;
+    }
+    if (moreButton) { moreButton.disabled = true; moreButton.textContent = '搜尋中…'; }
+    try {
+        let query = db.collection('equipment').where('searchTokens', 'array-contains', queryToken);
+        if (!canViewAllEquipment()) {
+            if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
+            else if (currentUser?.uid) query = query.where('ownerUid', '==', currentUser.uid);
+        }
+        query = query.limit(DEFAULT_LIST_LIMIT);
+        if (equipmentSearchCursor) query = query.startAfter(equipmentSearchCursor);
+        const snapshot = await query.get();
+        const records = new Map(equipmentSearchResults.map(record => [record.id, record]));
+        snapshot.forEach(doc => {
+            const data = { id:doc.id, ...doc.data() };
+            if (data.active !== false && fullHistoryRecordMatches('equipment', data, rawKeyword)) records.set(doc.id, data);
+        });
+        equipmentSearchResults = [...records.values()]
+            .sort((a,b)=>String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant'));
+        equipmentSearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
+        equipmentSearchActive = true;
+        renderEquipmentList();
+        if (moreButton) {
+            moreButton.style.display = equipmentSearchCursor ? '' : 'none';
+            moreButton.textContent = '載入更多搜尋結果';
+        }
+    } catch (err) {
+        console.error('儀器全資料搜尋失敗：', err);
+        equipmentSearchActive = false;
+        equipmentSearchCursor = null;
+        alert('儀器搜尋索引尚未補齊，請管理員到資料庫管理執行搜尋索引補建。');
+        renderEquipmentList();
+    } finally {
+        equipmentSearchLoading = false;
+        if (moreButton) moreButton.disabled = false;
+    }
+}
+
+window.scheduleEquipmentSearch = function() {
+    clearTimeout(equipmentSearchTimer);
+    const keyword = document.getElementById('eqSearchInput')?.value || '';
+    if (!normalizeFullHistorySearchValue(keyword)) return runEquipmentSearch(true);
+    equipmentSearchTimer = setTimeout(() => runEquipmentSearch(true), 350);
+};
+
 window.renderEquipmentList = function() {
     const tbody = document.getElementById('eqListBody');
     const keyword = (document.getElementById('eqSearchInput').value || '').toLowerCase();
@@ -8957,7 +9030,8 @@ window.renderEquipmentList = function() {
     tbody.innerHTML = '';
     let shown = 0;
 
-    equipmentList.forEach(eq => {
+    const source = equipmentSearchActive ? equipmentSearchResults : equipmentList;
+    source.forEach(eq => {
         const searchable = `${eq.customerName || ''} ${eq.brand || ''} ${eq.salesName || ''} ${eq.model || ''} ${eq.serialNo || ''} ${eq.assetId || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
 
