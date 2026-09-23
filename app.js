@@ -8846,9 +8846,9 @@ window.exportOrdersByDate = async function() {
 /* =========================================================
    儀器管理系統：客戶儀器維修保養／校正紀錄
    ========================================================= */
-// 儀器管理系統的查看權限：業務只能看到自己名下的儀器，管理員／工程師／採購可看到全部
+// 儀器管理系統的查看權限：業務只看自己；管理員／工程師可依 Firestore Rules 查看全部。
 function canViewAllEquipment() {
-    return currentUserRole === 'admin' || currentUserRole === 'engineer' || currentUserRole === 'purchaser';
+    return currentUserRole === 'admin' || currentUserRole === 'engineer';
 }
 
 window.loadEquipmentFromCloud = function() {
