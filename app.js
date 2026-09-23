@@ -10579,6 +10579,11 @@ window.exportSalesStatisticsExcel = async function() {
                     '資料註記': contribution.estimated ? '歷史推估資料' : ''
                 };
             });
+        if(!salesStatsSensitiveVisible){
+            const sensitiveKeys=['總成本','毛利','毛利率','成本狀態','成本未填筆數'];
+            for(const row of detailRows)sensitiveKeys.forEach(key=>delete row[key]);
+            for(let i=summaryRows.length-1;i>=0;i--)if(['總成本','毛利','毛利率','成本未填筆數'].includes(summaryRows[i]['項目']))summaryRows.splice(i,1);
+        }
         const workbook = XLSX.utils.book_new();
         const appendSheet = (rows, name, widths) => {
             const sheet = XLSX.utils.json_to_sheet(rows);
