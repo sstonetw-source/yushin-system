@@ -99,7 +99,7 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
     assert.match(indexSource, /styles\.css\?v=20260923-8/);
-    assert.match(indexSource, /app\.js\?v=20260923-8/);
+    assert.match(indexSource, /app\.js\?v=20260924-2/);
 });
 
 test('product management uses server search without exposing protected cost data', () => {
@@ -156,7 +156,7 @@ test('low-stock inventory can hand off to formal replenishment purchase flow', (
     assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && canEditPage\('orders\.po'\)/);
     assert.match(appSource, /poDirectStockMode = true/);
     assert.match(appSource, /suggestedQty = Math\.max\(1, safetyStock - stock\.available\)/);
-    assert.match(appSource, /generateNextPoNumber\(\)/);
+    assert.match(appSource, /generatePoNo\(\)/);
 });
 
 test('purchase workspace shows waiting days only for open warehouse receipts', () => {
@@ -591,7 +591,7 @@ test('phase 6 supports direct stock purchase independent of customer orders and 
     assert.doesNotMatch(s,/ensurePriceListLoaded/);
     assert.match(s,/addDirectPoItem/);
     assert.match(s,/poDirectStockMode = true/);
-    assert.match(s,/generateNextPoNumber/);
+    assert.match(s,/generatePoNo/);
 });
 
 
@@ -936,7 +936,7 @@ test('direct stock purchase uses the formal PO modal and supports batch items', 
     const s = appSource.slice(start, end);
     assert.match(s, /poDirectStockMode = true/);
     assert.match(s, /addDirectPoItem/);
-    assert.match(s, /generateNextPoNumber/);
+    assert.match(s, /generatePoNo/);
     assert.match(s, /poModalOverlay/);
     assert.match(appSource, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
 });
@@ -1371,7 +1371,7 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
 test('production HTML cache-busts local application assets after main deployments', () => {
   assert.match(indexSource,/styles\.css\?v=20260923-\d+/);
   assert.match(indexSource,/modules\/workflow-core\.js\?v=20260923-\d+/);
-  assert.match(indexSource,/app\.js\?v=20260923-\d+/);
+  assert.match(indexSource,/app\.js\?v=20260924-\d+/);
   assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-\d+/);
 });
 

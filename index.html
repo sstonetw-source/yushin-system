@@ -790,15 +790,31 @@
 
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
-        <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
-        <div id="poListPanel">
+        <div class="sub-nav no-print" aria-label="採購工作流程">
+            <div class="sub-tab active" id="purchase-sub-pending" onclick="switchPurchasingView('pending', this)">待採購</div>
+            <div class="sub-tab" id="purchase-sub-arrival" onclick="switchPurchasingView('arrival', this)">到貨入庫</div>
+            <div class="sub-tab" id="purchase-sub-history" onclick="switchPurchasingView('history', this)">訂購單記錄</div>
+        </div>
+        <div id="purchasePendingPanel">
             <div class="toolbar no-print">
-                <input type="text" id="poListSearch" placeholder="搜尋單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
+                <button type="button" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">🔄 重新整理</button>
+                <button type="button" onclick="openDirectStockPurchase()">＋ 原廠備貨採購</button>
+                <span id="purchasePendingStatus" role="status"></span>
+            </div>
+            <div class="table-wrap"><table>
+                <thead><tr><th>訂單日期</th><th>來源訂單</th><th>客戶</th><th>負責業務</th><th>待採購品項</th><th>操作</th></tr></thead>
+                <tbody id="purchasePendingBody"></tbody>
+            </table></div>
+            <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
+        </div>
+        <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
+        <div id="poListPanel" style="display:none">
+            <div class="toolbar no-print">
+                <input type="text" id="poListSearch" placeholder="搜尋已載入的單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
                 <select id="poPeriodFilter" onchange="renderPoList()">
                     <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
                 </select>
                 <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
-                <button onclick="openDirectStockPurchase()">＋ 原廠備貨採購</button>
             </div>
             <table>
                 <thead><tr><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
