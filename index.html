@@ -791,9 +791,9 @@
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
         <div class="sub-nav no-print" aria-label="採購工作流程">
-            <div class="sub-tab active" id="purchase-sub-pending" onclick="switchPurchasingView('pending', this)">待採購</div>
-            <div class="sub-tab" id="purchase-sub-arrival" onclick="switchPurchasingView('arrival', this)">到貨入庫</div>
-            <div class="sub-tab" id="purchase-sub-history" onclick="switchPurchasingView('history', this)">訂購單記錄</div>
+            <div class="sub-tab active" id="purchase-sub-ordering" onclick="switchPurchasingView('ordering', this)">訂購</div>
+            <div class="sub-tab" id="purchase-sub-receiving" onclick="switchPurchasingView('receiving', this)">收貨</div>
+            <div class="sub-tab" id="purchase-sub-dispatch" onclick="switchPurchasingView('dispatch', this)">發貨</div>
         </div>
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
@@ -822,6 +822,18 @@
             </table>
             <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何訂購單。</div>
             <div class="po-load-more-row no-print"><button type="button" id="poLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMorePurchaseOrders()">載入更多（每次 50 筆）</button></div>
+        </div>
+        <div id="purchaseDispatchPanel" style="display:none">
+            <div class="toolbar no-print">
+                <button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">🔄 重新整理</button>
+                <span id="purchaseDispatchStatus" role="status"></span>
+            </div>
+            <div class="inventory-summary-note">顯示已到貨、尚有待打單數量的訂單。完成出貨單後按「已打單」，訂單即進入可出貨狀態。</div>
+            <div class="table-wrap"><table>
+                <thead><tr><th>訂單日期</th><th>訂單</th><th>客戶</th><th>負責業務</th><th>待打單品項</th><th>操作</th></tr></thead>
+                <tbody id="purchaseDispatchBody"></tbody>
+            </table></div>
+            <div class="po-load-more-row no-print"><button type="button" id="purchaseDispatchMoreBtn" class="btn-secondary" style="display:none" onclick="loadPurchasingDispatchOrders(false)">載入更多（每次 50 筆）</button></div>
         </div>
     </div>
 
@@ -1339,6 +1351,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260923-1"></script>
-    <script src="app.js?v=20260924-1"></script>
+    <script src="app.js?v=20260924-3"></script>
 </body>
 </html>
