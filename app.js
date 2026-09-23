@@ -9478,7 +9478,7 @@ window.exportEquipmentExcel = async function() {
 };
 
 /* =========================================================
-   管理員雲端後台：業務名單、價格表、估價單記錄管理
+   管理員雲端後台：人員、Product Master、廠牌、進銷存、倉庫與資料庫管理
    ========================================================= */
 window.switchAdminTab = function(tab, el) {
     document.querySelectorAll('#admin-system .sub-tab').forEach(t => t.classList.remove('active'));
@@ -9497,7 +9497,7 @@ window.switchAdminTab = function(tab, el) {
     });
     // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
     if (tab === 'statistics') ensurePriceListLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
-    if (tab === 'quotes') loadAllQuotesFromCloud();
+    if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
     if (tab === 'storage') resetCleanupPreview();
 };
@@ -10680,7 +10680,6 @@ function loadAllUsersForAdmin() {
                 phone: d.phone || '',
                 role: d.role || 'sales',
                 email: d.email || '',
-                productLineIds: Array.isArray(d.productLineIds) ? d.productLineIds : [],
                 disabled: !!d.disabled,
                 mustChangePassword: !!d.mustChangePassword
             });
