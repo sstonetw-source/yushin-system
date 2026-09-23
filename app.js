@@ -5950,10 +5950,11 @@ function renderPurchasingDispatchOrders() {
     body.innerHTML='';
     purchasingDispatchCache.forEach(order=>{
         const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>row.state.pending>0);
-        if(!pending.length)return;
-        const tr=document.createElement('tr');
-        tr.innerHTML=`<td>${escapeHtml(order.orderDate||'')}</td><td>${escapeHtml(order.orderNo||order.id)}</td><td>${escapeHtml(order.customerName||order.customer||'')}</td><td>${escapeHtml(order.salesName||'')}</td><td>${pending.map(({item,state})=>`${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}`).join('<br>')}</td><td>${pending.map(({item,state})=>`<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button>`).join(' ')}</td>`;
-        body.appendChild(tr);
+        pending.forEach(({item,state})=>{
+            const tr=document.createElement('tr');
+            tr.innerHTML=`<td>${escapeHtml(order.orderDate||'')}</td><td>${escapeHtml(order.orderNo||order.id)}</td><td>${escapeHtml(order.customerName||order.customer||'')}</td><td>${escapeHtml(order.salesName||'')}</td><td>${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td><button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button></td>`;
+            body.appendChild(tr);
+        });
     });
     if(status)status.textContent=purchasingDispatchLoading?'載入中…':(body.children.length?`已顯示 ${body.children.length} 張待打單訂單`:'目前載入範圍內沒有待打單訂單');
     if(more){more.style.display=purchasingDispatchHasMore?'':'none';more.disabled=purchasingDispatchLoading;}
@@ -5970,10 +5971,11 @@ function renderPendingPurchaseOrders() {
     body.innerHTML = '';
     for (const order of pendingPurchaseCache) {
         const items = pendingPurchaseLines(order);
-        if (!items.length) continue;
-        const row = document.createElement('tr');
-        row.innerHTML = `<td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.orderNo || order.id)}</td><td>${escapeHtml(order.customer || order.customerName || '')}</td><td>${escapeHtml(order.salesName || '')}</td><td>${items.map(item => `${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}`).join('<br>')}</td><td><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}')">建立訂購單</button></td>`;
-        body.appendChild(row);
+        for (const item of items) {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.orderNo || order.id)}</td><td>${escapeHtml(order.customer || order.customerName || '')}</td><td>${escapeHtml(order.salesName || '')}</td><td>${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">建立訂購單</button></td>`;
+            body.appendChild(row);
+        }
     }
     const status = document.getElementById('purchasePendingStatus');
     if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 張待採購訂單` : '目前載入範圍內沒有待採購訂單');
@@ -6006,7 +6008,7 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     }
 };
 
-window.openOrderPurchaseDraft = async function(orderId) {
+window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const button = [...document.querySelectorAll('#purchasePendingBody button')].find(el => el.getAttribute('onclick')?.includes(`'${orderId}'`));
     if (button) { button.disabled = true; button.textContent = '載入中…'; }
@@ -6017,8 +6019,9 @@ window.openOrderPurchaseDraft = async function(orderId) {
         if (normalizedOrderStatus(order) !== 'normal') throw new Error('訂單已取消或作廢');
         await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCosts([order])]);
         if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-        const items = pendingPurchaseLines(order);
-        if (!items.length) throw new Error('這張訂單已無待採購數量');
+        const pendingItems = pendingPurchaseLines(order);
+        const items = itemId ? pendingItems.filter(item => item.itemId === itemId) : pendingItems.slice(0, 1);
+        if (!items.length) throw new Error('此品項已無待採購數量');
         poDirectStockMode = false;
         poEditingId = null;
         poItems = items;
@@ -6136,20 +6139,25 @@ window.renderPoList = function() {
         const companyInfo = companyData[po.company];
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td data-th="單號">${escapeHtml(po.poNo || '')}</td>
-            <td data-th="公司">${escapeHtml(companyLabel)}</td>
-            <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
-            <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
-            <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
-            <td data-th="等待天數">${escapeHtml(poWaitingDays(po) || '—')}</td>
-            <td data-th="品項數">${items.length}</td>
-            <td data-th="總計金額">${grandTotal.toLocaleString()}</td>
-            <td data-th="到貨進度">${escapeHtml(poReceiptLabel(po))}</td>
-            <td data-th="操作" class="no-print">${poActionHtml(po)}</td>
-        `;
-        tbody.appendChild(tr);
+        items.forEach((item,itemIndex)=>{
+            const received=receivedQuantityForPoItem(po,itemIndex);
+            const itemTotal=Math.round(Number(item.qty||0)*Number(item.unitPrice||0)*1.05);
+            const complete=received>=Number(item.qty||0);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td data-th="單號">${escapeHtml(po.poNo || '')}</td>
+                <td data-th="公司">${escapeHtml(companyLabel)}</td>
+                <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
+                <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
+                <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
+                <td data-th="等待天數">${escapeHtml(complete?'—':(poWaitingDays(po)||'—'))}</td>
+                <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${Number(item.qty||0)}</td>
+                <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
+                <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${Number(item.qty||0)}`:`待到貨 0/${Number(item.qty||0)}`}</td>
+                <td data-th="操作" class="no-print">${complete?'<span>已完成</span>':`<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">📥 到貨入庫</button>`} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
+            `;
+            tbody.appendChild(tr);
+        });
     });
 
     document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
@@ -6434,6 +6442,33 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
     const freeQty=Math.max(0,Number(qty||0)-reservedForSource);
     if(freeQty>0)await allocateFreeReceiptStockToShortages(receivedProductKey,receivedWarehouseId,freeQty,actor,sourceOrderId);
 }
+
+window.receivePurchaseOrderItem = function(poId,itemIndex) {
+    if (!canEditPage('orders.po')) return;
+    const po=poListCache.find(p=>p.id===poId);
+    if(!po)return;
+    const items=purchaseItemsFromSavedPo(po),item=items[itemIndex];
+    if(!item)return;
+    const received=receivedQuantityForPoItem(po,itemIndex);
+    const remaining=Math.max(0,Number(item.qty||0)-received);
+    if(remaining<=0){alert('此品項已全部到貨。');return;}
+    if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){alert('此品項為原廠直送，不需執行入庫。');return;}
+    poReceiptTargetId=poId;
+    const body=document.getElementById('poReceiptBatchBody');
+    const title=document.getElementById('poReceiptBatchTitle');
+    if(title)title.textContent=`到貨入庫｜${po.poNo||po.id}｜${item.itemCode||item.itemName||''}`;
+    body.innerHTML=`
+        <tr data-index="${itemIndex}">
+            <td><input type="checkbox" class="po-receive-select" checked></td>
+            <td>${escapeHtml(item.itemCode||'')}</td>
+            <td>${escapeHtml(item.itemName||'')}</td>
+            <td>${Number(item.qty||0)}</td><td>${received}</td><td>${remaining}</td>
+            <td><input type="number" class="po-receive-qty" min="0" max="${remaining}" step="any" value="${remaining}" style="width:85px;"></td>
+            <td><input type="text" class="po-receive-lot" placeholder="批號"></td>
+            <td><input type="date" class="po-receive-expiry"></td>
+        </tr>`;
+    document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
+};
 
 window.receivePurchaseOrder = function(poId) {
     if (!canEditPage('orders.po')) return;
