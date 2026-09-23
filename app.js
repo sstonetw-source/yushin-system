@@ -8799,13 +8799,13 @@ window.exportOrdersByDate = async function() {
 
     // Firestore 不支援同時對兩個不同欄位做範圍查詢，日期區間已經用掉唯一的範圍條件，
     // 所以業務姓名這邊改成撈出區間內全部訂單後，在前端依身分過濾（同時比對新舊兩種業務欄位格式）
-    db.collection('orders')
+    const exportQuery = db.collection('orders')
         .where('orderDate', '>=', start)
         .where('orderDate', '<=', end)
-        .get().then(async snapshot => {
+        .orderBy('orderDate');
+    readQueryInBatches(exportQuery).then(async records => {
             const rows = [];
-            snapshot.forEach(doc => {
-                const o = doc.data();
+            records.forEach(o => {
                 if (!canViewAllData('orders') && !belongsToCurrentUser(o.salesName, o.ownerUid)) {
                     return;
                 }
@@ -9308,8 +9308,11 @@ window.handleEquipmentExcelUpload = async function(input) {
             // 依權限範圍建立「儀器編號 -> 文件ID」索引；一般角色不讀取其他業務資料。
             const existingPromise = canViewAllEquipment()
                 ? readCollectionInBatches('equipment')
-                : db.collection('equipment').where('salesName', '==', currentUserName).get()
-                    .then(snapshot => snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                : readQueryInBatches(
+                    currentUserCode
+                        ? db.collection('equipment').where('salesCode', '==', currentUserCode).orderBy('salesCode')
+                        : db.collection('equipment').where('salesName', '==', currentUserName).orderBy('salesName')
+                );
 
             existingPromise.then(records => {
                 const idMap = new Map();
