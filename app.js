@@ -642,7 +642,7 @@ function initializePageData(mainKey) {
         ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
         loadOrdersFromCloud();
     }
-    if (mainKey === 'orders.po') switchPurchasingView(canCreatePurchaseOrderCapability() ? 'pending' : 'arrival');
+    if (mainKey === 'orders.po') switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
     if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') ensureSalesListLoaded().then(() => {
         populateEquipmentSalesDropdown();
@@ -5837,27 +5837,84 @@ let poListCache = [];
 let poListCursor = null;
 let poListHasMore = false;
 let poListPageLoading = false;
-let purchasingView = 'pending';
+let purchasingView = 'ordering';
 let pendingPurchaseCursor = null;
 let pendingPurchaseHasMore = true;
 let pendingPurchaseLoading = false;
 let pendingPurchaseCache = [];
 let pendingPurchaseError = '';
+let purchasingDispatchCache = [];
+let purchasingDispatchCursor = null;
+let purchasingDispatchHasMore = true;
+let purchasingDispatchLoading = false;
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['pending', 'arrival', 'history'].includes(view)) return;
-    if (view === 'pending' && !canCreatePurchaseOrderCapability()) return;
+    if (!['ordering', 'receiving', 'dispatch'].includes(view)) return;
+    if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
-    const pendingTab = document.getElementById('purchase-sub-pending');
-    if (pendingTab) pendingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const orderingTab = document.getElementById('purchase-sub-ordering');
+    if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchasing-system > .sub-nav .sub-tab').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-sub-${view}`))));
-    document.getElementById('purchasePendingPanel').style.display = view === 'pending' ? '' : 'none';
-    document.getElementById('poListPanel').style.display = view === 'pending' ? 'none' : '';
-    if (view === 'pending') loadPendingPurchaseOrders(true);
-    else if (poListCache.length) renderPoList();
-    else loadMyPurchaseOrders();
+    const pendingPanel=document.getElementById('purchasePendingPanel');
+    const poPanel=document.getElementById('poListPanel');
+    const dispatchPanel=document.getElementById('purchaseDispatchPanel');
+    if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
+    if(poPanel)poPanel.style.display=view==='receiving'?'':'none';
+    if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
+    if (view === 'ordering') loadPendingPurchaseOrders(true);
+    else if (view === 'receiving') {
+        if (poListCache.length) renderPoList();
+        else loadMyPurchaseOrders();
+    } else loadPurchasingDispatchOrders(true);
 };
+
+async function loadPurchasingDispatchOrders(reset=true) {
+    if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
+    if (reset) { purchasingDispatchCache=[]; purchasingDispatchCursor=null; purchasingDispatchHasMore=true; }
+    purchasingDispatchLoading=true;
+    renderPurchasingDispatchOrders();
+    try {
+        let q=db.collection('orders').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT);
+        if(purchasingDispatchCursor) q=q.startAfter(purchasingDispatchCursor);
+        const snap=await q.get();
+        if(!snap.empty)purchasingDispatchCursor=snap.docs[snap.docs.length-1];
+        purchasingDispatchHasMore=snap.size===DEFAULT_LIST_LIMIT;
+        snap.forEach(doc=>{
+            const order={id:doc.id,...doc.data()};
+            if(normalizedOrderStatus(order)!=='normal')return;
+            const pendingItems=normalizedOrderItems(order).filter(item=>itemDispatchState(order,item).pending>0);
+            if(!pendingItems.length)return;
+            const index=purchasingDispatchCache.findIndex(x=>x.id===order.id);
+            if(index>=0)purchasingDispatchCache[index]=order;else purchasingDispatchCache.push(order);
+        });
+    } catch(err) {
+        console.error('採購發貨清單載入失敗：',err);
+        const status=document.getElementById('purchaseDispatchStatus');
+        if(status)status.textContent='載入失敗：'+(err.message||err);
+    } finally {
+        purchasingDispatchLoading=false;
+        renderPurchasingDispatchOrders();
+    }
+}
+window.loadPurchasingDispatchOrders=loadPurchasingDispatchOrders;
+
+function renderPurchasingDispatchOrders() {
+    const body=document.getElementById('purchaseDispatchBody');
+    const status=document.getElementById('purchaseDispatchStatus');
+    const more=document.getElementById('purchaseDispatchMoreBtn');
+    if(!body)return;
+    body.innerHTML='';
+    purchasingDispatchCache.forEach(order=>{
+        const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>row.state.pending>0);
+        if(!pending.length)return;
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${escapeHtml(order.orderDate||'')}</td><td>${escapeHtml(order.orderNo||order.id)}</td><td>${escapeHtml(order.customerName||order.customer||'')}</td><td>${escapeHtml(order.salesName||'')}</td><td>${pending.map(({item,state})=>`${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}`).join('<br>')}</td><td>${pending.map(({item,state})=>`<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button>`).join(' ')}</td>`;
+        body.appendChild(tr);
+    });
+    if(status)status.textContent=purchasingDispatchLoading?'載入中…':(body.children.length?`已顯示 ${body.children.length} 張待打單訂單`:'目前載入範圍內沒有待打單訂單');
+    if(more){more.style.display=purchasingDispatchHasMore?'':'none';more.disabled=purchasingDispatchLoading;}
+}
 
 function pendingPurchaseLines(order) {
     if (normalizedOrderStatus(order) !== 'normal') return [];
@@ -6026,8 +6083,8 @@ window.renderPoList = function() {
         const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
         // 未到貨 PO 屬於未完成狀態，跨期間保留；已完成 PO 依訂購日期套用統計期間。
-        if (purchasingView === 'arrival' && (poReceiptProgress(po).complete || poReceiptProgress(po).directShipOnly)) return;
-        if (purchasingView === 'history' && poReceiptProgress(po).complete && !dateInUnifiedPeriod(po.poDate || po.createdAt, periodFilter)) return;
+        if (purchasingView === 'receiving' && (poReceiptProgress(po).complete || poReceiptProgress(po).directShipOnly)) return;
+        if (purchasingView === 'receiving' && poReceiptProgress(po).complete) return;
         shown++;
 
         const items = purchaseItemsFromSavedPo(po);
@@ -7082,7 +7139,7 @@ window.printPurchaseOrder = async function() {
         poEditingId = savedPo.id;
         renderOrdersList();
         renderPoList();
-        if (purchasingView === 'pending') loadPendingPurchaseOrders(true);
+        if (purchasingView === 'ordering') loadPendingPurchaseOrders(true);
 
         // 雲端確認沒有重複下單後才開啟列印。
         printSavedPoDocument(poNo, vendorName);
