@@ -994,7 +994,6 @@ function productManagementRow(product) {
       <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
       <td data-th="廠牌">${escapeHtml(product.brandName || product.brand || '')}</td>
       <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
-      <td data-th="單位">${escapeHtml(product.unit || '')}</td>
       <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
       <td data-th="快速操作" class="no-print product-management-actions">
         ${canAccessPage('quote.create') ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
@@ -1091,7 +1090,6 @@ function productManagementSource(product) {
         itemName: product.productName || product.nameCn || product.nameEn || '',
         brand: product.brandName || product.brand || '',
         spec: product.specification || product.spec || '',
-        unit: product.unit || '',
         price: Number(product.listPrice ?? product.price ?? 0),
         unitPrice: Number(product.listPrice ?? product.price ?? 0),
         qty: 1,
@@ -1909,7 +1907,6 @@ async function forecastOrderItems(forecast) {
                 productType: item.productType || '',
                 spec: item.spec || '',
                 qty: Number(item.qty || 1),
-                unit: item.unit || '',
                 price: parseMoney(item.price),
                 subtotal: parseMoney(item.subtotal)
             }));
@@ -1931,7 +1928,6 @@ async function forecastOrderItems(forecast) {
         productType: match?.productType || '',
         spec: match?.spec || '',
         qty: 1,
-        unit: match?.unit || '',
         price: parseMoney(match?.price || forecast.estimatedAmount || 0),
         subtotal: parseMoney(match?.price || forecast.estimatedAmount || 0)
     }];
@@ -1949,7 +1945,6 @@ function forecastItemToOrderSource(forecast, item) {
         itemCode: item.model || '',
         brand: normalizeForecastBrand(item.brand || forecast.brand || match?.brand || ''),
         qty,
-        unit: item.unit || match?.unit || '',
         unitPrice,
         totalPrice,
         costPrice: safeEmbeddedOrderCost(match, match?.cost),
@@ -4198,7 +4193,6 @@ window.createForecastFromQuote = async function(quoteNo) {
                 productType: item.productType || '',
                 spec: item.spec || '',
                 qty: Number(item.qty || 1),
-                unit: item.unit || '',
                 price: parseMoney(item.price),
                 subtotal: parseMoney(item.subtotal)
             })),
@@ -4268,7 +4262,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
                 itemCode:item.model||'', itemCodeKey:normalizeHistoryItemCode(item.model||''),
                 itemName:item.nameCn||item.nameEn||'', brand, productLine:item.productLine||priceMatch?.productLine||'',
                 productType:item.productType||priceMatch?.productType||'', spec:item.spec||priceMatch?.spec||'',
-                supplier:priceMatch?.supplier||'', qty:Number(item.qty||1), unit:item.unit||priceMatch?.unit||'',
+                supplier:priceMatch?.supplier||'', qty:Number(item.qty||1),
                 unitPrice:parseMoney(item.price||0), totalPrice:parseMoney(item.subtotal||0),
                 fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id||''
             };
@@ -4651,7 +4645,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
     poItems = [{
         orderId:'', itemName:item.itemName || match?.nameCn || match?.nameEn || '',
         itemCode:item.itemCode || match?.model || '', productId:item.productId || item.productKey || match?.productId || '',
-        brand:resolveBrandName(item.brand || match?.brand || ''), qty:suggestedQty, unit:match?.unit || '',
+        brand:resolveBrandName(item.brand || match?.brand || ''), qty:suggestedQty,
         unitPrice, supplier:match?.supplier || '', productLine:match?.productLine || '',
         fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
     }];
@@ -4998,7 +4992,6 @@ function legacyOrderItemFromOrder(order, index = 0) {
         spec: order?.spec || '',
         supplier: order?.supplier || '',
         qty: Number(order?.qty || 0),
-        unit: order?.unit || '',
         unitPrice: parseMoney(order?.unitPrice || 0),
         totalPrice: parseMoney(order?.totalPrice || 0),
         fulfillmentType: order?.fulfillmentType || 'WAREHOUSE',
@@ -5773,7 +5766,7 @@ window.renderOrdersList = function() {
             <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory('${escapeAttr(o.customerName)}')">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${normalizedOrderItems(o).map((item,index)=>`<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)} ${escapeHtml(item.unit||'')}</small></div>`).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${normalizedOrderItems(o).map((item,index)=>`<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small></div>`).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
             ${canGeneratePo ? `
             <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" value="${o.costPrice != null ? o.costPrice : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
@@ -6499,7 +6492,6 @@ function purchaseItemsFromSavedPo(po) {
         productId: item.productId || '',
         brand: item.brand || item.manufacturer || '',
         qty: parseFloat(item.qty ?? item.quantity ?? item.count) || 1,
-        unit: item.unit || '',
         unitPrice: parseFloat(item.unitPrice ?? item.costPrice ?? item.cost ?? item.purchasePrice) || 0
     })).filter(item => item.itemName || item.itemCode);
 }
@@ -6542,7 +6534,6 @@ function purchaseItemsFromOrder(order) {
             productId: item.productId || order.productId || '',
             brand,
             qty: remainingPurchase,
-            unit: item.unit || order.unit || '',
             productLine: item.productLine || order.productLine || '',
             fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
             warehouseId: item.warehouseId || order.warehouseId || '',
@@ -6582,7 +6573,7 @@ window.openDirectStockPurchase = async function() {
 
 function emptyDirectPoItem() {
     return {
-        orderId:'', itemName:'', itemCode:'', productId:'', brand:'', qty:1, unit:'', unitPrice:0, supplier:'',
+        orderId:'', itemName:'', itemCode:'', productId:'', brand:'', qty:1, unitPrice:0, supplier:'',
         productLine:'', fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
     };
 }
@@ -6608,7 +6599,6 @@ window.onDirectPoCodeChange = async function(idx, value) {
             itemName: match.nameCn || match.nameEn || '',
             productId: match.productId || stableProductId(match),
             brand: resolveBrandName(match.brand || ''),
-            unit: match.unit || '',
             unitPrice: secureCost !== null && Number.isFinite(secureCost)
                 ? secureCost
                 : (authorizationTypeForProduct(match) === 'NON_AUTHORIZED' ? Number(match.cost || 0) : 0),
@@ -8478,7 +8468,7 @@ function normalizeNewOrderItem(item = {}) {
     return {
         ...item,itemId:item.itemId||`item-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
-        brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unit:String(item.unit||'').trim(),unitPrice,totalPrice:qty*unitPrice,
+        brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
         productId:item.productId||match?.productId||stableProductId(match||item),productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
         authorizationType:match?authorizationTypeForProduct(match):(item.authorizationType||''),supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
         fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||'')
@@ -8700,7 +8690,7 @@ window.saveNewOrder = function() {
         itemName: firstItem.itemName,
         productLine: '',
         productType: '',
-        fulfillmentType:firstItem.fulfillmentType,warehouseId:firstItem.warehouseId||'',qty:firstItem.qty,unit:firstItem.unit,unitPrice:firstItem.unitPrice,
+        fulfillmentType:firstItem.fulfillmentType,warehouseId:firstItem.warehouseId||'',qty:firstItem.qty,unitPrice:firstItem.unitPrice,
         totalPrice:items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0),items,itemCount:items.length,orderSchemaVersion:2,
         status: BUSINESS_STATUS.ACTIVE,
         ...grossAmountMetadata(items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0)),
@@ -8749,7 +8739,6 @@ window.saveNewOrder = function() {
     data.authorizationType = priceMatch ? authorizationTypeForProduct(priceMatch) : '';
     if (priceMatch) {
         data.productId = priceMatch.productId || stableProductId(priceMatch);
-        data.unit = data.unit || priceMatch.unit || '';
         data.supplier = priceMatch.supplier || '';
         data.spec = priceMatch.spec || '';
     }
@@ -9853,7 +9842,6 @@ function normalizeProductMasterItem(item) {
         ...item,
         productId: item.productId || stableProductId(item),
         sku: item.sku || item.model || '',
-        unit: item.unit || '',
         supplier: item.supplier || '',
         spec: item.spec || '',
         inventoryTracked: !!item.inventoryTracked,
@@ -9924,7 +9912,6 @@ function productMasterDocToPriceItem(doc) {
         productType: data.category || data.productType || '',
         authorizationType: data.authorizationType || '',
         spec: data.specification || data.spec || '',
-        unit: data.unit || '',
         price: data.listPrice ?? data.price ?? 0,
         supplier: data.supplier || '',
         status: data.status || 'ACTIVE',
@@ -11304,7 +11291,6 @@ function productMasterRecordFromLegacyItem(item) {
         productLine: normalized.productLine || '',
         productLineId: normalized.productLine || '',
         specification: normalized.spec || '',
-        unit: normalized.unit || '',
         listPrice: Number(normalized.price || 0),
         authorizationType: authorizationTypeForProduct(normalized),
         status: normalized.active === false ? 'INACTIVE' : 'ACTIVE',
