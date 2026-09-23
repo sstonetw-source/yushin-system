@@ -11732,6 +11732,20 @@ async function confirmProductMasterImport(groups) {
 }
 
 
+window.downloadProductMasterTemplate = function() {
+    if (typeof XLSX === 'undefined') {
+        alert('Excel 元件尚未載入，請重新整理後再試。');
+        return;
+    }
+    const headers = ['貨號','中文品名','英文品名','廠牌','規格','產品線','含稅售價','含稅成本'];
+    const example = ['EXAMPLE-001','範例中文品名','Example Product','Roche','96 tests','','1000','600'];
+    const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+    ws['!cols'] = [18,28,32,18,24,18,14,14].map(wch => ({ wch }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '品牌名稱');
+    XLSX.writeFile(wb, 'Product_Master_匯入範本.xlsx');
+};
+
 window.handlePriceExcelUpload = async function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
