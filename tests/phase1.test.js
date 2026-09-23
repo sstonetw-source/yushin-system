@@ -115,6 +115,12 @@ test('product management uses server search without exposing protected cost data
     assert.match(appSource, /window\.addProductManagementToOrder/);
 });
 
+test('commercial owner selector keeps assisted documents assigned to sales role', () => {
+    assert.match(appSource, /function populateSalesDropdown\(\)/);
+    assert.match(appSource, /return role === 'sales';/);
+    assert.doesNotMatch(appSource, /return role === 'sales' \|\| role === 'engineer';/);
+});
+
 test('low-stock inventory can hand off to formal replenishment purchase flow', () => {
     assert.match(appSource, /openInventoryReplenishment/);
     assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && canEditPage\('orders\.po'\)/);
