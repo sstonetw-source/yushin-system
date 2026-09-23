@@ -5777,6 +5777,7 @@ window.renderOrdersList = function() {
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
                             ${selfOrderActionHtml(o)}
+                            ${canGeneratePo && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                         </div>
@@ -5788,6 +5789,32 @@ window.renderOrdersList = function() {
         tbody.appendChild(tr);
     });
     document.getElementById('ordersEmptyHint').style.display = shown === 0 ? 'block' : 'none';
+};
+
+window.retryOrderInventoryReservation = async function(orderId) {
+    if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser')) { alert('只有管理員或採購可以重新同步庫存占用。'); return; }
+    const order=ordersCache.find(row=>row.id===orderId);
+    if(!order){alert('找不到這筆訂單，請重新整理後再試。');return;}
+    if(order.inventoryReservationStatus!=='failed'){alert('只有庫存占用失敗的訂單可以重新同步。');return;}
+    if(normalizedOrderStatus(order)!=='normal'){alert('已取消／作廢的訂單不可重新同步庫存占用。');return;}
+    try{
+        const now=new Date().toISOString();
+        await db.collection('orders').doc(orderId).set({inventoryReservationStatus:'pending',inventoryReservationError:'',inventoryReservationUpdatedAt:now},{merge:true});
+        order.inventoryReservationStatus='pending';order.inventoryReservationError='';order.inventoryReservationUpdatedAt=now;renderOrdersList();
+        const reservation=await reserveInventoryForNewOrder(orderId,order);
+        const completedAt=new Date().toISOString();
+        const updates={inventoryReservationStatus:'completed',inventoryReservationError:'',inventoryReservationUpdatedAt:completedAt,inventoryReservedQty:reservation.reservedQty,inventoryShortageQty:reservation.shortageQty};
+        await db.collection('orders').doc(orderId).set(updates,{merge:true});
+        Object.assign(order,updates);
+        renderOrdersList();
+        alert('庫存占用已重新同步完成。');
+    }catch(err){
+        const failedAt=new Date().toISOString();
+        const updates={inventoryReservationStatus:'failed',inventoryReservationError:String(err?.message||err),inventoryReservationUpdatedAt:failedAt};
+        await db.collection('orders').doc(orderId).set(updates,{merge:true}).catch(markErr=>console.error('重新同步失敗狀態寫入失敗：',markErr));
+        Object.assign(order,updates);renderOrdersList();
+        alert('重新同步庫存占用失敗：'+(err?.message||err));
+    }
 };
 
 window.toggleAllOrderSelect = function(checkbox) {
