@@ -10197,7 +10197,7 @@ window.openQuickProductCreate = function(mode, input) {
         ? (input.closest('tr')?.querySelector('.item-spec')?.value || '')
         : (document.getElementById('orderSpec')?.value || '');
     document.getElementById('quickProductUnit').value = mode === 'quote'
-        ? (input.closest('tr')?.querySelector('.item-unit')?.value || '')
+        ? ''
         : (document.getElementById('orderUnit')?.value || '');
     document.getElementById('quickProductLine').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-product-line')?.value || '')
