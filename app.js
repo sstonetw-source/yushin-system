@@ -620,15 +620,7 @@ function showApp() {
         }
     }
 
-    // 只有採購／管理員才看得到「產生訂購單」按鈕跟業務訂單裡的成本/利潤欄位
-    const generatePoBtn = document.getElementById('generatePoBtn');
-    if (generatePoBtn) {
-        generatePoBtn.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
-    }
-    const purchaseOrderActionBar = document.getElementById('purchaseOrderActionBar');
-    if (purchaseOrderActionBar) {
-        purchaseOrderActionBar.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
-    }
+    // 採購／管理員可查看業務訂單的成本／毛利；供應商訂購流程集中在獨立採購工作台。
     const orderCostFieldWrap = document.getElementById('orderCostFieldWrap');
     if (orderCostFieldWrap) {
         orderCostFieldWrap.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
@@ -5693,11 +5685,9 @@ window.renderOrdersList = function() {
     const searchInput = document.getElementById('orderSearch');
     if (!tbody || !searchInput) return;
 
-    const canGeneratePo = currentUserRole === 'purchaser' || currentUserRole === 'admin';
-    const selectHeader = document.getElementById('orderSelectHeader');
-    if (selectHeader) selectHeader.style.display = canGeneratePo ? '' : 'none';
+    const canManageOrderOps = currentUserRole === 'purchaser' || currentUserRole === 'admin';
     const costHeader = document.getElementById('orderCostHeader');
-    if (costHeader) costHeader.style.display = canGeneratePo ? '' : 'none';
+    if (costHeader) costHeader.style.display = canManageOrderOps ? '' : 'none';
 
     populatePurchaserOrderFilters();
     const salesFilter = document.getElementById('orderSalesFilter')?.value || '';
@@ -5732,13 +5722,12 @@ window.renderOrdersList = function() {
         }
         bindListRowSelection(tr);
         tr.innerHTML = `
-            ${canGeneratePo ? `<td class="no-print" data-th="選取">${o.purchaseOrderNo ? '<span style="color:#777;font-size:10px;">已建立</span>' : `<input type="checkbox" class="order-select-checkbox" data-order-id="${o.id}">`}</td>` : ''}
             <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory('${escapeAttr(o.customerName)}')">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
             <td data-th="產品資訊" class="order-product-cell">${normalizedOrderItems(o).map((item,index)=>`<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small></div>`).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
-            ${canGeneratePo ? `
+            ${canManageOrderOps ? `
             <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" value="${o.costPrice != null ? o.costPrice : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
             <td data-th="交易資訊" class="order-transaction-cell">
                 <select onchange="updateOrderField('${o.id}','transactionType',this.value)">
@@ -5755,7 +5744,7 @@ window.renderOrdersList = function() {
                 <div class="order-compact-actions">
                     <span class="order-progress-badge">${escapeHtml(purchaseProgressInfo(o).label)}</span>
                     <span class="order-progress-badge">${escapeHtml(fulfillmentProgressInfo(o).label)}</span>
-                    ${!canGeneratePo ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
+                    ${!canManageOrderOps ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
                     <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已報帳' : '報帳'}</button>
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
@@ -5769,14 +5758,13 @@ window.renderOrdersList = function() {
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
                             ${selfOrderActionHtml(o)}
-                            ${canGeneratePo && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
+                            ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                         </div>
                     </details>
                 </div>
             </td>
-            <td class="no-print" data-th="訂購單">${o.purchaseOrderNo ? `<button type="button" class="btn-small btn-secondary" onclick="openPurchaseOrderFromOrder('${escapeAttr(o.purchaseOrderNo)}')">${escapeHtml(o.purchaseOrderNo)}</button>` : '－'}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -5807,10 +5795,6 @@ window.retryOrderInventoryReservation = async function(orderId) {
         Object.assign(order,updates);renderOrdersList();
         alert('重新同步庫存占用失敗：'+(err?.message||err));
     }
-};
-
-window.toggleAllOrderSelect = function(checkbox) {
-    document.querySelectorAll('.order-select-checkbox').forEach(cb => { cb.checked = checkbox.checked; });
 };
 
 // 採購主頁資料
