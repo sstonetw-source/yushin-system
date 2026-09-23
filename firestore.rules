@@ -34,7 +34,9 @@ service cloud.firestore {
 
     // Engineer is a business role plus engineering capability.
     function businessOwner() {
-      return sales() || engineer();
+      // Commercial ownership is reserved for sales. Engineers may assist document creation,
+      // but do not become the responsible salesperson or gain owner-only order actions.
+      return sales();
     }
 
     function businessAssistant() {
@@ -316,7 +318,7 @@ service cloud.firestore {
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
       allow create: if admin() || purchaser()
-        || (businessOwner()
+        || (sales()
           && request.resource.data.type == 'SALES_SELF_ORDER'
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.salesCode == salesCode());
@@ -325,7 +327,7 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'receivedQty', 'status', 'updatedAt'
           ]))
-        || (businessOwner()
+        || (sales()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == request.auth.uid
