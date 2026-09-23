@@ -6613,49 +6613,6 @@ async function autoFillPoSupplier(items) {
     return header;
 }
 
-window.openPurchaseOrderModal = async function() {
-    poDirectStockMode = false;
-    await loadSupplierWarehouseMasters();
-    const checked = Array.from(document.querySelectorAll('.order-select-checkbox:checked'));
-    if (checked.length === 0) {
-        alert('請先在業務訂單左邊勾選要放進訂購單的品項。');
-        return;
-    }
-
-    const selectedOrders = checked.map(cb => ordersCache.find(x => x.id === cb.dataset.orderId)).filter(Boolean);
-    const fullyPurchased=selectedOrders.filter(order=>{
-        const info=purchaseProgressInfo(order);return info.state==='ordered'||info.state==='not_required';
-    });
-    if(fullyPurchased.length===selectedOrders.length){
-        alert('選取的訂單已完成所需採購，沒有待採購數量。');return;
-    }
-    poEditingId = null;
-    populatePoVendorSuggestions();
-    await preloadPurchaseCosts(selectedOrders);
-    poAllItems = selectedOrders.flatMap(purchaseItemsFromOrder);
-    if (!poAllItems.length) {
-        alert('選取的訂單沒有可辨識的品項，請確認品名、貨號或 items 資料。');
-        return;
-    }
-    poItems = poAllItems;
-
-    document.getElementById('poVendorName').value = '';
-    document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
-    const today = new Date();
-    document.getElementById('poDate').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-    // 優先沿用來源訂單公司；舊訂單沒有 company 時，選擇能保留最多品項的公司，
-    // 避免目前估價單公司不相符而把全部採購品項靜默過濾掉。
-    const initialCompany = bestPurchaseOrderCompany(selectedOrders, poAllItems, currentCompany || 'yushin');
-    switchPoCompany(initialCompany);
-    if (!poItems.length) {
-        alert('品項已讀取，但目前三間公司的代理廠牌設定都不允許這些品項。請先到管理後台調整代理廠牌，或確認訂單廠牌是否正確。');
-        return;
-    }
-    updatePoModeUI();
-    document.getElementById('poModalOverlay').classList.add('active');
-};
-
 function populatePoVendorSuggestions() {
     const list = document.getElementById('poVendorSuggestions');
     if (!list) return;
