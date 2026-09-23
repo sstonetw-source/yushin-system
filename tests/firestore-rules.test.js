@@ -47,10 +47,35 @@ test('inactive user is denied', async () => {
   await assertFails(getDoc(doc(db('off1'), 'settings/company')));
 });
 
-test('engineer can create own quote and order', async () => {
-  const quote = { ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20' };
+test('engineer can assist a salesperson with quote and order creation', async () => {
+  const quote = {
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
+  };
   await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/q1'), quote));
   await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...quote, orderDate:'2026-09-20' }));
+});
+
+test('commercial creator audit fields cannot be rewritten by normal owner edits', async () => {
+  await seed('quotes/creator-audit', {
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
+  });
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'quotes/creator-audit'), {
+    quoteDate:'2026-09-21'
+  }));
+  await assertFails(updateDoc(doc(db('sales1'), 'quotes/creator-audit'), {
+    createdByUid:'sales1', createdByName:'Sales', createdByRole:'sales'
+  }));
+});
+
+test('legacy commercial documents without creator metadata remain editable', async () => {
+  await seed('orders/legacy-creator', {
+    ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-20'
+  });
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'orders/legacy-creator'), {
+    orderDate:'2026-09-21'
+  }));
 });
 
 test('five-role mutation matrix keeps master commercial purchase and receipt boundaries distinct', async () => {
