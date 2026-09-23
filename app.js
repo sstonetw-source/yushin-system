@@ -48,6 +48,7 @@ const PERMISSION_PAGES = [
     { key: 'quote', label: '📄 估價單系統', system: true },
     { key: 'quote.create', label: '　建立估價單' },
     { key: 'quote.my', label: '　我的估價單' },
+    { key: 'products', label: '產品管理', system: true },
     { key: 'orders', label: '📦 訂單管理系統', system: true },
     { key: 'orders.list', label: '　業務訂單' },
     { key: 'orders.po', label: '　採購訂單' },
@@ -386,6 +387,16 @@ function loadRolePermissions() {
         if (!doc.exists) return;
         rolePermissions = doc.exists ? (doc.data().roles || {}) : {};
         roleDataScopes = doc.exists ? (doc.data().dataScopes || {}) : {};
+        // 新增產品管理頁時保持既有權限設定相容：只要原本可查看估價、訂單或庫存，
+        // 就先提供唯讀 Product Master。管理員日後可在身份權限中明確設定 products。
+        ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => {
+            const configured = rolePermissions[role] || {};
+            if (configured.products !== undefined) return;
+            const sourceLevels = ['quote', 'orders', 'inventory'].map(key => PERMISSION_LEVELS[configured[key] || 'none']);
+            if (Math.max(...sourceLevels) >= PERMISSION_LEVELS.view) {
+                rolePermissions[role] = { ...configured, products: 'view' };
+            }
+        });
     }).catch(err => console.warn('讀取身份權限設定失敗，將不授予任何非管理員權限：', err));
 }
 
@@ -498,6 +509,7 @@ function getActivePermissionPage() {
     if (section.id === 'quote-system') return document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'quote.my' : 'quote.create';
     if (section.id === 'order-system') return document.getElementById('poListPanel')?.style.display === 'block' ? 'orders.po' : 'orders.list';
     if (section.id === 'forecast-system') return 'forecast';
+    if (section.id === 'product-system') return 'products';
     if (section.id === 'inventory-system') return 'inventory';
     if (section.id === 'equipment-system') return 'equipment';
     if (section.id === 'admin-system') return 'admin';
@@ -529,7 +541,7 @@ function updateReadonlyNotice() {
 }
 
 function firstAccessibleMainPage() {
-    return ['forecast', 'quote', 'orders', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
+    return ['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
 }
 
 function showLoginScreen() {
@@ -564,10 +576,10 @@ function showApp() {
 
     applyPermissionVisibility();
     const activeSection = document.querySelector('.content-section.active');
-    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
+    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
     if (activeMainKey && !canAccessPage(activeMainKey)) {
         const fallback = firstAccessibleMainPage();
-        const fallbackId = { forecast:'forecast-system', quote:'quote-system', orders:'order-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
+        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', orders:'order-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
         if (fallbackId) {
             document.getElementById('noPermissionMessage')?.remove();
             setTimeout(() => actuallySwitchMainTab(fallbackId), 0);
@@ -609,6 +621,7 @@ function showApp() {
 function initializePageData(mainKey) {
     if (mainKey === 'forecast') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
+    if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
     if (mainKey === 'orders') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(loadOrdersFromCloud);
     if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => {
@@ -898,7 +911,7 @@ window.switchViewRole = function(role) {
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
-    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
+    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
     if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
         return;
@@ -921,6 +934,8 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
         if (!options.skipReload) loadForecasts(true);
     } else if (tabId === 'equipment-system') {
         if (!options.skipReload) initializePageData('equipment');
+    } else if (tabId === 'product-system') {
+        if (!options.skipReload) initializePageData('products');
     } else if (tabId === 'order-system') {
         const orderView = canAccessPage('orders.list') ? 'list' : 'po';
         if (!options.preserveSubView) switchOrderView(orderView, document.getElementById(orderView === 'list' ? 'osub-list' : 'osub-po'), { skipHistory: true });
@@ -934,6 +949,142 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
     }
     updateReadonlyNotice();
 }
+
+/* =========================================================
+   產品管理：唯讀 Product Master 搜尋
+   - 直接查 Firestore products，不依賴目前已載入的 500 筆快取
+   - 不讀 productCosts，避免一般業務畫面暴露成本
+   ========================================================= */
+let productManagementResults = [];
+let productManagementSearchInProgress = false;
+
+function productManagementRow(product) {
+    const productId = product.productId || product.id || '';
+    const price = Number(product.listPrice ?? product.price ?? 0);
+    return `<tr>
+      <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
+      <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
+      <td data-th="廠牌">${escapeHtml(product.brandName || product.brand || '')}</td>
+      <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
+      <td data-th="單位">${escapeHtml(product.unit || '')}</td>
+      <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
+      <td data-th="快速操作" class="no-print product-management-actions">
+        ${canAccessPage('quote.create') ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
+        ${canAccessPage('orders.list') ? `<button type="button" class="btn-small btn-secondary" onclick="addProductManagementToOrder('${escapeAttr(productId)}')">建立訂單</button>` : ''}
+      </td>
+    </tr>`;
+}
+
+function renderProductManagementResults() {
+    const body = document.getElementById('productManagementBody');
+    if (!body) return;
+    body.innerHTML = productManagementResults.length
+        ? productManagementResults.map(productManagementRow).join('')
+        : '<tr><td colspan="7" class="empty-hint">查無符合產品。</td></tr>';
+}
+
+window.clearProductManagementSearch = function(options = {}) {
+    productManagementResults = [];
+    const input = document.getElementById('productManagementSearch');
+    const status = document.getElementById('productManagementSearchStatus');
+    const body = document.getElementById('productManagementBody');
+    if (input && !options.preserveInput) input.value = '';
+    if (status) status.textContent = '';
+    if (body) body.innerHTML = '<tr><td colspan="7" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
+};
+
+window.searchProductManagement = async function() {
+    if (productManagementSearchInProgress || !canAccessPage('products')) return;
+    const input = document.getElementById('productManagementSearch');
+    const button = document.getElementById('productManagementSearchBtn');
+    const status = document.getElementById('productManagementSearchStatus');
+    const raw = String(input?.value || '').trim();
+    if (raw.length < 2) {
+        if (status) status.textContent = '請至少輸入 2 個字或完整貨號。';
+        return;
+    }
+    productManagementSearchInProgress = true;
+    if (button) { button.disabled = true; button.textContent = '搜尋中…'; }
+    if (input) input.disabled = true;
+    if (status) status.textContent = '正在搜尋完整 Product Master…';
+    try {
+        const normalized = normalizeItemCodeLoose(raw);
+        const end = raw + '\uf8ff';
+        const [codeSnap, nameSnap] = await Promise.all([
+            firestoreReadWithTimeout(
+                db.collection('products').where('normalizedPartNo', '==', normalized).limit(50).get(),
+                '產品貨號搜尋'
+            ),
+            firestoreReadWithTimeout(
+                db.collection('products').orderBy('productName').startAt(raw).endAt(end).limit(50).get(),
+                '產品品名搜尋'
+            ).catch(() => ({ docs: [] }))
+        ]);
+        const map = new Map();
+        [...(codeSnap.docs || []), ...(nameSnap.docs || [])].forEach(doc => {
+            const data = { id: doc.id, ...doc.data() };
+            if (data.status !== 'INACTIVE') map.set(doc.id, data);
+        });
+        productManagementResults = [...map.values()].slice(0, 50);
+        renderProductManagementResults();
+        if (status) status.textContent = `完成，共 ${productManagementResults.length} 筆。`;
+    } catch (err) {
+        console.error('產品管理搜尋失敗：', err);
+        productManagementResults = [];
+        renderProductManagementResults();
+        if (status) status.textContent = '搜尋失敗，請稍後再試。';
+    } finally {
+        productManagementSearchInProgress = false;
+        if (button) { button.disabled = false; button.textContent = '搜尋產品'; }
+        if (input) { input.disabled = false; input.focus(); }
+    }
+};
+
+function productManagementSource(product) {
+    return {
+        productId: product.productId || product.id || '',
+        model: product.manufacturerPartNo || product.sku || '',
+        itemCode: product.manufacturerPartNo || product.sku || '',
+        nameCn: product.productName || product.nameCn || '',
+        nameEn: product.nameEn || '',
+        itemName: product.productName || product.nameCn || product.nameEn || '',
+        brand: product.brandName || product.brand || '',
+        spec: product.specification || product.spec || '',
+        unit: product.unit || '',
+        price: Number(product.listPrice ?? product.price ?? 0),
+        unitPrice: Number(product.listPrice ?? product.price ?? 0),
+        qty: 1,
+        productLine: product.productLine || '',
+        productType: product.category || product.productType || ''
+    };
+}
+
+window.addProductManagementToQuote = function(productId) {
+    const product = productManagementResults.find(item => (item.productId || item.id) === productId);
+    if (!product || !canAccessPage('quote.create')) return;
+    actuallySwitchMainTab('quote-system', document.querySelector('[data-main-nav="quote"]'));
+    switchQuoteView('create', document.getElementById('qsub-create'), { skipHistory: true });
+    ensureQuoteFormInitialized();
+    addQuoteRow(productManagementSource(product));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window.addProductManagementToOrder = function(productId) {
+    const product = productManagementResults.find(item => (item.productId || item.id) === productId);
+    if (!product || !canAccessPage('orders.list')) return;
+    openOrderWorkspace(document.querySelector('[data-main-nav="orders"]'));
+    openOrderModal(productManagementSource(product));
+};
+
+window.openOrderWorkspace = function(el) {
+    actuallySwitchMainTab('order-system', el, { preserveSubView: true });
+    switchOrderView('list', document.getElementById('osub-list'), { skipHistory: true });
+};
+
+window.openPurchasingWorkspace = function(el) {
+    actuallySwitchMainTab('order-system', el, { preserveSubView: true });
+    switchOrderView('po', document.getElementById('osub-po'), { skipHistory: true });
+};
 
 /* =========================================================
    Forecast：業務機會追蹤
@@ -4303,7 +4454,9 @@ window.searchBusinessProducts=async function(){
 };
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;
- const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';
+ const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();
+ const stateFilter=document.getElementById('inventoryStateFilter')?.value||'all';
+ body.innerHTML='';
  inventoryCache.forEach(x=>{
    const lots=fefoLots(x);
    const productKey=x.productKey||x.productId||'';
@@ -4316,6 +4469,10 @@ window.renderInventoryList=function(){
    const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();
    if(k&&!text.includes(k))return;
    const n=inventoryNumbers(x);
+   const safetyStock=Number(x.safetyStock||0);
+   if(stateFilter==='low' && !(n.available<=safetyStock))return;
+   if(stateFilter==='out' && n.available>0)return;
+   if(stateFilter==='reserved' && n.reserved<=0)return;
    const assignedOnHand=warehouseRows.reduce((sum,row)=>sum+row.n.onHand,0);
    const assignedReserved=warehouseRows.reduce((sum,row)=>sum+row.n.reserved,0);
    const assignedIncoming=warehouseRows.reduce((sum,row)=>sum+row.n.incoming,0);
@@ -5503,6 +5660,9 @@ window.switchOrderView = function(view, el, options = {}) {
 
     document.getElementById('orderListPanel').style.display = view === 'list' ? 'block' : 'none';
     document.getElementById('poListPanel').style.display = view === 'po' ? 'block' : 'none';
+    document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+    const mainNav = document.querySelector(`[data-main-nav="${view === 'po' ? 'purchasing' : 'orders'}"]`);
+    if (mainNav) mainNav.classList.add('active');
 
     if (view === 'po' && !options.skipReload && poListCache.length === 0) loadMyPurchaseOrders();
     updateReadonlyNotice();
