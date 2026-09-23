@@ -11722,7 +11722,7 @@ function renderPriceCatalogSummary() {
         <tr>
             <td>${escapeHtml(item.name)}</td>
             <td>${escapeHtml(formatPriceCatalogTime(item.updatedAt))}</td>
-            <td class="no-print"><button type="button" class="btn-danger" data-brand="${escapeAttr(item.name)}" onclick="deletePriceBrand(this.dataset.brand)">刪除這份價格表</button></td>
+            <td class="no-print"><span style="font-size:12px;color:#666;">重新上傳同廠牌即可更新</span></td>
         </tr>
     `).join('') : '<tr><td colspan="3" style="color:#888;">目前雲端沒有價格表。</td></tr>';
 }
@@ -11761,39 +11761,6 @@ window.loadPriceCatalogSummary = function() {
     }).catch(err => {
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" style="color:#c00;">載入失敗：${escapeHtml(err.message)}</td></tr>`;
     });
-};
-
-window.deletePriceBrand = async function(brandName) {
-    if (!confirm(`確定要刪除「${brandName}」整個廠牌的價格資料嗎？此動作無法復原。`)) return;
-    try {
-        const priceDoc = db.collection('settings').doc('prices');
-        const doc = await priceDoc.get();
-        const meta = doc.exists ? doc.data() : {};
-        const brands = Array.isArray(meta.brands) ? meta.brands : [];
-        const entry = brands.find(b => b.name === brandName);
-
-        if (entry) {
-            const chunkCount = entry.chunkCount || 1;
-            for (let i = 0; i < chunkCount; i++) {
-                const docId = i === 0 ? entry.id : `${entry.id}-part${i}`;
-                await db.collection('settings').doc(docId).delete().catch(() => {});
-            }
-            const remainingBrands = brands.filter(b => b.id !== entry.id);
-            await priceDoc.set({ brands: remainingBrands, updatedAt: new Date().toISOString() }, { merge: true });
-        } else {
-            // 舊版資料可能還存在 settings/prices 文件的 list 欄位裡，一併清掉。
-            const legacyList = Array.isArray(meta.list) ? meta.list.filter(item => (item.brand || '').trim() !== brandName) : [];
-            await priceDoc.set({ list: legacyList, updatedAt: new Date().toISOString() }, { merge: true });
-        }
-
-        priceList = priceList.filter(p => (p.brand || '').trim().toLocaleLowerCase() !== brandName.toLocaleLowerCase());
-        refreshPriceDatalists();
-        loadPriceCatalogSummary();
-        renderCompanyAgencyBrandSettings();
-        alert(`已刪除「${brandName}」的價格資料。`);
-    } catch (err) {
-        alert('刪除失敗：' + err.message);
-    }
 };
 
 // 價格表僅能透過上傳 Excel 整批更新，不開放在網頁上逐筆編輯／新增／刪除
