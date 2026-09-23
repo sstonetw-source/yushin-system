@@ -1370,7 +1370,7 @@ async function runForecastHistorySearch(reset = true) {
         forecastHistorySearchCursor = null;
     }
     try {
-        let query = db.collection('forecasts').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
+        let query = scopedHistorySearchQuery('forecasts', queryToken).limit(DEFAULT_LIST_LIMIT);
         if (forecastHistorySearchCursor) query = query.startAfter(forecastHistorySearchCursor);
         const snapshot = await query.get();
         const records = new Map(forecastHistorySearchResults.map(record => [record.id, record]));
@@ -3893,7 +3893,7 @@ async function runQuoteHistorySearch(reset = true) {
     }
     updateQuoteHistorySearchUi('正在搜尋全部歷史估價單…');
     try {
-        let query = db.collection('quotes').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
+        let query = scopedHistorySearchQuery('quotes', queryToken).limit(DEFAULT_LIST_LIMIT);
         if (quoteHistorySearchCursor) query = query.startAfter(quoteHistorySearchCursor);
         const snapshot = await query.get();
         const records = new Map(quoteHistorySearchResults.map(record => [record.id, record]));
@@ -5574,6 +5574,16 @@ function fullHistoryQueryToken(type, keyword) {
     return '';
 }
 
+function scopedHistorySearchQuery(collectionName, queryToken) {
+    let query = db.collection(collectionName).where('searchTokens', 'array-contains', queryToken);
+    const scopeKey = collectionName === 'quotes' ? 'quotes' : collectionName === 'forecasts' ? 'forecast' : 'orders';
+    if (!canViewAllData(scopeKey)) {
+        if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
+        else if (currentUser?.uid) query = query.where('ownerUid', '==', currentUser.uid);
+    }
+    return query;
+}
+
 function fullHistoryRecordMatches(type, record, keyword) {
     const needle = normalizeFullHistorySearchValue(keyword);
     if (!needle) return true;
@@ -5627,7 +5637,7 @@ async function runOrderHistorySearch(reset = true) {
     }
     updateOrderHistorySearchUi('正在搜尋全部歷史訂單…');
     try {
-        let query = db.collection('orders').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
+        let query = scopedHistorySearchQuery('orders', queryToken).limit(DEFAULT_LIST_LIMIT);
         if (orderHistorySearchCursor) query = query.startAfter(orderHistorySearchCursor);
         const snapshot = await query.get();
         const records = new Map(orderHistorySearchResults.map(record => [record.id, record]));
