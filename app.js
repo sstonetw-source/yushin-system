@@ -1870,6 +1870,7 @@ function forecastItemToOrderSource(forecast, item) {
     const totalPrice = parseMoney(item.subtotal || (unitPrice * qty));
     return {
         customerName: forecast.customerName || '',
+        ownerUid: forecast.ownerUid || '',
         itemName: item.nameCn || item.nameEn || item.model || forecast.productName || '',
         itemCode: item.model || '',
         brand: normalizeForecastBrand(item.brand || forecast.brand || match?.brand || ''),
@@ -1968,7 +1969,7 @@ function initSalesList() {
         snapshot.forEach(doc => {
             const d = doc.data();
             if (d.name && d.code) {
-                list.push({ uid: doc.id, code: d.code, name: d.name, phone: d.phone || '', role: d.role || 'sales' });
+                list.push({ uid: doc.id, code: d.code, name: d.name, phone: d.phone || '', role: d.role || 'sales', active: d.active !== false });
             }
         });
 
@@ -8247,6 +8248,19 @@ window.deleteOrder = function(orderId) {
 let newOrderDraftItems = [];
 const ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2';
 let orderFrequentItemTemplates = [];
+let requestedOrderOwnerUid = '';
+
+function populateOrderOwnerSelect() {
+    const wrap = document.getElementById('orderOwnerWrap');
+    const select = document.getElementById('orderOwnerUid');
+    if (!wrap || !select) return;
+    wrap.style.display = currentUserRole === 'purchaser' ? '' : 'none';
+    if (currentUserRole !== 'purchaser') return;
+    const salespeople = salesList.filter(person => person.role === 'sales' && person.active !== false && person.uid && person.code);
+    select.replaceChildren(new Option('請選擇負責業務', ''));
+    salespeople.forEach(person => select.add(new Option(`${person.name}（${person.code}）`, person.uid)));
+    select.value = salespeople.some(person => person.uid === requestedOrderOwnerUid) ? requestedOrderOwnerUid : '';
+}
 
 function orderDraftStorageKey() {
     return `${ORDER_DRAFT_STORAGE_PREFIX}:${currentUser?.uid || 'anonymous'}`;
@@ -8259,6 +8273,7 @@ function orderDraftFieldValue(id) {
 function collectOrderDraft() {
     return {
         savedAt:new Date().toISOString(),
+        ownerUid:orderDraftFieldValue('orderOwnerUid'),
         date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
         itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
@@ -8322,6 +8337,8 @@ window.restoreSavedOrderDraft=function(){
     const draft=readOrderDraft();if(!draft){updateOrderDraftStatus();return;}
     restoringOrderDraft=true;
     try {
+        requestedOrderOwnerUid = draft.ownerUid || '';
+        populateOrderOwnerSelect();
         document.getElementById('orderDateInput').value=draft.date||'';
         document.getElementById('orderCustomer').value=draft.customerName||'';
         setOrderModalItem(draft);
@@ -8402,6 +8419,11 @@ window.addCurrentOrderItemToDraft=function(){
 
 window.openOrderModal = function(source = null) {
     ensurePriceListLoaded().catch(() => {});
+    requestedOrderOwnerUid = source?.ownerUid || '';
+    populateOrderOwnerSelect();
+    if (currentUserRole === 'purchaser') {
+        ensureSalesListLoaded().then(populateOrderOwnerSelect).catch(err => console.error('讀取負責業務名單失敗：', err));
+    }
     loadSupplierWarehouseMasters().then(() => populateOrderWarehouseOptions(source?.warehouseId || ''));
     populateOrderBrandDropdown();
     populateOrderCustomerSuggestions();
@@ -8520,6 +8542,10 @@ window.copyOrderAsNew = function(orderId) {
         return;
     }
     openOrderModal();
+    if (currentUserRole === 'purchaser') {
+        requestedOrderOwnerUid = source.ownerUid || '';
+        populateOrderOwnerSelect();
+    }
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = '複製成新訂單';
     document.getElementById('orderCustomer').value = source.customerName || '';
@@ -8569,6 +8595,11 @@ window.saveNewOrder = function() {
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
+    const assistedOwner = currentUserRole === 'purchaser'
+        ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
+            && person.role === 'sales' && person.active !== false && person.code)
+        : null;
+    if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
     const firstItem=items[0];
     const itemCode = firstItem.itemCode;
     const data = {
@@ -8593,9 +8624,9 @@ window.saveNewOrder = function() {
         quoteNo: '',
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
         productId: window._orderModalProductId || '',
-        salesName: currentUserName || '',
-        salesCode: currentUserCode || '',
-        ownerUid: currentUser?.uid || '',
+        salesName: assistedOwner?.name || currentUserName || '',
+        salesCode: assistedOwner?.code || currentUserCode || '',
+        ownerUid: assistedOwner?.uid || currentUser?.uid || '',
         isOrdered: false,
         isArrived: false,
         isDelivered: false,
