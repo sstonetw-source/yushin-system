@@ -2281,9 +2281,8 @@ function loadPriceListFromCloud() {
         refreshPriceDatalists();
         return null;
     });
-    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(async result => {
-        // 正式 Product Master 以 products 集合為優先；舊 settings/prices 暫時保留做過渡來源。
-        await loadProductMasterOverlay();
+    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(result => {
+        // 舊 settings/prices 僅供遷移／相容性工具使用；正式 Product Master 由各流程按需精準查詢。
         refreshPriceDatalists();
         renderKeyStatisticBrands();
         renderCompanyAgencyBrandSettings();
@@ -9960,24 +9959,6 @@ function productMasterDocToPriceItem(doc) {
         status: data.status || 'ACTIVE',
         active: data.status !== 'INACTIVE'
     });
-}
-
-async function loadProductMasterOverlay() {
-    if (productMasterLoadPromise) return productMasterLoadPromise;
-    productMasterLoadPromise = db.collection('products').limit(500).get().then(snapshot => {
-        productMasterCache = snapshot.docs
-            .map(productMasterDocToPriceItem)
-            .filter(item => item.status !== 'INACTIVE' && item.active !== false);
-        const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
-        productMasterCache.forEach(item => merged.set(item.productId || stableProductId(item), item));
-        priceList = [...merged.values()];
-        return productMasterCache;
-    }).catch(err => {
-        console.warn('Product Master 載入失敗，暫時沿用舊價目表：', err);
-        productMasterLoadPromise = null;
-        return [];
-    });
-    return productMasterLoadPromise;
 }
 
 async function loadVisibleProductCost(item) {
