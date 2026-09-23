@@ -31,9 +31,9 @@ test.after(async () => {
 test.beforeEach(async () => {
   await env.clearFirestore();
   await seed('users/admin', { role:'admin', email:'admin@admin.com', name:'admin', salesCode:'ADM' });
-  await seed('users/sales1', { role:'sales', active:true, salesCode:'S01', productLineIds:['roche'] });
-  await seed('users/sales2', { role:'sales', active:true, salesCode:'S02', productLineIds:[] });
-  await seed('users/eng1', { role:'engineer', active:true, salesCode:'E01', productLineIds:['thermo'] });
+  await seed('users/sales1', { role:'sales', active:true, salesCode:'S01' });
+  await seed('users/sales2', { role:'sales', active:true, salesCode:'S02' });
+  await seed('users/eng1', { role:'engineer', active:true, salesCode:'E01' });
   await seed('users/buyer1', { role:'purchaser', active:true, salesCode:'P01' });
   await seed('users/wh1', { role:'warehouse', active:true, salesCode:'W01' });
   await seed('users/off1', { role:'sales', active:false, salesCode:'OFF' });
@@ -168,16 +168,30 @@ test('business owner can change only remaining quantity on an inventory lot', as
   await assertFails(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), { remainingQty:-1 }));
 });
 
-test('assigned product-line owner can read protected cost; unassigned cannot', async () => {
-  await seed('productCosts/c1', { productId:'p1', productLineId:'roche', unitCost:100 });
-  await assertSucceeds(getDoc(doc(db('sales1'), 'productCosts/c1')));
-  await assertFails(getDoc(doc(db('sales2'), 'productCosts/c1')));
+test('business users can see visible non-agency cost but not agency or legacy hidden costs', async () => {
+  await seed('products/p1', { authorizationType:'NON_AUTHORIZED' });
+  await seed('products/p2', { authorizationType:'AUTHORIZED' });
+  await seed('productCosts/p1', { productId:'p1', salesVisible:true, standardCost:100 });
+  await seed('productCosts/p2', { productId:'p2', salesVisible:true, standardCost:200 });
+  await seed('productCosts/legacy', { productId:'p1', salesVisible:true, standardCost:300 });
+  await assertSucceeds(getDoc(doc(db('sales2'), 'productCosts/p1')));
+  await assertFails(getDoc(doc(db('sales1'), 'productCosts/p2')));
+  await assertFails(getDoc(doc(db('sales1'), 'productCosts/legacy')));
+  await assertSucceeds(getDoc(doc(db('buyer1'), 'productCosts/p2')));
 });
 
-test('legacy productLine remains compatible with assigned product-line authorization', async () => {
-  await seed('productCosts/c2', { productId:'p2', productLine:'roche', unitCost:200 });
-  await assertSucceeds(getDoc(doc(db('sales1'), 'productCosts/c2')));
-  await assertFails(getDoc(doc(db('sales2'), 'productCosts/c2')));
+test('sales may create a temporary product and own non-agency cost, but cannot alter existing master products', async () => {
+  const product = { productId:'p3', status:'TEMPORARY', createdBy:'sales1', updatedBy:'sales1', authorizationType:'NON_AUTHORIZED' };
+  await assertSucceeds(setDoc(doc(db('sales1'), 'products/p3'), product));
+  await assertFails(updateDoc(doc(db('sales1'), 'products/p3'), { listPrice:1 }));
+  await assertFails(setDoc(doc(db('sales2'), 'products/p4'), { ...product, productId:'p4' }));
+  const cost = { productId:'p3', productLineId:'Roche', standardCost:100, salesVisible:true, source:'quick_create', updatedAt:'2026-09-23', updatedBy:'sales1' };
+  await assertSucceeds(setDoc(doc(db('sales1'), 'productCosts/p3'), cost));
+  await assertFails(setDoc(doc(db('sales2'), 'productCosts/p3'), { ...cost, updatedBy:'sales2' }));
+  await assertFails(setDoc(doc(db('sales1'), 'productCosts/p3'), { ...cost, standardCost:101, salesVisible:false }));
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'productCosts/p3'), { standardCost:102 }));
+  await assertFails(updateDoc(doc(db('sales1'), 'productCosts/p3'), { salesVisible:false }));
+  await assertFails(setDoc(doc(db('sales1'), 'priceHistory/p3'), { productId:'p3', unitCost:1 }));
 });
 
 test('only purchaser/admin can create dispatch paperwork record', async () => {

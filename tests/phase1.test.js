@@ -1002,11 +1002,12 @@ test('sales can enter transaction cost only for non-authorized products', () => 
     assert.match(source, /NON_AUTHORIZED/);
 });
 
-test('Firestore rules separate product data from costs and protect authorized costs', () => {
+test('Firestore rules use fixed roles and protect authorized product costs', () => {
     assert.match(rulesSource, /match \/productCosts\/\{id\}/);
-    assert.match(rulesSource, /assignedProductLine\(resource\.data\)/);
+    assert.match(rulesSource, /visibleNonAuthorizedCost\(id, resource\.data\)/);
     assert.match(rulesSource, /match \/productLines\/\{id\}/);
-    assert.match(rulesSource, /assignedProductLine\(request\.resource\.data\)/);
+    assert.match(rulesSource, /ownTemporaryNonAuthorizedCost\(id, request\.resource\.data\)/);
+    assert.doesNotMatch(rulesSource, /assignedProductLine|productLineIds/);
     assert.match(rulesSource, /allow update: if admin\(\) \|\| purchaser\(\)/);
 });
 

@@ -144,16 +144,51 @@ service cloud.firestore {
         && sameCommercialOwner();
     }
 
-    function productLineKey(data) {
-      return data.get('productLineId', data.get('productLine', ''));
+    function productPath(id) {
+      return /databases/$(database)/documents/products/$(id);
     }
 
-    function assignedProductLine(data) {
-      return admin() ||
-        (sales()
-          && userDoc().data.productLineIds is list
-          && productLineKey(data) != ''
-          && userDoc().data.productLineIds.hasAny([productLineKey(data)]));
+    function nonAuthorizedProduct(id) {
+      return exists(productPath(id))
+        && get(productPath(id)).data.get('authorizationType', '') == 'NON_AUTHORIZED';
+    }
+
+    function businessTemporaryProduct(id, data) {
+      return businessOwner()
+        && data.get('productId', '') == id
+        && data.get('status', '') == 'TEMPORARY'
+        && data.get('createdBy', '') == request.auth.uid
+        && data.get('updatedBy', '') == request.auth.uid
+        && data.get('authorizationType', '') in ['AUTHORIZED', 'NON_AUTHORIZED']
+        && data.get('listPrice', -1) is number
+        && data.listPrice >= 0
+        && data.keys().hasOnly([
+          'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+          'normalizedPartNo', 'productName', 'productLine', 'productLineId',
+          'authorizationType', 'listPrice', 'status', 'createdAt',
+          'createdBy', 'updatedAt', 'updatedBy'
+        ]);
+    }
+
+    function visibleNonAuthorizedCost(id, data) {
+      return businessOwner()
+        && data.get('productId', '') == id
+        && data.get('salesVisible', false) == true
+        && nonAuthorizedProduct(id);
+    }
+
+    function ownTemporaryNonAuthorizedCost(id, data) {
+      return visibleNonAuthorizedCost(id, data)
+        && get(productPath(id)).data.get('status', '') == 'TEMPORARY'
+        && get(productPath(id)).data.get('createdBy', '') == request.auth.uid
+        && data.get('updatedBy', '') == request.auth.uid
+        && data.get('source', '') == 'quick_create'
+        && data.get('standardCost', -1) is number
+        && data.standardCost >= 0
+        && data.keys().hasOnly([
+          'productId', 'productLineId', 'standardCost', 'salesVisible',
+          'source', 'updatedAt', 'updatedBy'
+        ]);
     }
 
     function nonNegativeInventory(data) {
@@ -243,25 +278,24 @@ service cloud.firestore {
     // Searchable product master. Cost is intentionally stored separately.
     match /products/{id} {
       allow read: if active();
-      allow create, update: if admin() || purchaser() || assignedProductLine(request.resource.data);
+      allow create: if admin() || purchaser() || businessTemporaryProduct(id, request.resource.data);
+      allow update: if admin() || purchaser();
       allow delete: if false;
     }
 
-    // Protected cost data. Assigned business owners can maintain only their product lines.
+    // Business roles may see only explicitly visible non-agency cost records.
     match /productCosts/{id} {
-      allow read: if admin() || purchaser() || assignedProductLine(resource.data);
-      allow create: if admin() || purchaser() || assignedProductLine(request.resource.data);
+      allow read: if admin() || purchaser() || visibleNonAuthorizedCost(id, resource.data);
+      allow create: if admin() || purchaser() || ownTemporaryNonAuthorizedCost(id, request.resource.data);
       allow update: if admin() || purchaser()
-        || (assignedProductLine(resource.data)
-          && assignedProductLine(request.resource.data)
-          && request.resource.data.productId == resource.data.productId
-          && productLineKey(request.resource.data) == productLineKey(resource.data));
+        || (ownTemporaryNonAuthorizedCost(id, resource.data)
+          && ownTemporaryNonAuthorizedCost(id, request.resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['standardCost', 'updatedAt', 'updatedBy']));
       allow delete: if false;
     }
 
     match /priceHistory/{id} {
-      allow read: if admin() || purchaser() || assignedProductLine(resource.data);
-      allow create: if admin() || purchaser() || assignedProductLine(request.resource.data);
+      allow read, create: if admin() || purchaser();
       allow update, delete: if false;
     }
 
