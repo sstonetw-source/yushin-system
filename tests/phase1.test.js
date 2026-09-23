@@ -102,6 +102,26 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(indexSource, /app\\.js\\?v=20260923-6/);
 });
 
+test('product management uses server search without exposing protected cost data', () => {
+    assert.match(indexSource, /id="product-system"/);
+    assert.match(indexSource, /data-main-nav="products"/);
+    const searchStart = appSource.indexOf('window.searchProductManagement =');
+    const searchEnd = appSource.indexOf('\n};', searchStart) + 3;
+    const productSearch = appSource.slice(searchStart, searchEnd);
+    assert.match(productSearch, /db\.collection\('products'\)/);
+    assert.match(productSearch, /limit\(50\)/);
+    assert.doesNotMatch(productSearch, /productCosts|loadVisibleProductCost/);
+    assert.match(appSource, /window\.addProductManagementToQuote/);
+    assert.match(appSource, /window\.addProductManagementToOrder/);
+});
+
+test('main navigation exposes focused order and purchasing workspaces', () => {
+    assert.match(indexSource, /data-main-nav="orders"/);
+    assert.match(indexSource, /data-main-nav="purchasing"/);
+    assert.match(appSource, /window\.openOrderWorkspace/);
+    assert.match(appSource, /window\.openPurchasingWorkspace/);
+});
+
 test('agency settings do not trigger a full orders statistics query', () => {
     const switchStart = appSource.indexOf('window.switchAdminTab =');
     const switchEnd = appSource.indexOf('\n};', switchStart) + 3;
