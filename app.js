@@ -5364,28 +5364,28 @@ function createOrderPaginationState() {
         sources.push({
             cursor: null,
             exhausted: false,
-            query: () => db.collection('orders').orderBy('orderDate', 'desc')
+            query: () => db.collection('orders').where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
         });
     } else {
         if (currentUserCode) {
             sources.push({
                 cursor: null,
                 exhausted: false,
-                query: () => db.collection('orders').where('salesCode', '==', currentUserCode)
+                query: () => db.collection('orders').where('salesCode', '==', currentUserCode).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
             });
         }
         if (currentUser?.uid) {
             sources.push({
                 cursor: null,
                 exhausted: false,
-                query: () => db.collection('orders').where('ownerUid', '==', currentUser.uid)
+                query: () => db.collection('orders').where('ownerUid', '==', currentUser.uid).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
             });
         }
         if (currentUserName) {
             sources.push({
                 cursor: null,
                 exhausted: false,
-                query: () => db.collection('orders').where('salesName', '>=', currentUserName).where('salesName', '<=', currentUserName + '\uf8ff')
+                query: () => db.collection('orders').where('salesName', '==', currentUserName).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
             });
         }
     }
@@ -5761,6 +5761,7 @@ window.renderOrdersList = function() {
 
     const visibleOrderSource = orderHistorySearchActive ? orderHistorySearchResults : ordersCache;
     const baseOrders = visibleOrderSource.filter(o => {
+        if (!orderHistorySearchActive && o.status !== BUSINESS_STATUS.ACTIVE) return false;
         const itemSearchable = normalizedOrderItems(o).flatMap(item => [
             item.brand, item.itemCode, item.itemName, item.productLine, item.productType, item.spec
         ]).join(' ');
