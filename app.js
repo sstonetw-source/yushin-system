@@ -104,7 +104,6 @@ let appInitialized = false;  // 避免每次登入狀態變化都重複初始化
 let pendingTab = null;
 let salesListLoadPromise = null;
 let priceListLoadPromise = null;
-let productMasterLoadPromise = null;
 let productMasterCache = [];
 let quickProductTarget = null;
 let clientHistoryLoadPromise = null;
@@ -11496,7 +11495,6 @@ window.runProductMasterMigration = async function() {
             }, { merge: true });
         }
 
-        productMasterLoadPromise = null;
         priceListLoadPromise = null;
         await ensurePriceListLoaded();
         window._productMasterMigrationPreview = null;
