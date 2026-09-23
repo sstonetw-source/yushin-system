@@ -11553,7 +11553,7 @@ function inventoryCostMigrationPlan(lots, inventory, receipts, movements, orders
         legacyOrders: orders.filter(row => [...(row.data.deliveryRecords || []), ...(row.data.returnRecords || [])].some(recordContainsEmbeddedCost))
     };
 }
-async function readCollectionInBatches(collectionName, fields = null, batchSize = 500) {
+async function readCollectionInBatches(collectionName, batchSize = 500) {
     const rows = [];
     let cursor = null;
     while (true) {
