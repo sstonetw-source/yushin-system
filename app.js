@@ -10123,8 +10123,8 @@ window.openQuickProductCreate = function(mode, input) {
     document.getElementById('quickProductName').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-cn')?.value || '')
         : (document.getElementById('orderItemName')?.value || '');
-    document.getElementById('quickProductNameEn').value = mode === 'quote' ? (input.closest('tr')?.querySelector('.item-en')?.value || '') : '';
-    document.getElementById('quickProductSpec').value = mode === 'quote' ? (input.closest('tr')?.querySelector('.item-spec')?.value || '') : '';
+    document.getElementById('quickProductNameEn').value = mode === 'quote' ? (input.closest('tr')?.querySelector('.item-en')?.value || '') : (document.getElementById('orderItemNameEn')?.value || '');
+    document.getElementById('quickProductSpec').value = mode === 'quote' ? (input.closest('tr')?.querySelector('.item-spec')?.value || '') : (document.getElementById('orderItemSpec')?.value || '');
     document.getElementById('quickProductLine').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-product-line')?.value || '')
         : (document.getElementById('orderProductLine')?.value || '');
@@ -10136,7 +10136,10 @@ window.openQuickProductCreate = function(mode, input) {
         : '';
     document.getElementById('quickProductAuthorization').value =
         isBrandAuthorizedForCurrentCompany(currentBrand) ? 'AUTHORIZED' : 'NON_AUTHORIZED';
+    const saved=localStorage.getItem('quick_product_draft');
+    if(saved){try{const draft=JSON.parse(saved);if(draft.quickProductCode===input.value.trim())Object.entries(draft).forEach(([id,value])=>{const el=document.getElementById(id);if(el)el.value=value;});}catch(_){}}
     updateQuickProductCostVisibility();
+    overlay.querySelectorAll('input,select').forEach(el=>{el.oninput=saveQuickProductDraft;el.onchange=saveQuickProductDraft;});
     overlay.classList.add('active');
 };
 
