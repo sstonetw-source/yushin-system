@@ -2266,28 +2266,16 @@ function loadPriceListFromCloud() {
                     const data = brandDoc.exists ? brandDoc.data() : {};
                     return Array.isArray(data.items) ? data.items : [];
                 })));
-                refreshPriceDatalists();
-                renderKeyStatisticBrands();
             });
         }
         priceList = normalizeProductMasterList(meta.list || []);
-        refreshPriceDatalists();
-        renderKeyStatisticBrands();
     }).catch(err => {
-        console.warn('舊價目表載入失敗，將繼續嘗試正式 Product Master：', err);
+        console.warn('舊價目表載入失敗：', err);
         priceList = [];
-        refreshPriceDatalists();
         return null;
     });
-    return Promise.all([pricesPromise, loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()]).then(result => {
-        // 舊 settings/prices 僅供遷移／相容性工具使用；正式 Product Master 由各流程按需精準查詢。
-        refreshPriceDatalists();
-        renderKeyStatisticBrands();
-        renderCompanyAgencyBrandSettings();
-        return result;
-    });
+    return pricesPromise;
 }
-
 function loadCompanyAgencyBrandSettings() {
     return db.collection('settings').doc('companyAgencyBrands').get().then(doc => {
         companyAgencyBrandsConfigured = doc.exists;
