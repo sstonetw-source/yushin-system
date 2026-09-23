@@ -5315,7 +5315,7 @@ function orderWorkCategory(order) {
     if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return 'closed';
     if(delivery.state==='complete')return order.isBilled?'complete':'billing';
     if(delivery.delivered>0||fulfillment.state==='shippable'||fulfillment.state==='direct')return 'delivery';
-    if(fulfillment.state==='pending_dispatch'||fulfillment.state==='partial_dispatch')return 'dispatch';
+    if(fulfillment.state==='pending_dispatch'||fulfillment.state==='partial_dispatch')return 'delivery';
     if(purchase.state==='ordered'||purchase.state==='partial')return 'arrival';
     return 'ordering';
 }
@@ -5337,8 +5337,10 @@ function renderOrderWorkCards(orders) {
     const container = document.getElementById('orderWorkCards');
     if (!container) return;
     const definitions = [
-        ['all', '全部'], ['ordering', '待採購'], ['arrival', '採購／到貨中'], ['dispatch', '待打單'], ['delivery', '可出貨／待送貨'],
-        ['billing', '待報帳'], ['complete', '已完成'], ['closed', '異常／已關閉']
+        ['ordering', '待採購'],
+        ['arrival', '待到貨'],
+        ['delivery', '待送貨'],
+        ['billing', '待核銷']
     ];
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
     orders.forEach(order => {
