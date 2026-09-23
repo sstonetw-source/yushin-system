@@ -912,7 +912,9 @@ window.switchViewRole = function(role) {
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
     const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
-    if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
+    const orderWorkspaceAllowed = tabId === 'order-system'
+        && (canAccessPage('orders.list') || canAccessPage('orders.po'));
+    if (!mainKey || (!canAccessPage(mainKey) && !orderWorkspaceAllowed) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
         return;
     }
