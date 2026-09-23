@@ -164,8 +164,8 @@ service cloud.firestore {
         && data.listPrice >= 0
         && data.keys().hasOnly([
           'productId', 'brandId', 'brandName', 'manufacturerPartNo',
-          'normalizedPartNo', 'productName', 'productLine', 'productLineId',
-          'authorizationType', 'listPrice', 'status', 'createdAt',
+          'normalizedPartNo', 'productName', 'nameEn', 'specification',
+          'productLine', 'productLineId', 'authorizationType', 'listPrice', 'status', 'createdAt',
           'createdBy', 'updatedAt', 'updatedBy'
         ]);
     }
