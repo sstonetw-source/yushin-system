@@ -2451,6 +2451,123 @@ async function syncLegacyBrandSettingsToMaster() {
     }
 }
 
+const BRAND_AUDIT_BLOCKING_SOURCES = new Set([
+    'priceCatalog', 'products', 'statistics', 'companyAgencies', 'supplierMappings'
+]);
+
+function brandAuditNamesFromRecord(source, record = {}) {
+    const data = record?.data || record || {};
+    if (source === 'statistics' || source === 'companyAgencies') return [String(data.name || data || '')];
+    if (source === 'supplierMappings') return [data.brandName || data.brand || ''];
+    if (source === 'orders') return [
+        data.brand || '',
+        ...normalizedOrderItems(data).map(item => item.brand || '')
+    ];
+    if (source === 'quotes') return [
+        data.brand || '',
+        ...(Array.isArray(data.items) ? data.items.map(item => item.brand || '') : [])
+    ];
+    return [data.brand || data.brandName || ''];
+}
+
+function buildBrandMasterCompatibilityAudit(masterEntries, sources) {
+    const master = (masterEntries || []).filter(entry => entry && entry.active !== false && entry.name);
+    const coverage = new Map();
+    master.forEach(entry => {
+        [entry.name, ...(entry.aliases || [])].forEach(name => {
+            const key = normalizeBrandLookupKey(name);
+            if (key) coverage.set(key, entry.name);
+        });
+    });
+
+    const found = new Map();
+    Object.entries(sources || {}).forEach(([source, rows]) => {
+        (rows || []).forEach(row => {
+            brandAuditNamesFromRecord(source, row).forEach(raw => {
+                const name = String(raw || '').trim();
+                const key = normalizeBrandLookupKey(name);
+                if (!key || ['其他', '其他廠牌', '維修'].some(skip => normalizeBrandLookupKey(skip) === key)) return;
+                if (!found.has(key)) found.set(key, { name, sources: new Set(), blocking: false });
+                const item = found.get(key);
+                item.sources.add(source);
+                if (BRAND_AUDIT_BLOCKING_SOURCES.has(source)) item.blocking = true;
+            });
+        });
+    });
+
+    const rows = [...found.entries()].map(([key, item]) => ({
+        name: item.name,
+        sources: [...item.sources].sort(),
+        blocking: item.blocking,
+        covered: coverage.has(key),
+        canonicalName: coverage.get(key) || ''
+    })).sort((a, b) => Number(b.blocking) - Number(a.blocking) || a.name.localeCompare(b.name, 'zh-Hant'));
+
+    return {
+        masterCount: master.length,
+        rows,
+        missingBlocking: rows.filter(row => row.blocking && !row.covered),
+        missingHistorical: rows.filter(row => !row.blocking && !row.covered),
+        canRemoveCompatibilityLayer: rows.every(row => !row.blocking || row.covered)
+    };
+}
+
+window.previewBrandMasterCompatibilityAudit = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
+        alert('只有管理員可以執行 Brand Master 相容層稽核。');
+        return;
+    }
+    const button = document.getElementById('brandMasterAuditBtn');
+    const status = document.getElementById('brandMasterAuditStatus');
+    if (button?.disabled) return;
+    if (button) button.disabled = true;
+    if (status) status.innerText = '正在讀取正式主檔與舊品牌來源…';
+    try {
+        await Promise.all([ensurePriceListLoaded(), loadBrandMaster(), loadSupplierWarehouseMasters()]);
+        const sources = {
+            priceCatalog: priceList,
+            products: (await readCollectionForMigration('products')).map(row => row.data),
+            statistics: [
+                ...keyStatisticBrands.map(name => ({ name })),
+                ...Object.entries(keyStatisticBrandAliases).flatMap(([name, aliases]) => [
+                    { name }, ...(aliases || []).map(alias => ({ name: alias }))
+                ])
+            ],
+            companyAgencies: Object.values(companyAgencyBrands).flat().map(name => ({ name })),
+            supplierMappings: supplierMappingCache
+        };
+
+        const historicalCollections = ['orders', 'quotes', 'forecasts', 'equipment'];
+        for (let index = 0; index < historicalCollections.length; index++) {
+            const name = historicalCollections[index];
+            if (status) status.innerText = `正在分頁檢查歷史品牌快照（${index + 1}/${historicalCollections.length}）：${name}…`;
+            sources[name] = await readCollectionForMigration(name);
+        }
+
+        const report = buildBrandMasterCompatibilityAudit(brandMasterCache, sources);
+        window._brandMasterCompatibilityAudit = report;
+        const blockingNames = report.missingBlocking.map(row => `${row.name}（${row.sources.join('、')}）`);
+        const historicalNames = report.missingHistorical.map(row => `${row.name}（${row.sources.join('、')}）`);
+        const lines = [
+            `Brand Master：${report.masterCount} 個啟用品牌；所有來源共辨識 ${report.rows.length} 個品牌。`,
+            report.canRemoveCompatibilityLayer
+                ? '正式來源檢查通過：相容層已具備移除條件。'
+                : `尚不可移除相容層：${blockingNames.length} 個正式來源品牌尚未進入 Brand Master。`,
+            blockingNames.length ? `需先補齊：${blockingNames.join('；')}` : '正式來源缺漏：0。',
+            historicalNames.length
+                ? `歷史快照另有 ${historicalNames.length} 個未對應名稱（不阻擋移除，但應確認是否為別名）：${historicalNames.join('；')}`
+                : '歷史快照未對應名稱：0。',
+            '本功能僅讀取與比對，不會修改或刪除資料。'
+        ];
+        if (status) status.innerText = lines.join('\n');
+    } catch (err) {
+        console.error('Brand Master 相容層稽核失敗：', err);
+        if (status) status.innerText = '稽核失敗：' + (err.message || err);
+    } finally {
+        if (button) button.disabled = false;
+    }
+};
+
 
 function normalizeThermoBrandList(brands) {
     return dedupeBrandsCaseInsensitive((brands || []).map(value =>

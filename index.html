@@ -1258,6 +1258,15 @@
                 <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
             </div>
 
+            <h4 style="margin-top:28px;">Brand Master 相容層稽核</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button id="brandMasterAuditBtn" onclick="previewBrandMasterCompatibilityAudit()">檢查品牌主檔完整性</button>
+                <span style="font-size:12px;color:#666;">
+                    分頁讀取 Product Master、舊價格來源、統計／分公司／供應商設定及歷史交易品牌，確認所有正式來源品牌是否已被 Brand Master 名稱或別名涵蓋。只讀取與比對，不會修改資料。
+                </span>
+                <div id="brandMasterAuditStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
+            </div>
+
             <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button onclick="calculateStorageUsage()">🔄 計算目前用量</button>
@@ -1337,6 +1346,6 @@
     <script src="modules/fulfillment-core.js?v=20260922-4"></script>
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
-    <script src="app.js?v=20260922-5"></script>
+    <script src="app.js?v=20260923-1"></script>
 </body>
 </html>

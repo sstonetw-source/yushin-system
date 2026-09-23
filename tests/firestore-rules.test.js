@@ -53,6 +53,35 @@ test('engineer can create own quote and order', async () => {
   await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...quote, orderDate:'2026-09-20' }));
 });
 
+test('five-role mutation matrix keeps master commercial purchase and receipt boundaries distinct', async () => {
+  await assertSucceeds(setDoc(doc(db('admin'), 'brands/roche'), {
+    name:'Roche', aliases:[], active:true
+  }));
+  await assertFails(setDoc(doc(db('sales1'), 'brands/unauthorized'), {
+    name:'Unauthorized', active:true
+  }));
+
+  await assertSucceeds(setDoc(doc(db('sales1'), 'quotes/matrix-sales'), {
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-23'
+  }));
+  await assertSucceeds(setDoc(doc(db('eng1'), 'equipment/matrix-engineer'), {
+    ownerUid:'sales1', salesCode:'S01', customerName:'A', model:'M1'
+  }));
+  await assertSucceeds(setDoc(doc(db('buyer1'), 'purchaseOrders/matrix-purchase'), {
+    status:'ORDERED', items:[{ itemCode:'A', qty:2 }]
+  }));
+  await assertFails(setDoc(doc(db('sales1'), 'purchaseOrders/matrix-sales-po'), {
+    status:'ORDERED', items:[{ itemCode:'A', qty:2 }]
+  }));
+
+  await assertSucceeds(setDoc(doc(db('wh1'), 'receipts/matrix-receipt'), {
+    ownerUid:'sales1', salesCode:'S01', productKey:'p1', qty:2
+  }));
+  await assertFails(setDoc(doc(db('wh1'), 'orders/matrix-warehouse-order'), {
+    ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-23'
+  }));
+});
+
 test('sales cannot create a commercial document owned by another salesperson', async () => {
   await assertFails(setDoc(doc(db('sales1'), 'orders/o2'), {
     ownerUid:'sales2', salesCode:'S02', orderDate:'2026-09-20'

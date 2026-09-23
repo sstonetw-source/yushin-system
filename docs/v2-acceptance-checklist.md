@@ -31,7 +31,7 @@
 - [x] quote number generator unchanged
 - [x] Forecast admin / salesCode / ownerUid 三種正式查詢皆有 composite index
 
-截至 2026-09-22，PR #32 合併前最新 Node regression 為 **142/142 通過**；Firestore Rules emulator 亦已在 GitHub Actions 通過。PR #32 已合併至 main（merge commit `7f6df3b`）。
+截至 2026-09-23，最新 main 已具備 iPhone 背景恢復保護與 Brand Master 只讀完整性稽核；Node regression 與 Firestore Rules emulator 仍須在每次 main 更新後全部通過。
 
 ## 人工驗收
 - [ ] Desktop Chrome/Safari
@@ -50,6 +50,8 @@
 - [ ] partial delivery
 - [ ] stock replenishment no customer
 - [ ] multi-item mixed sourcing
+- [ ] peer transfer：經倉與直送
+- [ ] advance delivery：待商業定義確認後加入
 - [ ] cancel/void/restore/return
 - [ ] low stock/safety stock
 - [ ] batch cost/COGS
@@ -67,3 +69,4 @@
 - [ ] 正式資料備份：使用者於 2026-09-21 決定免費方案不建立 managed backup，接受正式資料無快照可直接還原的風險
 - [ ] 在 Firebase 專案執行舊資料成本隔離並重新預覽為 0
 - [ ] 完成 Desktop / iPhone × 五角色人工驗收
+- [ ] Brand Master 稽核正式來源缺漏為 0，再決定是否移除相容層
