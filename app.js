@@ -72,10 +72,10 @@ const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', 
 const PERMISSION_LEVELS = { none: 0, view: 1, edit: 2 };
 const FIXED_ROLE_PERMISSIONS = Object.freeze({
     sales: { forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', equipment:'view' },
-    purchaser: { quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', orders:'edit', 'orders.list':'edit', purchasing:'edit', inventory:'edit' },
+    purchaser: { quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'edit', purchasing:'edit', inventory:'edit' },
     warehouse: { products:'view', inventory:'edit' },
     engineer: { quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', equipment:'edit' },
-    admin: { forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'edit', orders:'edit', 'orders.list':'edit', purchasing:'edit', inventory:'edit', equipment:'edit', admin:'edit' }
+    admin: { forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'edit', orders:'edit', 'orders.list':'edit', 'orders.po':'edit', purchasing:'edit', inventory:'edit', equipment:'edit', admin:'edit' }
 });
 const FIXED_DATA_SCOPES = Object.freeze({
     sales: { quotes:'own', orders:'own', forecast:'own' },
@@ -5308,23 +5308,18 @@ function renderOrderWorkCards(orders) {
     const container = document.getElementById('orderWorkCards');
     if (!container) return;
     const definitions = [
-        ['all', '全部'], ['ordering', '待採購'], ['arrival', '採購／到貨中'], ['dispatch', '待打單'], ['delivery', '可出貨／待送貨'],
-        ['billing', '待報帳'], ['complete', '已完成'], ['closed', '異常／已關閉']
+        ['ordering', '待採購'], ['arrival', '採購／到貨中'], ['dispatch', '待打單'], ['delivery', '可出貨／待送貨'], ['billing', '待報帳']
     ];
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
     orders.forEach(order => {
         const category = orderWorkCategory(order);
         const amount = orderWorkAmount(order, category);
-        if (dateInOrderPeriod(order.orderDate || '')) {
-            metrics.all.count++;
-            metrics.all.amount += salesAmount(order);
-        }
-        if (orderMatchesWorkPeriod(order, category)) {
+         if (orderMatchesWorkPeriod(order, category)) {
             metrics[category].count++;
             metrics[category].amount += amount;
         }
     });
-    container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
+    container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong></button>`).join('');
 }
 
 function createOrderPaginationState() {
