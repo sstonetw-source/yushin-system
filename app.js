@@ -5187,6 +5187,7 @@ function canBusinessSelfOrder(order = null) {
 function selfOrderActionHtml(order) {
     if (!canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
     return normalizedOrderItems(order)
+        .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
         .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
         .map(item => {
             const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
@@ -5250,6 +5251,8 @@ window.saveSelfOrder = async function() {
             const index=items.findIndex(row=>row.itemId===itemId);
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
+            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，業務不可自行訂貨。');
+            if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') throw new Error('原廠直送的業務自行訂貨流程尚未完成到貨追蹤，暫不允許建立，避免形成無法結案的訂貨紀錄。');
             const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
             const already=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
             const remaining=Math.max(0,required-already);
