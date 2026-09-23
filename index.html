@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260923-8">
+        <link rel="stylesheet" href="styles.css?v=20260924-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -791,11 +791,11 @@
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
         <div class="sub-nav no-print" aria-label="採購工作流程">
-            <div class="sub-tab active" id="purchase-sub-pending" onclick="switchPurchasingView('pending', this)">待採購</div>
-            <div class="sub-tab" id="purchase-sub-arrival" onclick="switchPurchasingView('arrival', this)">到貨入庫</div>
-            <div class="sub-tab" id="purchase-sub-history" onclick="switchPurchasingView('history', this)">訂購單記錄</div>
+            <div class="sub-tab active" id="purchase-sub-ordering" onclick="switchPurchasingView('ordering', this)">訂購</div>
+            <div class="sub-tab" id="purchase-sub-receiving" onclick="switchPurchasingView('receiving', this)">收貨</div>
+            <div class="sub-tab" id="purchase-sub-shipping" onclick="switchPurchasingView('shipping', this)">發貨</div>
         </div>
-        <div id="purchasePendingPanel">
+        <div id="purchasePendingPanel" data-purchasing-view="ordering">
             <div class="toolbar no-print">
                 <button type="button" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">🔄 重新整理</button>
                 <button type="button" onclick="openDirectStockPurchase()">＋ 原廠備貨採購</button>
@@ -808,7 +808,7 @@
             <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
         </div>
         <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
-        <div id="poListPanel" style="display:none">
+        <div id="poListPanel" data-purchasing-view="receiving shipping" style="display:none">
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋已載入的單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
                 <select id="poPeriodFilter" onchange="renderPoList()">
@@ -1154,25 +1154,28 @@
                 <select id="salesStatsBrandFilter" onchange="renderSalesStatistics()"><option value="">全部廠牌</option></select>
                 <select id="salesStatsTypeFilter" onchange="renderSalesStatistics()"><option value="">全部類型</option></select>
                 <select id="salesStatsLineFilter" onchange="renderSalesStatistics()"><option value="">全部產品線</option></select>
-                <button type="button" onclick="exportSalesStatisticsExcel()">⬇️ 匯出季報 Excel</button>
+                <button type="button" id="salesStatsCostVisibilityBtn" class="btn-secondary" onclick="toggleSalesStatsCostVisibility()">🙈 隱藏成本／毛利</button>
+                <button type="button" onclick="exportSalesStatisticsExcel()">⬇️ 匯出分析 Excel</button>
                 <button class="btn-secondary" onclick="loadSalesStatistics()">🔄 重新整理</button>
-                <span style="font-size:12px;color:#666;">實際送貨依送貨日期計算，退貨依退貨日期負數沖銷；待出貨為截至迄日的未交餘額。</span>
             </div>
             <div class="sales-stat-cards">
-                <div class="sales-stat-card"><span>實際送貨金額</span><strong id="salesStatsActualSales">NT$ 0</strong><small id="salesStatsActualDetail"></small></div>
-                <div class="sales-stat-card"><span>待出貨金額</span><strong id="salesStatsPendingSales">NT$ 0</strong><small id="salesStatsPendingDetail"></small></div>
-                <div class="sales-stat-card sales-stat-card-total"><span>總金額</span><strong id="salesStatsTotalSales">NT$ 0</strong><small id="salesStatsTotalDetail"></small></div>
+                <div class="sales-stat-card sales-stat-card-total"><span>銷售額</span><strong id="salesStatsSalesInc">NT$ 0</strong><small id="salesStatsOrderCount"></small></div>
+                <div class="sales-stat-card sales-cost-sensitive"><span>銷售成本</span><strong id="salesStatsCostInc">NT$ 0</strong></div>
+                <div class="sales-stat-card sales-cost-sensitive"><span>毛利</span><strong id="salesStatsProfit">NT$ 0</strong></div>
+                <div class="sales-stat-card sales-cost-sensitive"><span>毛利率</span><strong id="salesStatsProfitRate">－</strong></div>
             </div>
-            <div class="panel" style="overflow-x:auto;">
-                <table style="margin:0;"><thead><tr><th>總銷售額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>成本未填</th><th>歷史推估</th></tr></thead>
-                <tbody><tr><td id="salesStatsSalesInc">NT$ 0</td><td id="salesStatsCostInc">NT$ 0</td><td id="salesStatsProfit">NT$ 0</td><td id="salesStatsProfitRate">－</td><td><button type="button" id="salesStatsMissingCost" class="missing-cost-trigger" onclick="openMissingCostOrders()" disabled>0 筆</button></td><td id="salesStatsEstimated">NT$ 0／0 筆</td></tr></tbody></table>
-                <span id="salesStatsOrderCount" style="display:block;margin-top:8px;color:#666;font-size:13px;"></span>
+            <div class="panel">
+                <strong>資料完整性</strong>
+                <div style="margin-top:8px;">成本未填：<button type="button" id="salesStatsMissingCost" class="missing-cost-trigger" onclick="openMissingCostOrders()" disabled>0 筆</button>
+                <span class="sales-cost-sensitive" style="margin-left:16px;">歷史推估：<span id="salesStatsEstimated">NT$ 0／0 筆</span></span></div>
+                <span id="salesStatsActualSales" style="display:none"></span><span id="salesStatsPendingSales" style="display:none"></span><span id="salesStatsTotalSales" style="display:none"></span>
+                <span id="salesStatsActualDetail" style="display:none"></span><span id="salesStatsPendingDetail" style="display:none"></span><span id="salesStatsTotalDetail" style="display:none"></span>
             </div>
             <div class="sales-stat-tables">
-                <div><h3>各廠牌統計</h3><table class="sales-stats-table"><thead><tr><th>廠牌</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByBrand"></tbody></table></div>
-                <div><h3>各業務統計</h3><table class="sales-stats-table"><thead><tr><th>業務</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsBySales"></tbody></table></div>
-                <div><h3>各類型統計</h3><table class="sales-stats-table"><thead><tr><th>類型</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByType"></tbody></table></div>
-                <div><h3>各產品線統計</h3><table class="sales-stats-table"><thead><tr><th>產品線</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByLine"></tbody></table></div>
+                <div><h3>各廠牌分析</h3><table class="sales-stats-table"><thead><tr><th>廠牌</th><th>實際送貨</th><th>待出貨</th><th>銷售額</th><th class="sales-cost-sensitive">成本</th><th class="sales-cost-sensitive">毛利</th><th class="sales-cost-sensitive">毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByBrand"></tbody></table></div>
+                <div><h3>各業務分析</h3><table class="sales-stats-table"><thead><tr><th>業務</th><th>實際送貨</th><th>待出貨</th><th>銷售額</th><th class="sales-cost-sensitive">成本</th><th class="sales-cost-sensitive">毛利</th><th class="sales-cost-sensitive">毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsBySales"></tbody></table></div>
+                <div><h3>各類型分析</h3><table class="sales-stats-table"><thead><tr><th>類型</th><th>實際送貨</th><th>待出貨</th><th>銷售額</th><th class="sales-cost-sensitive">成本</th><th class="sales-cost-sensitive">毛利</th><th class="sales-cost-sensitive">毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByType"></tbody></table></div>
+                <div><h3>各產品線分析</h3><table class="sales-stats-table"><thead><tr><th>產品線</th><th>實際送貨</th><th>待出貨</th><th>銷售額</th><th class="sales-cost-sensitive">成本</th><th class="sales-cost-sensitive">毛利</th><th class="sales-cost-sensitive">毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByLine"></tbody></table></div>
             </div>
         </div>
 
@@ -1247,17 +1250,6 @@
                 <div id="databaseBackupUploadStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
-            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
-<h4 style="margin-top:28px;">估價單／Forecast／訂單／儀器全歷史搜尋索引</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正全歷史搜尋索引</button>
-                <span style="font-size:12px;color:#666;">
-                    供估價單、Forecast、訂單與儀器的完整歷史搜尋使用。系統每次只讀取 200 筆並分批寫入 searchTokens；訂單同時保留標準化貨號 itemCodeKey。只新增搜尋索引，不會修改金額、狀態或流程紀錄。升級後執行一次即可，重複執行也安全。
-                </span>
-                <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
-            </div>
-</div>
-
             <h4 style="margin-top:28px;">系統資料檢查</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">檢查系統資料</button>
@@ -1268,27 +1260,9 @@
                 <div id="systemDataAuditResults" style="margin-top:10px;"></div>
             </div>
 
-            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
-<h4 style="margin-top:28px;">舊成本資料安全檢查</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">檢查舊成本資料</button>
-                <span style="font-size:12px;color:#666;">
-                    只讀取並統計舊庫存、分倉、收貨、異動與訂單內是否仍含成本欄位；不會修改或刪除任何資料。
-                </span>
-                <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-            </div>
-</div>
+            
 
-            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
-<h4 style="margin-top:28px;">Brand Master 相容層稽核</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="brandMasterAuditBtn" onclick="previewBrandMasterCompatibilityAudit()">檢查品牌主檔完整性</button>
-                <span style="font-size:12px;color:#666;">
-                    分頁讀取 Product Master、舊價格來源、統計／分公司／供應商設定及歷史交易品牌，確認所有正式來源品牌是否已被 Brand Master 名稱或別名涵蓋。只讀取與比對，不會修改資料。
-                </span>
-                <div id="brandMasterAuditStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-            </div>
-</div>
+            
 
             <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
             <div class="toolbar no-print" style="display:block;">
@@ -1339,6 +1313,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260923-1"></script>
-    <script src="app.js?v=20260924-1"></script>
+    <script src="app.js?v=20260924-2"></script>
 </body>
 </html>
