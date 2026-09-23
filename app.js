@@ -11737,10 +11737,10 @@ window.downloadProductMasterTemplate = function() {
         alert('Excel 元件尚未載入，請重新整理後再試。');
         return;
     }
-    const headers = ['貨號','中文品名','英文品名','廠牌','規格','產品線','含稅售價','含稅成本'];
-    const example = ['EXAMPLE-001','範例中文品名','Example Product','Roche','96 tests','','1000','600'];
+    const headers = ['貨號','中文品名','英文品名','規格','產品線','類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
+    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','','耗材','','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [18,28,32,18,24,18,14,14].map(wch => ({ wch }));
+    ws['!cols'] = [18,28,32,24,18,14,24,14,14,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '品牌名稱');
     XLSX.writeFile(wb, 'Product_Master_匯入範本.xlsx');
