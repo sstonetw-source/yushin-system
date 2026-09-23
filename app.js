@@ -652,7 +652,7 @@ function initializePageData(mainKey) {
         populateEquipmentSalesDropdown();
         loadEquipmentFromCloud();
     });
-    if (mainKey === 'admin') ensureSalesListLoaded().then(reloadSalesFromUsers);
+    if (mainKey === 'admin') reloadSalesFromUsers();
 }
 
 function ensureSalesListLoaded() {
@@ -10691,21 +10691,17 @@ function bindListRowSelection(row) {
 // 這裡顯示 users 集合裡「所有」帳號（包含還沒填 name/code、只能登入沒被列進業務下拉選單的人），
 // 讓你能一眼看出目前有哪些帳號對這個系統有登入權限；下拉選單用的業務清單（salesList）不受影響，仍只取有填 name+code 的人
 function loadAllUsersForAdmin() {
-    return db.collection('users').get().then(snapshot => {
-        allUsersCache = [];
-        snapshot.forEach(doc => {
-            const d = doc.data();
-            allUsersCache.push({
-                uid: doc.id,
-                code: d.code || '',
-                name: d.name || '',
-                phone: d.phone || '',
-                role: d.role || 'sales',
-                email: d.email || '',
-                disabled: !!d.disabled,
-                mustChangePassword: !!d.mustChangePassword
-            });
-        });
+    return readCollectionInBatches('users').then(rows => {
+        allUsersCache = rows.map(d => ({
+            uid: d.id,
+            code: d.code || '',
+            name: d.name || '',
+            phone: d.phone || '',
+            role: d.role || 'sales',
+            email: d.email || '',
+            disabled: !!d.disabled,
+            mustChangePassword: !!d.mustChangePassword
+        }));
         allUsersCache.sort((a, b) => {
             if (a.name && !b.name) return -1;
             if (!a.name && b.name) return 1;
