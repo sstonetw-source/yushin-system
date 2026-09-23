@@ -5150,7 +5150,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
         const idx=ordersCache.findIndex(o=>o.id===orderId);
         if(idx>=0)ordersCache[idx]={id:orderId,...saved};
     }catch(err){alert('標記已打單失敗：'+err.message);}
-    finally{pendingDispatchOrderIds.delete(key);renderOrdersList();if(currentDeliveryOrderId===orderId)renderDeliveryModal();}
+    finally{pendingDispatchOrderIds.delete(key);renderOrdersList();if(purchasingView==='dispatch')loadPurchasingDispatchOrders();if(currentDeliveryOrderId===orderId)renderDeliveryModal();}
 };
 
 
@@ -5846,17 +5846,72 @@ let pendingPurchaseError = '';
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['pending', 'arrival', 'history'].includes(view)) return;
+    if (!['pending', 'arrival', 'dispatch'].includes(view)) return;
     if (view === 'pending' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
     const pendingTab = document.getElementById('purchase-sub-pending');
     if (pendingTab) pendingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchasing-system > .sub-nav .sub-tab').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-sub-${view}`))));
     document.getElementById('purchasePendingPanel').style.display = view === 'pending' ? '' : 'none';
-    document.getElementById('poListPanel').style.display = view === 'pending' ? 'none' : '';
+    document.getElementById('poListPanel').style.display = view === 'arrival' ? '' : 'none';
+    const dispatchPanel = document.getElementById('purchaseDispatchPanel');
+    if (dispatchPanel) dispatchPanel.style.display = view === 'dispatch' ? '' : 'none';
     if (view === 'pending') loadPendingPurchaseOrders(true);
-    else if (poListCache.length) renderPoList();
-    else loadMyPurchaseOrders();
+    else if (view === 'arrival') {
+        if (poListCache.length) renderPoList();
+        else loadMyPurchaseOrders();
+    } else {
+        loadPurchasingDispatchOrders();
+    }
+};
+
+let purchasingDispatchCache = [];
+let purchasingDispatchLoading = false;
+
+function renderPurchasingDispatchOrders() {
+    const body = document.getElementById('purchaseDispatchBody');
+    const empty = document.getElementById('purchaseDispatchEmptyHint');
+    const status = document.getElementById('purchaseDispatchStatus');
+    if (!body) return;
+    body.innerHTML = '';
+    const rows = purchasingDispatchCache.filter(order => {
+        const category = orderWorkCategory(order);
+        return normalizedOrderStatus(order) === 'normal' && (category === 'dispatch' || category === 'delivery');
+    });
+    rows.forEach(order => {
+        const fulfillment = fulfillmentProgressInfo(order);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td>
+            <td data-th="客戶">${escapeHtml(order.customerName || '')}</td>
+            <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(order.salesName || ''))}</td>
+            <td data-th="產品">${normalizedOrderItems(order).map(item => `${escapeHtml(item.itemCode || '')} ${escapeHtml(item.itemName || '')} × ${Number(item.orderedQty || item.qty || 0)}`).join('<br>')}</td>
+            <td data-th="出貨狀態">${escapeHtml(fulfillment.label)}</td>
+            <td data-th="操作">${dispatchActionHtml(order) || (fulfillment.shippable > 0 ? '<span class="status-ok">已打單／可出貨</span>' : '—')}</td>
+        `;
+        body.appendChild(tr);
+    });
+    if (empty) empty.style.display = rows.length ? 'none' : 'block';
+    if (status) status.textContent = purchasingDispatchLoading ? '載入中…' : `待處理 ${rows.length} 張`;
+}
+
+window.loadPurchasingDispatchOrders = async function() {
+    if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
+    purchasingDispatchLoading = true;
+    renderPurchasingDispatchOrders();
+    try {
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('orders').orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT).get(),
+            '發貨訂單'
+        );
+        purchasingDispatchCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (err) {
+        const status = document.getElementById('purchaseDispatchStatus');
+        if (status) status.textContent = '讀取失敗：' + err.message;
+    } finally {
+        purchasingDispatchLoading = false;
+        renderPurchasingDispatchOrders();
+    }
 };
 
 function pendingPurchaseLines(order) {
