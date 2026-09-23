@@ -649,7 +649,12 @@ function initializePageData(mainKey) {
     if (mainKey === 'forecast') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
-    if (mainKey === 'orders') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(loadOrdersFromCloud);
+    if (mainKey === 'orders') {
+        // 訂單列表本身不需要完整 Product Master。先載 50 筆訂單，避免 iPhone 每次進頁
+        // 都等待舊價目表分片 + products 500 筆 + 大量 datalist DOM 建立完成才顯示資料。
+        ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
+        loadOrdersFromCloud();
+    }
     if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => {
         populateEquipmentSalesDropdown();

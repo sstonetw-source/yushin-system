@@ -1018,3 +1018,34 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 }
 .preview-environment-banner[hidden] { display: none !important; }
 html[data-app-environment="preview"] body { border-top: 0; }
+
+
+/* Product Management mobile: iOS search input must stay a normal single-line control. */
+@media screen and (max-width: 640px) {
+    #product-system .product-search-toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    #product-system .product-search-toolbar #productManagementSearch {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-width: 0;
+        height: 44px;
+        min-height: 44px;
+        max-height: 44px;
+        padding: 8px 12px;
+        flex: none;
+        appearance: auto;
+        -webkit-appearance: searchfield;
+    }
+    #product-system .product-search-toolbar #productManagementSearchBtn,
+    #product-system .product-search-toolbar .btn-secondary {
+        width: 100%;
+        min-height: 44px;
+    }
+    #product-system .product-search-toolbar .inline-status {
+        grid-column: 1 / -1;
+        width: auto;
+    }
+}
