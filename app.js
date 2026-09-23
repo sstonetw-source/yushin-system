@@ -10729,7 +10729,7 @@ window.renderAdminSalesTable = function() {
             <td data-label="姓名">${escapeHtml(u.name || '（尚未設定姓名）')}</td>
             <td data-label="電話">${escapeHtml(u.phone || '—')}</td>
             <td data-label="Email">${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
-            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select><button type="button" class="btn-small" style="margin-left:6px;" onclick="saveAdminUserRole('${escapeAttr(u.uid)}')">儲存</button></td>
+            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}" onchange="saveAdminUserRole('${escapeAttr(u.uid)}', this)">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
             <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
                     ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
@@ -10745,20 +10745,27 @@ window.renderAdminSalesTable = function() {
     });
 };
 
-window.saveAdminUserRole=async function(uid){
+window.saveAdminUserRole=async function(uid, selectEl){
     if(trueUserRole!=='admin')return;
-    const role=document.getElementById(`adminUserRole-${uid}`)?.value||'sales';
+    const select=selectEl||document.getElementById(`adminUserRole-${uid}`);
+    const user=allUsersCache.find(x=>x.uid===uid);
+    const previousRole=user?.role||'sales';
+    const role=select?.value||'sales';
+    if(role===previousRole)return;
+    if(select)select.disabled=true;
     try{
         await db.collection('users').doc(uid).set({
             role,
             capabilities:role==='engineer'?['business','engineering']:role==='sales'?['business']:[],
             updatedAt:new Date().toISOString()
         },{merge:true});
-        const user=allUsersCache.find(x=>x.uid===uid);
         if(user) user.role=role;
-        alert('人員角色已更新。');
+        if(select)select.title='角色已更新';
     } catch(err) {
+        if(select)select.value=previousRole;
         alert('更新失敗：'+err.message);
+    } finally {
+        if(select)select.disabled=false;
     }
 };
 
@@ -11850,5 +11857,4 @@ window.handlePriceExcelUpload = async function(input) {
     };
     reader.readAsArrayBuffer(file);
 };
-
 
