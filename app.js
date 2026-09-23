@@ -12118,3 +12118,118 @@ window.exportQuotesCSV = function() {
     a.click();
     URL.revokeObjectURL(url);
 };
+
+
+/* ===== 2026-09-23 workflow simplification ===== */
+window.downloadProductMasterTemplate = async function() {
+    await ensureXlsxLoaded();
+    const rows=[{'貨號':'5000006','中文品名':'範例產品（請刪除此列）','英文品名':'Example Product','廠牌':'Roche','規格':'96 tests','產品線':'Molecular','產品類型':'試劑','建議售價':0,'供應商':''}];
+    const wb=XLSX.utils.book_new(), ws=XLSX.utils.json_to_sheet(rows);
+    ws['!cols']=[14,28,28,16,20,18,16,14,20].map(wch=>({wch}));
+    XLSX.utils.book_append_sheet(wb,ws,'範例廠牌');
+    XLSX.writeFile(wb,'Product_Master_匯入範本.xlsx');
+};
+
+window.downloadInventoryTemplate = async function() {
+    await ensureXlsxLoaded();
+    const rows=[{'貨號':'5000006','倉庫':'台北倉','數量':1,'含稅成本':0,'批號':'','效期':'','備註':'範例列，請刪除'}];
+    const wb=XLSX.utils.book_new(), ws=XLSX.utils.json_to_sheet(rows);
+    ws['!cols']=[16,16,12,14,18,14,28].map(wch=>({wch}));
+    XLSX.utils.book_append_sheet(wb,ws,'庫存匯入');
+    XLSX.writeFile(wb,'庫存批量匯入範本.xlsx');
+};
+
+window.handleInventoryExcelUpload = async function(input) {
+    const file=input.files?.[0], status=document.getElementById('inventoryImportStatus');
+    if(!file)return;
+    if(!canEditPage('inventory')){alert('沒有庫存編輯權限。');input.value='';return;}
+    try{
+        await Promise.all([ensureXlsxLoaded(),loadSupplierWarehouseMasters()]);
+        if(status)status.textContent='讀取 Excel 中…';
+        const data=await file.arrayBuffer(), wb=XLSX.read(data,{type:'array'});
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+        const warehouseByName=new Map(warehouseMasterCache.map(w=>[String(w.name||'').trim(),w]));
+        const prepared=[], errors=[];
+        for(let i=0;i<rows.length;i++){
+            const r=rows[i], code=String(r['貨號']||r['型號']||'').trim(), warehouseName=String(r['倉庫']||'').trim(), qty=Number(r['數量']||0), cost=Number(r['含稅成本']||r['成本']||0);
+            if(!code&&!warehouseName&&!qty)continue;
+            if(!code||!Number.isFinite(qty)||qty<=0){errors.push(`第 ${i+2} 列：貨號或數量錯誤`);continue;}
+            const wh=warehouseByName.get(warehouseName);
+            if(warehouseMasterCache.length&&!wh){errors.push(`第 ${i+2} 列：找不到倉庫「${warehouseName}」`);continue;}
+            const normalized=normalizeItemCodeLoose(code);
+            const snap=await db.collection('products').where('normalizedPartNo','==',normalized).limit(10).get();
+            if(snap.empty){errors.push(`第 ${i+2} 列：Product Master 找不到貨號 ${code}`);continue;}
+            const match=productMasterDocToPriceItem(snap.docs[0]);
+            prepared.push({itemCode:match.model||code,itemName:match.nameCn||match.nameEn||'',brand:resolveBrandName(match.brand||''),productId:match.productId||stableProductId(match),warehouseId:wh?.id||'',qty,unitCost:Number.isFinite(cost)?cost:0,lotNo:String(r['批號']||'').trim(),expiryDate:String(r['效期']||'').trim()});
+        }
+        if(status)status.textContent=`Excel ${rows.length} 列：可匯入 ${prepared.length}；錯誤 ${errors.length}`;
+        if(errors.length)alert('匯入檢查結果：\n'+errors.slice(0,20).join('\n')+(errors.length>20?'\n…其餘略':''));
+        if(!prepared.length)return;
+        inventoryAdjustmentRows=prepared;
+        const typeSelect=document.getElementById('inventoryAdjustmentType');if(typeSelect){typeSelect.value='initial';typeSelect.disabled=true;}
+        document.getElementById('inventoryAdjustmentTitle').innerText='Excel 批量新增庫存';
+        const addBtn=document.getElementById('inventoryAddRowBtn');if(addBtn)addBtn.style.display='';
+        renderInventoryAdjustmentRows();
+        document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');
+    }catch(err){if(status)status.textContent='匯入失敗';alert('Excel 匯入失敗：'+err.message);}
+    finally{input.value='';}
+};
+
+function backupRestoreValue(value){
+    if(value&&typeof value==='object'&&value.__type==='timestamp')return firebase.firestore.Timestamp.fromDate(new Date(value.value));
+    if(value&&typeof value==='object'&&value.__type==='date')return value.value;
+    if(Array.isArray(value))return value.map(backupRestoreValue);
+    if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,backupRestoreValue(v)]));
+    return value;
+}
+window.previewDatabaseRestore = async function(input){
+    const file=input.files?.[0]; if(!file)return;
+    if(trueUserRole!=='admin'||currentUserRole!=='admin'){alert('只有管理員可以還原備份。');input.value='';return;}
+    try{
+        const backup=JSON.parse(await file.text());
+        if(backup?.format!=='yu-shing-firestore-backup'||!backup.collections)throw new Error('不是又鑫系統的有效備份檔。');
+        const groups=Object.entries(backup.collections), count=groups.reduce((n,[,rows])=>n+(Array.isArray(rows)?rows.length:0),0);
+        const summary=groups.filter(([,rows])=>Array.isArray(rows)&&rows.length).map(([name,rows])=>`${name}: ${rows.length} 筆`).join('\n');
+        if(!confirm(`備份日期：${backup.createdAt||'未知'}\n共 ${count} 筆文件。\n\n${summary}\n\n將採「合併還原」：同路徑文件會更新，不會先清空資料庫。確定繼續？`))return;
+        const typed=prompt('這會寫入正式資料。請輸入 RESTORE 確認：');
+        if(typed!=='RESTORE')return;
+        const status=document.getElementById('databaseBackupStatus');if(status)status.textContent='還原中，請勿關閉頁面…';
+        let batch=db.batch(), ops=0, done=0;
+        const flush=async()=>{if(!ops)return;await batch.commit();batch=db.batch();ops=0;};
+        for(const [,rows] of groups){
+            if(!Array.isArray(rows))continue;
+            for(const row of rows){
+                if(!row?.path||!row?.data)continue;
+                batch.set(db.doc(row.path),backupRestoreValue(row.data),{merge:true});ops++;done++;
+                if(ops>=400){await flush();if(status)status.textContent=`已還原 ${done}/${count} 筆…`;}
+            }
+        }
+        await flush(); if(status)status.textContent=`還原完成：${done} 筆。`; alert('資料庫合併還原完成。');
+    }catch(err){alert('備份檔還原失敗：'+err.message);}
+    finally{input.value='';}
+};
+
+window.runSystemDataCheck = async function(){
+    if(trueUserRole!=='admin'||currentUserRole!=='admin')return;
+    const btn=document.getElementById('systemDataCheckBtn'),status=document.getElementById('systemDataCheckStatus');
+    if(btn){btn.disabled=true;btn.textContent='檢查中…';} if(status)status.textContent='唯讀掃描中…';
+    try{
+        const [products,orders,pos,inventory]=await Promise.all([db.collection('products').get(),db.collection('orders').get(),db.collection('purchaseOrders').get(),db.collection('inventory').get()]);
+        const issues=[];
+        const codes=new Map();
+        products.forEach(doc=>{const d=doc.data(),key=normalizeItemCodeLoose(d.manufacturerPartNo||d.sku||'');if(!key)return;if(codes.has(key))issues.push(`Product Master 重複貨號：${d.manufacturerPartNo||key}`);else codes.set(key,doc.id);});
+        orders.forEach(doc=>{const d=doc.data();if(!d.customerName)issues.push(`訂單 ${d.orderNo||doc.id}：缺客戶`);normalizedOrderItems(d).forEach(item=>{if(!item.itemCode)issues.push(`訂單 ${d.orderNo||doc.id}：品項缺貨號`);if(Number(item.qty||item.orderedQty||0)<0)issues.push(`訂單 ${d.orderNo||doc.id}：數量為負數`);});});
+        pos.forEach(doc=>{const d=doc.data();(d.items||[]).forEach(item=>{if(Number(item.receivedQty||0)>Number(item.qty||item.orderedQty||0))issues.push(`採購單 ${d.poNo||doc.id}：到貨數量大於訂購數量`);});});
+        inventory.forEach(doc=>{const d=doc.data(),n=inventoryNumbers(d);if(n.onHand<0||n.reserved<0||n.available<0)issues.push(`庫存 ${d.itemCode||doc.id}：數量異常（現有 ${n.onHand}／占用 ${n.reserved}／可用 ${n.available}）`);});
+        const head=`檢查完成：Product ${products.size}、訂單 ${orders.size}、採購單 ${pos.size}、庫存 ${inventory.size}。\n`;
+        if(status)status.textContent=head+(issues.length?`發現 ${issues.length} 個問題：\n${issues.slice(0,100).join('\n')}`:'未發現上述資料一致性問題。');
+    }catch(err){if(status)status.textContent='檢查失敗：'+err.message;}
+    finally{if(btn){btn.disabled=false;btn.textContent='🔍 執行唯讀健檢';}}
+};
+
+let salesStatsSensitiveVisible=true;
+window.toggleSalesStatsSensitive=function(){
+    salesStatsSensitiveVisible=!salesStatsSensitiveVisible;
+    document.getElementById('admin-statistics')?.classList.toggle('hide-sensitive',!salesStatsSensitiveVisible);
+    const btn=document.getElementById('toggleSalesStatsSensitiveBtn');if(btn)btn.textContent=salesStatsSensitiveVisible?'🙈 隱藏成本／毛利':'👁 顯示成本／毛利';
+};
