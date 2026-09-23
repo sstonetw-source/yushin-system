@@ -9305,16 +9305,19 @@ window.handleEquipmentExcelUpload = async function(input) {
                 return '';
             };
 
-            // 依權限範圍（一般業務只查自己名下的、管理員查全部）建立「儀器編號 -> 文件ID」比對索引
-            let existingQuery = db.collection('equipment');
+            // 依權限範圍建立「儀器編號 -> 文件ID」索引；一般角色不讀取其他業務資料。
+            const existingPromise = canViewAllEquipment()
+                ? readCollectionInBatches('equipment')
+                : db.collection('equipment').where('salesName', '==', currentUserName).get()
+                    .then(snapshot => snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
-            existingQuery.get().then(snapshot => {
+            existingPromise.then(records => {
                 const idMap = new Map();
                 const maxSeqByPrefix = {}; // 各業務代號前綴各自獨立計算目前最大流水號
-                snapshot.forEach(doc => {
-                    const d = doc.data();
+                records.forEach(record => {
+                    const d = record || {};
                     if (d.assetId) {
-                        idMap.set(d.assetId, doc.id);
+                        idMap.set(d.assetId, d.id);
                         const m = d.assetId.match(/^(EQ-[^-]+-)(\d+)$/);
                         if (m) {
                             const prefix = m[1];
