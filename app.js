@@ -3004,6 +3004,10 @@ window.onOrderItemCodeChange = async function(input) {
     if (match.brand) { selectBrandInDropdown(document.getElementById('orderBrand'), resolveBrandName(match.brand)); onOrderBrandSelectChange(); }
     const itemNameInput = document.getElementById('orderItemName');
     if (itemNameInput) itemNameInput.value = match.nameCn || match.nameEn || '';
+    const itemNameEnInput = document.getElementById('orderItemNameEn');
+    if (itemNameEnInput) itemNameEnInput.value = match.nameEn || '';
+    const itemSpecInput = document.getElementById('orderItemSpec');
+    if (itemSpecInput) itemSpecInput.value = match.spec || '';
     const priceInput = document.getElementById('orderUnitPrice');
     if (priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') { priceInput.value = match.price; calcOrderTotal(); }
     input.dataset.productLine = match.productLine || '';
@@ -8461,7 +8465,7 @@ window.onOrderProcurementModeChange=function(){
 function currentOrderModalItem() {
     const procurementMode=document.getElementById('orderProcurementMode')?.value||'PURCHASING_PO';
     const directShip=!!document.getElementById('orderDirectShip')?.checked;
-    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,fulfillmentType:directShip?'DIRECT_SHIP':'WAREHOUSE',warehouseId:'',procurementMode,productId:window._orderModalProductId||''};
+    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',spec:document.getElementById('orderItemSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,fulfillmentType:directShip?'DIRECT_SHIP':'WAREHOUSE',warehouseId:'',procurementMode,productId:window._orderModalProductId||''};
     const cost=document.getElementById('orderCostPrice').value;
     if(procurementMode==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
@@ -8477,7 +8481,7 @@ window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(x=>(x.productId&&x.productId===item.productId)||(!x.productId&&normalizeItemCodeLoose(x.itemCode)===normalizeItemCodeLoose(item.itemCode)&&normalizeBrandLookupKey(x.brand)===normalizeBrandLookupKey(item.brand)));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0),totalPrice:(Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0))*Number(item.unitPrice||0)};}else newOrderDraftItems.push(item);renderNewOrderDraftItems();
-    ['orderItemCode','orderItemName'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
+    ['orderItemCode','orderItemName','orderItemNameEn','orderItemSpec'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
 };
 
 window.openOrderModal = function(source = null) {
@@ -8493,7 +8497,7 @@ window.openOrderModal = function(source = null) {
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderInvoiceTitle'].forEach(id => {
+    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderItemNameEn', 'orderItemSpec', 'orderInvoiceTitle'].forEach(id => {
         document.getElementById(id).value = '';
     });
     onOrderBrandSelectChange();
@@ -8520,6 +8524,8 @@ window.openOrderModal = function(source = null) {
         document.getElementById('orderCustomer').value = source.customerName || '';
         document.getElementById('orderItemCode').value = source.itemCode || '';
         document.getElementById('orderItemName').value = source.itemName || '';
+        document.getElementById('orderItemNameEn').value = source.itemNameEn || '';
+        document.getElementById('orderItemSpec').value = source.spec || '';
         document.getElementById('orderQty').value = source.qty || 1;
         document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
         if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
