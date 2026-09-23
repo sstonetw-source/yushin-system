@@ -3154,52 +3154,31 @@ window.onIncPriceChange = function(input) {
 // 帶入舊估價單時，畫面上顯示的是那張單當初存下來的舊價格，不會自動比對現在的價目表。
 // 這個功能讓使用者可以一次把整張單的品項，都重新依「貨號」→「中文品名」的順序去比對目前的價目表，
 // 有找到就更新單價（連帶更新英文品名/廠牌），找不到的品項維持原樣不動，最後跳出更新結果讓使用者確認
-window.refreshAllItemPricesFromPriceList = function() {
-    const rows = document.querySelectorAll('#quoteItems tr');
+window.refreshAllItemPricesFromPriceList = async function() {
+    const rows = [...document.querySelectorAll('#quoteItems tr')];
     if (rows.length === 0) {
         alert('目前沒有任何品項可以更新。');
         return;
     }
-    if (!confirm(`確定要把目前這 ${rows.length} 個品項，都依貨號／中文品名重新比對現在的價目表、更新單價嗎？\n找不到對應品項的列不會被更動；已經比對到的列，原本的單價會被目前價目表的價格蓋掉。`)) {
-        return;
-    }
+    if (!confirm(`確定要把目前這 ${rows.length} 個品項依貨號重新比對 Product Master、更新單價嗎？\n沒有貨號或找不到唯一產品的列不會被更動。`)) return;
 
     let updated = 0;
     let notFound = 0;
-
-    rows.forEach(row => {
-        const modelInput = row.querySelector('.item-model');
-        const cnInput = row.querySelector('.item-cn');
-        const model = (modelInput.value || '').trim();
-        const cn = (cnInput.value || '').trim();
-
-        // 優先用貨號比對（比較不會撞名），貨號比對不到才退而用中文品名比對
-        let match = model ? findPriceItemByCodeValue(model) : null;
-        if (!match && cn) match = priceList.find(p => p.nameCn === cn);
-
+    for (const row of rows) {
+        const model = (row.querySelector('.item-model')?.value || '').trim();
+        let match = model ? await findProductByCode(model) : null;
         if (!match) {
-            notFound++;
-            return;
+            const cn = (row.querySelector('.item-cn')?.value || '').trim();
+            const nameMatches = cn ? priceList.filter(p => String(p.nameCn || '').trim() === cn) : [];
+            match = nameMatches.length === 1 ? nameMatches[0] : null;
         }
-
-        row.querySelector('.item-en').value = match.nameEn || '';
-        row.querySelector('.item-cn').value = match.nameCn || '';
-        row.querySelector('.item-model').value = match.model || '';
-        row.querySelector('.item-brand').value = match.brand || '';
-        row.querySelector('.item-product-line').value = match.productLine || '';
-        row.querySelector('.item-product-type').value = match.productType || '';
-        if (match.price) {
-            const incPriceInput = row.querySelector('.inc-price');
-            incPriceInput.value = match.price;
-            onIncPriceChange(incPriceInput);
-            updated++;
-        }
-    });
-
+        if (!match) { notFound++; continue; }
+        applyQuoteProductMatch(row, match);
+        updated++;
+    }
     calculateTotals();
-
-    let msg = `已更新 ${updated} 個品項的單價。`;
-    if (notFound > 0) msg += `\n有 ${notFound} 個品項在目前的價目表裡找不到對應的貨號／品名，維持原本的舊價格，請自行確認是否需要手動處理。`;
+    let msg = `已更新 ${updated} 個品項。`;
+    if (notFound > 0) msg += `\n有 ${notFound} 個品項找不到唯一對應產品，維持原資料。`;
     alert(msg);
 };
 
@@ -4625,11 +4604,11 @@ window.openInventoryReplenishment = async function(inventoryId) {
     if (!canEditPage('orders.po')) { alert('您沒有採購權限。'); return; }
     const item = inventoryCache.find(x => x.id === inventoryId);
     if (!item) { alert('找不到庫存品項。'); return; }
-    await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
+    await loadSupplierWarehouseMasters();
     const stock = inventoryNumbers(item);
     const safetyStock = Math.max(0, Number(item.safetyStock || 0));
     const suggestedQty = Math.max(1, safetyStock - stock.available);
-    const match = findPriceItemByCodeValue(item.itemCode || '');
+    const match = await findProductByCode(item.itemCode || '');
     let unitPrice = 0;
     if (match) {
         const secureCost = await loadVisibleProductCost(match);
@@ -4673,7 +4652,7 @@ let inventoryAdjustmentRows = [];
 
 window.openInventoryAdjustment = async function(type = 'initial', item = null) {
     if (!canEditPage('inventory')) return;
-    await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
+    await loadSupplierWarehouseMasters();
     const selectedType = type || 'initial';
     const source = item || null;
     inventoryAdjustmentRows = [{
@@ -6551,7 +6530,7 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
 
 window.openDirectStockPurchase = async function() {
     if (!canEditPage('orders.po')) return;
-    await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
+    await loadSupplierWarehouseMasters();
     poDirectStockMode = true;
     poEditingId = null;
     poAllItems = [];
@@ -8491,7 +8470,6 @@ window.addCurrentOrderItemToDraft=function(){
 };
 
 window.openOrderModal = function(source = null) {
-    ensurePriceListLoaded().catch(() => {});
     requestedOrderOwnerUid = source?.ownerUid || '';
     populateOrderOwnerSelect();
     if (currentUserRole === 'purchaser') {
