@@ -1049,3 +1049,24 @@ html[data-app-environment="preview"] body { border-top: 0; }
         width: auto;
     }
 }
+
+
+/* Admin statistics privacy: hide sensitive cost/margin values without changing underlying permissions. */
+#admin-statistics.hide-sensitive .sensitive-stat,
+#admin-statistics.hide-sensitive #salesStatsActualDetail,
+#admin-statistics.hide-sensitive #salesStatsPendingDetail,
+#admin-statistics.hide-sensitive #salesStatsTotalDetail,
+#admin-statistics.hide-sensitive #salesStatsMissingCost,
+#admin-statistics.hide-sensitive .sales-stats-table th:nth-child(5),
+#admin-statistics.hide-sensitive .sales-stats-table th:nth-child(6),
+#admin-statistics.hide-sensitive .sales-stats-table th:nth-child(7),
+#admin-statistics.hide-sensitive .sales-stats-table td:nth-child(5),
+#admin-statistics.hide-sensitive .sales-stats-table td:nth-child(6),
+#admin-statistics.hide-sensitive .sales-stats-table td:nth-child(7) { display:none !important; }
+
+/* Keep admin and inventory action groups usable on phones. */
+@media screen and (max-width:640px){
+  #inventory-system .section-header { align-items:flex-start; gap:10px; }
+  #inventory-system .section-header > div { display:grid; grid-template-columns:1fr 1fr; gap:6px; width:100%; }
+  #inventory-system .section-header > div button:first-child { grid-column:1/-1; }
+}
