@@ -3001,8 +3001,7 @@ function getBrandFieldValue(selectId, otherInputId) {
 window.onOrderItemCodeChange = async function(input) {
     const value = input.value.trim();
     if (!value) return;
-    await ensurePriceListLoaded().catch(() => {});
-    const match = findPriceItemByCodeValue(value);
+    const match = await findProductByCode(value);
     if (!match) {
         input.dataset.autofillStatus = 'not-found';
         setOrderCostFieldForProduct(null);
@@ -3131,8 +3130,7 @@ window.onItemModelChange = async function(input) {
     const value = input.value.trim();
     if (!value) return;
 
-    await ensurePriceListLoaded().catch(() => {});
-    const match = findPriceItemByCodeValue(value);
+    const match = await findProductByCode(value);
     if (!match) {
         input.dataset.autofillStatus = 'not-found';
         showQuickProductButton(input, 'quote');
@@ -4737,8 +4735,7 @@ window.removeInventoryAdjustmentRow = function(idx) {
 };
 
 window.onInventoryAdjustmentCode = async function(idx, value) {
-    await ensurePriceListLoaded().catch(() => {});
-    const match = findPriceItemByCodeValue(value);
+    const match = await findProductByCode(value);
     inventoryAdjustmentRows[idx].itemCode = String(value||'').trim();
     if (match) {
         inventoryAdjustmentRows[idx].itemCode = match.model || value;
@@ -6588,8 +6585,7 @@ window.addDirectPoItem = function() {
 
 window.onDirectPoCodeChange = async function(idx, value) {
     if (!poItems[idx]) return;
-    await ensurePriceListLoaded().catch(() => {});
-    const match = findPriceItemByCodeValue(value);
+    const match = await findProductByCode(value);
     poItems[idx].itemCode = String(value || '').trim();
     if (match) {
         const secureCost = await loadVisibleProductCost(match);
@@ -9789,6 +9785,37 @@ function findPriceItemByCodeValue(value) {
     return candidates.length === 1 ? candidates[0] : null;
 }
 
+function cacheProductLookupItem(item) {
+    if (!item) return null;
+    const productId = item.productId || stableProductId(item);
+    const next = normalizeProductMasterItem({ ...item, productId });
+    priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(next);
+    productMasterCache = productMasterCache.filter(row => (row.productId || stableProductId(row)) !== productId).concat(next);
+    rebuildPriceItemLookup();
+    return next;
+}
+
+async function findProductByCode(value) {
+    const cached = findPriceItemByCodeValue(value);
+    if (cached) return cached;
+    const normalized = normalizeItemCodeLoose(value);
+    if (!normalized) return null;
+    try {
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('products').where('normalizedPartNo', '==', normalized).limit(20).get(),
+            'Product Master 貨號查詢'
+        );
+        const active = snapshot.docs
+            .map(productMasterDocToPriceItem)
+            .filter(item => item.status !== 'INACTIVE' && item.active !== false);
+        if (active.length !== 1) return null;
+        return cacheProductLookupItem(active[0]);
+    } catch (err) {
+        console.warn('Product Master 貨號查詢失敗：', err);
+        return null;
+    }
+}
+
 function applyQuoteProductMatch(row, match) {
     if (!row || !match) return false;
 
@@ -9823,8 +9850,7 @@ window.onItemModelInput = function(input) {
     quoteModelInputTimer = setTimeout(async () => {
         const value = input.value.trim();
         if (!value) return;
-        await ensurePriceListLoaded().catch(() => {});
-        const match = findPriceItemByCodeValue(value);
+        const match = await findProductByCode(value);
         if (match && input.value.trim() === value) applyQuoteProductMatch(input.closest('tr'), match);
     }, 180);
 };
