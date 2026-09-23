@@ -70,23 +70,22 @@ let trueUserRole = null;     // 真正登入帳號的身份；只有這個是 ad
 let mustChangePassword = false;  // 管理員要求這個帳號下次登入必須先改密碼
 const ROLE_LABELS = { admin: '管理員', sales: '業務', purchaser: '採購', warehouse: '倉管', engineer: '工程師' };
 const PERMISSION_LEVELS = { none: 0, view: 1, edit: 2 };
-const PERMISSION_PAGES = [
-    { key: 'forecast', label: '📈 Forecast', system: true },
-    { key: 'quote', label: '📄 估價單系統', system: true },
-    { key: 'quote.create', label: '　建立估價單' },
-    { key: 'quote.my', label: '　我的估價單' },
-    { key: 'products', label: '產品管理', system: true },
-    { key: 'orders', label: '📦 訂單管理系統', system: true },
-    { key: 'orders.list', label: '　業務訂單' },
-    { key: 'orders.po', label: '　採購訂單' },
-    { key: 'inventory', label: '📦 庫存管理', system: true },
-    { key: 'equipment', label: '🔬 儀器管理系統', system: true },
-    { key: 'admin', label: '⚙️ 管理員雲端後台', system: true }
-];
-// 權限不在 HTML 內提供預設值，唯一來源是 Firestore settings/rolePermissions。
-// 管理員固定保留完整權限，避免誤設後無人能再進入後台修正。
-let rolePermissions = {};
-let roleDataScopes = {};
+const FIXED_ROLE_PERMISSIONS = Object.freeze({
+    sales: { forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', equipment:'view' },
+    purchaser: { quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', orders:'edit', 'orders.list':'edit', purchasing:'edit', inventory:'edit' },
+    warehouse: { products:'view', inventory:'edit' },
+    engineer: { quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', equipment:'edit' },
+    admin: { forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'edit', orders:'edit', 'orders.list':'edit', purchasing:'edit', inventory:'edit', equipment:'edit', admin:'edit' }
+});
+const FIXED_DATA_SCOPES = Object.freeze({
+    sales: { quotes:'own', orders:'own', forecast:'own' },
+    purchaser: { quotes:'all', orders:'all', inventory:'all', purchasing:'all' },
+    warehouse: { inventory:'all' },
+    engineer: { quotes:'own', equipment:'all' },
+    admin: { quotes:'all', orders:'all', forecast:'all', inventory:'all', purchasing:'all', equipment:'all' }
+});
+let rolePermissions = FIXED_ROLE_PERMISSIONS;
+let roleDataScopes = FIXED_DATA_SCOPES;
 let currentUserName = '';    // 目前登入者自己的業務姓名（來自 users 集合）
 let currentUserPhone = '';   // 目前登入者自己的電話
 let currentUserCode = '';    // 目前登入者自己的業務代號
@@ -376,10 +375,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 currentUserPhone = d.phone || '';
                 currentUserCode = d.code || '';
                 mustChangePassword = !!d.mustChangePassword;
-                loadRolePermissions().finally(() => {
-                    showApp();
-                    if (mustChangePassword) openChangePasswordModal(true);
-                });
+                showApp();
+                if (mustChangePassword) openChangePasswordModal(true);
 
                 // 把自己的登入 Email 同步存回自己的 users 文件，這樣管理員雲端後台才查得到每個帳號的 Email
                 // （用來寄送密碼重設信）；只寫自己的資料，不影響、也不需要動到別人的帳號
@@ -409,31 +406,11 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-function loadRolePermissions() {
-    return db.collection('settings').doc('rolePermissions').get().then(doc => {
-        if (!doc.exists) return;
-        rolePermissions = doc.exists ? (doc.data().roles || {}) : {};
-        roleDataScopes = doc.exists ? (doc.data().dataScopes || {}) : {};
-        // 新增產品管理頁時保持既有權限設定相容：只要原本可查看估價、訂單或庫存，
-        // 就先提供唯讀 Product Master。管理員日後可在身份權限中明確設定 products。
-        ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => {
-            const configured = rolePermissions[role] || {};
-            if (configured.products !== undefined) return;
-            const sourceLevels = ['quote', 'orders', 'inventory'].map(key => PERMISSION_LEVELS[configured[key] || 'none']);
-            if (Math.max(...sourceLevels) >= PERMISSION_LEVELS.view) {
-                rolePermissions[role] = { ...configured, products: 'view' };
-            }
-        });
-    }).catch(err => console.warn('讀取身份權限設定失敗，將不授予任何非管理員權限：', err));
-}
+function loadRolePermissions() { return Promise.resolve(); }
 
 function getPagePermission(pageKey, role = currentUserRole) {
     if (role === 'admin') return 'edit';
-    const direct = rolePermissions[role]?.[pageKey] || 'none';
-    const parentKey = pageKey.includes('.') ? pageKey.split('.')[0] : '';
-    if (!parentKey) return direct;
-    const parent = rolePermissions[role]?.[parentKey] || 'none';
-    return PERMISSION_LEVELS[parent] < PERMISSION_LEVELS[direct] ? parent : direct;
+    return FIXED_ROLE_PERMISSIONS[role]?.[pageKey] || 'none';
 }
 
 function canAccessPage(pageKey) {
@@ -631,12 +608,7 @@ function showApp() {
     if (purchaseOrderActionBar) {
         purchaseOrderActionBar.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
     }
-    const orderCostFieldWrap = document.getElementById('orderCostFieldWrap');
-    if (orderCostFieldWrap) {
-        orderCostFieldWrap.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
-    }
-    const osubPo = document.getElementById('osub-po');
-    if (osubPo) osubPo.style.display = canAccessPage('orders.po') ? '' : 'none';
+    onOrderProcurementModeChange();
 
     if (!appInitialized) {
         appInitialized = true;
@@ -660,7 +632,7 @@ function initializePageData(mainKey) {
         populateEquipmentSalesDropdown();
         loadEquipmentFromCloud();
     });
-    if (mainKey === 'admin') ensureSalesListLoaded().then(reloadSalesFromUsers);
+    if (mainKey === 'admin') reloadSalesFromUsers();
 }
 
 function ensureSalesListLoaded() {
@@ -713,6 +685,7 @@ window.openChangePasswordModal = function(forced) {
     const cancelBtn = document.getElementById('changePasswordCancelBtn');
     if (cancelBtn) cancelBtn.style.display = forced ? 'none' : '';
     overlay.classList.add('active');
+    ['quickProductBrand','quickProductCode','quickProductName','quickProductNameEn','quickProductSpec','quickProductLine','quickProductPrice','quickProductCost'].forEach(id=>document.getElementById(id)?.addEventListener('input',saveQuickProductDraft,{once:true}));
 };
 
 window.closeChangePasswordModal = function() {
@@ -1915,8 +1888,7 @@ async function forecastOrderItems(forecast) {
                 productType: item.productType || '',
                 spec: item.spec || '',
                 qty: Number(item.qty || 1),
-                unit: item.unit || '',
-                price: parseMoney(item.price),
+                        price: parseMoney(item.price),
                 subtotal: parseMoney(item.subtotal)
             }));
             // 背景補回 Forecast，之後不必每次重新讀估價單。
@@ -2483,7 +2455,6 @@ async function loadSupplierWarehouseMasters(force = false) {
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
         warehouseMasterCache.sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderSupplierMappingAdmin();
-        renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
         return { suppliers:supplierMasterCache, mappings:supplierMappingCache, warehouses:warehouseMasterCache };
     }).catch(err => {
@@ -3012,42 +2983,33 @@ function getBrandFieldValue(selectId, otherInputId) {
 window.onOrderItemCodeChange = async function(input) {
     const value = input.value.trim();
     if (!value) return;
-    await ensurePriceListLoaded().catch(() => {});
-    const match = findPriceItemByCodeValue(value);
+    const normalized = normalizeItemCodeLoose(value);
+    let match = findPriceItemByCodeValue(value);
+    if (!match && normalized) {
+        try {
+            const snap = await db.collection('products').where('normalizedPartNo','==',normalized).limit(10).get();
+            if (!snap.empty) match = productMasterDocToPriceItem(snap.docs[0]);
+        } catch (err) { console.warn('Product Master 貨號查詢失敗：', err); }
+    }
     if (!match) {
         input.dataset.autofillStatus = 'not-found';
         setOrderCostFieldForProduct(null);
         showQuickProductButton(input, 'order');
         return;
     }
-
     clearQuickProductButton(input);
     input.dataset.autofillStatus = 'matched';
     input.value = match.model || value;
     window._orderModalProductId = match.productId || stableProductId(match);
-
-    if (match.brand) {
-        selectBrandInDropdown(document.getElementById('orderBrand'), resolveBrandName(match.brand));
-        onOrderBrandSelectChange();
-    }
-
+    if (match.brand) { selectBrandInDropdown(document.getElementById('orderBrand'), resolveBrandName(match.brand)); onOrderBrandSelectChange(); }
     const itemNameInput = document.getElementById('orderItemName');
     if (itemNameInput) itemNameInput.value = match.nameCn || match.nameEn || '';
-    const unitInput = document.getElementById('orderUnit');
-    if (unitInput) unitInput.value = match.unit || '';
     const priceInput = document.getElementById('orderUnitPrice');
-    if (priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') {
-        priceInput.value = match.price;
-        calcOrderTotal();
-    }
-
+    if (priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') { priceInput.value = match.price; calcOrderTotal(); }
     input.dataset.productLine = match.productLine || '';
     input.dataset.productType = match.productType || '';
-
     await applyOrderProductCost(match);
-    await refreshOrderWarehouseStock();
 };
-
 let orderItemCodeTimer = null;
 window.onOrderItemCodeInput = function(input) {
     clearTimeout(orderItemCodeTimer);
@@ -8494,33 +8456,41 @@ function normalizeNewOrderItem(item = {}) {
     };
 }
 
+window.onOrderProcurementModeChange=function(){
+    const mode=document.getElementById('orderProcurementMode')?.value||'PURCHASING_PO';
+    const wrap=document.getElementById('orderCostFieldWrap');
+    if(wrap)wrap.style.display=mode==='SALES_SELF_ORDER'?'':'none';
+    if(mode!=='SALES_SELF_ORDER'){const input=document.getElementById('orderCostPrice');if(input)input.value='';}
+};
+
 function currentOrderModalItem() {
-    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unit:document.getElementById('orderUnit').value,unitPrice:document.getElementById('orderUnitPrice').value,fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
-    const cost=document.getElementById('orderCostPrice').value;if(cost!=='')item.costPrice=Number(cost);
+    const procurementMode=document.getElementById('orderProcurementMode')?.value||'PURCHASING_PO';
+    const directShip=!!document.getElementById('orderDirectShip')?.checked;
+    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,fulfillmentType:directShip?'DIRECT_SHIP':'WAREHOUSE',warehouseId:'',procurementMode,productId:window._orderModalProductId||''};
+    const cost=document.getElementById('orderCostPrice').value;
+    if(procurementMode==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
 
 function renderNewOrderDraftItems(){
     const body=document.getElementById('newOrderItemsBody'),wrap=document.getElementById('newOrderItemsWrap');if(!body||!wrap)return;
     wrap.style.display=newOrderDraftItems.length?'':'none';
-    body.innerHTML=newOrderDraftItems.map((item,index)=>`<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td>${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td><button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`).join('');
+    body.innerHTML=newOrderDraftItems.map((item,index)=>`<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td>${item.procurementMode==='SALES_SELF_ORDER'?'業務訂貨':'採購訂貨'}${item.fulfillmentType==='DIRECT_SHIP'?'／直送':''}</td><td><button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`).join('');
 }
 window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();saveOrderDraft();};
 window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
-    if(item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId){alert('請為目前品項選擇出貨倉庫。');return;}
-    newOrderDraftItems.push(item);renderNewOrderDraftItems();
-    ['orderItemCode','orderItemName','orderUnit'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
+    const duplicateIndex=newOrderDraftItems.findIndex(x=>(x.productId&&x.productId===item.productId)||(!x.productId&&normalizeItemCodeLoose(x.itemCode)===normalizeItemCodeLoose(item.itemCode)&&normalizeBrandLookupKey(x.brand)===normalizeBrandLookupKey(item.brand)));
+    if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0),totalPrice:(Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0))*Number(item.unitPrice||0)};}else newOrderDraftItems.push(item);renderNewOrderDraftItems();
+    ['orderItemCode','orderItemName'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
 };
 
 window.openOrderModal = function(source = null) {
-    ensurePriceListLoaded().catch(() => {});
     requestedOrderOwnerUid = source?.ownerUid || '';
     populateOrderOwnerSelect();
     if (currentUserRole === 'purchaser') {
         ensureSalesListLoaded().then(populateOrderOwnerSelect).catch(err => console.error('讀取負責業務名單失敗：', err));
     }
-    loadSupplierWarehouseMasters().then(() => populateOrderWarehouseOptions(source?.warehouseId || ''));
     populateOrderBrandDropdown();
     populateOrderCustomerSuggestions();
     newOrderDraftItems=[];renderNewOrderDraftItems();
@@ -8528,7 +8498,7 @@ window.openOrderModal = function(source = null) {
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderUnit', 'orderInvoiceTitle'].forEach(id => {
+    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderInvoiceTitle'].forEach(id => {
         document.getElementById(id).value = '';
     });
     onOrderBrandSelectChange();
@@ -8537,9 +8507,9 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderTotalPrice').value = 0;
     document.getElementById('orderCostPrice').value = '';
     setOrderCostFieldForProduct(null);
-    document.getElementById('orderFulfillmentType').value = source?.fulfillmentType || 'WAREHOUSE';
-    populateOrderWarehouseOptions(source?.warehouseId || '');
-    onOrderFulfillmentChange();
+    document.getElementById('orderProcurementMode').value = source?.procurementMode || 'PURCHASING_PO';
+    document.getElementById('orderDirectShip').checked = source?.fulfillmentType === 'DIRECT_SHIP';
+    onOrderProcurementModeChange();
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
     refreshOrderRecentOptions();
@@ -8556,7 +8526,6 @@ window.openOrderModal = function(source = null) {
         document.getElementById('orderItemCode').value = source.itemCode || '';
         document.getElementById('orderItemName').value = source.itemName || '';
         document.getElementById('orderQty').value = source.qty || 1;
-        document.getElementById('orderUnit').value = source.unit || '';
         document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
         if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
             document.getElementById('orderCostPrice').value = source.costPrice ?? '';
@@ -9491,7 +9460,7 @@ window.switchAdminTab = function(tab, el) {
     document.querySelectorAll('.admin-panel').forEach(p => p.style.display = 'none');
     document.getElementById(`admin-${tab}`).style.display = 'block';
 
-    if (tab === 'sales') ensureSalesListLoaded().then(reloadSalesFromUsers);
+    if (tab === 'sales') reloadSalesFromUsers();
     if (tab === 'prices') loadPriceCatalogSummary();
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
     if (tab === 'agencies') Promise.all([ensurePriceListLoaded(), loadSupplierWarehouseMasters()]).then(() => {
@@ -9502,10 +9471,9 @@ window.switchAdminTab = function(tab, el) {
     });
     // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
     if (tab === 'statistics') ensurePriceListLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
-    if (tab === 'quotes') loadAllQuotesFromCloud();
+    if (tab === 'warehouses') loadSupplierWarehouseMasters().then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
-    if (tab === 'storage') resetCleanupPreview();
-    if (tab === 'permissions') renderRolePermissions();
+    if (tab === 'storage') { /* maintenance tools are explicitly user-triggered */ }
 };
 
 function renderRolePermissions() {
@@ -10117,7 +10085,9 @@ function ensureQuickProductModal() {
         <div class="form-grid">
           <div><label>廠牌</label><input id="quickProductBrand" type="text" list="quickProductBrandList" autocomplete="off"><datalist id="quickProductBrandList"></datalist></div>
           <div><label>貨號</label><input id="quickProductCode" type="text" autocomplete="off"></div>
-          <div style="grid-column:1/-1;"><label>品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
+          <div><label>中文品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
+          <div><label>英文品名</label><input id="quickProductNameEn" type="text" autocomplete="off"></div>
+          <div style="grid-column:1/-1;"><label>規格</label><input id="quickProductSpec" type="text" autocomplete="off"></div>
           <div><label>產品線</label><input id="quickProductLine" type="text" placeholder="例如 Roche"></div>
           <div><label>產品來源</label><select id="quickProductAuthorization" onchange="updateQuickProductCostVisibility()"><option value="AUTHORIZED">公司代理產品</option><option value="NON_AUTHORIZED">非代理產品</option></select></div>
           <div><label>建議售價</label><input id="quickProductPrice" type="number" min="0"></div>
@@ -10128,7 +10098,7 @@ function ensureQuickProductModal() {
           <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">取消</button>
         </div>
       </div>`;
-    overlay.onclick = event => { if (event.target === overlay) closeQuickProductCreate(); };
+    overlay.onclick = event => { if (event.target === overlay) event.stopPropagation(); };
     document.body.appendChild(overlay);
     return overlay;
 }
@@ -10156,6 +10126,8 @@ window.openQuickProductCreate = function(mode, input) {
     document.getElementById('quickProductName').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-cn')?.value || '')
         : (document.getElementById('orderItemName')?.value || '');
+    document.getElementById('quickProductNameEn').value = mode === 'quote' ? (input.closest('tr')?.querySelector('.item-en')?.value || '') : '';
+    document.getElementById('quickProductSpec').value = mode === 'quote' ? (input.closest('tr')?.querySelector('.item-spec')?.value || '') : '';
     document.getElementById('quickProductLine').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-product-line')?.value || '')
         : (document.getElementById('orderProductLine')?.value || '');
@@ -10171,9 +10143,17 @@ window.openQuickProductCreate = function(mode, input) {
     overlay.classList.add('active');
 };
 
-window.closeQuickProductCreate = function() {
+function saveQuickProductDraft(){
+    const data={};
+    ['quickProductBrand','quickProductCode','quickProductName','quickProductNameEn','quickProductSpec','quickProductLine','quickProductPrice','quickProductCost','quickProductAuthorization'].forEach(id=>data[id]=document.getElementById(id)?.value||'');
+    localStorage.setItem('quick_product_draft',JSON.stringify(data));
+}
+window.closeQuickProductCreate = function(force=false) {
     const overlay = document.getElementById('quickProductOverlay');
+    const hasData=['quickProductBrand','quickProductCode','quickProductName','quickProductNameEn','quickProductSpec'].some(id=>String(document.getElementById(id)?.value||'').trim());
+    if(!force&&hasData&&!confirm('尚有未儲存的產品資料，確定放棄嗎？'))return;
     if (overlay) overlay.classList.remove('active');
+    if(force||!hasData)localStorage.removeItem('quick_product_draft');
     quickProductTarget = null;
 };
 
@@ -10181,6 +10161,8 @@ window.saveQuickProduct = async function() {
     const brand = resolveBrandName(document.getElementById('quickProductBrand')?.value || '');
     const code = String(document.getElementById('quickProductCode')?.value || '').trim();
     const productName = String(document.getElementById('quickProductName')?.value || '').trim();
+    const productNameEn = String(document.getElementById('quickProductNameEn')?.value || '').trim();
+    const spec = String(document.getElementById('quickProductSpec')?.value || '').trim();
     const productLine = String(document.getElementById('quickProductLine')?.value || '').trim();
     const authorizationType = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
     const priceRaw = document.getElementById('quickProductPrice')?.value ?? '';
@@ -10208,7 +10190,7 @@ window.saveQuickProduct = async function() {
             await onOrderItemCodeChange(quickProductTarget.input);
         }
         clearQuickProductButton(quickProductTarget?.input);
-        closeQuickProductCreate();
+        closeQuickProductCreate(true);
         return;
     }
 
@@ -10221,6 +10203,8 @@ window.saveQuickProduct = async function() {
         manufacturerPartNo: code,
         normalizedPartNo,
         productName,
+        productNameEn,
+        spec,
         productLine,
         productLineId: productLine,
         authorizationType,
@@ -10257,7 +10241,7 @@ window.saveQuickProduct = async function() {
             await onOrderItemCodeChange(quickProductTarget.input);
         }
         clearQuickProductButton(quickProductTarget?.input);
-        closeQuickProductCreate();
+        localStorage.removeItem('quick_product_draft'); closeQuickProductCreate(true);
     } catch (err) {
         alert('快速新增產品失敗：' + err.message);
     } finally {
@@ -10708,7 +10692,6 @@ function loadAllUsersForAdmin() {
                 phone: d.phone || '',
                 role: d.role || 'sales',
                 email: d.email || '',
-                productLineIds: Array.isArray(d.productLineIds) ? d.productLineIds : [],
                 disabled: !!d.disabled,
                 mustChangePassword: !!d.mustChangePassword
             });
@@ -10759,8 +10742,7 @@ window.renderAdminSalesTable = function() {
             <td data-label="姓名">${escapeHtml(u.name || '（尚未設定姓名）')}</td>
             <td data-label="電話">${escapeHtml(u.phone || '—')}</td>
             <td data-label="Email">${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
-            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
-            <td data-label="負責產品線"><input id="adminUserLines-${escapeAttr(u.uid)}" value="${escapeAttr((u.productLineIds||[]).join(', '))}" placeholder="例如 Roche, Beckman"><button type="button" class="btn-small" onclick="saveAdminUserCapabilities('${escapeAttr(u.uid)}')">儲存</button></td>
+            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}" onchange="saveAdminUserCapabilities('${escapeAttr(u.uid)}')">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
             <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
                     ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
@@ -10779,11 +10761,8 @@ window.renderAdminSalesTable = function() {
 window.saveAdminUserCapabilities=async function(uid){
     if(trueUserRole!=='admin')return;
     const role=document.getElementById(`adminUserRole-${uid}`)?.value||'sales';
-    const productLineIds=String(document.getElementById(`adminUserLines-${uid}`)?.value||'').split(',').map(x=>x.trim()).filter(Boolean);
-    const button=null;
-    try{await db.collection('users').doc(uid).set({role,productLineIds,capabilities:role==='engineer'?['business','engineering']:role==='sales'?['business']:[],updatedAt:new Date().toISOString()},{merge:true});const user=allUsersCache.find(x=>x.uid===uid);if(user){user.role=role;user.productLineIds=productLineIds;}alert('人員角色與產品線已更新。');}
+    try{await db.collection('users').doc(uid).set({role,updatedAt:new Date().toISOString()},{merge:true});const user=allUsersCache.find(x=>x.uid===uid);if(user)user.role=role;alert('人員角色已更新。');}
     catch(err){alert('更新失敗：'+err.message);}
-    finally{if(button){button.disabled=false;button.textContent='儲存';}}
 };
 
 // 強制某帳號下次登入時必須先修改密碼才能使用系統。
