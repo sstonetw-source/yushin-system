@@ -1077,11 +1077,13 @@ window.addProductManagementToOrder = function(productId) {
 };
 
 window.openOrderWorkspace = function(el) {
+    if (!canAccessPage('orders.list')) { alert('您沒有權限查看訂單。'); return; }
     actuallySwitchMainTab('order-system', el, { preserveSubView: true });
     switchOrderView('list', document.getElementById('osub-list'), { skipHistory: true });
 };
 
 window.openPurchasingWorkspace = function(el) {
+    if (!canAccessPage('orders.po')) { alert('您沒有權限查看採購。'); return; }
     actuallySwitchMainTab('order-system', el, { preserveSubView: true });
     switchOrderView('po', document.getElementById('osub-po'), { skipHistory: true });
 };
@@ -4470,7 +4472,7 @@ window.renderInventoryList=function(){
    if(k&&!text.includes(k))return;
    const n=inventoryNumbers(x);
    const safetyStock=Number(x.safetyStock||0);
-   if(stateFilter==='low' && !(n.available<=safetyStock))return;
+   if(stateFilter==='low' && !(safetyStock>0 && n.available<=safetyStock))return;
    if(stateFilter==='out' && n.available>0)return;
    if(stateFilter==='reserved' && n.reserved<=0)return;
    const assignedOnHand=warehouseRows.reduce((sum,row)=>sum+row.n.onHand,0);
