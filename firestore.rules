@@ -79,10 +79,13 @@ service cloud.firestore {
 
     function validOwnedCommercialCreate(data) {
       return admin() ||
-        (businessOwner() &&
+        (sales() &&
           data.ownerUid == request.auth.uid &&
           data.salesCode != null &&
           data.salesCode == salesCode()) ||
+        (engineer() &&
+          data.ownerUid != null &&
+          data.salesCode != null) ||
         (businessAssistant() &&
           data.ownerUid != null &&
           data.salesCode != null &&
@@ -92,6 +95,17 @@ service cloud.firestore {
     function sameCommercialOwner() {
       return request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.salesCode == resource.data.salesCode;
+    }
+
+    // Creator identity is an audit field. Legacy documents without creator metadata
+    // remain editable; once present, normal workflow edits cannot rewrite it.
+    function preservesCreator() {
+      return resource.data.get('createdByUid', '') == ''
+        || (
+          request.resource.data.get('createdByUid', '') == resource.data.get('createdByUid', '')
+          && request.resource.data.get('createdByName', '') == resource.data.get('createdByName', '')
+          && request.resource.data.get('createdByRole', '') == resource.data.get('createdByRole', '')
+        );
     }
 
     function purchaserOrderWorkflowUpdate() {
@@ -236,11 +250,12 @@ service cloud.firestore {
     }
 
     match /quotes/{id} {
-      allow read: if admin() || purchaser() || owns(resource.data);
+      allow read: if admin() || purchaser() || owns(resource.data)
+        || (engineer() && resource.data.get('createdByUid', '') == request.auth.uid);
       allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
-        || (purchaser() && sameCommercialOwner());
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
+        || (purchaser() && sameCommercialOwner() && preservesCreator());
       allow delete: if false;
     }
 
@@ -248,7 +263,7 @@ service cloud.firestore {
       allow read: if admin() || owns(resource.data);
       allow create: if (admin() || businessOwner()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner());
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
       allow delete: if false;
     }
 
@@ -267,7 +282,7 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
+        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || purchaserOrderWorkflowUpdate()
         || warehouseOrderWorkflowUpdate();
       allow delete: if false;
