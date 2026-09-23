@@ -617,7 +617,7 @@
     <!-- ============ 儀器管理系統：客戶儀器維修保養／校正紀錄 ============ -->
     <div id="equipment-system" class="content-section">
         <div class="toolbar no-print">
-            <input type="text" id="eqSearchInput" placeholder="搜尋客戶 / 廠牌 / 業務 / 型號 / 序號 / 編號" style="width:280px;" oninput="renderEquipmentList()">
+            <input type="text" id="eqSearchInput" placeholder="搜尋全部儀器：客戶 / 廠牌 / 業務 / 型號 / 序號 / 編號" style="width:280px;" oninput="scheduleEquipmentSearch()">
             <select id="eqStatusFilter" onchange="renderEquipmentList()">
                 <option value="all">全部狀態</option>
                 <option value="overdue">已逾期</option>
