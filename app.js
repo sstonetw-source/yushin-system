@@ -9237,21 +9237,7 @@ function loadEquipmentFromCloudThenReopen(eqId) {
         alert('重新載入儀器失敗：'+err.message);
     });
     return;
-    let query = db.collection('equipment');
-    if (canViewAllEquipment()) {
-        query = query.orderBy('customerName').limit(DEFAULT_LIST_LIMIT);
-    } else {
-        query = query.where('salesName', '==', currentUserName).limit(DEFAULT_LIST_LIMIT);
-    }
-    query.get().then(snapshot => {
-        equipmentList = [];
-        snapshot.forEach(doc => equipmentList.push({ id: doc.id, ...doc.data() }));
-        if (!canViewAllEquipment()) {
-            equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
-        }
-        renderEquipmentList();
-        openEquipmentModal(eqId);
-    });
+
 }
 
 // 依 Firestore batch 500 筆上限，自動切批次執行「依儀器編號」更新／新增（不刪除任何既有資料）
