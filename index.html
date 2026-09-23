@@ -78,7 +78,7 @@
             </div>
         </div>
         <div class="toolbar no-print product-search-toolbar">
-            <input id="productManagementSearch" type="search" placeholder="輸入完整貨號或品名前綴（至少 2 個字）" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
+            <input id="productManagementSearch" type="search" placeholder="輸入貨號或品名（至少 2 個字）" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
             <span id="productManagementSearchStatus" class="inline-status"></span>
