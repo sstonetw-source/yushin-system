@@ -4074,7 +4074,7 @@ window.renderMyQuotesList = function() {
     visibleQuoteSource.forEach(q => {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
-        if (!equipmentSearchActive && keyword && !searchable.includes(keyword)) return;
+        if (!quoteHistorySearchActive && keyword && !searchable.includes(keyword)) return;
         if (q.dealClosed && !dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
         shown++;
 
