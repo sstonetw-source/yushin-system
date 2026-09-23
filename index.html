@@ -45,12 +45,14 @@
     <!-- ============ 系統主體（登入後才顯示） ============ -->
     <div id="appContainer" style="display:none;">
     <div class="nav-tabs no-print">
-        <div class="nav-tab active" data-permission-page="quote" onclick="switchMainTab('quote-system', this)">📄 估價單系統</div>
-        <div class="nav-tab" data-permission-page="forecast" onclick="switchMainTab('forecast-system', this)">📈 Forecast</div>
-        <div class="nav-tab" data-permission-page="orders" onclick="switchMainTab('order-system', this)">📦 訂單管理系統</div>
-        <div class="nav-tab" data-permission-page="inventory" onclick="switchMainTab('inventory-system', this)">📦 庫存管理</div>
-        <div class="nav-tab" data-permission-page="equipment" onclick="switchMainTab('equipment-system', this)">🔬 儀器管理系統</div>
-        <div class="nav-tab" id="navAdminTab" data-permission-page="admin" onclick="switchMainTab('admin-system', this)">⚙️ 管理員雲端後台</div>
+        <div class="nav-tab active" data-permission-page="quote" data-main-nav="quote" onclick="switchMainTab('quote-system', this)">估價單</div>
+        <div class="nav-tab" data-permission-page="forecast" data-main-nav="forecast" onclick="switchMainTab('forecast-system', this)">Forecast</div>
+        <div class="nav-tab" data-permission-page="products" data-main-nav="products" onclick="switchMainTab('product-system', this)">產品管理</div>
+        <div class="nav-tab" data-permission-page="orders.list" data-main-nav="orders" onclick="openOrderWorkspace(this)">訂單</div>
+        <div class="nav-tab" data-permission-page="orders.po" data-main-nav="purchasing" onclick="openPurchasingWorkspace(this)">採購</div>
+        <div class="nav-tab" data-permission-page="inventory" data-main-nav="inventory" onclick="switchMainTab('inventory-system', this)">庫存</div>
+        <div class="nav-tab" data-permission-page="equipment" data-main-nav="equipment" onclick="switchMainTab('equipment-system', this)">儀器</div>
+        <div class="nav-tab" id="navAdminTab" data-permission-page="admin" data-main-nav="admin" onclick="switchMainTab('admin-system', this)">管理員後台</div>
         <div class="nav-spacer"></div>
         <div class="auth-status" id="authStatus">
             <span id="authUserLabel"></span>
@@ -63,6 +65,29 @@
             </select>
             <button class="btn-secondary" onclick="openChangePasswordModal()">修改密碼</button>
             <button class="btn-secondary" onclick="handleLogout()">登出</button>
+        </div>
+    </div>
+
+    <!-- ============ 產品管理 ============ -->
+    <div id="product-system" class="content-section">
+        <div class="section-header no-print">
+            <div>
+                <h2>產品管理</h2>
+                <div class="section-subtitle">搜尋 Product Master；一般業務畫面不顯示成本。</div>
+            </div>
+        </div>
+        <div class="toolbar no-print product-search-toolbar">
+            <input id="productManagementSearch" type="search" placeholder="輸入完整貨號或品名前綴（至少 2 個字）" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
+            <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋產品</button>
+            <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
+            <span id="productManagementSearchStatus" class="inline-status"></span>
+        </div>
+        <div class="inventory-summary-note">搜尋直接查詢 Product Master，不受目前畫面載入筆數限制。結果最多顯示 50 筆；成本資料不會出現在此頁。</div>
+        <div class="table-wrap">
+            <table class="product-management-table">
+                <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>規格</th><th>單位</th><th>建議售價</th><th class="no-print">快速操作</th></tr></thead>
+                <tbody id="productManagementBody"><tr><td colspan="7" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
+            </table>
         </div>
     </div>
 
@@ -414,7 +439,7 @@
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
       <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment('initial')">＋ 新增庫存</button></div>
-      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋已載入庫存" oninput="renderInventoryList()"><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
+      <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="篩選目前已載入庫存" oninput="renderInventoryList()"><select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">低於安全庫存</option><option value="out">缺貨</option><option value="reserved">有占用</option></select><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
       <div class="toolbar no-print"><input id="businessProductSearch" type="search" placeholder="查貨號或品名（伺服器查詢，最多 25 筆）"><button type="button" onclick="searchBusinessProducts()">查產品／售價／庫存</button><span id="businessProductSearchStatus"></span></div>
       <div id="businessProductSearchResults" class="table-wrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table></div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨。</div>
