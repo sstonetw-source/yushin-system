@@ -1530,6 +1530,7 @@ window.saveForecast = async function() {
                 updatedAt: now,
                 ...linkedDocumentFields('', '', [])
             };
+            record.searchTokens = buildFullHistorySearchTokens('forecast', record);
 
             const batch = db.batch();
             batch.set(ref, record);
@@ -1556,6 +1557,7 @@ window.saveForecast = async function() {
                 estimatedAmount,
                 updatedAt: now
             };
+            updateData.searchTokens = buildFullHistorySearchTokens('forecast', { ...existing, ...updateData });
 
             const batch = db.batch();
             batch.set(ref, updateData, { merge: true });
@@ -1683,13 +1685,15 @@ window.saveForecastProgress = async function() {
         const progressRef = forecastRef.collection('progress').doc();
         const batch = db.batch();
 
-        batch.update(forecastRef, {
+        const forecastUpdate = {
             latestProgress: displayText,
             latestProgressAt: now,
             stage,
             status,
             updatedAt: now
-        });
+        };
+        forecastUpdate.searchTokens = buildFullHistorySearchTokens('forecast', { ...item, ...forecastUpdate });
+        batch.update(forecastRef, forecastUpdate);
 
         batch.set(progressRef, {
             text: progressText,
@@ -5445,6 +5449,12 @@ function normalizeHistoryItemCode(value) {
 }
 
 function fullHistorySearchValues(type, record = {}) {
+    if (type === 'forecast') {
+        return [
+            record.customerName, record.brand, record.productName, record.latestProgress,
+            record.salesName, forecastStageLabel(record.stage), forecastStatusLabel(record.status)
+        ];
+    }
     if (type === 'quote') {
         return [
             record.quoteNo, record.clientName, record.ordererName, record.salesName,
@@ -5504,7 +5514,9 @@ function fullHistoryServerToken(keyword) {
 function fullHistoryQueryToken(type, keyword) {
     const token = fullHistoryServerToken(keyword);
     if (!token) return '';
-    const canViewAll = type === 'quote' ? canViewAllData('quotes') : canViewAllData('orders');
+    const canViewAll = type === 'quote' ? canViewAllData('quotes')
+        : type === 'forecast' ? canViewAllData('forecast')
+        : canViewAllData('orders');
     if (canViewAll) return token;
     if (currentUserCode) return `sc:${currentUserCode}:${token}`;
     if (currentUser?.uid) return `uid:${currentUser.uid}:${token}`;
