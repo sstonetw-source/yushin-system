@@ -32,8 +32,12 @@ service cloud.firestore {
     function purchaser() { return role() == 'purchaser'; }
     function warehouse() { return role() == 'warehouse'; }
 
-    // Engineer is a business role plus engineering capability.
+    // Sales and engineers own their own commercial and fulfillment records.
     function businessOwner() {
+      return sales() || engineer();
+    }
+
+    function commercialDocumentOwner() {
       return sales() || engineer();
     }
 
@@ -42,7 +46,7 @@ service cloud.firestore {
     }
 
     function canCreateCommercialDoc() {
-      return admin() || businessOwner() || businessAssistant();
+      return admin() || commercialDocumentOwner() || businessAssistant();
     }
 
     function canPurchase() {
@@ -77,21 +81,47 @@ service cloud.firestore {
       );
     }
 
+    function validSalesOwner(data) {
+      return data.ownerUid != null
+        && data.salesCode != null
+        && exists(/databases/$(database)/documents/users/$(data.ownerUid))
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales'
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
+          'salesCode',
+          get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
+        ) == data.salesCode;
+    }
+
     function validOwnedCommercialCreate(data) {
       return admin() ||
-        (businessOwner() &&
+        (commercialDocumentOwner() &&
           data.ownerUid == request.auth.uid &&
           data.salesCode != null &&
           data.salesCode == salesCode()) ||
         (businessAssistant() &&
-          data.ownerUid != null &&
-          data.salesCode != null &&
+          validSalesOwner(data) &&
           data.ownerUid != request.auth.uid);
     }
 
     function sameCommercialOwner() {
       return request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.salesCode == resource.data.salesCode;
+    }
+
+    // Creator identity is an audit field. Legacy documents without creator metadata
+    // remain editable; once present, normal workflow edits cannot rewrite it.
+    function preservesCreator() {
+      return resource.data.get('createdByUid', '') == ''
+        ? (
+          request.resource.data.get('createdByUid', '') == ''
+          && request.resource.data.get('createdByName', '') == ''
+          && request.resource.data.get('createdByRole', '') == ''
+        )
+        : (
+          request.resource.data.get('createdByUid', '') == resource.data.get('createdByUid', '')
+          && request.resource.data.get('createdByName', '') == resource.data.get('createdByName', '')
+          && request.resource.data.get('createdByRole', '') == resource.data.get('createdByRole', '')
+        );
     }
 
     function purchaserOrderWorkflowUpdate() {
@@ -120,7 +150,7 @@ service cloud.firestore {
 
     function assignedProductLine(data) {
       return admin() ||
-        (businessOwner()
+        (sales()
           && userDoc().data.productLineIds is list
           && productLineKey(data) != ''
           && userDoc().data.productLineIds.hasAny([productLineKey(data)]));
@@ -239,16 +269,16 @@ service cloud.firestore {
       allow read: if admin() || purchaser() || owns(resource.data);
       allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
-        || (purchaser() && sameCommercialOwner());
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
+        || (purchaser() && sameCommercialOwner() && preservesCreator());
       allow delete: if false;
     }
 
     match /forecasts/{id} {
       allow read: if admin() || owns(resource.data);
-      allow create: if (admin() || businessOwner()) && validOwnedCommercialCreate(request.resource.data);
+      allow create: if (admin() || commercialDocumentOwner()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner());
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
       allow delete: if false;
     }
 
@@ -257,7 +287,7 @@ service cloud.firestore {
         return get(/databases/$(database)/documents/forecasts/$(forecastId));
       }
       allow read: if admin() || owns(parentForecast().data);
-      allow create: if admin() || (businessOwner() && owns(parentForecast().data));
+      allow create: if admin() || (commercialDocumentOwner() && owns(parentForecast().data));
       allow update, delete: if false;
     }
 
@@ -267,7 +297,7 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner())
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || purchaserOrderWorkflowUpdate()
         || warehouseOrderWorkflowUpdate();
       allow delete: if false;
@@ -288,7 +318,7 @@ service cloud.firestore {
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
       allow create: if admin() || purchaser()
-        || (businessOwner()
+        || (sales()
           && request.resource.data.type == 'SALES_SELF_ORDER'
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.salesCode == salesCode());
@@ -297,7 +327,7 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'receivedQty', 'status', 'updatedAt'
           ]))
-        || (businessOwner()
+        || (sales()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == request.auth.uid

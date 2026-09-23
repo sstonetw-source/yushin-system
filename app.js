@@ -6,20 +6,47 @@ const STAMP_MULTI_LIFE = "assets/stamps/multi-life.png";
 
 // app.js - 估價單系統 / 儀器管理系統 核心邏輯
 
-const firebaseConfig = {
-    apiKey: "AIzaSyAmGAU2spWI54ujLyIFTWiX-mXyuau7Vps",
-    authDomain: "yu-shing-company.firebaseapp.com",
-    projectId: "yu-shing-company",
-    storageBucket: "yu-shing-company.firebasestorage.app",
-    messagingSenderId: "22622213823",
-    appId: "1:22622213823:web:c3f0a9c367a88e271ed80a",
-    measurementId: "G-861X26VW6M"
-};
+const FIREBASE_CONFIGS = Object.freeze({
+    production: {
+        apiKey: "AIzaSyAmGAU2spWI54ujLyIFTWiX-mXyuau7Vps",
+        authDomain: "yu-shing-company.firebaseapp.com",
+        projectId: "yu-shing-company",
+        storageBucket: "yu-shing-company.firebasestorage.app",
+        messagingSenderId: "22622213823",
+        appId: "1:22622213823:web:c3f0a9c367a88e271ed80a",
+        measurementId: "G-861X26VW6M"
+    },
+    preview: {
+        apiKey: "AIzaSyDSbSZiwiHmdgi6146vqpfE84JgWU1KhK8",
+        authDomain: "preview-20135.firebaseapp.com",
+        projectId: "preview-20135",
+        storageBucket: "preview-20135.firebasestorage.app",
+        messagingSenderId: "546566883230",
+        appId: "1:546566883230:web:396c28f1f01ada0a1c788f"
+    }
+});
+
+function resolveAppEnvironment() {
+    const host = String(window.location.hostname || '').toLowerCase();
+    return host === 'preview-20135.web.app' || host === 'preview-20135.firebaseapp.com'
+        ? 'preview'
+        : 'production';
+}
+const APP_ENVIRONMENT = resolveAppEnvironment();
+const firebaseConfig = FIREBASE_CONFIGS[APP_ENVIRONMENT];
 
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
+
+if (APP_ENVIRONMENT === 'preview') {
+    document.documentElement.dataset.appEnvironment = 'preview';
+    window.addEventListener('DOMContentLoaded', () => {
+        const banner = document.getElementById('previewEnvironmentBanner');
+        if (banner) banner.hidden = false;
+    });
+}
 
 // 登入一次之後，不用每次重新輸入帳號密碼：明確指定用「LOCAL」持久化方式，
 // 登入狀態會存在瀏覽器本機，關掉分頁、關掉瀏覽器、甚至重開手機，只要沒有登出，
@@ -48,6 +75,7 @@ const PERMISSION_PAGES = [
     { key: 'quote', label: '📄 估價單系統', system: true },
     { key: 'quote.create', label: '　建立估價單' },
     { key: 'quote.my', label: '　我的估價單' },
+    { key: 'products', label: '產品管理', system: true },
     { key: 'orders', label: '📦 訂單管理系統', system: true },
     { key: 'orders.list', label: '　業務訂單' },
     { key: 'orders.po', label: '　採購訂單' },
@@ -386,6 +414,16 @@ function loadRolePermissions() {
         if (!doc.exists) return;
         rolePermissions = doc.exists ? (doc.data().roles || {}) : {};
         roleDataScopes = doc.exists ? (doc.data().dataScopes || {}) : {};
+        // 新增產品管理頁時保持既有權限設定相容：只要原本可查看估價、訂單或庫存，
+        // 就先提供唯讀 Product Master。管理員日後可在身份權限中明確設定 products。
+        ['sales', 'purchaser', 'warehouse', 'engineer'].forEach(role => {
+            const configured = rolePermissions[role] || {};
+            if (configured.products !== undefined) return;
+            const sourceLevels = ['quote', 'orders', 'inventory'].map(key => PERMISSION_LEVELS[configured[key] || 'none']);
+            if (Math.max(...sourceLevels) >= PERMISSION_LEVELS.view) {
+                rolePermissions[role] = { ...configured, products: 'view' };
+            }
+        });
     }).catch(err => console.warn('讀取身份權限設定失敗，將不授予任何非管理員權限：', err));
 }
 
@@ -431,6 +469,14 @@ function canReceiveInventoryCapability(role = currentUserRole) {
 }
 function canManageEquipmentCapability(role = currentUserRole) {
     return role === 'admin' || role === 'engineer';
+}
+
+function commercialCreatorFields() {
+    return {
+        createdByUid: currentUser?.uid || '',
+        createdByName: currentUserName || '',
+        createdByRole: currentUserRole || ''
+    };
 }
 
 function canViewAllData(dataType, role = currentUserRole) {
@@ -490,6 +536,7 @@ function getActivePermissionPage() {
     if (section.id === 'quote-system') return document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'quote.my' : 'quote.create';
     if (section.id === 'order-system') return document.getElementById('poListPanel')?.style.display === 'block' ? 'orders.po' : 'orders.list';
     if (section.id === 'forecast-system') return 'forecast';
+    if (section.id === 'product-system') return 'products';
     if (section.id === 'inventory-system') return 'inventory';
     if (section.id === 'equipment-system') return 'equipment';
     if (section.id === 'admin-system') return 'admin';
@@ -521,7 +568,7 @@ function updateReadonlyNotice() {
 }
 
 function firstAccessibleMainPage() {
-    return ['forecast', 'quote', 'orders', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
+    return ['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
 }
 
 function showLoginScreen() {
@@ -556,10 +603,10 @@ function showApp() {
 
     applyPermissionVisibility();
     const activeSection = document.querySelector('.content-section.active');
-    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
+    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
     if (activeMainKey && !canAccessPage(activeMainKey)) {
         const fallback = firstAccessibleMainPage();
-        const fallbackId = { forecast:'forecast-system', quote:'quote-system', orders:'order-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
+        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', orders:'order-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
         if (fallbackId) {
             document.getElementById('noPermissionMessage')?.remove();
             setTimeout(() => actuallySwitchMainTab(fallbackId), 0);
@@ -601,6 +648,7 @@ function showApp() {
 function initializePageData(mainKey) {
     if (mainKey === 'forecast') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
+    if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
     if (mainKey === 'orders') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(loadOrdersFromCloud);
     if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') Promise.all([ensureSalesListLoaded(), ensurePriceListLoaded()]).then(() => {
@@ -890,8 +938,10 @@ window.switchViewRole = function(role) {
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
-    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
-    if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
+    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
+    const orderWorkspaceAllowed = tabId === 'order-system'
+        && (canAccessPage('orders.list') || canAccessPage('orders.po'));
+    if (!mainKey || (!canAccessPage(mainKey) && !orderWorkspaceAllowed) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
         return;
     }
@@ -913,6 +963,8 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
         if (!options.skipReload) loadForecasts(true);
     } else if (tabId === 'equipment-system') {
         if (!options.skipReload) initializePageData('equipment');
+    } else if (tabId === 'product-system') {
+        if (!options.skipReload) initializePageData('products');
     } else if (tabId === 'order-system') {
         const orderView = canAccessPage('orders.list') ? 'list' : 'po';
         if (!options.preserveSubView) switchOrderView(orderView, document.getElementById(orderView === 'list' ? 'osub-list' : 'osub-po'), { skipHistory: true });
@@ -926,6 +978,144 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
     }
     updateReadonlyNotice();
 }
+
+/* =========================================================
+   產品管理：唯讀 Product Master 搜尋
+   - 直接查 Firestore products，不依賴目前已載入的 500 筆快取
+   - 不讀 productCosts，避免一般業務畫面暴露成本
+   ========================================================= */
+let productManagementResults = [];
+let productManagementSearchInProgress = false;
+
+function productManagementRow(product) {
+    const productId = product.productId || product.id || '';
+    const price = Number(product.listPrice ?? product.price ?? 0);
+    return `<tr>
+      <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
+      <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
+      <td data-th="廠牌">${escapeHtml(product.brandName || product.brand || '')}</td>
+      <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
+      <td data-th="單位">${escapeHtml(product.unit || '')}</td>
+      <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
+      <td data-th="快速操作" class="no-print product-management-actions">
+        ${canAccessPage('quote.create') ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
+        ${canAccessPage('orders.list') ? `<button type="button" class="btn-small btn-secondary" onclick="addProductManagementToOrder('${escapeAttr(productId)}')">建立訂單</button>` : ''}
+      </td>
+    </tr>`;
+}
+
+function renderProductManagementResults() {
+    const body = document.getElementById('productManagementBody');
+    if (!body) return;
+    body.innerHTML = productManagementResults.length
+        ? productManagementResults.map(productManagementRow).join('')
+        : '<tr><td colspan="7" class="empty-hint">查無符合產品。</td></tr>';
+}
+
+window.clearProductManagementSearch = function(options = {}) {
+    productManagementResults = [];
+    const input = document.getElementById('productManagementSearch');
+    const status = document.getElementById('productManagementSearchStatus');
+    const body = document.getElementById('productManagementBody');
+    if (input && !options.preserveInput) input.value = '';
+    if (status) status.textContent = '';
+    if (body) body.innerHTML = '<tr><td colspan="7" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
+};
+
+window.searchProductManagement = async function() {
+    if (productManagementSearchInProgress || !canAccessPage('products')) return;
+    const input = document.getElementById('productManagementSearch');
+    const button = document.getElementById('productManagementSearchBtn');
+    const status = document.getElementById('productManagementSearchStatus');
+    const raw = String(input?.value || '').trim();
+    if (raw.length < 2) {
+        if (status) status.textContent = '請至少輸入 2 個字或完整貨號。';
+        return;
+    }
+    productManagementSearchInProgress = true;
+    if (button) { button.disabled = true; button.textContent = '搜尋中…'; }
+    if (input) input.disabled = true;
+    if (status) status.textContent = '正在搜尋完整 Product Master…';
+    try {
+        const normalized = normalizeItemCodeLoose(raw);
+        const end = raw + '\uf8ff';
+        const [codeSnap, nameSnap] = await Promise.all([
+            firestoreReadWithTimeout(
+                db.collection('products').where('normalizedPartNo', '==', normalized).limit(50).get(),
+                '產品貨號搜尋'
+            ),
+            firestoreReadWithTimeout(
+                db.collection('products').orderBy('productName').startAt(raw).endAt(end).limit(50).get(),
+                '產品品名搜尋'
+            ).catch(() => ({ docs: [] }))
+        ]);
+        const map = new Map();
+        [...(codeSnap.docs || []), ...(nameSnap.docs || [])].forEach(doc => {
+            const data = { id: doc.id, ...doc.data() };
+            if (data.status !== 'INACTIVE') map.set(doc.id, data);
+        });
+        productManagementResults = [...map.values()].slice(0, 50);
+        renderProductManagementResults();
+        if (status) status.textContent = `完成，共 ${productManagementResults.length} 筆。`;
+    } catch (err) {
+        console.error('產品管理搜尋失敗：', err);
+        productManagementResults = [];
+        renderProductManagementResults();
+        if (status) status.textContent = '搜尋失敗，請稍後再試。';
+    } finally {
+        productManagementSearchInProgress = false;
+        if (button) { button.disabled = false; button.textContent = '搜尋產品'; }
+        if (input) { input.disabled = false; input.focus(); }
+    }
+};
+
+function productManagementSource(product) {
+    return {
+        productId: product.productId || product.id || '',
+        model: product.manufacturerPartNo || product.sku || '',
+        itemCode: product.manufacturerPartNo || product.sku || '',
+        nameCn: product.productName || product.nameCn || '',
+        nameEn: product.nameEn || '',
+        itemName: product.productName || product.nameCn || product.nameEn || '',
+        brand: product.brandName || product.brand || '',
+        spec: product.specification || product.spec || '',
+        unit: product.unit || '',
+        price: Number(product.listPrice ?? product.price ?? 0),
+        unitPrice: Number(product.listPrice ?? product.price ?? 0),
+        qty: 1,
+        productLine: product.productLine || '',
+        productType: product.category || product.productType || ''
+    };
+}
+
+window.addProductManagementToQuote = function(productId) {
+    const product = productManagementResults.find(item => (item.productId || item.id) === productId);
+    if (!product || !canAccessPage('quote.create')) return;
+    actuallySwitchMainTab('quote-system', document.querySelector('[data-main-nav="quote"]'));
+    switchQuoteView('create', document.getElementById('qsub-create'), { skipHistory: true });
+    ensureQuoteFormInitialized();
+    addQuoteRow(productManagementSource(product));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window.addProductManagementToOrder = function(productId) {
+    const product = productManagementResults.find(item => (item.productId || item.id) === productId);
+    if (!product || !canAccessPage('orders.list')) return;
+    openOrderWorkspace(document.querySelector('[data-main-nav="orders"]'));
+    openOrderModal(productManagementSource(product));
+};
+
+window.openOrderWorkspace = function(el) {
+    if (!canAccessPage('orders.list')) { alert('您沒有權限查看訂單。'); return; }
+    actuallySwitchMainTab('order-system', el, { preserveSubView: true });
+    switchOrderView('list', document.getElementById('osub-list'), { skipHistory: true });
+};
+
+window.openPurchasingWorkspace = function(el) {
+    if (!canAccessPage('orders.po')) { alert('您沒有權限查看採購。'); return; }
+    actuallySwitchMainTab('order-system', el, { preserveSubView: true });
+    switchOrderView('po', document.getElementById('osub-po'), { skipHistory: true });
+};
 
 /* =========================================================
    Forecast：業務機會追蹤
@@ -1322,6 +1512,7 @@ window.saveForecast = async function() {
                 ownerUid: currentUser?.uid || '',
                 productId: '',
                 createdAt: now,
+                ...commercialCreatorFields(),
                 updatedAt: now,
                 ...linkedDocumentFields('', '', [])
             };
@@ -1710,7 +1901,7 @@ async function createForecastOrdersDirectly(forecast, items) {
     const totalPrice = normalizedItems.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
     const orderRef = db.collection('orders').doc();
     const orderData = {
-        orderDate, createdAt:now, company:currentCompany || 'yushin',
+        orderDate, createdAt:now, ...commercialCreatorFields(), company:currentCompany || 'yushin',
         customerName:forecast.customerName || '',
         customerId:forecast.customerId || customerIdForName(forecast.customerName || ''),
         ...first,
@@ -1896,19 +2087,26 @@ window.onSalesChange = function() {
     updateSalesPhoneDisplay();
 };
 
-// 建立估價單時，「負責業務」只顯示角色為業務或工程師的人員；
-// 管理員與採購不會出現在這個選單中。舊版 sales.csv 沒有角色資料時，仍視為業務保留相容性。
+// 建立估價單時，「負責業務」只顯示業務角色；工程師／採購可協助建立，但商業歸屬仍必須指定業務。
+// 管理員與其他角色不會出現在這個選單中。舊版沒有 role 資料時仍視為業務以保留相容性。
 function populateSalesDropdown() {
     const select = document.getElementById('salesName');
     if (!select) return;
 
     const visibleList = salesList.filter(s => {
         const role = (s.role || 'sales').toLowerCase();
-        return role === 'sales' || role === 'engineer';
+        return currentUserRole === 'engineer'
+            ? s.uid === currentUser?.uid
+            : role === 'sales';
     });
 
+    if (currentUserRole === 'engineer' && currentUser?.uid && currentUserName
+        && !visibleList.some(s => s.uid === currentUser.uid)) {
+        visibleList.push({ uid: currentUser.uid, name: currentUserName, code: currentUserCode, role: 'engineer' });
+    }
+
     const currentValue = select.value;
-    select.innerHTML = '<option value="">請選擇業務</option>';
+    select.innerHTML = '<option value="">請選擇負責人</option>';
     visibleList.forEach(s => {
         if (s.name) {
             const option = document.createElement('option');
@@ -1925,7 +2123,8 @@ function populateSalesDropdown() {
         delete window._pendingDraftSalesName;
     }
     // 若原本選的人仍在名單裡就保留選擇，否則清空，絕不自動帶入
-    select.value = visibleList.some(s => s.name === valueToApply) ? valueToApply : '';
+    select.value = visibleList.some(s => s.name === valueToApply) ? valueToApply
+        : (currentUserRole === 'engineer' ? currentUserName : '');
 
     // 還原草稿的過程中不要重新產生單號，沿用草稿裡存的那組
     if (!restoringQuoteDraft) generateQuoteNo();
@@ -3104,7 +3303,7 @@ function collectCurrentQuoteRecord() {
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
         salesName, salesCode: selectedSales?.code || salesCodeForName(salesName),
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName, '', selectedSales?.code || salesCodeForName(salesName)) ? currentUser?.uid || '' : ''),
-        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
+        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), ...commercialCreatorFields(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
@@ -3331,6 +3530,7 @@ window.handleSaveAndPrint = function() {
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName, '', selectedSales?.code || salesCodeForName(selectedSalesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
+        ...commercialCreatorFields(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
@@ -3939,6 +4139,7 @@ window.createForecastFromQuote = async function(quoteNo) {
             salesCode: q.salesCode || salesCodeForName(q.salesName) || currentUserCode || '',
             ownerUid: q.ownerUid || currentUser?.uid || '',
             createdAt: now,
+            ...commercialCreatorFields(),
             updatedAt: now,
             ...linkedDocumentFields(
                 DOCUMENT_TYPES.QUOTE,
@@ -4005,7 +4206,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
         const orderRef=db.collection('orders').doc();
         const todayStr=localDateString();
         const orderData={
-            orderDate:todayStr,createdAt:new Date().toISOString(),company:q.company||'',
+            orderDate:todayStr,createdAt:new Date().toISOString(),...commercialCreatorFields(),company:q.company||'',
             customerName:q.ordererName||q.clientName||'',customerId:q.customerId||customerIdForName(q.ordererName||q.clientName||''),
             ...first,qty:first.qty,unitPrice:first.unitPrice,totalPrice,
             items,itemCount:items.length,orderSchemaVersion:2,status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(totalPrice),
@@ -4292,7 +4493,9 @@ window.searchBusinessProducts=async function(){
 };
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;
- const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();body.innerHTML='';
+ const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();
+ const stateFilter=document.getElementById('inventoryStateFilter')?.value||'all';
+ body.innerHTML='';
  inventoryCache.forEach(x=>{
    const lots=fefoLots(x);
    const productKey=x.productKey||x.productId||'';
@@ -4305,6 +4508,10 @@ window.renderInventoryList=function(){
    const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();
    if(k&&!text.includes(k))return;
    const n=inventoryNumbers(x);
+   const safetyStock=Number(x.safetyStock||0);
+   if(stateFilter==='low' && !(safetyStock>0 && n.available<=safetyStock))return;
+   if(stateFilter==='out' && n.available>0)return;
+   if(stateFilter==='reserved' && n.reserved<=0)return;
    const assignedOnHand=warehouseRows.reduce((sum,row)=>sum+row.n.onHand,0);
    const assignedReserved=warehouseRows.reduce((sum,row)=>sum+row.n.reserved,0);
    const assignedIncoming=warehouseRows.reduce((sum,row)=>sum+row.n.incoming,0);
@@ -4331,6 +4538,7 @@ window.renderInventoryList=function(){
       <td data-th="操作" class="no-print">
         ${canEditPage('inventory') ? `
           <div class="inventory-row-actions">
+            ${safetyStock>0 && n.available<=safetyStock && canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment('${escapeAttr(x.id)}')">建立補庫採購</button>` : ''}
             <button type="button" class="btn-small" onclick="openInventoryItemAdjustment('decrease','${escapeAttr(x.id)}')">減庫存</button>
             <button type="button" class="btn-small btn-secondary" onclick="openInventoryItemAdjustment('return','${escapeAttr(x.id)}')">退貨</button>
             <button type="button" class="btn-small btn-danger" onclick="openInventoryItemAdjustment('scrap','${escapeAttr(x.id)}')">報廢</button>
@@ -4340,6 +4548,46 @@ window.renderInventoryList=function(){
    </tr>`);
  });
 };
+window.openInventoryReplenishment = async function(inventoryId) {
+    if (!canEditPage('orders.po')) { alert('您沒有採購權限。'); return; }
+    const item = inventoryCache.find(x => x.id === inventoryId);
+    if (!item) { alert('找不到庫存品項。'); return; }
+    await Promise.all([ensurePriceListLoaded().catch(() => {}), loadSupplierWarehouseMasters()]);
+    const stock = inventoryNumbers(item);
+    const safetyStock = Math.max(0, Number(item.safetyStock || 0));
+    const suggestedQty = Math.max(1, safetyStock - stock.available);
+    const match = findPriceItemByCodeValue(item.itemCode || '');
+    let unitPrice = 0;
+    if (match) {
+        const secureCost = await loadVisibleProductCost(match);
+        unitPrice = secureCost !== null && Number.isFinite(secureCost)
+            ? secureCost
+            : (authorizationTypeForProduct(match) === 'NON_AUTHORIZED' ? Number(match.cost || 0) : 0);
+    }
+    poDirectStockMode = true;
+    poEditingId = null;
+    poAllItems = [];
+    poItems = [{
+        orderId:'', itemName:item.itemName || match?.nameCn || match?.nameEn || '',
+        itemCode:item.itemCode || match?.model || '', productId:item.productId || item.productKey || match?.productId || '',
+        brand:resolveBrandName(item.brand || match?.brand || ''), qty:suggestedQty, unit:match?.unit || '',
+        unitPrice, supplier:match?.supplier || '', productLine:match?.productLine || '',
+        fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
+    }];
+    poAllItems = poItems;
+    populatePoVendorSuggestions();
+    document.getElementById('poVendorName').value = '';
+    await autoFillPoSupplier(poItems);
+    document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
+    document.getElementById('poDate').value = localDateString();
+    switchPoCompany(currentCompany || 'yushin', null, true);
+    generateNextPoNumber();
+    updatePoModeUI();
+    const hint = document.getElementById('poModeHint');
+    if (hint) hint.textContent = `安全庫存補貨：目前可用 ${stock.available}，安全庫存 ${safetyStock}，建議採購 ${suggestedQty}。`;
+    document.getElementById('poModalOverlay').classList.add('active');
+};
+
 window.setInventorySafetyStock=async function(inventoryId){
  if(!canEditPage('inventory'))return;const item=inventoryCache.find(x=>x.id===inventoryId);if(!item)return;
  const raw=prompt(`設定 ${item.itemCode||item.itemName||'品項'} 的安全庫存`,String(Number(item.safetyStock||0)));if(raw===null)return;
@@ -4852,12 +5100,16 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
 };
 
 
-function canBusinessSelfOrder() {
-    return ['admin','sales','engineer'].includes(currentUserRole);
+function canBusinessSelfOrder(order = null) {
+    if (currentUserRole === 'admin') return true;
+    if (currentUserRole !== 'sales') return false;
+    if (!order) return true;
+    return (order.ownerUid && order.ownerUid === currentUser?.uid)
+        || (order.salesCode && currentUserCode && order.salesCode === currentUserCode);
 }
 
 function selfOrderActionHtml(order) {
-    if (!canBusinessSelfOrder() || normalizedOrderStatus(order) !== 'normal') return '';
+    if (!canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
     return normalizedOrderItems(order)
         .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
         .map(item => {
@@ -4874,7 +5126,7 @@ function selfOrderActionHtml(order) {
 window.openSelfOrderModal = function(orderId,itemId) {
     const order=ordersCache.find(row=>row.id===orderId);
     const item=normalizedOrderItems(order||{}).find(row=>row.itemId===itemId);
-    if(!order||!item||!canBusinessSelfOrder())return;
+    if(!order||!item||!canBusinessSelfOrder(order))return;
     const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
     const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
     const remaining=Math.max(0,required-ordered);
@@ -4916,6 +5168,7 @@ window.saveSelfOrder = async function() {
             const snap=await tx.get(orderRef);
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
+            if(!canBusinessSelfOrder(order))throw new Error('只有負責業務可自行訂貨。');
             if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
             const items=normalizedOrderItems(order);
             const index=items.findIndex(row=>row.itemId===itemId);
@@ -5492,6 +5745,9 @@ window.switchOrderView = function(view, el, options = {}) {
 
     document.getElementById('orderListPanel').style.display = view === 'list' ? 'block' : 'none';
     document.getElementById('poListPanel').style.display = view === 'po' ? 'block' : 'none';
+    document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+    const mainNav = document.querySelector(`[data-main-nav="${view === 'po' ? 'purchasing' : 'orders'}"]`);
+    if (mainNav) mainNav.classList.add('active');
 
     if (view === 'po' && !options.skipReload && poListCache.length === 0) loadMyPurchaseOrders();
     updateReadonlyNotice();
@@ -5556,6 +5812,19 @@ function poReceiptLabel(po) {
     return '待到貨 0/' + progress.ordered;
 }
 
+function poWaitingDays(po) {
+    const progress = poReceiptProgress(po);
+    if (progress.complete || progress.directShipOnly) return '';
+    const raw = String(po.poDate || '').trim();
+    const match = raw.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (!match) return '';
+    const start = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    const today = new Date();
+    const current = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (Number.isNaN(start.getTime()) || start > current) return '0 天';
+    return Math.floor((current - start) / 86400000) + ' 天';
+}
+
 function poActionHtml(po) {
     const reprint = `<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`;
     if (poReceiptProgress(po).directShipOnly) return reprint;
@@ -5591,6 +5860,7 @@ window.renderPoList = function() {
             <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
             <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
             <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
+            <td data-th="等待天數">${escapeHtml(poWaitingDays(po) || '—')}</td>
             <td data-th="品項數">${items.length}</td>
             <td data-th="總計金額">${grandTotal.toLocaleString()}</td>
             <td data-th="到貨進度">${escapeHtml(poReceiptLabel(po))}</td>
@@ -8304,6 +8574,7 @@ window.saveNewOrder = function() {
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
         createdAt: new Date().toISOString(),
+        ...commercialCreatorFields(),
         company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
         customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),

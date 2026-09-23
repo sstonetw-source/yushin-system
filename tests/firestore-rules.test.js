@@ -47,10 +47,53 @@ test('inactive user is denied', async () => {
   await assertFails(getDoc(doc(db('off1'), 'settings/company')));
 });
 
-test('engineer can create own quote and order', async () => {
-  const quote = { ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20' };
+test('engineer owns and can edit own quote, forecast and order', async () => {
+  const quote = {
+    ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
+  };
   await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/q1'), quote));
   await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...quote, orderDate:'2026-09-20' }));
+  await assertSucceeds(setDoc(doc(db('eng1'), 'forecasts/f1'), quote));
+  await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/q1'), { quoteDate:'2026-09-21' }));
+  await assertSucceeds(updateDoc(doc(db('eng1'), 'orders/o1'), { orderDate:'2026-09-21' }));
+  await assertSucceeds(updateDoc(doc(db('eng1'), 'forecasts/f1'), { quoteDate:'2026-09-21' }));
+});
+
+test('engineer cannot create documents for salesperson; purchaser assistance requires matching owner code', async () => {
+  await assertFails(setDoc(doc(db('eng1'), 'quotes/bad-owner-role'), {
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
+  }));
+  await assertFails(setDoc(doc(db('buyer1'), 'orders/bad-owner-code'), {
+    ownerUid:'sales1', salesCode:'S02', orderDate:'2026-09-20',
+    createdByUid:'buyer1', createdByName:'Buyer', createdByRole:'purchaser'
+  }));
+});
+
+test('commercial creator audit fields cannot be rewritten by normal owner edits', async () => {
+  await seed('quotes/creator-audit', {
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
+  });
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'quotes/creator-audit'), {
+    quoteDate:'2026-09-21'
+  }));
+  await assertFails(updateDoc(doc(db('sales1'), 'quotes/creator-audit'), {
+    createdByUid:'sales1', createdByName:'Sales', createdByRole:'sales'
+  }));
+});
+
+test('legacy commercial documents without creator metadata remain editable', async () => {
+  await seed('orders/legacy-creator', {
+    ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-20'
+  });
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'orders/legacy-creator'), {
+    orderDate:'2026-09-21'
+  }));
+  await assertFails(updateDoc(doc(db('sales1'), 'orders/legacy-creator'), {
+    createdByUid:'sales1', createdByName:'Sales', createdByRole:'sales'
+  }));
 });
 
 test('five-role mutation matrix keeps master commercial purchase and receipt boundaries distinct', async () => {
@@ -97,8 +140,11 @@ test('purchaser may assist create order only with a responsible owner', async ()
   }));
 });
 
-test('engineer self-order is allowed but formal purchase order is denied', async () => {
-  await assertSucceeds(setDoc(doc(db('eng1'), 'supplyOrders/s1'), {
+test('self-order is restricted to the responsible salesperson; engineer cannot become commercial owner', async () => {
+  await assertSucceeds(setDoc(doc(db('sales1'), 'supplyOrders/sales-self-order'), {
+    type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', qty:2, cost:100
+  }));
+  await assertFails(setDoc(doc(db('eng1'), 'supplyOrders/engineer-self-order'), {
     type:'SALES_SELF_ORDER', ownerUid:'eng1', salesCode:'E01', qty:2, cost:100
   }));
   await assertFails(setDoc(doc(db('eng1'), 'purchaseOrders/p1'), { status:'ORDERED' }));

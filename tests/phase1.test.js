@@ -98,8 +98,57 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(appSource, /window\.addEventListener\('pageshow'/);
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
-    assert.match(indexSource, /styles\.css\?v=20260922-5/);
-    assert.match(indexSource, /app\.js\?v=20260923-2/);
+    assert.match(indexSource, /styles\.css\?v=20260923-6/);
+    assert.match(indexSource, /app\.js\?v=20260923-6/);
+});
+
+test('product management uses server search without exposing protected cost data', () => {
+    assert.match(indexSource, /id="product-system"/);
+    assert.match(indexSource, /data-main-nav="products"/);
+    const searchStart = appSource.indexOf('window.searchProductManagement =');
+    const searchEnd = appSource.indexOf('\n};', searchStart) + 3;
+    const productSearch = appSource.slice(searchStart, searchEnd);
+    assert.match(productSearch, /db\.collection\('products'\)/);
+    assert.match(productSearch, /limit\(50\)/);
+    assert.doesNotMatch(productSearch, /productCosts|loadVisibleProductCost/);
+    assert.match(appSource, /window\.addProductManagementToQuote/);
+    assert.match(appSource, /window\.addProductManagementToOrder/);
+});
+
+test('preview host selects isolated Firebase project and exposes a visible environment banner', () => {
+    assert.match(appSource, /preview-20135\.firebaseapp\.com/);
+    assert.match(appSource, /preview-20135\.web\.app/);
+    assert.match(appSource, /projectId: "preview-20135"/);
+    assert.match(appSource, /APP_ENVIRONMENT === 'preview'/);
+    assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
+});
+
+test('engineer quote selector uses own identity; purchaser selects responsible salesperson', () => {
+    assert.match(appSource, /function populateSalesDropdown\(\)/);
+    assert.match(appSource, /currentUserRole === 'engineer'\s*\? s\.uid === currentUser\?\.uid\s*: role === 'sales'/);
+    assert.match(appSource, /currentUserRole === 'engineer' \? currentUserName : ''/);
+});
+
+test('low-stock inventory can hand off to formal replenishment purchase flow', () => {
+    assert.match(appSource, /openInventoryReplenishment/);
+    assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && canEditPage\('orders\.po'\)/);
+    assert.match(appSource, /poDirectStockMode = true/);
+    assert.match(appSource, /suggestedQty = Math\.max\(1, safetyStock - stock\.available\)/);
+    assert.match(appSource, /generateNextPoNumber\(\)/);
+});
+
+test('purchase workspace shows waiting days only for open warehouse receipts', () => {
+    assert.match(indexSource, />等待天數</);
+    assert.match(appSource, /function poWaitingDays\(po\)/);
+    assert.match(appSource, /progress\.complete \|\| progress\.directShipOnly/);
+    assert.match(appSource, /data-th="等待天數"/);
+});
+
+test('main navigation exposes focused order and purchasing workspaces', () => {
+    assert.match(indexSource, /data-main-nav="orders"/);
+    assert.match(indexSource, /data-main-nav="purchasing"/);
+    assert.match(appSource, /window\.openOrderWorkspace/);
+    assert.match(appSource, /window\.openPurchasingWorkspace/);
 });
 
 test('agency settings do not trigger a full orders statistics query', () => {
@@ -626,13 +675,14 @@ test('period semantics are shared across Forecast Quote Order and PO', () => {
     assert.match(appSource, /this-quarter/);
 });
 
-test('permission routing includes Forecast and Inventory', () => {
+test('permission routing includes Product Forecast and Inventory workspaces', () => {
     const start = appSource.indexOf('function getActivePermissionPage');
     const end = appSource.indexOf('function applyPermissionVisibility', start);
     const s = appSource.slice(start, end);
     assert.match(s, /forecast-system/);
+    assert.match(s, /product-system/);
     assert.match(s, /inventory-system/);
-    assert.match(appSource, /\['forecast', 'quote', 'orders', 'inventory', 'equipment'\]/);
+    assert.match(appSource, /function firstAccessibleMainPage\(\)[\s\S]*?\['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'\]/);
 });
 
 
@@ -1296,8 +1346,8 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
 });
 
 test('production HTML cache-busts local application assets after main deployments', () => {
-  assert.match(indexSource,/styles\.css\?v=20260922-5/);
-  assert.match(indexSource,/modules\/workflow-core\.js\?v=20260923-1/);
-  assert.match(indexSource,/app\.js\?v=20260923-2/);
-  assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-4/);
+  assert.match(indexSource,/styles\.css\?v=20260923-\d+/);
+  assert.match(indexSource,/modules\/workflow-core\.js\?v=20260923-\d+/);
+  assert.match(indexSource,/app\.js\?v=20260923-\d+/);
+  assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-\d+/);
 });
