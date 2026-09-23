@@ -4555,7 +4555,7 @@ window.renderInventoryList=function(){
       <td data-th="現有庫存">${n.onHand}</td>
       <td data-th="已占用">${reserved}</td>
       <td data-th="可用庫存">${n.available}</td>
-      <td data-th="安全庫存"><button type="button" class="link-button ${n.available<Number(x.safetyStock||0)?'status-overdue':''}" onclick="setInventorySafetyStock('${escapeAttr(x.id)}')">${Number(x.safetyStock||0)}</button></td>
+      <td data-th="安全庫存"><button type="button" class="link-button ${n.available<=Number(x.safetyStock||0)&&Number(x.safetyStock||0)>0?'status-overdue':''}" onclick="setInventorySafetyStock('${escapeAttr(x.id)}')">${Number(x.safetyStock||0)}</button></td>
       <td data-th="在途">${n.incoming}</td>
       <td data-th="批號／效期">${lotHtml}</td>
       <td data-th="操作" class="no-print">
