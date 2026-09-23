@@ -531,7 +531,8 @@ function getActivePermissionPage() {
     const section = document.querySelector('.content-section.active');
     if (!section) return '';
     if (section.id === 'quote-system') return document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'quote.my' : 'quote.create';
-    if (section.id === 'order-system') return document.getElementById('poListPanel')?.style.display === 'block' ? 'orders.po' : 'orders.list';
+    if (section.id === 'order-system') return 'orders.list';
+    if (section.id === 'purchasing-system') return 'orders.po';
     if (section.id === 'forecast-system') return 'forecast';
     if (section.id === 'product-system') return 'products';
     if (section.id === 'inventory-system') return 'inventory';
@@ -565,7 +566,7 @@ function updateReadonlyNotice() {
 }
 
 function firstAccessibleMainPage() {
-    return ['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
+    return ['quote', 'forecast', 'products', 'orders', 'orders.po', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
 }
 
 function showLoginScreen() {
@@ -600,10 +601,10 @@ function showApp() {
 
     applyPermissionVisibility();
     const activeSection = document.querySelector('.content-section.active');
-    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
+    const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders.list', 'purchasing-system':'orders.po', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
     if (activeMainKey && !canAccessPage(activeMainKey)) {
         const fallback = firstAccessibleMainPage();
-        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', orders:'order-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
+        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', orders:'order-system', 'orders.po':'purchasing-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
         if (fallbackId) {
             document.getElementById('noPermissionMessage')?.remove();
             setTimeout(() => actuallySwitchMainTab(fallbackId), 0);
@@ -632,9 +633,6 @@ function showApp() {
     if (orderCostFieldWrap) {
         orderCostFieldWrap.style.display = (currentUserRole === 'purchaser' || currentUserRole === 'admin') ? '' : 'none';
     }
-    const osubPo = document.getElementById('osub-po');
-    if (osubPo) osubPo.style.display = canAccessPage('orders.po') ? '' : 'none';
-
     if (!appInitialized) {
         appInitialized = true;
         initDate();
@@ -652,6 +650,7 @@ function initializePageData(mainKey) {
         ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
         loadOrdersFromCloud();
     }
+    if (mainKey === 'orders.po') loadMyPurchaseOrders();
     if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') ensureSalesListLoaded().then(() => {
         populateEquipmentSalesDropdown();
@@ -821,7 +820,6 @@ function currentAppNavigationState() {
     const tabId = active?.id || '';
     const state = { yushinApp: true, tabId, scrollY: window.scrollY || 0 };
     if (tabId === 'quote-system') state.quoteView = document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'my' : 'create';
-    if (tabId === 'order-system') state.orderView = document.getElementById('poListPanel')?.style.display === 'block' ? 'po' : 'list';
     return state;
 }
 
@@ -844,7 +842,6 @@ window.addEventListener('popstate', event => {
     try {
         if (state.tabId) actuallySwitchMainTab(state.tabId, null, { preserveSubView: true, skipReload: true });
         if (state.tabId === 'quote-system' && state.quoteView) switchQuoteView(state.quoteView, null, { skipHistory: true, skipReload: true });
-        if (state.tabId === 'order-system' && state.orderView) switchOrderView(state.orderView, null, { skipHistory: true, skipReload: true });
         requestAnimationFrame(() => window.scrollTo(0, Number(state.scrollY) || 0));
     } finally {
         restoringBrowserNavigation = false;
@@ -928,7 +925,7 @@ window.switchViewRole = function(role) {
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
-    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
+    const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders.list', 'purchasing-system':'orders.po', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
     const orderWorkspaceAllowed = tabId === 'order-system'
         && (canAccessPage('orders.list') || canAccessPage('orders.po'));
     if (!mainKey || (!canAccessPage(mainKey) && !orderWorkspaceAllowed) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
@@ -956,9 +953,9 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
     } else if (tabId === 'product-system') {
         if (!options.skipReload) initializePageData('products');
     } else if (tabId === 'order-system') {
-        const orderView = canAccessPage('orders.list') ? 'list' : 'po';
-        if (!options.preserveSubView) switchOrderView(orderView, document.getElementById(orderView === 'list' ? 'osub-list' : 'osub-po'), { skipHistory: true });
         if (!options.skipReload) initializePageData('orders');
+    } else if (tabId === 'purchasing-system') {
+        if (!options.skipReload) initializePageData('orders.po');
     } else if (tabId === 'quote-system') {
         if (!options.skipReload) initializePageData('quote');
         const quoteView = canAccessPage('quote.create') ? 'create' : 'my';
@@ -1109,15 +1106,12 @@ window.addProductManagementToOrder = function(productId) {
 
 window.openOrderWorkspace = function(el) {
     if (!canAccessPage('orders.list')) { alert('您沒有權限查看訂單。'); return; }
-    actuallySwitchMainTab('order-system', el, { preserveSubView: true });
-    switchOrderView('list', document.getElementById('osub-list'), { skipHistory: true });
+    switchMainTab('order-system', el);
 };
 
 window.openPurchasingWorkspace = function(el) {
     if (!canAccessPage('orders.po')) { alert('您沒有權限查看採購。'); return; }
-    // 採購入口直接開啟採購訂單，不先載入業務 orders；需要看業務訂單時再由該分頁載入。
-    actuallySwitchMainTab('order-system', el, { preserveSubView: true, skipReload: true });
-    switchOrderView('po', document.getElementById('osub-po'), { skipHistory: true });
+    switchMainTab('purchasing-system', el);
 };
 
 /* =========================================================
@@ -5821,25 +5815,7 @@ window.toggleAllOrderSelect = function(checkbox) {
     document.querySelectorAll('.order-select-checkbox').forEach(cb => { cb.checked = checkbox.checked; });
 };
 
-// 訂單管理系統的子分頁：「業務訂單」跟「採購訂單」（已經產生過的訂購單紀錄，只有採購／管理員看得到）
-window.switchOrderView = function(view, el, options = {}) {
-    const pageKey = view === 'po' ? 'orders.po' : 'orders.list';
-    const previousView = document.getElementById('poListPanel')?.style.display === 'block' ? 'po' : 'list';
-    if (!options.skipHistory && previousView !== view) pushAppNavigationState({ tabId: 'order-system', orderView: view });
-    if (!canAccessPage(pageKey)) { alert('您沒有權限查看這個分頁。'); return; }
-    document.querySelectorAll('#order-system .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
-    if (el) el.classList.add('active');
-
-    document.getElementById('orderListPanel').style.display = view === 'list' ? 'block' : 'none';
-    document.getElementById('poListPanel').style.display = view === 'po' ? 'block' : 'none';
-    document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
-    const mainNav = document.querySelector(`[data-main-nav="${view === 'po' ? 'purchasing' : 'orders'}"]`);
-    if (mainNav) mainNav.classList.add('active');
-
-    if (view === 'po' && !options.skipReload && poListCache.length === 0) loadMyPurchaseOrders();
-    updateReadonlyNotice();
-};
-
+// 採購主頁資料
 let poListCache = [];
 let poListCursor = null;
 let poListHasMore = false;
