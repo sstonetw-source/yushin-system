@@ -1069,6 +1069,7 @@
         <!-- Product Master：正式資料只存 products / productCosts。 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
+                <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ 下載 Product Master Excel 範本</button>
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
                 <span style="font-size:12px;color:#666;">（每個工作表＝一個廠牌。同廠牌再次上傳會更新正式 Product Master；產品與售價寫入 products，成本只寫入 productCosts。）</span>
@@ -1224,7 +1225,8 @@
                 <div id="databaseBackupUploadStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
-            <h4 style="margin-top:28px;">估價單／Forecast／訂單／儀器全歷史搜尋索引</h4>
+            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
+<h4 style="margin-top:28px;">估價單／Forecast／訂單／儀器全歷史搜尋索引</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正全歷史搜尋索引</button>
                 <span style="font-size:12px;color:#666;">
@@ -1232,6 +1234,7 @@
                 </span>
                 <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
+</div>
 
             <h4 style="margin-top:28px;">系統資料檢查</h4>
             <div class="toolbar no-print" style="display:block;">
@@ -1243,7 +1246,8 @@
                 <div id="systemDataAuditResults" style="margin-top:10px;"></div>
             </div>
 
-            <h4 style="margin-top:28px;">舊成本資料安全檢查</h4>
+            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
+<h4 style="margin-top:28px;">舊成本資料安全檢查</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">檢查舊成本資料</button>
                 <span style="font-size:12px;color:#666;">
@@ -1251,8 +1255,10 @@
                 </span>
                 <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
             </div>
+</div>
 
-            <h4 style="margin-top:28px;">Brand Master 相容層稽核</h4>
+            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
+<h4 style="margin-top:28px;">Brand Master 相容層稽核</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="brandMasterAuditBtn" onclick="previewBrandMasterCompatibilityAudit()">檢查品牌主檔完整性</button>
                 <span style="font-size:12px;color:#666;">
@@ -1260,6 +1266,7 @@
                 </span>
                 <div id="brandMasterAuditStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
             </div>
+</div>
 
             <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
             <div class="toolbar no-print" style="display:block;">
@@ -1310,6 +1317,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260923-1"></script>
-    <script src="app.js?v=20260924-1"></script>
+    <script src="app.js?v=20260924-2"></script>
 </body>
 </html>
