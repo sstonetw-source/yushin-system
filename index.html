@@ -50,7 +50,7 @@
         <div class="nav-tab" data-permission-page="forecast" data-main-nav="forecast" onclick="switchMainTab('forecast-system', this)">Forecast</div>
         <div class="nav-tab" data-permission-page="products" data-main-nav="products" onclick="switchMainTab('product-system', this)">產品管理</div>
         <div class="nav-tab" data-permission-page="orders.list" data-main-nav="orders" onclick="openOrderWorkspace(this)">訂單</div>
-        <div class="nav-tab" data-permission-page="orders.po" data-main-nav="purchasing" onclick="openPurchasingWorkspace(this)">採購</div>
+        <div class="nav-tab" data-permission-page="orders.po" data-main-nav="purchasing" onclick="switchMainTab('purchasing-system', this)">採購</div>
         <div class="nav-tab" data-permission-page="inventory" data-main-nav="inventory" onclick="switchMainTab('inventory-system', this)">庫存</div>
         <div class="nav-tab" data-permission-page="equipment" data-main-nav="equipment" onclick="switchMainTab('equipment-system', this)">儀器</div>
         <div class="nav-tab" id="navAdminTab" data-permission-page="admin" data-main-nav="admin" onclick="switchMainTab('admin-system', this)">管理員後台</div>
@@ -711,11 +711,6 @@
 
     <!-- ============ 訂單管理系統 ============ -->
     <div id="order-system" class="content-section">
-        <div class="sub-nav no-print" style="display:none;" aria-hidden="true">
-            <div class="sub-tab active" id="osub-list" data-permission-page="orders.list">業務訂單</div>
-            <div class="sub-tab" id="osub-po" data-permission-page="orders.po">採購訂單</div>
-        </div>
-
         <div id="orderListPanel">
         <div class="toolbar no-print order-primary-toolbar">
             <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
@@ -797,8 +792,12 @@
             </div>
         </div>
 
+    </div>
+
+    <!-- ============ 採購管理系統 ============ -->
+    <div id="purchasing-system" class="content-section">
         <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
-        <div id="poListPanel" style="display:none;">
+        <div id="poListPanel">
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
                 <select id="poPeriodFilter" onchange="renderPoList()">
