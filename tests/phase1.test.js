@@ -1373,3 +1373,11 @@ test('production HTML cache-busts local application assets after main deployment
   assert.match(indexSource,/app\.js\?v=20260923-\d+/);
   assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-\d+/);
 });
+
+test('Forecast full-history search uses Firestore searchTokens', () => {
+    assert.match(indexSource, /id="forecastSearch"[\s\S]*?oninput="scheduleForecastHistorySearch\(\)"/);
+    assert.match(appSource, /buildFullHistorySearchTokens\('forecast', record\)/);
+    assert.match(appSource, /collection\('forecasts'\)\.where\('searchTokens', 'array-contains', queryToken\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(appSource, /forecastHistorySearchTimer = setTimeout\(\(\) => runForecastHistorySearch\(true\), 350\)/);
+});
+
