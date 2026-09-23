@@ -99,7 +99,7 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
     assert.match(indexSource, /styles\.css\?v=20260922-5/);
-    assert.match(indexSource, /app\.js\?v=20260923-1/);
+    assert.match(indexSource, /app\.js\?v=20260923-2/);
 });
 
 test('agency settings do not trigger a full orders statistics query', () => {
@@ -1297,6 +1297,7 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
 
 test('production HTML cache-busts local application assets after main deployments', () => {
   assert.match(indexSource,/styles\.css\?v=20260922-5/);
-  assert.match(indexSource,/app\.js\?v=20260923-1/);
+  assert.match(indexSource,/modules\/workflow-core\.js\?v=20260923-1/);
+  assert.match(indexSource,/app\.js\?v=20260923-2/);
   assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-4/);
 });

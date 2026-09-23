@@ -19,8 +19,9 @@ jobs:
           node --check modules/fulfillment-core.js
           node --check modules/supply-core.js
           node --check modules/reservation-core.js
+          node --check modules/workflow-core.js
       - name: Regression tests
-        run: node --test tests/phase1.test.js tests/v2-fulfillment-core.test.js tests/v2-supply-core.test.js tests/v2-reservation-core.test.js
+        run: node --test tests/phase1.test.js tests/v2-fulfillment-core.test.js tests/v2-supply-core.test.js tests/v2-reservation-core.test.js tests/v2-workflow-core.test.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator
