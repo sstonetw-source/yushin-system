@@ -2060,15 +2060,15 @@ window.onSalesChange = function() {
     updateSalesPhoneDisplay();
 };
 
-// 建立估價單時，「負責業務」只顯示角色為業務或工程師的人員；
-// 管理員與採購不會出現在這個選單中。舊版 sales.csv 沒有角色資料時，仍視為業務保留相容性。
+// 建立估價單時，「負責業務」只顯示業務角色；工程師／採購可協助建立，但商業歸屬仍必須指定業務。
+// 管理員與其他角色不會出現在這個選單中。舊版沒有 role 資料時仍視為業務以保留相容性。
 function populateSalesDropdown() {
     const select = document.getElementById('salesName');
     if (!select) return;
 
     const visibleList = salesList.filter(s => {
         const role = (s.role || 'sales').toLowerCase();
-        return role === 'sales' || role === 'engineer';
+        return role === 'sales';
     });
 
     const currentValue = select.value;
