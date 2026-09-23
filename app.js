@@ -2676,7 +2676,7 @@ async function syncLegacyBrandSettingsToMaster() {
 }
 
 const BRAND_AUDIT_BLOCKING_SOURCES = new Set([
-    'priceCatalog', 'products', 'statistics', 'companyAgencies', 'supplierMappings'
+    'products', 'statistics', 'companyAgencies', 'supplierMappings'
 ]);
 
 function brandAuditNamesFromRecord(source, record = {}) {
@@ -2745,11 +2745,10 @@ window.previewBrandMasterCompatibilityAudit = async function() {
     const status = document.getElementById('brandMasterAuditStatus');
     if (button?.disabled) return;
     if (button) button.disabled = true;
-    if (status) status.innerText = '正在讀取正式主檔與舊品牌來源…';
+    if (status) status.innerText = '正在讀取正式主檔與品牌設定…';
     try {
-        await Promise.all([ensurePriceListLoaded(), loadBrandMaster(), loadSupplierWarehouseMasters()]);
+        await Promise.all([loadBrandMaster(), loadSupplierWarehouseMasters()]);
         const sources = {
-            priceCatalog: priceList,
             products: (await readCollectionForMigration('products')).map(row => row.data),
             statistics: [
                 ...keyStatisticBrands.map(name => ({ name })),
@@ -11657,39 +11656,19 @@ function renderPriceCatalogSummary() {
 }
 
 // 價格表管理頁只讀取輕量索引；不再為了顯示清單下載所有價格明細。
-window.loadPriceCatalogSummary = function() {
+window.loadPriceCatalogSummary = async function() {
     const tbody = document.getElementById('adminPriceCatalogBody');
     if (tbody) tbody.innerHTML = '<tr><td colspan="3" style="color:#888;">載入中…</td></tr>';
-    return db.collection('settings').doc('prices').get().then(async doc => {
-        const meta = doc.exists ? doc.data() : {};
-        if (meta.storage === 'brands' && Array.isArray(meta.brands)) {
-            const catalogEntries = await Promise.all(meta.brands.map(async brand => {
-                if (brand.updatedAt) return { name: brand.name, updatedAt: brand.updatedAt };
-                const firstChunk = await db.collection('settings').doc(brand.id).get().catch(() => null);
-                return { name: brand.name, updatedAt: firstChunk?.exists ? firstChunk.data().updatedAt : null };
-            }));
-            const unique = new Map();
-            catalogEntries.forEach(entry => {
-                const key = String(entry.name || '').trim().toLocaleLowerCase();
-                const current = unique.get(key);
-                const entryTime = entry.updatedAt?.toDate ? entry.updatedAt.toDate().getTime() : new Date(entry.updatedAt || 0).getTime();
-                const currentTime = current?.updatedAt?.toDate ? current.updatedAt.toDate().getTime() : new Date(current?.updatedAt || 0).getTime();
-                if (!current || entryTime > currentTime) unique.set(key, entry);
-            });
-            priceCatalogMeta = [...unique.values()];
-        } else {
-            const names = new Map();
-            (meta.list || []).forEach(item => {
-                const name = (item.brand || '未分類').trim() || '未分類';
-                if (!names.has(name.toLocaleLowerCase())) names.set(name.toLocaleLowerCase(), name);
-            });
-            priceCatalogMeta = [...names.values()].map(name => ({ name, updatedAt: meta.updatedAt }));
-        }
-        priceCatalogMeta.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    try {
+        await loadBrandMaster();
+        priceCatalogMeta = brandMasterCache
+            .filter(item => item.active !== false)
+            .map(item => ({ name: item.name, updatedAt: item.updatedAt || null }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
         renderPriceCatalogSummary();
-    }).catch(err => {
+    } catch (err) {
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" style="color:#c00;">載入失敗：${escapeHtml(err.message)}</td></tr>`;
-    });
+    }
 };
 
 // 價格表僅能透過上傳 Excel 整批更新，不開放在網頁上逐筆編輯／新增／刪除
@@ -11704,30 +11683,6 @@ function setPriceUploadProgress(percent, status, keepVisible = true) {
     statusEl.innerText = status;
     percentEl.innerText = `${safePercent}%`;
     bar.style.width = `${safePercent}%`;
-}
-
-function priceBrandDocumentId(brand) {
-    return `price-brand-${encodeURIComponent(brand)}`;
-}
-
-// 將一個廠牌的品項陣列依 JSON 大小切成多份，每份控制在 maxBytes 以內，
-// 避免超過 Firestore 單一文件 1MB 的硬限制（保留安全緩衝）。
-function chunkPriceItems(imported, maxBytes) {
-    const chunks = [];
-    let current = [];
-    let currentSize = 2; // 陣列外層的中括號
-    imported.forEach(item => {
-        const itemSize = new Blob([JSON.stringify(item)]).size + 1; // +1 估算逗號
-        if (current.length && currentSize + itemSize > maxBytes) {
-            chunks.push(current);
-            current = [];
-            currentSize = 2;
-        }
-        current.push(item);
-        currentSize += itemSize;
-    });
-    if (current.length) chunks.push(current);
-    return chunks.length ? chunks : [[]];
 }
 
 async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
