@@ -986,6 +986,7 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
    ========================================================= */
 let productManagementResults = [];
 let productManagementSearchInProgress = false;
+let productManagementSearchTimer = null;
 
 function productManagementRow(product) {
     const productId = product.productId || product.id || '';
@@ -1020,6 +1021,19 @@ window.clearProductManagementSearch = function(options = {}) {
     if (input && !options.preserveInput) input.value = '';
     if (status) status.textContent = '';
     if (body) body.innerHTML = '<tr><td colspan="7" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
+};
+
+window.queueProductManagementSearch = function() {
+    clearTimeout(productManagementSearchTimer);
+    const input = document.getElementById('productManagementSearch');
+    const raw = String(input?.value || '').trim();
+    if (raw.length < 2) {
+        clearProductManagementSearch({ preserveInput: true });
+        const status = document.getElementById('productManagementSearchStatus');
+        if (status && raw.length) status.textContent = '再輸入 1 個字即可搜尋。';
+        return;
+    }
+    productManagementSearchTimer = setTimeout(() => searchProductManagement(), 400);
 };
 
 window.searchProductManagement = async function() {
