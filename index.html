@@ -753,14 +753,9 @@
             <span class="order-period-note">訂單進度依訂單日期；待報帳包含跨年度；已完成依開發票日期。</span>
         </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
-        <div class="toolbar no-print" id="purchaseOrderActionBar" style="display:none;background:#eef5ff;">
-            <button id="generatePoBtn" style="display:none;" onclick="openPurchaseOrderModal()">🧾 產生訂購單（給廠商下單）</button>
-        </div>
-
         <table id="ordersTable">
             <thead>
                 <tr>
-                     <th class="no-print" id="orderSelectHeader" style="display:none;"><input type="checkbox" id="orderSelectAllBox" onchange="toggleAllOrderSelect(this)"></th>
                      <th>訂單日期</th>
             <th>客戶名稱</th>
             <th>負責業務</th> <!-- 新增 -->
@@ -770,7 +765,6 @@
             <th>交易資訊</th>
             <th>備註</th> <!-- 新增 -->
             <th class="no-print">操作</th>
-            <th class="no-print">訂購單</th>
                 </tr>
             </thead>
             <tbody id="ordersBody"></tbody>
