@@ -11372,10 +11372,10 @@ window.backfillOrderSearchIndex = async function() {
     }
 };
 
-/* ---------- Product Master v2：舊價目表安全遷移 ---------- */
+/* ---------- Product Master：正式主檔與資料維護 ---------- */
 let productMasterMigrationRunning = false;
 
-function legacyPriceItemWithoutCost(item) {
+function productItemWithoutCost(item) {
     const clean = { ...item };
     delete clean.cost;
     delete clean.standardCost;
@@ -11383,7 +11383,7 @@ function legacyPriceItemWithoutCost(item) {
     return clean;
 }
 
-function productMasterRecordFromLegacyItem(item) {
+function productMasterRecordFromItem(item) {
     const normalized = normalizeProductMasterItem(item);
     const brand = resolveBrandName(normalized.brand || '');
     const brandEntry = brandMasterEntryForName(brand);
@@ -11402,13 +11402,13 @@ function productMasterRecordFromLegacyItem(item) {
         listPrice: Number(normalized.price || 0),
         authorizationType: authorizationTypeForProduct(normalized),
         status: normalized.active === false ? 'INACTIVE' : 'ACTIVE',
-        legacySource: 'settings/prices',
+        source: 'product_master',
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser?.uid || ''
     };
 }
 
-function legacyCostRecord(item, productRecord) {
+function productCostRecordFromItem(item, productRecord) {
     const raw = item?.cost;
     if (raw === undefined || raw === null || String(raw).trim() === '') return null;
     const cost = Number(raw);
@@ -11418,7 +11418,7 @@ function legacyCostRecord(item, productRecord) {
         productLineId: productRecord.productLineId || productRecord.productLine || '',
         standardCost: cost,
         salesVisible: productRecord.authorizationType === 'NON_AUTHORIZED',
-        source: 'legacy_price_migration',
+        source: 'product_master',
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser?.uid || ''
     };
@@ -11693,13 +11693,13 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
 
     (imported || []).forEach(raw => {
         const item = normalizeProductMasterItem({ ...raw, brand: storedBrand });
-        const product = productMasterRecordFromLegacyItem(item);
+        const product = productMasterRecordFromItem(item);
         product.status = item.active === false ? 'INACTIVE' : 'ACTIVE';
         product.legacySource = 'excel_import';
         product.updatedAt = now;
         operations.push(batch => batch.set(db.collection('products').doc(product.productId), product, { merge: true }));
 
-        const cost = legacyCostRecord(item, product);
+        const cost = productCostRecordFromItem(item, product);
         if (cost) {
             cost.source = 'excel_import';
             cost.updatedAt = now;
@@ -11848,7 +11848,7 @@ window.handlePriceExcelUpload = async function(input) {
                 const normalizedImported = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
                 const visibleImported = (currentUserRole === 'admin' || currentUserRole === 'purchaser')
                     ? normalizedImported
-                    : normalizedImported.map(legacyPriceItemWithoutCost);
+                    : normalizedImported.map(productItemWithoutCost);
                 priceList = priceList.filter(item => (item.brand || '').trim().toLocaleLowerCase() !== storedBrand.toLocaleLowerCase()).concat(visibleImported);
                 savedBrands.push(`${storedBrand}（${imported.length} 筆）`);
             }
