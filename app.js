@@ -9478,7 +9478,6 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'statistics') salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics();
     if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
-    if (tab === 'storage') resetCleanupPreview();
 };
 
 function renderKeyStatisticBrands() {
@@ -10690,27 +10689,6 @@ function bindListRowSelection(row) {
 /* ---------- 業務名單管理（唯讀，資料來源為 users 集合，與登入帳號綁定） ---------- */
 // 這裡顯示 users 集合裡「所有」帳號（包含還沒填 name/code、只能登入沒被列進業務下拉選單的人），
 // 讓你能一眼看出目前有哪些帳號對這個系統有登入權限；下拉選單用的業務清單（salesList）不受影響，仍只取有填 name+code 的人
-function loadAllUsersForAdmin() {
-    return readCollectionInBatches('users').then(rows => {
-        allUsersCache = rows.map(d => ({
-            uid: d.id,
-            code: d.code || '',
-            name: d.name || '',
-            phone: d.phone || '',
-            role: d.role || 'sales',
-            email: d.email || '',
-            disabled: !!d.disabled,
-            mustChangePassword: !!d.mustChangePassword
-        }));
-        allUsersCache.sort((a, b) => {
-            if (a.name && !b.name) return -1;
-            if (!a.name && b.name) return 1;
-            return (a.code || '').localeCompare(b.code || '') || a.uid.localeCompare(b.uid);
-        });
-    }).catch(() => {
-        allUsersCache = [];
-    });
-}
 
 window.renderAdminSalesTable = function() {
     const tbody = document.getElementById('adminSalesBody');
