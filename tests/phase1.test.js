@@ -115,6 +115,14 @@ test('product management uses server search without exposing protected cost data
     assert.match(appSource, /window\.addProductManagementToOrder/);
 });
 
+test('preview host selects isolated Firebase project and exposes a visible environment banner', () => {
+    assert.match(appSource, /preview-20135\.firebaseapp\.com/);
+    assert.match(appSource, /preview-20135\.web\.app/);
+    assert.match(appSource, /projectId: "preview-20135"/);
+    assert.match(appSource, /APP_ENVIRONMENT === 'preview'/);
+    assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
+});
+
 test('commercial owner selector keeps assisted documents assigned to sales role', () => {
     assert.match(appSource, /function populateSalesDropdown\(\)/);
     assert.match(appSource, /return role === 'sales';/);
