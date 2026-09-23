@@ -1240,6 +1240,16 @@
                 <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
+            <h4 style="margin-top:28px;">系統資料檢查</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">檢查系統資料</button>
+                <span style="font-size:12px;color:#666;">
+                    唯讀檢查 Product Master、人員、訂單、採購、庫存、分倉與庫存占用的關聯；只列出異常，不會修改或刪除正式資料。
+                </span>
+                <div id="systemDataAuditStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
+                <div id="systemDataAuditResults" style="margin-top:10px;"></div>
+            </div>
+
             <h4 style="margin-top:28px;">舊成本資料安全檢查</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">檢查舊成本資料</button>
