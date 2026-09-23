@@ -791,9 +791,9 @@
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
         <div class="sub-nav no-print" aria-label="採購工作流程">
-            <div class="sub-tab active" id="purchase-sub-pending" onclick="switchPurchasingView('pending', this)">待採購</div>
-            <div class="sub-tab" id="purchase-sub-arrival" onclick="switchPurchasingView('arrival', this)">到貨入庫</div>
-            <div class="sub-tab" id="purchase-sub-history" onclick="switchPurchasingView('history', this)">訂購單記錄</div>
+            <div class="sub-tab active" id="purchase-sub-pending" onclick="switchPurchasingView('pending', this)">訂購</div>
+            <div class="sub-tab" id="purchase-sub-arrival" onclick="switchPurchasingView('arrival', this)">收貨</div>
+            <div class="sub-tab" id="purchase-sub-dispatch" onclick="switchPurchasingView('dispatch', this)">發貨</div>
         </div>
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
@@ -822,6 +822,17 @@
             </table>
             <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何訂購單。</div>
             <div class="po-load-more-row no-print"><button type="button" id="poLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMorePurchaseOrders()">載入更多（每次 50 筆）</button></div>
+        </div>
+        <div id="purchaseDispatchPanel" style="display:none">
+            <div class="toolbar no-print">
+                <button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders()">🔄 重新整理</button>
+                <span id="purchaseDispatchStatus" role="status"></span>
+            </div>
+            <div class="table-wrap"><table>
+                <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>產品</th><th>出貨狀態</th><th>操作</th></tr></thead>
+                <tbody id="purchaseDispatchBody"></tbody>
+            </table></div>
+            <div class="empty-hint" id="purchaseDispatchEmptyHint" style="display:none;">目前沒有待打單或可出貨訂單。</div>
         </div>
     </div>
 

@@ -1388,3 +1388,13 @@ test('order list does not block on full Product Master loading', () => {
     assert.match(appSource, /if \(mainKey === 'orders'\) \{[\s\S]*?ensureSalesListLoaded\(\)[\s\S]*?loadOrdersFromCloud\(\);[\s\S]*?\}/);
     assert.doesNotMatch(appSource, /if \(mainKey === 'orders'\) Promise\.all\(\[ensureSalesListLoaded\(\), ensurePriceListLoaded\(\)\]\)\.then\(loadOrdersFromCloud\)/);
 });
+
+
+test('purchasing workspace has order receive dispatch tabs', () => {
+    assert.match(indexSource, /switchPurchasingView\('pending',[\s\S]*?>訂購<\/div>/);
+    assert.match(indexSource, /switchPurchasingView\('arrival',[\s\S]*?>收貨<\/div>/);
+    assert.match(indexSource, /switchPurchasingView\('dispatch',[\s\S]*?>發貨<\/div>/);
+    assert.match(indexSource, /id="purchaseDispatchPanel"/);
+    assert.match(appSource, /loadPurchasingDispatchOrders/);
+    assert.match(appSource, /category === 'dispatch' \|\| category === 'delivery'/);
+});
