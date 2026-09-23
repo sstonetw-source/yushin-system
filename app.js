@@ -4281,18 +4281,18 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
     )) return;
 
     try {
-        const snapshot = await db.collection('orders')
-            .where('quoteNo', '==', quoteNo)
-            .get();
+        const linkedOrders = await readQueryInBatches(
+            db.collection('orders').where('quoteNo', '==', quoteNo).orderBy('quoteNo')
+        );
 
         const actor = deliveryActor();
         const cancelledAt = new Date().toISOString();
         const cancelledDate = localDateString();
 
         // 每筆來源訂單沿用正式的訂單生命週期與庫存釋放邏輯
-        for (const doc of snapshot.docs) {
+        for (const linkedOrder of linkedOrders) {
             await db.runTransaction(async transaction => {
-                const orderRef = db.collection('orders').doc(doc.id);
+                const orderRef = db.collection('orders').doc(linkedOrder.id);
                 const orderSnap = await transaction.get(orderRef);
 
                 if (!orderSnap.exists) return;
