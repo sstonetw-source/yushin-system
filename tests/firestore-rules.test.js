@@ -181,7 +181,7 @@ test('business users can see visible non-agency cost but not agency or legacy hi
 });
 
 test('sales may create a temporary product and own non-agency cost, but cannot alter existing master products', async () => {
-  const product = { productId:'p3', status:'TEMPORARY', createdBy:'sales1', updatedBy:'sales1', authorizationType:'NON_AUTHORIZED' };
+  const product = { productId:'p3', status:'TEMPORARY', createdBy:'sales1', updatedBy:'sales1', authorizationType:'NON_AUTHORIZED', listPrice:0 };
   await assertSucceeds(setDoc(doc(db('sales1'), 'products/p3'), product));
   await assertFails(updateDoc(doc(db('sales1'), 'products/p3'), { listPrice:1 }));
   await assertFails(setDoc(doc(db('sales2'), 'products/p4'), { ...product, productId:'p4' }));
