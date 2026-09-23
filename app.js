@@ -10964,6 +10964,22 @@ function getTransferSelection() {
     return { salesCode, targetUid, currentHolder, target, master };
 }
 
+async function legacySalesDocsInPages(collectionName, salesName, onPage, pageSize = 200) {
+    let cursor = null;
+    while (true) {
+        let query = db.collection(collectionName)
+            .where('salesName', '==', salesName)
+            .orderBy(firebase.firestore.FieldPath.documentId())
+            .limit(pageSize);
+        if (cursor) query = query.startAfter(cursor);
+        const snap = await query.get();
+        if (snap.empty) break;
+        await onPage(snap.docs);
+        cursor = snap.docs[snap.docs.length - 1];
+        if (snap.size < pageSize) break;
+    }
+}
+
 async function countLegacyRecordsForSalesCode(person) {
     if (!person?.name) return { quotes:0, orders:0, forecasts:0, equipment:0, total:0 };
     const configs = [
@@ -10971,8 +10987,11 @@ async function countLegacyRecordsForSalesCode(person) {
     ];
     const counts = {};
     await Promise.all(configs.map(async ([key, collection]) => {
-        const snap = await db.collection(collection).where('salesName', '==', person.name).get();
-        counts[key] = snap.docs.filter(doc => !doc.data().salesCode).length;
+        let count = 0;
+        await legacySalesDocsInPages(collection, person.name, docs => {
+            count += docs.filter(doc => !doc.data().salesCode).length;
+        });
+        counts[key] = count;
     }));
     counts.total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
     return counts;
@@ -11015,13 +11034,14 @@ async function backfillSalesCodeForLegacyRecords(person, salesCode) {
     if (!person?.name || !salesCode) return 0;
     const collections = ['quotes','orders','forecasts','equipment'];
     let total = 0;
+    const migratedAt = new Date().toISOString();
     for (const collection of collections) {
-        const snap = await db.collection(collection).where('salesName', '==', person.name).get();
-        const refs = snap.docs.filter(doc => !doc.data().salesCode).map(doc => doc.ref);
-        if (refs.length) {
-            await runFirestoreBatchUpdates(refs, { salesCode, ownershipMigratedAt: new Date().toISOString() });
+        await legacySalesDocsInPages(collection, person.name, async docs => {
+            const refs = docs.filter(doc => !doc.data().salesCode).map(doc => doc.ref);
+            if (!refs.length) return;
+            await runFirestoreBatchUpdates(refs, { salesCode, ownershipMigratedAt: migratedAt });
             total += refs.length;
-        }
+        });
     }
     return total;
 }
