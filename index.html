@@ -1231,11 +1231,11 @@
                 <div id="databaseBackupUploadStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
-            <h4 style="margin-top:28px;">估價單／訂單全歷史搜尋索引</h4>
+            <h4 style="margin-top:28px;">估價單／Forecast／訂單／儀器全歷史搜尋索引</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正全歷史搜尋索引</button>
                 <span style="font-size:12px;color:#666;">
-                    供估價單與訂單的完整歷史搜尋使用。系統每次只讀取 200 筆並分批寫入 searchTokens；訂單同時保留標準化貨號 itemCodeKey。只新增搜尋索引，不會修改金額、狀態或流程紀錄。升級後執行一次即可，重複執行也安全。
+                    供估價單、Forecast、訂單與儀器的完整歷史搜尋使用。系統每次只讀取 200 筆並分批寫入 searchTokens；訂單同時保留標準化貨號 itemCodeKey。只新增搜尋索引，不會修改金額、狀態或流程紀錄。升級後執行一次即可，重複執行也安全。
                 </span>
                 <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
