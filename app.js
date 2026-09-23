@@ -10472,9 +10472,10 @@ window.renderSalesStatistics = function() {
 
     const countEl = document.getElementById('salesStatsOrderCount');
     const setMetric = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = formatStatsMoney(value); };
-    setMetric('salesStatsActualSales', total.actualSales);
-    setMetric('salesStatsPendingSales', total.pendingSales);
-    setMetric('salesStatsTotalSales', total.totalSales);
+    setMetric('salesStatsActualSales', total.totalSales);
+    setMetric('salesStatsPendingSales', total.totalCost);
+    if (total.missingCostIds.size) document.getElementById('salesStatsTotalSales').innerText = '待補成本';
+    else setMetric('salesStatsTotalSales', total.profit);
     setMetric('salesStatsSalesInc', total.totalSales);
     setMetric('salesStatsCostInc', total.totalCost);
     if (total.missingCostIds.size) document.getElementById('salesStatsProfit').innerText = '待補成本';
