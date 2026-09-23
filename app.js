@@ -433,6 +433,14 @@ function canManageEquipmentCapability(role = currentUserRole) {
     return role === 'admin' || role === 'engineer';
 }
 
+function commercialCreatorFields() {
+    return {
+        createdByUid: currentUser?.uid || '',
+        createdByName: currentUserName || '',
+        createdByRole: currentUserRole || ''
+    };
+}
+
 function canViewAllData(dataType, role = currentUserRole) {
     return role === 'admin' || roleDataScopes[role]?.[dataType] === 'all';
 }
@@ -1322,6 +1330,7 @@ window.saveForecast = async function() {
                 ownerUid: currentUser?.uid || '',
                 productId: '',
                 createdAt: now,
+                ...commercialCreatorFields(),
                 updatedAt: now,
                 ...linkedDocumentFields('', '', [])
             };
@@ -1710,7 +1719,7 @@ async function createForecastOrdersDirectly(forecast, items) {
     const totalPrice = normalizedItems.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
     const orderRef = db.collection('orders').doc();
     const orderData = {
-        orderDate, createdAt:now, company:currentCompany || 'yushin',
+        orderDate, createdAt:now, ...commercialCreatorFields(), company:currentCompany || 'yushin',
         customerName:forecast.customerName || '',
         customerId:forecast.customerId || customerIdForName(forecast.customerName || ''),
         ...first,
@@ -3104,7 +3113,7 @@ function collectCurrentQuoteRecord() {
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
         salesName, salesCode: selectedSales?.code || salesCodeForName(salesName),
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName, '', selectedSales?.code || salesCodeForName(salesName)) ? currentUser?.uid || '' : ''),
-        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(),
+        quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), ...commercialCreatorFields(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
@@ -3331,6 +3340,7 @@ window.handleSaveAndPrint = function() {
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName, '', selectedSales?.code || salesCodeForName(selectedSalesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value,
         createdAt: new Date().toISOString(),
+        ...commercialCreatorFields(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
         validDays: document.getElementById('validDays').value,
         discountRate: document.getElementById('discountRateInput').value,
@@ -3939,6 +3949,7 @@ window.createForecastFromQuote = async function(quoteNo) {
             salesCode: q.salesCode || salesCodeForName(q.salesName) || currentUserCode || '',
             ownerUid: q.ownerUid || currentUser?.uid || '',
             createdAt: now,
+            ...commercialCreatorFields(),
             updatedAt: now,
             ...linkedDocumentFields(
                 DOCUMENT_TYPES.QUOTE,
@@ -4005,7 +4016,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
         const orderRef=db.collection('orders').doc();
         const todayStr=localDateString();
         const orderData={
-            orderDate:todayStr,createdAt:new Date().toISOString(),company:q.company||'',
+            orderDate:todayStr,createdAt:new Date().toISOString(),...commercialCreatorFields(),company:q.company||'',
             customerName:q.ordererName||q.clientName||'',customerId:q.customerId||customerIdForName(q.ordererName||q.clientName||''),
             ...first,qty:first.qty,unitPrice:first.unitPrice,totalPrice,
             items,itemCount:items.length,orderSchemaVersion:2,status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(totalPrice),
@@ -8304,6 +8315,7 @@ window.saveNewOrder = function() {
     const data = {
         orderDate: document.getElementById('orderDateInput').value,
         createdAt: new Date().toISOString(),
+        ...commercialCreatorFields(),
         company: currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
         customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
