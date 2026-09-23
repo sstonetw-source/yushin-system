@@ -136,8 +136,11 @@ test('purchaser may assist create order only with a responsible owner', async ()
   }));
 });
 
-test('engineer self-order is allowed but formal purchase order is denied', async () => {
-  await assertSucceeds(setDoc(doc(db('eng1'), 'supplyOrders/s1'), {
+test('self-order is restricted to the responsible salesperson; engineer cannot become commercial owner', async () => {
+  await assertSucceeds(setDoc(doc(db('sales1'), 'supplyOrders/sales-self-order'), {
+    type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', qty:2, cost:100
+  }));
+  await assertFails(setDoc(doc(db('eng1'), 'supplyOrders/engineer-self-order'), {
     type:'SALES_SELF_ORDER', ownerUid:'eng1', salesCode:'E01', qty:2, cost:100
   }));
   await assertFails(setDoc(doc(db('eng1'), 'purchaseOrders/p1'), { status:'ORDERED' }));
