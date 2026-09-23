@@ -646,13 +646,14 @@ test('period semantics are shared across Forecast Quote Order and PO', () => {
     assert.match(appSource, /this-quarter/);
 });
 
-test('permission routing includes Forecast and Inventory', () => {
+test('permission routing includes Product Forecast and Inventory workspaces', () => {
     const start = appSource.indexOf('function getActivePermissionPage');
     const end = appSource.indexOf('function applyPermissionVisibility', start);
     const s = appSource.slice(start, end);
     assert.match(s, /forecast-system/);
+    assert.match(s, /product-system/);
     assert.match(s, /inventory-system/);
-    assert.match(appSource, /\['forecast', 'quote', 'orders', 'inventory', 'equipment'\]/);
+    assert.match(appSource, /\['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'\]/);
 });
 
 
