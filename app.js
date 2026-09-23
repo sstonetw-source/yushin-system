@@ -1140,7 +1140,8 @@ window.openOrderWorkspace = function(el) {
 
 window.openPurchasingWorkspace = function(el) {
     if (!canAccessPage('orders.po')) { alert('您沒有權限查看採購。'); return; }
-    actuallySwitchMainTab('order-system', el, { preserveSubView: true });
+    // 採購入口直接開啟採購訂單，不先載入業務 orders；需要看業務訂單時再由該分頁載入。
+    actuallySwitchMainTab('order-system', el, { preserveSubView: true, skipReload: true });
     switchOrderView('po', document.getElementById('osub-po'), { skipHistory: true });
 };
 
