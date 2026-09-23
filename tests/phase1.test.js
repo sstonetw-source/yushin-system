@@ -115,6 +115,12 @@ test('product management uses server search without exposing protected cost data
     assert.match(appSource, /window\.addProductManagementToOrder/);
 });
 
+test('product management debounces full Product Master search', () => {
+    assert.match(indexSource, /oninput="queueProductManagementSearch\(\)"/);
+    assert.match(appSource, /productManagementSearchTimer = setTimeout\(\(\) => searchProductManagement\(\), 400\)/);
+    assert.match(appSource, /db\.collection\('products'\).*limit\(50\)/s);
+});
+
 test('preview host selects isolated Firebase project and exposes a visible environment banner', () => {
     assert.match(appSource, /preview-20135\.firebaseapp\.com/);
     assert.match(appSource, /preview-20135\.web\.app/);
