@@ -439,7 +439,7 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <div class="section-header no-print"><h2>庫存管理</h2><button onclick="openInventoryAdjustment('initial')">＋ 新增庫存</button></div>
+      <div class="section-header no-print"><h2>庫存管理</h2><div style="display:flex;gap:8px;flex-wrap:wrap;"><button onclick="openInventoryAdjustment('initial')">＋ 新增庫存</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
       <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="篩選目前已載入庫存" oninput="renderInventoryList()"><select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">低於安全庫存</option><option value="out">缺貨</option><option value="reserved">有占用</option></select><button class="btn-secondary" onclick="loadInventory(true)">重新整理</button></div>
       <div class="toolbar no-print"><input id="businessProductSearch" type="search" placeholder="查貨號或品名（伺服器查詢，最多 25 筆）" oninput="queueBusinessProductSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchBusinessProducts();}"><button type="button" onclick="searchBusinessProducts()">查產品／售價／庫存</button><span id="businessProductSearchStatus"></span></div>
       <div id="businessProductSearchResults" class="table-wrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table></div>
@@ -855,29 +855,35 @@
                 <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid"><option value="">請選擇負責業務</option></select></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
                 <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" oninput="onOrderItemCodeInput(this)" onchange="onOrderItemCodeChange(this)"></div>
-                <div><label>品名</label><input type="text" id="orderItemName"></div>
+                <div><label>中文品名</label><input type="text" id="orderItemName"></div>
+                <div><label>英文品名</label><input type="text" id="orderItemNameEn"></div>
                 <div><label>廠牌</label>
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
                     <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
                 </div>
+                <div><label>規格</label><input type="text" id="orderSpec"></div>
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
                 <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
                 <div><label>總價</label><input type="number" id="orderTotalPrice" value="0" readonly style="background:#f5f5f5;"></div>
+                <div>
+                    <label>訂貨方式</label>
+                    <select id="orderProcurementType" onchange="onOrderProcurementTypeChange()">
+                        <option value="PURCHASING_PO">交由採購訂貨</option>
+                        <option value="SALES_SELF_ORDER">業務自行訂貨</option>
+                    </select>
+                </div>
                 <div id="orderCostFieldWrap" style="display:none;">
                     <label>含稅成本</label>
-                    <input type="number" id="orderCostPrice" step="0.01" placeholder="有貨號且價目表填了成本時會自動帶入">
+                    <input type="number" id="orderCostPrice" step="0.01" placeholder="業務自行訂貨時填寫成本">
                 </div>
                 <div>
-                    <label>履約方式</label>
+                    <label>物流方式</label>
                     <select id="orderFulfillmentType" onchange="onOrderFulfillmentChange()">
-                        <option value="WAREHOUSE">倉庫出貨</option>
+                        <option value="WAREHOUSE">依實際庫存自動配置</option>
                         <option value="DIRECT_SHIP">原廠直送客戶</option>
                     </select>
                 </div>
-                <div id="orderWarehouseWrap">
-                    <label>出貨倉庫</label>
-                    <select id="orderWarehouse" onchange="refreshOrderWarehouseStock()"><option value="">請選擇倉庫</option></select>
-                </div>
+                <input type="hidden" id="orderWarehouse" value="">
                 <div id="orderWarehouseStockHint" style="grid-column:1/-1;font-size:12px;color:#666;"></div>
                 <div>
                     <label>交易方式</label>
@@ -1333,6 +1339,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260923-1"></script>
-    <script src="app.js?v=20260924-2"></script>
+    <script src="app.js?v=20260924-1"></script>
 </body>
 </html>
