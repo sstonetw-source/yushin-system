@@ -219,7 +219,6 @@ let supplierMappingCache = [];
 let warehouseMasterCache = [];
 let supplierWarehouseLoadPromise = null;
 let purchaseCostCache = new Map();
-let hiddenBrands = [];       // 舊欄位，保留避免舊資料丟失，畫面已經不再使用黑名單模式
 
 // 印章圖片常數定義在 stamps-data.js（需在此檔案之前載入）。
 // 這裡用防禦性寫法讀取：萬一該檔案沒被正確載入（例如部署時漏傳、路徑錯誤），
