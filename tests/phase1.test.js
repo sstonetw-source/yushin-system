@@ -234,8 +234,8 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
     assert.match(loader, /where\('orderDate', '<=', end\)/);
     assert.match(loader, /where\('updatedAt', '>=', startIso\)/);
     assert.match(loader, /where\('status', '==', BUSINESS_STATUS\.ACTIVE\)/);
-    assert.match(loader, /limit\(1500\)/);
-    assert.match(loader, /limit\(1000\)/);
+    assert.match(loader, /readQueryInBatches/);
+    assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
     assert.doesNotMatch(loader, /collection\('orders'\)\.get\(\)/);
 });
 
@@ -382,7 +382,7 @@ test('quote and order search-index migration is admin-only batched and idempoten
     const migration = appSource.slice(start, end);
     assert.match(migration, /trueUserRole !== 'admin'/);
     assert.match(migration, /currentUserRole !== 'admin'/);
-    assert.match(migration, /\['quotes','orders'\]/);
+    assert.match(migration, /\['quotes','forecasts','orders','equipment'\]/);
     assert.match(migration, /limit\(200\)/);
     assert.match(migration, /startAfter\(cursor\)/);
     assert.match(migration, /buildFullHistorySearchTokens/);
@@ -417,7 +417,7 @@ test('new quotes and orders persist createdAt and normalized order item-code key
 });
 
 
-test('phase 2 product master keeps the existing price catalog as a compatibility source and overlays formal products', () => {
+test('phase 2 product master keeps formal product identity and legacy migration compatibility without Unit', () => {
     assert.match(appSource, /function stableProductId\(item\)/);
     assert.match(appSource, /function normalizeProductMasterItem\(item\)/);
     assert.match(appSource, /productId:/);
@@ -425,11 +425,11 @@ test('phase 2 product master keeps the existing price catalog as a compatibility
     assert.match(appSource, /lotTracked:/);
     assert.match(appSource, /expiryTracked:/);
     assert.match(appSource, /supplier:/);
-    assert.match(appSource, /unit:/);
+    assert.doesNotMatch(appSource, /\bunit\s*:/);
     assert.match(appSource, /spec:/);
     assert.match(appSource, /normalizeProductMasterList\(imported/);
     assert.match(appSource, /collection\('products'\)/);
-    assert.match(appSource, /舊 settings\/prices 暫時保留做過渡來源/);
+    assert.match(appSource, /舊 settings\/prices 僅供遷移／相容性工具使用/);
 });
 
 
@@ -587,7 +587,8 @@ test('phase 6 supports direct stock purchase independent of customer orders and 
     const end=appSource.indexOf('window.openPurchaseOrderModal',start);
     const s=appSource.slice(start,end);
     assert.match(s,/orderId:\s*''/);
-    assert.match(s,/ensurePriceListLoaded/);
+    assert.match(s,/loadSupplierWarehouseMasters/);
+    assert.doesNotMatch(s,/ensurePriceListLoaded/);
     assert.match(s,/addDirectPoItem/);
     assert.match(s,/poDirectStockMode = true/);
     assert.match(s,/generateNextPoNumber/);
@@ -611,14 +612,14 @@ test('phase 9 analysis separates actual receipts sales stock value incoming and 
  assert.match(appSource,/where\('type','==','receipt'\)/);
  assert.match(appSource,/difference:\s*sales\s*-\s*purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
- assert.match(appSource,/limit\(1000\)/);
+ assert.match(appSource,/readQueryInBatches\(receiptQuery\)/);
 });
-test('phase 8 permission editor includes warehouse role',()=>{assert.match(appSource,/\['sales', 'purchaser', 'warehouse', 'engineer', 'admin'\]/);});
+test('phase 8 fixed role permissions include warehouse role without an editable permission matrix',()=>{assert.match(appSource,/warehouse:\s*Object\.freeze/);assert.doesNotMatch(appSource,/saveAdminUserCapabilities/);});
 
 
 test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=>{
  assert.match(appSource,/where\('type','==','receipt'\)/);
- assert.match(appSource,/inventoryMovements[\s\S]{0,300}limit\(1000\)/);
+ assert.match(appSource,/const receiptQuery = db\.collection\('inventoryMovements'\)[\s\S]{0,500}where\('type','==','receipt'\)/);
  assert.doesNotMatch(appSource,/collection\('inventoryMovements'\)\.get\(\)/);
 });
 test('phase 10 role model consistently documents warehouse',()=>{
@@ -708,12 +709,12 @@ test('permission routing includes Product Forecast and Inventory workspaces', ()
 });
 
 
-test('shared Customer Master and order unit are persisted in the unified workflow', () => {
+test('shared Customer Master is persisted and legacy order Unit is retired', () => {
     assert.match(appSource, /function customerIdForName/);
     assert.match(appSource, /function syncCustomerMaster/);
     assert.match(appSource, /customerId:/);
-    assert.match(appSource, /document\.getElementById\('orderUnit'\)/);
-    assert.match(indexSource, /id="orderUnit"/);
+    assert.doesNotMatch(appSource, /document\.getElementById\('orderUnit'\)/);
+    assert.doesNotMatch(indexSource, /id="orderUnit"/);
 });
 
 test('inventory UI exposes reservation and pending-item detail without duplicate HTML ids', () => {
@@ -776,7 +777,7 @@ test('phase 16 inventory analysis uses protected lot costs without copying cost 
     const start = appSource.indexOf('function inventoryAnalysisTotals');
     const end = appSource.indexOf('function renderInventoryAnalysisSummary', start);
     const source = appSource.slice(start, end);
-    assert.match(appSource, /db\.collection\('inventoryLotCosts'\)\.limit\(1000\)/);
+    assert.match(appSource, /readCollectionInBatches\('inventoryLotCosts'\)/);
     assert.match(source, /inventoryAnalysisLotCosts\.get\(receipt\.lotId\)/);
     assert.match(source, /inventoryAnalysisLotCosts\.get\(lot\.id\)/);
     assert.doesNotMatch(source, /receipt\.unitCost|receipt\.purchaseNetAmount|stock\.unitCost/);
@@ -797,8 +798,7 @@ test('phase 18 statistics avoid all-history downloads and important writes stamp
     const end = appSource.indexOf('\n};', start) + 3;
     const loader = appSource.slice(start, end);
     assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
-    assert.match(loader, /\.limit\(1500\)/);
-    assert.match(loader, /\.limit\(1000\)/);
+    assert.match(loader, /readQueryInBatches/);
     assert.doesNotMatch(loader, /db\.collection\('orders'\)\.get\(\)/);
     assert.match(appSource, /updatedAt: timestamp/);
     assert.match(appSource, /updatedAt: history\.at/);
@@ -921,8 +921,8 @@ test('order item-code autofill waits for Product Master and fills sale/cost fiel
     const start = appSource.indexOf('window.onOrderItemCodeChange');
     const end = appSource.indexOf('function loadClientHistory', start);
     const s = appSource.slice(start, end);
-    assert.match(s, /await ensurePriceListLoaded/);
-    assert.match(s, /findPriceItemByCodeValue/);
+    assert.match(s, /await findProductByCode/);
+    assert.doesNotMatch(s, /await ensurePriceListLoaded/);
     assert.match(s, /orderItemName/);
     assert.match(s, /orderUnitPrice/);
     assert.match(s, /applyOrderProductCost/);
@@ -962,12 +962,12 @@ test('manual inventory changes support batch rows instead of browser prompts', (
 });
 
 
-test('Product Master v2 overlays products on top of the legacy price list', () => {
-    assert.match(appSource, /function loadProductMasterOverlay/);
-    assert.match(appSource, /db\.collection\('products'\)\.limit\(500\)/);
-    assert.match(appSource, /await loadProductMasterOverlay\(\)/);
+test('Product Master v2 uses targeted server lookup instead of a 500-row overlay', () => {
+    assert.match(appSource, /async function findProductByCode/);
+    assert.match(appSource, /where\('normalizedPartNo', '==', normalized\)\.limit\(20\)/);
     assert.match(appSource, /productMasterDocToPriceItem/);
-    assert.match(appSource, /const merged = new Map\(priceList/);
+    assert.doesNotMatch(appSource, /function loadProductMasterOverlay/);
+    assert.doesNotMatch(appSource, /collection\('products'\)\.limit\(500\)/);
 });
 
 test('Product Master v2 keeps authorization separate from the legacy productType category', () => {
@@ -1127,10 +1127,11 @@ test('V2 product lookup is server bounded and shows sale and inventory quantitie
     assert.doesNotMatch(source, /db\.collection\('products'\)\.get\(\)/);
 });
 
-test('V2 personnel UI stores role capabilities and product line responsibility', () => {
-    assert.match(indexSource, /負責產品線/);
-    assert.match(appSource, /saveAdminUserCapabilities/);
-    assert.match(appSource, /productLineIds,capabilities/);
+test('V2 personnel UI uses fixed role permissions and removes product-line responsibility', () => {
+    assert.doesNotMatch(indexSource, /負責產品線/);
+    assert.doesNotMatch(appSource, /saveAdminUserCapabilities/);
+    assert.doesNotMatch(appSource, /productLineIds/);
+    assert.match(appSource, /const rolePermissions = Object\.freeze/);
 });
 
 test('personnel screen omits duplicate dashboard while safety stock remains available', () => {
@@ -1318,7 +1319,7 @@ test('legacy cost migration also sanitizes aggregate and warehouse stock cost fi
 test('database backup covers governed master, audit, delivery and Forecast progress data', () => {
   for (const name of ['productLines','priceHistory','deliveries','auditLogs']) assert.match(appSource,new RegExp("'"+name+"'"));
   assert.doesNotMatch(appSource,/collectionGroup\('progress'\)/);
-  assert.match(appSource,/forecastDoc\.ref\.collection\('progress'\)/);
+  assert.match(appSource,/collection\('progress'\)/);
   assert.match(appSource,/data\.forecastProgress/);
   assert.match(appSource,/path:doc\.ref\.path/);
 });
@@ -1377,7 +1378,8 @@ test('production HTML cache-busts local application assets after main deployment
 test('Forecast full-history search uses Firestore searchTokens', () => {
     assert.match(indexSource, /id="forecastSearch"[\s\S]*?oninput="scheduleForecastHistorySearch\(\)"/);
     assert.match(appSource, /buildFullHistorySearchTokens\('forecast', record\)/);
-    assert.match(appSource, /collection\('forecasts'\)\.where\('searchTokens', 'array-contains', queryToken\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(appSource, /scopedHistorySearchQuery\('forecasts', queryToken\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(appSource, /where\('searchTokens', 'array-contains', queryToken\)/);
     assert.match(appSource, /forecastHistorySearchTimer = setTimeout\(\(\) => runForecastHistorySearch\(true\), 350\)/);
 });
 
