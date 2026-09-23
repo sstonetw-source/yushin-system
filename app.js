@@ -103,7 +103,6 @@ let currentUserCode = '';    // 目前登入者自己的業務代號
 let appInitialized = false;  // 避免每次登入狀態變化都重複初始化頁面資料
 let pendingTab = null;
 let salesListLoadPromise = null;
-let priceListLoadPromise = null;
 let quickProductTarget = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
@@ -664,18 +663,6 @@ function initializePageData(mainKey) {
 function ensureSalesListLoaded() {
     if (!salesListLoadPromise) salesListLoadPromise = initSalesList();
     return salesListLoadPromise;
-}
-
-function ensurePriceListLoaded() {
-    if (!priceListLoadPromise) {
-        priceListLoadPromise = loadPriceListFromCloud().catch(err => {
-            // First-load failures must be retryable; never leave the app stuck with a rejected cached promise.
-            priceListLoadPromise = null;
-            console.error('Product Master 載入失敗：', err);
-            throw err;
-        });
-    }
-    return priceListLoadPromise;
 }
 
 function ensureClientHistoryLoaded() {
@@ -2242,40 +2229,6 @@ function populateEquipmentSalesDropdown() {
     });
 }
 
-function loadPriceListFromCloud() {
-    const priceDoc = db.collection('settings').doc('prices');
-    // 新版每個廠牌各存一份文件；舊版仍保留從同一文件的 list 欄位讀取，避免既有資料失效。
-    const pricesPromise = priceDoc.get().then(doc => {
-        const meta = doc.exists ? doc.data() : {};
-        if (meta.storage === 'brands' && Array.isArray(meta.brands)) {
-            // 資料量大的廠牌會被拆成多份分片文件（price-brand-xxx、price-brand-xxx-part1...），
-            // 這裡依 chunkCount 展開所有分片 ID 一起讀回，再合併成完整清單。
-            const chunkDocIds = [];
-            meta.brands.forEach(brand => {
-                const count = brand.chunkCount || 1;
-                for (let i = 0; i < count; i++) {
-                    chunkDocIds.push(i === 0 ? brand.id : `${brand.id}-part${i}`);
-                }
-            });
-            return Promise.all(chunkDocIds.map(id =>
-                db.collection('settings').doc(id).get()
-            )).then(docs => {
-                const replacementBrands = new Set(meta.brands.map(brand => String(brand.name || '').trim().toLocaleLowerCase()));
-                const legacyItems = Array.isArray(meta.list) ? meta.list.filter(item => !replacementBrands.has((item.brand || '').trim().toLocaleLowerCase())) : [];
-                priceList = normalizeProductMasterList(legacyItems.concat(docs.flatMap(brandDoc => {
-                    const data = brandDoc.exists ? brandDoc.data() : {};
-                    return Array.isArray(data.items) ? data.items : [];
-                })));
-            });
-        }
-        priceList = normalizeProductMasterList(meta.list || []);
-    }).catch(err => {
-        console.warn('舊價目表載入失敗：', err);
-        priceList = [];
-        return null;
-    });
-    return pricesPromise;
-}
 function loadCompanyAgencyBrandSettings() {
     return db.collection('settings').doc('companyAgencyBrands').get().then(doc => {
         companyAgencyBrandsConfigured = doc.exists;
@@ -11472,180 +11425,6 @@ function legacyCostRecord(item, productRecord) {
     };
 }
 
-async function readLegacyPriceStorage() {
-    const metaRef = db.collection('settings').doc('prices');
-    const metaDoc = await metaRef.get();
-    const meta = metaDoc.exists ? metaDoc.data() : {};
-    const documents = [];
-    const items = [];
-
-    if (meta.storage === 'brands' && Array.isArray(meta.brands)) {
-        for (const brand of meta.brands) {
-            const count = brand.chunkCount || 1;
-            for (let i = 0; i < count; i++) {
-                const id = i === 0 ? brand.id : `${brand.id}-part${i}`;
-                const doc = await db.collection('settings').doc(id).get();
-                if (!doc.exists) continue;
-                const data = doc.data() || {};
-                documents.push({ ref: doc.ref, id, data });
-                (Array.isArray(data.items) ? data.items : []).forEach(item => items.push(item));
-            }
-        }
-        // 舊 list 可能仍保留尚未分片的廠牌，需一併遷移。
-        (Array.isArray(meta.list) ? meta.list : []).forEach(item => items.push(item));
-    } else {
-        (Array.isArray(meta.list) ? meta.list : []).forEach(item => items.push(item));
-    }
-
-    return { metaRef, meta, documents, items };
-}
-
-function dedupeLegacyProducts(items) {
-    const map = new Map();
-    (items || []).forEach(item => {
-        const normalized = normalizeProductMasterItem(item);
-        const key = normalized.productId || stableProductId(normalized);
-        if (!key) return;
-        map.set(key, normalized);
-    });
-    return [...map.values()];
-}
-
-window.previewProductMasterMigration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
-        alert('只有管理員可以執行 Product Master 遷移。');
-        return;
-    }
-    const status = document.getElementById('productMasterMigrationStatus');
-    if (status) status.innerText = '正在檢查舊價目表…';
-    try {
-        await Promise.all([ensurePriceListLoaded(), loadBrandMaster()]);
-        const legacy = await readLegacyPriceStorage();
-        const unique = dedupeLegacyProducts(legacy.items);
-        let costCount = 0;
-        let authorized = 0;
-        let nonAuthorized = 0;
-        unique.forEach(item => {
-            const product = productMasterRecordFromLegacyItem(item);
-            if (product.authorizationType === 'AUTHORIZED') authorized++;
-            else nonAuthorized++;
-            if (legacyCostRecord(item, product)) costCount++;
-        });
-        window._productMasterMigrationPreview = {
-            products: unique.length,
-            costs: costCount,
-            authorized,
-            nonAuthorized,
-            documents: legacy.documents.length
-        };
-        if (status) status.innerText =
-            `預覽完成：${unique.length} 個產品（代理 ${authorized}／非代理 ${nonAuthorized}），` +
-            `${costCount} 筆成本；將處理 ${legacy.documents.length} 個舊價目表分片。\n` +
-            '執行後：產品寫入 products、成本寫入 productCosts，舊價目表會保留產品/售價但移除成本欄位。可重複執行。';
-        const button = document.getElementById('productMasterMigrationBtn');
-        if (button) button.disabled = unique.length === 0;
-    } catch (err) {
-        console.error('Product Master 遷移預覽失敗：', err);
-        if (status) status.innerText = '預覽失敗：' + err.message;
-    }
-};
-
-async function commitMigrationBatch(operations) {
-    let batch = db.batch();
-    let count = 0;
-    for (const operation of operations) {
-        operation(batch);
-        count++;
-        if (count >= 400) {
-            await batch.commit();
-            batch = db.batch();
-            count = 0;
-        }
-    }
-    if (count) await batch.commit();
-}
-
-window.runProductMasterMigration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
-        alert('只有管理員可以執行 Product Master 遷移。');
-        return;
-    }
-    if (productMasterMigrationRunning) return;
-    if (!window._productMasterMigrationPreview) {
-        alert('請先按「預覽遷移」確認筆數。');
-        return;
-    }
-    if (!confirm('確定執行 Product Master 安全遷移？\n\n產品與成本會寫入新的主檔；舊價目表不刪除，但會移除成本欄位，避免業務從舊 settings 文件讀到代理產品成本。')) return;
-
-    productMasterMigrationRunning = true;
-    const button = document.getElementById('productMasterMigrationBtn');
-    const previewButton = document.getElementById('productMasterMigrationPreviewBtn');
-    const status = document.getElementById('productMasterMigrationStatus');
-    if (button) button.disabled = true;
-    if (previewButton) previewButton.disabled = true;
-
-    try {
-        await Promise.all([ensurePriceListLoaded(), loadBrandMaster()]);
-        const legacy = await readLegacyPriceStorage();
-        const unique = dedupeLegacyProducts(legacy.items);
-        const operations = [];
-        let productWrites = 0;
-        let costWrites = 0;
-
-        unique.forEach(item => {
-            const product = productMasterRecordFromLegacyItem(item);
-            operations.push(batch => batch.set(db.collection('products').doc(product.productId), product, { merge: true }));
-            productWrites++;
-            const cost = legacyCostRecord(item, product);
-            if (cost) {
-                operations.push(batch => batch.set(db.collection('productCosts').doc(product.productId), cost, { merge: true }));
-                costWrites++;
-            }
-        });
-
-        await commitMigrationBatch(operations);
-        if (status) status.innerText = `主檔寫入完成：產品 ${productWrites}、成本 ${costWrites}。正在清理舊價目表成本欄位…`;
-
-        // 分片文件只移除成本欄位，保留原本產品與售價，確保既有估價/訂單自動帶入不被中斷。
-        for (const entry of legacy.documents) {
-            const cleanItems = (Array.isArray(entry.data.items) ? entry.data.items : []).map(legacyPriceItemWithoutCost);
-            await entry.ref.set({ items: cleanItems, costSanitizedAt: new Date().toISOString() }, { merge: true });
-        }
-
-        // 舊版 settings/prices.list 也可能仍含成本，一併去除。
-        if (Array.isArray(legacy.meta.list)) {
-            await legacy.metaRef.set({
-                list: legacy.meta.list.map(legacyPriceItemWithoutCost),
-                costSanitizedAt: new Date().toISOString(),
-                productMasterMigratedAt: new Date().toISOString(),
-                productMasterMigrationVersion: 2
-            }, { merge: true });
-        } else {
-            await legacy.metaRef.set({
-                costSanitizedAt: new Date().toISOString(),
-                productMasterMigratedAt: new Date().toISOString(),
-                productMasterMigrationVersion: 2
-            }, { merge: true });
-        }
-
-        priceListLoadPromise = null;
-        await ensurePriceListLoaded();
-        window._productMasterMigrationPreview = null;
-        if (status) status.innerText =
-            `完成：${productWrites} 個產品已進入 products、${costWrites} 筆成本已進入 productCosts；舊價目表成本欄位已移除。\n` +
-            '歷史估價與訂單快照未修改。';
-    } catch (err) {
-        console.error('Product Master 遷移失敗：', err);
-        if (status) status.innerText = '遷移中斷：' + err.message + '。此流程可安全重新執行，已寫入資料會以相同 productId 更新，不會重複建立。';
-        alert('Product Master 遷移未完成，請確認網路與 Firestore 權限後重新執行。');
-    } finally {
-        productMasterMigrationRunning = false;
-        if (button) button.disabled = false;
-        if (previewButton) previewButton.disabled = false;
-    }
-};
-
-
 async function readCollectionForMigration(name, pageSize = 300) {
     const rows = [];
     let cursor = null;
@@ -11975,60 +11754,30 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
     await commitMigrationBatch(operations);
 }
 
-async function savePriceBrandList(imported, brand) {
-    const maxBytes = 700 * 1024; // 留緩衝空間給欄位名稱等額外開銷，避免貼近 1MB 上限
-    const priceDoc = db.collection('settings').doc('prices');
-    const doc = await priceDoc.get();
-    const meta = doc.exists ? doc.data() : {};
-    const currentBrands = Array.isArray(meta.brands) ? meta.brands : [];
-    const matchingEntry = currentBrands.find(item => String(item.name || '').trim().toLocaleLowerCase() === brand.toLocaleLowerCase());
-    // 廠牌名稱不分大小寫；如雲端已有 Thermo，上傳 thermo 會直接更新原本那份。
-    const storedBrand = matchingEntry?.name || brand;
-    const normalizedItems = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
-    // 舊 settings 僅保留業務需要的產品/售價資料；成本改存 productCosts。
-    const publicItems = normalizedItems.map(legacyPriceItemWithoutCost);
-    const chunks = chunkPriceItems(publicItems, maxBytes);
-    const brandId = matchingEntry?.id || priceBrandDocumentId(storedBrand);
-    const chunkDocId = (index) => index === 0 ? brandId : `${brandId}-part${index}`;
-    const updatedAt = new Date().toISOString();
-
-    for (let i = 0; i < chunks.length; i++) {
-        setPriceUploadProgress(85 + Math.round(((i + 1) / chunks.length) * 10), `正在儲存「${brand}」價目表（第 ${i + 1}/${chunks.length} 個分片）…`);
-        await db.collection('settings').doc(chunkDocId(i)).set({
-            brand: storedBrand, items: chunks[i], updatedAt,
-            chunkIndex: i, chunkCount: chunks.length
-        });
-    }
-
-    const brands = currentBrands.filter(item => item.id !== brandId && String(item.name || '').trim().toLocaleLowerCase() !== storedBrand.toLocaleLowerCase());
-    const previousEntry = matchingEntry || currentBrands.find(item => item.id === brandId);
-    const previousChunkCount = (previousEntry && previousEntry.chunkCount) || 1;
-
-    // 若這次上傳的分片數比上次少，刪除多出來的舊分片文件，避免留下用不到的雲端資料。
-    for (let i = chunks.length; i < previousChunkCount; i++) {
-        await db.collection('settings').doc(chunkDocId(i)).delete().catch(() => {});
-    }
-
-    brands.push({ id: brandId, name: storedBrand, chunkCount: chunks.length, itemCount: normalizedItems.length, updatedAt });
-    brands.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-    await priceDoc.set({
-        // 舊版 list 暫時保留，尚未個別上傳的廠牌仍可正常讀取；同廠牌的新資料會優先取代舊資料。
-        storage: 'brands', brands, updatedAt
-    }, { merge: true });
-    await syncImportedBrandToFormalProductMaster(normalizedItems, storedBrand);
-    return storedBrand;
+async function saveProductMasterBrand(imported, brand) {
+    const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand })));
+    await syncImportedBrandToFormalProductMaster(normalizedItems, brand);
+    normalizedItems.forEach(item => cacheProductLookupItem(item));
+    return brand;
 }
+
 
 let pendingPriceImportPreview = null;
 
-function summarizeProductMasterImport(groups) {
-    const existingById = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
+async function summarizeProductMasterImport(groups) {
+    const rows = groups.flatMap(group => group.imported.map(raw => normalizeProductMasterItem({ ...raw, brand: group.brand })));
+    const existingIds = new Set();
+    for (let i = 0; i < rows.length; i += 10) {
+        const chunk = rows.slice(i, i + 10);
+        const docs = await Promise.all(chunk.map(item => db.collection('products').doc(item.productId).get()));
+        docs.forEach(doc => { if (doc.exists) existingIds.add(doc.id); });
+    }
     let added = 0, updated = 0, inactive = 0;
     const brands = groups.map(group => {
         let brandAdded = 0, brandUpdated = 0;
         group.imported.forEach(raw => {
-            const item = normalizeProductMasterItem(raw);
-            if (existingById.has(item.productId)) { updated++; brandUpdated++; } else { added++; brandAdded++; }
+            const item = normalizeProductMasterItem({ ...raw, brand: group.brand });
+            if (existingIds.has(item.productId)) { updated++; brandUpdated++; } else { added++; brandAdded++; }
             if (!item.active) inactive++;
         });
         return { brand: group.brand, count: group.imported.length, added: brandAdded, updated: brandUpdated };
@@ -12036,11 +11785,12 @@ function summarizeProductMasterImport(groups) {
     return { added, updated, inactive, total: added + updated, brands };
 }
 
-function confirmProductMasterImport(groups) {
-    const summary = summarizeProductMasterImport(groups);
+async function confirmProductMasterImport(groups) {
+    const summary = await summarizeProductMasterImport(groups);
     const lines = summary.brands.map(item => `${item.brand}：${item.count} 筆（新增 ${item.added}／更新 ${item.updated}）`);
-    return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n同廠牌會以本次 Excel 內容更新；歷史估價單與訂單保存的是當時快照，不會被改寫。確定寫入雲端嗎？`);
+    return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n資料將直接寫入 products / productCosts；歷史估價單與訂單快照不會被改寫。確定寫入雲端嗎？`);
 }
+
 
 window.handlePriceExcelUpload = async function(input) {
     const file = input.files && input.files[0];
@@ -12102,7 +11852,6 @@ window.handlePriceExcelUpload = async function(input) {
                     const productLine = String(getField(row, ['產品線', '产品线', '產品類別', '产品类别', 'Product Line', 'ProductLine'])).trim();
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
                     const supplier = String(getField(row, ['供應商', '供应商', 'Supplier', 'Vendor'])).trim();
-                    const unit = String(getField(row, ['單位', '单位', 'Unit'])).trim();
                     const activeRaw = String(getField(row, ['啟用', '启用', 'Active', 'Status'])).trim().toLocaleLowerCase();
                     const yes = value => ['1', 'true', 'yes', 'y', '是', '啟用', '启用'].includes(String(value || '').trim().toLocaleLowerCase());
                     const inventoryTracked = yes(getField(row, ['庫存管理', '库存管理', 'Inventory Tracked', 'Inventory']));
@@ -12114,7 +11863,7 @@ window.handlePriceExcelUpload = async function(input) {
                     const cost = costRaw === '' ? null : parseFloat(costRaw) || 0;
 
                     if (nameCn || nameEn || model) {
-                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, supplier, unit, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost });
+                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, supplier, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost });
                     }
                 });
 
@@ -12128,7 +11877,7 @@ window.handlePriceExcelUpload = async function(input) {
                 return;
             }
 
-            if (!confirmProductMasterImport(brandGroups)) {
+            if (!await confirmProductMasterImport(brandGroups)) {
                 setPriceUploadProgress(0, '已取消，尚未寫入雲端。', false);
                 input.value = '';
                 return;
@@ -12139,7 +11888,7 @@ window.handlePriceExcelUpload = async function(input) {
                 const { brand, imported } = brandGroups[i];
                 const basePercent = 55 + Math.round((i / brandGroups.length) * 40);
                 setPriceUploadProgress(basePercent, `正在儲存「${brand}」（${i + 1}/${brandGroups.length} 個廠牌）的 ${imported.length} 筆資料…`);
-                const storedBrand = await savePriceBrandList(imported, brand);
+                const storedBrand = await saveProductMasterBrand(imported, brand);
                 // 直接更新本機清單，其他廠牌不受這次上傳影響。
                 const normalizedImported = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
                 const visibleImported = (currentUserRole === 'admin' || currentUserRole === 'purchaser')
