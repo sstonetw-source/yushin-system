@@ -5292,7 +5292,7 @@ function orderProgressInfo(order) {
     const fulfillment=fulfillmentProgressInfo(order);
     if(lifecycle.status!=='normal'||lifecycle.returned>0)return {label:lifecycle.label,css:lifecycle.css==='returned'?'partial':'invalid'};
     if(delivery.delivered>0&&delivery.state==='partial')return {label:`部分送貨 ${delivery.delivered}/${delivery.total}`,css:'partial'};
-    if(delivery.state==='complete')return order.isBilled?{label:'已完成',css:'complete'}:{label:'已送貨・待報帳',css:'active'};
+    if(delivery.state==='complete')return order.isBilled?{label:'已完成',css:'complete'}:{label:'待核銷',css:'active'};
     if(fulfillment.state==='shippable')return {label:fulfillment.label,css:'active'};
     if(fulfillment.state==='pending_dispatch')return {label:fulfillment.label,css:'pending'};
     if(fulfillment.state==='partial_dispatch')return {label:fulfillment.label,css:'partial'};
@@ -5314,10 +5314,25 @@ function orderWorkCategory(order) {
     const fulfillment=fulfillmentProgressInfo(order);
     if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return 'closed';
     if(delivery.state==='complete')return order.isBilled?'complete':'billing';
-    if(delivery.delivered>0||fulfillment.state==='shippable'||fulfillment.state==='direct')return 'delivery';
-    if(fulfillment.state==='pending_dispatch'||fulfillment.state==='partial_dispatch')return 'delivery';
+    // Stock already reserved / newly received means the order is ready for delivery.
+    if(fulfillment.ready>delivery.delivered||fulfillment.state==='shippable'||fulfillment.state==='pending_dispatch'||fulfillment.state==='partial_dispatch'||fulfillment.state==='direct')return 'delivery';
+    // Once either purchasing or the responsible salesperson has placed the order, it is waiting for arrival.
     if(purchase.state==='ordered'||purchase.state==='partial')return 'arrival';
+    // Only purchasing-owned shortages that have not been ordered are "待採購".
     return 'ordering';
+}
+
+function orderWorkStatusInfo(order) {
+    const category=orderWorkCategory(order);
+    const map={
+        ordering:{label:'待採購',css:'pending'},
+        arrival:{label:'待到貨',css:'pending'},
+        delivery:{label:'待送貨',css:'active'},
+        billing:{label:'待核銷',css:'active'},
+        complete:{label:'已完成',css:'complete'},
+        closed:{label:orderLifecycleInfo(order).label,css:'invalid'}
+    };
+    return map[category]||{label:'待採購',css:'pending'};
 }
 
 function orderWorkAmount(order, category) {
@@ -5806,10 +5821,9 @@ window.renderOrdersList = function() {
             <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
                 <div class="order-compact-actions">
-                    <span class="order-progress-badge">${escapeHtml(purchaseProgressInfo(o).label)}</span>
-                    <span class="order-progress-badge">${escapeHtml(fulfillmentProgressInfo(o).label)}</span>
+                    <span class="order-progress-badge">${escapeHtml(orderWorkStatusInfo(o).label)}</span>
                     ${!canManageOrderOps ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
-                    <button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已報帳' : '報帳'}</button>
+                    ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || orderWorkCategory(o)!=='billing' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
