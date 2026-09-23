@@ -644,9 +644,9 @@ function initializePageData(mainKey) {
     if (mainKey === 'forecast') ensureSalesListLoaded().then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
-    if (mainKey === 'orders') {
+    if (mainKey === 'orders.list') {
         // 訂單列表本身不需要完整 Product Master。先載 50 筆訂單，避免 iPhone 每次進頁
-        // 都等待舊價目表分片 + products 500 筆 + 大量 datalist DOM 建立完成才顯示資料。
+        // 都等待 Product Master 與大量 datalist DOM 建立完成才顯示資料。
         ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
         loadOrdersFromCloud();
     }
@@ -926,9 +926,7 @@ window.switchViewRole = function(role) {
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
     const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders.list', 'purchasing-system':'orders.po', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
-    const orderWorkspaceAllowed = tabId === 'order-system'
-        && (canAccessPage('orders.list') || canAccessPage('orders.po'));
-    if (!mainKey || (!canAccessPage(mainKey) && !orderWorkspaceAllowed) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
+    if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
         return;
     }
@@ -953,7 +951,7 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
     } else if (tabId === 'product-system') {
         if (!options.skipReload) initializePageData('products');
     } else if (tabId === 'order-system') {
-        if (!options.skipReload) initializePageData('orders');
+        if (!options.skipReload) initializePageData('orders.list');
     } else if (tabId === 'purchasing-system') {
         if (!options.skipReload) initializePageData('orders.po');
     } else if (tabId === 'quote-system') {
