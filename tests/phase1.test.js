@@ -1381,3 +1381,8 @@ test('Forecast full-history search uses Firestore searchTokens', () => {
     assert.match(appSource, /forecastHistorySearchTimer = setTimeout\(\(\) => runForecastHistorySearch\(true\), 350\)/);
 });
 
+
+test('order list does not block on full Product Master loading', () => {
+    assert.match(appSource, /if \(mainKey === 'orders'\) \{[\s\S]*?ensureSalesListLoaded\(\)[\s\S]*?loadOrdersFromCloud\(\);[\s\S]*?\}/);
+    assert.doesNotMatch(appSource, /if \(mainKey === 'orders'\) Promise\.all\(\[ensureSalesListLoaded\(\), ensurePriceListLoaded\(\)\]\)\.then\(loadOrdersFromCloud\)/);
+});
