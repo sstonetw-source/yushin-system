@@ -9689,21 +9689,31 @@ window.loadSalesStatistics = function() {
 };
 
 async function loadInventoryAnalysisSupport(start, end) {
+    const receiptQuery = db.collection('inventoryMovements')
+        .where('createdAt','>=',start+'T00:00:00')
+        .where('createdAt','<=',end+'T23:59:59')
+        .where('type','==','receipt')
+        .orderBy('createdAt','desc');
+    const purchaseOrderQuery = db.collection('purchaseOrders')
+        .where('poDate','>=',start)
+        .where('poDate','<=',end)
+        .orderBy('poDate','desc');
     const [movements, stocks, lots, lotCosts, purchaseOrders] = await Promise.all([
-        db.collection('inventoryMovements').where('createdAt','>=',start+'T00:00:00').where('createdAt','<=',end+'T23:59:59').where('type','==','receipt').orderBy('createdAt','desc').limit(1000).get(),
-        db.collection('inventory').orderBy('updatedAt','desc').limit(1000).get(),
-        db.collection('inventoryLots').limit(1000).get(),
-        db.collection('inventoryLotCosts').limit(1000).get(),
-        db.collection('purchaseOrders').where('poDate','>=',start).where('poDate','<=',end).orderBy('poDate','desc').limit(1000).get()
+        readQueryInBatches(receiptQuery),
+        readCollectionInBatches('inventory'),
+        readCollectionInBatches('inventoryLots'),
+        readCollectionInBatches('inventoryLotCosts'),
+        readQueryInBatches(purchaseOrderQuery)
     ]);
-    inventoryAnalysisReceipts = movements.docs.map(d=>({id:d.id,...d.data()}));
-    inventoryAnalysisStocks = stocks.docs.map(d=>({id:d.id,...d.data()}));
-    inventoryAnalysisLots = lots.docs.map(d=>({id:d.id,...d.data()}));
-    inventoryAnalysisLotCosts = new Map(lotCosts.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
-    inventoryAnalysisPurchaseOrders = purchaseOrders.docs.map(d=>({id:d.id,...d.data()}));
+    inventoryAnalysisReceipts = movements;
+    inventoryAnalysisStocks = stocks;
+    inventoryAnalysisLots = lots;
+    inventoryAnalysisLotCosts = new Map(lotCosts.map(row=>[row.id,row]));
+    inventoryAnalysisPurchaseOrders = purchaseOrders;
     inventoryAnalysisDirectShipPurchaseOrders = inventoryAnalysisPurchaseOrders
         .filter(po=>purchaseItemsFromSavedPo(po).some(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'));
 }
+
 function protectedAllocationCost(records) {
     return (Array.isArray(records) ? records : []).reduce((sum, record) => {
         return sum + (Array.isArray(record.lotAllocations) ? record.lotAllocations : []).reduce((allocationSum, allocation) => {
@@ -11558,6 +11568,20 @@ async function readCollectionInBatches(collectionName, fields = null, batchSize 
     let cursor = null;
     while (true) {
         let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(batchSize);
+        if (cursor) query = query.startAfter(cursor);
+        const snap = await query.get();
+        snap.forEach(doc => rows.push({ id:doc.id, ...doc.data() }));
+        if (snap.size < batchSize) break;
+        cursor = snap.docs[snap.docs.length - 1];
+    }
+    return rows;
+}
+
+async function readQueryInBatches(baseQuery, batchSize = 500) {
+    const rows = [];
+    let cursor = null;
+    while (true) {
+        let query = baseQuery.limit(batchSize);
         if (cursor) query = query.startAfter(cursor);
         const snap = await query.get();
         snap.forEach(doc => rows.push({ id:doc.id, ...doc.data() }));
