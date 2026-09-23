@@ -10759,8 +10759,7 @@ window.renderAdminSalesTable = function() {
             <td data-label="姓名">${escapeHtml(u.name || '（尚未設定姓名）')}</td>
             <td data-label="電話">${escapeHtml(u.phone || '—')}</td>
             <td data-label="Email">${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
-            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
-            <td data-label="負責產品線"><input id="adminUserLines-${escapeAttr(u.uid)}" value="${escapeAttr((u.productLineIds||[]).join(', '))}" placeholder="例如 Roche, Beckman"><button type="button" class="btn-small" onclick="saveAdminUserCapabilities('${escapeAttr(u.uid)}')">儲存</button></td>
+            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}" onchange="saveAdminUserCapabilities('${escapeAttr(u.uid)}')">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
             <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
                     ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
@@ -10779,9 +10778,8 @@ window.renderAdminSalesTable = function() {
 window.saveAdminUserCapabilities=async function(uid){
     if(trueUserRole!=='admin')return;
     const role=document.getElementById(`adminUserRole-${uid}`)?.value||'sales';
-    const productLineIds=String(document.getElementById(`adminUserLines-${uid}`)?.value||'').split(',').map(x=>x.trim()).filter(Boolean);
     const button=null;
-    try{await db.collection('users').doc(uid).set({role,productLineIds,capabilities:role==='engineer'?['business','engineering']:role==='sales'?['business']:[],updatedAt:new Date().toISOString()},{merge:true});const user=allUsersCache.find(x=>x.uid===uid);if(user){user.role=role;user.productLineIds=productLineIds;}alert('人員角色與產品線已更新。');}
+    try{await db.collection('users').doc(uid).set({role,capabilities:role==='engineer'?['business','engineering']:role==='sales'?['business']:[],updatedAt:new Date().toISOString()},{merge:true});const user=allUsersCache.find(x=>x.uid===uid);if(user){user.role=role;}alert('人員角色已更新。');}
     catch(err){alert('更新失敗：'+err.message);}
     finally{if(button){button.disabled=false;button.textContent='儲存';}}
 };
