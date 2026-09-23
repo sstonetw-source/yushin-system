@@ -99,7 +99,7 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
     assert.match(indexSource, /styles\.css\?v=20260923-6/);
-    assert.match(indexSource, /app\.js\?v=20260923-6/);
+    assert.match(indexSource, /app\.js\?v=20260923-7/);
 });
 
 test('product management uses server search without exposing protected cost data', () => {
@@ -127,6 +127,16 @@ test('engineer quote selector uses own identity; purchaser selects responsible s
     assert.match(appSource, /function populateSalesDropdown\(\)/);
     assert.match(appSource, /currentUserRole === 'engineer'\s*\? s\.uid === currentUser\?\.uid\s*: role === 'sales'/);
     assert.match(appSource, /currentUserRole === 'engineer' \? currentUserName : ''/);
+});
+
+test('purchaser order form assigns a salesperson while preserving creator identity', () => {
+    assert.match(indexSource, /id="orderOwnerUid"/);
+    const start = appSource.indexOf('window.saveNewOrder = function()');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const saveOrder = appSource.slice(start, end);
+    assert.match(saveOrder, /currentUserRole === 'purchaser' && !assistedOwner/);
+    assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| currentUser\?\.uid/);
+    assert.match(saveOrder, /\.\.\.commercialCreatorFields\(\)/);
 });
 
 test('low-stock inventory can hand off to formal replenishment purchase flow', () => {
