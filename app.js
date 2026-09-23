@@ -4505,18 +4505,41 @@ function lotStatus(lot){const d=expiryDays(lot.expiryDate);if(d===null)return ''
 function fefoLots(stock){return [...(stock.lots||[])].filter(l=>Number(l.qty||0)>0).sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));}
 async function loadWarehouseStocksForInventoryPage() {
     await loadSupplierWarehouseMasters();
+    const productKeys = [...new Set(inventoryCache
+        .map(item => String(item.productKey || item.productId || '').trim())
+        .filter(Boolean))];
+    if (!productKeys.length || !warehouseMasterCache.length) return;
+
+    // Firestore 'in' 查詢分批處理目前頁面的 productKey，避免每個品項 × 每個倉庫各讀一次文件。
+    const chunkSize = 30;
     const jobs = [];
-    inventoryCache.forEach(item => {
-        const productKey = item.productKey || item.productId || '';
-        if (!productKey) return;
-        warehouseMasterCache.forEach(warehouse => {
-            const cacheKey = warehouse.id + '||' + productKey;
-            jobs.push(db.collection('warehouseStocks').doc(warehouseStockDocId(warehouse.id,productKey)).get()
-                .then(doc => warehouseStockCache.set(cacheKey, doc.exists ? {id:doc.id,...doc.data()} : null))
-                .catch(() => warehouseStockCache.set(cacheKey,null)));
-        });
+    warehouseMasterCache.filter(warehouse => warehouse.active !== false).forEach(warehouse => {
+        for (let i = 0; i < productKeys.length; i += chunkSize) {
+            const keys = productKeys.slice(i, i + chunkSize);
+            jobs.push(
+                db.collection('warehouseStocks')
+                    .where('warehouseId', '==', warehouse.id)
+                    .where('productKey', 'in', keys)
+                    .get()
+                    .then(snapshot => {
+                        snapshot.docs.forEach(doc => {
+                            const data = { id: doc.id, ...doc.data() };
+                            const productKey = String(data.productKey || data.productId || '').trim();
+                            if (productKey) warehouseStockCache.set(warehouse.id + '||' + productKey, data);
+                        });
+                    })
+            );
+        }
     });
     await Promise.all(jobs);
+
+    // 沒有 warehouseStock 文件的品項也記成 null，避免 render 階段誤以為尚未讀取。
+    warehouseMasterCache.filter(warehouse => warehouse.active !== false).forEach(warehouse => {
+        productKeys.forEach(productKey => {
+            const cacheKey = warehouse.id + '||' + productKey;
+            if (!warehouseStockCache.has(cacheKey)) warehouseStockCache.set(cacheKey, null);
+        });
+    });
 }
 
 window.loadInventory=async function(reset=true){
