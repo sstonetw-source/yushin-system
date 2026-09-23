@@ -56,6 +56,17 @@ test('engineer can assist a salesperson with quote and order creation', async ()
   await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...quote, orderDate:'2026-09-20' }));
 });
 
+test('assisted commercial creation requires a real salesperson owner with matching sales code', async () => {
+  await assertFails(setDoc(doc(db('eng1'), 'quotes/bad-owner-role'), {
+    ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
+  }));
+  await assertFails(setDoc(doc(db('buyer1'), 'orders/bad-owner-code'), {
+    ownerUid:'sales1', salesCode:'S02', orderDate:'2026-09-20',
+    createdByUid:'buyer1', createdByName:'Buyer', createdByRole:'purchaser'
+  }));
+});
+
 test('commercial creator audit fields cannot be rewritten by normal owner edits', async () => {
   await seed('quotes/creator-audit', {
     ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
@@ -75,6 +86,9 @@ test('legacy commercial documents without creator metadata remain editable', asy
   });
   await assertSucceeds(updateDoc(doc(db('sales1'), 'orders/legacy-creator'), {
     orderDate:'2026-09-21'
+  }));
+  await assertFails(updateDoc(doc(db('sales1'), 'orders/legacy-creator'), {
+    createdByUid:'sales1', createdByName:'Sales', createdByRole:'sales'
   }));
 });
 
