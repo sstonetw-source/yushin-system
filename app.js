@@ -5731,6 +5731,19 @@ function poReceiptLabel(po) {
     return '待到貨 0/' + progress.ordered;
 }
 
+function poWaitingDays(po) {
+    const progress = poReceiptProgress(po);
+    if (progress.complete || progress.directShipOnly) return '';
+    const raw = String(po.poDate || '').trim();
+    const match = raw.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (!match) return '';
+    const start = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    const today = new Date();
+    const current = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (Number.isNaN(start.getTime()) || start > current) return '0 天';
+    return Math.floor((current - start) / 86400000) + ' 天';
+}
+
 function poActionHtml(po) {
     const reprint = `<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`;
     if (poReceiptProgress(po).directShipOnly) return reprint;
@@ -5766,6 +5779,7 @@ window.renderPoList = function() {
             <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
             <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
             <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
+            <td data-th="等待天數">${escapeHtml(poWaitingDays(po) || '—')}</td>
             <td data-th="品項數">${items.length}</td>
             <td data-th="總計金額">${grandTotal.toLocaleString()}</td>
             <td data-th="到貨進度">${escapeHtml(poReceiptLabel(po))}</td>
