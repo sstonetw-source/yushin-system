@@ -98,8 +98,8 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(appSource, /window\.addEventListener\('pageshow'/);
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
-    assert.match(indexSource, /styles\.css\?v=20260923-7/);
-    assert.match(indexSource, /app\.js\?v=20260923-7/);
+    assert.match(indexSource, /styles\\.css\\?v=20260924-1/);
+    assert.match(indexSource, /app\\.js\\?v=20260924-1/);
 });
 
 test('product management uses server search without exposing protected cost data', () => {
@@ -1385,4 +1385,12 @@ test('Forecast full-history search uses Firestore searchTokens', () => {
 test('order list does not block on full Product Master loading', () => {
     assert.match(appSource, /if \(mainKey === 'orders'\) \{[\s\S]*?ensureSalesListLoaded\(\)[\s\S]*?loadOrdersFromCloud\(\);[\s\S]*?\}/);
     assert.doesNotMatch(appSource, /if \(mainKey === 'orders'\) Promise\.all\(\[ensureSalesListLoaded\(\), ensurePriceListLoaded\(\)\]\)\.then\(loadOrdersFromCloud\)/);
+});
+
+test('admin people page stays focused on people management', () => {
+    assert.doesNotMatch(indexSource, /工作儀表板/);
+    assert.doesNotMatch(indexSource, /<th>負責產品線<\/th>/);
+    assert.doesNotMatch(appSource, /loadAdminDashboard/);
+    assert.doesNotMatch(appSource, /adminUserLines-/);
+    assert.match(appSource, /saveAdminUserRole/);
 });
