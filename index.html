@@ -1057,7 +1057,7 @@
             <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">💲 價格表</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
             <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
-            <div class="sub-tab" id="admin-sub-quotes" onclick="switchAdminTab('quotes', this)">📋 估價單記錄</div>
+            <div class="sub-tab" id="admin-sub-warehouses" onclick="switchAdminTab('warehouses', this)">🏬 倉庫管理</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
             <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>        </div>
 
@@ -1123,17 +1123,7 @@
                 <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>訂購單抬頭</th><th>操作</th></tr></thead><tbody id="supplierMappingBody"></tbody></table></div>
             </div>
 
-            <div class="panel" style="margin-top:16px;">
-                <strong>倉庫管理</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">建立公司實際倉庫。訂單可選倉庫出貨，或選原廠直送；原廠直送不會進入庫存。</p>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
-                    <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：台北倉"></div>
-                    <label style="font-size:13px;"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫</label>
-                    <button type="button" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
-                </div>
-                <div id="warehouseMasterStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
-                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>倉庫</th><th>預設</th><th>狀態</th><th>操作</th></tr></thead><tbody id="warehouseMasterBody"></tbody></table></div>
-            </div>
+
         </div>
 
         <!-- 進銷存分析：銷售以訂單/送貨、進貨以實際 receipt、庫存以 inventory 為準 -->
@@ -1184,19 +1174,19 @@
             </div>
         </div>
 
-        <!-- 估價單記錄管理 -->
-        <div id="admin-quotes" class="admin-panel" style="display:none;">
-            <div class="toolbar no-print">
-                <input type="text" id="adminQuoteSearch" placeholder="搜尋單號 / 客戶名稱" style="width:260px;" oninput="renderAdminQuotesList()">
-                <button class="btn-secondary" onclick="loadAllQuotesFromCloud()">🔄 重新整理</button>
-                <button onclick="exportQuotesCSV()">⬇️ 匯出目前清單為 CSV</button>
+        <!-- 倉庫管理：沿用 warehouses 主檔，不建立第二套資料來源 -->
+        <div id="admin-warehouses" class="admin-panel" style="display:none;">
+            <div class="panel" style="margin-top:16px;">
+                <strong>倉庫管理</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">建立公司實際倉庫。訂單可選倉庫出貨，或選原廠直送；原廠直送不會進入庫存。</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+                    <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：台北倉"></div>
+                    <label style="font-size:13px;"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫</label>
+                    <button type="button" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
+                </div>
+                <div id="warehouseMasterStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
+                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>倉庫</th><th>預設</th><th>狀態</th><th>操作</th></tr></thead><tbody id="warehouseMasterBody"></tbody></table></div>
             </div>
-            <table>
-                <thead><tr><th>單號</th><th>公司</th><th>客戶</th><th>業務</th><th>日期</th><th>總計</th><th class="no-print">操作</th></tr></thead>
-                <tbody id="adminQuotesBody"></tbody>
-            </table>
-            <div class="empty-hint" id="adminQuotesEmptyHint" style="display:none;">找不到符合的估價單。</div>
-            <div class="quote-load-more-row no-print"><button type="button" id="adminQuotesLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreAdminQuotes()">載入更多（每次 50 筆）</button></div>
         </div>
 
         <!-- 業務代號交接：交易資料歸屬在 salesCode，不重寫歷史業務姓名 -->
