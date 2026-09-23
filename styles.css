@@ -999,3 +999,22 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     .product-management-table td[data-th]::before { content:attr(data-th) "："; display:block; margin-bottom:3px; color:#7a858f; font-size:11px; font-weight:700; }
     .product-management-actions button { flex:1 1 120px; min-height:42px; }
 }
+
+
+/* Preview environment must remain visually unmistakable on desktop and mobile. */
+.preview-environment-banner {
+    position: sticky;
+    top: 0;
+    z-index: 10000;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    text-align: center;
+    font-weight: 800;
+    letter-spacing: .04em;
+    background: #fff3cd;
+    color: #7a4b00;
+    border-bottom: 2px solid #f0ad4e;
+}
+.preview-environment-banner[hidden] { display: none !important; }
+html[data-app-environment="preview"] body { border-top: 0; }
