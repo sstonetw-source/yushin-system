@@ -653,7 +653,7 @@ test('permission routing includes Product Forecast and Inventory workspaces', ()
     assert.match(s, /forecast-system/);
     assert.match(s, /product-system/);
     assert.match(s, /inventory-system/);
-    assert.match(appSource, /\['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'\]/);
+    assert.match(appSource, /function firstAccessibleMainPage\(\)[\s\S]*?\['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'\]/);
 });
 
 
