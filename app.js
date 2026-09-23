@@ -8719,12 +8719,34 @@ window.saveNewOrder = function() {
     }
     ensureOrderItemCompatibility(data);
     data.searchTokens = buildFullHistorySearchTokens('order', data);
+    data.inventoryReservationStatus = 'pending';
+    data.inventoryReservationUpdatedAt = new Date().toISOString();
 
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     db.collection('orders').add(data).then(async docRef => {
-        const reservation = await reserveInventoryForNewOrder(docRef.id, data);
+        let reservation;
+        try {
+            reservation = await reserveInventoryForNewOrder(docRef.id, data);
+            const completedAt = new Date().toISOString();
+            await db.collection('orders').doc(docRef.id).set({
+                inventoryReservationStatus:'completed',
+                inventoryReservationError:'',
+                inventoryReservationUpdatedAt:completedAt
+            },{merge:true});
+            data.inventoryReservationStatus='completed';
+            data.inventoryReservationError='';
+            data.inventoryReservationUpdatedAt=completedAt;
+        } catch (reservationErr) {
+            const failedAt = new Date().toISOString();
+            await db.collection('orders').doc(docRef.id).set({
+                inventoryReservationStatus:'failed',
+                inventoryReservationError:String(reservationErr?.message||reservationErr),
+                inventoryReservationUpdatedAt:failedAt
+            },{merge:true}).catch(markErr=>console.error('標記訂單庫存占用失敗：',markErr));
+            throw new Error(`訂單已建立，但庫存占用未完成：${reservationErr?.message||reservationErr}。請勿重複建立訂單，重新整理後再處理此訂單。`);
+        }
         data.inventoryReservedQty = reservation.reservedQty;
         data.inventoryShortageQty = reservation.shortageQty;
         data.inventoryProductKey = inventoryProductKey(data);
