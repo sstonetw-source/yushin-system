@@ -1834,6 +1834,24 @@ window.closeForecastHistoryModal = function() {
     document.getElementById('forecastHistoryOverlay')?.classList.remove('active');
 };
 
+async function forecastProductMatchAsync(item) {
+    const productId = String(item?.productId || '').trim();
+    if (productId) {
+        const cached = priceList.find(product => String(product.productId || '') === productId);
+        if (cached) return cached;
+        try {
+            const snap = await db.collection('products').doc(productId).get();
+            if (snap.exists) {
+                const product = productMasterDocToPriceItem(snap);
+                if (product.status !== 'INACTIVE' && product.active !== false) return cacheProductLookupItem(product);
+            }
+        } catch (err) {
+            console.warn('Forecast Product Master 查詢失敗：', err);
+        }
+    }
+    return forecastProductMatch(item);
+}
+
 function forecastProductMatch(item) {
     const key = String(item.productName || '').trim().toLocaleLowerCase();
 
@@ -1844,11 +1862,11 @@ function forecastProductMatch(item) {
     ) || null;
 }
 
-window.createQuoteFromForecast = function(id) {
+window.createQuoteFromForecast = async function(id) {
     const forecast = forecastCache.find(item => item.id === id);
     if (!forecast) return;
 
-    const match = forecastProductMatch(forecast);
+    const match = await forecastProductMatchAsync(forecast);
 
     actuallySwitchMainTab('quote-system', null, { preserveSubView: false });
 
@@ -1917,7 +1935,7 @@ async function forecastOrderItems(forecast) {
         }
     }
 
-    const match = forecastProductMatch(forecast);
+    const match = await forecastProductMatchAsync(forecast);
     return [{
         nameCn: match?.nameCn || forecast.productName || '',
         nameEn: match?.nameEn || '',
