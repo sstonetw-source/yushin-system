@@ -104,7 +104,6 @@ let appInitialized = false;  // 避免每次登入狀態變化都重複初始化
 let pendingTab = null;
 let salesListLoadPromise = null;
 let priceListLoadPromise = null;
-let productMasterCache = [];
 let quickProductTarget = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
@@ -2855,12 +2854,6 @@ function normalizeThermoBrandList(brands) {
 function includesBrandCaseInsensitive(brands, brand) {
     const key = String(brand || '').trim().toLocaleLowerCase();
     return (brands || []).some(value => String(value || '').trim().toLocaleLowerCase() === key);
-}
-
-// 價格表原始廠牌清單僅供價格資料管理使用；一般模組請改走 Brand Master 相容層。
-function getAllPriceListBrandsRaw() {
-    return dedupeBrandsCaseInsensitive(priceList.map(p => p.brand))
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 }
 
 // 分公司代理廠牌清單裡的「其他廠牌」是特殊項目，代表這間公司是否開放「其他（自行輸入）」，不是一個真的廠牌名稱
@@ -9518,7 +9511,7 @@ function statisticBrandAliasLookup() {
 
 function rawBrandsWithOrderCounts() {
     const entries = new Map();
-    [...getAllPriceListBrandsRaw(), ...salesStatisticsOrders.map(order => order.brand)].forEach(value => {
+    [...brandMasterCache.map(item => item.name), ...salesStatisticsOrders.map(order => order.brand)].forEach(value => {
         const brand = String(value || '').trim();
         if (!brand || brand === '維修') return;
         const key = normalizeStatisticBrandKey(brand);
@@ -9803,7 +9796,6 @@ function cacheProductLookupItem(item) {
     const productId = item.productId || stableProductId(item);
     const next = normalizeProductMasterItem({ ...item, productId });
     priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(next);
-    productMasterCache = productMasterCache.filter(row => (row.productId || stableProductId(row)) !== productId).concat(next);
     rebuildPriceItemLookup();
     return next;
 }
@@ -10244,7 +10236,6 @@ window.saveQuickProduct = async function() {
         const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
         if (authorizationType === 'NON_AUTHORIZED' && String(costRaw).trim() !== '') item.cost = Number(costRaw) || 0;
         priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
-        productMasterCache = productMasterCache.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
         refreshPriceDatalists();
         if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, item);
         if (quickProductTarget?.mode === 'order') {
