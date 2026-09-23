@@ -6630,6 +6630,8 @@ function purchaseItemsFromOrder(order) {
         }
         const parsedQty=parseFloat(qtyValue);
         const fullQty=Number.isFinite(parsedQty)&&parsedQty>0?parsedQty:1;
+        const procurementType=item.procurementType||order.procurementType||'PURCHASING_PO';
+        if(procurementType==='SALES_SELF_ORDER') return null;
         const procurementRequired=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
             ? fullQty : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??fullQty));
         const remainingPurchase=Math.max(0,procurementRequired-Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0)));
@@ -6647,9 +6649,10 @@ function purchaseItemsFromOrder(order) {
             salesCode: order.salesCode || '',
             fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
             warehouseId: item.warehouseId || order.warehouseId || '',
-            unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0
+            unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0,
+            procurementType
         };
-    }).filter(item => (item.itemName || item.itemCode) && Number(item.qty||0)>0);
+    }).filter(item => item && (item.itemName || item.itemCode) && Number(item.qty||0)>0);
 }
 
 function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
