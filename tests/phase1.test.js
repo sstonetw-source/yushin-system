@@ -98,7 +98,7 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(appSource, /window\.addEventListener\('pageshow'/);
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
-    assert.match(indexSource, /styles\.css\?v=20260923-6/);
+    assert.match(indexSource, /styles\.css\?v=20260923-7/);
     assert.match(indexSource, /app\.js\?v=20260923-7/);
 });
 
