@@ -2440,8 +2440,7 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
         upsert(item.name, { ...item, preferName: true });
     });
 
-    // 舊資料相容層：價目表、統計設定、分公司代理設定在完成移轉前仍納入候選品牌。
-    priceList.forEach(item => upsert(item.brand));
+    // 一般介面以正式 Brand Master 與已保存設定為來源；舊價目表僅供遷移／稽核工具使用。
     keyStatisticBrands.forEach(name => upsert(name, {
         isKeyBrand: true,
         aliases: keyStatisticBrandAliases[name] || []
@@ -9464,14 +9463,14 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'sales') ensureSalesListLoaded().then(reloadSalesFromUsers);
     if (tab === 'prices') loadPriceCatalogSummary();
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
-    if (tab === 'agencies') Promise.all([ensurePriceListLoaded(), loadSupplierWarehouseMasters()]).then(() => {
+    if (tab === 'agencies') Promise.all([loadBrandMaster(), loadSupplierWarehouseMasters()]).then(() => {
         renderKeyStatisticBrands();
         renderCompanyAgencyBrandSettings();
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
     });
     // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
-    if (tab === 'statistics') ensurePriceListLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
+    if (tab === 'statistics') salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics();
     if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
     if (tab === 'storage') resetCleanupPreview();
@@ -9583,7 +9582,7 @@ function renderCompanyAgencyBrandSettings() {
         const selected = companyAgencyBrands[company] || [];
         const brandChoices = brands.length ? brands.map(brand =>
             `<label style="display:inline-block;margin:5px 12px 5px 0;font-size:13px;"><input type="checkbox" class="company-agency-brand" data-company="${company}" value="${escapeAttr(brand)}" ${includesBrandCaseInsensitive(selected, brand) ? 'checked' : ''}> ${escapeHtml(brand)}</label>`
-        ).join('') : '<span style="color:#888;font-size:13px;">請先上傳含廠牌資料的價目表。</span>';
+        ).join('') : '<span style="color:#888;font-size:13px;">請先建立 Brand Master 廠牌。</span>';
         const otherChoice = `<label style="display:inline-block;margin:5px 12px 5px 0;font-size:13px;padding-left:10px;border-left:2px solid #ccc;"><input type="checkbox" class="company-agency-brand" data-company="${company}" value="${escapeAttr(OTHER_BRAND_OPTION_KEY)}" ${selected.includes(OTHER_BRAND_OPTION_KEY) ? 'checked' : ''}> 其他廠牌（開放自行輸入）</label>`;
         return `<div style="padding:12px 0;border-bottom:1px solid #ddd;"><strong>${escapeHtml(info.title)}（${escapeHtml(info.prefix)}）</strong><div style="margin-top:6px;">${brandChoices}${otherChoice}</div></div>`;
     }).join('');
