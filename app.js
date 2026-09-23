@@ -185,6 +185,8 @@ function ensureXlsxLoaded() {
 let equipmentList = [];
 let currentEquipmentId = null;
 let equipmentLoadGeneration = 0;
+let equipmentCursor = null;
+let equipmentHasMore = false;
 
 // 管理員後台狀態
 let allUsersCache = [];
@@ -8844,33 +8846,53 @@ function canViewAllEquipment() {
     return currentUserRole === 'admin' || currentUserRole === 'engineer';
 }
 
-window.loadEquipmentFromCloud = function() {
+window.loadEquipmentFromCloud = function(reset = true) {
     const generation = ++equipmentLoadGeneration;
     const requestedRole = currentUserRole;
+    if (reset) {
+        equipmentCursor = null;
+        equipmentHasMore = false;
+    }
     let query = db.collection('equipment');
     if (canViewAllEquipment()) {
-        query = query.orderBy('customerName').limit(DEFAULT_LIST_LIMIT);
+        query = query.orderBy('customerName');
     } else {
         query = currentUserCode ? query.where('salesCode', '==', currentUserCode) : query.where('salesName', '==', currentUserName);
-        query = query.limit(DEFAULT_LIST_LIMIT);
     }
+    query = query.limit(DEFAULT_LIST_LIMIT);
+    if (!reset && equipmentCursor) query = query.startAfter(equipmentCursor);
+
+    const moreButton = document.getElementById('equipmentLoadMoreBtn');
+    if (moreButton) { moreButton.disabled = true; moreButton.textContent = '載入中…'; }
+
     query.get().then(snapshot => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
-        equipmentList = [];
-        snapshot.forEach(doc => {
-            const data = doc.data() || {};
-            if (data.active === false) return;
-            equipmentList.push({ id: doc.id, ...data });
-        });
+        const nextRows = snapshot.docs
+            .map(doc => ({ id:doc.id, ...doc.data() }))
+            .filter(data => data.active !== false);
+        equipmentList = reset ? nextRows : [...equipmentList, ...nextRows.filter(row => !equipmentList.some(existing => existing.id === row.id))];
+        equipmentCursor = snapshot.docs.length ? snapshot.docs[snapshot.docs.length - 1] : equipmentCursor;
+        equipmentHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
         if (!canViewAllEquipment()) {
             equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
         }
         renderEquipmentList();
+        if (moreButton) {
+            moreButton.style.display = equipmentHasMore ? '' : 'none';
+            moreButton.disabled = false;
+            moreButton.textContent = '載入更多';
+        }
     }).catch(err => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         console.error(err);
+        if (moreButton) { moreButton.disabled = false; moreButton.textContent = '載入更多'; }
         alert('讀取儀器資料失敗，請確認 Firestore 權限設定。');
     });
+};
+
+window.loadMoreEquipment = function() {
+    if (!equipmentHasMore || !equipmentCursor) return;
+    loadEquipmentFromCloud(false);
 };
 
 function addMonths(dateStr, months) {
