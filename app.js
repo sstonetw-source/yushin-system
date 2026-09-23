@@ -1191,7 +1191,8 @@ function populateForecastBrandFilter() {
         if (key && !brands.has(key)) brands.set(key, brand);
     });
 
-    forecastCache.forEach(item => {
+    const forecastRows = forecastHistorySearchActive ? forecastHistorySearchResults : forecastCache;
+    forecastRows.forEach(item => {
         const brand = normalizeForecastBrand(item.brand || '');
         const key = brand.toLocaleLowerCase();
         if (key && !brands.has(key)) brands.set(key, brand);
@@ -1345,6 +1346,62 @@ window.loadForecasts = async function(reset = true) {
     }
 };
 
+let forecastHistorySearchActive = false;
+let forecastHistorySearchLoading = false;
+let forecastHistorySearchCursor = null;
+let forecastHistorySearchKeyword = '';
+let forecastHistorySearchResults = [];
+let forecastHistorySearchTimer = null;
+
+async function runForecastHistorySearch(reset = true) {
+    const input = document.getElementById('forecastSearch');
+    const rawKeyword = input?.value || '';
+    const normalized = normalizeFullHistorySearchValue(rawKeyword);
+    if (!normalized) {
+        forecastHistorySearchActive = false;
+        forecastHistorySearchResults = [];
+        forecastHistorySearchCursor = null;
+        renderForecastList();
+        return;
+    }
+    const queryToken = fullHistoryQueryToken('forecast', rawKeyword);
+    if (!queryToken || forecastHistorySearchLoading) return;
+    forecastHistorySearchLoading = true;
+    if (reset || rawKeyword !== forecastHistorySearchKeyword) {
+        forecastHistorySearchKeyword = rawKeyword;
+        forecastHistorySearchResults = [];
+        forecastHistorySearchCursor = null;
+    }
+    try {
+        let query = db.collection('forecasts').where('searchTokens', 'array-contains', queryToken).limit(DEFAULT_LIST_LIMIT);
+        if (forecastHistorySearchCursor) query = query.startAfter(forecastHistorySearchCursor);
+        const snapshot = await query.get();
+        const records = new Map(forecastHistorySearchResults.map(record => [record.id, record]));
+        snapshot.forEach(doc => {
+            const data = { id: doc.id, ...doc.data() };
+            if (fullHistoryRecordMatches('forecast', data, rawKeyword)) records.set(doc.id, data);
+        });
+        forecastHistorySearchResults = [...records.values()].sort(
+            (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))
+        );
+        forecastHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
+        forecastHistorySearchActive = true;
+        renderForecastList();
+    } catch (err) {
+        console.error('Forecast 全歷史搜尋失敗：', err);
+        alert('Forecast 全歷史搜尋失敗，舊資料可能尚未完成搜尋索引補建。');
+    } finally {
+        forecastHistorySearchLoading = false;
+    }
+}
+
+window.scheduleForecastHistorySearch = function() {
+    clearTimeout(forecastHistorySearchTimer);
+    const keyword = document.getElementById('forecastSearch')?.value || '';
+    if (!normalizeFullHistorySearchValue(keyword)) return runForecastHistorySearch(true);
+    forecastHistorySearchTimer = setTimeout(() => runForecastHistorySearch(true), 350);
+};
+
 window.renderForecastList = function() {
     const body = document.getElementById('forecastListBody');
     if (!body) return;
@@ -1372,7 +1429,7 @@ window.renderForecastList = function() {
             ${forecastStatusLabel(item.status)}
         `.toLocaleLowerCase();
 
-        if (!quoteHistorySearchActive && keyword && !searchable.includes(keyword)) return;
+        if (!forecastHistorySearchActive && keyword && !searchable.includes(keyword)) return;
         if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
         if (salesFilter && salesName !== salesFilter) return;
         if (stageFilter && item.stage !== stageFilter) return;
