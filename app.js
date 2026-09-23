@@ -5483,7 +5483,7 @@ async function loadOrderPage(reset, options = {}) {
     }
 }
 
-// 訂單資料範圍由管理員在身份權限中設定：只看自己或查看所有人。
+// 訂單資料範圍由固定角色權限決定：業務/工程師只看自己，採購/倉管查看全部。
 // 首次與重新整理只載入 50 筆；歷史資料由「載入更多」明確取得，避免資料增加後
 // 每次進入訂單頁都在背景掃完整個 orders 集合。
 window.loadOrdersFromCloud = function() {
@@ -9500,43 +9500,7 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'quotes') loadAllQuotesFromCloud();
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
     if (tab === 'storage') resetCleanupPreview();
-    if (tab === 'permissions') renderRolePermissions();
 };
-
-function renderRolePermissions() {
-    const tbody = document.getElementById('rolePermissionsBody');
-    if (!tbody) return;
-    const roles = ['sales', 'purchaser', 'warehouse', 'engineer', 'admin'];
-    tbody.innerHTML = PERMISSION_PAGES.map(page => {
-        const cells = roles.map(role => {
-            const value = getPagePermission(page.key, role);
-            const disabled = (role === 'admin' || page.key === 'admin') ? 'disabled' : '';
-            return `<td><select class="permission-select" data-role="${role}" data-page="${page.key}" ${disabled}>
-                <option value="none" ${value === 'none' ? 'selected' : ''}>禁止查看</option>
-                <option value="view" ${value === 'view' ? 'selected' : ''}>僅可查看</option>
-                <option value="edit" ${value === 'edit' ? 'selected' : ''}>可編輯</option>
-            </select></td>`;
-        }).join('');
-        return `<tr class="${page.system ? 'permission-system-row' : ''}"><td>${page.label}</td>${cells}</tr>`;
-    }).join('');
-
-    const scopeBody = document.getElementById('roleDataScopesBody');
-    if (scopeBody) {
-        const roles = ['sales', 'purchaser', 'warehouse', 'engineer', 'admin'];
-        const types = [{ key:'quotes', label:'📄 估價單' }, { key:'orders', label:'📦 訂單' }];
-        scopeBody.innerHTML = types.map(type => {
-            const cells = roles.map(role => {
-                const value = role === 'admin' ? 'all' : (roleDataScopes[role]?.[type.key] || 'none');
-                return `<td><select class="permission-select data-scope-select" data-role="${role}" data-type="${type.key}" ${role === 'admin' ? 'disabled' : ''}>
-                    <option value="none" ${value === 'none' ? 'selected' : ''}>尚未授權</option>
-                    <option value="own" ${value === 'own' ? 'selected' : ''}>只看自己的</option>
-                    <option value="all" ${value === 'all' ? 'selected' : ''}>查看所有人</option>
-                </select></td>`;
-            }).join('');
-            return `<tr><td>${type.label}</td>${cells}</tr>`;
-        }).join('');
-    }
-}
 
 function renderKeyStatisticBrands() {
     const container = document.getElementById('keyStatisticBrands');
