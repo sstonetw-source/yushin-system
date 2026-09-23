@@ -1281,38 +1281,7 @@
                 <tbody id="storageUsageBody"><tr><td colspan="3" style="color:#888;">尚未計算，請按上方「計算目前用量」。</td></tr></tbody>
             </table>
 
-            <h4 style="margin-top:28px;">批量清理舊資料</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <span style="font-size:12px;color:#666;">
-                    用於定期清掉太久以前、不再需要留存的估價單或訂單紀錄。這個動作會直接從雲端刪除資料，無法復原，執行前請務必先按「查詢筆數」確認範圍，並自行考慮是否需要先匯出備份。
-                </span>
-            </div>
-            <div class="form-grid" style="max-width:640px;margin-top:10px;">
-                <div>
-                    <label>要清理的資料</label>
-                    <select id="cleanupCollection" onchange="resetCleanupPreview()">
-                        <option value="quotes">估價單</option>
-                        <option value="orders">訂單</option>
-                    </select>
-                </div>
-                <div>
-                    <label>刪除範圍（依日期）</label>
-                    <div style="display:flex;gap:6px;align-items:center;">
-                        <input type="date" id="cleanupStartDate" onchange="resetCleanupPreview()">
-                        <span>至</span>
-                        <input type="date" id="cleanupEndDate" onchange="resetCleanupPreview()">
-                    </div>
-                </div>
-            </div>
-            <div>
-                <button onclick="previewDataCleanup()">🔍 查詢筆數</button>
-            </div>
-            <div id="cleanupResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
-            <div id="cleanupConfirmArea" style="display:none;margin-top:10px;padding:12px;background:#fff5f5;border:1px solid #f5c2c2;border-radius:6px;">
-                <label style="font-weight:bold;color:#cc0000;">請輸入「確定刪除」以解鎖刪除按鈕：</label><br>
-                <input type="text" id="cleanupConfirmInput" oninput="onCleanupConfirmInput()" style="width:200px;margin-top:6px;">
-                <button class="btn-danger" id="cleanupExecuteBtn" disabled onclick="executeDataCleanup()" style="margin-left:8px;">🗑️ 確認刪除</button>
-            </div>
+
         </div>
     </div>
 
