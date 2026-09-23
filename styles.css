@@ -71,6 +71,14 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 
 .content-section { display: none; padding: 20px; max-width: 1150px; margin: 0 auto; background: #fff; min-height: 80vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); box-sizing: border-box; }
 .content-section.active { display: block; }
+.section-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
+.section-header h2 { margin:0; color:#003366; }
+.section-subtitle { margin-top:4px; color:#66727d; font-size:12px; }
+.inline-status { color:#5d6a76; font-size:12px; }
+.product-search-toolbar input[type="search"] { flex:1 1 320px; min-width:220px; padding:8px 10px; border:1px solid #bfcbd7; border-radius:5px; }
+.product-management-actions { display:flex; gap:6px; flex-wrap:wrap; min-width:150px; }
+.product-management-table td:nth-child(4) { max-width:280px; white-space:normal; }
+
 .header-container { position: relative; display: flex; justify-content: center; align-items: center; border-bottom: 2px solid #333; padding-bottom: 4px; margin-bottom: 4px; }
 .company-logo { position: absolute; left: 2px; top: 50%; transform: translateY(-50%); width: 145px; max-height: 110px; object-fit: contain; display: none; }
 #printableQuote.theme-yushin .company-logo-yushin,
@@ -550,7 +558,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
    只在螢幕（screen）套用，列印/存 PDF 一律用上面 @media print 或原本桌面版的表格排版，
    所以「輸出」出來的估價單格式完全不受這裡影響 */
 @media screen and (max-width: 640px) {
-    /* 四個主系統入口固定為整齊的 2 × 2 等寬按鍵。 */
+    /* 主系統入口固定為兩欄等寬按鍵；新增模組後仍維持手機可快速點選。 */
     .nav-tabs {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -973,4 +981,21 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         padding: 6px 10px !important;
         font-size: 12px !important;
     }
+}
+
+@media screen and (max-width: 640px) {
+    #product-system .section-header { align-items:flex-start; }
+    .product-search-toolbar { align-items:stretch; }
+    .product-search-toolbar > * { width:100%; box-sizing:border-box; }
+    #product-system .table-wrap { overflow-x:visible; }
+    .product-management-table,
+    .product-management-table tbody,
+    .product-management-table tr,
+    .product-management-table td { display:block; width:100%; box-sizing:border-box; min-width:0; }
+    .product-management-table thead { display:none; }
+    .product-management-table tbody tr { margin-bottom:12px; padding:12px; border:1px solid #d8e4f2; border-radius:10px; background:#fff; }
+    .product-management-table td { border:0; border-bottom:1px solid #eef1f4; padding:7px 0; text-align:left; }
+    .product-management-table td:last-child { border-bottom:0; }
+    .product-management-table td[data-th]::before { content:attr(data-th) "："; display:block; margin-bottom:3px; color:#7a858f; font-size:11px; font-weight:700; }
+    .product-management-actions button { flex:1 1 120px; min-height:42px; }
 }
