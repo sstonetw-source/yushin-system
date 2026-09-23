@@ -836,7 +836,9 @@
                 <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid"><option value="">請選擇負責業務</option></select></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
                 <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" oninput="onOrderItemCodeInput(this)" onchange="onOrderItemCodeChange(this)"></div>
-                <div><label>品名</label><input type="text" id="orderItemName"></div>
+                <div><label>中文品名</label><input type="text" id="orderItemName"></div>
+                <div><label>英文品名</label><input type="text" id="orderItemNameEn"></div>
+                <div><label>規格</label><input type="text" id="orderItemSpec"></div>
                 <div><label>廠牌</label>
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
                     <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
