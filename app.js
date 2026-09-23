@@ -6,15 +6,34 @@ const STAMP_MULTI_LIFE = "assets/stamps/multi-life.png";
 
 // app.js - 估價單系統 / 儀器管理系統 核心邏輯
 
-const firebaseConfig = {
-    apiKey: "AIzaSyAmGAU2spWI54ujLyIFTWiX-mXyuau7Vps",
-    authDomain: "yu-shing-company.firebaseapp.com",
-    projectId: "yu-shing-company",
-    storageBucket: "yu-shing-company.firebasestorage.app",
-    messagingSenderId: "22622213823",
-    appId: "1:22622213823:web:c3f0a9c367a88e271ed80a",
-    measurementId: "G-861X26VW6M"
-};
+const FIREBASE_CONFIGS = Object.freeze({
+    production: {
+        apiKey: "AIzaSyAmGAU2spWI54ujLyIFTWiX-mXyuau7Vps",
+        authDomain: "yu-shing-company.firebaseapp.com",
+        projectId: "yu-shing-company",
+        storageBucket: "yu-shing-company.firebasestorage.app",
+        messagingSenderId: "22622213823",
+        appId: "1:22622213823:web:c3f0a9c367a88e271ed80a",
+        measurementId: "G-861X26VW6M"
+    },
+    preview: {
+        apiKey: "AIzaSyDSbSZiwiHmdgi6146vqpfE84JgWU1KhK8",
+        authDomain: "preview-20135.firebaseapp.com",
+        projectId: "preview-20135",
+        storageBucket: "preview-20135.firebasestorage.app",
+        messagingSenderId: "546566883230",
+        appId: "1:546566883230:web:396c28f1f01ada0a1c788f"
+    }
+});
+
+function resolveAppEnvironment() {
+    const host = String(window.location.hostname || '').toLowerCase();
+    return host === 'preview-20135.web.app' || host === 'preview-20135.firebaseapp.com'
+        ? 'preview'
+        : 'production';
+}
+const APP_ENVIRONMENT = resolveAppEnvironment();
+const firebaseConfig = FIREBASE_CONFIGS[APP_ENVIRONMENT];
 
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
