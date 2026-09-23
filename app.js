@@ -5499,6 +5499,12 @@ function normalizeHistoryItemCode(value) {
 }
 
 function fullHistorySearchValues(type, record = {}) {
+    if (type === 'equipment') {
+        return [
+            record.assetId, record.customerName, record.brand, record.model,
+            record.serialNo, record.salesName, record.location, record.notes
+        ];
+    }
     if (type === 'forecast') {
         return [
             record.customerName, record.brand, record.productName, record.latestProgress,
@@ -5566,6 +5572,7 @@ function fullHistoryQueryToken(type, keyword) {
     if (!token) return '';
     const canViewAll = type === 'quote' ? canViewAllData('quotes')
         : type === 'forecast' ? canViewAllData('forecast')
+        : type === 'equipment' ? canViewAllEquipment()
         : canViewAllData('orders');
     if (canViewAll) return token;
     if (currentUserCode) return `sc:${currentUserCode}:${token}`;
@@ -9151,6 +9158,7 @@ window.saveEquipmentFromModal = function() {
     }
 
     data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode }) || data.customerId;
+    data.searchTokens = buildFullHistorySearchTokens('equipment', data);
     const ref = editId ? db.collection('equipment').doc(editId) : db.collection('equipment').doc();
     const payload = editId ? data : { ...data, assetId: getNextAssetId(data.salesName), logs: [] };
 
@@ -9398,13 +9406,18 @@ window.handleEquipmentExcelUpload = async function(input) {
                         notes: String(getField(row, ['備註'])).trim()
                     };
 
+                    recordData.salesCode = salesCodeForName(recordData.salesName);
+                    recordData.searchTokens = buildFullHistorySearchTokens('equipment', { ...recordData, assetId:assetIdInFile });
+
                     const matchedId = assetIdInFile ? idMap.get(assetIdInFile) : null;
                     if (matchedId) {
                         updateOps.push({ docId: matchedId, data: recordData });
                     } else {
+                        const assetId = assetIdInFile || nextIdForSales(recordData.salesName);
                         insertRecords.push({
                             ...recordData,
-                            assetId: assetIdInFile || nextIdForSales(recordData.salesName),
+                            assetId,
+                            searchTokens: buildFullHistorySearchTokens('equipment', { ...recordData, assetId }),
                             logs: []
                         });
                     }
@@ -11266,7 +11279,7 @@ window.backfillOrderSearchIndex = async function() {
     const status = document.getElementById('orderSearchIndexMigrationStatus');
     if (!orderSearchIndexAwaitingConfirmation) {
         orderSearchIndexAwaitingConfirmation = true;
-        if (status) status.innerText = '這會逐批檢查舊估價單與訂單，只補建搜尋索引，不修改金額、狀態或流程。請在 10 秒內再按一次確認開始。';
+        if (status) status.innerText = '這會逐批檢查舊估價單、Forecast、訂單與儀器，只補建搜尋索引，不修改金額、狀態或流程。請在 10 秒內再按一次確認開始。';
         if (button) button.innerText = '確認開始補建';
         clearTimeout(orderSearchIndexConfirmationTimer);
         orderSearchIndexConfirmationTimer = setTimeout(() => {
@@ -11283,7 +11296,7 @@ window.backfillOrderSearchIndex = async function() {
     if (button) { button.disabled = true; button.innerText = '補建中…'; }
     let scanned = 0, updated = 0;
     try {
-        for (const collectionName of ['quotes','orders']) {
+        for (const collectionName of ['quotes','orders','forecasts','equipment']) {
             let cursor = null;
             while (true) {
                 let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
@@ -11294,7 +11307,9 @@ window.backfillOrderSearchIndex = async function() {
                 let writes = 0;
                 snapshot.docs.forEach(doc => {
                     const data = doc.data() || {};
-                    const type = collectionName === 'quotes' ? 'quote' : 'order';
+                    const type = collectionName === 'quotes' ? 'quote'
+                        : collectionName === 'forecasts' ? 'forecast'
+                        : collectionName === 'equipment' ? 'equipment' : 'order';
                     const searchTokens = buildFullHistorySearchTokens(type, { id: doc.id, ...data });
                     const update = {};
                     if (JSON.stringify(data.searchTokens || []) !== JSON.stringify(searchTokens)) update.searchTokens = searchTokens;
@@ -11312,11 +11327,11 @@ window.backfillOrderSearchIndex = async function() {
                 });
                 if (writes) await batch.commit();
                 cursor = snapshot.docs[snapshot.docs.length - 1];
-                if (status) status.innerText = `${collectionName === 'quotes' ? '估價單' : '訂單'}：已檢查 ${scanned} 筆，更新 ${updated} 筆搜尋索引…`;
+                if (status) status.innerText = `${collectionName === 'quotes' ? '估價單' : collectionName === 'forecasts' ? 'Forecast' : collectionName === 'equipment' ? '儀器' : '訂單'}：已檢查 ${scanned} 筆，更新 ${updated} 筆搜尋索引…`;
                 if (snapshot.size < 200) break;
             }
         }
-        if (status) status.innerText = `完成：共檢查 ${scanned} 筆估價單／訂單，建立或修正 ${updated} 筆全歷史搜尋索引。`;
+        if (status) status.innerText = `完成：共檢查 ${scanned} 筆估價單／Forecast／訂單／儀器，建立或修正 ${updated} 筆全歷史搜尋索引。`;
     } catch (err) {
         console.error('全歷史搜尋索引補建失敗：', err);
         if (status) status.innerText = `補建中斷：已檢查 ${scanned} 筆、更新 ${updated} 筆。可重新執行，已完成資料不會重複修改。`;
