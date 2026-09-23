@@ -2095,11 +2095,18 @@ function populateSalesDropdown() {
 
     const visibleList = salesList.filter(s => {
         const role = (s.role || 'sales').toLowerCase();
-        return role === 'sales';
+        return currentUserRole === 'engineer'
+            ? s.uid === currentUser?.uid
+            : role === 'sales';
     });
 
+    if (currentUserRole === 'engineer' && currentUser?.uid && currentUserName
+        && !visibleList.some(s => s.uid === currentUser.uid)) {
+        visibleList.push({ uid: currentUser.uid, name: currentUserName, code: currentUserCode, role: 'engineer' });
+    }
+
     const currentValue = select.value;
-    select.innerHTML = '<option value="">請選擇業務</option>';
+    select.innerHTML = '<option value="">請選擇負責人</option>';
     visibleList.forEach(s => {
         if (s.name) {
             const option = document.createElement('option');
@@ -2116,7 +2123,8 @@ function populateSalesDropdown() {
         delete window._pendingDraftSalesName;
     }
     // 若原本選的人仍在名單裡就保留選擇，否則清空，絕不自動帶入
-    select.value = visibleList.some(s => s.name === valueToApply) ? valueToApply : '';
+    select.value = visibleList.some(s => s.name === valueToApply) ? valueToApply
+        : (currentUserRole === 'engineer' ? currentUserName : '');
 
     // 還原草稿的過程中不要重新產生單號，沿用草稿裡存的那組
     if (!restoringQuoteDraft) generateQuoteNo();

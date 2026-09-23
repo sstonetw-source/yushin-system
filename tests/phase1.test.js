@@ -123,10 +123,10 @@ test('preview host selects isolated Firebase project and exposes a visible envir
     assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
 });
 
-test('commercial owner selector keeps assisted documents assigned to sales role', () => {
+test('engineer quote selector uses own identity; purchaser selects responsible salesperson', () => {
     assert.match(appSource, /function populateSalesDropdown\(\)/);
-    assert.match(appSource, /return role === 'sales';/);
-    assert.doesNotMatch(appSource, /return role === 'sales' \|\| role === 'engineer';/);
+    assert.match(appSource, /currentUserRole === 'engineer'\s*\? s\.uid === currentUser\?\.uid\s*: role === 'sales'/);
+    assert.match(appSource, /currentUserRole === 'engineer' \? currentUserName : ''/);
 });
 
 test('low-stock inventory can hand off to formal replenishment purchase flow', () => {

@@ -32,11 +32,13 @@ service cloud.firestore {
     function purchaser() { return role() == 'purchaser'; }
     function warehouse() { return role() == 'warehouse'; }
 
-    // Engineer is a business role plus engineering capability.
+    // Sales and engineers own their own commercial and fulfillment records.
     function businessOwner() {
-      // Commercial ownership is reserved for sales. Engineers may assist document creation,
-      // but do not become the responsible salesperson or gain owner-only order actions.
-      return sales();
+      return sales() || engineer();
+    }
+
+    function commercialDocumentOwner() {
+      return sales() || engineer();
     }
 
     function businessAssistant() {
@@ -44,7 +46,7 @@ service cloud.firestore {
     }
 
     function canCreateCommercialDoc() {
-      return admin() || businessOwner() || businessAssistant();
+      return admin() || commercialDocumentOwner() || businessAssistant();
     }
 
     function canPurchase() {
@@ -92,11 +94,10 @@ service cloud.firestore {
 
     function validOwnedCommercialCreate(data) {
       return admin() ||
-        (sales() &&
+        (commercialDocumentOwner() &&
           data.ownerUid == request.auth.uid &&
           data.salesCode != null &&
           data.salesCode == salesCode()) ||
-        (engineer() && validSalesOwner(data)) ||
         (businessAssistant() &&
           validSalesOwner(data) &&
           data.ownerUid != request.auth.uid);
@@ -149,7 +150,7 @@ service cloud.firestore {
 
     function assignedProductLine(data) {
       return admin() ||
-        (businessOwner()
+        (sales()
           && userDoc().data.productLineIds is list
           && productLineKey(data) != ''
           && userDoc().data.productLineIds.hasAny([productLineKey(data)]));
@@ -265,20 +266,19 @@ service cloud.firestore {
     }
 
     match /quotes/{id} {
-      allow read: if admin() || purchaser() || owns(resource.data)
-        || (engineer() && resource.data.get('createdByUid', '') == request.auth.uid);
+      allow read: if admin() || purchaser() || owns(resource.data);
       allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || (purchaser() && sameCommercialOwner() && preservesCreator());
       allow delete: if false;
     }
 
     match /forecasts/{id} {
       allow read: if admin() || owns(resource.data);
-      allow create: if (admin() || businessOwner()) && validOwnedCommercialCreate(request.resource.data);
+      allow create: if (admin() || commercialDocumentOwner()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
       allow delete: if false;
     }
 
@@ -287,7 +287,7 @@ service cloud.firestore {
         return get(/databases/$(database)/documents/forecasts/$(forecastId));
       }
       allow read: if admin() || owns(parentForecast().data);
-      allow create: if admin() || (businessOwner() && owns(parentForecast().data));
+      allow create: if admin() || (commercialDocumentOwner() && owns(parentForecast().data));
       allow update, delete: if false;
     }
 
@@ -297,7 +297,7 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if admin()
-        || (businessOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || purchaserOrderWorkflowUpdate()
         || warehouseOrderWorkflowUpdate();
       allow delete: if false;

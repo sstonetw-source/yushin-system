@@ -47,18 +47,22 @@ test('inactive user is denied', async () => {
   await assertFails(getDoc(doc(db('off1'), 'settings/company')));
 });
 
-test('engineer can assist a salesperson with quote and order creation', async () => {
+test('engineer owns and can edit own quote, forecast and order', async () => {
   const quote = {
-    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
+    ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   };
   await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/q1'), quote));
   await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...quote, orderDate:'2026-09-20' }));
+  await assertSucceeds(setDoc(doc(db('eng1'), 'forecasts/f1'), quote));
+  await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/q1'), { quoteDate:'2026-09-21' }));
+  await assertSucceeds(updateDoc(doc(db('eng1'), 'orders/o1'), { orderDate:'2026-09-21' }));
+  await assertSucceeds(updateDoc(doc(db('eng1'), 'forecasts/f1'), { quoteDate:'2026-09-21' }));
 });
 
-test('assisted commercial creation requires a real salesperson owner with matching sales code', async () => {
+test('engineer cannot create documents for salesperson; purchaser assistance requires matching owner code', async () => {
   await assertFails(setDoc(doc(db('eng1'), 'quotes/bad-owner-role'), {
-    ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20',
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   }));
   await assertFails(setDoc(doc(db('buyer1'), 'orders/bad-owner-code'), {
