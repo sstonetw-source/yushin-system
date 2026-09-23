@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260923-7">
+        <link rel="stylesheet" href="styles.css?v=20260924-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1065,17 +1065,12 @@
 
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
-            <div class="panel" style="margin-bottom:14px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="margin:0;">工作儀表板</h3><button type="button" class="btn-secondary" onclick="loadAdminDashboard()">重新整理</button></div>
-                <div id="adminDashboardCards" class="forecast-summary-grid" style="margin-top:12px;"></div>
-                <div id="adminDashboardStatus" style="font-size:12px;color:#666;"></div>
-            </div>
             <div class="toolbar no-print">
                 <button class="btn-secondary" onclick="reloadSalesFromUsers()">🔄 重新整理</button>
                 <span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span>
             </div>
             <table>
-                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>負責產品線</th><th>密碼</th><th>帳號 UID</th></tr></thead>
+                <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>密碼</th><th>帳號 UID</th></tr></thead>
                 <tbody id="adminSalesBody"></tbody>
             </table>
         </div>
@@ -1374,6 +1369,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260923-1"></script>
-    <script src="app.js?v=20260923-7"></script>
+    <script src="app.js?v=20260924-1"></script>
 </body>
 </html>
