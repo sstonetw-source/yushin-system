@@ -6502,11 +6502,13 @@ function purchaseItemsFromOrder(order) {
         const qtyValue = item.qty ?? item.quantity ?? item.count ?? (sourceItems.length === 1 ? order.qty ?? order.quantity : 1);
         let cost = parseFloat(item.costPrice ?? item.cost ?? item.purchasePrice ?? (sourceItems.length === 1 ? order.costPrice : NaN));
         if (!Number.isFinite(cost) || cost <= 0) {
+            const savedProductId = item.productId || order.productId || '';
             const normalizedCode = normalizeItemCode(itemCode);
             const normalizedBrand = String(brand || '').trim().toLocaleLowerCase();
-            const priceMatch = (normalizedBrand && priceItemLookup.get(`brand:${normalizedBrand}:${normalizedCode}`))
+            const priceMatch = (savedProductId && priceList.find(product => product.productId === savedProductId))
+                || (normalizedBrand && priceItemLookup.get(`brand:${normalizedBrand}:${normalizedCode}`))
                 || priceItemLookup.get(`code:${normalizedCode}`);
-            const productId = item.productId || order.productId || priceMatch?.productId || (priceMatch ? stableProductId(priceMatch) : '');
+            const productId = savedProductId || priceMatch?.productId || (priceMatch ? stableProductId(priceMatch) : '');
             const secureCost = productId ? purchaseCostCache.get(productId) : null;
             if (secureCost !== undefined && secureCost !== null) cost = Number(secureCost);
             else if (priceMatch && authorizationTypeForProduct(priceMatch) !== 'AUTHORIZED') {
@@ -6659,7 +6661,6 @@ window.openPurchaseOrderModal = async function() {
     }
     poEditingId = null;
     populatePoVendorSuggestions();
-    await ensurePriceListLoaded().catch(() => {});
     await preloadPurchaseCosts(selectedOrders);
     poAllItems = selectedOrders.flatMap(purchaseItemsFromOrder);
     if (!poAllItems.length) {
@@ -9902,22 +9903,44 @@ function safeEmbeddedOrderCost(item, rawCost) {
     return Number.isFinite(cost) && cost >= 0 ? cost : '';
 }
 
+async function findProductForPurchaseItem(item) {
+    const productId = String(item?.productId || '').trim();
+    if (productId) {
+        const cached = priceList.find(product => String(product.productId || '') === productId);
+        if (cached) return cached;
+        try {
+            const snap = await db.collection('products').doc(productId).get();
+            if (snap.exists) {
+                const product = productMasterDocToPriceItem(snap);
+                if (product.status !== 'INACTIVE' && product.active !== false) return cacheProductLookupItem(product);
+            }
+        } catch (err) {
+            console.warn('採購 Product Master productId 查詢失敗：', err);
+        }
+    }
+    const code = item?.itemCode || item?.productCode || item?.code || item?.model || '';
+    return code ? await findProductByCode(code) : null;
+}
+
 async function preloadPurchaseCosts(orders) {
     purchaseCostCache = new Map();
+    const purchaseItems = (orders || []).flatMap(order => purchaseItemsFromOrder(order));
+    const resolved = await Promise.all(purchaseItems.map(async item => ({
+        item,
+        product: await findProductForPurchaseItem(item)
+    })));
     const products = new Map();
-    (orders || []).forEach(order => {
-        purchaseItemsFromOrder(order).forEach(item => {
-            const match = findPriceItemForOrder({ itemCode:item.itemCode, brand:item.brand });
-            if (!match) return;
-            const id = match.productId || stableProductId(match);
-            if (id) products.set(id, match);
-        });
+    resolved.forEach(({ item, product }) => {
+        if (!product) return;
+        const id = product.productId || item.productId || stableProductId(product);
+        if (id) products.set(id, product);
     });
-    await Promise.all([...products.entries()].map(async ([id,item]) => {
+    await Promise.all([...products.entries()].map(async ([id, item]) => {
         const cost = await loadVisibleProductCost(item);
-        if (cost !== null && Number.isFinite(cost)) purchaseCostCache.set(id,cost);
+        if (cost !== null && Number.isFinite(cost)) purchaseCostCache.set(id, cost);
     }));
 }
+
 
 function productMasterDocToPriceItem(doc) {
     const data = doc.data ? doc.data() : doc;
