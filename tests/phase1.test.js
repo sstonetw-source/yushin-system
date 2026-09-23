@@ -98,8 +98,8 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(appSource, /window\.addEventListener\('pageshow'/);
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
-    assert.match(indexSource, /styles\.css\?v=20260923-7/);
-    assert.match(indexSource, /app\.js\?v=20260923-7/);
+    assert.match(indexSource, /styles\.css\?v=20260923-8/);
+    assert.match(indexSource, /app\.js\?v=20260923-8/);
 });
 
 test('product management uses server search without exposing protected cost data', () => {
@@ -1132,9 +1132,8 @@ test('V2 personnel UI stores role capabilities and product line responsibility',
     assert.match(appSource, /productLineIds,capabilities/);
 });
 
-test('V2 dashboard and safety stock use bounded data', () => {
-    assert.match(indexSource, /adminDashboardCards/);
-    assert.match(appSource, /window\.loadAdminDashboard/);
+test('personnel screen omits duplicate dashboard while safety stock remains available', () => {
+    assert.doesNotMatch(indexSource, /adminDashboardCards/);
     assert.match(appSource, /limit\(100\)/);
     assert.match(appSource, /setInventorySafetyStock/);
     assert.match(appSource, /safetyStock,updatedAt/);

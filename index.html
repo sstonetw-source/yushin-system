@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260923-7">
+        <link rel="stylesheet" href="styles.css?v=20260923-8">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1065,11 +1065,6 @@
 
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
-            <div class="panel" style="margin-bottom:14px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="margin:0;">工作儀表板</h3><button type="button" class="btn-secondary" onclick="loadAdminDashboard()">重新整理</button></div>
-                <div id="adminDashboardCards" class="forecast-summary-grid" style="margin-top:12px;"></div>
-                <div id="adminDashboardStatus" style="font-size:12px;color:#666;"></div>
-            </div>
             <div class="toolbar no-print">
                 <button class="btn-secondary" onclick="reloadSalesFromUsers()">🔄 重新整理</button>
                 <span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span>
@@ -1261,10 +1256,14 @@
             <h4 style="margin-top:0;">資料庫備份</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="databaseBackupBtn" onclick="downloadDatabaseBackup()">⬇️ 下載資料庫備份</button>
+                <button type="button" id="databaseBackupUploadBtn" class="btn-secondary" onclick="document.getElementById('databaseBackupFile').click()">⬆️ 上傳備份檢查</button>
+                <input id="databaseBackupFile" type="file" accept=".json,application/json" style="display:none" onchange="previewDatabaseBackupUpload(this)">
+                <button type="button" id="databaseBackupRestoreBtn" class="btn-secondary" onclick="restoreMissingDatabaseBackupDocuments()" style="display:none">補回缺少的文件</button>
                 <span style="font-size:12px;color:#666;">
                     備份會將訂單、估價單、採購單、儀器、使用者與系統設定整理成一個 JSON 檔下載到電腦。不會占用 Firebase 儲存空間，但每次會讀取全部資料。
                 </span>
                 <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
+                <div id="databaseBackupUploadStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
 
             <h4 style="margin-top:28px;">估價單／訂單全歷史搜尋索引</h4>
@@ -1374,6 +1373,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260923-1"></script>
-    <script src="app.js?v=20260923-7"></script>
+    <script src="app.js?v=20260923-8"></script>
 </body>
 </html>

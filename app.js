@@ -367,7 +367,10 @@ window.addEventListener('DOMContentLoaded', () => {
     firebase.auth().onAuthStateChanged(function(user) {
         if (user) {
             currentUser = user;
-            db.collection('users').doc(user.uid).get().then(doc => {
+            // User profile and role configuration are independent reads. Fetch together so
+            // a returning user does not wait for two network round trips in sequence.
+            Promise.all([db.collection('users').doc(user.uid).get(), loadRolePermissions()]).then(([doc]) => {
+                if (firebase.auth().currentUser?.uid !== user.uid) return;
                 if (!doc.exists) throw new Error('找不到此 UID 對應的 users 文件');
                 const d = doc.data() || {};
                 currentUserRole = d.role || 'sales';
@@ -376,10 +379,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 currentUserPhone = d.phone || '';
                 currentUserCode = d.code || '';
                 mustChangePassword = !!d.mustChangePassword;
-                loadRolePermissions().finally(() => {
-                    showApp();
-                    if (mustChangePassword) openChangePasswordModal(true);
-                });
+                showApp();
+                if (mustChangePassword) openChangePasswordModal(true);
 
                 // 把自己的登入 Email 同步存回自己的 users 文件，這樣管理員雲端後台才查得到每個帳號的 Email
                 // （用來寄送密碼重設信）；只寫自己的資料，不影響、也不需要動到別人的帳號
@@ -389,13 +390,14 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
             }).catch(err => {
                 console.error('讀取登入帳號資料失敗：', err);
-                currentUserRole = 'sales';
-                trueUserRole = 'sales';
+                currentUserRole = null;
+                trueUserRole = null;
                 currentUserName = '';
                 currentUserPhone = '';
                 currentUserCode = '';
-                showApp();
-                setTimeout(() => alert('無法讀取帳號資料：' + (err.message || err)), 0);
+                showLoginScreen();
+                const errorEl = document.getElementById('loginError');
+                if (errorEl) errorEl.innerText = '無法讀取帳號資料，請檢查網路後重新整理。';
             });
         } else {
             currentUser = null;
@@ -411,6 +413,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function loadRolePermissions() {
     return db.collection('settings').doc('rolePermissions').get().then(doc => {
+        rolePermissions = {};
+        roleDataScopes = {};
         if (!doc.exists) return;
         rolePermissions = doc.exists ? (doc.data().roles || {}) : {};
         roleDataScopes = doc.exists ? (doc.data().dataScopes || {}) : {};
@@ -424,7 +428,11 @@ function loadRolePermissions() {
                 rolePermissions[role] = { ...configured, products: 'view' };
             }
         });
-    }).catch(err => console.warn('讀取身份權限設定失敗，將不授予任何非管理員權限：', err));
+    }).catch(err => {
+        rolePermissions = {};
+        roleDataScopes = {};
+        console.warn('讀取身份權限設定失敗，將不授予任何非管理員權限：', err);
+    });
 }
 
 function getPagePermission(pageKey, role = currentUserRole) {
@@ -10111,7 +10119,7 @@ function ensureQuickProductModal() {
       <div class="eq-modal-box" style="max-width:620px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
           <h3 style="margin:0;">快速新增產品</h3>
-          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">✕ 關閉</button>
+          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">✕ 暫存並關閉</button>
         </div>
         <div style="font-size:12px;color:#666;margin:8px 0 14px;">只填銷售當下需要的資料，其餘欄位可由採購或管理員後補。</div>
         <div class="form-grid">
@@ -10125,12 +10133,34 @@ function ensureQuickProductModal() {
         </div>
         <div style="margin-top:14px;text-align:right;">
           <button type="button" id="saveQuickProductBtn" onclick="saveQuickProduct()">儲存並帶入</button>
-          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">取消</button>
+          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">暫存並關閉</button>
         </div>
       </div>`;
-    overlay.onclick = event => { if (event.target === overlay) closeQuickProductCreate(); };
+    // A backdrop tap on a phone must not discard a partially entered product.
+    overlay.addEventListener('input', saveQuickProductDraft);
+    overlay.addEventListener('change', saveQuickProductDraft);
     document.body.appendChild(overlay);
     return overlay;
+}
+
+const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'Line', 'Authorization', 'Price', 'Cost'];
+function quickProductDraftKey() {
+    return currentUser?.uid ? `quick-product-draft:${currentUser.uid}` : '';
+}
+function saveQuickProductDraft() {
+    const key = quickProductDraftKey();
+    if (!key) return;
+    const fields = Object.fromEntries(QUICK_PRODUCT_FIELDS.map(field => [field, document.getElementById(`quickProduct${field}`)?.value || '']));
+    try { localStorage.setItem(key, JSON.stringify(fields)); }
+    catch (err) { console.warn('無法暫存產品草稿：', err); }
+}
+function readQuickProductDraft() {
+    try { return JSON.parse(localStorage.getItem(quickProductDraftKey()) || 'null'); }
+    catch (_) { return null; }
+}
+function clearQuickProductDraft() {
+    const key = quickProductDraftKey();
+    if (key) localStorage.removeItem(key);
 }
 
 window.updateQuickProductCostVisibility = function() {
@@ -10167,12 +10197,22 @@ window.openQuickProductCreate = function(mode, input) {
         : '';
     document.getElementById('quickProductAuthorization').value =
         isBrandAuthorizedForCurrentCompany(currentBrand) ? 'AUTHORIZED' : 'NON_AUTHORIZED';
+    const draft = readQuickProductDraft();
+    // Resume only the same product; another item's form must not inherit stale values.
+    if (draft && normalizeItemCodeLoose(draft.Code) === normalizeItemCodeLoose(input.value.trim())
+        && normalizeBrandLookupKey(draft.Brand) === normalizeBrandLookupKey(currentBrand)) {
+        QUICK_PRODUCT_FIELDS.forEach(field => {
+            const node = document.getElementById(`quickProduct${field}`);
+            if (node) node.value = draft[field] || '';
+        });
+    }
     updateQuickProductCostVisibility();
     overlay.classList.add('active');
 };
 
 window.closeQuickProductCreate = function() {
     const overlay = document.getElementById('quickProductOverlay');
+    if (overlay?.classList.contains('active')) saveQuickProductDraft();
     if (overlay) overlay.classList.remove('active');
     quickProductTarget = null;
 };
@@ -10209,6 +10249,7 @@ window.saveQuickProduct = async function() {
         }
         clearQuickProductButton(quickProductTarget?.input);
         closeQuickProductCreate();
+        clearQuickProductDraft();
         return;
     }
 
@@ -10258,6 +10299,7 @@ window.saveQuickProduct = async function() {
         }
         clearQuickProductButton(quickProductTarget?.input);
         closeQuickProductCreate();
+        clearQuickProductDraft();
     } catch (err) {
         alert('快速新增產品失敗：' + err.message);
     } finally {
@@ -10723,30 +10765,6 @@ function loadAllUsersForAdmin() {
     });
 }
 
-let adminDashboardLoading=false;
-window.loadAdminDashboard=async function(){
- if(trueUserRole!=='admin'||adminDashboardLoading)return;adminDashboardLoading=true;
- const status=document.getElementById('adminDashboardStatus'),cards=document.getElementById('adminDashboardCards');if(status)status.textContent='統計中…';
- try{
-   const [ordersSnap,supplySnap,poSnap]=await Promise.all([
-     db.collection('orders').orderBy('updatedAt','desc').limit(100).get(),
-     db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(100).get(),
-     db.collection('purchaseOrders').orderBy('updatedAt','desc').limit(100).get()
-   ]);
-   const orders=ordersSnap.docs.map(doc=>({id:doc.id,...doc.data()})).filter(order=>normalizedOrderStatus(order)==='normal');
-   const items=orders.flatMap(order=>normalizedOrderItems(order));
-   const pendingOrder=items.reduce((sum,item)=>sum+Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??0)-Number(item.supplyOrderedQty||item.purchaseOrderedQty||0)),0);
-   const pendingDispatch=items.reduce((sum,item)=>sum+(window.YushinFulfillment?.pendingDispatchQty(item)||0),0);
-   const shippable=items.reduce((sum,item)=>sum+(window.YushinFulfillment?.shippableQty(item)||0),0);
-   const unbilled=orders.filter(order=>deliveredQuantity(order)>returnedQuantity(order)&&!order.isBilled).length;
-   const pendingReceipt=supplySnap.docs.reduce((sum,doc)=>sum+Math.max(0,Number(doc.data().qty||0)-Number(doc.data().receivedQty||0)),0);
-   const values=[['待訂貨數量',pendingOrder],['待入庫數量',pendingReceipt],['待打單數量',pendingDispatch],['可出貨數量',shippable],['已送貨未報帳',unbilled],['近期採購單',poSnap.size]];
-   if(cards)cards.innerHTML=values.map(([label,value])=>`<div class="forecast-summary-card"><span>${label}</span><strong>${value}</strong></div>`).join('');
-   if(status)status.textContent='以每類最多 100 筆待辦／近期資料即時計算，不掃描全部歷史。';
- }catch(err){if(status)status.textContent='讀取失敗：'+err.message;}
- finally{adminDashboardLoading=false;}
-};
-
 window.renderAdminSalesTable = function() {
     const tbody = document.getElementById('adminSalesBody');
     tbody.innerHTML = '';
@@ -11147,6 +11165,7 @@ window.downloadDatabaseBackup = async function() {
         const backup = {
             format: 'yu-shing-firestore-backup',
             version: 1,
+            projectId: firebaseConfig.projectId,
             createdAt: createdAt.toISOString(),
             createdBy: currentUser?.email || currentUserName || '',
             documentCount,
@@ -11171,6 +11190,104 @@ window.downloadDatabaseBackup = async function() {
         button.disabled = false;
         button.innerText = '⬇️ 下載資料庫備份';
     }
+};
+
+// A restore never overwrites live documents. Identity and permission settings require
+// separate administrator review, so the browser cannot recreate them from an old file.
+let pendingDatabaseBackup = null;
+const RESTORABLE_BACKUP_COLLECTIONS = new Set([
+    'quotes','forecasts','orders','purchaseOrders','equipment','brands','productLines',
+    'products','productCosts','priceHistory','customers','salesCodes','suppliers',
+    'brandSupplierMappings','warehouses','warehouseStocks','inventory','inventoryLots',
+    'inventoryLotCosts','inventoryReservations','pendingInventoryItems','inventoryMovements',
+    'receipts','supplyOrders','dispatchRecords','deliveries','auditLogs','forecastProgress'
+]);
+function restoreBackupValue(value) {
+    if (Array.isArray(value)) return value.map(restoreBackupValue);
+    if (value && typeof value === 'object') {
+        if (Object.keys(value).length === 2 && (value.__type === 'timestamp' || value.__type === 'date')) {
+            const date = new Date(value.value);
+            if (!Number.isFinite(date.getTime())) throw new Error('備份包含無效日期。');
+            return value.__type === 'timestamp' ? firebase.firestore.Timestamp.fromDate(date) : date;
+        }
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, restoreBackupValue(item)]));
+    }
+    return value;
+}
+function validateBackupDocuments(backup) {
+    if (backup?.format !== 'yu-shing-firestore-backup' || backup.version !== 1 ||
+        !backup.collections || typeof backup.collections !== 'object' || Array.isArray(backup.collections)) {
+        throw new Error('檔案不是支援的資料庫備份格式。');
+    }
+    if (backup.projectId && backup.projectId !== firebaseConfig.projectId) throw new Error('備份屬於不同 Firebase 專案。');
+    const docs = [], seen = new Set();
+    for (const [collection, rows] of Object.entries(backup.collections)) {
+        if (!RESTORABLE_BACKUP_COLLECTIONS.has(collection) && collection !== 'users' && collection !== 'settings')
+            throw new Error(`未知的集合：${collection}`);
+        if (!Array.isArray(rows)) throw new Error(`${collection} 不是文件清單。`);
+        for (const row of rows) {
+            const segments = String(row?.path || '').split('/');
+            const validPath = collection === 'forecastProgress'
+                ? segments.length === 4 && segments[0] === 'forecasts' && segments[2] === 'progress'
+                : segments.length === 2 && segments[0] === collection;
+            if (!validPath || segments.some(part => !part || part === '.' || part === '..') || row.id !== segments.at(-1) ||
+                !row.data || typeof row.data !== 'object' || Array.isArray(row.data) || seen.has(row.path)) {
+                throw new Error(`無效或重複的文件路徑：${row?.path || collection}`);
+            }
+            seen.add(row.path);
+            if (seen.size > 10000) throw new Error('備份超過 10,000 筆，請改用受控的伺服器端還原。');
+            if (collection !== 'users' && collection !== 'settings') docs.push({ path: row.path, data: restoreBackupValue(row.data) });
+        }
+    }
+    if (seen.size !== backup.documentCount) throw new Error('備份文件數量與檔案記錄不符。');
+    return docs;
+}
+window.previewDatabaseBackupUpload = async function(input) {
+    const status = document.getElementById('databaseBackupUploadStatus');
+    const restore = document.getElementById('databaseBackupRestoreBtn');
+    pendingDatabaseBackup = null;
+    if (restore) restore.style.display = 'none';
+    const file = input?.files?.[0];
+    if (!file) return;
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    try {
+        if (file.size > 50 * 1024 * 1024) throw new Error('檔案超過 50 MB，請改用受控的伺服器端還原。');
+        status.textContent = '正在檢查備份檔案…';
+        const backup = JSON.parse(await file.text());
+        const documents = validateBackupDocuments(backup);
+        pendingDatabaseBackup = documents;
+        status.textContent = `備份時間：${backup.createdAt || '未記錄'}；共 ${backup.documentCount} 筆，其中 ${documents.length} 筆可補回。上傳檢查不會改動雲端資料。補回時只建立目前不存在的文件；帳號及系統設定不會由檔案還原。`;
+        if (restore && documents.length) restore.style.display = '';
+    } catch (err) { status.textContent = `備份檢查失敗：${err.message}`; }
+    finally { input.value = ''; }
+};
+window.restoreMissingDatabaseBackupDocuments = async function() {
+    const docs = pendingDatabaseBackup;
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || !docs?.length) return;
+    if (!confirm(`將逐筆檢查 ${docs.length} 筆備份文件，只補回目前不存在的文件；現有文件不會覆蓋，帳號與系統設定不會還原。過程可能耗時並增加讀寫量。確定執行嗎？`)) return;
+    const button = document.getElementById('databaseBackupRestoreBtn');
+    const status = document.getElementById('databaseBackupUploadStatus');
+    button.disabled = true;
+    let created = 0, skipped = 0;
+    try {
+        for (const row of docs) {
+            const ref = db.doc(row.path);
+            // A transaction makes repeat clicks and retries safe even if another user writes concurrently.
+            const inserted = await db.runTransaction(async transaction => {
+                const existing = await transaction.get(ref);
+                if (existing.exists) return false;
+                transaction.set(ref, row.data);
+                return true;
+            });
+            if (inserted) created++; else skipped++;
+            if ((created + skipped) % 20 === 0) status.textContent = `補回中：已檢查 ${created + skipped}/${docs.length}，新增 ${created}，略過既有 ${skipped}。`;
+        }
+        status.textContent = `補回完成：新增 ${created}，略過既有 ${skipped}。帳號與系統設定未還原。`;
+        pendingDatabaseBackup = null;
+        button.style.display = 'none';
+    } catch (err) {
+        status.textContent = `補回中斷：新增 ${created}，略過既有 ${skipped}。${err.message} 可重新上傳同一備份繼續，既有文件不會覆蓋。`;
+    } finally { button.disabled = false; }
 };
 
 /* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */
