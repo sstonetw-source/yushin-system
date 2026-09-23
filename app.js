@@ -10991,54 +10991,45 @@ function formatBytes(bytes) {
 
 // 統計各集合的文件數與內容大小；這是「文件 JSON 內容」的估計值，
 // 跟 Firebase 主控台的實際帳單用量（還包含索引等額外儲存空間）不完全相同，僅供大致參考
-window.calculateStorageUsage = function() {
+window.calculateStorageUsage = async function() {
     const tbody = document.getElementById('storageUsageBody');
-    tbody.innerHTML = '<tr><td colspan="3" style="color:#888;">計算中，請稍候…（資料量大時可能需要幾秒到十幾秒）</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="3" style="color:#888;">計算中，請稍候…</td></tr>';
 
     const collections = [
-        { key: 'quotes', label: '估價單' },
-        { key: 'forecasts', label: 'Forecast' },
-        { key: 'orders', label: '訂單' },
-        { key: 'purchaseOrders', label: '採購單' },
-        { key: 'supplyOrders', label: '供應／訂貨紀錄' },
-        { key: 'receipts', label: '收貨紀錄' },
-        { key: 'dispatchRecords', label: '出貨打單紀錄' },
-        { key: 'inventory', label: '庫存彙總' },
-        { key: 'inventoryLots', label: '庫存批次' },
-        { key: 'inventoryLotCosts', label: '受保護批次成本' },
-        { key: 'inventoryReservations', label: '庫存占用' },
-        { key: 'inventoryMovements', label: '庫存異動' },
-        { key: 'warehouseStocks', label: '分倉庫存' },
-        { key: 'products', label: 'Product Master' },
-        { key: 'productCosts', label: '受保護產品成本' },
-        { key: 'equipment', label: '儀器' },
-        { key: 'users', label: '人員／使用者帳號' },
-        { key: 'settings', label: '系統設定' }
+        { key: 'quotes', label: '估價單' }, { key: 'forecasts', label: 'Forecast' },
+        { key: 'orders', label: '訂單' }, { key: 'purchaseOrders', label: '採購單' },
+        { key: 'supplyOrders', label: '供應／訂貨紀錄' }, { key: 'receipts', label: '收貨紀錄' },
+        { key: 'dispatchRecords', label: '出貨打單紀錄' }, { key: 'inventory', label: '庫存彙總' },
+        { key: 'inventoryLots', label: '庫存批次' }, { key: 'inventoryLotCosts', label: '受保護批次成本' },
+        { key: 'inventoryReservations', label: '庫存占用' }, { key: 'inventoryMovements', label: '庫存異動' },
+        { key: 'warehouseStocks', label: '分倉庫存' }, { key: 'products', label: 'Product Master' },
+        { key: 'productCosts', label: '受保護產品成本' }, { key: 'equipment', label: '儀器' },
+        { key: 'users', label: '人員／使用者帳號' }, { key: 'settings', label: '系統設定' }
     ];
 
-    Promise.all(collections.map(c => db.collection(c.key).get()))
-        .then(snapshots => {
-            let totalBytes = 0;
-            let totalDocs = 0;
-            const rows = collections.map((c, i) => {
-                let bytes = 0;
-                snapshots[i].forEach(doc => {
-                    bytes += new Blob([JSON.stringify(doc.data())]).size;
-                });
-                totalBytes += bytes;
-                totalDocs += snapshots[i].size;
-                return { label: c.label, count: snapshots[i].size, bytes };
-            });
-
-            tbody.innerHTML = rows.map(r => `
-                <tr><td>${escapeHtml(r.label)}</td><td>${r.count}</td><td>${formatBytes(r.bytes)}</td></tr>
-            `).join('') + `
-                <tr style="font-weight:bold;background:#f5f5f5;"><td>總計</td><td>${totalDocs}</td><td>${formatBytes(totalBytes)}</td></tr>
-            `;
-        })
-        .catch(err => {
-            tbody.innerHTML = `<tr><td colspan="3" style="color:#cc0000;">計算失敗：${escapeHtml(err.message)}</td></tr>`;
-        });
+    try {
+        let totalBytes = 0, totalDocs = 0;
+        const rows = [];
+        for (let i = 0; i < collections.length; i++) {
+            const c = collections[i];
+            tbody.innerHTML = `<tr><td colspan="3" style="color:#888;">正在分批讀取 ${escapeHtml(c.label)}（${i + 1}/${collections.length}）…</td></tr>`;
+            const records = await readCollectionInBatches(c.key);
+            const bytes = records.reduce((sum, row) => {
+                const { id, ...data } = row;
+                return sum + new Blob([JSON.stringify(data)]).size;
+            }, 0);
+            totalBytes += bytes;
+            totalDocs += records.length;
+            rows.push({ label:c.label, count:records.length, bytes });
+        }
+        tbody.innerHTML = rows.map(r => `
+            <tr><td>${escapeHtml(r.label)}</td><td>${r.count}</td><td>${formatBytes(r.bytes)}</td></tr>
+        `).join('') + `
+            <tr style="font-weight:bold;background:#f5f5f5;"><td>總計</td><td>${totalDocs}</td><td>${formatBytes(totalBytes)}</td></tr>
+        `;
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="3" style="color:#cc0000;">計算失敗：${escapeHtml(err.message)}</td></tr>`;
+    }
 };
 
 /* ---------- 資料庫備份 ---------- */
@@ -11070,23 +11061,34 @@ window.downloadDatabaseBackup = async function() {
     button.innerText = '正在整理備份…';
     status.innerText = '讀取雲端資料中，請不要關閉頁面。';
     try {
-        const snapshots = await Promise.all(collections.map(name => db.collection(name).get()));
         const data = {};
         let documentCount = 0;
-        snapshots.forEach((snapshot, index) => {
-            data[collections[index]] = snapshot.docs.map(doc => ({ id: doc.id, path:doc.ref.path, data: backupSerializableValue(doc.data()) }));
-            documentCount += snapshot.size;
-        });
+        for (let i = 0; i < collections.length; i++) {
+            const name = collections[i];
+            status.innerText = `正在分批備份 ${name}（${i + 1}/${collections.length}）…`;
+            const records = await readCollectionInBatches(name);
+            data[name] = records.map(row => {
+                const { id, ...recordData } = row;
+                return { id, path:`${name}/${id}`, data:backupSerializableValue(recordData) };
+            });
+            documentCount += records.length;
+        }
         // Read Forecast progress through each authorized parent path. A collection-group query
         // cannot safely prove the parent-specific Firestore rule for every possible progress path.
         data.forecastProgress = [];
-        const forecastSnapshot = snapshots[collections.indexOf('forecasts')];
-        for (const forecastDoc of (forecastSnapshot?.docs || [])) {
-            const progressSnapshot = await forecastDoc.ref.collection('progress').get();
-            progressSnapshot.docs.forEach(doc => {
-                data.forecastProgress.push({ id:doc.id, path:doc.ref.path, data:backupSerializableValue(doc.data()) });
+        for (let i = 0; i < (data.forecasts || []).length; i++) {
+            const forecast = data.forecasts[i];
+            status.innerText = `正在備份 Forecast 進度（${i + 1}/${data.forecasts.length}）…`;
+            const progressRows = await readQueryInBatches(db.collection('forecasts').doc(forecast.id).collection('progress'));
+            progressRows.forEach(row => {
+                const { id, ...recordData } = row;
+                data.forecastProgress.push({
+                    id,
+                    path:`forecasts/${forecast.id}/progress/${id}`,
+                    data:backupSerializableValue(recordData)
+                });
             });
-            documentCount += progressSnapshot.size;
+            documentCount += progressRows.length;
         }
         const createdAt = new Date();
         const backup = {
