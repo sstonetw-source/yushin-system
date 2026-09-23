@@ -5065,12 +5065,16 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
 };
 
 
-function canBusinessSelfOrder() {
-    return ['admin','sales','engineer'].includes(currentUserRole);
+function canBusinessSelfOrder(order = null) {
+    if (currentUserRole === 'admin') return true;
+    if (currentUserRole !== 'sales') return false;
+    if (!order) return true;
+    return (order.ownerUid && order.ownerUid === currentUser?.uid)
+        || (order.salesCode && currentUserCode && order.salesCode === currentUserCode);
 }
 
 function selfOrderActionHtml(order) {
-    if (!canBusinessSelfOrder() || normalizedOrderStatus(order) !== 'normal') return '';
+    if (!canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
     return normalizedOrderItems(order)
         .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
         .map(item => {
@@ -5087,7 +5091,7 @@ function selfOrderActionHtml(order) {
 window.openSelfOrderModal = function(orderId,itemId) {
     const order=ordersCache.find(row=>row.id===orderId);
     const item=normalizedOrderItems(order||{}).find(row=>row.itemId===itemId);
-    if(!order||!item||!canBusinessSelfOrder())return;
+    if(!order||!item||!canBusinessSelfOrder(order))return;
     const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
     const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
     const remaining=Math.max(0,required-ordered);
@@ -5129,6 +5133,7 @@ window.saveSelfOrder = async function() {
             const snap=await tx.get(orderRef);
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
+            if(!canBusinessSelfOrder(order))throw new Error('只有負責業務可自行訂貨。');
             if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
             const items=normalizedOrderItems(order);
             const index=items.findIndex(row=>row.itemId===itemId);
