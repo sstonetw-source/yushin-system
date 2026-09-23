@@ -10502,7 +10502,8 @@ window.renderSalesStatistics = function() {
 function salesStatsMetricExportRows(values, grandTotal, label) {
     return Object.entries(values)
         .sort((a, b) => b[1].totalSales - a[1].totalSales)
-        .map(([name, metric]) => ({
+        .map(([name, metric]) => {
+          const row={
             [label]: name,
             '實際送貨金額': Math.round(metric.actualSales),
             '待出貨金額': Math.round(metric.pendingSales),
@@ -10513,7 +10514,10 @@ function salesStatsMetricExportRows(values, grandTotal, label) {
             '占比': grandTotal ? (metric.totalSales / grandTotal * 100).toFixed(1) + '%' : '－',
             '成本未填筆數': metric.missingCostIds.size,
             '歷史推估金額': Math.round(metric.estimatedSales)
-        }));
+          };
+          if(!salesStatsSensitiveVisible)['總成本','毛利','毛利率','成本未填筆數'].forEach(key=>delete row[key]);
+          return row;
+        });
 }
 
 window.exportSalesStatisticsExcel = async function() {
