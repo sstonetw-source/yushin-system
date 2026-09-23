@@ -11668,6 +11668,125 @@ function inventoryCostMigrationPlan(lots, inventory, receipts, movements, orders
         legacyOrders: orders.filter(row => [...(row.data.deliveryRecords || []), ...(row.data.returnRecords || [])].some(recordContainsEmbeddedCost))
     };
 }
+async function readCollectionInBatches(collectionName, fields = null, batchSize = 500) {
+    const rows = [];
+    let cursor = null;
+    while (true) {
+        let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(batchSize);
+        if (cursor) query = query.startAfter(cursor);
+        const snap = await query.get();
+        snap.forEach(doc => rows.push({ id:doc.id, ...doc.data() }));
+        if (snap.size < batchSize) break;
+        cursor = snap.docs[snap.docs.length - 1];
+    }
+    return rows;
+}
+
+function systemAuditProductKey(record = {}) {
+    return String(record.productKey || record.productId || '').trim();
+}
+
+window.runSystemDataAudit = async function() {
+    if (trueUserRole !== 'admin') return;
+    const button = document.getElementById('systemDataAuditBtn');
+    const status = document.getElementById('systemDataAuditStatus');
+    const results = document.getElementById('systemDataAuditResults');
+    if (!button || !status || !results || button.disabled) return;
+    button.disabled = true;
+    button.textContent = '檢查中…';
+    status.textContent = '讀取主檔與關聯資料中…';
+    results.innerHTML = '';
+    try {
+        const [products, users, warehouses, orders, purchaseOrders, inventory, warehouseStocks, reservations] = await Promise.all([
+            readCollectionInBatches('products'),
+            readCollectionInBatches('users'),
+            readCollectionInBatches('warehouses'),
+            readCollectionInBatches('orders'),
+            readCollectionInBatches('purchaseOrders'),
+            readCollectionInBatches('inventory'),
+            readCollectionInBatches('warehouseStocks'),
+            readCollectionInBatches('inventoryReservations')
+        ]);
+        const issues = [];
+        const productIds = new Set();
+        const productCodes = new Set();
+        const duplicateProducts = new Map();
+        products.forEach(product => {
+            const id = String(product.productId || product.id || '').trim();
+            if (id) productIds.add(id);
+            const code = normalizeItemCodeLoose(product.manufacturerPartNo || product.itemCode || product.sku || '');
+            if (code) productCodes.add(code);
+            const duplicateKey = normalizeBrandLookupKey(product.brandName || product.brand || '') + '|' + code;
+            if (code) {
+                const list = duplicateProducts.get(duplicateKey) || [];
+                list.push(product);
+                duplicateProducts.set(duplicateKey, list);
+            }
+        });
+        duplicateProducts.forEach((list, key) => {
+            if (list.length > 1) issues.push({ type:'Product Master 重複', detail:`${key}：${list.length} 筆` });
+        });
+
+        const validRoles = new Set(['admin','sales','purchaser','warehouse','engineer']);
+        users.forEach(user => {
+            if (!validRoles.has(String(user.role || ''))) issues.push({ type:'人員角色異常', detail:`${user.name || user.email || user.id}：${user.role || '未設定'}` });
+        });
+
+        const orderIds = new Set(orders.map(order => String(order.id || '').trim()).filter(Boolean));
+        const warehouseIds = new Set(warehouses.filter(w => w.active !== false).map(w => String(w.warehouseId || w.id || '').trim()).filter(Boolean));
+        const knownProduct = record => {
+            const key = systemAuditProductKey(record);
+            const code = normalizeItemCodeLoose(record.itemCode || record.manufacturerPartNo || '');
+            return !key && !code ? true : (productIds.has(key) || productCodes.has(code));
+        };
+
+        orders.forEach(order => {
+            if (!knownProduct(order)) issues.push({ type:'訂單找不到 Product', detail:`${order.orderNo || order.id}｜${order.itemCode || order.productKey || ''}` });
+            if ((order.fulfillmentType || '') === 'WAREHOUSE' && order.warehouseId && !warehouseIds.has(String(order.warehouseId))) {
+                issues.push({ type:'訂單倉庫不存在', detail:`${order.orderNo || order.id}｜${order.warehouseId}` });
+            }
+        });
+
+        purchaseOrders.forEach(po => {
+            const sourceOrderId = String(po.orderId || po.sourceOrderId || '').trim();
+            if (sourceOrderId && !orderIds.has(sourceOrderId)) issues.push({ type:'採購來源訂單不存在', detail:`${po.poNo || po.id}｜${sourceOrderId}` });
+        });
+
+        inventory.forEach(item => {
+            if (!knownProduct(item)) issues.push({ type:'庫存找不到 Product', detail:`${item.itemCode || item.id}` });
+            const n = inventoryNumbers(item);
+            if (n.onHand < 0 || n.reserved < 0 || n.reserved > n.onHand) {
+                issues.push({ type:'庫存數量異常', detail:`${item.itemCode || item.id}｜現有 ${n.onHand}／占用 ${n.reserved}` });
+            }
+        });
+
+        warehouseStocks.forEach(stock => {
+            if (stock.warehouseId && !warehouseIds.has(String(stock.warehouseId))) issues.push({ type:'分倉指向不存在倉庫', detail:`${stock.id}｜${stock.warehouseId}` });
+            if (!knownProduct(stock)) issues.push({ type:'分倉找不到 Product', detail:`${stock.id}` });
+            const n = inventoryNumbers(stock);
+            if (n.onHand < 0 || n.reserved < 0 || n.reserved > n.onHand) issues.push({ type:'分倉數量異常', detail:`${stock.id}｜現有 ${n.onHand}／占用 ${n.reserved}` });
+        });
+
+        reservations.filter(r => r.status === 'active').forEach(reservation => {
+            const orderId = String(reservation.orderId || reservation.sourceId || reservation.id || '').trim();
+            if (orderId && !orderIds.has(orderId)) issues.push({ type:'庫存占用來源訂單不存在', detail:`${reservation.orderNo || reservation.id}｜${orderId}` });
+            if (!knownProduct(reservation)) issues.push({ type:'庫存占用找不到 Product', detail:`${reservation.orderNo || reservation.id}｜${reservation.productKey || reservation.itemCode || ''}` });
+        });
+
+        const counts = `Product ${products.length}、人員 ${users.length}、訂單 ${orders.length}、採購單 ${purchaseOrders.length}、庫存 ${inventory.length}、分倉 ${warehouseStocks.length}、占用 ${reservations.length}`;
+        status.textContent = issues.length ? `檢查完成：${counts}。發現 ${issues.length} 項需確認。` : `檢查完成：${counts}。未發現上述關聯異常。`;
+        results.innerHTML = issues.length
+            ? '<div class="table-wrap"><table><thead><tr><th>類型</th><th>內容</th></tr></thead><tbody>' + issues.slice(0,500).map(issue => `<tr><td>${escapeHtml(issue.type)}</td><td>${escapeHtml(issue.detail)}</td></tr>`).join('') + '</tbody></table></div>' + (issues.length > 500 ? `<div style="font-size:12px;color:#666;margin-top:6px;">畫面只顯示前 500 項，共 ${issues.length} 項。</div>` : '')
+            : '<div style="padding:10px;background:#f4f8f4;border-radius:6px;">目前未發現需要處理的資料關聯異常。</div>';
+    } catch (err) {
+        console.error('系統資料檢查失敗：', err);
+        status.textContent = '檢查失敗：' + err.message;
+    } finally {
+        button.disabled = false;
+        button.textContent = '檢查系統資料';
+    }
+};
+
 window.previewInventoryCostMigration = async function() {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行庫存成本隔離。');
     const status=document.getElementById('inventoryCostMigrationStatus'), runButton=document.getElementById('inventoryCostMigrationBtn'), previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
