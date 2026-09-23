@@ -3027,8 +3027,6 @@ window.onOrderItemCodeChange = async function(input) {
 
     const itemNameInput = document.getElementById('orderItemName');
     if (itemNameInput) itemNameInput.value = match.nameCn || match.nameEn || '';
-    const unitInput = document.getElementById('orderUnit');
-    if (unitInput) unitInput.value = match.unit || '';
     const priceInput = document.getElementById('orderUnitPrice');
     if (priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') {
         priceInput.value = match.price;
@@ -8367,7 +8365,7 @@ function collectOrderDraft() {
         date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
         itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
-        unit:orderDraftFieldValue('orderUnit'),unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
+        unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
         fulfillmentType:orderDraftFieldValue('orderFulfillmentType')||'WAREHOUSE',warehouseId:orderDraftFieldValue('orderWarehouse'),
         transactionType:orderDraftFieldValue('orderTransactionType'),invoiceTitle:orderDraftFieldValue('orderInvoiceTitle'),
         productId:window._orderModalProductId||'',items:newOrderDraftItems
@@ -8411,7 +8409,6 @@ function setOrderModalItem(item={}) {
     else document.getElementById('orderBrand').value='';
     onOrderBrandSelectChange();
     document.getElementById('orderQty').value=normalized.qty||1;
-    document.getElementById('orderUnit').value=normalized.unit||'';
     document.getElementById('orderUnitPrice').value=normalized.unitPrice||0;
     document.getElementById('orderTotalPrice').value=normalized.totalPrice||0;
     document.getElementById('orderCostPrice').value=normalized.costPrice??'';
@@ -8489,7 +8486,7 @@ function normalizeNewOrderItem(item = {}) {
 }
 
 function currentOrderModalItem() {
-    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unit:document.getElementById('orderUnit').value,unitPrice:document.getElementById('orderUnitPrice').value,fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     const cost=document.getElementById('orderCostPrice').value;if(cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
@@ -8504,7 +8501,7 @@ window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
     if(item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId){alert('請為目前品項選擇出貨倉庫。');return;}
     newOrderDraftItems.push(item);renderNewOrderDraftItems();
-    ['orderItemCode','orderItemName','orderUnit'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
+    ['orderItemCode','orderItemName'].forEach(id=>document.getElementById(id).value='');document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
 };
 
 window.openOrderModal = function(source = null) {
@@ -8522,7 +8519,7 @@ window.openOrderModal = function(source = null) {
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderUnit', 'orderInvoiceTitle'].forEach(id => {
+    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderInvoiceTitle'].forEach(id => {
         document.getElementById(id).value = '';
     });
     onOrderBrandSelectChange();
@@ -8550,7 +8547,6 @@ window.openOrderModal = function(source = null) {
         document.getElementById('orderItemCode').value = source.itemCode || '';
         document.getElementById('orderItemName').value = source.itemName || '';
         document.getElementById('orderQty').value = source.qty || 1;
-        document.getElementById('orderUnit').value = source.unit || '';
         document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
         if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
             document.getElementById('orderCostPrice').value = source.costPrice ?? '';
@@ -8647,7 +8643,6 @@ window.copyOrderAsNew = function(orderId) {
     if (first.brand) selectBrandInDropdown(document.getElementById('orderBrand'), first.brand);
     onOrderBrandSelectChange();
     document.getElementById('orderQty').value = first.qty || 1;
-    document.getElementById('orderUnit').value = first.unit || '';
     document.getElementById('orderUnitPrice').value = first.unitPrice || 0;
     document.getElementById('orderFulfillmentType').value = first.fulfillmentType || 'WAREHOUSE';
     populateOrderWarehouseOptions(first.warehouseId || '');
