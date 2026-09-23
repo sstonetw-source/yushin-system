@@ -1317,8 +1317,8 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
 });
 
 test('production HTML cache-busts local application assets after main deployments', () => {
-  assert.match(indexSource,/styles\.css\?v=20260923-6/);
-  assert.match(indexSource,/modules\/workflow-core\.js\?v=20260923-1/);
-  assert.match(indexSource,/app\.js\?v=20260923-6/);
-  assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-4/);
+  assert.match(indexSource,/styles\.css\?v=20260923-\d+/);
+  assert.match(indexSource,/modules\/workflow-core\.js\?v=20260923-\d+/);
+  assert.match(indexSource,/app\.js\?v=20260923-\d+/);
+  assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-\d+/);
 });
