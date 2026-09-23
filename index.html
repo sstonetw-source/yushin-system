@@ -711,9 +711,9 @@
 
     <!-- ============ 訂單管理系統 ============ -->
     <div id="order-system" class="content-section">
-        <div class="sub-nav no-print">
-            <div class="sub-tab active" id="osub-list" data-permission-page="orders.list" onclick="switchOrderView('list', this)">📦 業務訂單</div>
-            <div class="sub-tab" id="osub-po" data-permission-page="orders.po" style="display:none;" onclick="switchOrderView('po', this)">🧾 採購訂單</div>
+        <div class="sub-nav no-print" style="display:none;" aria-hidden="true">
+            <div class="sub-tab active" id="osub-list" data-permission-page="orders.list">業務訂單</div>
+            <div class="sub-tab" id="osub-po" data-permission-page="orders.po">採購訂單</div>
         </div>
 
         <div id="orderListPanel">
