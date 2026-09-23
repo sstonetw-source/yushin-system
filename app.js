@@ -106,6 +106,30 @@ let salesListLoadPromise = null;
 let quickProductTarget = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
+const USER_PROFILE_CACHE_PREFIX = 'yushin-user-profile:';
+function userProfileCacheKey(uid) { return uid ? USER_PROFILE_CACHE_PREFIX + uid : ''; }
+function readCachedUserProfile(uid) {
+    try {
+        const data=JSON.parse(localStorage.getItem(userProfileCacheKey(uid))||'null');
+        return data && ['admin','sales','purchaser','warehouse','engineer'].includes(data.role) ? data : null;
+    } catch (_) { return null; }
+}
+function writeCachedUserProfile(uid, data={}) {
+    if(!uid)return;
+    try {
+        localStorage.setItem(userProfileCacheKey(uid),JSON.stringify({
+            role:data.role||'sales',name:data.name||'',phone:data.phone||'',code:data.code||'',mustChangePassword:!!data.mustChangePassword
+        }));
+    } catch (_) {}
+}
+function applyUserProfile(data={}) {
+    currentUserRole=data.role||'sales';
+    trueUserRole=currentUserRole;
+    currentUserName=data.name||'';
+    currentUserPhone=data.phone||'';
+    currentUserCode=data.code||'';
+    mustChangePassword=!!data.mustChangePassword;
+}
 const DEFAULT_LIST_LIMIT = 50;
 const FIRESTORE_READ_TIMEOUT_MS = 15000;
 const DEFAULT_CURRENCY = 'TWD';
@@ -380,18 +404,16 @@ window.addEventListener('DOMContentLoaded', () => {
     firebase.auth().onAuthStateChanged(function(user) {
         if (user) {
             currentUser = user;
-            // User profile and role configuration are independent reads. Fetch together so
-            // a returning user does not wait for two network round trips in sequence.
+            // Returning sessions can render immediately from a small local profile cache.
+            // Firestore is still authoritative; permissions are refreshed before any new session data is trusted.
+            const cachedProfile=readCachedUserProfile(user.uid);
+            if(cachedProfile){applyUserProfile(cachedProfile);showApp();}
             db.collection('users').doc(user.uid).get().then(doc => {
                 if (firebase.auth().currentUser?.uid !== user.uid) return;
                 if (!doc.exists) throw new Error('找不到此 UID 對應的 users 文件');
                 const d = doc.data() || {};
-                currentUserRole = d.role || 'sales';
-                trueUserRole = currentUserRole;
-                currentUserName = d.name || '';
-                currentUserPhone = d.phone || '';
-                currentUserCode = d.code || '';
-                mustChangePassword = !!d.mustChangePassword;
+                applyUserProfile(d);
+                writeCachedUserProfile(user.uid,d);
                 showApp();
                 if (mustChangePassword) openChangePasswordModal(true);
 
@@ -10366,10 +10388,10 @@ function ensureQuickProductModal() {
           <div style="grid-column:1/-1;"><label>中文品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
           <div style="grid-column:1/-1;"><label>英文品名</label><input id="quickProductNameEn" type="text" autocomplete="off"></div>
           <div><label>規格</label><input id="quickProductSpec" type="text" autocomplete="off"></div>
-          <div><label>產品線</label><input id="quickProductLine" type="text" placeholder="例如 Roche"></div>
-          <div><label>產品來源</label><select id="quickProductAuthorization" onchange="updateQuickProductCostVisibility()"><option value="AUTHORIZED">公司代理產品</option><option value="NON_AUTHORIZED">非代理產品</option></select></div>
           <div><label>建議售價</label><input id="quickProductPrice" type="number" min="0"></div>
-          <div id="quickProductCostWrap"><label>成本</label><input id="quickProductCost" type="number" min="0" placeholder="沒有價目表時可自行輸入"></div>
+          <input id="quickProductLine" type="hidden">
+          <input id="quickProductAuthorization" type="hidden">
+          <input id="quickProductCost" type="hidden">
         </div>
         <div style="margin-top:14px;text-align:right;">
           <button type="button" id="saveQuickProductBtn" onclick="saveQuickProduct()">儲存並帶入</button>
@@ -10405,8 +10427,6 @@ function clearQuickProductDraft() {
 
 window.updateQuickProductCostVisibility = function() {
     const type = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
-    const wrap = document.getElementById('quickProductCostWrap');
-    if (wrap) wrap.style.display = type === 'NON_AUTHORIZED' ? '' : 'none';
     if (type === 'AUTHORIZED') {
         const input = document.getElementById('quickProductCost');
         if (input) input.value = '';
@@ -10526,19 +10546,7 @@ window.saveQuickProduct = async function() {
     if (button) { button.disabled = true; button.innerText = '儲存中…'; }
     try {
         await db.collection('products').doc(productId).set(productDoc, { merge: true });
-        if (authorizationType === 'NON_AUTHORIZED' && String(costRaw).trim() !== '') {
-            await db.collection('productCosts').doc(productId).set({
-                productId,
-                productLineId: productLine,
-                standardCost: Number(costRaw) || 0,
-                salesVisible: true,
-                source: 'quick_create',
-                updatedAt: now,
-                updatedBy: currentUser?.uid || ''
-            }, { merge: true });
-        }
         const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
-        if (authorizationType === 'NON_AUTHORIZED' && String(costRaw).trim() !== '') item.cost = Number(costRaw) || 0;
         priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
         refreshPriceDatalists();
         if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, item);
