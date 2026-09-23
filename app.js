@@ -9644,28 +9644,29 @@ window.loadSalesStatistics = function() {
     const { start, end } = salesStatisticsQueryWindow();
     const startIso = start + 'T00:00:00';
     const endIso = end + 'T23:59:59';
-    const periodOrders = db.collection('orders')
-        .where('orderDate', '>=', start)
-        .where('orderDate', '<=', end)
-        .orderBy('orderDate', 'desc')
-        .limit(1500)
-        .get();
-    const activityOrders = db.collection('orders')
-        .where('updatedAt', '>=', startIso)
-        .where('updatedAt', '<=', endIso)
-        .orderBy('updatedAt', 'desc')
-        .limit(1500)
-        .get();
-    const openOrders = db.collection('orders')
-        .where('status', '==', BUSINESS_STATUS.ACTIVE)
-        .limit(1000)
-        .get();
+    const periodOrders = readQueryInBatches(
+        db.collection('orders')
+            .where('orderDate', '>=', start)
+            .where('orderDate', '<=', end)
+            .orderBy('orderDate', 'desc')
+    );
+    const activityOrders = readQueryInBatches(
+        db.collection('orders')
+            .where('updatedAt', '>=', startIso)
+            .where('updatedAt', '<=', endIso)
+            .orderBy('updatedAt', 'desc')
+    );
+    const openOrders = readQueryInBatches(
+        db.collection('orders')
+            .where('status', '==', BUSINESS_STATUS.ACTIVE)
+            .orderBy(firebase.firestore.FieldPath.documentId())
+    );
 
-    salesStatisticsLoadPromise = Promise.all([periodOrders, activityOrders, openOrders]).then(([periodSnapshot, activitySnapshot, openSnapshot]) => {
+    salesStatisticsLoadPromise = Promise.all([periodOrders, activityOrders, openOrders]).then(([periodRows, activityRows, openRows]) => {
         if (requestedRole !== currentUserRole) return;
         const records = new Map();
-        [periodSnapshot, activitySnapshot, openSnapshot].forEach(snapshot => {
-            snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
+        [periodRows, activityRows, openRows].forEach(rows => {
+            rows.forEach(row => records.set(row.id, row));
         });
         salesStatisticsOrders = [...records.values()];
         const startInput = document.getElementById('salesStatsStart');
