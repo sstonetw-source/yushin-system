@@ -13,11 +13,17 @@ const validate = vm.runInNewContext(`${validation}\nassertPurchaseLinesAvailable
     normalizedOrderItems: order => order.items
 });
 
-test('purchasing has three active workflows and no legacy number function', () => {
-    for (const view of ['pending', 'arrival', 'history']) {
-        assert.match(html, new RegExp(`id="purchase-sub-${view}"`));
+test('purchasing has three item-level work queues and no legacy number function', () => {
+    for (const view of ['ordering', 'receiving', 'dispatch']) {
+        assert.match(html, new RegExp(`id="purchase-card-${view}"`));
     }
-    assert.match(app, /switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'pending' : 'arrival'\)/);
+    assert.match(html, /id="purchaseCountOrdering"/);
+    assert.match(html, /id="purchaseCountReceiving"/);
+    assert.match(html, /id="purchaseCountDispatch"/);
+    assert.match(app, /switchPurchasingView\('ordering'\)/);
+    assert.match(app, /loadPendingPurchaseOrders\(true\)/);
+    assert.match(app, /loadMyPurchaseOrders\(\)/);
+    assert.match(app, /loadPurchasingDispatchOrders\(true\)/);
     assert.doesNotMatch(app, /generateNextPoNumber/);
 });
 
