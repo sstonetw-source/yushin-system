@@ -6723,11 +6723,19 @@ window.savePoReceiptBatch = async function() {
             for (const entry of entries){ await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate); completed++; }
         }
         await loadMyPurchaseOrders();
+        await Promise.all([
+            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
+            loadPurchasingDispatchOrders(true)
+        ]);
         if (canAccessPage('inventory')) await loadInventory(true);
         closePoReceiptBatch();
         alert(`已完成 ${completed} 個品項的批量到貨入庫。`);
     } catch (err) {
         await loadMyPurchaseOrders().catch(()=>{});
+        await Promise.all([
+            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true).catch(()=>{}) : Promise.resolve(),
+            loadPurchasingDispatchOrders(true).catch(()=>{})
+        ]);
         if (canAccessPage('inventory')) await loadInventory(true).catch(()=>{});
         if (completed > 0) {
             closePoReceiptBatch();
