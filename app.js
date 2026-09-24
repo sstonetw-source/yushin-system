@@ -7212,18 +7212,22 @@ window.printPurchaseOrder = async function() {
             });
         });
 
-        await registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming);
-
+        // The PO + source-order linkage above is the authoritative commit.
+        // Cache it before the separate incoming-stock registration so a transient
+        // failure can retry the same PO idempotently instead of attempting to
+        // create another PO with the same number.
         ordersCache.forEach(order => {
             if (poItems.some(item => item.orderId === order.id)) order.purchaseOrderNo = poNo;
         });
-        const savedPo = { id: poNo, ...poRecord };
+        const savedPo = { id: poDocumentId, ...poRecord };
         const cachedIndex = poListCache.findIndex(po => po.id === savedPo.id);
         if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
         renderOrdersList();
         renderPoList();
+
+        await registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming);
         if (purchasingView === 'ordering') loadPendingPurchaseOrders(true);
 
         // 雲端確認沒有重複下單後才開啟列印。
