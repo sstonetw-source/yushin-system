@@ -7637,6 +7637,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         }
 
         const needed = Math.max(0, ordered - delivered);
+        // On restore, rebuild only the outstanding reservation. Delivered units
+        // are historical fulfillment and must never be reserved a second time.
         const reserve = invState && whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved),Math.max(0,invState.onHand-invState.reserved)) : 0;
         const shortage = Math.max(0, needed - reserve);
         if (reserve > 0) {
@@ -7651,8 +7653,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
             orderDate:order.orderDate||'',quantity:reserve,shortageQty:shortage,
             status:reserve>0?'active':(shortage>0?'shortage':'fulfilled'),warehouseId,updatedAt:now
         },{merge:true});
-        nextItems.push({...item,itemId,inventoryReservedQty:delivered+reserve,inventoryShortageQty:shortage,reservedQty:delivered+reserve,shortageQty:shortage});
-        totalReserved += delivered + reserve;
+        nextItems.push({...item,itemId,inventoryReservedQty:reserve,inventoryShortageQty:shortage,reservedQty:reserve,shortageQty:shortage});
+        totalReserved += reserve;
         totalShortage += shortage;
     }
 
