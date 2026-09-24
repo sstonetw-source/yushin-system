@@ -8050,6 +8050,11 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canEditPage('orders.list')) return;
     if (returnedQuantity(cachedOrder) > 0) { alert('這筆訂單已有退貨紀錄，請先從 ⋯ 中更正或刪除退貨紀錄。'); return; }
+    if (normalizedOrderItems(cachedOrder).length > 1) {
+        alert('舊版多品項訂單不能使用一鍵取消全部送貨，請逐品項更正送貨紀錄，避免庫存還原到錯誤品項。');
+        openDeliveryModal(orderId);
+        return;
+    }
     const optimisticBefore = { deliveryRecords: savedDeliveryRecords(cachedOrder).slice(), deliveredQty: cachedOrder.deliveredQty, isDelivered: cachedOrder.isDelivered };
     cachedOrder.deliveryRecords = [];
     cachedOrder.deliveredQty = 0;
