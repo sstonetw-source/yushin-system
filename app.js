@@ -6136,21 +6136,20 @@ window.renderPoList = function() {
     poListCache.forEach(po => {
         const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
-        // 未到貨 PO 屬於未完成狀態，跨期間保留；已完成 PO 依訂購日期套用統計期間。
-        if (purchasingView === 'receiving' && (poReceiptProgress(po).complete || poReceiptProgress(po).directShipOnly)) return;
-        if (purchasingView === 'receiving' && poReceiptProgress(po).complete) return;
-        shown++;
 
         const items = purchaseItemsFromSavedPo(po);
-        const subtotal = items.reduce((sum, item) => sum + (item.qty * item.unitPrice), 0);
-        const grandTotal = Math.round(subtotal) + Math.round(subtotal * 0.05);
         const companyInfo = companyData[po.company];
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
         items.forEach((item,itemIndex)=>{
             const received=receivedQuantityForPoItem(po,itemIndex);
-            const itemTotal=Math.round(Number(item.qty||0)*Number(item.unitPrice||0)*1.05);
-            const complete=received>=Number(item.qty||0);
+            const ordered=Number(item.qty||0);
+            const complete=received>=ordered;
+            const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+            // 「待到貨」完全以單一品項為單位：已完成或原廠直送品項不留在待到貨清單。
+            if (purchasingView === 'receiving' && (complete || directShip)) return;
+            shown++;
+            const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td data-th="單號">${escapeHtml(po.poNo || '')}</td>
@@ -6159,9 +6158,9 @@ window.renderPoList = function() {
                 <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
                 <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
                 <td data-th="等待天數">${escapeHtml(complete?'—':(poWaitingDays(po)||'—'))}</td>
-                <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${Number(item.qty||0)}</td>
+                <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
-                <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${Number(item.qty||0)}`:`待到貨 0/${Number(item.qty||0)}`}</td>
+                <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
                 <td data-th="操作" class="no-print">${complete?'<span>已完成</span>':`<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">📥 到貨入庫</button>`} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
             `;
             tbody.appendChild(tr);
