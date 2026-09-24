@@ -2018,7 +2018,7 @@ async function createForecastOrdersDirectly(forecast, items) {
         created.push({id:orderRef.id,data:orderData});
     });
     await batch.commit();
-    await Promise.all(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
+    await Promise.allSettled(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
     ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))]
         .sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
     return created;
@@ -4228,11 +4228,16 @@ window.markQuoteAsDeal = async function(quoteNo) {
             linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),...created.map(order=>documentLink(DOCUMENT_TYPES.ORDER,order.id,'created'))])
         });
         await batch.commit();
-        await Promise.all(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
+        const reservationResults=await Promise.allSettled(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
+        const reservationFailures=reservationResults.filter(result=>result.status==='rejected');
         ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache];
-        renderOrdersList();
-        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) await loadPendingPurchaseOrders(true);
-        alert(`已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並分別執行庫存保留。`);
+        try { renderOrdersList(); } catch(refreshErr) { console.error('訂單畫面刷新失敗',refreshErr); }
+        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
+            try { await loadPendingPurchaseOrders(true); } catch(refreshErr) { console.error('採購畫面刷新失敗',refreshErr); }
+        }
+        alert(reservationFailures.length
+            ? `已成交並建立 ${created.length} 筆獨立訂單；其中 ${reservationFailures.length} 筆庫存保留需重新整理後重試。`
+            : `已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並同步至訂單／採購流程。`);
         loadMyQuotesFromCloud();
     } catch(err){alert('匯入失敗：'+err.message);}
 };
@@ -4266,7 +4271,7 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
 
                 await adjustInventoryReservationForLifecycle(
                     transaction,
-                    doc.id,
+                    linkedOrder.id,
                     order,
                     'cancelled',
                     actor
@@ -5364,11 +5369,7 @@ function renderOrderWorkCards(orders) {
     orders.forEach(order => {
         const category = orderWorkCategory(order);
         const amount = orderWorkAmount(order, category);
-        if (dateInOrderPeriod(order.orderDate || '')) {
-            metrics.all.count++;
-            metrics.all.amount += salesAmount(order);
-        }
-        if (orderMatchesWorkPeriod(order, category)) {
+        if (metrics[category] && orderMatchesWorkPeriod(order, category)) {
             metrics[category].count++;
             metrics[category].amount += amount;
         }
