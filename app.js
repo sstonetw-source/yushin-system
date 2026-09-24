@@ -5135,7 +5135,9 @@ function itemDispatchState(order, item) {
     const reserved=Number(item.reservedQty??item.inventoryReservedQty??0);
     const prepared=Number(item.dispatchPreparedQty||0);
     const shippable=Math.max(0,prepared-delivered);
-    return { delivered, reserved, prepared, shippable, pending:Math.max(0,reserved-shippable) };
+    // reserved/prepared are cumulative quantities. Delivery consumes shippable
+    // quantity but must not make an already-prepared item appear as "待打單" again.
+    return { delivered, reserved, prepared, shippable, pending:Math.max(0,reserved-prepared) };
 }
 
 function dispatchActionHtml(order) {
