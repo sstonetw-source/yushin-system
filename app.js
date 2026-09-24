@@ -6342,15 +6342,27 @@ window.receiveSupplyOrder = function(supplyId) {
 async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='') {
     let remaining=Math.max(0,Number(maxQty||0));
     if(!remaining||!productKey||!warehouseId||!window.YushinReservation)return {allocatedQty:0,unallocatedQty:remaining};
-    // Bounded query: only shortage reservations for this product are candidates.
-    const snap=await db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==','shortage').limit(50).get();
-    const candidates=snap.docs.map(doc=>({id:doc.id,...doc.data()}))
-        .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0);
-    // A reservation can become partially active while still having shortage; include it in later refill passes.
-    const activeSnap=await db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==','active').limit(50).get();
-    activeSnap.docs.map(doc=>({id:doc.id,...doc.data()})).forEach(row=>{
-        if(row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0&&!candidates.some(x=>x.id===row.id))candidates.push(row);
-    });
+    // Read bounded candidate pages for both pure shortages and partially-reserved
+    // shortages. Sort all candidates by original order date before allocation so
+    // receipt stock is consistently assigned oldest-first rather than Firestore's
+    // unspecified query order.
+    const loadCandidates=async status=>{
+        const rows=[]; let cursor=null; let hasMore=true;
+        while(hasMore&&rows.length<500){
+            let q=db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==',status).limit(50);
+            if(cursor)q=q.startAfter(cursor);
+            const page=await q.get();
+            page.docs.forEach(doc=>rows.push({id:doc.id,...doc.data()}));
+            cursor=page.empty?null:page.docs[page.docs.length-1];
+            hasMore=page.size===50;
+        }
+        return rows;
+    };
+    const [shortageRows,activeRows]=await Promise.all([loadCandidates('shortage'),loadCandidates('active')]);
+    const candidates=[...shortageRows,...activeRows]
+        .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0)
+        .filter((row,index,all)=>all.findIndex(x=>x.id===row.id)===index)
+        .sort((a,b)=>String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))||String(a.id).localeCompare(String(b.id)));
     const plan=window.YushinReservation.allocateReceiptToShortages(candidates,remaining);
     let allocatedQty=0;
     for(const allocation of plan.allocations){
