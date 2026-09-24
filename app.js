@@ -7390,6 +7390,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
             isOrdered: updates.isOrdered !== undefined ? updates.isOrdered : order.isOrdered,
             isArrived: updates.isArrived !== undefined ? updates.isArrived : order.isArrived,
             isBilled: updates.isBilled !== undefined ? updates.isBilled : order.isBilled,
+            status: updates.status !== undefined ? updates.status : order.status,
             invoiceDate: updates.invoiceDate !== undefined ? updates.invoiceDate : order.invoiceDate,
             orderedBy: updates.orderedBy !== undefined ? updates.orderedBy : order.orderedBy,
             statusHistory: [...(order.statusHistory || []), ...entries]
