@@ -396,7 +396,7 @@ window.addEventListener('DOMContentLoaded', () => {
         orderModal.addEventListener('input', scheduleOrderDraftSave);
         orderModal.addEventListener('change', event => {
             scheduleOrderDraftSave(event);
-            if (event.target?.id === 'orderCustomer') refreshOrderFrequentItemOptions();
+            
         });
     }
 
@@ -8704,7 +8704,7 @@ window.restoreSavedOrderDraft=function(){
         document.getElementById('orderTransactionType').value=draft.transactionType||'';
         const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';invoice.disabled=draft.transactionType!=='直';
         newOrderDraftItems=Array.isArray(draft.items)?draft.items.map(normalizeNewOrderItem):[];
-        renderNewOrderDraftItems();refreshOrderFrequentItemOptions();
+        renderNewOrderDraftItems();
         const title=document.getElementById('orderModalTitle');if(title)title.innerText='新增訂單（已恢復草稿）';
     } finally { restoringOrderDraft=false;updateOrderDraftStatus(); }
 };
@@ -8806,8 +8806,6 @@ window.openOrderModal = function(source = null) {
     onOrderFulfillmentChange();
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
-    refreshOrderRecentOptions();
-    refreshOrderFrequentItemOptions();
     updateOrderDraftStatus();
 
     window._orderModalSourceLink = source?.sourceType && source?.sourceId
@@ -8930,7 +8928,6 @@ window.copyOrderAsNew = function(orderId) {
     const invoiceInput = document.getElementById('orderInvoiceTitle');
     invoiceInput.value = source.invoiceTitle || '';
     invoiceInput.disabled = transactionType !== '直';
-    refreshOrderFrequentItemOptions();
     saveOrderDraft();
 };
 
