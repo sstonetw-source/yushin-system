@@ -2018,7 +2018,7 @@ async function createForecastOrdersDirectly(forecast, items) {
         created.push({id:orderRef.id,data:orderData});
     });
     await batch.commit();
-    for(const order of created) await reserveInventoryForNewOrder(order.id,order.data);
+    await Promise.all(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
     ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))]
         .sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
     return created;
@@ -2044,6 +2044,7 @@ window.createOrderFromForecast = async function(id) {
         if (!confirm(`此 Forecast 含 ${items.length} 個品項，將拆成 ${items.length} 筆獨立訂單。確定繼續？`)) return;
         await createForecastOrdersDirectly(forecast, items);
         renderOrdersList();
+        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) await loadPendingPurchaseOrders(true);
         alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單。`);
     } catch (err) {
         console.error('Forecast 轉訂單失敗', err);
@@ -4227,8 +4228,10 @@ window.markQuoteAsDeal = async function(quoteNo) {
             linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),...created.map(order=>documentLink(DOCUMENT_TYPES.ORDER,order.id,'created'))])
         });
         await batch.commit();
-        for(const order of created)await reserveInventoryForNewOrder(order.id,order.data);
+        await Promise.all(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
         ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache];
+        renderOrdersList();
+        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) await loadPendingPurchaseOrders(true);
         alert(`已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並分別執行庫存保留。`);
         loadMyQuotesFromCloud();
     } catch(err){alert('匯入失敗：'+err.message);}
@@ -5896,9 +5899,9 @@ window.switchPurchasingView = function(view, tab) {
     if (!['ordering', 'receiving', 'dispatch'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
-    const orderingTab = document.getElementById('purchase-sub-ordering');
+    const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
-    document.querySelectorAll('#purchasing-system > .sub-nav .sub-tab').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-sub-${view}`))));
+    document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
     const pendingPanel=document.getElementById('purchasePendingPanel');
     const poPanel=document.getElementById('poListPanel');
     const dispatchPanel=document.getElementById('purchaseDispatchPanel');
@@ -5956,7 +5959,8 @@ function renderPurchasingDispatchOrders() {
             body.appendChild(tr);
         });
     });
-    if(status)status.textContent=purchasingDispatchLoading?'載入中…':(body.children.length?`已顯示 ${body.children.length} 張待打單訂單`:'目前載入範圍內沒有待打單訂單');
+    if(status)status.textContent=purchasingDispatchLoading?'載入中…':(body.children.length?`已顯示 ${body.children.length} 筆待打單品項`:'目前沒有待打單品項');
+    const count=document.getElementById('purchaseCountDispatch'); if(count)count.textContent=purchasingDispatchLoading?'…':String(body.children.length);
     if(more){more.style.display=purchasingDispatchHasMore?'':'none';more.disabled=purchasingDispatchLoading;}
 }
 
@@ -5978,7 +5982,8 @@ function renderPendingPurchaseOrders() {
         }
     }
     const status = document.getElementById('purchasePendingStatus');
-    if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 張待採購訂單` : '目前載入範圍內沒有待採購訂單');
+    if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 筆待採購品項` : '目前沒有待採購品項');
+    const count=document.getElementById('purchaseCountOrdering'); if(count)count.textContent=pendingPurchaseLoading?'…':String(body.children.length);
     const more = document.getElementById('purchasePendingMoreBtn');
     if (more) { more.style.display = pendingPurchaseHasMore ? '' : 'none'; more.disabled = pendingPurchaseLoading; }
 }
@@ -6161,6 +6166,7 @@ window.renderPoList = function() {
     });
 
     document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
+    const count=document.getElementById('purchaseCountReceiving'); if(count)count.textContent=String(shown);
 };
 
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
