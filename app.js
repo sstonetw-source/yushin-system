@@ -8602,7 +8602,6 @@ window.deleteOrder = function(orderId) {
 
 let newOrderDraftItems = [];
 const ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2';
-let orderFrequentItemTemplates = [];
 let requestedOrderOwnerUid = '';
 
 function populateOrderOwnerSelect() {
@@ -8707,40 +8706,6 @@ window.restoreSavedOrderDraft=function(){
         renderNewOrderDraftItems();
         const title=document.getElementById('orderModalTitle');if(title)title.innerText='新增訂單（已恢復草稿）';
     } finally { restoringOrderDraft=false;updateOrderDraftStatus(); }
-};
-
-function recentOrderCandidates(){
-    return [...ordersCache].filter(order=>normalizedOrderStatus(order)==='normal')
-        .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id')).slice(0,10);
-}
-
-function refreshOrderRecentOptions(){
-    const select=document.getElementById('orderRecentTemplateSelect');if(!select)return;
-    const rows=recentOrderCandidates();
-    select.innerHTML=rows.length?'<option value="">選擇一筆最近訂單</option>':'<option value="">目前沒有可用的最近訂單</option>';
-    rows.forEach(order=>{const option=document.createElement('option');option.value=order.id;option.textContent=`${order.orderDate||''}｜${order.customerName||'未填客戶'}｜${normalizedOrderItems(order).map(item=>item.itemName||item.itemCode).filter(Boolean).join('、')}`;select.appendChild(option);});
-}
-
-window.loadSelectedRecentOrder=function(){
-    const id=document.getElementById('orderRecentTemplateSelect')?.value;if(!id){alert('請先選擇一筆最近訂單。');return;}
-    copyOrderAsNew(id);saveOrderDraft();
-};
-
-function refreshOrderFrequentItemOptions(){
-    const select=document.getElementById('orderFrequentItemSelect');if(!select)return;
-    const customer=customerNameKey(orderDraftFieldValue('orderCustomer'));
-    const counts=new Map();
-    if(customer)ordersCache.filter(order=>customerNameKey(order.customerName)===customer&&normalizedOrderStatus(order)==='normal').forEach(order=>{
-        normalizedOrderItems(order).forEach(item=>{const normalized=normalizeNewOrderItem(item);const key=normalized.productId||`${normalized.brand}|${normalizeHistoryItemCode(normalized.itemCode)}|${normalized.itemName}`;const existing=counts.get(key)||{item:normalized,count:0,lastDate:''};existing.count+=1;if((order.orderDate||'')>=existing.lastDate){existing.item=normalized;existing.lastDate=order.orderDate||'';}counts.set(key,existing);});
-    });
-    orderFrequentItemTemplates=[...counts.values()].sort((a,b)=>b.count-a.count||b.lastDate.localeCompare(a.lastDate)).slice(0,20);
-    select.innerHTML=customer?(orderFrequentItemTemplates.length?'<option value="">選擇常購品項</option>':'<option value="">目前載入資料中沒有此客戶的歷史品項</option>'):'<option value="">請先輸入客戶名稱</option>';
-    orderFrequentItemTemplates.forEach((entry,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${entry.item.itemCode||'無貨號'}｜${entry.item.itemName||''}（${entry.count} 次）`;select.appendChild(option);});
-}
-
-window.loadSelectedFrequentItem=function(){
-    const value=document.getElementById('orderFrequentItemSelect')?.value;if(value===''||!orderFrequentItemTemplates[Number(value)]){alert('請先選擇一個常購品項。');return;}
-    setOrderModalItem(orderFrequentItemTemplates[Number(value)].item);saveOrderDraft();
 };
 
 function normalizeNewOrderItem(item = {}) {
