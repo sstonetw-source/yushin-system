@@ -116,6 +116,42 @@ let salesListLoadPromise = null;
 let quickProductTarget = null;
 let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
+const APP_CACHE_VERSION = 1;
+const APP_DATA_CACHE_PREFIX = 'yushin-data-cache:';
+const APP_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function appDataCacheKey(kind, uid = currentUser?.uid || 'anonymous', role = currentUserRole || 'unknown') {
+    return `${APP_DATA_CACHE_PREFIX}v${APP_CACHE_VERSION}:${uid}:${role}:${kind}`;
+}
+function readAppDataCache(kind, options = {}) {
+    try {
+        const raw = localStorage.getItem(appDataCacheKey(kind));
+        if (!raw) return null;
+        const cached = JSON.parse(raw);
+        if (!cached || !Array.isArray(cached.records)) return null;
+        const age = Date.now() - Number(cached.savedAt || 0);
+        if (!options.allowStale && age > APP_CACHE_MAX_AGE_MS) return null;
+        return cached;
+    } catch (_) { return null; }
+}
+function writeAppDataCache(kind, records = []) {
+    try {
+        localStorage.setItem(appDataCacheKey(kind), JSON.stringify({
+            savedAt: Date.now(),
+            records: Array.isArray(records) ? records.slice(0, DEFAULT_LIST_LIMIT) : []
+        }));
+    } catch (_) {}
+}
+function clearAppDataCacheForCurrentUser() {
+    const uid = currentUser?.uid;
+    if (!uid) return;
+    try {
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith(APP_DATA_CACHE_PREFIX) && key.includes(`:${uid}:`)) localStorage.removeItem(key);
+        });
+    } catch (_) {}
+}
+
 const USER_PROFILE_CACHE_PREFIX = 'yushin-user-profile:';
 function userProfileCacheKey(uid) { return uid ? USER_PROFILE_CACHE_PREFIX + uid : ''; }
 function readCachedUserProfile(uid) {
@@ -683,8 +719,34 @@ function showApp() {
 let lastShowAppInitKey = '';
 const loadedMainPages = new Set();
 
+function hydratePageFromLocalCache(mainKey) {
+    // Gmail-style stale-while-revalidate: cached content paints immediately; Firestore refresh follows in background.
+    if (mainKey === 'orders.list' && !ordersCache.length) {
+        const cached = readAppDataCache('orders');
+        if (cached?.records?.length) {
+            ordersCache = cached.records;
+            renderOrdersList();
+        }
+    }
+    if (mainKey === 'forecast' && !forecastCache.length) {
+        const cached = readAppDataCache('forecasts');
+        if (cached?.records?.length) {
+            forecastCache = cached.records;
+            renderForecastList();
+        }
+    }
+    if (mainKey === 'quote' && !myQuotesCache.length) {
+        const cached = readAppDataCache('quotes');
+        if (cached?.records?.length) {
+            myQuotesCache = cached.records;
+            if (document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
+        }
+    }
+}
+
 function initializePageData(mainKey, options = {}) {
     const force = options.force === true;
+    hydratePageFromLocalCache(mainKey);
     if (!force && loadedMainPages.has(mainKey)) return;
     loadedMainPages.add(mainKey);
     if (mainKey === 'forecast') ensureSalesListLoaded().then(() => loadForecasts(true));
@@ -853,6 +915,7 @@ window.handleLogin = function() {
 };
 
 window.handleLogout = function() {
+    clearAppDataCacheForCurrentUser();
     firebase.auth().signOut();
 };
 
@@ -1388,6 +1451,7 @@ window.loadForecasts = async function(reset = true) {
 
         populateForecastBrandFilter();
         populateForecastSalesFilter();
+        writeAppDataCache('forecasts', forecastCache);
         renderForecastList();
     } catch (err) {
         console.error('讀取 Forecast 失敗', err);
@@ -4094,6 +4158,7 @@ async function loadMyQuotesPage(reset) {
             if (snapshot.size < requested) myQuotesPaginationState.sourceIndex++;
         }
         myQuotesCache.sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
+        writeAppDataCache('quotes', myQuotesCache);
         renderMyQuotesList();
         if (!currentUserName && myQuotesCache.length === 0) {
             hint.style.display = 'block';
@@ -5680,6 +5745,7 @@ async function loadOrderPage(reset, options = {}) {
         }
         if (generation !== orderLoadGeneration) return;
         ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
+        writeAppDataCache('orders', ordersCache);
         renderOrdersList();
     } catch (err) {
         if (generation !== orderLoadGeneration) return;
