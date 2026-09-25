@@ -790,12 +790,23 @@ function initializePageData(mainKey, options = {}) {
 }
 
 function ensureSalesListLoaded() {
-    if (!salesListLoadPromise) salesListLoadPromise = initSalesList();
+    if (!salesListLoadPromise) {
+        salesListLoadPromise = initSalesList().catch(err => {
+            // 失敗不能永久快取 rejected Promise；下次真正需要人員名單時允許重試。
+            salesListLoadPromise = null;
+            throw err;
+        });
+    }
     return salesListLoadPromise;
 }
 
 function ensureClientHistoryLoaded() {
-    if (!clientHistoryLoadPromise) clientHistoryLoadPromise = loadClientHistory();
+    if (!clientHistoryLoadPromise) {
+        clientHistoryLoadPromise = loadClientHistory().catch(err => {
+            clientHistoryLoadPromise = null;
+            throw err;
+        });
+    }
     return clientHistoryLoadPromise;
 }
 
