@@ -105,3 +105,11 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /YushinWorkflow\?\.itemWorkCategory/);
     assert.match(app, /if\(required>ordered\)return 'ordering';[\s\S]*if\(required>0\)return 'arrival';[\s\S]*return 'delivery';/);
 });
+
+
+test('purchase receiving queue calculates progress per PO item',()=>{
+    assert.match(app,/function poItemReceiptProgress\(po,item,itemIndex\)/);
+    assert.match(app,/const receipt=poItemReceiptProgress\(po,item,itemIndex\)/);
+    assert.match(app,/receipt\.remaining<=0/);
+    assert.match(app,/receivePurchaseOrderItem\('\$\{escapeAttr\(po\.id\)\}',\$\{itemIndex\}\)/);
+});
