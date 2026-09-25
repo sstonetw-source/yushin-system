@@ -39,6 +39,17 @@ if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
+// 這套系統在部分實際使用網路環境持續出現 Firestore WebChannel transport error。
+// Firebase 官方提供 forceLongPolling 用於避開 Proxy／防毒／網路設備對長連線的相容性問題。
+// 必須在任何 Firestore 讀寫前設定；不要同時啟用 autoDetectLongPolling。
+try {
+    db.settings({
+        experimentalForceLongPolling: true,
+        useFetchStreams: false
+    });
+} catch (err) {
+    console.warn('Firestore long polling 設定未套用：', err);
+}
 if (APP_ENVIRONMENT === 'preview') {
     document.documentElement.dataset.appEnvironment = 'preview';
     window.addEventListener('DOMContentLoaded', () => {
