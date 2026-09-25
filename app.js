@@ -10188,6 +10188,20 @@ window.loadSalesStatistics = function() {
     return salesStatisticsLoadPromise;
 };
 
+async function readDocumentsByIds(collectionName, ids, chunkSize = 30) {
+    const uniqueIds = [...new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean))];
+    if (!uniqueIds.length) return [];
+    const rows = [];
+    for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+        const chunk = uniqueIds.slice(i, i + chunkSize);
+        const snapshot = await db.collection(collectionName)
+            .where(firebase.firestore.FieldPath.documentId(), 'in', chunk)
+            .get();
+        snapshot.forEach(doc => rows.push({ id:doc.id, ...doc.data() }));
+    }
+    return rows;
+}
+
 async function loadInventoryAnalysisSupport(start, end) {
     const receiptQuery = db.collection('inventoryMovements')
         .where('createdAt','>=',start+'T00:00:00')
@@ -10198,15 +10212,32 @@ async function loadInventoryAnalysisSupport(start, end) {
         .where('poDate','>=',start)
         .where('poDate','<=',end)
         .orderBy('poDate','desc');
-    const [movements, stocks, lots, lotCosts, purchaseOrders] = await Promise.all([
+    // 目前庫存價值只需要仍有餘量的 lot；已耗盡歷史 lot 不應隨資料量成長而反覆下載。
+    const activeLotsQuery = db.collection('inventoryLots')
+        .where('remainingQty','>',0)
+        .orderBy('remainingQty');
+    const [movements, lots, purchaseOrders] = await Promise.all([
         readQueryInBatches(receiptQuery),
-        readCollectionInBatches('inventory'),
-        readCollectionInBatches('inventoryLots'),
-        readCollectionInBatches('inventoryLotCosts'),
+        readQueryInBatches(activeLotsQuery),
         readQueryInBatches(purchaseOrderQuery)
     ]);
+
+    // COGS、期間入庫與目前庫存各自可能引用不同 lot。只抓實際被這次分析引用的受保護成本文件。
+    const requiredLotIds = new Set();
+    movements.forEach(row => { if (row.lotId) requiredLotIds.add(row.lotId); });
+    lots.forEach(row => requiredLotIds.add(row.id));
+    salesStatisticsOrders.forEach(order => {
+        [...savedDeliveryRecords(order), ...savedReturnRecords(order)].forEach(record => {
+            if (!dateInStatsRange(record.date, start, end)) return;
+            (record.lotAllocations || []).forEach(allocation => {
+                if (allocation?.lotId) requiredLotIds.add(allocation.lotId);
+            });
+        });
+    });
+    const lotCosts = await readDocumentsByIds('inventoryLotCosts', [...requiredLotIds]);
+
     inventoryAnalysisReceipts = movements;
-    inventoryAnalysisStocks = stocks;
+    inventoryAnalysisStocks = [];
     inventoryAnalysisLots = lots;
     inventoryAnalysisLotCosts = new Map(lotCosts.map(row=>[row.id,row]));
     inventoryAnalysisPurchaseOrders = purchaseOrders;
