@@ -39,3 +39,29 @@ test('advance delivery can bill only after the customer document is completed',(
   assert.equal(w.canBill({...closed,advanceDelivery:{...closed.advanceDelivery,customerOrderReference:''}}),false);
   assert.equal(w.canBill({...closed,advanceDelivery:{...closed.advanceDelivery,status:'APPROVED'}}),false);
 });
+
+
+test('item workflow keeps unresolved shortage in ordering even when some stock is available',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,deliveredQty:0,purchaseRequiredQty:7,purchaseOrderedQty:0}),'ordering');
+});
+
+test('item workflow moves an issued purchase or self order to arrival',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,purchaseRequiredQty:7,purchaseOrderedQty:7}),'arrival');
+  assert.equal(w.itemWorkCategory({orderedQty:10,purchaseRequiredQty:7,supplyOrderedQty:7}),'arrival');
+});
+
+test('item workflow treats stock-covered items as delivery and direct ship as ordering then arrival',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:3,purchaseRequiredQty:0}),'delivery');
+  assert.equal(w.itemWorkCategory({orderedQty:3,fulfillmentType:'DIRECT_SHIP',purchaseOrderedQty:0}),'ordering');
+  assert.equal(w.itemWorkCategory({orderedQty:3,fulfillmentType:'DIRECT_SHIP',purchaseOrderedQty:3}),'arrival');
+});
+
+test('item workflow moves delivered items through billing and complete',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:2,deliveredQty:2,isBilled:false}),'billing');
+  assert.equal(w.itemWorkCategory({orderedQty:2,deliveredQty:2,isBilled:true}),'complete');
+});
+
+test('item workflow closes cancelled or fully returned work',()=>{
+  assert.equal(w.itemWorkCategory({lifecycleStatus:'cancelled',orderedQty:2}),'closed');
+  assert.equal(w.itemWorkCategory({lifecycleStatus:'normal',orderedQty:2,returnedQty:2,effectiveDeliveredQty:0}),'closed');
+});
