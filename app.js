@@ -6493,7 +6493,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
                     const shortage=Math.max(0,Number(item.inventoryShortageQty??item.shortageQty??0));
                     reserveQty=Math.min(qty,shortage);reservedForSource=reserveQty;
                     const next=window.YushinFulfillment.applyReceipt(item,qty);
-                    items[itemIndex]={...next,reservedQty:Number(item.reservedQty??item.inventoryReservedQty??0)+reserveQty,inventoryReservedQty:Number(item.reservedQty??item.inventoryReservedQty??0)+reserveQty};
+                    items[itemIndex]={...next,reservedQty:next.reservedQty,inventoryReservedQty:next.reservedQty};
                     tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now});
                     tx.set(db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`),{
                         orderId:supply.orderId,itemId:supply.itemId,orderNo:order.orderNo||order.quoteNo||supply.orderId,
