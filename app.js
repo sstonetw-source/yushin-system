@@ -6678,27 +6678,31 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             }, { merge:true });
         }
 
-        if(sourceOrder&&sourceItem&&reserveFromReceipt>0){
+        if(sourceOrder&&sourceItem){
             const itemShortage=Math.max(0,Number(sourceItem.inventoryShortageQty||0));
+            const sourceReceivedQty=Math.min(Number(sourceItem.qty||sourceItem.orderedQty||0),Number(sourceItem.receivedQty||0)+qty);
             const nextSourceItems=sourceOrderItems.map((row,index)=>index===sourceItemIndex?{
-                ...row,inventoryReservedQty:Number(row.inventoryReservedQty||0)+reserveFromReceipt,
+                ...row,receivedQty:sourceReceivedQty,
+                inventoryReservedQty:Number(row.inventoryReservedQty||0)+reserveFromReceipt,
                 inventoryShortageQty:Math.max(0,itemShortage-reserveFromReceipt),inventoryProductKey:key,warehouseId
             }:row);
             const totalReserved=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryReservedQty||0),0);
             const totalShortage=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryShortageQty||0),0);
             tx.update(db.collection('orders').doc(item.orderId),{
                 items:nextSourceItems,itemCount:nextSourceItems.length,orderSchemaVersion:2,
-                inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage
+                inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now
             });
-            const sourceItemId=String(sourceItem.itemId||`item-${sourceItemIndex+1}`);
-            tx.set(db.collection('inventoryReservations').doc(`${item.orderId}__${sourceItemId}`),{
-                orderId:item.orderId,itemId:sourceItemId,orderNo:sourceOrder.orderNo||sourceOrder.quoteNo||item.orderId,
-                productKey:key,itemCode:sourceItem.itemCode||'',itemName:sourceItem.itemName||'',
-                customerName:sourceOrder.customerName||'',salesCode:sourceOrder.salesCode||'',
-                salesName:sourceOrder.salesName||'',orderDate:sourceOrder.orderDate||'',
-                quantity:Number(sourceItem.inventoryReservedQty||0)+reserveFromReceipt,
-                shortageQty:Math.max(0,itemShortage-reserveFromReceipt),status:'active',warehouseId,updatedAt:now
-            },{merge:true});
+            if(reserveFromReceipt>0){
+                const sourceItemId=String(sourceItem.itemId||`item-${sourceItemIndex+1}`);
+                tx.set(db.collection('inventoryReservations').doc(`${item.orderId}__${sourceItemId}`),{
+                    orderId:item.orderId,itemId:sourceItemId,orderNo:sourceOrder.orderNo||sourceOrder.quoteNo||item.orderId,
+                    productKey:key,itemCode:sourceItem.itemCode||'',itemName:sourceItem.itemName||'',
+                    customerName:sourceOrder.customerName||'',salesCode:sourceOrder.salesCode||'',
+                    salesName:sourceOrder.salesName||'',orderDate:sourceOrder.orderDate||'',
+                    quantity:Number(sourceItem.inventoryReservedQty||0)+reserveFromReceipt,
+                    shortageQty:Math.max(0,itemShortage-reserveFromReceipt),status:'active',warehouseId,updatedAt:now
+                },{merge:true});
+            }
         }
 
         // V2 authoritative receipt cost lives in Inventory Lot, not Product Master / moving average.
