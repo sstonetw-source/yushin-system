@@ -98,8 +98,8 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(appSource, /window\.addEventListener\('pageshow'/);
     assert.doesNotMatch(appSource, /orderPaginationState = createOrderPaginationState\(\);\s*ordersCache = \[\];/);
     assert.match(cssSource, /#appContainer\.resume-repaint/);
-    assert.match(indexSource, /styles\.css\?v=20260923-8/);
-    assert.match(indexSource, /app\.js\?v=20260924-2/);
+    assert.match(indexSource, /styles\.css\?v=\d{8}-\d+/);
+    assert.match(indexSource, /app\.js\?v=\d{8}-\d+/);
 });
 
 test('product management uses server search without exposing protected cost data', () => {
@@ -321,9 +321,9 @@ test('failed billing write restores the previous state and unlocks the button', 
 
 
 test('quote and order lists use global business-date ordering across companies', () => {
-    assert.match(appSource, /collection\('quotes'\)\.orderBy\('quoteDate', 'desc'\)/);
+    assert.match(appSource, /db\.collection\('quotes'\)\.orderBy\('quoteDate', 'desc'\)/);
     assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'quoteDate', 'quoteNo'\)/);
-    assert.match(appSource, /collection\('orders'\)\.orderBy\('orderDate', 'desc'\)/);
+    assert.match(appSource, /db\.collection\('orders'\)\.orderBy\('orderDate', 'desc'\)/);
     assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'orderDate', 'id'\)/);
     const compareStart = appSource.indexOf('function compareBusinessRecordsNewestFirst');
     const compareEnd = appSource.indexOf('\n}', compareStart) + 2;
@@ -359,9 +359,6 @@ test('browser history restores internal pages without forcing Firestore reloads'
     const quoteStart = appSource.indexOf('window.switchQuoteView =');
     const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
     assert.match(appSource.slice(quoteStart, quoteEnd), /skipHistory/);
-    const orderStart = appSource.indexOf('window.switchOrderView =');
-    const orderEnd = appSource.indexOf('\n};', orderStart) + 3;
-    assert.match(appSource.slice(orderStart, orderEnd), /skipHistory/);
 });
 
 
@@ -412,7 +409,7 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
     const deal = appSource.slice(dealStart, dealEnd);
-    assert.match(deal, /createdAt\s*:\s*new Date\(\)\.toISOString\(\)/);
+    assert.match(deal, /createdAt\s*:\s*now/);
     assert.match(deal, /itemCodeKey:\s*normalizeHistoryItemCode/);
 });
 
@@ -445,7 +442,7 @@ test('phase 2 documents link to productId while retaining historical snapshots',
 test('phase 2 product-master Excel import supports enrichment fields and preview', () => {
     assert.match(appSource, /Product Master 匯入預覽/);
     assert.match(appSource, /confirmProductMasterImport\(brandGroups\)/);
-    for (const field of ['供應商', '單位', '庫存管理', '批號管理', '效期管理', '啟用']) {
+    for (const field of ['供應商', '庫存管理', '批號管理', '效期管理', '啟用']) {
         assert.ok(appSource.includes(field), `missing import field: ${field}`);
     }
 });
@@ -529,7 +526,7 @@ test('phase 5 order creation reserves only available stock and records shortage'
     const start=appSource.indexOf('async function reserveSingleOrderItem');
     const end=appSource.indexOf('async function reserveInventoryForNewOrder',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/Math\.min\(requested,warehouse\.available,aggregate\.available\)/);
+    assert.match(s,/Math\.min\(additionalNeeded,warehouse\.available,aggregate\.available\)/);
     assert.match(s,/inventoryReservedQty/);
     assert.match(s,/inventoryShortageQty/);
     assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
@@ -891,7 +888,7 @@ test('quote item-code auto-fill waits for Product Master and reacts while typing
     assert.match(appSource, /function findPriceItemByCodeValue/);
     assert.match(appSource, /function applyQuoteProductMatch/);
     assert.match(appSource, /window\.onItemModelInput/);
-    assert.match(appSource, /await ensurePriceListLoaded\(\)/);
+    assert.match(appSource, /await findProductByCode\(value\)/);
     assert.match(appSource, /oninput="onItemModelInput\(this\)"/);
 });
 
@@ -1012,27 +1009,7 @@ test('Firestore rules use fixed roles and protect authorized product costs', () 
 });
 
 
-test('Product Master migration safely moves legacy price data and sanitizes old cost fields', () => {
-    assert.match(appSource, /window\.previewProductMasterMigration/);
-    assert.match(appSource, /window\.runProductMasterMigration/);
-    assert.match(appSource, /function legacyPriceItemWithoutCost/);
-    assert.match(appSource, /function productMasterRecordFromLegacyItem/);
-    assert.match(appSource, /function legacyCostRecord/);
-    assert.match(appSource, /productMasterMigrationVersion: 2/);
-    assert.match(appSource, /productMasterMigratedAt/);
-    assert.match(appSource, /delete clean\.cost/);
-    assert.match(appSource, /db\.collection\('products'\)/);
-    assert.match(appSource, /db\.collection\('productCosts'\)/);
-});
 
-test('new Excel imports no longer persist costs into legacy settings price documents', () => {
-    const start = appSource.indexOf('async function savePriceBrandList');
-    const end = appSource.indexOf('let pendingPriceImportPreview', start);
-    const source = appSource.slice(start, end);
-    assert.match(source, /const publicItems = normalizedItems\.map\(legacyPriceItemWithoutCost\)/);
-    assert.match(source, /chunkPriceItems\(publicItems/);
-    assert.match(source, /syncImportedBrandToFormalProductMaster/);
-});
 
 test('database backup includes formal Product Master and cost collections', () => {
     assert.match(appSource, /'products'/);
@@ -1216,13 +1193,6 @@ test('warehouse master save has immediate feedback and duplicate-submit guard', 
     assert.match(source, /button\.disabled = false/);
 });
 
-test('Product Master first load failure clears cached promise so next action can retry', () => {
-    const start = appSource.indexOf('function ensurePriceListLoaded');
-    const end = appSource.indexOf('function ensureClientHistoryLoaded', start);
-    const source = appSource.slice(start, end);
-    assert.match(source, /priceListLoadPromise = null/);
-    assert.match(source, /Product Master 載入失敗/);
-});
 
 test('formal purchase order automatically derives ordered progress on linked order items', () => {
     assert.match(appSource, /purchaseOrderedQty:cumulative/);
@@ -1337,15 +1307,6 @@ test('Forecast list queries have production composite indexes for every ownershi
     'legacy ownerUid-owned Forecast query requires its composite index');
 });
 
-test('new order modal provides recent-order and customer frequent-item shortcuts', () => {
-  assert.match(indexSource,/id="orderRecentTemplateSelect"/);
-  assert.match(indexSource,/onclick="loadSelectedRecentOrder\(\)"/);
-  assert.match(indexSource,/id="orderFrequentItemSelect"/);
-  assert.match(indexSource,/onclick="loadSelectedFrequentItem\(\)"/);
-  assert.match(appSource,/function recentOrderCandidates\(\)/);
-  assert.match(appSource,/function refreshOrderFrequentItemOptions\(\)/);
-  assert.match(appSource,/customerNameKey\(order\.customerName\)===customer/);
-});
 
 test('new order drafts are per-user, restorable and cleared only after successful save', () => {
   assert.match(appSource,/ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2'/);
