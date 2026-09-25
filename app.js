@@ -5346,7 +5346,10 @@ function orderItemWorkCategory(order, item) {
         purchaseRequiredQty:item.purchaseRequiredQty,
         inventoryShortageQty:item.inventoryShortageQty,
         purchaseOrderedQty:item.purchaseOrderedQty,
-        supplyOrderedQty:item.supplyOrderedQty
+        supplyOrderedQty:item.supplyOrderedQty,
+        receivedQty:item.receivedQty,
+        purchaseReceivedQty:item.purchaseReceivedQty,
+        supplyReceivedQty:item.supplyReceivedQty
     };
     if(window.YushinWorkflow?.itemWorkCategory)return window.YushinWorkflow.itemWorkCategory(input);
     // Keep the same deterministic fallback if the core module fails to load.
@@ -5355,8 +5358,9 @@ function orderItemWorkCategory(order, item) {
     if(qty>0&&Number(input.deliveredQty||0)>=qty)return input.isBilled?'complete':'billing';
     const required=input.fulfillmentType==='DIRECT_SHIP'?qty:Math.max(0,Number(input.purchaseRequiredQty??input.inventoryShortageQty??0));
     const ordered=Math.max(Number(input.purchaseOrderedQty||0),Number(input.supplyOrderedQty||0));
+    const received=Math.max(Number(input.receivedQty||0),Number(input.purchaseReceivedQty||0),Number(input.supplyReceivedQty||0));
     if(required>ordered)return 'ordering';
-    if(required>0)return 'arrival';
+    if(required>0&&received<required)return 'arrival';
     return 'delivery';
 }
 
