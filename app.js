@@ -5338,14 +5338,17 @@ function orderItemWorkCategory(order, item) {
     const qty=Number(item.orderedQty||item.qty||0);
     const dispatch=itemDispatchState(order,item);
     if(qty>0&&dispatch.delivered>=qty)return order.isBilled?'complete':'billing';
-    if(dispatch.reserved>dispatch.delivered||dispatch.prepared>dispatch.delivered)return 'delivery';
     const fulfillmentType=item.fulfillmentType||order.fulfillmentType||'WAREHOUSE';
     const required=fulfillmentType==='DIRECT_SHIP'
         ? qty
         : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0));
     const ordered=Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0));
+    // A partially reserved item is not fully ready: unresolved shortage stays in
+    // procurement/arrival until the shortage is replenished. Only then does the
+    // item advance to dispatch/delivery.
     if(required>ordered)return 'ordering';
     if(required>0)return 'arrival';
+    if(dispatch.reserved>dispatch.delivered||dispatch.prepared>dispatch.delivered)return 'delivery';
     return 'delivery';
 }
 
