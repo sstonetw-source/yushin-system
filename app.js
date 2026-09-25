@@ -5334,21 +5334,29 @@ function orderWorkCategory(order) {
 
 function orderItemWorkCategory(order, item) {
     const lifecycle=orderLifecycleInfo(order);
-    if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return 'closed';
-    const qty=Number(item.orderedQty||item.qty||0);
     const dispatch=itemDispatchState(order,item);
-    if(qty>0&&dispatch.delivered>=qty)return order.isBilled?'complete':'billing';
-    const fulfillmentType=item.fulfillmentType||order.fulfillmentType||'WAREHOUSE';
-    const required=fulfillmentType==='DIRECT_SHIP'
-        ? qty
-        : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0));
-    const ordered=Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0));
-    // A partially reserved item is not fully ready: unresolved shortage stays in
-    // procurement/arrival until the shortage is replenished. Only then does the
-    // item advance to dispatch/delivery.
+    const input={
+        lifecycleStatus:lifecycle.status,
+        returnedQty:lifecycle.returned,
+        effectiveDeliveredQty:lifecycle.effectiveDelivered,
+        orderedQty:item.orderedQty??item.qty,
+        deliveredQty:dispatch.delivered,
+        isBilled:!!order.isBilled,
+        fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+        purchaseRequiredQty:item.purchaseRequiredQty,
+        inventoryShortageQty:item.inventoryShortageQty,
+        purchaseOrderedQty:item.purchaseOrderedQty,
+        supplyOrderedQty:item.supplyOrderedQty
+    };
+    if(window.YushinWorkflow?.itemWorkCategory)return window.YushinWorkflow.itemWorkCategory(input);
+    // Keep the same deterministic fallback if the core module fails to load.
+    const qty=Math.max(0,Number(input.orderedQty)||0);
+    if(input.lifecycleStatus!=='normal'||(Number(input.returnedQty||0)>0&&Number(input.effectiveDeliveredQty||0)<=0))return 'closed';
+    if(qty>0&&Number(input.deliveredQty||0)>=qty)return input.isBilled?'complete':'billing';
+    const required=input.fulfillmentType==='DIRECT_SHIP'?qty:Math.max(0,Number(input.purchaseRequiredQty??input.inventoryShortageQty??0));
+    const ordered=Math.max(Number(input.purchaseOrderedQty||0),Number(input.supplyOrderedQty||0));
     if(required>ordered)return 'ordering';
     if(required>0)return 'arrival';
-    if(dispatch.reserved>dispatch.delivered||dispatch.prepared>dispatch.delivered)return 'delivery';
     return 'delivery';
 }
 
