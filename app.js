@@ -4441,11 +4441,13 @@ window.markQuoteAsDeal = async function(quoteNo) {
         if(cachedQuote)Object.assign(cachedQuote,dealClosedPatch);
         const searchedQuote=quoteHistorySearchResults.find(item=>item.quoteNo===quoteNo);
         if(searchedQuote)Object.assign(searchedQuote,dealClosedPatch);
+        writeAppDataCache('quotes', myQuotesCache);
         try { renderMyQuotesList(); } catch(refreshErr) { console.error('估價單畫面即時刷新失敗',refreshErr); }
 
         const reservationResults=await Promise.allSettled(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
         const reservationFailures=reservationResults.filter(result=>result.status==='rejected');
         ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache];
+        writeAppDataCache('orders', ordersCache);
         try { renderOrdersList(); } catch(refreshErr) { console.error('訂單畫面刷新失敗',refreshErr); }
         if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
             try { await loadPendingPurchaseOrders(true); } catch(refreshErr) { console.error('採購畫面刷新失敗',refreshErr); }
@@ -7738,6 +7740,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     optimisticEntries.push(logEntry);
     o.statusHistory = [...previous.statusHistory, ...optimisticEntries];
     pendingOrderStatusKeys.add(pendingKey);
+    writeAppDataCache('orders', ordersCache);
     renderOrdersList();
 
     let committed;
@@ -7778,12 +7781,14 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     }).then(() => {
         Object.assign(o, committed);
         pendingOrderStatusKeys.delete(pendingKey);
+        writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     }).catch(err => {
         Object.assign(o, previous);
         pendingOrderStatusKeys.delete(pendingKey);
         activeOrderWorkFilter = previousWorkFilter;
+        writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) {
             renderDeliveryModal();
@@ -7805,10 +7810,12 @@ window.updateOrderInvoiceDate = function(orderId, value) {
     };
     order.invoiceDate = value;
     order.fieldEditHistory = [...(order.fieldEditHistory || []), history];
+    writeAppDataCache('orders', ordersCache);
     renderOrdersList();
     db.collection('orders').doc(orderId).update({ invoiceDate: value, updatedAt: history.at, fieldEditHistory: firebase.firestore.FieldValue.arrayUnion(history) }).catch(err => {
         order.invoiceDate = previous;
         order.fieldEditHistory = (order.fieldEditHistory || []).filter(item => item !== history);
+        writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         alert('更新開票日期失敗，已還原：' + err.message);
     });
