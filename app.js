@@ -6154,7 +6154,7 @@ async function loadPurchaseOrderPage(reset) {
         if (poListCursor) query = query.startAfter(poListCursor);
         const [snapshot,supplySnapshot] = await Promise.all([
             query.get(),
-            db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT).get()
+            db.collection('supplyOrders').where('type','==','SALES_SELF_ORDER').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT).get()
         ]);
         supplyReceivingCache=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
         if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return;
