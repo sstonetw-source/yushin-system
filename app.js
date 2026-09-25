@@ -1473,6 +1473,7 @@ window.renderForecastList = function() {
                 <button type="button" class="btn-small btn-secondary" onclick="createQuoteFromForecast('${escapeAttr(item.id)}')">轉估價</button>
                 <button type="button" class="btn-small btn-secondary" onclick="createOrderFromForecast('${escapeAttr(item.id)}')">轉訂單</button>
             ` : ''}
+            ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="btn-small danger-menu-item" onclick="permanentlyDeleteForecast('${escapeAttr(item.id)}')">永久刪除</button>` : ''}
         `;
 
         row.innerHTML = `
@@ -1681,6 +1682,53 @@ window.saveForecast = async function() {
             button.innerText = '儲存';
         }
     }
+};
+
+window.permanentlyDeleteForecast = async function(id) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const item=forecastCache.find(row=>row.id===id);
+    if(!confirm(`永久刪除 Forecast「${item?.customerName||id}」及其進度紀錄？此操作無法復原。`))return;
+    try{
+        await deleteCollectionInBatches(`forecasts/${id}/progress`);
+        await db.collection('forecasts').doc(id).delete();
+        forecastCache=forecastCache.filter(row=>row.id!==id);
+        forecastHistorySearchResults=forecastHistorySearchResults.filter(row=>row.id!==id);
+        renderForecastList();
+    }catch(err){alert('永久刪除失敗：'+(err.message||err));}
+};
+
+window.permanentlyDeleteQuote = async function(quoteNo) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    if(!confirm(`永久刪除估價單「${quoteNo}」？此操作無法復原；已建立的 Forecast／訂單不會連帶刪除。`))return;
+    try{
+        await db.collection('quotes').doc(quoteNo).delete();
+        myQuotesCache=myQuotesCache.filter(row=>row.quoteNo!==quoteNo);
+        quoteHistorySearchResults=quoteHistorySearchResults.filter(row=>row.quoteNo!==quoteNo);
+        renderMyQuotesList();
+    }catch(err){alert('永久刪除失敗：'+(err.message||err));}
+};
+
+window.permanentlyDeleteOrder = async function(orderId) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const order=ordersCache.find(row=>row.id===orderId);
+    if(!order)return alert('找不到這筆訂單，請重新整理。');
+    const hasFlow=savedDeliveryRecords(order).length>0||savedReturnRecords(order).length>0||
+        normalizedOrderItems(order).some(item=>Number(item.purchaseOrderedQty||0)>0||Number(item.purchaseReceivedQty||item.receivedQty||0)>0);
+    if(hasFlow)return alert('這筆訂單已有採購／到貨／送貨／退貨紀錄。為避免庫存帳失真，請使用「系統初始化」清除整批測試資料，或先處理相關流程。');
+    if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？系統會先釋放未使用的庫存占用。此操作無法復原。`))return;
+    try{
+        if(normalizedOrderStatus(order)!=='cancelled'){
+            await db.runTransaction(async tx=>{
+                const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);
+                if(!snap.exists)throw new Error('找不到這筆訂單。');
+                await adjustInventoryReservationForLifecycle(tx,orderId,{id:orderId,...snap.data()},'cancelled',deliveryActor());
+            });
+        }
+        const refs=normalizedOrderItems(order).map((item,index)=>db.collection('inventoryReservations').doc(`${orderId}__${String(item.itemId||`item-${index+1}`)}`));
+        refs.push(reservationDocRef(orderId));
+        const batch=db.batch();refs.forEach(ref=>batch.delete(ref));batch.delete(db.collection('orders').doc(orderId));await batch.commit();
+        ordersCache=ordersCache.filter(row=>row.id!==orderId);orderHistorySearchResults=orderHistorySearchResults.filter(row=>row.id!==orderId);renderOrdersList();
+    }catch(err){alert('永久刪除失敗：'+(err.message||err));}
 };
 
 window.openForecastProgressModal = function(id) {
@@ -4075,6 +4123,7 @@ window.renderMyQuotesList = function() {
                     <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
                     ${canEditPage('forecast') ? `<button type="button" class="btn-small btn-secondary" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">Forecast</button>` : ''}
                     ${actionBtn}
+                    ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="btn-small danger-menu-item" onclick="permanentlyDeleteQuote('${escapeAttr(q.quoteNo)}')">永久刪除</button>` : ''}
                 </div>
             </td>
         `;
@@ -5928,6 +5977,7 @@ window.renderOrdersList = function() {
                             ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
+                            ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteOrder('${escapeAttr(o.id)}')">永久刪除</button>` : ''}
                         </div>
                     </details>
                 </div>
@@ -11980,103 +12030,6 @@ function systemAuditProductKey(record = {}) {
     return String(record.productKey || record.productId || '').trim();
 }
 
-function orderNeedsV2Migration(order = {}) {
-    return Number(order.orderSchemaVersion || 0) !== 2
-        || !Array.isArray(order.items)
-        || !order.items.length
-        || !order.ownerUid;
-}
-
-function orderV2MigrationPatch(order = {}, usersByCode = new Map(), usersByName = new Map()) {
-    const items = normalizedOrderItems(order);
-    const salesCode = String(order.salesCode || salesCodeForName(order.salesName) || '').trim();
-    const salesNameKey = stripPhoneSuffix(order.salesName || '').trim();
-    const ownerUid = String(order.ownerUid || usersByCode.get(salesCode)?.uid || usersByName.get(salesNameKey)?.uid || '').trim();
-    const next = {
-        ...order,
-        items,
-        itemCount: items.length,
-        orderSchemaVersion: 2,
-        salesCode,
-        ownerUid
-    };
-    return {
-        items,
-        itemCount: items.length,
-        orderSchemaVersion: 2,
-        salesCode,
-        ownerUid,
-        ...orderWorkIndexFields(next),
-        schemaMigratedAt: new Date().toISOString(),
-        schemaMigratedBy: currentUser?.uid || ''
-    };
-}
-
-window.previewOrderV2Migration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以檢查訂單 V2。');
-    const button = document.getElementById('orderV2PreviewBtn');
-    const execute = document.getElementById('orderV2MigrateBtn');
-    const status = document.getElementById('orderV2MigrationStatus');
-    if (!button || button.disabled) return;
-    button.disabled = true;
-    if (execute) execute.style.display = 'none';
-    if (status) status.textContent = '正在分頁檢查訂單格式…';
-    try {
-        const [orders, users] = await Promise.all([readCollectionForMigration('orders'), readCollectionInBatches('users')]);
-        const usersByCode = new Map(users.filter(u => u.code).map(u => [String(u.code).trim(), u]));
-        const usersByName = new Map(users.filter(u => u.name).map(u => [stripPhoneSuffix(u.name).trim(), u]));
-        const targets = orders.filter(row => orderNeedsV2Migration(row.data));
-        const unresolvedOwners = targets.filter(row => {
-            const patch = orderV2MigrationPatch(row.data, usersByCode, usersByName);
-            return !patch.ownerUid;
-        });
-        window._orderV2MigrationPlan = { targets, usersByCode, usersByName, unresolvedOwners };
-        if (status) status.textContent = `檢查完成：共 ${orders.length} 筆訂單，需升級 ${targets.length} 筆；其中 ${unresolvedOwners.length} 筆無法判定 ownerUid。` +
-            (unresolvedOwners.length ? '\n請先補齊無法判定的資料歸屬，暫不允許執行升級。' : '\n資料歸屬完整，可執行 V2 升級。');
-        if (execute) execute.style.display = targets.length && !unresolvedOwners.length ? '' : 'none';
-    } catch (err) {
-        console.error('檢查訂單 V2 失敗：', err);
-        if (status) status.textContent = '檢查失敗：' + (err.message || err);
-    } finally {
-        button.disabled = false;
-    }
-};
-
-window.executeOrderV2Migration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行訂單 V2 升級。');
-    const plan = window._orderV2MigrationPlan;
-    const button = document.getElementById('orderV2MigrateBtn');
-    const status = document.getElementById('orderV2MigrationStatus');
-    if (!plan?.targets?.length || plan.unresolvedOwners?.length || !button || button.disabled) return;
-    if (!confirm(`確定將 ${plan.targets.length} 筆訂單升級為 V2 格式嗎？\n這次只補齊訂單 items、ownerUid、salesCode、schema 與工作索引，不會修改庫存數量、採購或送貨紀錄。`)) return;
-    button.disabled = true;
-    let updated = 0;
-    try {
-        for (let start = 0; start < plan.targets.length; start += 200) {
-            const batch = db.batch();
-            plan.targets.slice(start, start + 200).forEach(row => {
-                batch.set(row.ref, orderV2MigrationPatch(row.data, plan.usersByCode, plan.usersByName), { merge:true });
-            });
-            await batch.commit();
-            updated += Math.min(200, plan.targets.length - start);
-            if (status) status.textContent = `升級中：${updated}/${plan.targets.length}…`;
-        }
-        ordersCache = [];
-        pendingPurchaseCache = [];
-        purchasingDispatchCache = [];
-        orderPaginationState = null;
-        loadedMainPages.delete('orders.list');
-        if (status) status.textContent = `完成：已將 ${updated} 筆訂單統一為 V2；訂單／採購快取已清除，下次進頁會讀取新版資料。`;
-        button.style.display = 'none';
-        window._orderV2MigrationPlan = null;
-    } catch (err) {
-        console.error('訂單 V2 升級失敗：', err);
-        if (status) status.textContent = `升級失敗：已完成 ${updated} 筆。請重新執行檢查後再繼續。\n${err.message || err}`;
-    } finally {
-        button.disabled = false;
-    }
-};
-
 window.rebuildOrderWorkIndexes = async function() {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以重建訂單工作索引。');
     const button=document.getElementById('orderWorkIndexRebuildBtn');
@@ -12109,6 +12062,135 @@ window.rebuildOrderWorkIndexes = async function() {
     }catch(err){
         console.error('重建訂單工作索引失敗：',err);
         if(status)status.textContent='失敗：'+(err.message||err);
+    }finally{button.disabled=false;}
+};
+
+const TEST_DATA_RESET_DELETE_COLLECTIONS = [
+    'quotes','orders','purchaseOrders','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
+    'receipts','dispatchRecords','deliveries','pendingInventoryItems','inventoryMovements','auditLogs'
+];
+let testDataResetPreviewState = null;
+
+async function countCollectionDocuments(name) {
+    let count = 0, cursor = null;
+    while (true) {
+        let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(500);
+        if (cursor) query = query.startAfter(cursor);
+        const snap = await query.get();
+        count += snap.size;
+        if (snap.size < 500) break;
+        cursor = snap.docs[snap.docs.length - 1];
+    }
+    return count;
+}
+
+async function deleteCollectionInBatches(name, onProgress) {
+    let deleted = 0;
+    while (true) {
+        const snap = await db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(300).get();
+        if (snap.empty) break;
+        const batch = db.batch();
+        snap.docs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        deleted += snap.size;
+        if (onProgress) onProgress(deleted);
+        if (snap.size < 300) break;
+    }
+    return deleted;
+}
+
+async function resetStockCollection(name, status) {
+    let cursor = null, updated = 0;
+    while (true) {
+        let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(300);
+        if (cursor) query = query.startAfter(cursor);
+        const snap = await query.get();
+        if (snap.empty) break;
+        const batch = db.batch();
+        snap.docs.forEach(doc => batch.set(doc.ref, {
+            onHand:0, reserved:0, available:0, incoming:0, shortage:0,
+            updatedAt:new Date().toISOString(), resetBy:currentUser.uid
+        }, {merge:true}));
+        await batch.commit();
+        updated += snap.size;
+        if (status) status.textContent = `庫存歸零中：${name} ${updated} 筆…`;
+        if (snap.size < 300) break;
+        cursor = snap.docs[snap.docs.length - 1];
+    }
+    return updated;
+}
+
+window.previewTestDataReset = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有真正的管理員可以執行系統初始化。');
+    const button=document.getElementById('testDataResetPreviewBtn');
+    const preview=document.getElementById('testDataResetPreview');
+    const wrap=document.getElementById('testDataResetConfirmWrap');
+    const status=document.getElementById('testDataResetStatus');
+    if(!button||button.disabled)return;
+    button.disabled=true;if(wrap)wrap.style.display='none';if(status)status.textContent='';
+    try{
+        const counts={};
+        for(const name of [...TEST_DATA_RESET_DELETE_COLLECTIONS,'forecasts','inventory','warehouseStocks']){
+            if(preview)preview.textContent=`正在檢查 ${name}…`;
+            counts[name]=await countCollectionDocuments(name);
+        }
+        const forecasts=await readCollectionInBatches('forecasts');
+        let progressCount=0;
+        for(const forecast of forecasts){
+            progressCount += await countCollectionDocuments(`forecasts/${forecast.id}/progress`);
+        }
+        counts.forecastProgress=progressCount;
+        testDataResetPreviewState={counts,checkedAt:new Date().toISOString()};
+        const deleteTotal=TEST_DATA_RESET_DELETE_COLLECTIONS.reduce((sum,name)=>sum+(counts[name]||0),0)+(counts.forecasts||0)+progressCount;
+        if(preview)preview.textContent=
+            `待永久刪除：${deleteTotal} 筆營運文件\n`+
+            `估價單 ${counts.quotes||0}、Forecast ${counts.forecasts||0}（進度 ${progressCount}）、訂單 ${counts.orders||0}、採購單 ${counts.purchaseOrders||0}、供應／自購 ${counts.supplyOrders||0}\n`+
+            `庫存交易相關 ${deleteTotal-(counts.quotes||0)-(counts.forecasts||0)-progressCount-(counts.orders||0)-(counts.purchaseOrders||0)-(counts.supplyOrders||0)} 筆\n`+
+            `另將 inventory ${counts.inventory||0} 筆、warehouseStocks ${counts.warehouseStocks||0} 筆數量歸零。\nMaster Data、帳號、角色、倉庫與系統設定保留。`;
+        if(wrap)wrap.style.display='';
+    }catch(err){
+        console.error('檢查測試資料失敗：',err);
+        if(preview)preview.textContent='檢查失敗：'+(err.message||err);
+        testDataResetPreviewState=null;
+    }finally{button.disabled=false;}
+};
+
+window.executeTestDataReset = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有真正的管理員可以執行系統初始化。');
+    const input=document.getElementById('testDataResetConfirmInput');
+    const button=document.getElementById('testDataResetExecuteBtn');
+    const status=document.getElementById('testDataResetStatus');
+    if(!testDataResetPreviewState)return alert('請先執行「檢查待清除資料」。');
+    if((input?.value||'').trim()!=='清除所有測試資料')return alert('確認文字不正確。');
+    if(!confirm('最後確認：永久清除所有測試營運資料並將庫存歸零？此操作無法復原。'))return;
+    button.disabled=true;
+    try{
+        const forecasts=await readCollectionInBatches('forecasts');
+        for(let i=0;i<forecasts.length;i++){
+            const forecast=forecasts[i];
+            if(status)status.textContent=`清除 Forecast 進度 ${i+1}/${forecasts.length}…`;
+            await deleteCollectionInBatches(`forecasts/${forecast.id}/progress`);
+        }
+        for(const name of TEST_DATA_RESET_DELETE_COLLECTIONS){
+            if(status)status.textContent=`清除 ${name}…`;
+            await deleteCollectionInBatches(name,n=>{if(status)status.textContent=`清除 ${name}：已刪除 ${n} 筆…`;});
+        }
+        await deleteCollectionInBatches('forecasts');
+        await resetStockCollection('inventory',status);
+        await resetStockCollection('warehouseStocks',status);
+
+        myQuotesCache=[]; quoteHistorySearchResults=[]; forecastCache=[]; forecastHistorySearchResults=[];
+        ordersCache=[]; orderHistorySearchResults=[]; pendingPurchaseCache=[]; purchasingDispatchCache=[];
+        poListCache=[]; supplyReceivingCache=[]; inventoryCache=[]; inventoryMovementsCache=[]; pendingInventoryCache=[];
+        orderPaginationState=null; loadedMainPages.clear();
+        testDataResetPreviewState=null;
+        if(input)input.value='';
+        document.getElementById('testDataResetConfirmWrap').style.display='none';
+        document.getElementById('testDataResetPreview').textContent='';
+        if(status)status.textContent='初始化完成：測試營運資料已清除，庫存與分倉數量已歸零。重新整理後即可從零開始正式使用。';
+    }catch(err){
+        console.error('系統初始化失敗：',err);
+        if(status)status.textContent='初始化中斷：'+(err.message||err)+'\n請不要繼續建立新資料，先重新檢查剩餘資料後再執行一次。';
     }finally{button.disabled=false;}
 };
 
