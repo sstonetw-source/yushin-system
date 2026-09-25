@@ -5332,8 +5332,33 @@ function orderWorkCategory(order) {
     return 'ordering';
 }
 
+function orderItemWorkCategory(order, item) {
+    const lifecycle=orderLifecycleInfo(order);
+    if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return 'closed';
+    const qty=Number(item.orderedQty||item.qty||0);
+    const dispatch=itemDispatchState(order,item);
+    if(qty>0&&dispatch.delivered>=qty)return order.isBilled?'complete':'billing';
+    if(dispatch.reserved>dispatch.delivered||dispatch.prepared>dispatch.delivered)return 'delivery';
+    const fulfillmentType=item.fulfillmentType||order.fulfillmentType||'WAREHOUSE';
+    const required=fulfillmentType==='DIRECT_SHIP'
+        ? qty
+        : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0));
+    const ordered=Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0));
+    if(required>ordered)return 'ordering';
+    if(required>0)return 'arrival';
+    return 'delivery';
+}
+
+function orderWorkCategories(order) {
+    const lifecycle=orderLifecycleInfo(order);
+    if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return ['closed'];
+    const categories=[...new Set(normalizedOrderItems(order).map(item=>orderItemWorkCategory(order,item)))];
+    if(!categories.length)return [orderWorkCategory(order)];
+    return categories;
+}
+
 function orderWorkStatusInfo(order) {
-    const category=orderWorkCategory(order);
+    const categories=orderWorkCategories(order);
     const map={
         ordering:{label:'待採購',css:'pending'},
         arrival:{label:'待到貨',css:'pending'},
@@ -5342,15 +5367,28 @@ function orderWorkStatusInfo(order) {
         complete:{label:'已完成',css:'complete'},
         closed:{label:orderLifecycleInfo(order).label,css:'invalid'}
     };
-    return map[category]||{label:'待採購',css:'pending'};
+    const active=categories.filter(category=>category!=='complete');
+    const shown=active.length?active:categories;
+    return {
+        label:shown.map(category=>map[category]?.label).filter(Boolean).join('／')||'待採購',
+        css:shown.length===1?(map[shown[0]]?.css||'pending'):'partial'
+    };
+}
+
+function orderItemWorkAmount(order, item, category) {
+    const qty=Number(item.orderedQty||item.qty||0);
+    const totalQty=orderQuantity(order);
+    const unitSales=Number(item.unitPrice||item.salesPrice||0)||(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
+    const state=itemDispatchState(order,item);
+    if(category==='delivery')return Math.max(0,qty-state.delivered)*unitSales;
+    if(category==='billing'||category==='complete')return Math.min(qty,state.delivered)*unitSales;
+    return qty*unitSales;
 }
 
 function orderWorkAmount(order, category) {
-    const totalQty = orderQuantity(order);
-    const unitSales = totalQty ? salesAmount(order) / totalQty : (parseFloat(order.unitPrice) || 0);
-    if (category === 'delivery') return Math.max(0, totalQty - deliveredQuantity(order)) * unitSales;
-    if (category === 'billing' || category === 'complete') return orderLifecycleInfo(order).effectiveDelivered * unitSales;
-    return salesAmount(order);
+    return normalizedOrderItems(order)
+        .filter(item=>orderItemWorkCategory(order,item)===category)
+        .reduce((sum,item)=>sum+orderItemWorkAmount(order,item,category),0);
 }
 
 window.setOrderWorkFilter = function(filter) {
@@ -5369,12 +5407,13 @@ function renderOrderWorkCards(orders) {
     ];
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
     orders.forEach(order => {
-        const category = orderWorkCategory(order);
-        const amount = orderWorkAmount(order, category);
-        if (metrics[category] && orderMatchesWorkPeriod(order, category)) {
-            metrics[category].count++;
-            metrics[category].amount += amount;
-        }
+        normalizedOrderItems(order).forEach(item => {
+            const category=orderItemWorkCategory(order,item);
+            if(metrics[category]&&orderMatchesWorkPeriod(order,category)){
+                metrics[category].count++;
+                metrics[category].amount+=orderItemWorkAmount(order,item,category);
+            }
+        });
     });
     container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
 }
@@ -5795,9 +5834,9 @@ window.renderOrdersList = function() {
     renderOrderWorkCards(baseOrders);
 
     baseOrders.forEach(o => {
-        const category = orderWorkCategory(o);
-        if (activeOrderWorkFilter !== 'all' && category !== activeOrderWorkFilter) return;
-        if (!orderMatchesWorkPeriod(o, activeOrderWorkFilter === 'all' ? 'all' : category)) return;
+        const categories=orderWorkCategories(o);
+        if(activeOrderWorkFilter!=='all'&&!categories.includes(activeOrderWorkFilter))return;
+        if(!orderMatchesWorkPeriod(o,activeOrderWorkFilter==='all'?'all':activeOrderWorkFilter))return;
         shown++;
 
         const tr = document.createElement('tr');
