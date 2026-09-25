@@ -141,3 +141,11 @@ test('new order reservation persists derived work category index after item rese
     assert.match(app,/workCategories:categories/);
     assert.match(app,/Object\.assign\(updates,orderWorkIndexFields\(order\)\);\s*await db\.collection\('orders'\)\.doc\(orderId\)\.set\(updates,\{merge:true\}\)/);
 });
+
+
+test('purchasing state transitions refresh the derived order work index',()=>{
+    assert.match(app,/const nextOrderData=\{\.\.\.orderData,items:nextItems[\s\S]*?\.\.\.orderWorkIndexFields\(nextOrderData\)/);
+    assert.match(app,/savedOrder=\{\.\.\.order,items,itemCount:items\.length[\s\S]*?\.\.\.orderWorkIndexFields\(savedOrder\)/);
+    assert.match(app,/const nextOrder=\{\.\.\.order,items,itemCount:items\.length[\s\S]*?\.\.\.orderWorkIndexFields\(nextOrder\)/);
+    assert.match(app,/const nextSourceOrder=\{\.\.\.sourceOrder,items:nextSourceItems[\s\S]*?\.\.\.orderWorkIndexFields\(nextSourceOrder\)/);
+});
