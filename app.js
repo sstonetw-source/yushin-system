@@ -4711,8 +4711,8 @@ window.closeInventoryAdjustment = function() {
 };
 
 
-window.downloadInventoryImportTemplate=function(){
-    if(typeof XLSX==='undefined'){alert('Excel 元件尚未載入，請重新整理後再試。');return;}
+window.downloadInventoryImportTemplate=async function(){
+    try{await ensureXlsxLoaded();}catch(err){alert(err.message);return;}
     const rows=[{'貨號':'5000006','倉庫':'台北倉','數量':10,'實際單位成本':0,'批號':'','效期':'','備註':'範例列，可刪除'}];
     const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'庫存匯入');XLSX.writeFile(wb,'又鑫_庫存批量匯入範本.xlsx');
 };
@@ -12276,9 +12276,11 @@ async function confirmProductMasterImport(groups) {
 }
 
 
-window.downloadProductMasterTemplate = function() {
-    if (typeof XLSX === 'undefined') {
-        alert('Excel 元件尚未載入，請重新整理後再試。');
+window.downloadProductMasterTemplate = async function() {
+    try {
+        await ensureXlsxLoaded();
+    } catch (err) {
+        alert(err.message);
         return;
     }
     const headers = ['貨號','中文品名','英文品名','規格','產品線','類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
