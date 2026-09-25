@@ -6470,7 +6470,8 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const totalReserved=items.reduce((s,row)=>s+Number(row.reservedQty??row.inventoryReservedQty??0),0);
             const totalShortage=items.reduce((s,row)=>s+Number(row.shortageQty??row.inventoryShortageQty??0),0);
             const now=new Date().toISOString();
-            tx.update(orderRef,{items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now});
+            const nextOrder={...order,items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now};
+            tx.update(orderRef,{items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,...orderWorkIndexFields(nextOrder),updatedAt:now});
             tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
             tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
             tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
