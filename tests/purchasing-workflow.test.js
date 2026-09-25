@@ -121,3 +121,9 @@ test('purchase receipt synchronizes received quantity back to the source order i
     assert.match(app,/inventoryReservedQty:Number\(row\.inventoryReservedQty\|\|0\)\+reserveFromReceipt/);
     assert.match(app,/if\(reserveFromReceipt>0\)\{/);
 });
+
+
+test('self-order receipt uses fulfillment core receivedQty without adding it twice',()=>{
+    assert.match(app,/const next=window\.YushinFulfillment\.applyReceipt\(item,qty\);/);
+    assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
+});
