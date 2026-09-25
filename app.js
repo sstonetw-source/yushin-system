@@ -6148,7 +6148,7 @@ async function loadPurchaseOrderPage(reset) {
     const requestedRole = currentUserRole;
     updatePoLoadMoreButton();
     try {
-        let query = db.collection('purchaseOrders').where('receiptStatus','in',['PENDING','PARTIAL']).orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
+        let query = db.collection('purchaseOrders').where('receiptStatus','in',['pending','partial']).orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
         if (poListCursor) query = query.startAfter(poListCursor);
         const [snapshot,supplySnapshot] = await Promise.all([
             query.get(),
@@ -7273,6 +7273,7 @@ window.printPurchaseOrder = async function() {
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
         status: BUSINESS_STATUS.ACTIVE,
+        receiptStatus: 'pending',
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
         incomingRegistrationVersion:1,
         items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
