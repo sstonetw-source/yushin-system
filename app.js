@@ -4730,7 +4730,16 @@ async function loadWarehouseStocksForInventoryPage() {
 
 window.loadInventory=async function(reset=true){
  if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCursor=null;inventoryHasMore=true;warehouseStockCache=new Map();if(!inventoryCache.length){const cached=readAppDataCache('inventory');if(cached?.records?.length){inventoryCache=cached.records;renderInventoryList();}}} inventoryLoading=true;
- try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await q.get();if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];snap.forEach(d=>{const x={id:d.id,...d.data()};const i=inventoryCache.findIndex(v=>v.id===d.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
+ try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await q.get();if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];
+ const freshRows=snap.docs.map(d=>({id:d.id,...d.data()}));
+ if(reset){
+   // stale-while-revalidate：舊快取只負責先畫畫面；雲端第一頁成功後必須整頁取代，
+   // 否則已刪除／已不符合條件的舊庫存會永遠殘留在本機 cache。
+   inventoryCache=freshRows;
+ }else{
+   freshRows.forEach(x=>{const i=inventoryCache.findIndex(v=>v.id===x.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});
+ }
+ inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
  if(reset){
  const [m,pending,supplies]=await Promise.all([
  db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
