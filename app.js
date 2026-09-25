@@ -9156,7 +9156,9 @@ function collectOrderDraft() {
         procurementType:orderDraftFieldValue('orderProcurementType')||'PURCHASING_PO',
         fulfillmentType:orderDraftFieldValue('orderFulfillmentType')||'WAREHOUSE',warehouseId:'',
         transactionType:orderDraftFieldValue('orderTransactionType'),invoiceTitle:orderDraftFieldValue('orderInvoiceTitle'),
-        productId:window._orderModalProductId||'',items:newOrderDraftItems
+        productId:window._orderModalProductId||'',items:newOrderDraftItems,
+        sourceLink:window._orderModalSourceLink||null,
+        quoteContext:window._orderModalQuoteContext||null
     };
 }
 
@@ -9217,6 +9219,8 @@ window.restoreSavedOrderDraft=function(){
     restoringOrderDraft=true;
     try {
         requestedOrderOwnerUid = draft.ownerUid || '';
+        window._orderModalSourceLink = draft.sourceLink || null;
+        window._orderModalQuoteContext = draft.quoteContext || null;
         populateOrderOwnerSelect();
         document.getElementById('orderDateInput').value=draft.date||'';
         document.getElementById('orderCustomer').value=draft.customerName||'';
@@ -9426,8 +9430,13 @@ window.copyOrderAsNew = function(orderId) {
     saveOrderDraft();
 };
 
-window.closeOrderModal = function() {
+window.closeOrderModal = function(options = {}) {
     document.getElementById('orderModalOverlay').classList.remove('active');
+    if (!options.preserveSource) {
+        window._orderModalSourceLink = null;
+        window._orderModalQuoteContext = null;
+        window._orderModalProductId = '';
+    }
 };
 
 window.calcOrderTotal = function() {
@@ -9456,7 +9465,7 @@ window.saveNewOrder = function() {
         orderDate: document.getElementById('orderDateInput').value,
         createdAt: new Date().toISOString(),
         ...commercialCreatorFields(),
-        company: currentCompany || 'yushin',
+        company: window._orderModalQuoteContext?.company || currentCompany || 'yushin',
         customerName: document.getElementById('orderCustomer').value.trim(),
         customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
         brand: firstItem.brand,
@@ -9471,7 +9480,7 @@ window.saveNewOrder = function() {
         ...grossAmountMetadata(items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0)),
         transactionType: document.getElementById('orderTransactionType').value,
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
-        quoteNo: '',
+        quoteNo: window._orderModalQuoteContext?.quoteNo || '',
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
         productId: window._orderModalProductId || '',
         salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || currentUserName || '',
@@ -9573,7 +9582,7 @@ window.saveNewOrder = function() {
             }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
         }
         window._orderModalSourceLink = null; window._orderModalProductId = ''; window._orderModalQuoteContext = null;
-        closeOrderModal();
+        closeOrderModal({ preserveSource:true });
         // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
         ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
             .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
