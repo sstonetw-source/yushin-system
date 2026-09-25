@@ -100,4 +100,5 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /const itemStatus=orderItemWorkCategory\(o,item\)/);
     assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
     assert.match(app, /<span class="order-progress-badge">品項狀態<\\\/span>/);
+    assert.match(app, /if\(required>ordered\)return 'ordering';[\s\S]*if\(required>0\)return 'arrival';[\s\S]*if\(dispatch\.reserved>dispatch\.delivered\|\|dispatch\.prepared>dispatch\.delivered\)return 'delivery';/);
 });
