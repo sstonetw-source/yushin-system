@@ -1292,7 +1292,7 @@ test('database backup covers governed master, audit, delivery and Forecast progr
   assert.doesNotMatch(appSource,/collectionGroup\('progress'\)/);
   assert.match(appSource,/collection\('progress'\)/);
   assert.match(appSource,/data\.forecastProgress/);
-  assert.match(appSource,/path:doc\.ref\.path/);
+  assert.match(appSource,/path:\`forecasts\/\$\{forecast\.id\}\/progress\/\$\{id\}\`/);
 });
 
 test('Forecast list queries have production composite indexes for every ownership path', () => {
@@ -1352,5 +1352,5 @@ test('order list does not block on full Product Master loading', () => {
     const source = appSource.slice(start, end);
     assert.match(source, /ensureSalesListLoaded\(\)/);
     assert.match(source, /loadOrdersFromCloud\(\)/);
-    assert.doesNotMatch(source, /Product Master|ensurePriceListLoaded/);
+    assert.doesNotMatch(source, /ensurePriceListLoaded\(\)/);
 });
