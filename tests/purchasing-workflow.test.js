@@ -127,3 +127,10 @@ test('self-order receipt uses fulfillment core receivedQty without adding it twi
     assert.match(app,/const next=window\.YushinFulfillment\.applyReceipt\(item,qty\);/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
 });
+
+
+test('self-order receipt keeps reservation from fulfillment core without adding reserveQty twice',()=>{
+    assert.match(app,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty,inventoryReservedQty:next\.reservedQty\}/);
+    assert.doesNotMatch(app,/reservedQty:Number\(item\.reservedQty\?\?item\.inventoryReservedQty\?\?0\)\+reserveQty/);
+    assert.match(app,/reserved:inv\.reserved\+reserveQty/);
+});
