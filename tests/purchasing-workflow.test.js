@@ -158,3 +158,16 @@ test('order lifecycle, delivery and return mutations refresh work category index
     assert.ok(deliverySync>=3,'all delivery mutation paths should refresh the work index');
     assert.ok(returnSync>=2,'all return mutation paths should refresh the work index');
 });
+
+
+test('purchasing queues use derived server-side work category queries',()=>{
+    assert.match(app,/where\('workCategories','array-contains','ordering'\)/);
+    assert.match(app,/where\('workCategories','array-contains','delivery'\)/);
+    assert.match(app,/where\('receiptStatus','in',\['pending','partial'\]\)/);
+    assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
+});
+
+test('shortage allocation and admin rebuild maintain work indexes',()=>{
+    assert.match(app,/allocateFreeReceiptStockToShortages[\s\S]*?orderWorkIndexFields\(nextOrder\)/);
+    assert.match(app,/window\.rebuildOrderWorkIndexes = async function/);
+});
