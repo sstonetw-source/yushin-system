@@ -20,7 +20,7 @@ test('purchasing has three item-level work queues and no legacy number function'
     assert.match(html, /id="purchaseCountOrdering"/);
     assert.match(html, /id="purchaseCountReceiving"/);
     assert.match(html, /id="purchaseCountDispatch"/);
-    assert.match(app, /switchPurchasingView\('ordering'\)/);
+    assert.match(app, /switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
     assert.match(app, /loadPendingPurchaseOrders\(true\)/);
     assert.match(app, /loadMyPurchaseOrders\(\)/);
     assert.match(app, /loadPurchasingDispatchOrders\(true\)/);
