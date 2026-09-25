@@ -11937,6 +11937,41 @@ function systemAuditProductKey(record = {}) {
     return String(record.productKey || record.productId || '').trim();
 }
 
+window.rebuildOrderWorkIndexes = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以重建訂單工作索引。');
+    const button=document.getElementById('orderWorkIndexRebuildBtn');
+    const status=document.getElementById('orderWorkIndexRebuildStatus');
+    if(!button||button.disabled)return;
+    button.disabled=true;
+    let scanned=0,updated=0,cursor=null;
+    try{
+        while(true){
+            let query=db.collection('orders').orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
+            if(cursor)query=query.startAfter(cursor);
+            const snap=await query.get();
+            if(snap.empty)break;
+            for(let start=0;start<snap.docs.length;start+=400){
+                const batch=db.batch();
+                snap.docs.slice(start,start+400).forEach(doc=>{
+                    const order={id:doc.id,...doc.data()};
+                    batch.update(doc.ref,orderWorkIndexFields(order));
+                    updated++;
+                });
+                await batch.commit();
+            }
+            scanned+=snap.size;
+            cursor=snap.docs[snap.docs.length-1];
+            if(status)status.textContent=`處理中：已掃描 ${scanned} 筆、更新 ${updated} 筆…`;
+            if(snap.size<200)break;
+        }
+        if(status)status.textContent=`完成：已重建 ${updated} 筆訂單工作索引。`;
+        pendingPurchaseCache=[];purchasingDispatchCache=[];
+    }catch(err){
+        console.error('重建訂單工作索引失敗：',err);
+        if(status)status.textContent='失敗：'+(err.message||err);
+    }finally{button.disabled=false;}
+};
+
 window.runSystemDataAudit = async function() {
     if (trueUserRole !== 'admin') return;
     const button = document.getElementById('systemDataAuditBtn');
