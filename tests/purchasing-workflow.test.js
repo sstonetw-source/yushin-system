@@ -103,7 +103,7 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /orderItemWorkCategory\(order,item\)==='delivery'&&itemDispatchState\(order,item\)\.pending>0/);
     assert.match(app, /<span class="order-progress-badge">品項狀態<\/span>/);
     assert.match(app, /YushinWorkflow\?\.itemWorkCategory/);
-    assert.match(app, /if\(required>ordered\)return 'ordering';[\s\S]*if\(required>0\)return 'arrival';[\s\S]*return 'delivery';/);
+    assert.match(app, /if\(required>ordered\)return 'ordering';[\s\S]*if\\(required>0&&received<required\\)return 'arrival';[\s\S]*return 'delivery';/);
 });
 
 
@@ -170,4 +170,16 @@ test('purchasing queues use derived server-side work category queries',()=>{
 test('shortage allocation and admin rebuild maintain work indexes',()=>{
     assert.match(app,/allocateFreeReceiptStockToShortages[\s\S]*?orderWorkIndexFields\(nextOrder\)/);
     assert.match(app,/window\.rebuildOrderWorkIndexes = async function/);
+});
+
+
+test('quote cancellation and legacy delivery cleanup refresh work category index',()=>{
+    assert.match(app,/const cancelledOrder = \{\.\.\.order,status:'cancelled'[\s\S]*?orderWorkIndexFields\(cancelledOrder\)/);
+    assert.match(app,/clearLegacyDelivery[\s\S]*?Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\)/);
+});
+
+test('receiving queue includes sales self orders and new POs start pending',()=>{
+    assert.match(app,/receiptStatus: 'pending'/);
+    assert.match(app,/supplyReceivingCache=supplySnapshot\.docs\.map/);
+    assert.match(app,/業務自行訂購/);
 });
