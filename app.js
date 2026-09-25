@@ -4048,12 +4048,12 @@ async function loadMyQuotesPage(reset) {
     }
     if (reset || !myQuotesPaginationState) {
         myQuotesPaginationState = createMyQuotesPaginationState();
-        myQuotesCache = [];
     }
     myQuotesPageLoading = true;
     const requestedRole = currentUserRole;
     updateMyQuotesLoadMoreButton();
-    const records = new Map(myQuotesCache.map(quote => [quote.id, quote]));
+    // 重新整理時保留目前畫面，背景抓到新資料後再一次替換，避免每次先清空造成長時間白畫面。
+    const records = new Map(reset ? [] : myQuotesCache.map(quote => [quote.id, quote]));
     let remainingReads = DEFAULT_LIST_LIMIT;
     try {
         while (remainingReads > 0 && myQuotesPaginationState.sourceIndex < myQuotesPaginationState.sources.length) {
@@ -4347,7 +4347,6 @@ window.markQuoteAsDeal = async function(quoteNo) {
         alert(reservationFailures.length
             ? `已成交並建立 ${created.length} 筆獨立訂單；其中 ${reservationFailures.length} 筆庫存保留需重新整理後重試。`
             : `已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並同步至訂單／採購流程。`);
-        loadMyQuotesFromCloud();
     } catch(err){alert('匯入失敗：'+err.message);}
     finally{endActionButton(button,buttonState);}
 };
@@ -4439,7 +4438,6 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
         renderMyQuotesList();
 
         alert('成交狀態已取消；相關訂單已保留並標記為取消，預留庫存已同步釋放。');
-        loadMyQuotesFromCloud();
 
     } catch (err) {
         alert('取消失敗：' + err.message);
