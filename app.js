@@ -5473,28 +5473,14 @@ function createOrderPaginationState() {
             exhausted: false,
             query: () => db.collection('orders').where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
         });
-    } else {
-        if (currentUserCode) {
-            sources.push({
-                cursor: null,
-                exhausted: false,
-                query: () => db.collection('orders').where('salesCode', '==', currentUserCode).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
-            });
-        }
-        if (currentUser?.uid) {
-            sources.push({
-                cursor: null,
-                exhausted: false,
-                query: () => db.collection('orders').where('ownerUid', '==', currentUser.uid).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
-            });
-        }
-        if (currentUserName) {
-            sources.push({
-                cursor: null,
-                exhausted: false,
-                query: () => db.collection('orders').where('salesName', '==', currentUserName).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
-            });
-        }
+    } else if (currentUser?.uid) {
+        // 新版訂單一律寫入 ownerUid。近期列表以 Firebase UID 為唯一權威歸屬，
+        // 避免每次進頁為了相容舊 salesCode / salesName 而串行執行 2～3 個重複 Query。
+        sources.push({
+            cursor: null,
+            exhausted: false,
+            query: () => db.collection('orders').where('ownerUid', '==', currentUser.uid).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
+        });
     }
     return { sources, sourceIndex: 0 };
 }
