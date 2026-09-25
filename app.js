@@ -6196,12 +6196,10 @@ window.renderPoList = function() {
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
         items.forEach((item,itemIndex)=>{
-            const received=receivedQuantityForPoItem(po,itemIndex);
-            const ordered=Number(item.qty||0);
-            const complete=received>=ordered;
-            const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+            const receipt=poItemReceiptProgress(po,item,itemIndex);
+            const {received,ordered,complete,directShip}=receipt;
             // 「待到貨」完全以單一品項為單位：已完成或原廠直送品項不留在待到貨清單。
-            if (purchasingView === 'receiving' && (complete || directShip)) return;
+            if (purchasingView === 'receiving' && (complete || directShip || receipt.remaining<=0)) return;
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
             const tr = document.createElement('tr');
@@ -6277,13 +6275,20 @@ function receivedQuantityForPoItem(po, itemIndex) {
         .filter(r => Number(r.itemIndex) === Number(itemIndex))
         .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
 }
+function poItemReceiptProgress(po,item,itemIndex) {
+    const ordered=Math.max(0,Number(item?.qty||0));
+    const directShip=(item?.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+    const received=directShip?0:Math.min(ordered,Math.max(0,receivedQuantityForPoItem(po,itemIndex)));
+    const remaining=directShip?0:Math.max(0,ordered-received);
+    return {ordered,received,remaining,complete:ordered>0&&!directShip&&received>=ordered,directShip};
+}
 function poReceiptProgress(po) {
     const allItems = purchaseItemsFromSavedPo(po);
-    const warehouseRows = allItems.map((item,index)=>({item,index}))
-        .filter(row => (row.item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
+    const rows=allItems.map((item,index)=>poItemReceiptProgress(po,item,index));
+    const warehouseRows=rows.filter(row=>!row.directShip);
     if (!warehouseRows.length) return { ordered:0, received:0, remaining:0, complete:false, directShipOnly:allItems.length>0 };
-    const ordered = warehouseRows.reduce((s,row)=>s+Number(row.item.qty||0),0);
-    const received = warehouseRows.reduce((s,row)=>s+Math.min(Number(row.item.qty||0), receivedQuantityForPoItem(po,row.index)),0);
+    const ordered=warehouseRows.reduce((s,row)=>s+row.ordered,0);
+    const received=warehouseRows.reduce((s,row)=>s+row.received,0);
     return { ordered, received, remaining:Math.max(0,ordered-received), complete:ordered>0&&received>=ordered, directShipOnly:false };
 }
 function poIncomingKey(item) {
