@@ -537,6 +537,38 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "workCategories",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "orderDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "purchaseOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "receiptStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "poNo",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
