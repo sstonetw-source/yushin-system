@@ -1256,16 +1256,6 @@
             </div>
 </div>
 
-            <h4 style="margin-top:28px;">訂單 V2 格式整理</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="orderV2PreviewBtn" onclick="previewOrderV2Migration()">檢查訂單 V2</button>
-                <button id="orderV2MigrateBtn" onclick="executeOrderV2Migration()" style="display:none;">執行 V2 升級</button>
-                <span style="font-size:12px;color:#666;">
-                    先唯讀檢查舊訂單，再將可安全判定歸屬的資料統一為 items[]、ownerUid、salesCode、orderSchemaVersion 2；不修改庫存數量、採購或送貨紀錄。
-                </span>
-                <div id="orderV2MigrationStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-            </div>
-
             <h4 style="margin-top:28px;">訂單工作索引</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="orderWorkIndexRebuildBtn" onclick="rebuildOrderWorkIndexes()">重建訂單工作索引</button>
@@ -1273,6 +1263,21 @@
                     重新依每筆訂單目前的品項、採購、到貨、送貨與核銷狀態建立 workCategories。每次讀取 200 筆並分批寫入；目前資料為測試資料時可直接執行。
                 </span>
                 <div id="orderWorkIndexRebuildStatus" style="margin-top:8px;font-size:13px;"></div>
+            </div>
+
+            <h4 style="margin-top:28px;color:#b42318;">系統初始化／清除測試營運資料</h4>
+            <div class="toolbar no-print" style="display:block;border:1px solid #f0b4ae;padding:12px;border-radius:8px;">
+                <button id="testDataResetPreviewBtn" type="button" onclick="previewTestDataReset()">檢查待清除資料</button>
+                <div id="testDataResetPreview" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
+                <div id="testDataResetConfirmWrap" style="display:none;margin-top:12px;">
+                    <label for="testDataResetConfirmInput">確認執行時請輸入 <strong>清除所有測試資料</strong></label>
+                    <input id="testDataResetConfirmInput" type="text" autocomplete="off" placeholder="清除所有測試資料" style="margin:6px 8px 6px 0;">
+                    <button id="testDataResetExecuteBtn" type="button" class="btn-danger" onclick="executeTestDataReset()">永久清除並初始化</button>
+                </div>
+                <div id="testDataResetStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
+                <span style="display:block;margin-top:8px;font-size:12px;color:#666;">
+                    僅真正管理員可執行。清除估價單、Forecast、訂單、採購、庫存交易／占用／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、Product／Supplier／Brand／Customer Master、倉庫與系統設定。
+                </span>
             </div>
 
             <h4 style="margin-top:28px;">系統資料檢查</h4>
