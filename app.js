@@ -2652,7 +2652,8 @@ async function loadSupplierWarehouseMasters(force = false) {
     }).catch(err => {
         supplierWarehouseLoadPromise = null;
         console.warn('讀取供應商／倉庫主檔失敗：', err);
-        return { suppliers:[], mappings:[], warehouses:[] };
+        // 已有快取時繼續使用，避免短暫斷線讓下拉選單突然變空。
+        return { suppliers:supplierMasterCache, mappings:supplierMappingCache, warehouses:warehouseMasterCache };
     });
     return supplierWarehouseLoadPromise;
 }
@@ -2847,8 +2848,9 @@ function loadBrandMaster() {
             .filter(item => item.name && item.active !== false);
         return brandMasterCache;
     }).catch(err => {
+        // 暫時失敗時保留既有資料，但不要永久記住失敗結果；下次需要時可重新連線。
         console.warn('讀取 Brand Master 失敗，暫時沿用既有廠牌設定：', err);
-        brandMasterCache = [];
+        brandMasterLoadPromise = null;
         return brandMasterCache;
     });
     return brandMasterLoadPromise;
