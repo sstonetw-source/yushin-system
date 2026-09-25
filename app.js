@@ -2233,9 +2233,12 @@ window.createOrderFromForecast = async function(id) {
 
         if (!confirm(`此 Forecast 含 ${items.length} 個品項，將拆成 ${items.length} 筆獨立訂單。確定繼續？`)) return;
         await createForecastOrdersDirectly(forecast, items);
+        writeAppDataCache('orders', ordersCache);
         renderOrdersList();
-        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) await loadPendingPurchaseOrders(true);
         alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單。`);
+        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
+            loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
+        }
     } catch (err) {
         console.error('Forecast 轉訂單失敗', err);
         alert('Forecast 轉訂單失敗：' + err.message);
@@ -4449,12 +4452,12 @@ window.markQuoteAsDeal = async function(quoteNo) {
         ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache];
         writeAppDataCache('orders', ordersCache);
         try { renderOrdersList(); } catch(refreshErr) { console.error('訂單畫面刷新失敗',refreshErr); }
-        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
-            try { await loadPendingPurchaseOrders(true); } catch(refreshErr) { console.error('採購畫面刷新失敗',refreshErr); }
-        }
         alert(reservationFailures.length
             ? `已成交並建立 ${created.length} 筆獨立訂單；其中 ${reservationFailures.length} 筆庫存保留需重新整理後重試。`
             : `已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並同步至訂單／採購流程。`);
+        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
+            loadPendingPurchaseOrders(true).catch(refreshErr => console.error('成交後採購背景刷新失敗',refreshErr));
+        }
     } catch(err){alert('匯入失敗：'+err.message);}
     finally{endActionButton(button,buttonState);}
 };
@@ -5071,8 +5074,8 @@ window.saveInventoryAdjustmentBatch = async function() {
         });
       }
       closeInventoryAdjustment();
-      await loadInventory(true);
       alert(`已完成 ${rows.length} 筆庫存異動。`);
+      loadInventory(true).catch(refreshErr => console.error('庫存異動後背景刷新失敗', refreshErr));
     }catch(e){alert('庫存異動失敗：'+e.message);}
     finally{if(button){button.disabled=false;button.textContent='確認儲存';}}
 };
