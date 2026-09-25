@@ -441,6 +441,7 @@ window.addEventListener('DOMContentLoaded', () => {
             currentUserName = '';
             currentUserPhone = '';
             currentUserCode = '';
+            lastShowAppInitKey = '';
             showLoginScreen();
         }
     });
@@ -651,8 +652,16 @@ function showApp() {
         appInitialized = true;
         initDate();
     }
-    if (activeMainKey && canAccessPage(activeMainKey)) initializePageData(activeMainKey);
+    if (activeMainKey && canAccessPage(activeMainKey)) {
+        const initKey=`${currentUser?.uid||''}:${currentUserRole||''}:${activeMainKey}`;
+        if (lastShowAppInitKey !== initKey) {
+            lastShowAppInitKey = initKey;
+            initializePageData(activeMainKey);
+        }
+    }
 }
+
+let lastShowAppInitKey = '';
 
 function initializePageData(mainKey) {
     if (mainKey === 'forecast') ensureSalesListLoaded().then(() => loadForecasts(true));
