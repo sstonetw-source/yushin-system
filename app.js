@@ -6264,6 +6264,8 @@ let purchasingDispatchCursor = null;
 let purchasingDispatchHasMore = true;
 let purchasingDispatchLoading = false;
 
+const purchasingViewLoaded = new Set();
+
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
     if (!['ordering', 'receiving', 'dispatch'].includes(view)) return;
@@ -6282,17 +6284,35 @@ window.switchPurchasingView = function(view, tab) {
         const cached=readAppDataCache('purchase-pending');
         if(!pendingPurchaseCache.length && cached?.records?.length) pendingPurchaseCache=cached.records;
         renderPendingPurchaseOrders();
-        loadPendingPurchaseOrders(true);
+        if (!purchasingViewLoaded.has('ordering')) {
+            purchasingViewLoaded.add('ordering');
+            loadPendingPurchaseOrders(true).catch(err => {
+                purchasingViewLoaded.delete('ordering');
+                console.error('待採購首次載入失敗：', err);
+            });
+        }
     } else if (view === 'receiving') {
         const cached=readAppDataCache('purchase-receiving');
         if(!poListCache.length && cached?.records?.length) poListCache=cached.records;
         renderPoList();
-        loadMyPurchaseOrders();
+        if (!purchasingViewLoaded.has('receiving')) {
+            purchasingViewLoaded.add('receiving');
+            Promise.resolve(loadMyPurchaseOrders()).catch(err => {
+                purchasingViewLoaded.delete('receiving');
+                console.error('待到貨首次載入失敗：', err);
+            });
+        }
     } else {
         const cached=readAppDataCache('purchase-dispatch');
         if(!purchasingDispatchCache.length && cached?.records?.length) purchasingDispatchCache=cached.records;
         renderPurchasingDispatchOrders();
-        loadPurchasingDispatchOrders(true);
+        if (!purchasingViewLoaded.has('dispatch')) {
+            purchasingViewLoaded.add('dispatch');
+            Promise.resolve(loadPurchasingDispatchOrders(true)).catch(err => {
+                purchasingViewLoaded.delete('dispatch');
+                console.error('待打單首次載入失敗：', err);
+            });
+        }
     }
 };
 
