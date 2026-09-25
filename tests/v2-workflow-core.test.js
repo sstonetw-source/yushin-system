@@ -65,3 +65,10 @@ test('item workflow closes cancelled or fully returned work',()=>{
   assert.equal(w.itemWorkCategory({lifecycleStatus:'cancelled',orderedQty:2}),'closed');
   assert.equal(w.itemWorkCategory({lifecycleStatus:'normal',orderedQty:2,returnedQty:2,effectiveDeliveredQty:0}),'closed');
 });
+
+
+test('item workflow moves fully received purchased items to delivery',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,purchaseRequiredQty:7,purchaseOrderedQty:7,receivedQty:3}),'arrival');
+  assert.equal(w.itemWorkCategory({orderedQty:10,purchaseRequiredQty:7,purchaseOrderedQty:7,receivedQty:7}),'delivery');
+  assert.equal(w.itemWorkCategory({orderedQty:3,fulfillmentType:'DIRECT_SHIP',purchaseOrderedQty:3,receivedQty:3}),'delivery');
+});
