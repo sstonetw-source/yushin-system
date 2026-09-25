@@ -39,17 +39,6 @@ if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
-// 某些公司／行動網路、Proxy 或瀏覽器環境會讓 Firestore WebChannel 長連線反覆 transport error。
-// 本系統沒有 onSnapshot 即時監聽需求，啟用官方 long-polling 自動偵測可在 WebChannel 不穩時切換較相容的傳輸方式。
-try {
-    db.settings({
-        experimentalAutoDetectLongPolling: true,
-        useFetchStreams: false
-    });
-} catch (err) {
-    console.warn('Firestore 相容連線設定未套用：', err);
-}
-
 if (APP_ENVIRONMENT === 'preview') {
     document.documentElement.dataset.appEnvironment = 'preview';
     window.addEventListener('DOMContentLoaded', () => {
@@ -141,7 +130,7 @@ function applyUserProfile(data={}) {
     mustChangePassword=!!data.mustChangePassword;
 }
 const DEFAULT_LIST_LIMIT = 50;
-const FIRESTORE_READ_TIMEOUT_MS = 8000;
+const FIRESTORE_READ_TIMEOUT_MS = 15000;
 const DEFAULT_CURRENCY = 'TWD';
 const DEFAULT_TAX_RATE = 0.05;
 const BUSINESS_STATUS = Object.freeze({
@@ -435,6 +424,15 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
             }).catch(err => {
                 console.error('讀取登入帳號資料失敗：', err);
+                // Auth 仍有效且已有本機 profile 時，Firestore 暫時離線不能把使用者踢回登入頁。
+                // 保留既有畫面；所有真正的資料寫入仍會由 Firestore / Rules 驗證。
+                if (cachedProfile && firebase.auth().currentUser?.uid === user.uid) {
+                    applyUserProfile(cachedProfile);
+                    showApp();
+                    const authLabel=document.getElementById('authUserLabel');
+                    if(authLabel)authLabel.title='Firestore 暫時無法連線；目前使用已快取的帳號資料，連線恢復後會重新驗證。';
+                    return;
+                }
                 currentUserRole = null;
                 trueUserRole = null;
                 currentUserName = '';
