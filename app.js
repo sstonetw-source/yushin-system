@@ -9909,17 +9909,21 @@ window.deleteEquipment = function(eqId) {
     if (!eq) return;
     if (!confirm('確定要停用這台儀器嗎？既有維修／保養紀錄會保留，可由管理員後續恢復。')) return;
     const now = new Date().toISOString();
+    const previousList = [...equipmentList];
+    equipmentList = equipmentList.filter(item => item.id !== eqId);
+    writeAppDataCache('equipment', equipmentList);
+    renderEquipmentList();
+    closeEquipmentModal();
     db.collection('equipment').doc(eqId).set({
         active:false,
         disabledAt:now,
         disabledByUid:currentUser?.uid || '',
         disabledBy:currentUserName || currentUser?.email || '',
         updatedAt:now
-    }, { merge:true }).then(() => {
-        equipmentList = equipmentList.filter(item => item.id !== eqId);
+    }, { merge:true }).catch(err => {
+        equipmentList = previousList;
+        writeAppDataCache('equipment', equipmentList);
         renderEquipmentList();
-        closeEquipmentModal();
-    }).catch(err => {
         alert('停用失敗：' + err.message);
     });
 };
@@ -9949,9 +9953,18 @@ window.addEquipmentLogFromModal = function() {
         updates.lastServiceDate = date;
     }
 
-    db.collection('equipment').doc(currentEquipmentId).update(updates).then(() => {
-        loadEquipmentFromCloudThenReopen(currentEquipmentId);
-    }).catch(err => {
+    const previousLogs = [...(eq.logs || [])];
+    const previousLastServiceDate = eq.lastServiceDate || '';
+    Object.assign(eq, updates);
+    writeAppDataCache('equipment', equipmentList);
+    renderEquipmentList();
+    openEquipmentModal(currentEquipmentId);
+    db.collection('equipment').doc(currentEquipmentId).update(updates).catch(err => {
+        eq.logs = previousLogs;
+        eq.lastServiceDate = previousLastServiceDate;
+        writeAppDataCache('equipment', equipmentList);
+        renderEquipmentList();
+        openEquipmentModal(currentEquipmentId);
         alert('新增紀錄失敗：' + err.message);
     });
 };
@@ -9969,9 +9982,17 @@ window.quickAddMaintenanceLog = function(eqId) {
     const newLog = { date: dateStr, type: '保養', tech: '', desc: '' };
     const updatedLogs = [...(eq.logs || []), newLog];
 
-    db.collection('equipment').doc(eqId).update({ logs: updatedLogs, lastServiceDate: dateStr }).then(() => {
-        loadEquipmentFromCloud();
-    }).catch(err => {
+    const previousLogs = [...(eq.logs || [])];
+    const previousLastServiceDate = eq.lastServiceDate || '';
+    eq.logs = updatedLogs;
+    eq.lastServiceDate = dateStr;
+    writeAppDataCache('equipment', equipmentList);
+    renderEquipmentList();
+    db.collection('equipment').doc(eqId).update({ logs: updatedLogs, lastServiceDate: dateStr }).catch(err => {
+        eq.logs = previousLogs;
+        eq.lastServiceDate = previousLastServiceDate;
+        writeAppDataCache('equipment', equipmentList);
+        renderEquipmentList();
         alert('新增保養紀錄失敗：' + err.message);
     });
 };
@@ -9981,9 +10002,16 @@ window.deleteEquipmentLog = function(eqId, logIndex) {
     const eq = equipmentList.find(e => e.id === eqId);
     if (!eq) return;
     const updatedLogs = (eq.logs || []).filter((_, idx) => idx !== logIndex);
-    db.collection('equipment').doc(eqId).update({ logs: updatedLogs }).then(() => {
-        loadEquipmentFromCloudThenReopen(eqId);
-    }).catch(err => {
+    const previousLogs = [...(eq.logs || [])];
+    eq.logs = updatedLogs;
+    writeAppDataCache('equipment', equipmentList);
+    renderEquipmentList();
+    openEquipmentModal(eqId);
+    db.collection('equipment').doc(eqId).update({ logs: updatedLogs }).catch(err => {
+        eq.logs = previousLogs;
+        writeAppDataCache('equipment', equipmentList);
+        renderEquipmentList();
+        openEquipmentModal(eqId);
         alert('刪除失敗：' + err.message);
     });
 };
