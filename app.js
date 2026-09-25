@@ -6260,14 +6260,21 @@ async function loadPurchasingDispatchOrders(reset=true) {
         const snap=await firestoreReadWithTimeout(q.get(), '待打單訂單');
         if(!snap.empty)purchasingDispatchCursor=snap.docs[snap.docs.length-1];
         purchasingDispatchHasMore=snap.size===DEFAULT_LIST_LIMIT;
+        const freshOrders=[];
         snap.forEach(doc=>{
             const order={id:doc.id,...doc.data()};
             if(normalizedOrderStatus(order)!=='normal')return;
             const pendingItems=normalizedOrderItems(order).filter(item=>orderItemWorkCategory(order,item)==='delivery'&&itemDispatchState(order,item).pending>0);
-            if(!pendingItems.length)return;
-            const index=purchasingDispatchCache.findIndex(x=>x.id===order.id);
-            if(index>=0)purchasingDispatchCache[index]=order;else purchasingDispatchCache.push(order);
+            if(pendingItems.length)freshOrders.push(order);
         });
+        if(reset){
+            purchasingDispatchCache=freshOrders;
+        }else{
+            freshOrders.forEach(order=>{
+                const index=purchasingDispatchCache.findIndex(x=>x.id===order.id);
+                if(index>=0)purchasingDispatchCache[index]=order;else purchasingDispatchCache.push(order);
+            });
+        }
     } catch(err) {
         console.error('採購發貨清單載入失敗：',err);
         const status=document.getElementById('purchaseDispatchStatus');
@@ -6350,13 +6357,21 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         if (requestedRole !== currentUserRole || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
         if (!snapshot.empty) pendingPurchaseCursor = snapshot.docs[snapshot.docs.length - 1];
         pendingPurchaseHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
+        const freshOrders = [];
         snapshot.forEach(doc => {
             const order = { id:doc.id, ...doc.data() };
             if (order.status !== BUSINESS_STATUS.ACTIVE) return;
             if (!Array.isArray(order.workCategories) || !order.workCategories.includes('ordering')) return;
-            const index = pendingPurchaseCache.findIndex(row => row.id === order.id);
-            if (index >= 0) pendingPurchaseCache[index] = order; else pendingPurchaseCache.push(order);
+            freshOrders.push(order);
         });
+        if (reset) {
+            pendingPurchaseCache = freshOrders;
+        } else {
+            freshOrders.forEach(order => {
+                const index = pendingPurchaseCache.findIndex(row => row.id === order.id);
+                if (index >= 0) pendingPurchaseCache[index] = order; else pendingPurchaseCache.push(order);
+            });
+        }
     } catch (err) {
         pendingPurchaseError = `讀取失敗：${err.message}`;
         return;
@@ -6433,8 +6448,10 @@ async function loadPurchaseOrderPage(reset) {
         supplyReceivingCache=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
         if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return;
         if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
-        const records = new Map(poListCache.map(po => [po.id, po]));
-        snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
+        const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const records = new Map((reset ? [] : poListCache).map(po => [po.id, po]));
+        freshRecords.forEach(po => records.set(po.id, po));
+        // reset 時雲端結果完整取代 stale cache；Load More 才追加。
         poListCache = [...records.values()].sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
         poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
         writeAppDataCache('purchase-receiving', poListCache);
