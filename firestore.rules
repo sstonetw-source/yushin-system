@@ -305,7 +305,7 @@ service cloud.firestore {
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || (purchaser() && sameCommercialOwner() && preservesCreator());
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     match /forecasts/{id} {
@@ -313,7 +313,7 @@ service cloud.firestore {
       allow create: if (admin() || commercialDocumentOwner()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     match /forecasts/{forecastId}/progress/{progressId} {
@@ -322,7 +322,8 @@ service cloud.firestore {
       }
       allow read: if admin() || owns(parentForecast().data);
       allow create: if admin() || (commercialDocumentOwner() && owns(parentForecast().data));
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if admin();
     }
 
     match /orders/{id} {
@@ -334,7 +335,7 @@ service cloud.firestore {
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || purchaserOrderWorkflowUpdate()
         || warehouseOrderWorkflowUpdate();
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
@@ -342,7 +343,7 @@ service cloud.firestore {
       allow read: if admin() || purchaser() || warehouse();
       allow create: if canPurchase();
       allow update: if canPurchase() || warehousePurchaseReceiptUpdate();
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     // Unified source/order evidence: PURCHASING_PO, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
@@ -366,7 +367,7 @@ service cloud.firestore {
           && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.type == resource.data.type);
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     match /inventory/{id} {
@@ -396,7 +397,7 @@ service cloud.firestore {
         || (businessOwner() && owns(resource.data));
       allow create, update: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(request.resource.data));
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     match /inventoryLots/{id} {
@@ -405,7 +406,7 @@ service cloud.firestore {
       allow create: if canReceiveInventory() && !('unitCost' in request.resource.data);
       allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate())
         && !('unitCost' in request.resource.data);
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     // Actual receipt/lot cost is physically separated from operational lot data.
@@ -414,7 +415,7 @@ service cloud.firestore {
       allow read: if admin() || purchaser();
       allow create: if canReceiveInventory();
       allow update: if admin() || purchaser();
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     match /receipts/{id} {
@@ -423,7 +424,8 @@ service cloud.firestore {
       allow create: if canReceiveInventory()
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if admin();
     }
 
     // Purchaser records completion of the company's existing shipping paperwork.
@@ -431,7 +433,8 @@ service cloud.firestore {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
       allow create: if admin() || purchaser();
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if admin();
     }
 
     // Physical delivery is recorded by the responsible business owner.
@@ -440,13 +443,14 @@ service cloud.firestore {
         || (businessOwner() && owns(resource.data));
       allow create: if admin()
         || (businessOwner() && owns(request.resource.data));
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if admin();
     }
 
     match /pendingInventoryItems/{id} {
       allow read: if admin() || purchaser() || warehouse();
       allow create, update: if admin() || purchaser() || warehouse();
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     // Immutable stock ledger.
@@ -458,14 +462,16 @@ service cloud.firestore {
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if admin();
     }
 
     // Immutable operational audit trail.
     match /auditLogs/{id} {
       allow read: if admin() || (active() && resource.data.actorUid == request.auth.uid);
       allow create: if active() && request.resource.data.actorUid == request.auth.uid;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if admin();
     }
 
     match /equipment/{id} {
