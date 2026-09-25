@@ -5998,7 +5998,7 @@ async function loadPurchasingDispatchOrders(reset=true) {
     purchasingDispatchLoading=true;
     renderPurchasingDispatchOrders();
     try {
-        let q=db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT);
+        let q=db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE).where('workCategories','array-contains','delivery').orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT);
         if(purchasingDispatchCursor) q=q.startAfter(purchasingDispatchCursor);
         const snap=await q.get();
         if(!snap.empty)purchasingDispatchCursor=snap.docs[snap.docs.length-1];
@@ -6078,7 +6078,7 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     const requestedRole = currentUserRole;
     renderPendingPurchaseOrders();
     try {
-        let query = db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT);
+        let query = db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE).where('workCategories','array-contains','ordering').orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT);
         if (pendingPurchaseCursor) query = query.startAfter(pendingPurchaseCursor);
         const snapshot = await firestoreReadWithTimeout(query.get(), '待採購訂單');
         if (requestedRole !== currentUserRole || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
