@@ -5959,6 +5959,7 @@ let poListCache = [];
 let poListCursor = null;
 let poListHasMore = false;
 let poListPageLoading = false;
+let supplyReceivingCache = [];
 let purchasingView = 'ordering';
 let pendingPurchaseCursor = null;
 let pendingPurchaseHasMore = true;
@@ -6147,9 +6148,13 @@ async function loadPurchaseOrderPage(reset) {
     const requestedRole = currentUserRole;
     updatePoLoadMoreButton();
     try {
-        let query = db.collection('purchaseOrders').orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
+        let query = db.collection('purchaseOrders').where('receiptStatus','in',['PENDING','PARTIAL']).orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
         if (poListCursor) query = query.startAfter(poListCursor);
-        const snapshot = await query.get();
+        const [snapshot,supplySnapshot] = await Promise.all([
+            query.get(),
+            db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT).get()
+        ]);
+        supplyReceivingCache=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
         if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return;
         if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
         const records = new Map(poListCache.map(po => [po.id, po]));
@@ -6240,6 +6245,17 @@ window.renderPoList = function() {
             `;
             tbody.appendChild(tr);
         });
+    });
+
+    supplyReceivingCache.forEach(supply=>{
+        const ordered=Math.max(0,Number(supply.qty||0));
+        const received=Math.max(0,Number(supply.receivedQty||0));
+        const remaining=Math.max(0,ordered-received);
+        if(!remaining)return;
+        shown++;
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">業務自行訂購</td><td data-th="廠商">${escapeHtml(supply.vendorName||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">—</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">—</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">📥 到貨入庫</button></td>`;
+        tbody.appendChild(tr);
     });
 
     document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
