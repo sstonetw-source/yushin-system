@@ -39,6 +39,16 @@ if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
+// 某些公司／行動網路、Proxy 或瀏覽器環境會讓 Firestore WebChannel 長連線反覆 transport error。
+// 本系統沒有 onSnapshot 即時監聽需求，啟用官方 long-polling 自動偵測可在 WebChannel 不穩時切換較相容的傳輸方式。
+try {
+    db.settings({
+        experimentalAutoDetectLongPolling: true,
+        useFetchStreams: false
+    });
+} catch (err) {
+    console.warn('Firestore 相容連線設定未套用：', err);
+}
 
 if (APP_ENVIRONMENT === 'preview') {
     document.documentElement.dataset.appEnvironment = 'preview';
@@ -131,7 +141,7 @@ function applyUserProfile(data={}) {
     mustChangePassword=!!data.mustChangePassword;
 }
 const DEFAULT_LIST_LIMIT = 50;
-const FIRESTORE_READ_TIMEOUT_MS = 15000;
+const FIRESTORE_READ_TIMEOUT_MS = 8000;
 const DEFAULT_CURRENCY = 'TWD';
 const DEFAULT_TAX_RATE = 0.05;
 const BUSINESS_STATUS = Object.freeze({
