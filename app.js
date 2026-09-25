@@ -458,6 +458,16 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (firebase.auth().currentUser?.uid !== user.uid) return;
                 if (!doc.exists) throw new Error('找不到此 UID 對應的 users 文件');
                 const d = doc.data() || {};
+                // Firebase Auth 的 LOCAL session 會長期保留；帳號是否仍可使用由 users 文件控制。
+                // 管理員停用帳號後，即使裝置還保有 Auth session，也要在背景驗證時立即退出。
+                if (d.disabled === true || d.active === false) {
+                    try { localStorage.removeItem(userProfileCacheKey(user.uid)); } catch (_) {}
+                    clearAppDataCacheForCurrentUser();
+                    return firebase.auth().signOut().then(() => {
+                        const errorEl = document.getElementById('loginError');
+                        if (errorEl) errorEl.innerText = '此帳號已由管理員停用。';
+                    });
+                }
                 applyUserProfile(d);
                 writeCachedUserProfile(user.uid,d);
                 showApp();
@@ -993,6 +1003,28 @@ window.addEventListener('popstate', event => {
 let appBackgroundedAt = 0;
 let appResumeTimer = null;
 
+function revalidateCurrentUserAccess() {
+    const user = firebase.auth().currentUser;
+    if (!user) return Promise.resolve();
+    return db.collection('users').doc(user.uid).get().then(doc => {
+        if (firebase.auth().currentUser?.uid !== user.uid) return;
+        const d = doc.exists ? (doc.data() || {}) : null;
+        if (!d || d.disabled === true || d.active === false) {
+            try { localStorage.removeItem(userProfileCacheKey(user.uid)); } catch (_) {}
+            clearAppDataCacheForCurrentUser();
+            return firebase.auth().signOut().then(() => {
+                const errorEl = document.getElementById('loginError');
+                if (errorEl) errorEl.innerText = '此帳號已由管理員停用。';
+            });
+        }
+        applyUserProfile(d);
+        writeCachedUserProfile(user.uid, d);
+    }).catch(err => {
+        // 網路暫時失敗不登出：維持 Gmail 式長期登入，等下次恢復前景再驗證。
+        console.warn('背景驗證帳號狀態失敗：', err);
+    });
+}
+
 function recoverVisibleAppAfterResume() {
     if (document.visibilityState === 'hidden' || !appBackgroundedAt) return;
     const backgroundDuration = Date.now() - appBackgroundedAt;
@@ -1000,6 +1032,7 @@ function recoverVisibleAppAfterResume() {
     clearTimeout(appResumeTimer);
     appResumeTimer = setTimeout(() => {
         const appContainer = document.getElementById('appContainer');
+        if (currentUser && backgroundDuration >= 5000) revalidateCurrentUserAccess();
         if (currentUser && appContainer) {
             // 觸發一次很短的合成層重繪，修復部分 iOS Safari 從背景回來只顯示白色快照的情況。
             appContainer.classList.remove('resume-repaint');
