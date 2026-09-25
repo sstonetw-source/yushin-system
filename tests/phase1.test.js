@@ -1354,3 +1354,10 @@ test('order list does not block on full Product Master loading', () => {
     assert.match(source, /loadOrdersFromCloud\(\)/);
     assert.doesNotMatch(source, /ensurePriceListLoaded\(\)/);
 });
+
+
+test('cached session restore does not initialize the same active page twice',()=>{
+  assert.match(app,/let lastShowAppInitKey = '';/);
+  assert.match(app,/if \(lastShowAppInitKey !== initKey\) \{\s*lastShowAppInitKey = initKey;\s*initializePageData\(activeMainKey\);/);
+  assert.match(app,/lastShowAppInitKey = '';\s*showLoginScreen\(\);/);
+});
