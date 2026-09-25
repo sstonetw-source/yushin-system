@@ -4292,6 +4292,21 @@ window.markQuoteAsDeal = async function(quoteNo) {
             linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),...created.map(order=>documentLink(DOCUMENT_TYPES.ORDER,order.id,'created'))])
         });
         await batch.commit();
+
+        // Firestore 已成功建立訂單並標記成交後，立即更新本機估價單快取與畫面。
+        // 庫存 reservation／採購頁刷新可以繼續在後面執行，不應讓使用者等到全部完成才看到「已成交」。
+        const dealClosedPatch={
+            dealClosed:true,
+            dealClosedAt:todayStr,
+            status:BUSINESS_STATUS.COMPLETED,
+            linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),...created.map(order=>documentLink(DOCUMENT_TYPES.ORDER,order.id,'created'))])
+        };
+        const cachedQuote=myQuotesCache.find(item=>item.quoteNo===quoteNo);
+        if(cachedQuote)Object.assign(cachedQuote,dealClosedPatch);
+        const searchedQuote=quoteHistorySearchResults.find(item=>item.quoteNo===quoteNo);
+        if(searchedQuote)Object.assign(searchedQuote,dealClosedPatch);
+        try { renderMyQuotesList(); } catch(refreshErr) { console.error('估價單畫面即時刷新失敗',refreshErr); }
+
         const reservationResults=await Promise.allSettled(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
         const reservationFailures=reservationResults.filter(result=>result.status==='rejected');
         ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache];
