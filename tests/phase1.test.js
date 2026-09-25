@@ -268,6 +268,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => { throw new Error('billing must not depend on window.prompt'); }, alert: message => { throw new Error(message); },
         currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {},
+        orderWorkIndexFields: () => ({ workCategories:['complete'], workCategoryUpdatedAt:'2026-09-17T00:00:00.000Z' }),
         currentDeliveryOrderId: null, renderDeliveryModal: () => {}, renderOrderLifecycleModal: () => {},
         firebase: { firestore: { FieldValue: { arrayUnion: (...entries) => ({ entries }) } } },
         db: {
@@ -1332,8 +1333,8 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
 
 test('production HTML cache-busts local application assets after main deployments', () => {
   assert.match(indexSource,/styles\.css\?v=20260923-\d+/);
-  assert.match(indexSource,/modules\/workflow-core\.js\?v=20260923-\d+/);
-  assert.match(indexSource,/app\.js\?v=20260924-\d+/);
+  assert.match(indexSource,/modules\/workflow-core\.js\?v=20260925-\d+/);
+  assert.match(indexSource,/app\.js\?v=20260925-\d+/);
   assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-\d+/);
 });
 
@@ -1357,7 +1358,7 @@ test('order list does not block on full Product Master loading', () => {
 
 
 test('cached session restore does not initialize the same active page twice',()=>{
-  assert.match(app,/let lastShowAppInitKey = '';/);
-  assert.match(app,/if \(lastShowAppInitKey !== initKey\) \{\s*lastShowAppInitKey = initKey;\s*initializePageData\(activeMainKey\);/);
-  assert.match(app,/lastShowAppInitKey = '';\s*showLoginScreen\(\);/);
+  assert.match(appSource,/let lastShowAppInitKey = '';/);
+  assert.match(appSource,/if \(lastShowAppInitKey !== initKey\) \{\s*lastShowAppInitKey = initKey;\s*initializePageData\(activeMainKey\);/);
+  assert.match(appSource,/lastShowAppInitKey = '';\s*showLoginScreen\(\);/);
 });
