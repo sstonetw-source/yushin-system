@@ -97,4 +97,7 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /metrics\[category\]\.count\+\+/);
     assert.match(app, /categories\.includes\(activeOrderWorkFilter\)/);
     assert.match(app, /shown\.map\(category=>map\[category\]\?\.label\)/);
+    assert.match(app, /const itemStatus=orderItemWorkCategory\(o,item\)/);
+    assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
+    assert.match(app, /<span class="order-progress-badge">品項狀態<\\\/span>/);
 });
