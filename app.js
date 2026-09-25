@@ -4540,8 +4540,13 @@ window.searchBusinessProducts=async function(){
    ]);
    const map=new Map();[...(codeSnap.docs||[]),...(nameSnap.docs||[])].forEach(doc=>map.set(doc.id,{id:doc.id,...doc.data()}));
    const products=[...map.values()].slice(0,25);
-   const stockSnaps=await Promise.all(products.map(product=>db.collection('inventory').doc(encodeURIComponent(product.productId||product.id)).get()));
-   body.innerHTML=products.map((product,index)=>{const n=inventoryNumbers(stockSnaps[index]?.exists?stockSnaps[index].data():{});return `<tr><td>${escapeHtml(product.manufacturerPartNo||'')}</td><td>${escapeHtml(product.productName||'')}</td><td>${escapeHtml(product.brandName||'')}</td><td>${Number(product.listPrice||0).toLocaleString()}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td></tr>`;}).join('')||'<tr><td colspan="7">查無結果</td></tr>';
+   const inventoryIds=products.map(product=>encodeURIComponent(product.productId||product.id));
+   const stockById=new Map();
+   if(inventoryIds.length){
+     const stockSnap=await db.collection('inventory').where(firebase.firestore.FieldPath.documentId(),'in',inventoryIds).get();
+     stockSnap.docs.forEach(doc=>stockById.set(doc.id,doc.data()));
+   }
+   body.innerHTML=products.map(product=>{const inventoryId=encodeURIComponent(product.productId||product.id);const n=inventoryNumbers(stockById.get(inventoryId)||{});return `<tr><td>${escapeHtml(product.manufacturerPartNo||'')}</td><td>${escapeHtml(product.productName||'')}</td><td>${escapeHtml(product.brandName||'')}</td><td>${Number(product.listPrice||0).toLocaleString()}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td></tr>`;}).join('')||'<tr><td colspan="7">查無結果</td></tr>';
    if(wrap)wrap.style.display='';if(status)status.textContent=`完成，共 ${products.length} 筆`;
  }catch(err){if(status)status.textContent='查詢失敗';alert('產品查詢失敗：'+err.message);}
  finally{if(input)input.disabled=false;}
