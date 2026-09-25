@@ -8181,6 +8181,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
             await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
             const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -8355,6 +8356,7 @@ window.saveDeliveryRecord = async function() {
                     updates.deliveryRecords=records;
                 }
             }
+            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
@@ -8403,6 +8405,7 @@ window.deleteDeliveryRecord = async function(recordId) {
             const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty??targetItem.inventoryReservedQty??0),inventoryReservedQty:Number(targetItem.reservedQty??targetItem.inventoryReservedQty??0),deliveryRecords:itemRecords,isDelivered:false};
             await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
             const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
         });
