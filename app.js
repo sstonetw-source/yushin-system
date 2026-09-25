@@ -4513,7 +4513,7 @@ window.loadInventory=async function(reset=true){
  const [m,pending,supplies]=await Promise.all([
  db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
  db.collection('pendingInventoryItems').where('status','==','pending-arrival').limit(100).get(),
- db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(100).get().catch(()=>({docs:[]}))
+ db.collection('supplyOrders').where('type','==','SALES_SELF_ORDER').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(100).get().catch(()=>({docs:[]}))
  ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));pendingSupplyCache=supplies.docs.map(d=>({id:d.id,...d.data()}));
  }
  await loadWarehouseStocksForInventoryPage();
@@ -6835,7 +6835,7 @@ window.savePoReceiptBatch = async function() {
             canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
             loadPurchasingDispatchOrders(true)
         ]);
-        if (canAccessPage('inventory')) await loadInventory(true);
+        if (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active')) await loadInventory(true);
         closePoReceiptBatch();
         alert(`已完成 ${completed} 個品項的批量到貨入庫。`);
     } catch (err) {
@@ -6844,7 +6844,7 @@ window.savePoReceiptBatch = async function() {
             canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true).catch(()=>{}) : Promise.resolve(),
             loadPurchasingDispatchOrders(true).catch(()=>{})
         ]);
-        if (canAccessPage('inventory')) await loadInventory(true).catch(()=>{});
+        if (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active')) await loadInventory(true).catch(()=>{});
         if (completed > 0) {
             closePoReceiptBatch();
             alert(`已成功入庫 ${completed} 個品項；後續品項中斷：${err.message}\n已成功的資料不會重複入庫，請重新開啟訂購單處理剩餘數量。`);
