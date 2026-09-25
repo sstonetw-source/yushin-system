@@ -88,3 +88,13 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
     assert.equal(docs.get('pendingInventoryItems/W1__P1').incomingQty,3);
     assert.equal(records.length,2);
 });
+
+
+test('order work cards and filters use item-level work states', () => {
+    assert.match(app, /function orderItemWorkCategory\(order, item\)/);
+    assert.match(app, /function orderWorkCategories\(order\)/);
+    assert.match(app, /normalizedOrderItems\(order\)\.forEach\(item => \{/);
+    assert.match(app, /metrics\[category\]\.count\+\+/);
+    assert.match(app, /categories\.includes\(activeOrderWorkFilter\)/);
+    assert.match(app, /shown\.map\(category=>map\[category\]\?\.label\)/);
+});
