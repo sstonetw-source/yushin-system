@@ -113,3 +113,11 @@ test('purchase receiving queue calculates progress per PO item',()=>{
     assert.match(app,/receipt\.remaining<=0/);
     assert.match(app,/receivePurchaseOrderItem\('\$\{escapeAttr\(po\.id\)\}',\$\{itemIndex\}\)/);
 });
+
+
+test('purchase receipt synchronizes received quantity back to the source order item',()=>{
+    assert.match(app,/const sourceReceivedQty=Math\.min\(Number\(sourceItem\.qty\|\|sourceItem\.orderedQty\|\|0\),Number\(sourceItem\.receivedQty\|\|0\)\+qty\)/);
+    assert.match(app,/\.\.\.row,receivedQty:sourceReceivedQty,/);
+    assert.match(app,/inventoryReservedQty:Number\(row\.inventoryReservedQty\|\|0\)\+reserveFromReceipt/);
+    assert.match(app,/if\(reserveFromReceipt>0\)\{/);
+});
