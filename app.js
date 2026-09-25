@@ -662,8 +662,12 @@ function showApp() {
 }
 
 let lastShowAppInitKey = '';
+const loadedMainPages = new Set();
 
-function initializePageData(mainKey) {
+function initializePageData(mainKey, options = {}) {
+    const force = options.force === true;
+    if (!force && loadedMainPages.has(mainKey)) return;
+    loadedMainPages.add(mainKey);
     if (mainKey === 'forecast') ensureSalesListLoaded().then(() => loadForecasts(true));
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
@@ -918,6 +922,8 @@ window.switchViewRole = function(role) {
     if (trueUserRole !== 'admin') return;
     currentUserRole = role;
     // 先清掉前一個視角的分頁狀態，避免非同步查詢完成前短暫顯示不屬於新視角的資料。
+    loadedMainPages.clear();
+    lastShowAppInitKey = '';
     myQuotesCache = [];
     myQuotesPaginationState = null;
     ordersCache = [];
@@ -972,9 +978,9 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
     }
 
     if (tabId === 'inventory-system') {
-        if (!options.skipReload) loadInventory(true);
+        if (!options.skipReload) initializePageData('inventory');
     } else if (tabId === 'forecast-system') {
-        if (!options.skipReload) loadForecasts(true);
+        if (!options.skipReload) initializePageData('forecast');
     } else if (tabId === 'equipment-system') {
         if (!options.skipReload) initializePageData('equipment');
     } else if (tabId === 'product-system') {
