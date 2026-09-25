@@ -4302,6 +4302,7 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
                     at: cancelledAt
                 };
 
+                const cancelledOrder = {...order,status:'cancelled',orderStatus:'cancelled',orderStatusDate:cancelledDate,orderStatusReason:'來源估價單取消成交'};
                 transaction.update(orderRef, {
                     status: 'cancelled',
                     orderStatus: 'cancelled',
@@ -4310,6 +4311,7 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
                     cancelledAt,
                     cancelledBy: actor,
                     cancelReason: '來源估價單取消成交',
+                    ...orderWorkIndexFields(cancelledOrder),
                     orderLifecycleHistory:
                         firebase.firestore.FieldValue.arrayUnion(history),
                     linkedDocuments:
@@ -8450,7 +8452,9 @@ window.clearLegacyDelivery = async function() {
     const now = new Date().toISOString();
     const history = { action: 'clear_legacy_estimate', before: { isDelivered: true, estimatedDate: order.orderDate || '' }, after: null, by: deliveryActor(), at: now };
     try {
-        await db.collection('orders').doc(order.id).update({ isDelivered: false, deliveredQty: 0, deliveryRecords: [], deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now });
+        const updates={isDelivered:false,deliveredQty:0,deliveryRecords:[],deliveryHistory:firebase.firestore.FieldValue.arrayUnion(history),updatedAt:now};
+        Object.assign(updates,orderWorkIndexFields({...order,...updates}));
+        await db.collection('orders').doc(order.id).update(updates);
         order.isDelivered = false;
         order.deliveredQty = 0;
         order.deliveryRecords = [];
