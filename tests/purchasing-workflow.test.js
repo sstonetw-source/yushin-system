@@ -149,3 +149,12 @@ test('purchasing state transitions refresh the derived order work index',()=>{
     assert.match(app,/const nextOrder=\{\.\.\.order,items,itemCount:items\.length[\s\S]*?\.\.\.orderWorkIndexFields\(nextOrder\)/);
     assert.match(app,/const nextSourceOrder=\{\.\.\.sourceOrder,items:nextSourceItems[\s\S]*?\.\.\.orderWorkIndexFields\(nextSourceOrder\)/);
 });
+
+
+test('order lifecycle, delivery and return mutations refresh work category index',()=>{
+    assert.match(app,/Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\);/);
+    const deliverySync=(app.match(/orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)[\s\S]{0,160}deliveryHistory/g)||[]).length;
+    const returnSync=(app.match(/orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)[\s\S]{0,160}returnHistory/g)||[]).length;
+    assert.ok(deliverySync>=3,'all delivery mutation paths should refresh the work index');
+    assert.ok(returnSync>=2,'all return mutation paths should refresh the work index');
+});
