@@ -19,6 +19,29 @@
     CLOSED:'CLOSED'
   });
   function n(value){const number=Number(value);return Number.isFinite(number)?Math.max(0,number):0;}
+  const ITEM_WORK_CATEGORIES=Object.freeze({
+    ORDERING:'ordering',
+    ARRIVAL:'arrival',
+    DELIVERY:'delivery',
+    BILLING:'billing',
+    COMPLETE:'complete',
+    CLOSED:'closed'
+  });
+  function itemWorkCategory(input={}){
+    if(input.lifecycleStatus&&input.lifecycleStatus!=='normal')return ITEM_WORK_CATEGORIES.CLOSED;
+    if(n(input.returnedQty)>0&&n(input.effectiveDeliveredQty)<=0)return ITEM_WORK_CATEGORIES.CLOSED;
+    const qty=n(input.orderedQty??input.qty);
+    const delivered=n(input.deliveredQty);
+    if(qty>0&&delivered>=qty)return input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
+    const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
+    const required=fulfillmentType==='DIRECT_SHIP'
+      ? qty
+      : n(input.purchaseRequiredQty??input.inventoryShortageQty);
+    const ordered=Math.max(n(input.purchaseOrderedQty),n(input.supplyOrderedQty));
+    if(required>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
+    if(required>0)return ITEM_WORK_CATEGORIES.ARRIVAL;
+    return ITEM_WORK_CATEGORIES.DELIVERY;
+  }
   function normalizeSupplyAllocations(item={}){
     const orderedQty=n(item.orderedQty??item.qty);
     const source=Array.isArray(item.supplyAllocations)?item.supplyAllocations:[];
@@ -72,5 +95,5 @@
       && !!String(advance.customerOrderReference||'').trim()
       && !!advance.completedAt;
   }
-  return {SUPPLY_SOURCE_TYPES,RELEASE_MODES,ADVANCE_STATUSES,normalizeSupplyAllocations,validateSupplyAllocations,normalizeCommercialRelease,validateAdvanceRequest,canDeliver,canBill};
+  return {SUPPLY_SOURCE_TYPES,RELEASE_MODES,ADVANCE_STATUSES,ITEM_WORK_CATEGORIES,itemWorkCategory,normalizeSupplyAllocations,validateSupplyAllocations,normalizeCommercialRelease,validateAdvanceRequest,canDeliver,canBill};
 });
