@@ -12181,7 +12181,7 @@ window.executeTestDataReset = async function() {
 
         myQuotesCache=[]; quoteHistorySearchResults=[]; forecastCache=[]; forecastHistorySearchResults=[];
         ordersCache=[]; orderHistorySearchResults=[]; pendingPurchaseCache=[]; purchasingDispatchCache=[];
-        poListCache=[]; supplyReceivingCache=[]; inventoryCache=[]; inventoryMovementsCache=[]; pendingInventoryCache=[];
+        poListCache=[]; supplyReceivingCache=[]; inventoryCache=[]; pendingInventoryCache=[];
         orderPaginationState=null; loadedMainPages.clear();
         testDataResetPreviewState=null;
         if(input)input.value='';
