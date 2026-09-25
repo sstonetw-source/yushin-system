@@ -6133,9 +6133,11 @@ async function loadPurchasingDispatchOrders(reset=true) {
     purchasingDispatchLoading=true;
     renderPurchasingDispatchOrders();
     try {
-        let q=db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE).where('workCategories','array-contains','delivery').orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT);
+        // 與待採購清單一致：避免多條件 + orderBy 需要額外 Composite Index。
+        // 先快速取得近期訂單，再於前端判斷真正待打單的品項。
+        let q=db.collection('orders').orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT);
         if(purchasingDispatchCursor) q=q.startAfter(purchasingDispatchCursor);
-        const snap=await q.get();
+        const snap=await firestoreReadWithTimeout(q.get(), '待打單訂單');
         if(!snap.empty)purchasingDispatchCursor=snap.docs[snap.docs.length-1];
         purchasingDispatchHasMore=snap.size===DEFAULT_LIST_LIMIT;
         snap.forEach(doc=>{
@@ -6213,13 +6215,20 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     const requestedRole = currentUserRole;
     renderPendingPurchaseOrders();
     try {
-        let query = db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE).where('workCategories','array-contains','ordering').orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT);
+        // 採購頁只用 orderDate 做伺服器端排序／分頁，其餘工作狀態在已取回的近期 50 筆中篩選。
+        // 避免 status + array-contains + orderBy 形成 Composite Index 依賴，導致缺索引時整頁讀取失敗。
+        let query = db.collection('orders').orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT);
         if (pendingPurchaseCursor) query = query.startAfter(pendingPurchaseCursor);
         const snapshot = await firestoreReadWithTimeout(query.get(), '待採購訂單');
         if (requestedRole !== currentUserRole || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
         if (!snapshot.empty) pendingPurchaseCursor = snapshot.docs[snapshot.docs.length - 1];
         pendingPurchaseHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
-        snapshot.forEach(doc => pendingPurchaseCache.push({ id:doc.id, ...doc.data() }));
+        snapshot.forEach(doc => {
+            const order = { id:doc.id, ...doc.data() };
+            if (order.status !== BUSINESS_STATUS.ACTIVE) return;
+            if (!Array.isArray(order.workCategories) || !order.workCategories.includes('ordering')) return;
+            pendingPurchaseCache.push(order);
+        });
     } catch (err) {
         pendingPurchaseError = `讀取失敗：${err.message}`;
         return;
