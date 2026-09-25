@@ -5982,7 +5982,7 @@ async function loadPurchasingDispatchOrders(reset=true) {
         snap.forEach(doc=>{
             const order={id:doc.id,...doc.data()};
             if(normalizedOrderStatus(order)!=='normal')return;
-            const pendingItems=normalizedOrderItems(order).filter(item=>itemDispatchState(order,item).pending>0);
+            const pendingItems=normalizedOrderItems(order).filter(item=>orderItemWorkCategory(order,item)==='delivery'&&itemDispatchState(order,item).pending>0);
             if(!pendingItems.length)return;
             const index=purchasingDispatchCache.findIndex(x=>x.id===order.id);
             if(index>=0)purchasingDispatchCache[index]=order;else purchasingDispatchCache.push(order);
@@ -6005,7 +6005,7 @@ function renderPurchasingDispatchOrders() {
     if(!body)return;
     body.innerHTML='';
     purchasingDispatchCache.forEach(order=>{
-        const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>row.state.pending>0);
+        const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>orderItemWorkCategory(order,row.item)==='delivery'&&row.state.pending>0);
         pending.forEach(({item,state})=>{
             const tr=document.createElement('tr');
             tr.innerHTML=`<td>${escapeHtml(order.orderDate||'')}</td><td>${escapeHtml(order.orderNo||order.id)}</td><td>${escapeHtml(order.customerName||order.customer||'')}</td><td>${escapeHtml(order.salesName||'')}</td><td>${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td><button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button></td>`;
@@ -6019,7 +6019,11 @@ function renderPurchasingDispatchOrders() {
 
 function pendingPurchaseLines(order) {
     if (normalizedOrderStatus(order) !== 'normal') return [];
-    return purchaseItemsFromOrder(order);
+    const itemById=new Map(normalizedOrderItems(order).map(item=>[item.itemId,item]));
+    return purchaseItemsFromOrder(order).filter(line=>{
+        const sourceItem=itemById.get(line.itemId);
+        return sourceItem&&orderItemWorkCategory(order,sourceItem)==='ordering';
+    });
 }
 
 function renderPendingPurchaseOrders() {
