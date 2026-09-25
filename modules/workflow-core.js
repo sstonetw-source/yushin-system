@@ -38,8 +38,9 @@
       ? qty
       : n(input.purchaseRequiredQty??input.inventoryShortageQty);
     const ordered=Math.max(n(input.purchaseOrderedQty),n(input.supplyOrderedQty));
+    const received=Math.max(n(input.receivedQty),n(input.purchaseReceivedQty),n(input.supplyReceivedQty));
     if(required>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
-    if(required>0)return ITEM_WORK_CATEGORIES.ARRIVAL;
+    if(required>0&&received<required)return ITEM_WORK_CATEGORIES.ARRIVAL;
     return ITEM_WORK_CATEGORIES.DELIVERY;
   }
   function normalizeSupplyAllocations(item={}){
