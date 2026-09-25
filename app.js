@@ -7093,14 +7093,20 @@ window.savePoReceiptBatch = async function() {
         }else{
             for (const entry of entries){ await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate); completed++; }
         }
-        await loadMyPurchaseOrders();
-        await Promise.all([
-            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
-            loadPurchasingDispatchOrders(true)
-        ]);
-        if (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active')) await loadInventory(true);
+        // 核心入庫 transaction 已完成後就結束使用者等待；跨模組列表改成背景同步。
+        // 這些 reload 只是 UI refresh，不應延長「確認入庫」按鈕的完成時間。
         closePoReceiptBatch();
         alert(`已完成 ${completed} 個品項的批量到貨入庫。`);
+        Promise.allSettled([
+            loadMyPurchaseOrders(),
+            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
+            loadPurchasingDispatchOrders(true),
+            (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
+                ? loadInventory(true) : Promise.resolve()
+        ]).then(results => {
+            const failed=results.filter(result=>result.status==='rejected');
+            if(failed.length) console.warn('入庫完成後背景同步部分失敗：', failed.map(result=>result.reason));
+        });
     } catch (err) {
         await loadMyPurchaseOrders().catch(()=>{});
         await Promise.all([
