@@ -7483,6 +7483,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         if (field === 'isOrdered') updates.orderedBy = newValue ? actor : '';
         entries.push(logEntry);
         updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...entries);
+        Object.assign(updates,orderWorkIndexFields({...order,...updates}));
         transaction.update(ref, updates);
         committed = {
             isOrdered: updates.isOrdered !== undefined ? updates.isOrdered : order.isOrdered,
@@ -7834,6 +7835,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
                 updatedAt: history.at,
                 orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(history)
             };
+            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
         });
@@ -8524,6 +8526,7 @@ window.saveOrderLifecycleStatus = async function() {
                 orderStatus: nextStatus, orderStatusDate: date, orderStatusReason: reason,
                 orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(liveHistory), updatedAt: at
             };
+            Object.assign(updates,orderWorkIndexFields({...liveOrder,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...liveOrder, ...updates, orderLifecycleHistory: [...(liveOrder.orderLifecycleHistory || []), liveHistory] };
         });
