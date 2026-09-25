@@ -99,6 +99,8 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /shown\.map\(category=>map\[category\]\?\.label\)/);
     assert.match(app, /const itemStatus=orderItemWorkCategory\(o,item\)/);
     assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
+    assert.match(app, /orderItemWorkCategory\(order,sourceItem\)==='ordering'/);
+    assert.match(app, /orderItemWorkCategory\(order,item\)==='delivery'&&itemDispatchState\(order,item\)\.pending>0/);
     assert.match(app, /<span class="order-progress-badge">品項狀態<\/span>/);
     assert.match(app, /YushinWorkflow\?\.itemWorkCategory/);
     assert.match(app, /if\(required>ordered\)return 'ordering';[\s\S]*if\(required>0\)return 'arrival';[\s\S]*return 'delivery';/);
