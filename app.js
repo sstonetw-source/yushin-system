@@ -7111,18 +7111,23 @@ window.savePoReceiptBatch = async function() {
             if(failed.length) console.warn('入庫完成後背景同步部分失敗：', failed.map(result=>result.reason));
         });
     } catch (err) {
-        await loadMyPurchaseOrders().catch(()=>{});
-        await Promise.all([
-            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true).catch(()=>{}) : Promise.resolve(),
-            loadPurchasingDispatchOrders(true).catch(()=>{})
-        ]);
-        if (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active')) await loadInventory(true).catch(()=>{});
+        // 部分成功時，已完成的 transaction 是正式資料；錯誤訊息不應再被次要列表 refresh 阻塞。
         if (completed > 0) {
             closePoReceiptBatch();
             alert(`已成功入庫 ${completed} 個品項；後續品項中斷：${err.message}\n已成功的資料不會重複入庫，請重新開啟訂購單處理剩餘數量。`);
         } else {
             alert('批量到貨入庫失敗：'+err.message);
         }
+        Promise.allSettled([
+            loadMyPurchaseOrders(),
+            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
+            loadPurchasingDispatchOrders(true),
+            (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
+                ? loadInventory(true) : Promise.resolve()
+        ]).then(results => {
+            const failed=results.filter(result=>result.status==='rejected');
+            if(failed.length) console.warn('入庫中斷後背景同步部分失敗：', failed.map(result=>result.reason));
+        });
     } finally {
         if (button) { button.disabled=false; button.textContent='確認入庫'; }
     }
