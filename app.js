@@ -2294,20 +2294,29 @@ window.createOrderFromForecast = async function(id) {
    估價單系統
    ========================================================= */
 // 業務名單來源改為 users 集合（與登入帳號綁定，name/code/phone/role 皆存在同一份文件）
+function applySalesRows(rows) {
+    const list = (rows || [])
+        .filter(d => d.name && d.code && d.active !== false && d.disabled !== true)
+        .map(d => ({ uid:d.id || d.uid || '', code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', active:true }));
+    list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+    salesList = list;
+    populateSalesDropdown();
+    populateEquipmentSalesDropdown();
+    return salesList;
+}
+
 function initSalesList() {
-    return readCollectionInBatches('users').then(rows => {
-        const list = rows
-            .filter(d => d.name && d.code)
-            .map(d => ({ uid: d.id, code: d.code, name: d.name, phone: d.phone || '', role: d.role || 'sales', active: d.active !== false }));
-        list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
-        salesList = list;
-        populateSalesDropdown();
-        populateEquipmentSalesDropdown();
-    }).catch(err => {
+    // Admin 已讀過 users 時直接共用同一份記憶體資料，避免再次掃描 users collection。
+    if (allUsersCache.length) {
+        applySalesRows(allUsersCache.map(u => ({ id:u.uid, ...u })));
+        return Promise.resolve(salesList);
+    }
+    return readCollectionInBatches('users').then(rows => applySalesRows(rows)).catch(err => {
         console.error('讀取 users 人員名單失敗：', err);
-        salesList = [];
+        // 短暫斷線時保留既有名單；不要把畫面上的業務選項清空。
         populateSalesDropdown();
         populateEquipmentSalesDropdown();
+        throw err;
     });
 }
 
@@ -11714,15 +11723,16 @@ window.reloadSalesFromUsers = function() {
         allUsersCache = rows.map(d => ({
             uid:d.id, code:d.code || '', name:d.name || '', phone:d.phone || '',
             role:d.role || 'sales', email:d.email || '', disabled:!!d.disabled,
-            mustChangePassword:!!d.mustChangePassword
+            active:d.active !== false, mustChangePassword:!!d.mustChangePassword
         })).sort((a,b)=>{
             if (a.name && !b.name) return -1;
             if (!a.name && b.name) return 1;
             return String(a.code||'').localeCompare(String(b.code||'')) || a.uid.localeCompare(b.uid);
         });
 
-        populateSalesDropdown();
-        populateEquipmentSalesDropdown();
+        // Admin users 查詢同時就是一般頁面的 salesList 資料來源，兩邊共用，不再重查 users。
+        applySalesRows(rows);
+        salesListLoadPromise = Promise.resolve(salesList);
         if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
         await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
         renderAdminSalesTable();
