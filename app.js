@@ -8620,6 +8620,7 @@ window.saveReturnRecord = async function() {
                 if(existingIndex>=0)records[existingIndex]=record;else records[records.length-1]=record;
             }
             const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
         });
@@ -8665,6 +8666,7 @@ window.deleteReturnRecord = async function(recordId) {
             const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),deliveryRecords:itemDeliveries,returnRecords:itemReturns};
             await applyInventoryReturnDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, removed);
             const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
         });
