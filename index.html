@@ -1256,6 +1256,16 @@
             </div>
 </div>
 
+            <h4 style="margin-top:28px;">訂單 V2 格式整理</h4>
+            <div class="toolbar no-print" style="display:block;">
+                <button id="orderV2PreviewBtn" onclick="previewOrderV2Migration()">檢查訂單 V2</button>
+                <button id="orderV2MigrateBtn" onclick="executeOrderV2Migration()" style="display:none;">執行 V2 升級</button>
+                <span style="font-size:12px;color:#666;">
+                    先唯讀檢查舊訂單，再將可安全判定歸屬的資料統一為 items[]、ownerUid、salesCode、orderSchemaVersion 2；不修改庫存數量、採購或送貨紀錄。
+                </span>
+                <div id="orderV2MigrationStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
+            </div>
+
             <h4 style="margin-top:28px;">訂單工作索引</h4>
             <div class="toolbar no-print" style="display:block;">
                 <button id="orderWorkIndexRebuildBtn" onclick="rebuildOrderWorkIndexes()">重建訂單工作索引</button>
