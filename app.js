@@ -4985,8 +4985,9 @@ async function reserveInventoryForNewOrder(orderId, order) {
             inventoryProductKey:item.inventoryProductKey||'',
             fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:item.warehouseId||''
         };
-        await db.collection('orders').doc(orderId).set(updates,{merge:true});
         Object.assign(order,updates);
+        Object.assign(updates,orderWorkIndexFields(order));
+        await db.collection('orders').doc(orderId).set(updates,{merge:true});
         return {reservedQty:updates.inventoryReservedQty,shortageQty:updates.inventoryShortageQty,items:[item]};
     }
     const reservedItems=[];
@@ -4994,8 +4995,9 @@ async function reserveInventoryForNewOrder(orderId, order) {
     const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.inventoryReservedQty||0),0);
     const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.inventoryShortageQty||0),0);
     const updates={items:reservedItems,itemCount:reservedItems.length,orderSchemaVersion:2,inventoryReservedQty:reservedQty,inventoryShortageQty:shortageQty};
-    await db.collection('orders').doc(orderId).set(updates,{merge:true});
     Object.assign(order,updates);
+    Object.assign(updates,orderWorkIndexFields(order));
+    await db.collection('orders').doc(orderId).set(updates,{merge:true});
     return {reservedQty,shortageQty,items:reservedItems};
 }
 
@@ -5379,6 +5381,14 @@ function orderWorkCategories(order) {
     const categories=[...new Set(normalizedOrderItems(order).map(item=>orderItemWorkCategory(order,item)))];
     if(!categories.length)return [orderWorkCategory(order)];
     return categories;
+}
+
+function orderWorkIndexFields(order) {
+    const categories=orderWorkCategories(order);
+    return {
+        workCategories:categories,
+        workCategoryUpdatedAt:new Date().toISOString()
+    };
 }
 
 function orderWorkStatusInfo(order) {
