@@ -5295,8 +5295,8 @@ window.saveSelfOrder = async function() {
             if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
             tx.set(supplyRef,record);
             items[index]={...item,supplyOrderedQty:already+qty,purchaseOrderedQty:already+qty,selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])]};
-            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now});
             savedOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(savedOrder),updatedAt:now});
         });
         const index=ordersCache.findIndex(row=>row.id===orderId);
         if(index>=0)ordersCache[index]={id:orderId,...savedOrder};
@@ -6513,7 +6513,8 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
                     reserveQty=Math.min(qty,shortage);reservedForSource=reserveQty;
                     const next=window.YushinFulfillment.applyReceipt(item,qty);
                     items[itemIndex]={...next,reservedQty:next.reservedQty,inventoryReservedQty:next.reservedQty};
-                    tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now});
+                    const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+                    tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
                     tx.set(db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`),{
                         orderId:supply.orderId,itemId:supply.itemId,orderNo:order.orderNo||order.quoteNo||supply.orderId,
                         productKey,itemCode:supply.itemCode||'',itemName:supply.itemName||'',customerName:order.customerName||'',
@@ -6707,9 +6708,11 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             }:row);
             const totalReserved=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryReservedQty||0),0);
             const totalShortage=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryShortageQty||0),0);
+            const nextSourceOrder={...sourceOrder,items:nextSourceItems,itemCount:nextSourceItems.length,orderSchemaVersion:2,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now};
             tx.update(db.collection('orders').doc(item.orderId),{
                 items:nextSourceItems,itemCount:nextSourceItems.length,orderSchemaVersion:2,
-                inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now
+                inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,
+                ...orderWorkIndexFields(nextSourceOrder),updatedAt:now
             });
             if(reserveFromReceipt>0){
                 const sourceItemId=String(sourceItem.itemId||`item-${sourceItemIndex+1}`);
@@ -7307,8 +7310,10 @@ window.printPurchaseOrder = async function() {
                         ? Number(item.qty||0) : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.qty??0));
                     const totalNeeded=nextItems.reduce((sum,item)=>sum+requiredQty(item),0);
                     const totalOrdered=nextItems.reduce((sum,item)=>sum+Math.min(requiredQty(item),Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0))),0);
+                    const nextOrderData={...orderData,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,purchaseOrderedQty:totalOrdered};
                     transaction.update(orderRefs[index], {
                         items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,
+                        ...orderWorkIndexFields(nextOrderData),
                         purchaseOrderNo: poNo,
                         purchaseOrderNos:[...new Set([...(orderData.purchaseOrderNos||[]),poNo])],
                         purchaseOrderedQty:totalOrdered,
