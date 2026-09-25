@@ -323,7 +323,8 @@ test('failed billing write restores the previous state and unlocks the button', 
 test('quote and order lists use global business-date ordering across companies', () => {
     assert.match(appSource, /db\.collection\('quotes'\)\.orderBy\('quoteDate', 'desc'\)/);
     assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'quoteDate', 'quoteNo'\)/);
-    assert.match(appSource, /db\.collection\('orders'\)\.orderBy\('orderDate', 'desc'\)/);
+    assert.match(appSource, /db\.collection\('orders'\)/);
+    assert.match(appSource, /orderBy\('orderDate', 'desc'\)/);
     assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'orderDate', 'id'\)/);
     const compareStart = appSource.indexOf('function compareBusinessRecordsNewestFirst');
     const compareEnd = appSource.indexOf('\n}', compareStart) + 2;
@@ -379,7 +380,7 @@ test('quote and order search-index migration is admin-only batched and idempoten
     const migration = appSource.slice(start, end);
     assert.match(migration, /trueUserRole !== 'admin'/);
     assert.match(migration, /currentUserRole !== 'admin'/);
-    assert.match(migration, /\['quotes','forecasts','orders','equipment'\]/);
+    assert.match(migration, /\['quotes','orders','forecasts','equipment'\]/);
     assert.match(migration, /limit\(200\)/);
     assert.match(migration, /startAfter\(cursor\)/);
     assert.match(migration, /buildFullHistorySearchTokens/);
@@ -426,7 +427,7 @@ test('phase 2 product master keeps formal product identity and legacy migration 
     assert.match(appSource, /spec:/);
     assert.match(appSource, /normalizeProductMasterList\(imported/);
     assert.match(appSource, /collection\('products'\)/);
-    assert.match(appSource, /舊 settings\/prices 僅供遷移／相容性工具使用/);
+    assert.doesNotMatch(appSource, /settings\/prices/);
 });
 
 
@@ -434,7 +435,7 @@ test('phase 2 documents link to productId while retaining historical snapshots',
     assert.match(appSource, /class="item-product-id"/);
     assert.match(appSource, /productId: row\.querySelector\('\.item-product-id'\)/);
     assert.match(appSource, /data\.productId = priceMatch\.productId/);
-    assert.match(appSource, /productId:item\.productId\|\|priceMatch\?\.productId/);
+    assert.match(appSource, /productId:sourceItem\.productId\|\|priceMatch\?\.productId/);
     assert.match(appSource, /data\.supplier = priceMatch\.supplier/);
     assert.match(appSource, /data\.spec = priceMatch\.spec/);
 });
@@ -702,7 +703,7 @@ test('permission routing includes Product Forecast and Inventory workspaces', ()
     assert.match(s, /forecast-system/);
     assert.match(s, /product-system/);
     assert.match(s, /inventory-system/);
-    assert.match(appSource, /function firstAccessibleMainPage\(\)[\s\S]*?\['quote', 'forecast', 'products', 'orders', 'inventory', 'equipment'\]/);
+    assert.match(appSource, /function firstAccessibleMainPage\(\)[\s\S]*?\['quote', 'forecast', 'products', 'orders', 'orders\.po', 'inventory', 'equipment'\]/);
 });
 
 
@@ -1346,6 +1347,10 @@ test('Forecast full-history search uses Firestore searchTokens', () => {
 
 
 test('order list does not block on full Product Master loading', () => {
-    assert.match(appSource, /if \(mainKey === 'orders'\) \{[\s\S]*?ensureSalesListLoaded\(\)[\s\S]*?loadOrdersFromCloud\(\);[\s\S]*?\}/);
-    assert.doesNotMatch(appSource, /if \(mainKey === 'orders'\) Promise\.all\(\[ensureSalesListLoaded\(\), ensurePriceListLoaded\(\)\]\)\.then\(loadOrdersFromCloud\)/);
+    const start = appSource.indexOf("if (mainKey === 'orders.list')");
+    const end = appSource.indexOf("if (mainKey === 'orders.po')", start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /ensureSalesListLoaded\(\)/);
+    assert.match(source, /loadOrdersFromCloud\(\)/);
+    assert.doesNotMatch(source, /Product Master|ensurePriceListLoaded/);
 });
