@@ -5039,9 +5039,16 @@ function legacyOrderItemFromOrder(order, index = 0) {
 // Phase 1 相容層：舊訂單沒有 items 時，從既有單品欄位即時計算出一筆明細。
 // 目前仍保留所有 top-level 單品欄位，讓既有 PO／庫存／送貨流程完全不受影響。
 function normalizedOrderItems(order) {
-    const source = Array.isArray(order?.items) && order.items.length
+    // V2 是目前唯一正式寫入格式。已是 V2 的訂單直接使用 items，
+    // 不再執行舊 top-level 單品欄位判斷；尚未 migration 的舊資料才走 fallback。
+    const isV2 = Number(order?.orderSchemaVersion || 0) === 2
+        && Array.isArray(order?.items)
+        && order.items.length > 0;
+    const source = isV2
         ? order.items
-        : (order?.itemCode || order?.itemName || order?.productId ? [legacyOrderItemFromOrder(order)] : []);
+        : (Array.isArray(order?.items) && order.items.length
+            ? order.items
+            : (order?.itemCode || order?.itemName || order?.productId ? [legacyOrderItemFromOrder(order)] : []));
     return source.map((item, index) => {
         const base = {
             ...item,
