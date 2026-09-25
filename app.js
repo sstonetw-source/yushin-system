@@ -1158,6 +1158,28 @@ window.openPurchasingWorkspace = function(el) {
 let forecastCache = [];
 let forecastCursor = null;
 let forecastHasMore = true;
+// 全系統寫入按鍵共用狀態：立即顯示處理中、防止重複點擊，完成或失敗後一致恢復。
+function beginActionButton(button, busyText = '處理中…') {
+    if (!button || button.dataset.actionBusy === '1') return null;
+    const state = { text: button.textContent, disabled: button.disabled };
+    button.dataset.actionBusy = '1';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    if (busyText) button.textContent = busyText;
+    return state;
+}
+function endActionButton(button, state, finalText = '') {
+    if (!button || !state) return;
+    button.dataset.actionBusy = '';
+    button.removeAttribute('aria-busy');
+    button.disabled = state.disabled;
+    button.textContent = finalText || state.text;
+}
+function actionButtonFromEventOrSelector(selector = '') {
+    const eventButton = window.event?.currentTarget?.closest?.('button');
+    return eventButton || (selector ? document.querySelector(selector) : null);
+}
+
 let forecastLoading = false;
 let forecastSaveInProgress = false;
 let forecastProgressSaveInProgress = false;
@@ -2557,6 +2579,9 @@ function renderWarehouseMasterAdmin() {
 
 window.saveSupplierMapping = async function() {
     if (trueUserRole !== 'admin') return;
+    const button=actionButtonFromEventOrSelector('[onclick="saveSupplierMapping()"]');
+    const buttonState=beginActionButton(button,'儲存中…');
+    if(button && !buttonState)return;
     const supplierName = String(document.getElementById('supplierMasterName')?.value || '').trim();
     const purchaseHeaderName = String(document.getElementById('supplierMasterHeader')?.value || '').trim() || supplierName;
     const brandName = resolveBrandName(document.getElementById('supplierMappingBrand')?.value || '');
@@ -2581,6 +2606,8 @@ window.saveSupplierMapping = async function() {
         if (status) status.innerText = '供應商對應已儲存。';
     } catch (err) {
         if (status) status.innerText = '儲存失敗：' + err.message;
+    } finally {
+        endActionButton(button,buttonState);
     }
 };
 
@@ -4248,6 +4275,9 @@ window.createForecastFromQuote = async function(quoteNo) {
 };
 
 window.markQuoteAsDeal = async function(quoteNo) {
+    const button=actionButtonFromEventOrSelector();
+    const buttonState=beginActionButton(button,'處理中…');
+    if(button && !buttonState)return;
     try {
         const doc=await db.collection('quotes').doc(quoteNo).get();
         if(!doc.exists) throw new Error('找不到這張估價單');
@@ -4319,12 +4349,16 @@ window.markQuoteAsDeal = async function(quoteNo) {
             : `已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並同步至訂單／採購流程。`);
         loadMyQuotesFromCloud();
     } catch(err){alert('匯入失敗：'+err.message);}
+    finally{endActionButton(button,buttonState);}
 };
 
 window.unmarkQuoteAsDeal = async function(quoteNo) {
+    const button=actionButtonFromEventOrSelector();
+    const buttonState=beginActionButton(button,'處理中…');
+    if(button && !buttonState)return;
     if (!confirm(
         `確定要取消估價單 ${quoteNo} 的成交狀態嗎？相關訂單將標記為取消並釋放已預留庫存，不會永久刪除。`
-    )) return;
+    )) { endActionButton(button,buttonState); return; }
 
     try {
         const linkedOrders = await readQueryInBatches(
@@ -4397,11 +4431,20 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
             status: BUSINESS_STATUS.ACTIVE
         });
 
+        const reopenPatch={dealClosed:false,dealClosedAt:null,status:BUSINESS_STATUS.ACTIVE};
+        const cachedQuote=myQuotesCache.find(item=>item.quoteNo===quoteNo);
+        if(cachedQuote)Object.assign(cachedQuote,reopenPatch);
+        const searchedQuote=quoteHistorySearchResults.find(item=>item.quoteNo===quoteNo);
+        if(searchedQuote)Object.assign(searchedQuote,reopenPatch);
+        renderMyQuotesList();
+
         alert('成交狀態已取消；相關訂單已保留並標記為取消，預留庫存已同步釋放。');
         loadMyQuotesFromCloud();
 
     } catch (err) {
         alert('取消失敗：' + err.message);
+    } finally {
+        endActionButton(button,buttonState);
     }
 };
 /* =========================================================
