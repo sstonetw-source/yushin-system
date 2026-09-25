@@ -4440,81 +4440,65 @@ window.createForecastFromQuote = async function(quoteNo) {
 
 window.markQuoteAsDeal = async function(quoteNo) {
     const button=actionButtonFromEventOrSelector();
-    const buttonState=beginActionButton(button,'處理中…');
+    const buttonState=beginActionButton(button,'開啟訂單…');
     if(button && !buttonState)return;
     try {
-        const doc=await db.collection('quotes').doc(quoteNo).get();
-        if(!doc.exists) throw new Error('找不到這張估價單');
-        const q=doc.data();
+        const cached=myQuotesCache.find(q=>q.quoteNo===quoteNo) || quoteHistorySearchResults.find(q=>q.quoteNo===quoteNo);
+        const q=cached || (await db.collection('quotes').doc(quoteNo).get()).data();
+        if(!q)throw new Error('找不到這張估價單');
         if(q.dealClosed){alert('這張估價單已經標記過成交了。');return;}
         const sourceItems=(q.items||[]).filter(item=>item.nameCn||item.nameEn||item.model);
-        if(!sourceItems.length) throw new Error('估價單沒有可建立訂單的品項。');
-        if(!confirm(`確定將估價單 ${quoteNo} 標記為成交嗎？${sourceItems.length} 個品項會拆成 ${sourceItems.length} 筆獨立訂單。`))return;
+        if(!sourceItems.length)throw new Error('估價單沒有可建立訂單的品項。');
 
-        const now=new Date().toISOString(),todayStr=localDateString();
-        const batch=db.batch(),created=[];
-        sourceItems.forEach((sourceItem,index)=>{
+        // 成交不是直接寫死訂貨方式。先進入正式的訂單輸入流程，
+        // 讓使用者逐品項確認「採購下單／業務自行訂購」及「倉庫／原廠直送」後才儲存。
+        const toOrderItem=(sourceItem,index)=>{
             const brand=resolveBrandName(sourceItem.brand||'');
             const priceMatch=sourceItem.model?findPriceItemForOrder({itemCode:sourceItem.model,brand}):null;
-            const item={
-                itemId:'item-1',productId:sourceItem.productId||priceMatch?.productId||(priceMatch?stableProductId(priceMatch):''),
-                itemCode:sourceItem.model||'',itemCodeKey:normalizeHistoryItemCode(sourceItem.model||''),
-                itemName:sourceItem.nameCn||sourceItem.nameEn||'',itemNameEn:sourceItem.nameEn||'',brand,
-                productLine:sourceItem.productLine||priceMatch?.productLine||'',productType:sourceItem.productType||priceMatch?.productType||'',
-                spec:sourceItem.spec||priceMatch?.spec||'',supplier:priceMatch?.supplier||'',qty:Number(sourceItem.qty||1),
-                orderedQty:Number(sourceItem.qty||1),unitPrice:parseMoney(sourceItem.price||0),totalPrice:parseMoney(sourceItem.subtotal||0),
-                fulfillmentType:'WAREHOUSE',warehouseId:defaultWarehouse()?.id||'',procurementType:'PURCHASING_PO',sourceItemIndex:index
-            };
-            if(priceMatch&&authorizationTypeForProduct(priceMatch)==='NON_AUTHORIZED'&&priceMatch.cost!==undefined)item.costPrice=priceMatch.cost;
-            const orderRef=db.collection('orders').doc();
-            const orderData={
-                orderDate:todayStr,createdAt:now,...commercialCreatorFields(),company:q.company||'',
-                customerName:q.ordererName||q.clientName||'',customerId:q.customerId||customerIdForName(q.ordererName||q.clientName||''),
-                ...item,items:[item],itemCount:1,orderSchemaVersion:2,status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(item.totalPrice),
-                transactionType:'',invoiceTitle:q.clientName||'',quoteNo,
-                ...linkedDocumentFields(DOCUMENT_TYPES.QUOTE,quoteNo,[documentLink(DOCUMENT_TYPES.QUOTE,quoteNo,'source')]),
-                sourceItemIndex:index,salesName:stripPhoneSuffix(q.salesName),salesCode:q.salesCode||salesCodeForName(q.salesName),
-                ownerUid:q.ownerUid||salesList.find(s=>stripPhoneSuffix(s.name)===stripPhoneSuffix(q.salesName))?.uid||'',
-                isOrdered:false,isArrived:false,isDelivered:false,isBilled:false,invoiceDate:''
-            };
-            orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
-            batch.set(orderRef,orderData);
-            created.push({id:orderRef.id,data:orderData});
-        });
-        batch.update(db.collection('quotes').doc(quoteNo),{
-            dealClosed:true,dealClosedAt:todayStr,status:BUSINESS_STATUS.COMPLETED,
-            linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),...created.map(order=>documentLink(DOCUMENT_TYPES.ORDER,order.id,'created'))])
-        });
-        await batch.commit();
-
-        // Firestore 已成功建立訂單並標記成交後，立即更新本機估價單快取與畫面。
-        // 庫存 reservation／採購頁刷新可以繼續在後面執行，不應讓使用者等到全部完成才看到「已成交」。
-        const dealClosedPatch={
-            dealClosed:true,
-            dealClosedAt:todayStr,
-            status:BUSINESS_STATUS.COMPLETED,
-            linkedDocuments:normalizeDocumentLinks([...(q.linkedDocuments||[]),...created.map(order=>documentLink(DOCUMENT_TYPES.ORDER,order.id,'created'))])
+            return normalizeNewOrderItem({
+                itemId:`quote-${index+1}`,
+                productId:sourceItem.productId||priceMatch?.productId||(priceMatch?stableProductId(priceMatch):''),
+                itemCode:sourceItem.model||'', itemName:sourceItem.nameCn||sourceItem.nameEn||'',
+                itemNameEn:sourceItem.nameEn||'', brand,
+                productLine:sourceItem.productLine||priceMatch?.productLine||'',
+                productType:sourceItem.productType||priceMatch?.productType||'',
+                spec:sourceItem.spec||priceMatch?.spec||'', supplier:priceMatch?.supplier||'',
+                qty:Number(sourceItem.qty||1), unitPrice:parseMoney(sourceItem.price||0),
+                procurementType:'PURCHASING_PO', fulfillmentType:'WAREHOUSE'
+            });
         };
-        const cachedQuote=myQuotesCache.find(item=>item.quoteNo===quoteNo);
-        if(cachedQuote)Object.assign(cachedQuote,dealClosedPatch);
-        const searchedQuote=quoteHistorySearchResults.find(item=>item.quoteNo===quoteNo);
-        if(searchedQuote)Object.assign(searchedQuote,dealClosedPatch);
-        writeAppDataCache('quotes', myQuotesCache);
-        try { renderMyQuotesList(); } catch(refreshErr) { console.error('估價單畫面即時刷新失敗',refreshErr); }
-
-        const reservationResults=await Promise.allSettled(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
-        const reservationFailures=reservationResults.filter(result=>result.status==='rejected');
-        ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache];
-        writeAppDataCache('orders', ordersCache);
-        try { renderOrdersList(); } catch(refreshErr) { console.error('訂單畫面刷新失敗',refreshErr); }
-        alert(reservationFailures.length
-            ? `已成交並建立 ${created.length} 筆獨立訂單；其中 ${reservationFailures.length} 筆庫存保留需重新整理後重試。`
-            : `已標記成交，${created.length} 個品項已拆成 ${created.length} 筆獨立訂單並同步至訂單／採購流程。`);
-        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
-            loadPendingPurchaseOrders(true).catch(refreshErr => console.error('成交後採購背景刷新失敗',refreshErr));
-        }
-    } catch(err){alert('匯入失敗：'+err.message);}
-    finally{endActionButton(button,buttonState);}
+        const items=sourceItems.map(toOrderItem);
+        const first=items[0];
+        openOrderWorkspace(document.querySelector('[data-main-nav="orders"]'));
+        openOrderModal({
+            ...first,
+            customerName:q.ordererName||q.clientName||'',
+            sourceType:DOCUMENT_TYPES.QUOTE,
+            sourceId:quoteNo,
+            ownerUid:q.ownerUid||'',
+            salesName:stripPhoneSuffix(q.salesName||''),
+            salesCode:q.salesCode||salesCodeForName(q.salesName)
+        });
+        newOrderDraftItems=items.slice(1);
+        renderNewOrderDraftItems();
+        window._orderModalQuoteContext={
+            quoteNo,
+            ownerUid:q.ownerUid||'',
+            salesName:stripPhoneSuffix(q.salesName||''),
+            salesCode:q.salesCode||salesCodeForName(q.salesName),
+            company:q.company||'',
+            invoiceTitle:q.clientName||''
+        };
+        const title=document.getElementById('orderModalTitle');
+        if(title)title.innerText=`估價單 ${quoteNo} 成交 → 建立訂單`;
+        const invoice=document.getElementById('orderInvoiceTitle');
+        if(invoice)invoice.value=q.clientName||'';
+        window.scrollTo({top:0,behavior:'smooth'});
+    } catch(err) {
+        alert('開啟訂單失敗：'+err.message);
+    } finally {
+        endActionButton(button,buttonState);
+    }
 };
 
 window.unmarkQuoteAsDeal = async function(quoteNo) {
@@ -9268,8 +9252,17 @@ function currentOrderModalItem() {
 function renderNewOrderDraftItems(){
     const body=document.getElementById('newOrderItemsBody'),wrap=document.getElementById('newOrderItemsWrap');if(!body||!wrap)return;
     wrap.style.display=newOrderDraftItems.length?'':'none';
-    body.innerHTML=newOrderDraftItems.map((item,index)=>`<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td>${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td><button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`).join('');
+    body.innerHTML=newOrderDraftItems.map((item,index)=>`<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td>${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td><button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`).join('');
 }
+window.editNewOrderDraftItem=function(index){
+    const item=newOrderDraftItems[index];
+    if(!item)return;
+    const current=currentOrderModalItem();
+    if(current.itemName)newOrderDraftItems[index]=current;else newOrderDraftItems.splice(index,1);
+    setOrderModalItem(item);
+    renderNewOrderDraftItems();
+    saveOrderDraft();
+};
 window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();saveOrderDraft();};
 window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
@@ -9481,9 +9474,9 @@ window.saveNewOrder = function() {
         quoteNo: '',
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
         productId: window._orderModalProductId || '',
-        salesName: assistedOwner?.name || currentUserName || '',
-        salesCode: assistedOwner?.code || currentUserCode || '',
-        ownerUid: assistedOwner?.uid || currentUser?.uid || '',
+        salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || currentUserName || '',
+        salesCode: assistedOwner?.code || window._orderModalQuoteContext?.salesCode || currentUserCode || '',
+        ownerUid: assistedOwner?.uid || window._orderModalQuoteContext?.ownerUid || currentUser?.uid || '',
         isOrdered: false,
         isArrived: false,
         isDelivered: false,
@@ -9558,6 +9551,20 @@ window.saveNewOrder = function() {
         data.inventoryShortageQty = reservation.shortageQty;
         data.inventoryProductKey = inventoryProductKey(data);
         rememberRecentCustomerName(data.customerName);
+        const quoteContext=window._orderModalQuoteContext;
+        if (data.sourceType === DOCUMENT_TYPES.QUOTE && data.sourceId) {
+            const closedAt=localDateString();
+            await db.collection('quotes').doc(data.sourceId).set({
+                dealClosed:true,
+                dealClosedAt:closedAt,
+                status:BUSINESS_STATUS.COMPLETED,
+                linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,docRef.id,'created'))
+            },{merge:true});
+            const patch={dealClosed:true,dealClosedAt:closedAt,status:BUSINESS_STATUS.COMPLETED};
+            const cachedQuote=myQuotesCache.find(q=>q.quoteNo===data.sourceId);if(cachedQuote)Object.assign(cachedQuote,patch);
+            const searchedQuote=quoteHistorySearchResults.find(q=>q.quoteNo===data.sourceId);if(searchedQuote)Object.assign(searchedQuote,patch);
+            writeAppDataCache('quotes',myQuotesCache);
+        }
         clearSavedOrderDraft({ silent:true });
         if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
             db.collection('forecasts').doc(data.sourceId).set({
@@ -9565,7 +9572,7 @@ window.saveNewOrder = function() {
                 updatedAt: new Date().toISOString()
             }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
         }
-        window._orderModalSourceLink = null; window._orderModalProductId = '';
+        window._orderModalSourceLink = null; window._orderModalProductId = ''; window._orderModalQuoteContext = null;
         closeOrderModal();
         // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
         ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
