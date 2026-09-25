@@ -134,3 +134,10 @@ test('self-order receipt keeps reservation from fulfillment core without adding 
     assert.doesNotMatch(app,/reservedQty:Number\(item\.reservedQty\?\?item\.inventoryReservedQty\?\?0\)\+reserveQty/);
     assert.match(app,/reserved:inv\.reserved\+reserveQty/);
 });
+
+
+test('new order reservation persists derived work category index after item reservation is known',()=>{
+    assert.match(app,/function orderWorkIndexFields\(order\)/);
+    assert.match(app,/workCategories:categories/);
+    assert.match(app,/Object\.assign\(updates,orderWorkIndexFields\(order\)\);\s*await db\.collection\('orders'\)\.doc\(orderId\)\.set\(updates,\{merge:true\}\)/);
+});
