@@ -5860,20 +5860,24 @@ window.renderOrdersList = function() {
     let shown = 0;
 
     const visibleOrderSource = orderHistorySearchActive ? orderHistorySearchResults : ordersCache;
+    // 同一次列表 render 每筆訂單只 normalize 一次，避免搜尋、廠牌篩選、狀態卡片與產品欄重複處理 items。
+    const normalizedItemsByOrder = new Map(visibleOrderSource.map(o => [o.id, normalizedOrderItems(o)]));
     const baseOrders = visibleOrderSource.filter(o => {
         if (!orderHistorySearchActive && o.status !== BUSINESS_STATUS.ACTIVE) return false;
-        const itemSearchable = normalizedOrderItems(o).flatMap(item => [
+        const orderItems = normalizedItemsByOrder.get(o.id) || [];
+        const itemSearchable = orderItems.flatMap(item => [
             item.brand, item.itemCode, item.itemName, item.productLine, item.productType, item.spec
         ]).join(' ');
         const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''} ${itemSearchable}`.toLowerCase();
         if (!orderHistorySearchActive && keyword && !searchable.includes(keyword)) return false;
         if (salesFilter && stripPhoneSuffix(o.salesName) !== salesFilter) return false;
-        if (brandFilter && !normalizedOrderItems(o).some(item => (item.brand || '') === brandFilter) && (o.brand || '') !== brandFilter) return false;
+        if (brandFilter && !orderItems.some(item => (item.brand || '') === brandFilter) && (o.brand || '') !== brandFilter) return false;
         return true;
     });
     renderOrderWorkCards(baseOrders);
 
     baseOrders.forEach(o => {
+        const orderItems = normalizedItemsByOrder.get(o.id) || [];
         const categories=orderWorkCategories(o);
         if(activeOrderWorkFilter!=='all'&&!categories.includes(activeOrderWorkFilter))return;
         if(!orderMatchesWorkPeriod(o,activeOrderWorkFilter==='all'?'all':activeOrderWorkFilter))return;
@@ -5889,7 +5893,7 @@ window.renderOrdersList = function() {
             <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory('${escapeAttr(o.customerName)}')">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${normalizedOrderItems(o).map((item,index)=>{const itemStatus=orderItemWorkCategory(o,item);const itemStatusMap={ordering:'待採購',arrival:'待到貨',delivery:'待送貨',billing:'待核銷',complete:'已完成',closed:orderLifecycleInfo(o).label};return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span></small></div>`}).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const itemStatus=orderItemWorkCategory(o,item);const itemStatusMap={ordering:'待採購',arrival:'待到貨',delivery:'待送貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span></small></div>`}).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
             ${canManageOrderOps ? `
             <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" value="${o.costPrice != null ? o.costPrice : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
