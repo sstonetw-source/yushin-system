@@ -742,6 +742,28 @@ function hydratePageFromLocalCache(mainKey) {
             if (document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
         }
     }
+    if (mainKey === 'equipment' && !equipmentList.length) {
+        const cached = readAppDataCache('equipment');
+        if (cached?.records?.length) {
+            equipmentList = cached.records;
+            renderEquipmentList();
+        }
+    }
+    if (mainKey === 'inventory' && !inventoryCache.length) {
+        const cached = readAppDataCache('inventory');
+        if (cached?.records?.length) {
+            inventoryCache = cached.records;
+            renderInventoryList();
+        }
+    }
+    if (mainKey === 'orders.po') {
+        const pending = readAppDataCache('purchase-pending');
+        const receiving = readAppDataCache('purchase-receiving');
+        const dispatch = readAppDataCache('purchase-dispatch');
+        if (!pendingPurchaseCache.length && pending?.records?.length) pendingPurchaseCache = pending.records;
+        if (!poListCache.length && receiving?.records?.length) poListCache = receiving.records;
+        if (!purchasingDispatchCache.length && dispatch?.records?.length) purchasingDispatchCache = dispatch.records;
+    }
 }
 
 function initializePageData(mainKey, options = {}) {
@@ -4702,7 +4724,7 @@ async function loadWarehouseStocksForInventoryPage() {
 }
 
 window.loadInventory=async function(reset=true){
- if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCache=[];inventoryCursor=null;inventoryHasMore=true;warehouseStockCache=new Map();} inventoryLoading=true;
+ if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCursor=null;inventoryHasMore=true;warehouseStockCache=new Map();if(!inventoryCache.length){const cached=readAppDataCache('inventory');if(cached?.records?.length){inventoryCache=cached.records;renderInventoryList();}}} inventoryLoading=true;
  try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await q.get();if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];snap.forEach(d=>{const x={id:d.id,...d.data()};const i=inventoryCache.findIndex(v=>v.id===d.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
  if(reset){
  const [m,pending,supplies]=await Promise.all([
@@ -4712,6 +4734,7 @@ window.loadInventory=async function(reset=true){
  ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));pendingSupplyCache=supplies.docs.map(d=>({id:d.id,...d.data()}));
  }
  await loadWarehouseStocksForInventoryPage();
+ writeAppDataCache('inventory', inventoryCache);
  renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
  }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
@@ -6186,16 +6209,33 @@ window.switchPurchasingView = function(view, tab) {
     if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
     if(poPanel)poPanel.style.display=view==='receiving'?'':'none';
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
-    if (view === 'ordering') loadPendingPurchaseOrders(true);
-    else if (view === 'receiving') {
-        if (poListCache.length) renderPoList();
-        else loadMyPurchaseOrders();
-    } else loadPurchasingDispatchOrders(true);
+    if (view === 'ordering') {
+        const cached=readAppDataCache('purchase-pending');
+        if(!pendingPurchaseCache.length && cached?.records?.length) pendingPurchaseCache=cached.records;
+        renderPendingPurchaseOrders();
+        loadPendingPurchaseOrders(true);
+    } else if (view === 'receiving') {
+        const cached=readAppDataCache('purchase-receiving');
+        if(!poListCache.length && cached?.records?.length) poListCache=cached.records;
+        renderPoList();
+        loadMyPurchaseOrders();
+    } else {
+        const cached=readAppDataCache('purchase-dispatch');
+        if(!purchasingDispatchCache.length && cached?.records?.length) purchasingDispatchCache=cached.records;
+        renderPurchasingDispatchOrders();
+        loadPurchasingDispatchOrders(true);
+    }
 };
 
 async function loadPurchasingDispatchOrders(reset=true) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
-    if (reset) { purchasingDispatchCache=[]; purchasingDispatchCursor=null; purchasingDispatchHasMore=true; }
+    if (reset) {
+        purchasingDispatchCursor=null; purchasingDispatchHasMore=true;
+        if (!purchasingDispatchCache.length) {
+            const cached=readAppDataCache('purchase-dispatch');
+            if (cached?.records?.length) purchasingDispatchCache=cached.records;
+        }
+    }
     purchasingDispatchLoading=true;
     renderPurchasingDispatchOrders();
     try {
@@ -6220,6 +6260,7 @@ async function loadPurchasingDispatchOrders(reset=true) {
         if(status)status.textContent='載入失敗：'+(err.message||err);
     } finally {
         purchasingDispatchLoading=false;
+        writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
         renderPurchasingDispatchOrders();
     }
 }
@@ -6274,7 +6315,13 @@ function renderPendingPurchaseOrders() {
 
 window.loadPendingPurchaseOrders = async function(reset = true) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po') || pendingPurchaseLoading) return;
-    if (reset) { pendingPurchaseCursor = null; pendingPurchaseHasMore = true; pendingPurchaseCache = []; }
+    if (reset) {
+        pendingPurchaseCursor = null; pendingPurchaseHasMore = true;
+        if (!pendingPurchaseCache.length) {
+            const cached = readAppDataCache('purchase-pending');
+            if (cached?.records?.length) pendingPurchaseCache = cached.records;
+        }
+    }
     if (!pendingPurchaseHasMore) return;
     pendingPurchaseError = '';
     pendingPurchaseLoading = true;
@@ -6293,13 +6340,15 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
             const order = { id:doc.id, ...doc.data() };
             if (order.status !== BUSINESS_STATUS.ACTIVE) return;
             if (!Array.isArray(order.workCategories) || !order.workCategories.includes('ordering')) return;
-            pendingPurchaseCache.push(order);
+            const index = pendingPurchaseCache.findIndex(row => row.id === order.id);
+            if (index >= 0) pendingPurchaseCache[index] = order; else pendingPurchaseCache.push(order);
         });
     } catch (err) {
         pendingPurchaseError = `讀取失敗：${err.message}`;
         return;
     } finally {
         pendingPurchaseLoading = false;
+        writeAppDataCache('purchase-pending', pendingPurchaseCache);
         renderPendingPurchaseOrders();
     }
 };
@@ -6351,7 +6400,10 @@ async function loadPurchaseOrderPage(reset) {
     if (reset) {
         poListCursor = null;
         poListHasMore = true;
-        poListCache = [];
+        if (!poListCache.length) {
+            const cached = readAppDataCache('purchase-receiving');
+            if (cached?.records?.length) poListCache = cached.records;
+        }
     }
     if (!poListHasMore) return;
     poListPageLoading = true;
@@ -6371,6 +6423,7 @@ async function loadPurchaseOrderPage(reset) {
         snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
         poListCache = [...records.values()].sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
         poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
+        writeAppDataCache('purchase-receiving', poListCache);
         renderPoList();
     } catch (err) {
         console.error(err);
@@ -9503,6 +9556,7 @@ window.loadEquipmentFromCloud = function(reset = true) {
         if (!canViewAllEquipment()) {
             equipmentList.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || '', 'zh-Hant'));
         }
+        writeAppDataCache('equipment', equipmentList);
         renderEquipmentList();
         if (moreButton) {
             moreButton.style.display = equipmentHasMore ? '' : 'none';
