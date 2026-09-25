@@ -11969,6 +11969,103 @@ function systemAuditProductKey(record = {}) {
     return String(record.productKey || record.productId || '').trim();
 }
 
+function orderNeedsV2Migration(order = {}) {
+    return Number(order.orderSchemaVersion || 0) !== 2
+        || !Array.isArray(order.items)
+        || !order.items.length
+        || !order.ownerUid;
+}
+
+function orderV2MigrationPatch(order = {}, usersByCode = new Map(), usersByName = new Map()) {
+    const items = normalizedOrderItems(order);
+    const salesCode = String(order.salesCode || salesCodeForName(order.salesName) || '').trim();
+    const salesNameKey = stripPhoneSuffix(order.salesName || '').trim();
+    const ownerUid = String(order.ownerUid || usersByCode.get(salesCode)?.uid || usersByName.get(salesNameKey)?.uid || '').trim();
+    const next = {
+        ...order,
+        items,
+        itemCount: items.length,
+        orderSchemaVersion: 2,
+        salesCode,
+        ownerUid
+    };
+    return {
+        items,
+        itemCount: items.length,
+        orderSchemaVersion: 2,
+        salesCode,
+        ownerUid,
+        ...orderWorkIndexFields(next),
+        schemaMigratedAt: new Date().toISOString(),
+        schemaMigratedBy: currentUser?.uid || ''
+    };
+}
+
+window.previewOrderV2Migration = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以檢查訂單 V2。');
+    const button = document.getElementById('orderV2PreviewBtn');
+    const execute = document.getElementById('orderV2MigrateBtn');
+    const status = document.getElementById('orderV2MigrationStatus');
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    if (execute) execute.style.display = 'none';
+    if (status) status.textContent = '正在分頁檢查訂單格式…';
+    try {
+        const [orders, users] = await Promise.all([readCollectionForMigration('orders'), readCollectionInBatches('users')]);
+        const usersByCode = new Map(users.filter(u => u.code).map(u => [String(u.code).trim(), u]));
+        const usersByName = new Map(users.filter(u => u.name).map(u => [stripPhoneSuffix(u.name).trim(), u]));
+        const targets = orders.filter(row => orderNeedsV2Migration(row.data));
+        const unresolvedOwners = targets.filter(row => {
+            const patch = orderV2MigrationPatch(row.data, usersByCode, usersByName);
+            return !patch.ownerUid;
+        });
+        window._orderV2MigrationPlan = { targets, usersByCode, usersByName, unresolvedOwners };
+        if (status) status.textContent = `檢查完成：共 ${orders.length} 筆訂單，需升級 ${targets.length} 筆；其中 ${unresolvedOwners.length} 筆無法判定 ownerUid。` +
+            (unresolvedOwners.length ? '\n請先補齊無法判定的資料歸屬，暫不允許執行升級。' : '\n資料歸屬完整，可執行 V2 升級。');
+        if (execute) execute.style.display = targets.length && !unresolvedOwners.length ? '' : 'none';
+    } catch (err) {
+        console.error('檢查訂單 V2 失敗：', err);
+        if (status) status.textContent = '檢查失敗：' + (err.message || err);
+    } finally {
+        button.disabled = false;
+    }
+};
+
+window.executeOrderV2Migration = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行訂單 V2 升級。');
+    const plan = window._orderV2MigrationPlan;
+    const button = document.getElementById('orderV2MigrateBtn');
+    const status = document.getElementById('orderV2MigrationStatus');
+    if (!plan?.targets?.length || plan.unresolvedOwners?.length || !button || button.disabled) return;
+    if (!confirm(`確定將 ${plan.targets.length} 筆訂單升級為 V2 格式嗎？\n這次只補齊訂單 items、ownerUid、salesCode、schema 與工作索引，不會修改庫存數量、採購或送貨紀錄。`)) return;
+    button.disabled = true;
+    let updated = 0;
+    try {
+        for (let start = 0; start < plan.targets.length; start += 200) {
+            const batch = db.batch();
+            plan.targets.slice(start, start + 200).forEach(row => {
+                batch.set(row.ref, orderV2MigrationPatch(row.data, plan.usersByCode, plan.usersByName), { merge:true });
+            });
+            await batch.commit();
+            updated += Math.min(200, plan.targets.length - start);
+            if (status) status.textContent = `升級中：${updated}/${plan.targets.length}…`;
+        }
+        ordersCache = [];
+        pendingPurchaseCache = [];
+        purchasingDispatchCache = [];
+        orderPaginationState = null;
+        loadedMainPages.delete('orders.list');
+        if (status) status.textContent = `完成：已將 ${updated} 筆訂單統一為 V2；訂單／採購快取已清除，下次進頁會讀取新版資料。`;
+        button.style.display = 'none';
+        window._orderV2MigrationPlan = null;
+    } catch (err) {
+        console.error('訂單 V2 升級失敗：', err);
+        if (status) status.textContent = `升級失敗：已完成 ${updated} 筆。請重新執行檢查後再繼續。\n${err.message || err}`;
+    } finally {
+        button.disabled = false;
+    }
+};
+
 window.rebuildOrderWorkIndexes = async function() {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以重建訂單工作索引。');
     const button=document.getElementById('orderWorkIndexRebuildBtn');
