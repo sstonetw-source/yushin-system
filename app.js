@@ -6267,6 +6267,10 @@ let poListCache = [];
 let poListCursor = null;
 let poListHasMore = false;
 let poListPageLoading = false;
+let poHistorySearchResults = [];
+let poHistorySearchActive = false;
+let poHistorySearchLoading = false;
+let poHistorySearchTimer = null;
 let supplyReceivingCache = [];
 let receivingSourceOrderStatusCache = new Map();
 let purchasingView = 'ordering';
@@ -6622,6 +6626,59 @@ function poActionHtml(po) {
     return reprint + ` <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">${receiptLabel}</button>`;
 }
 
+function purchaseOrderHistoryMatches(po, keyword) {
+    const needle=normalizeFullHistorySearchValue(keyword);
+    if(!needle)return true;
+    const values=[
+        po.poNo,po.vendorName,po.buyerName,po.company,po.poDate,
+        ...purchaseItemsFromSavedPo(po).flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId])
+    ];
+    return values.some(value=>normalizeFullHistorySearchValue(value).includes(needle));
+}
+
+window.schedulePurchaseOrderHistorySearch = function() {
+    clearTimeout(poHistorySearchTimer);
+    poHistorySearchTimer=setTimeout(()=>runPurchaseOrderHistorySearch(),300);
+};
+
+async function runPurchaseOrderHistorySearch() {
+    if(purchasingView!=='history')return renderPoList();
+    const keyword=document.getElementById('poListSearch')?.value||'';
+    const status=document.getElementById('poHistorySearchStatus');
+    if(!normalizeFullHistorySearchValue(keyword)){
+        poHistorySearchActive=false;poHistorySearchResults=[];
+        if(status)status.textContent='';
+        renderPoList();return;
+    }
+    if(poHistorySearchLoading)return;
+    poHistorySearchLoading=true;poHistorySearchActive=true;poHistorySearchResults=[];
+    if(status)status.textContent='搜尋全部訂購單中…';
+    renderPoList();
+    try{
+        let cursor=null,done=false,scanned=0;
+        while(!done){
+            let q=db.collection('purchaseOrders').orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT);
+            if(cursor)q=q.startAfter(cursor);
+            const snap=await firestoreReadWithTimeout(q.get(),'訂購單歷史搜尋');
+            scanned+=snap.size;
+            snap.docs.forEach(doc=>{
+                const po={id:doc.id,...doc.data()};
+                if(purchaseOrderHistoryMatches(po,keyword))poHistorySearchResults.push(po);
+            });
+            cursor=snap.empty?null:snap.docs[snap.docs.length-1];
+            done=snap.size<DEFAULT_LIST_LIMIT;
+            // 找到一頁結果就先回畫面；使用者可直接看到，不必等完整歷史掃完。
+            renderPoList();
+            if(status)status.textContent=`已搜尋 ${scanned} 筆，找到 ${poHistorySearchResults.length} 筆${done?'':'…'}`;
+            await Promise.resolve();
+        }
+        if(status)status.textContent=`全歷史搜尋完成：找到 ${poHistorySearchResults.length} 筆`;
+    }catch(err){
+        console.error('訂購單全歷史搜尋失敗：',err);
+        if(status)status.textContent='搜尋失敗，請重試';
+    }finally{poHistorySearchLoading=false;renderPoList();}
+}
+
 window.renderPoList = function() {
     const tbody = document.getElementById('poListBody');
     const searchInput = document.getElementById('poListSearch');
@@ -6631,7 +6688,8 @@ window.renderPoList = function() {
     tbody.innerHTML = '';
     let shown = 0;
 
-    poListCache.forEach(po => {
+    const poRows = poHistorySearchActive ? poHistorySearchResults : poListCache;
+    poRows.forEach(po => {
         const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
         if (keyword && !searchable.includes(keyword)) return;
 
