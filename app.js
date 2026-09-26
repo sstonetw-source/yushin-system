@@ -7381,12 +7381,16 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             else lots.push({ lotNo, expiryDate, qty });
         }
 
-        tx.set(invRef, {
-            productKey:key, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), currency:live.currency||DEFAULT_CURRENCY,
-            onHand:stock.onHand+qty, reserved:stock.reserved+reserveFromReceipt,
-            incoming:Math.max(0,stock.incoming-qty), lots, updatedAt:now
-        }, { merge:true });
+        {
+            const nextInventory={...(invSnap.exists?invSnap.data():{}),
+                productKey:key, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
+                brand:resolveBrandName(item.brand||''), currency:live.currency||DEFAULT_CURRENCY,
+                onHand:stock.onHand+qty, reserved:stock.reserved+reserveFromReceipt,
+                incoming:Math.max(0,stock.incoming-qty), lots, updatedAt:now
+            };
+            nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
+            tx.set(invRef,nextInventory,{merge:true});
+        }
 
         if (whRef) {
             tx.set(whRef, {
