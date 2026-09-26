@@ -6808,10 +6808,15 @@ async function loadPurchaseOrderPage(reset) {
         const [snapshot,supplySnapshot] = await Promise.all([
             query.get(),
             purchasingView === 'receiving'
-                ? db.collection('supplyOrders').where('type','==','SALES_SELF_ORDER').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT).get()
+                // 單欄位狀態查詢即可使用 Firestore 自動索引；不要讓待到貨頁依賴
+                // type + status + orderDate 的 Composite Index，否則缺索引時整頁會被誤判成權限錯誤。
+                ? db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(DEFAULT_LIST_LIMIT).get()
                 : Promise.resolve({docs:[]})
         ]);
-        supplyReceivingCache=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+        supplyReceivingCache=supplySnapshot.docs
+            .map(doc=>({id:doc.id,...doc.data()}))
+            .filter(row=>row.type==='SALES_SELF_ORDER')
+            .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
         // 待到貨仍保留原 PO／自行訂購歷史，但工作佇列只顯示來源訂單仍有效的品項。
         const sourceOrderIds=[...new Set([
             ...snapshot.docs.flatMap(doc=>purchaseItemsFromSavedPo(doc.data()).map(item=>item.orderId).filter(Boolean)),
@@ -6834,8 +6839,9 @@ async function loadPurchaseOrderPage(reset) {
         writeAppDataCache(purchasingView === 'history' ? 'purchase-history' : 'purchase-receiving', poListCache);
         renderPoList();
     } catch (err) {
-        console.error(err);
-        alert('讀取訂購單紀錄失敗，請確認 Firestore 權限設定。');
+        console.error('讀取訂購單／待到貨資料失敗：', err);
+        const message = err?.message || String(err || '未知錯誤');
+        alert('讀取訂購單／待到貨資料失敗：' + message);
     } finally {
         poListPageLoading = false;
         updatePoLoadMoreButton();
