@@ -5649,11 +5649,18 @@ function orderItemWorkCategory(order, item) {
     const qty=Math.max(0,Number(input.orderedQty)||0);
     if(input.lifecycleStatus!=='normal'||(Number(input.returnedQty||0)>0&&Number(input.effectiveDeliveredQty||0)<=0))return 'closed';
     if(qty>0&&Number(input.deliveredQty||0)>=qty)return input.isBilled?'complete':'billing';
-    const required=input.fulfillmentType==='DIRECT_SHIP'?qty:Math.max(0,Number(input.purchaseRequiredQty??input.inventoryShortageQty??0));
     const ordered=Math.max(Number(input.purchaseOrderedQty||0),Number(input.supplyOrderedQty||0));
     const received=Math.max(Number(input.receivedQty||0),Number(input.purchaseReceivedQty||0),Number(input.supplyReceivedQty||0));
-    if(required>ordered)return 'ordering';
-    if(required>0&&received<required)return 'arrival';
+    if(input.fulfillmentType==='DIRECT_SHIP'){
+        if(qty>ordered)return 'ordering';
+        if(received<qty)return 'arrival';
+        return 'delivery';
+    }
+    // WAREHOUSE 的 inventoryShortageQty 是「目前仍未被庫存／既有供應覆蓋的缺口」，
+    // 不是累計採購需求。只要仍有 shortage 就必須待採購；既有 PO 尚未收齊才是待到貨。
+    const shortage=Math.max(0,Number(input.inventoryShortageQty??input.purchaseRequiredQty??0));
+    if(shortage>0)return 'ordering';
+    if(ordered>received)return 'arrival';
     return 'delivery';
 }
 
