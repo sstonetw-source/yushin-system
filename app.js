@@ -7977,7 +7977,12 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
         const serverDelivery = deliveryProgressInfo(order);
         if (field === 'isOrdered' && !newValue && (order.isArrived || serverDelivery.delivered > 0)) throw new Error('已有到貨或送貨進度，不能取消訂貨。');
-        if (field === 'isArrived' && !newValue && serverDelivery.delivered > 0) throw new Error('已有送貨進度，不能取消到貨。');
+        if (field === 'isArrived' && !newValue && serverDelivery.delivered > 0) throw new Error('已有送貨進度，不能直接取消到貨。');
+        // 核銷是整張訂單層級；只有所有品項都全數送貨後才能完成整單核銷。
+        // UI 雖只在 billing 狀態開放按鈕，transaction 仍以最新 Firestore 資料再次驗證。
+        if (field === 'isBilled' && newValue && serverDelivery.state !== 'complete') {
+            throw new Error('訂單尚未全數送貨，不能核銷。');
+        }
         const entries = [];
         const updates = { [field]: newValue, updatedAt: timestamp };
         if (field === 'isArrived' && newValue && !order.isOrdered) {
