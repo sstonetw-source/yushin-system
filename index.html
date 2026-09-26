@@ -652,7 +652,7 @@
         <div class="eq-modal-box">
             <h3 id="eqModalTitle">新增儀器</h3>
             <div class="form-grid">
-                <div><label>客戶名稱</label><input type="text" id="eqCustomer" list="orderCustomerSuggestions" autocomplete="off"></div>
+                <div><label>客戶名稱</label><input type="text" id="eqCustomer" list="orderCustomerSuggestions" autocomplete="off" oninput="queueCustomerMasterSuggestions(this.value)"></div>
                 <div><label>型號</label><input type="text" id="eqModel" list="priceModelList" oninput="onEqModelChange()" onchange="onEqModelChange()"></div>
                 <div><label>廠牌</label>
                     <select id="eqBrand" onchange="onEqBrandSelectChange()"></select>
@@ -853,7 +853,7 @@
             <div class="form-grid">
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid"><option value="">請選擇負責業務</option></select></div>
-                <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off"><datalist id="orderCustomerSuggestions"></datalist></div>
+                <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off" oninput="queueCustomerMasterSuggestions(this.value)"><datalist id="orderCustomerSuggestions"></datalist></div>
                 <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" oninput="onOrderItemCodeInput(this)" onchange="onOrderItemCodeChange(this)"></div>
                 <div><label>中文品名</label><input type="text" id="orderItemName"></div>
                 <div><label>英文品名</label><input type="text" id="orderItemNameEn"></div>
