@@ -9779,12 +9779,60 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderModalOverlay').classList.add('active');
 };
 
+let customerMasterSuggestionTimer = null;
+let customerMasterSuggestionResults = [];
+
+window.queueCustomerMasterSuggestions = function(value) {
+    clearTimeout(customerMasterSuggestionTimer);
+    const raw = String(value || '').trim();
+    if (raw.length < 2) {
+        customerMasterSuggestionResults = [];
+        populateOrderCustomerSuggestions();
+        return;
+    }
+    customerMasterSuggestionTimer = scheduleListSearch(customerMasterSuggestionTimer, () => searchCustomerMasterSuggestions(raw));
+};
+
+async function searchCustomerMasterSuggestions(raw) {
+    const keyword = String(raw || '').trim();
+    if (keyword.length < 2) return;
+    try {
+        // Customer Master 的 document id 由標準化客戶名稱產生，因此可用 documentId 前綴查詢，
+        // 不需要為了自動完成載入整個 customers collection。
+        const prefix = customerIdForName(keyword);
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('customers')
+                .orderBy(firebase.firestore.FieldPath.documentId())
+                .startAt(prefix)
+                .endAt(prefix + '\uf8ff')
+                .limit(20)
+                .get(),
+            'Customer Master 客戶建議'
+        );
+        // 使用者可能在等待期間繼續輸入；舊查詢結果不可覆蓋新的關鍵字。
+        const currentValues = [
+            document.getElementById('orderCustomer')?.value,
+            document.getElementById('eqCustomer')?.value
+        ].map(value => String(value || '').trim());
+        if (!currentValues.includes(keyword)) return;
+        customerMasterSuggestionResults = snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(item => item.active !== false && item.name)
+            .map(item => item.name)
+            .slice(0, 20);
+        populateOrderCustomerSuggestions();
+    } catch (err) {
+        console.warn('Customer Master 客戶建議查詢失敗：', err);
+    }
+}
+
 function populateOrderCustomerSuggestions() {
     const list = document.getElementById('orderCustomerSuggestions');
     if (!list) return;
     const customersByKey = new Map();
     const names = [
         ...getRecentCustomerNames(),
+        ...customerMasterSuggestionResults,
         ...ordersCache.map(order => order.customerName),
         ...equipmentList.map(equipment => equipment.customerName),
         ...myQuotesCache.map(quote => quote.clientName),
