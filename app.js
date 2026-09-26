@@ -5969,7 +5969,8 @@ function renderOrderWorkCards(orders) {
         ['ordering', '待採購'],
         ['arrival', '待到貨'],
         ['delivery', '待送貨'],
-        ['billing', '待核銷']
+        ['billing', '待核銷'],
+        ['complete', '已完成']
     ];
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
     orders.forEach(order => {
