@@ -7155,6 +7155,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             const sourceReceivedQty=Math.min(Number(sourceItem.qty||sourceItem.orderedQty||0),Number(sourceItem.receivedQty||0)+qty);
             const nextSourceItems=sourceOrderItems.map((row,index)=>index===sourceItemIndex?{
                 ...row,receivedQty:sourceReceivedQty,
+                purchaseReceivedQty:Math.min(Number(row.qty||row.orderedQty||0),Number(row.purchaseReceivedQty||0)+qty),
                 inventoryReservedQty:Number(row.inventoryReservedQty||0)+reserveFromReceipt,
                 inventoryShortageQty:Math.max(0,itemShortage-reserveFromReceipt),inventoryProductKey:key,warehouseId
             }:row);
