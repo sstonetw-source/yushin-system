@@ -4850,12 +4850,65 @@ window.searchBusinessProducts=async function(){
  }catch(err){if(status)status.textContent='查詢失敗';alert('產品查詢失敗：'+err.message);}
  finally{if(input)input.disabled=false;}
 };
+let inventorySearchTimer=null;
+let inventorySearchActive=false;
+let inventorySearchLoading=false;
+let inventorySearchResults=[];
+
+function inventoryRecordMatches(record,keyword){
+ const needle=normalizeFullHistorySearchValue(keyword);
+ if(!needle)return true;
+ const values=[record.itemCode,record.itemName,record.brand,record.productKey,record.productId,
+   ...(Array.isArray(record.lots)?record.lots.flatMap(lot=>[lot.lotNo,lot.expiryDate]):[])];
+ return values.some(value=>normalizeFullHistorySearchValue(value).includes(needle));
+}
+window.scheduleInventorySearch=function(){
+ clearTimeout(inventorySearchTimer);
+ const keyword=document.getElementById('inventorySearch')?.value||'';
+ if(!normalizeFullHistorySearchValue(keyword)){
+   inventorySearchActive=false;inventorySearchResults=[];
+   const status=document.getElementById('inventorySearchStatus');if(status)status.textContent='';
+   renderInventoryList();return;
+ }
+ inventorySearchTimer=scheduleListSearch(inventorySearchTimer,()=>runInventorySearch());
+};
+async function runInventorySearch(){
+ const keyword=document.getElementById('inventorySearch')?.value||'';
+ const normalized=normalizeFullHistorySearchValue(keyword);
+ const status=document.getElementById('inventorySearchStatus');
+ if(!normalized){inventorySearchActive=false;inventorySearchResults=[];if(status)status.textContent='';renderInventoryList();return;}
+ if(inventorySearchLoading)return;
+ inventorySearchLoading=true;inventorySearchActive=true;inventorySearchResults=[];
+ if(status)status.textContent='搜尋全部庫存中…';
+ renderInventoryList();
+ try{
+   let cursor=null,done=false,scanned=0;
+   while(!done){
+     let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);
+     if(cursor)q=q.startAfter(cursor);
+     const snap=await firestoreReadWithTimeout(q.get(),'庫存全庫搜尋');
+     scanned+=snap.size;
+     snap.docs.forEach(doc=>{const row={id:doc.id,...doc.data()};if(inventoryRecordMatches(row,keyword))inventorySearchResults.push(row);});
+     cursor=snap.empty?null:snap.docs[snap.docs.length-1];
+     done=snap.size<DEFAULT_LIST_LIMIT;
+     renderInventoryList();
+     if(status)status.textContent=`已搜尋 ${scanned} 筆，找到 ${inventorySearchResults.length} 筆${done?'':'…'}`;
+     await Promise.resolve();
+   }
+   if(status)status.textContent=`全庫搜尋完成：找到 ${inventorySearchResults.length} 筆`;
+ }catch(err){
+   console.error('庫存全庫搜尋失敗：',err);
+   if(status)status.textContent='搜尋失敗，請重試';
+ }finally{inventorySearchLoading=false;renderInventoryList();}
+}
+
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;
  const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();
  const stateFilter=document.getElementById('inventoryStateFilter')?.value||'all';
  body.innerHTML='';
- inventoryCache.forEach(x=>{
+ const inventoryRows=inventorySearchActive?inventorySearchResults:inventoryCache;
+ inventoryRows.forEach(x=>{
    const lots=fefoLots(x);
    const productKey=x.productKey||x.productId||'';
    const warehouseRows=warehouseMasterCache.map(warehouse=>{
@@ -4865,7 +4918,7 @@ window.renderInventoryList=function(){
    });
    const warehouseSearch=warehouseRows.map(row=>row.warehouse.warehouseName||'').join(' ');
    const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();
-   if(k&&!text.includes(k))return;
+   if(!inventorySearchActive&&k&&!text.includes(k))return;
    const n=inventoryNumbers(x);
    const safetyStock=Number(x.safetyStock||0);
    if(stateFilter==='low' && !(safetyStock>0 && n.available<=safetyStock))return;
