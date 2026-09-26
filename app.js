@@ -6570,6 +6570,27 @@ function pendingPurchaseLines(order) {
     });
 }
 
+function syncOrderIntoPurchasingCaches(order) {
+    if (!order?.id) return;
+    const sync = (cache, include) => {
+        const index = cache.findIndex(row => row.id === order.id);
+        if (include) {
+            if (index >= 0) cache[index] = order;
+            else cache.unshift(order);
+        } else if (index >= 0) {
+            cache.splice(index, 1);
+        }
+    };
+    sync(pendingPurchaseCache, pendingPurchaseLines(order).length > 0);
+    sync(purchasingDispatchCache, normalizedOrderItems(order).some(item =>
+        orderItemWorkCategory(order, item) === 'delivery' && itemDispatchState(order, item).pending > 0
+    ));
+    writeAppDataCache('purchase-pending', pendingPurchaseCache);
+    writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
+    if (purchasingView === 'ordering') renderPendingPurchaseOrders();
+    if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
+}
+
 function renderPendingPurchaseOrders() {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
@@ -10110,10 +10131,12 @@ window.saveNewOrder = function() {
         window._orderModalSourceLink = null; window._orderModalProductId = ''; window._orderModalQuoteContext = null;
         closeOrderModal({ preserveSource:true });
         // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
-        ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
+        const savedOrder = { id: docRef.id, ...data };
+        ordersCache = [savedOrder, ...ordersCache.filter(order => order.id !== docRef.id)]
             .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
+        syncOrderIntoPurchasingCaches(savedOrder);
         if (saveButton) saveButton.innerText = '已完成';
         showActionFeedback('訂單已建立，庫存占用已同步。', 'success');
     }).catch(err => {
