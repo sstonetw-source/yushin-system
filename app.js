@@ -6854,7 +6854,11 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const inv=inventoryNumbers(invSnap.data()),wh=inventoryNumbers(whSnap.data());
             const take=Math.min(qty,liveShortage,Math.max(0,inv.available),Math.max(0,wh.available));
             if(take<=0)return;
-            const order={id:orderSnap.id,...orderSnap.data()},items=normalizedOrderItems(order);
+            const order={id:orderSnap.id,...orderSnap.data()};
+            // Candidate rows are read before allocation. Re-check lifecycle inside the
+            // transaction so stale/legacy reservations can never reclaim stock for a cancelled order.
+            if(normalizedOrderStatus(order)!=='normal')return;
+            const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
             if(index<0)return;
             const item=items[index],oldReserved=Number(item.reservedQty??item.inventoryReservedQty??0);
