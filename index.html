@@ -21,7 +21,7 @@
             <h2>又鑫管理系統 登入</h2>
             <input type="email" id="loginEmail" placeholder="帳號 (Email)" autocomplete="username">
             <input type="password" id="loginPassword" placeholder="密碼" autocomplete="current-password">
-            <button onclick="handleLogin()">登入</button>
+            <button onclick="window.handleLogin ? window.handleLogin() : document.getElementById('loginError').innerText='主程式尚未成功載入，請重新整理；若持續出現請回報此訊息。'">登入</button>
             <div class="login-links"><a onclick="handleForgotPassword()">忘記密碼？</a></div>
             <div class="login-error" id="loginError"></div>
         </div>
@@ -1359,6 +1359,14 @@
         </div>
     </div>
 
+    <script>
+    window.addEventListener('error', function(event) {
+        var errorEl = document.getElementById('loginError');
+        if (!errorEl || document.getElementById('appContainer')?.style.display !== 'none') return;
+        var file = String(event.filename || '').split('/').pop();
+        errorEl.innerText = '主程式載入失敗：' + (event.message || 'JavaScript error') + (file ? '（' + file + ':' + (event.lineno || '?') + '）' : '');
+    });
+    </script>
     <script src="modules/fulfillment-core.js?v=20260922-4"></script>
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
