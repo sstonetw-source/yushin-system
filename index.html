@@ -811,7 +811,8 @@
         <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
         <div id="poListPanel" style="display:none">
             <div class="toolbar no-print">
-                <input type="text" id="poListSearch" placeholder="搜尋已載入的單號 / 廠商 / 採購人員" style="width:260px;" oninput="renderPoList()">
+                <input type="text" id="poListSearch" placeholder="搜尋全部訂購單：單號 / 廠商 / 採購人員" style="width:280px;" oninput="schedulePurchaseOrderHistorySearch()">
+                <span id="poHistorySearchStatus" role="status"></span>
                 <select id="poPeriodFilter" onchange="renderPoList()">
                     <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
                 </select>
