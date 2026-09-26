@@ -58,12 +58,8 @@ if (APP_ENVIRONMENT === 'preview') {
     });
 }
 
-// 登入一次之後，不用每次重新輸入帳號密碼：明確指定用「LOCAL」持久化方式，
-// 登入狀態會存在瀏覽器本機，關掉分頁、關掉瀏覽器、甚至重開手機，只要沒有登出，
-// 下次打開網址還是會自動維持登入狀態（不用再輸入一次帳號密碼）
-firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err => {
-    console.error('設定登入持久化失敗：', err);
-});
+// Firebase Auth 的瀏覽器 session 直接使用 SDK 預設持久化。
+// 不在 app 啟動時另外切換 persistence，避免 iOS Safari 初始化期間與手動登入競爭。
 
 let currentCompany = 'yushin';
 let restoringQuoteDraft = false;  // 還原本機草稿的過程中，暫停「重新產生單號」之類的副作用，避免蓋掉草稿裡存的資料
