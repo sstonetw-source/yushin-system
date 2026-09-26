@@ -5663,14 +5663,18 @@ function itemDispatchState(order, item) {
 function orderContextActionState(order) {
     const items = normalizedOrderItems(order);
     const states = items.map(item => itemDispatchState(order, item));
-    const orderedQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.orderedQty || item.qty || 0)), 0);
     const grossDelivered = states.reduce((sum, state) => sum + Math.max(0, Number(state.grossDelivered || 0)), 0);
     const returned = states.reduce((sum, state) => sum + Math.max(0, Number(state.returned || 0)), 0);
     const netDelivered = Math.max(0, grossDelivered - returned);
-    const receivedQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.purchaseReceivedQty ?? item.receivedQty ?? item.supplyReceivedQty ?? 0)), 0);
-    const shippable = states.reduce((sum, state) => sum + Math.max(0, Number(state.shippable || 0)), 0);
+    // 「分批交貨」只在真的有部分到貨品項時出現。
+    // 全數到貨走一般送貨流程；尚未到貨則不提供分批交貨，避免操作選單過早出現。
+    const hasPartialArrival = items.some(item => {
+        const ordered = Math.max(0, Number(item.orderedQty || item.qty || 0));
+        const received = Math.max(0, Number(item.purchaseReceivedQty ?? item.receivedQty ?? item.supplyReceivedQty ?? 0));
+        return ordered > 0 && received > 0 && received < ordered;
+    });
     return {
-        showPartialDelivery: normalizedOrderStatus(order) === 'normal' && grossDelivered < orderedQty && (receivedQty > 0 || shippable > 0),
+        showPartialDelivery: normalizedOrderStatus(order) === 'normal' && hasPartialArrival,
         showReturn: netDelivered > 0
     };
 }
