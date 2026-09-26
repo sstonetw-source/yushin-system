@@ -5660,6 +5660,21 @@ function itemDispatchState(order, item) {
     return { delivered, grossDelivered, returned, reserved, prepared, shippable, pending:Math.max(0,reserved-prepared) };
 }
 
+function orderContextActionState(order) {
+    const items = normalizedOrderItems(order);
+    const states = items.map(item => itemDispatchState(order, item));
+    const orderedQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.orderedQty || item.qty || 0)), 0);
+    const grossDelivered = states.reduce((sum, state) => sum + Math.max(0, Number(state.grossDelivered || 0)), 0);
+    const returned = states.reduce((sum, state) => sum + Math.max(0, Number(state.returned || 0)), 0);
+    const netDelivered = Math.max(0, grossDelivered - returned);
+    const receivedQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.purchaseReceivedQty ?? item.receivedQty ?? item.supplyReceivedQty ?? 0)), 0);
+    const shippable = states.reduce((sum, state) => sum + Math.max(0, Number(state.shippable || 0)), 0);
+    return {
+        showPartialDelivery: normalizedOrderStatus(order) === 'normal' && grossDelivered < orderedQty && (receivedQty > 0 || shippable > 0),
+        showReturn: netDelivered > 0
+    };
+}
+
 function dispatchActionHtml(order) {
     if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return '';
     if (normalizedOrderStatus(order) !== 'normal') return '';
@@ -6421,9 +6436,9 @@ window.renderOrdersList = function() {
                             ${pendingLifecycleOrderIds.has(o.id)
                                 ? '<button type="button" disabled>處理中…</button>'
                                 : normalizedOrderStatus(o) === 'normal'
-                                    ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>
+                                    ? `${orderContextActionState(o).showPartialDelivery ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>` : ''}
                             <button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>
-                            <button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>`
+                            ${orderContextActionState(o).showReturn ? `<button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}`
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
                             ${selfOrderActionHtml(o)}
