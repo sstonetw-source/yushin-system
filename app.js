@@ -5842,17 +5842,10 @@ window.saveSelfOrder = async function() {
 };
 
 function orderProgressInfo(order) {
-    const lifecycle=orderLifecycleInfo(order);
-    const delivery=deliveryProgressInfo(order);
-    const purchase=purchaseProgressInfo(order);
-    const fulfillment=fulfillmentProgressInfo(order);
-    if(lifecycle.status!=='normal'||lifecycle.returned>0)return {label:lifecycle.label,css:lifecycle.css==='returned'?'partial':'invalid'};
-    if(delivery.delivered>0&&delivery.state==='partial')return {label:`部分送貨 ${delivery.delivered}/${delivery.total}`,css:'partial'};
-    if(delivery.state==='complete')return order.isBilled?{label:'已完成',css:'complete'}:{label:'待核銷',css:'active'};
-    if(fulfillment.state==='shippable')return {label:fulfillment.label,css:'active'};
-    if(fulfillment.state==='pending_dispatch')return {label:fulfillment.label,css:'pending'};
-    if(fulfillment.state==='partial_dispatch')return {label:fulfillment.label,css:'partial'};
-    return {label:purchase.label,css:purchase.state==='partial'?'partial':'pending'};
+    // 訂單主狀態只由單一品項工作狀態引擎決定。
+    // purchaseProgressInfo / fulfillmentProgressInfo 僅保留數量與操作可用性資訊，
+    // 不再建立另一套「待採購／待到貨／待送貨／待核銷」判斷。
+    return orderWorkStatusInfo(order);
 }
 
 function isDeletableOrderDraft(order) {
