@@ -10244,8 +10244,9 @@ window.renderEquipmentList = function() {
 
     const source = equipmentSearchActive ? equipmentSearchResults : equipmentList;
     source.forEach(eq => {
-        const searchable = `${eq.customerName || ''} ${eq.brand || ''} ${eq.salesName || ''} ${eq.model || ''} ${eq.serialNo || ''} ${eq.assetId || ''}`.toLowerCase();
-        if (keyword && !searchable.includes(keyword)) return;
+        const searchable = `${eq.customerName || ''} ${eq.brand || ''} ${eq.salesName || ''} ${eq.model || ''} ${eq.serialNo || ''} ${eq.assetId || ''} ${eq.location || ''} ${eq.notes || ''}`.toLowerCase();
+        // 全資料搜尋已由 searchTokens + fullHistoryRecordMatches 完成，不再以畫面欄位二次縮小結果。
+        if (!equipmentSearchActive && keyword && !searchable.includes(keyword)) return;
 
         const { status, dueDate } = getEquipmentStatus(eq);
         if (statusFilter !== 'all' && status !== statusFilter) return;
