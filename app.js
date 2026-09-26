@@ -177,7 +177,21 @@ function applyUserProfile(data={}) {
     mustChangePassword=!!data.mustChangePassword;
 }
 const DEFAULT_LIST_LIMIT = 50;
+const DEFAULT_SEARCH_DEBOUNCE_MS = 350;
 const FIRESTORE_READ_TIMEOUT_MS = 15000;
+
+// 全系統清單搜尋統一規則：一般列表每頁 50 筆；輸入搜尋延遲 350ms。
+// 各模組只保留「如何查資料」的差異，不再自行定義 debounce 時間。
+function scheduleListSearch(timer, callback, delay = DEFAULT_SEARCH_DEBOUNCE_MS) {
+    clearTimeout(timer);
+    return setTimeout(callback, delay);
+}
+function mergeUniqueSearchResults(existing = [], incoming = [], key = 'id') {
+    const rows = new Map(existing.map(row => [String(row?.[key] ?? ''), row]));
+    incoming.forEach(row => rows.set(String(row?.[key] ?? ''), row));
+    return [...rows.values()];
+}
+
 const DEFAULT_CURRENCY = 'TWD';
 const DEFAULT_TAX_RATE = 0.05;
 const BUSINESS_STATUS = Object.freeze({
@@ -1200,7 +1214,7 @@ window.queueProductManagementSearch = function() {
         if (status && raw.length) status.textContent = '再輸入 1 個字即可搜尋。';
         return;
     }
-    productManagementSearchTimer = setTimeout(() => searchProductManagement(), 400);
+    productManagementSearchTimer = scheduleListSearch(productManagementSearchTimer, () => searchProductManagement());
 };
 
 window.searchProductManagement = async function() {
@@ -1586,7 +1600,7 @@ window.scheduleForecastHistorySearch = function() {
     clearTimeout(forecastHistorySearchTimer);
     const keyword = document.getElementById('forecastSearch')?.value || '';
     if (!normalizeFullHistorySearchValue(keyword)) return runForecastHistorySearch(true);
-    forecastHistorySearchTimer = setTimeout(() => runForecastHistorySearch(true), 350);
+    forecastHistorySearchTimer = scheduleListSearch(forecastHistorySearchTimer, () => runForecastHistorySearch(true));
 };
 
 window.renderForecastList = function() {
@@ -6659,7 +6673,7 @@ function purchaseOrderHistoryMatches(po, keyword) {
 
 window.schedulePurchaseOrderHistorySearch = function() {
     clearTimeout(poHistorySearchTimer);
-    poHistorySearchTimer=setTimeout(()=>runPurchaseOrderHistorySearch(),300);
+    poHistorySearchTimer=scheduleListSearch(poHistorySearchTimer,()=>runPurchaseOrderHistorySearch());
 };
 
 async function runPurchaseOrderHistorySearch() {
