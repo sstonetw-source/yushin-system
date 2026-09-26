@@ -4149,7 +4149,7 @@ window.scheduleQuoteHistorySearch = function() {
     clearTimeout(quoteHistorySearchTimer);
     const keyword = document.getElementById('myQuoteSearch')?.value || '';
     if (!normalizeFullHistorySearchValue(keyword)) return runQuoteHistorySearch(true);
-    quoteHistorySearchTimer = setTimeout(() => runQuoteHistorySearch(true), 350);
+    quoteHistorySearchTimer = scheduleListSearch(quoteHistorySearchTimer, () => runQuoteHistorySearch(true));
 };
 
 window.loadMoreQuoteHistorySearch = function() {
@@ -6086,7 +6086,7 @@ window.scheduleOrderHistorySearch = function() {
     clearTimeout(orderHistorySearchTimer);
     const keyword = document.getElementById('orderSearch')?.value || '';
     if (!normalizeFullHistorySearchValue(keyword)) return runOrderHistorySearch(true);
-    orderHistorySearchTimer = setTimeout(() => runOrderHistorySearch(true), 350);
+    orderHistorySearchTimer = scheduleListSearch(orderHistorySearchTimer, () => runOrderHistorySearch(true));
 };
 
 window.searchAllOrderHistory = function() { return runOrderHistorySearch(true); };
@@ -10127,7 +10127,7 @@ window.scheduleEquipmentSearch = function() {
     clearTimeout(equipmentSearchTimer);
     const keyword = document.getElementById('eqSearchInput')?.value || '';
     if (!normalizeFullHistorySearchValue(keyword)) return runEquipmentSearch(true);
-    equipmentSearchTimer = setTimeout(() => runEquipmentSearch(true), 350);
+    equipmentSearchTimer = scheduleListSearch(equipmentSearchTimer, () => runEquipmentSearch(true));
 };
 
 window.renderEquipmentList = function() {
