@@ -5668,10 +5668,13 @@ function orderContextActionState(order) {
     const netDelivered = Math.max(0, grossDelivered - returned);
     // 「分批交貨」只在真的有部分到貨品項時出現。
     // 全數到貨走一般送貨流程；尚未到貨則不提供分批交貨，避免操作選單過早出現。
-    const hasPartialArrival = items.some(item => {
+    const hasPartialArrival = items.some((item, index) => {
         const ordered = Math.max(0, Number(item.orderedQty || item.qty || 0));
         const received = Math.max(0, Number(item.purchaseReceivedQty ?? item.receivedQty ?? item.supplyReceivedQty ?? 0));
-        return ordered > 0 && received > 0 && received < ordered;
+        const state = states[index];
+        // 分批交貨不只要「部分到貨」，還必須真的有尚未交付、目前可出貨的數量。
+        // 避免部分到貨紀錄存在，但該批已全數送出時仍顯示無效操作。
+        return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
     return {
         showPartialDelivery: normalizedOrderStatus(order) === 'normal' && hasPartialArrival,
