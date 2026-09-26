@@ -6412,7 +6412,7 @@ window.renderOrdersList = function() {
             <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
                 <div class="order-compact-actions">
-                    <span class="order-progress-badge">品項狀態</span>
+                    
                     ${!canManageOrderOps ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
                     ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
                     <details class="order-more-menu">
