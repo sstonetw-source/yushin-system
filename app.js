@@ -8580,15 +8580,26 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
             transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)-row.qty,updatedAt:now});
         }
     }
-    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:inv.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
-    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+    // 退回的商品仍屬於這張尚待補送的訂單，因此回庫時同時恢復 reservation；
+    // 刪除／縮減退貨則反向釋放。這樣退貨後補送不會被其他訂單搶走庫存。
+    const reservationDelta=deltaQty;
+    const nextReserved=Math.max(0,inv.reserved+reservationDelta);
+    const nextWarehouseReserved=Math.max(0,wh.reserved+reservationDelta);
+    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:nextReserved,incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:nextWarehouseReserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+    const deliveryItemId=order.itemId||'';
+    const reservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
+    const currentItemState=itemDispatchState(order,order);
+    const currentReservation=Math.max(0,Number(order.reservedQty??order.inventoryReservedQty??0)-currentItemState.grossDelivered+currentItemState.returned);
+    const nextReservation=Math.max(0,currentReservation+deltaQty);
+    transaction.set(reservationRef,{...inventoryReservationPayload(sourceId,order,nextReservation,nextReservation>0?'active':'fulfilled'),itemId:deliveryItemId,warehouseId},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
-        createdAt:now,createdBy:actor,lotAllocations,costPending:true,
+        createdAt:now,createdBy:actor,lotAllocations,costPending:true,reservationDelta,
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     });
-    return {lotAllocations,cogs};
+    return {lotAllocations,cogs,reservationDelta};
 }
 
 window.quickCompleteDelivery = async function(orderIdOverride) {
