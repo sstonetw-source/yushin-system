@@ -7037,12 +7037,15 @@ window.closePoReceiptBatch = function() {
     document.getElementById('poReceiptBatchOverlay')?.classList.remove('active');
 };
 
-async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate = '') {
+async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate = '', operationId = '') {
     const now = new Date().toISOString();
     const actor = currentUserName || currentUser?.email || '';
-    const receiptId = `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${itemIndex}`;
+    const receiptId = operationId || `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${itemIndex}`;
 
     await db.runTransaction(async tx => {
+        const receiptRef = db.collection('receipts').doc(receiptId);
+        const receiptSnap = await tx.get(receiptRef);
+        if (receiptSnap.exists) return;
         const poRef = db.collection('purchaseOrders').doc(poId);
         const poSnap = await tx.get(poRef);
         if (!poSnap.exists) throw new Error('找不到訂購單');
@@ -7198,7 +7201,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             unitCost:Number(item.unitPrice||0),currency:live.currency||DEFAULT_CURRENCY,
             sourceType:'PURCHASE_ORDER',sourceId:poId,createdAt:now,createdBy:actor
         });
-        tx.set(db.collection('receipts').doc(receiptId),{
+        tx.set(receiptRef,{
             purchaseOrderId:poId,orderId:item.orderId||'',itemId:sourceItem?.itemId||'',
             productKey:key,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,
             createdAt:now,createdBy:actor
@@ -7276,7 +7279,8 @@ window.savePoReceiptBatch = async function() {
             const supplyId=poId.slice(7);
             for(const entry of entries){ await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate); completed++; }
         }else{
-            for (const entry of entries){ await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate); completed++; }
+            const batchOperationId=`po-receipt-${poId}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+            for (const entry of entries){ await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate, `${batchOperationId}-${entry.itemIndex}`); completed++; }
         }
         // 核心入庫 transaction 已完成後就結束使用者等待；跨模組列表改成背景同步。
         // 這些 reload 只是 UI refresh，不應延長「確認入庫」按鈕的完成時間。
