@@ -6870,7 +6870,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             const orderRef=db.collection('orders').doc(supply.orderId);
             const orderSnap=await tx.get(orderRef);
             if(!orderSnap.exists)throw new Error('找不到來源訂單。');
-            const order=orderSnap.data(),items=normalizedOrderItems(order);
+            const order=orderSnap.data();
+            if(normalizedOrderStatus(order)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
+            const items=normalizedOrderItems(order);
             const itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
             if(itemIndex<0)throw new Error('找不到來源訂單品項。');
             const item=items[itemIndex];
@@ -6899,7 +6901,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             const orderRef=db.collection('orders').doc(supply.orderId);
             const orderSnap=await tx.get(orderRef);
             if(orderSnap.exists){
-                order=orderSnap.data();items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
+                order=orderSnap.data();
+                if(normalizedOrderStatus(order)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
+                items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
                 if(itemIndex>=0){
                     const item=items[itemIndex];
                     const shortage=Math.max(0,Number(item.inventoryShortageQty??item.shortageQty??0));
@@ -7035,6 +7039,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
                 if(orderSnap.exists)sourceOrder={id:orderSnap.id,...orderSnap.data()};
             }
             if(!sourceOrder)throw new Error('原廠直送品項缺少來源訂單。');
+            if(normalizedOrderStatus(sourceOrder)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
             const sourceItems=normalizedOrderItems(sourceOrder);
             const sourceIndex=Number(item.orderItemIndex||0);
             const sourceItem=sourceItems[sourceIndex];
@@ -7082,6 +7087,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             const orderSnap = await tx.get(db.collection('orders').doc(item.orderId));
             if (orderSnap.exists) sourceOrder = { id: orderSnap.id, ...orderSnap.data() };
         }
+        if(sourceOrder&&normalizedOrderStatus(sourceOrder)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
 
         let reserveFromReceipt=0;
         let sourceOrderItems=sourceOrder?normalizedOrderItems(sourceOrder):[];
