@@ -6234,6 +6234,7 @@ let poListCursor = null;
 let poListHasMore = false;
 let poListPageLoading = false;
 let supplyReceivingCache = [];
+let receivingSourceOrderStatusCache = new Map();
 let purchasingView = 'ordering';
 let pendingPurchaseCursor = null;
 let pendingPurchaseHasMore = true;
@@ -6508,6 +6509,17 @@ async function loadPurchaseOrderPage(reset) {
             db.collection('supplyOrders').where('type','==','SALES_SELF_ORDER').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT).get()
         ]);
         supplyReceivingCache=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+        // 待到貨仍保留原 PO／自行訂購歷史，但工作佇列只顯示來源訂單仍有效的品項。
+        const sourceOrderIds=[...new Set([
+            ...snapshot.docs.flatMap(doc=>purchaseItemsFromSavedPo(doc.data()).map(item=>item.orderId).filter(Boolean)),
+            ...supplyReceivingCache.map(row=>row.orderId).filter(Boolean)
+        ])];
+        receivingSourceOrderStatusCache=new Map();
+        for(let i=0;i<sourceOrderIds.length;i+=10){
+            const batch=sourceOrderIds.slice(i,i+10);
+            const sourceSnap=await db.collection('orders').where(firebase.firestore.FieldPath.documentId(),'in',batch).get();
+            sourceSnap.docs.forEach(doc=>receivingSourceOrderStatusCache.set(doc.id,normalizedOrderStatus(doc.data())));
+        }
         if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return;
         if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
         const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -6580,6 +6592,7 @@ window.renderPoList = function() {
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
         items.forEach((item,itemIndex)=>{
+            if(item.orderId && receivingSourceOrderStatusCache.get(item.orderId) !== 'normal') return;
             const receipt=poItemReceiptProgress(po,item,itemIndex);
             const {received,ordered,complete,directShip}=receipt;
             // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。
@@ -6604,6 +6617,7 @@ window.renderPoList = function() {
     });
 
     supplyReceivingCache.forEach(supply=>{
+        if(supply.orderId && receivingSourceOrderStatusCache.get(supply.orderId) !== 'normal') return;
         const ordered=Math.max(0,Number(supply.qty||0));
         const received=Math.max(0,Number(supply.receivedQty||0));
         const remaining=Math.max(0,ordered-received);
@@ -12640,7 +12654,7 @@ window.executeTestDataReset = async function() {
 
         myQuotesCache=[]; quoteHistorySearchResults=[]; forecastCache=[]; forecastHistorySearchResults=[];
         ordersCache=[]; orderHistorySearchResults=[]; pendingPurchaseCache=[]; purchasingDispatchCache=[];
-        poListCache=[]; supplyReceivingCache=[]; inventoryCache=[]; pendingInventoryCache=[];
+        poListCache=[]; supplyReceivingCache=[]; receivingSourceOrderStatusCache=new Map(); inventoryCache=[]; pendingInventoryCache=[];
         orderPaginationState=null; loadedMainPages.clear();
         testDataResetPreviewState=null;
         if(input)input.value='';
