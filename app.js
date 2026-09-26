@@ -5649,7 +5649,10 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
             saved=nextOrder;
         });
         const idx=ordersCache.findIndex(o=>o.id===orderId);
-        if(idx>=0)ordersCache[idx]={id:orderId,...saved};
+        const savedOrder={id:orderId,...saved};
+        if(idx>=0)ordersCache[idx]=savedOrder;
+        syncOrderIntoPurchasingCaches(savedOrder);
+        writeAppDataCache('orders', ordersCache);
     }catch(err){alert('標記已打單失敗：'+err.message);}
     finally{pendingDispatchOrderIds.delete(key);renderOrdersList();if(currentDeliveryOrderId===orderId)renderDeliveryModal();}
 };
@@ -8694,7 +8697,10 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
         });
         const index = ordersCache.findIndex(item => item.id === orderId);
-        if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
+        const syncedOrder = { id: orderId, ...savedOrder };
+        if (index >= 0) ordersCache[index] = syncedOrder;
+        syncOrderIntoPurchasingCaches(syncedOrder);
+        writeAppDataCache('orders', ordersCache);
         pendingLifecycleOrderIds.delete(orderId);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
