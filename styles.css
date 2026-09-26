@@ -1049,3 +1049,29 @@ html[data-app-environment="preview"] body { border-top: 0; }
         width: auto;
     }
 }
+
+
+/* 手機訂單更多操作：固定在可視區內，避免靠近螢幕邊緣時選單被裁切。 */
+@media screen and (max-width: 640px) {
+    #ordersBody .order-more-menu { position: static; }
+    #ordersBody .order-more-menu-popover {
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        top: auto;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        width: auto;
+        max-width: none;
+        max-height: min(70vh, 520px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        z-index: 10020;
+        padding: 8px;
+        border-radius: 12px;
+    }
+    #ordersBody .order-more-menu-popover button {
+        min-height: 44px;
+        padding: 10px 12px;
+        font-size: 15px;
+    }
+}
