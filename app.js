@@ -10062,6 +10062,7 @@ window.saveNewOrder = function() {
     db.collection('orders').add(data).then(async docRef => {
         let reservation;
         try {
+            if (saveButton) saveButton.innerText = '同步庫存中…';
             reservation = await reserveInventoryForNewOrder(docRef.id, data);
             const completedAt = new Date().toISOString();
             await db.collection('orders').doc(docRef.id).set({
@@ -10111,7 +10112,10 @@ window.saveNewOrder = function() {
         // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
         ordersCache = [{ id: docRef.id, ...data }, ...ordersCache.filter(order => order.id !== docRef.id)]
             .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
+        writeAppDataCache('orders', ordersCache);
         renderOrdersList();
+        if (saveButton) saveButton.innerText = '已完成';
+        showActionFeedback('訂單已建立，庫存占用已同步。', 'success');
     }).catch(err => {
         alert('新增失敗：' + err.message);
     }).finally(() => {
