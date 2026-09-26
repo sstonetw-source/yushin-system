@@ -5294,6 +5294,7 @@ window.saveInventoryAdjustmentBatch = async function() {
           }
           tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',lotId:authoritativeLotId,sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
         });
+        if(row.warehouseId) invalidateWarehouseStockCache(key,row.warehouseId);
       }
       closeInventoryAdjustment();
       alert(`已完成 ${rows.length} 筆庫存異動。`);
@@ -5426,6 +5427,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         },{merge:true});
         result={...item,itemId,orderedQty:requested,reservedQty:reservable,inventoryReservedQty:reservable,shortageQty:shortage,inventoryShortageQty:shortage,purchaseRequiredQty:shortage,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,warehouseId};
     });
+    if(warehouseId) invalidateWarehouseStockCache(productKey,warehouseId);
     return result;
 }
 async function reserveInventoryForNewOrder(orderId, order) {
@@ -7113,6 +7115,7 @@ async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
                 createdAt:now, createdBy:currentUserName||currentUser?.email||''
             });
         });
+        if(warehouseId) invalidateWarehouseStockCache(key,warehouseId);
     }
 }
 
@@ -8736,6 +8739,11 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
+        });
+        normalizedOrderItems(savedOrder).forEach(item=>{
+            const productKey=inventoryProductKey(item);
+            const warehouseId=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||savedOrder.warehouseId||'');
+            if(productKey&&warehouseId) invalidateWarehouseStockCache(productKey,warehouseId);
         });
         const index = ordersCache.findIndex(item => item.id === orderId);
         const syncedOrder = { id: orderId, ...savedOrder };
