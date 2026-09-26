@@ -6373,7 +6373,11 @@ function pendingPurchaseLines(order) {
     const itemById=new Map(normalizedOrderItems(order).map(item=>[item.itemId,item]));
     return purchaseItemsFromOrder(order).filter(line=>{
         const sourceItem=itemById.get(line.itemId);
-        return sourceItem&&orderItemWorkCategory(order,sourceItem)==='ordering';
+        if (!sourceItem) return false;
+        // 採購頁只接手「採購下單」品項；業務自行訂購即使仍是 ordering，
+        // 也留在業務自己的自行訂貨流程，避免採購誤建立 PO。
+        const procurementType=sourceItem.procurementType||order.procurementType||'PURCHASING_PO';
+        return procurementType==='PURCHASING_PO' && orderItemWorkCategory(order,sourceItem)==='ordering';
     });
 }
 
