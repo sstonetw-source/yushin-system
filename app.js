@@ -2879,12 +2879,18 @@ function populateOrderWarehouseOptions(selected = '') {
 
 async function warehouseStockSnapshot(productKey, warehouseId) {
     if (!productKey || !warehouseId) return null;
+    const cacheKey = warehouseId + '||' + productKey;
+    if (warehouseStockCache.has(cacheKey)) return warehouseStockCache.get(cacheKey);
     const ref = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey));
     const snap = await ref.get().catch(() => null);
-    return snap && snap.exists ? { id:snap.id, ...snap.data() } : null;
+    const data = snap && snap.exists ? { id:snap.id, ...snap.data() } : null;
+    warehouseStockCache.set(cacheKey, data);
+    return data;
 }
 
+let orderWarehouseStockRefreshGeneration = 0;
 window.refreshOrderWarehouseStock = async function() {
+    const generation = ++orderWarehouseStockRefreshGeneration;
     const hint = document.getElementById('orderWarehouseStockHint');
     const fulfillment = document.getElementById('orderFulfillmentType')?.value || 'WAREHOUSE';
     if (!hint) return;
@@ -2896,13 +2902,17 @@ window.refreshOrderWarehouseStock = async function() {
     const match = findPriceItemByCodeValue(code);
     const key = match ? (match.productId || stableProductId(match)) : '';
     if (!key) { hint.innerText = '輸入貨號後會顯示各倉庫可用庫存。'; return; }
+    hint.innerText = '正在查詢各倉庫可用庫存…';
     await loadWarehouseMaster();
-    const rows = [];
-    for (const warehouse of warehouseMasterCache) {
-        const stock = await warehouseStockSnapshot(key, warehouse.id);
+    if (generation !== orderWarehouseStockRefreshGeneration) return;
+    const warehouses = warehouseMasterCache.filter(warehouse => warehouse.active !== false);
+    const stocks = await Promise.all(warehouses.map(warehouse => warehouseStockSnapshot(key, warehouse.id)));
+    if (generation !== orderWarehouseStockRefreshGeneration) return;
+    const rows = warehouses.map((warehouse, index) => {
+        const stock = stocks[index];
         const onHand = Number(stock?.onHand || 0), reserved = Number(stock?.reserved || 0);
-        rows.push(`${warehouse.warehouseName || warehouse.id}：${Math.max(0,onHand-reserved)} 可用（現有 ${onHand}）`);
-    }
+        return `${warehouse.warehouseName || warehouse.id}：${Math.max(0,onHand-reserved)} 可用（現有 ${onHand}）`;
+    });
     hint.innerText = rows.length ? rows.join(' ｜ ') : '尚未建立倉庫；可先到管理員後台 → 廠牌管理建立。';
 };
 
