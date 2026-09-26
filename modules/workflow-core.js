@@ -34,13 +34,16 @@
     const delivered=n(input.deliveredQty);
     if(qty>0&&delivered>=qty)return input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
-    const required=fulfillmentType==='DIRECT_SHIP'
-      ? qty
-      : n(input.purchaseRequiredQty??input.inventoryShortageQty);
     const ordered=Math.max(n(input.purchaseOrderedQty),n(input.supplyOrderedQty));
     const received=Math.max(n(input.receivedQty),n(input.purchaseReceivedQty),n(input.supplyReceivedQty));
-    if(required>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
-    if(required>0&&received<required)return ITEM_WORK_CATEGORIES.ARRIVAL;
+    if(fulfillmentType==='DIRECT_SHIP'){
+      if(qty>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
+      if(received<qty)return ITEM_WORK_CATEGORIES.ARRIVAL;
+      return ITEM_WORK_CATEGORIES.DELIVERY;
+    }
+    const shortage=n(input.inventoryShortageQty??input.purchaseRequiredQty);
+    if(shortage>0)return ITEM_WORK_CATEGORIES.ORDERING;
+    if(ordered>received)return ITEM_WORK_CATEGORIES.ARRIVAL;
     return ITEM_WORK_CATEGORIES.DELIVERY;
   }
   function normalizeSupplyAllocations(item={}){
