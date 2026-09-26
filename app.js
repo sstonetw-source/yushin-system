@@ -5659,8 +5659,12 @@ function orderItemWorkCategory(order, item) {
     // WAREHOUSE 的 inventoryShortageQty 是「目前仍未被庫存／既有供應覆蓋的缺口」，
     // 不是累計採購需求。只要仍有 shortage 就必須待採購；既有 PO 尚未收齊才是待到貨。
     const shortage=Math.max(0,Number(input.inventoryShortageQty??input.purchaseRequiredQty??0));
-    if(shortage>0)return 'ordering';
-    if(ordered>received)return 'arrival';
+    // shortage 是「目前尚未被實體庫存占用的數量」；已發單但尚未到貨的數量仍會留在 shortage。
+    // 因此要先扣掉尚在途的採購量，只有超出在途供應的缺口才屬於「待採購」。
+    const outstandingSupply=Math.max(0,ordered-received);
+    const uncoveredShortage=Math.max(0,shortage-outstandingSupply);
+    if(uncoveredShortage>0)return 'ordering';
+    if(shortage>0||ordered>received)return 'arrival';
     return 'delivery';
 }
 
