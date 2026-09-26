@@ -5203,9 +5203,12 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     const requested=Math.max(0,Number(item.qty||0));
     const productKey=inventoryProductKey(item);
     const itemId=String(item.itemId||`item-${itemIndex+1}`);
-    if(!requested||!productKey)return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:requested,inventoryShortageQty:requested,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey};
+    if(!requested)return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:0,inventoryShortageQty:0,purchaseRequiredQty:0,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey};
+    // 沒有 Product Master 對應時不能做庫存占用，但仍要保留完整缺貨/採購需求；
+    // 否則估價單轉訂單後會出現「有訂單、採購頁卻沒有需求」的斷鏈。
+    if(!productKey)return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:requested,inventoryShortageQty:requested,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:'',reservationError:'missing_product_master'};
     if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
-        return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:0,inventoryShortageQty:0,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,directShipQty:requested,warehouseId:''};
+        return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:0,inventoryShortageQty:0,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,directShipQty:requested,warehouseId:'',reservationStatus:'not_required'};
     }
     const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
     const aggregateRef=inventoryRefFor(item);
