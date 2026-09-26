@@ -6284,7 +6284,7 @@ const purchasingViewLoaded = new Set();
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['ordering', 'receiving', 'dispatch'].includes(view)) return;
+    if (!['ordering', 'receiving', 'dispatch', 'history'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
     const orderingTab = document.getElementById('purchase-card-ordering');
@@ -6294,7 +6294,7 @@ window.switchPurchasingView = function(view, tab) {
     const poPanel=document.getElementById('poListPanel');
     const dispatchPanel=document.getElementById('purchaseDispatchPanel');
     if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
-    if(poPanel)poPanel.style.display=view==='receiving'?'':'none';
+    if(poPanel)poPanel.style.display=(view==='receiving'||view==='history')?'':'none';
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if (view === 'ordering') {
         const cached=readAppDataCache('purchase-pending');
@@ -6318,6 +6318,13 @@ window.switchPurchasingView = function(view, tab) {
                 console.error('待到貨首次載入失敗：', err);
             });
         }
+    } else if (view === 'history') {
+        // 訂購單紀錄與待到貨工作佇列分離：歷史顯示最近 50 張正式訂購單（含已完成）。
+        poListCache = [];
+        poListCursor = null;
+        poListHasMore = true;
+        renderPoList();
+        loadPurchaseOrderPage(true).catch(err => console.error('訂購單紀錄首次載入失敗：', err));
     } else {
         const cached=readAppDataCache('purchase-dispatch');
         if(!purchasingDispatchCache.length && cached?.records?.length) purchasingDispatchCache=cached.records;
@@ -6536,11 +6543,15 @@ async function loadPurchaseOrderPage(reset) {
     const requestedRole = currentUserRole;
     updatePoLoadMoreButton();
     try {
-        let query = db.collection('purchaseOrders').orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
+        let query = purchasingView === 'receiving'
+            ? db.collection('purchaseOrders').where('receiptStatus','in',['pending','partial']).orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT)
+            : db.collection('purchaseOrders').orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT);
         if (poListCursor) query = query.startAfter(poListCursor);
         const [snapshot,supplySnapshot] = await Promise.all([
             query.get(),
-            db.collection('supplyOrders').where('type','==','SALES_SELF_ORDER').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT).get()
+            purchasingView === 'receiving'
+                ? db.collection('supplyOrders').where('type','==','SALES_SELF_ORDER').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT).get()
+                : Promise.resolve({docs:[]})
         ]);
         supplyReceivingCache=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
         // 待到貨仍保留原 PO／自行訂購歷史，但工作佇列只顯示來源訂單仍有效的品項。
@@ -6562,7 +6573,7 @@ async function loadPurchaseOrderPage(reset) {
         // reset 時雲端結果完整取代 stale cache；Load More 才追加。
         poListCache = [...records.values()].sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
         poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
-        writeAppDataCache('purchase-receiving', poListCache);
+        writeAppDataCache(purchasingView === 'history' ? 'purchase-history' : 'purchase-receiving', poListCache);
         renderPoList();
     } catch (err) {
         console.error(err);
@@ -6653,7 +6664,7 @@ window.renderPoList = function() {
         });
     });
 
-    supplyReceivingCache.forEach(supply=>{
+    if (purchasingView === 'receiving') supplyReceivingCache.forEach(supply=>{
         if(supply.orderId && receivingSourceOrderStatusCache.get(supply.orderId) !== 'normal') return;
         const ordered=Math.max(0,Number(supply.qty||0));
         const received=Math.max(0,Number(supply.receivedQty||0));
