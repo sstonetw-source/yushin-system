@@ -959,10 +959,11 @@ window.handleForgotPassword = function() {
     });
 };
 
-window.handleLogin = function() {
+window.handleLogin = async function() {
     const email = (document.getElementById('loginEmail').value || '').trim();
     const password = document.getElementById('loginPassword').value || '';
     const errorEl = document.getElementById('loginError');
+    const button = document.querySelector('#loginScreen button');
     if (errorEl) errorEl.innerText = '';
 
     if (!email || !password) {
@@ -970,9 +971,52 @@ window.handleLogin = function() {
         return;
     }
 
-    firebase.auth().signInWithEmailAndPassword(email, password).catch(() => {
-        if (errorEl) errorEl.innerText = '登入失敗，請確認帳號密碼是否正確。';
-    });
+    const originalText = button?.textContent || '登入';
+    if (button) { button.disabled = true; button.textContent = '登入中…'; }
+    if (errorEl) errorEl.innerText = '正在驗證帳號…';
+    try {
+        const credential = await Promise.race([
+            firebase.auth().signInWithEmailAndPassword(email, password),
+            new Promise((_, reject) => setTimeout(() => {
+                const err = new Error('Firebase Auth 登入逾時');
+                err.code = 'auth/login-timeout';
+                reject(err);
+            }, 15000))
+        ]);
+        currentUser = credential.user;
+        if (errorEl) errorEl.innerText = '帳號驗證完成，正在載入使用者資料…';
+        const cachedProfile = readCachedUserProfile(currentUser.uid);
+        if (cachedProfile) {
+            applyUserProfile(cachedProfile);
+            showApp();
+        }
+        // onAuthStateChanged 仍是 session 恢復的主要入口；手動登入時直接觸發相同 profile 讀取，
+        // 避免部分 iOS Safari 已完成 Auth 卻延遲送出 auth-state callback。
+        const doc = await firestoreReadWithTimeout(
+            db.collection('users').doc(currentUser.uid).get(),
+            '登入帳號資料'
+        );
+        if (!doc.exists) throw new Error('找不到此 UID 對應的 users 文件');
+        const d = doc.data() || {};
+        if (d.disabled === true || d.active === false) {
+            await firebase.auth().signOut();
+            throw new Error('此帳號已由管理員停用。');
+        }
+        applyUserProfile(d);
+        writeCachedUserProfile(currentUser.uid, d);
+        showApp();
+        if (mustChangePassword) openChangePasswordModal(true);
+    } catch (err) {
+        console.error('登入失敗：', err);
+        if (errorEl) {
+            if (err?.code === 'auth/login-timeout') errorEl.innerText = '登入服務連線逾時，請確認網路後再試。';
+            else if (err?.code === 'firestore-read-timeout') errorEl.innerText = '帳號已驗證，但使用者資料讀取逾時，請再試一次。';
+            else if (err?.code === 'auth/wrong-password' || err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') errorEl.innerText = '登入失敗，請確認帳號密碼是否正確。';
+            else errorEl.innerText = err?.message || '登入失敗，請稍後再試。';
+        }
+    } finally {
+        if (button) { button.disabled = false; button.textContent = originalText; }
+    }
 };
 
 window.handleLogout = function() {
