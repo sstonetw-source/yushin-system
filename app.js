@@ -6771,6 +6771,7 @@ async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
 }
 
 let poReceiptTargetId = '';
+let poReceiptSaveInProgress = false;
 
 
 window.receiveSupplyOrder = function(supplyId) {
@@ -7059,7 +7060,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
                 const formalReceived=Number(formalSupply.receivedQty||0)+qty;
                 tx.update(formalSupplyRef,{receivedQty:formalReceived,status:formalReceived>=Number(formalSupply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
             }
-            tx.set(db.collection('receipts').doc(),{purchaseOrderId:poId,orderId:item.orderId,itemId:sourceItem.itemId||'',qty,fulfillmentType:'DIRECT_SHIP',sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,createdAt:now,createdBy:actor});
+            tx.set(db.collection('receipts').doc(receiptId),{receiptId,purchaseOrderId:poId,orderId:item.orderId,itemId:sourceItem.itemId||'',qty,fulfillmentType:'DIRECT_SHIP',sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,createdAt:now,createdBy:actor});
             return;
         }
 
@@ -7218,6 +7219,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
 }
 
 window.savePoReceiptBatch = async function() {
+    if (poReceiptSaveInProgress) return;
     const poId = poReceiptTargetId;
     const button = document.getElementById('savePoReceiptBatchBtn');
     const rows = [...document.querySelectorAll('#poReceiptBatchBody tr')];
@@ -7229,7 +7231,8 @@ window.savePoReceiptBatch = async function() {
     })).filter(entry => entry.qty > 0);
     if (!poId || !entries.length) { alert('請至少勾選一個到貨品項並輸入數量。'); return; }
 
-    if (button) { button.disabled=true; button.textContent='入庫中…'; }
+    poReceiptSaveInProgress = true;
+    if (button) { button.disabled=true; button.textContent='處理中…'; }
     let completed = 0;
     try {
         if(poId.startsWith('supply:')){
@@ -7271,7 +7274,8 @@ window.savePoReceiptBatch = async function() {
             if(failed.length) console.warn('入庫中斷後背景同步部分失敗：', failed.map(result=>result.reason));
         });
     } finally {
-        if (button) { button.disabled=false; button.textContent='確認入庫'; }
+        poReceiptSaveInProgress = false;
+        if (button) { button.disabled=false; button.textContent='確認到貨'; }
     }
 };
 
