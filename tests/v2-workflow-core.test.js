@@ -94,3 +94,21 @@ test('mixed fulfillment keeps each item in its own workflow state',()=>{
   ].map(item=>w.itemWorkCategory(item));
   assert.deepEqual(categories,['arrival','delivery','arrival','delivery']);
 });
+
+
+test('restored warehouse item keeps uncovered demand in ordering even with an existing PO',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,inventoryShortageQty:2,purchaseOrderedQty:6,receivedQty:0}),'ordering');
+});
+
+test('restored warehouse item with no uncovered shortage stays in arrival while supply is still incoming',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,inventoryShortageQty:0,purchaseOrderedQty:6,receivedQty:2}),'arrival');
+});
+
+test('restored warehouse item with received supply and no uncovered shortage is ready for delivery',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,inventoryShortageQty:0,purchaseOrderedQty:6,receivedQty:6}),'delivery');
+});
+
+test('direct ship ignores warehouse shortage semantics and follows order then receipt progress',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:4,fulfillmentType:'DIRECT_SHIP',inventoryShortageQty:4,purchaseOrderedQty:4,receivedQty:2}),'arrival');
+  assert.equal(w.itemWorkCategory({orderedQty:4,fulfillmentType:'DIRECT_SHIP',inventoryShortageQty:4,purchaseOrderedQty:4,receivedQty:4}),'delivery');
+});
