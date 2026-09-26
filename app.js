@@ -8614,6 +8614,10 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
             const order = snapshot.data();
             if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
+            const transactionItems=normalizedOrderItems(order);
+            // UI 已阻擋多品項一鍵送貨；transaction 仍要以最新資料再次驗證，
+            // 避免 stale cache 或另一端剛修改品項後寫入無法歸屬品項的送貨紀錄。
+            if (transactionItems.length !== 1) throw new Error('多品項訂單不能一鍵完成送貨，請逐品項登錄。');
             if (order.isDelivered && savedDeliveryRecords(order).length === 0) throw new Error('這筆舊資料已視為全數送貨。');
             const total = orderQuantity(order);
             const records = savedDeliveryRecords(order).slice();
@@ -8622,7 +8626,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             if (!total || remaining <= 0) throw new Error('這筆訂單已無尚未送貨數量。');
             const actor = deliveryActor();
             const now = new Date().toISOString();
-            const record = { id: deliveryRecordId(), date: today, qty: remaining, notes: '一鍵完成剩餘送貨', createdBy: actor, createdAt: now };
+            const record = { id: deliveryRecordId(), itemId:transactionItems[0].itemId, date: today, qty: remaining, notes: '一鍵完成剩餘送貨', createdBy: actor, createdAt: now };
             records.push(record);
             const history = { action: 'create', source: 'quick_complete', recordId: record.id, before: null, after: record, by: actor, at: now };
             const statusEntries = [];
