@@ -7992,7 +7992,10 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         }
         if (field === 'isBilled') {
             updates.invoiceDate = invoiceDate;
-            updates.status = newValue ? BUSINESS_STATUS.COMPLETED : BUSINESS_STATUS.ACTIVE;
+            // 訂單完成狀態由 isBilled / workCategories 推導。
+            // status 保留給訂單生命週期（正常／取消），避免核銷後因 status=COMPLETED
+            // 被 ACTIVE 訂單 Query 排除而從訂單主列表消失。
+            updates.status = BUSINESS_STATUS.ACTIVE;
         }
         if (field === 'isOrdered') updates.orderedBy = newValue ? actor : '';
         entries.push(logEntry);
