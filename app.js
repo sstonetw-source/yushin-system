@@ -8629,6 +8629,9 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
             const order = snapshot.data();
+            // 前端雖已擋多品項，但 transaction 必須再次依最新 Firestore 資料驗證，
+            // 避免 stale cache／重複操作把整張訂單的庫存還原到錯誤品項。
+            if (normalizedOrderItems(order).length > 1) throw new Error('多品項訂單不能一鍵取消全部送貨，請逐品項更正送貨紀錄。');
             if (returnedQuantity(order) > 0) throw new Error('這筆訂單已有退貨紀錄，請先更正退貨紀錄。');
             const progress = deliveryProgressInfo(order);
             if (progress.state !== 'complete') throw new Error('這筆訂單目前不是全數已送貨狀態。');
