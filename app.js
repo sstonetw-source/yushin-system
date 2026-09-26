@@ -4824,7 +4824,7 @@ window.queueBusinessProductSearch=function(){
  clearTimeout(businessProductSearchTimer);
  const input=document.getElementById('businessProductSearch'),raw=String(input?.value||'').trim();
  if(raw.length<2){const status=document.getElementById('businessProductSearchStatus');if(status)status.textContent=raw.length?'再輸入 1 個字即可搜尋。':'';return;}
- businessProductSearchTimer=setTimeout(()=>searchBusinessProducts(),400);
+ businessProductSearchTimer=scheduleListSearch(businessProductSearchTimer,()=>searchBusinessProducts());
 };
 window.searchBusinessProducts=async function(){
  clearTimeout(businessProductSearchTimer);
