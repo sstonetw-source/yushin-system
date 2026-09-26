@@ -7218,11 +7218,13 @@ async function refreshAffectedOrderCaches(orderIds = []) {
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
     const now=new Date().toISOString(),actor=deliveryActor();
     let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',reservedForSource=0;
+    const affectedOrderIds = new Set();
     await db.runTransaction(async tx=>{
         const supplyRef=db.collection('supplyOrders').doc(supplyId);
         const supplySnap=await tx.get(supplyRef);
         if(!supplySnap.exists)throw new Error('找不到自行訂貨紀錄。');
         const supply=supplySnap.data();
+        if (supply.orderId) affectedOrderIds.add(supply.orderId);
         const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
         if(qty<=0||qty>remaining)throw new Error(`本次到貨數量不可超過 ${remaining}。`);
         const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
@@ -7305,7 +7307,11 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
     // Replenishment / excess receipt stock automatically serves oldest outstanding shortages.
     // Stock already reserved to the source order is excluded from this second allocation pass.
     const freeQty=Math.max(0,Number(qty||0)-reservedForSource);
-    if(freeQty>0)await allocateFreeReceiptStockToShortages(receivedProductKey,receivedWarehouseId,freeQty,actor,sourceOrderId);
+    if(freeQty>0){
+        const allocation=await allocateFreeReceiptStockToShortages(receivedProductKey,receivedWarehouseId,freeQty,actor,sourceOrderId);
+        allocation.affectedOrderIds.forEach(id=>affectedOrderIds.add(id));
+    }
+    return [...affectedOrderIds];
 }
 
 window.receivePurchaseOrderItem = function(poId,itemIndex) {
@@ -7381,6 +7387,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     const actor = currentUserName || currentUser?.email || '';
     const receiptId = operationId || `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${itemIndex}`;
     let committedPo = null;
+    const affectedOrderIds = new Set();
 
     await db.runTransaction(async tx => {
         const receiptRef = db.collection('receipts').doc(receiptId);
@@ -7393,6 +7400,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         const liveItems = purchaseItemsFromSavedPo(live);
         const item = liveItems[itemIndex];
         if (!item) throw new Error('找不到品項');
+        if (item.orderId) affectedOrderIds.add(item.orderId);
         const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
         const formalSupplyRef=db.collection('supplyOrders').doc(formalSupplyOrderId(poId,itemIndex));
         const formalSupplySnap=await tx.get(formalSupplyRef);
@@ -7595,7 +7603,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     // 原廠直送不進倉庫，因此不應執行入庫後的 FIFO 庫存分配。
     const completedPo=committedPo||{};
     const completedItem=purchaseItemsFromSavedPo(completedPo)[itemIndex]||{};
-    if((completedItem.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP') return;
+    if((completedItem.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP') return [...affectedOrderIds];
 
     // Formal PO replenishment / surplus stock follows the same FIFO shortage allocation as self-order receipts.
     // Reuse the PO state committed by the transaction instead of reading the same PO again.
@@ -7608,7 +7616,11 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     // receiveSinglePoLine already reserved reserveFromReceipt inside its transaction.
     // Persist it on the receipt row in future writes; for this call use the exact transaction result captured above.
     const freeQty=Math.max(0,Number(qty||0)-Number(receiptRow?.reservedQty??0));
-    if(freeQty>0&&postKey&&postWarehouse)await allocateFreeReceiptStockToShortages(postKey,postWarehouse,freeQty,actor,postItem.orderId||'');
+    if(freeQty>0&&postKey&&postWarehouse){
+        const allocation=await allocateFreeReceiptStockToShortages(postKey,postWarehouse,freeQty,actor,postItem.orderId||'');
+        allocation.affectedOrderIds.forEach(id=>affectedOrderIds.add(id));
+    }
+    return [...affectedOrderIds];
 }
 
 window.savePoReceiptBatch = async function() {
@@ -7627,13 +7639,14 @@ window.savePoReceiptBatch = async function() {
     poReceiptSaveInProgress = true;
     if (button) { button.disabled=true; button.textContent='處理中…'; }
     let completed = 0;
+    const affectedOrderIds = new Set();
     try {
         if(poId.startsWith('supply:')){
             const supplyId=poId.slice(7);
-            for(const entry of entries){ await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate); completed++; }
+            for(const entry of entries){ const ids=await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate); ids.forEach(id=>affectedOrderIds.add(id)); completed++; }
         }else{
             const batchOperationId=`po-receipt-${poId}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-            for (const entry of entries){ await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate, `${batchOperationId}-${entry.itemIndex}`); completed++; }
+            for (const entry of entries){ const ids=await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate, `${batchOperationId}-${entry.itemIndex}`); ids.forEach(id=>affectedOrderIds.add(id)); completed++; }
         }
         // 核心入庫 transaction 已完成後就結束使用者等待；跨模組列表改成背景同步。
         // 這些 reload 只是 UI refresh，不應延長「確認入庫」按鈕的完成時間。
@@ -7641,11 +7654,7 @@ window.savePoReceiptBatch = async function() {
         alert(`已完成 ${completed} 個品項的到貨確認。`);
         Promise.allSettled([
             loadMyPurchaseOrders(),
-            // 到貨會改變來源訂單品項的工作狀態；同步近期訂單 cache，
-            // 讓訂單圖卡／列表立即由「待到貨」切換成「待送貨」，不必重新登入。
-            getDataScope('orders') !== 'none' ? loadOrderPage(true, { silent:true }) : Promise.resolve(),
-            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
-            loadPurchasingDispatchOrders(true),
+            getDataScope('orders') !== 'none' ? refreshAffectedOrderCaches([...affectedOrderIds]) : Promise.resolve(),
             (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
                 ? loadInventory(true) : Promise.resolve()
         ]).then(results => {
@@ -7662,11 +7671,7 @@ window.savePoReceiptBatch = async function() {
         }
         Promise.allSettled([
             loadMyPurchaseOrders(),
-            // 到貨會改變來源訂單品項的工作狀態；同步近期訂單 cache，
-            // 讓訂單圖卡／列表立即由「待到貨」切換成「待送貨」，不必重新登入。
-            getDataScope('orders') !== 'none' ? loadOrderPage(true, { silent:true }) : Promise.resolve(),
-            canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
-            loadPurchasingDispatchOrders(true),
+            getDataScope('orders') !== 'none' ? refreshAffectedOrderCaches([...affectedOrderIds]) : Promise.resolve(),
             (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
                 ? loadInventory(true) : Promise.resolve()
         ]).then(results => {
