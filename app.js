@@ -6420,7 +6420,9 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         snapshot.forEach(doc => {
             const order = { id:doc.id, ...doc.data() };
             if (order.status !== BUSINESS_STATUS.ACTIVE) return;
-            if (!Array.isArray(order.workCategories) || !order.workCategories.includes('ordering')) return;
+            // 不依賴可能延遲／舊版留下的 workCategories 索引欄位；
+            // 待採購清單與訂單圖卡一律以目前品項狀態即時計算，避免漏單。
+            if (!pendingPurchaseLines(order).length) return;
             freshOrders.push(order);
         });
         if (reset) {
