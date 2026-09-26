@@ -4687,6 +4687,20 @@ function orderInvoiceDate(order) {
     return dateOnlyFromTimestamp(billedEntry?.at) || (order?.isBilled ? order.orderDate || '' : '');
 }
 
+function orderCompletionDate(order) {
+    if (!order?.isBilled || deliveryProgressInfo(order).state !== 'complete') return '';
+    const invoiceDate = orderInvoiceDate(order);
+    const records = savedDeliveryRecords(order);
+    const deliveryDate = records.length
+        ? records.reduce((latest, record) => {
+            const date = record.date || dateOnlyFromTimestamp(record.createdAt);
+            return date && date > latest ? date : latest;
+        }, '')
+        : (order?.isDelivered ? order.orderDate || '' : '');
+    // 核銷與送貨可任意先後；兩條流程都完成的較晚日期才是真正完成日。
+    return [invoiceDate, deliveryDate].filter(Boolean).sort().pop() || '';
+}
+
 function orderPeriodRange() {
     if (activeOrderPeriod === 'custom') {
         return {
@@ -4705,7 +4719,7 @@ function dateInOrderPeriod(date) {
 
 function orderMatchesWorkPeriod(order, category = orderWorkCategory(order)) {
     if (category === 'billing') return true;
-    if (category === 'complete') return dateInOrderPeriod(orderInvoiceDate(order));
+    if (category === 'complete') return dateInOrderPeriod(orderCompletionDate(order));
     return dateInOrderPeriod(order.orderDate || '');
 }
 
@@ -7960,7 +7974,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     o[field] = newValue;
     if (field === 'isBilled') o.invoiceDate = invoiceDate;
     if (field === 'isBilled' && !newValue && activeOrderWorkFilter === 'complete') activeOrderWorkFilter = 'billing';
-    if (field === 'isBilled' && newValue && activeOrderWorkFilter === 'billing') activeOrderWorkFilter = 'complete';
+    if (field === 'isBilled' && newValue && activeOrderWorkFilter === 'billing' && deliveryProgressInfo(o).state === 'complete') activeOrderWorkFilter = 'complete';
     if (field === 'isOrdered') o.orderedBy = newValue ? actor : '';
     optimisticEntries.push(logEntry);
     o.statusHistory = [...previous.statusHistory, ...optimisticEntries];
