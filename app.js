@@ -7363,6 +7363,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     const now = new Date().toISOString();
     const actor = currentUserName || currentUser?.email || '';
     const receiptId = operationId || `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${itemIndex}`;
+    let committedPo = null;
 
     await db.runTransaction(async tx => {
         const receiptRef = db.collection('receipts').doc(receiptId);
@@ -7407,7 +7408,9 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
                 return orderedQty>0&&got>=orderedQty;
             });
             const receiptComplete=allProgress.length>0&&allProgress.every(Boolean);
-            tx.update(poRef,{receiptRecords:records,updatedAt:now,status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,receiptStatus:receiptComplete?'received':'partial'});
+            const poUpdates={receiptRecords:records,updatedAt:now,status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,receiptStatus:receiptComplete?'received':'partial'};
+            tx.update(poRef,poUpdates);
+            committedPo={id:poId,...live,...poUpdates};
             if(formalSupplySnap.exists){
                 const formalSupply=formalSupplySnap.data();
                 const formalReceived=Number(formalSupply.receivedQty||0)+qty;
@@ -7564,21 +7567,22 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         });
         const receiptComplete=allProgress.length>0&&allProgress.every(row=>row.complete);
         const anyReceived=allProgress.some(row=>row.receivedQty>0);
-        tx.update(poRef, {
+        const poUpdates={
             receiptRecords:records, updatedAt:now,
             status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,
             receiptStatus:receiptComplete?'received':anyReceived?'partial':'pending'
-        });
+        };
+        tx.update(poRef, poUpdates);
+        committedPo={id:poId,...live,...poUpdates};
     });
     // 原廠直送不進倉庫，因此不應執行入庫後的 FIFO 庫存分配。
-    const completedPoSnap=await db.collection('purchaseOrders').doc(poId).get();
-    const completedPo=completedPoSnap.data()||{};
+    const completedPo=committedPo||{};
     const completedItem=purchaseItemsFromSavedPo(completedPo)[itemIndex]||{};
     if((completedItem.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP') return;
 
     // Formal PO replenishment / surplus stock follows the same FIFO shortage allocation as self-order receipts.
-    const postPoSnap=completedPoSnap;
-    const postPo=postPoSnap.data()||{};
+    // Reuse the PO state committed by the transaction instead of reading the same PO again.
+    const postPo=completedPo;
     const postItems=purchaseItemsFromSavedPo(postPo);
     const postItem=postItems[itemIndex]||{};
     const postKey=poIncomingKey(postItem);
