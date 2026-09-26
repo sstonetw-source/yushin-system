@@ -4855,6 +4855,25 @@ let inventorySearchActive=false;
 let inventorySearchLoading=false;
 let inventorySearchResults=[];
 
+function buildInventorySearchTokens(record={}){
+ const values=[record.itemCode,record.itemName,record.brand,record.productKey,record.productId,
+   ...(Array.isArray(record.lots)?record.lots.flatMap(lot=>[lot.lotNo,lot.expiryDate]):[])];
+ const tokens=new Set();
+ for(const raw of values){
+   const normalized=normalizeFullHistorySearchValue(raw);
+   if(!normalized)continue;
+   tokens.add(normalized);
+   const maxGram=Math.min(6,normalized.length);
+   for(let size=1;size<=maxGram;size++){
+     for(let i=0;i+size<=normalized.length;i++){
+       tokens.add(normalized.slice(i,i+size));
+       if(tokens.size>=300)return [...tokens];
+     }
+   }
+ }
+ return [...tokens];
+}
+
 function inventoryRecordMatches(record,keyword){
  const needle=normalizeFullHistorySearchValue(keyword);
  if(!needle)return true;
@@ -5187,7 +5206,11 @@ window.saveInventoryAdjustmentBatch = async function() {
           }
           const now=new Date().toISOString();
           if(type!=='warehouse_allocation'){
-            tx.set(ref,{productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now},{merge:true});
+            {
+              const nextInventory={...old,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now};
+              nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
+              tx.set(ref,nextInventory,{merge:true});
+            }
           }
           if(whRef){
             tx.set(whRef,{warehouseId:row.warehouseId,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
@@ -7164,7 +7187,11 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         const embeddedIndex=embeddedLots.findIndex(l=>(l.lotNo||'')===lotNo&&(l.expiryDate||'')===expiryDate);
         if(embeddedIndex>=0)embeddedLots[embeddedIndex]={...embeddedLots[embeddedIndex],qty:Number(embeddedLots[embeddedIndex].qty||0)+qty};
         else embeddedLots.push({lotNo,expiryDate,qty,receivedAt:now,sourceSupplyId:supplyId});
-        tx.set(invRef,{productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:inv.incoming,lots:embeddedLots,updatedAt:now},{merge:true});
+        {
+          const nextInventory={...(invSnap.exists?invSnap.data():{}),productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:inv.incoming,lots:embeddedLots,updatedAt:now};
+          nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
+          tx.set(invRef,nextInventory,{merge:true});
+        }
         if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:wh.incoming,updatedAt:now},{merge:true});
         const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
