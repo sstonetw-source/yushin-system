@@ -6733,8 +6733,11 @@ window.renderPoList = function() {
 
     const poRows = poHistorySearchActive ? poHistorySearchResults : poListCache;
     poRows.forEach(po => {
-        const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
-        if (keyword && !searchable.includes(keyword)) return;
+        // 全歷史搜尋已在資料層比對單號、廠商、採購人員與品項；歷史搜尋模式不可再用較窄欄位二次過濾。
+        if (!poHistorySearchActive) {
+            const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
+            if (keyword && !searchable.includes(keyword)) return;
+        }
 
         const items = purchaseItemsFromSavedPo(po);
         const companyInfo = companyData[po.company];
