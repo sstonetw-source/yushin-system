@@ -3298,8 +3298,11 @@ window.onOrderItemCodeChange = async function(input) {
     input.dataset.productLine = match.productLine || '';
     input.dataset.productType = match.productType || '';
 
-    await applyOrderProductCost(match);
-    await refreshOrderWarehouseStock();
+    // 成本與庫存彼此獨立；平行查詢，避免成本讀取阻塞庫存提示。
+    await Promise.all([
+        applyOrderProductCost(match),
+        refreshOrderWarehouseStock()
+    ]);
 };
 
 let orderItemCodeTimer = null;
@@ -11469,18 +11472,30 @@ function productMasterDocToPriceItem(doc) {
     });
 }
 
+const visibleProductCostCache = new Map();
+
 async function loadVisibleProductCost(item) {
     const productId = item?.productId || stableProductId(item || {});
     if (!productId) return null;
     const authType = authorizationTypeForProduct(item);
     if (hasBusinessCapability() && authType === 'AUTHORIZED') return null;
+    const cacheKey = `${currentUserRole || ''}||${productId}`;
+    if (visibleProductCostCache.has(cacheKey)) return visibleProductCostCache.get(cacheKey);
     try {
         const doc = await db.collection('productCosts').doc(productId).get();
-        if (!doc.exists) return null;
+        if (!doc.exists) {
+            visibleProductCostCache.set(cacheKey, null);
+            return null;
+        }
         const data = doc.data() || {};
-        if (hasBusinessCapability() && data.salesVisible !== true) return null;
+        if (hasBusinessCapability() && data.salesVisible !== true) {
+            visibleProductCostCache.set(cacheKey, null);
+            return null;
+        }
         const value = data.standardCost;
-        return value === undefined || value === null || String(value).trim() === '' ? null : Number(value);
+        const cost = value === undefined || value === null || String(value).trim() === '' ? null : Number(value);
+        visibleProductCostCache.set(cacheKey, cost);
+        return cost;
     } catch (_) {
         return null;
     }
