@@ -4794,6 +4794,17 @@ window.changeOrderPeriod = function(value) {
 
 let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[], pendingInventoryCache=[], pendingSupplyCache=[];
 let warehouseStockCache = new Map();
+function invalidateWarehouseStockCache(productKey = '', warehouseId = '') {
+    if (productKey && warehouseId) {
+        warehouseStockCache.delete(warehouseId + '||' + productKey);
+        return;
+    }
+    if (productKey) {
+        [...warehouseStockCache.keys()].filter(key=>key.endsWith('||' + productKey)).forEach(key=>warehouseStockCache.delete(key));
+        return;
+    }
+    warehouseStockCache.clear();
+}
 function expiryDays(date){if(!date)return null;return Math.ceil((new Date(date+'T23:59:59')-new Date())/86400000);}
 function lotStatus(lot){const d=expiryDays(lot.expiryDate);if(d===null)return '';if(d<0)return '已過期';if(d<=30)return '30天內';if(d<=60)return '60天內';if(d<=90)return '90天內';return '';}
 function fefoLots(stock){return [...(stock.lots||[])].filter(l=>Number(l.qty||0)>0).sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));}
@@ -7188,7 +7199,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,candidate.orderId,productKey,actor,{warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE'}));
             took=take;
         });
-        if(took>0){allocatedQty+=took;remaining-=took;affectedOrderIds.add(candidate.orderId);continue;}
+        if(took>0){invalidateWarehouseStockCache(productKey,warehouseId);allocatedQty+=took;remaining-=took;affectedOrderIds.add(candidate.orderId);continue;}
         if(skipCandidate){
             // Avoid repeatedly selecting a stale row during this invocation.
             // A later receipt will re-evaluate it after lifecycle/reservation cleanup.
@@ -7304,6 +7315,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         const receivedQty=Number(supply.receivedQty||0)+qty;
         tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
     });
+    if (receivedProductKey && receivedWarehouseId) invalidateWarehouseStockCache(receivedProductKey, receivedWarehouseId);
     // Replenishment / excess receipt stock automatically serves oldest outstanding shortages.
     // Stock already reserved to the source order is excluded from this second allocation pass.
     const freeQty=Math.max(0,Number(qty||0)-reservedForSource);
@@ -7387,12 +7399,13 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     const actor = currentUserName || currentUser?.email || '';
     const receiptId = operationId || `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${itemIndex}`;
     let committedPo = null;
+    let alreadyProcessed = false;
     const affectedOrderIds = new Set();
 
     await db.runTransaction(async tx => {
         const receiptRef = db.collection('receipts').doc(receiptId);
         const receiptSnap = await tx.get(receiptRef);
-        if (receiptSnap.exists) return;
+        if (receiptSnap.exists) { alreadyProcessed = true; return; }
         const poRef = db.collection('purchaseOrders').doc(poId);
         const poSnap = await tx.get(poRef);
         if (!poSnap.exists) throw new Error('找不到訂購單');
@@ -7600,6 +7613,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         tx.update(poRef, poUpdates);
         committedPo={id:poId,...live,...poUpdates};
     });
+    if (alreadyProcessed) return [...affectedOrderIds];
     // 原廠直送不進倉庫，因此不應執行入庫後的 FIFO 庫存分配。
     const completedPo=committedPo||{};
     const completedItem=purchaseItemsFromSavedPo(completedPo)[itemIndex]||{};
@@ -7616,6 +7630,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     // receiveSinglePoLine already reserved reserveFromReceipt inside its transaction.
     // Persist it on the receipt row in future writes; for this call use the exact transaction result captured above.
     const freeQty=Math.max(0,Number(qty||0)-Number(receiptRow?.reservedQty??0));
+    if(postKey&&postWarehouse) invalidateWarehouseStockCache(postKey,postWarehouse);
     if(freeQty>0&&postKey&&postWarehouse){
         const allocation=await allocateFreeReceiptStockToShortages(postKey,postWarehouse,freeQty,actor,postItem.orderId||'');
         allocation.affectedOrderIds.forEach(id=>affectedOrderIds.add(id));
