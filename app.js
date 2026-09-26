@@ -8199,8 +8199,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
                 orderDate:order.orderDate||'',quantity:0,shortageQty:nextStatus==='cancelled'?0:shortage,
                 status:nextStatus==='cancelled'?'released':(directShip?'direct_ship':'shortage'),warehouseId:'',updatedAt:now
             }, { merge:true });
-            nextItems.push({...item,itemId,inventoryReservedQty:delivered,inventoryShortageQty:nextStatus==='cancelled'?0:shortage,reservedQty:delivered,shortageQty:nextStatus==='cancelled'?0:shortage});
-            totalReserved += delivered;
+            const nextReserved = nextStatus==='cancelled' ? 0 : 0;
+            nextItems.push({...item,itemId,inventoryReservedQty:nextReserved,inventoryShortageQty:nextStatus==='cancelled'?0:shortage,reservedQty:nextReserved,shortageQty:nextStatus==='cancelled'?0:shortage});
+            totalReserved += nextReserved;
             totalShortage += nextStatus==='cancelled'?0:shortage;
             continue;
         }
@@ -8221,8 +8222,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
                 salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',
                 orderDate:order.orderDate||'',quantity:0,shortageQty:0,status:'released',warehouseId,updatedAt:now
             },{merge:true});
-            nextItems.push({...item,itemId,inventoryReservedQty:delivered,inventoryShortageQty:0,reservedQty:delivered,shortageQty:0});
-            totalReserved += delivered;
+            nextItems.push({...item,itemId,inventoryReservedQty:0,inventoryShortageQty:0,reservedQty:0,shortageQty:0});
             continue;
         }
 
