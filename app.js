@@ -6565,15 +6565,14 @@ window.loadMorePurchaseOrders = function() {
 
 function poReceiptLabel(po) {
     const progress = poReceiptProgress(po);
-    if (progress.directShipOnly) return '原廠直送（不入庫）';
-    if (progress.complete) return '已全部到貨';
-    if (progress.received > 0) return '部分到貨 ' + progress.received + '/' + progress.ordered;
-    return '待到貨 0/' + progress.ordered;
+    if (progress.complete) return progress.directShipOnly ? '原廠直送已到貨' : '已全部到貨';
+    if (progress.received > 0) return (progress.directShipOnly ? '原廠直送部分到貨 ' : '部分到貨 ') + progress.received + '/' + progress.ordered;
+    return (progress.directShipOnly ? '原廠直送待到貨 0/' : '待到貨 0/') + progress.ordered;
 }
 
 function poWaitingDays(po) {
     const progress = poReceiptProgress(po);
-    if (progress.complete || progress.directShipOnly) return '';
+    if (progress.complete) return '';
     const raw = String(po.poDate || '').trim();
     const match = raw.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
     if (!match) return '';
