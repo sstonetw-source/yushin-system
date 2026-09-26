@@ -72,3 +72,25 @@ test('item workflow moves fully received purchased items to delivery',()=>{
   assert.equal(w.itemWorkCategory({orderedQty:10,purchaseRequiredQty:7,purchaseOrderedQty:7,receivedQty:7}),'delivery');
   assert.equal(w.itemWorkCategory({orderedQty:3,fulfillmentType:'DIRECT_SHIP',purchaseOrderedQty:3,receivedQty:3}),'delivery');
 });
+
+
+test('mixed order items independently cover ordering arrival delivery billing and complete',()=>{
+  const categories=[
+    {orderedQty:5,purchaseRequiredQty:5,purchaseOrderedQty:0},
+    {orderedQty:4,purchaseRequiredQty:4,purchaseOrderedQty:4,receivedQty:0},
+    {orderedQty:3,purchaseRequiredQty:0},
+    {orderedQty:2,deliveredQty:2,isBilled:false},
+    {orderedQty:1,deliveredQty:1,isBilled:true}
+  ].map(item=>w.itemWorkCategory(item));
+  assert.deepEqual(categories,['ordering','arrival','delivery','billing','complete']);
+});
+
+test('mixed fulfillment keeps each item in its own workflow state',()=>{
+  const categories=[
+    {orderedQty:2,fulfillmentType:'DIRECT_SHIP',purchaseOrderedQty:2,receivedQty:0},
+    {orderedQty:2,fulfillmentType:'DIRECT_SHIP',purchaseOrderedQty:2,receivedQty:2},
+    {orderedQty:3,purchaseRequiredQty:2,purchaseOrderedQty:2,receivedQty:1},
+    {orderedQty:3,purchaseRequiredQty:2,purchaseOrderedQty:2,receivedQty:2}
+  ].map(item=>w.itemWorkCategory(item));
+  assert.deepEqual(categories,['arrival','delivery','arrival','delivery']);
+});
