@@ -5617,18 +5617,12 @@ function isDeletableOrderDraft(order) {
 }
 
 function orderWorkCategory(order) {
-    const lifecycle=orderLifecycleInfo(order);
-    const delivery=deliveryProgressInfo(order);
-    const purchase=purchaseProgressInfo(order);
-    const fulfillment=fulfillmentProgressInfo(order);
-    if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return 'closed';
-    if(delivery.state==='complete')return order.isBilled?'complete':'billing';
-    // Stock already reserved / newly received means the order is ready for delivery.
-    if(fulfillment.ready>delivery.delivered||fulfillment.state==='shippable'||fulfillment.state==='pending_dispatch'||fulfillment.state==='partial_dispatch'||fulfillment.state==='direct')return 'delivery';
-    // Once either purchasing or the responsible salesperson has placed the order, it is waiting for arrival.
-    if(purchase.state==='ordered'||purchase.state==='partial')return 'arrival';
-    // Only purchasing-owned shortages that have not been ordered are "待採購".
-    return 'ordering';
+    // 整張訂單狀態只由各品項的唯一狀態推導，避免另一套 aggregate 判斷
+    // 與列表／圖卡／Firestore workCategories 出現不同答案。
+    const categories=orderWorkCategories(order);
+    if(categories.includes('closed'))return 'closed';
+    const priority=['ordering','arrival','delivery','billing','complete'];
+    return priority.find(category=>categories.includes(category))||'ordering';
 }
 
 function orderItemWorkCategory(order, item) {
@@ -5650,8 +5644,7 @@ function orderItemWorkCategory(order, item) {
         purchaseReceivedQty:item.purchaseReceivedQty,
         supplyReceivedQty:item.supplyReceivedQty
     };
-    if(window.YushinWorkflow?.itemWorkCategory)return window.YushinWorkflow.itemWorkCategory(input);
-    // Keep the same deterministic fallback if the core module fails to load.
+    // 唯一品項工作狀態來源。所有訂單列表、圖卡與 workCategories 都使用這裡。
     const qty=Math.max(0,Number(input.orderedQty)||0);
     if(input.lifecycleStatus!=='normal'||(Number(input.returnedQty||0)>0&&Number(input.effectiveDeliveredQty||0)<=0))return 'closed';
     if(qty>0&&Number(input.deliveredQty||0)>=qty)return input.isBilled?'complete':'billing';
@@ -5667,7 +5660,7 @@ function orderWorkCategories(order) {
     const lifecycle=orderLifecycleInfo(order);
     if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return ['closed'];
     const categories=[...new Set(normalizedOrderItems(order).map(item=>orderItemWorkCategory(order,item)))];
-    if(!categories.length)return [orderWorkCategory(order)];
+    if(!categories.length)return ['ordering'];
     return categories;
 }
 
