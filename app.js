@@ -5498,7 +5498,6 @@ function selfOrderActionHtml(order) {
     if (!canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
     return normalizedOrderItems(order)
         .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
-        .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
         .map(item => {
             const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
             const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
@@ -5526,7 +5525,8 @@ window.openSelfOrderModal = function(orderId,itemId) {
     document.getElementById('selfOrderUnitCost').value=item.costPrice??'';
     document.getElementById('selfOrderDate').value=localDateString();
     document.getElementById('selfOrderNotes').value='';
-    document.getElementById('selfOrderStatus').innerText=`尚缺 ${remaining}；自行訂貨後會進入待入庫。`;
+    const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+    document.getElementById('selfOrderStatus').innerText=directShip ? `尚未訂貨 ${remaining}；原廠直送不入庫，到貨後直接更新訂單交貨進度。` : `尚缺 ${remaining}；自行訂貨後會進入待入庫。`;
     document.getElementById('selfOrderItemSummary').innerHTML=`<strong>${escapeHtml(item.itemCode||'')}</strong> ${escapeHtml(item.itemName||'')}<br><span style="color:#666;">客戶：${escapeHtml(order.customerName||'')}</span>`;
     document.getElementById('selfOrderOverlay').classList.add('active');
 };
@@ -5562,7 +5562,6 @@ window.saveSelfOrder = async function() {
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
             if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，業務不可自行訂貨。');
-            if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') throw new Error('原廠直送的業務自行訂貨流程尚未完成到貨追蹤，暫不允許建立，避免形成無法結案的訂貨紀錄。');
             const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
             const already=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
             const remaining=Math.max(0,required-already);
@@ -5576,7 +5575,8 @@ window.saveSelfOrder = async function() {
                 customerName:order.customerName||'',productId:item.productId||'',productKey:inventoryProductKey(item),
                 itemCode:item.itemCode||'',itemName:item.itemName||'',brand:item.brand||'',
                 qty,receivedQty:0,supplier,unitCost,orderDate,notes,
-                warehouseId:item.warehouseId||defaultWarehouse()?.id||'',
+                fulfillmentType:item.fulfillmentType||'WAREHOUSE',
+                warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP' ? '' : (item.warehouseId||defaultWarehouse()?.id||''),
                 createdAt:now,createdByUid:currentUser?.uid||'',createdBy:deliveryActor(),createdByRole:currentUserRole
             };
             const validation=window.YushinSupply?.validate(record);
@@ -6781,8 +6781,9 @@ window.receiveSupplyOrder = function(supplyId) {
     const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
     if(remaining<=0){alert('這筆訂貨已全部入庫。');return;}
     poReceiptTargetId='supply:'+supplyId;
+    const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
     const title=document.getElementById('poReceiptBatchTitle');
-    if(title)title.textContent=`到貨入庫｜${supply.internalNo||supplyId}`;
+    if(title)title.textContent=directShip ? `原廠直送到貨｜${supply.internalNo||supplyId}` : `到貨入庫｜${supply.internalNo||supplyId}`;
     const body=document.getElementById('poReceiptBatchBody');
     body.innerHTML=`<tr data-index="0">
       <td><input type="checkbox" class="po-receive-select" checked></td>
@@ -6868,6 +6869,25 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         const supply=supplySnap.data();
         const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
         if(qty<=0||qty>remaining)throw new Error(`本次到貨數量不可超過 ${remaining}。`);
+        const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+        if(directShip){
+            if(!supply.orderId||!supply.itemId)throw new Error('原廠直送紀錄缺少來源訂單／品項。');
+            const orderRef=db.collection('orders').doc(supply.orderId);
+            const orderSnap=await tx.get(orderRef);
+            if(!orderSnap.exists)throw new Error('找不到來源訂單。');
+            const order=orderSnap.data(),items=normalizedOrderItems(order);
+            const itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
+            if(itemIndex<0)throw new Error('找不到來源訂單品項。');
+            const item=items[itemIndex];
+            const delivered=Math.min(Number(item.orderedQty??item.qty||0),Number(item.deliveredQty||0)+qty);
+            items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,supplyReceivedQty:Number(item.supplyReceivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
+            const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
+            const receivedQty=Number(supply.receivedQty||0)+qty;
+            tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
+            tx.set(db.collection('receipts').doc(),{supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
+            return;
+        }
         const productKey=supply.productKey||supply.productId||(supply.itemCode?`code:${normalizeHistoryItemCode(supply.itemCode)}`:'');
         if(!productKey)throw new Error('此品項缺少 Product ID／貨號。');
         const warehouseId=supply.warehouseId||defaultWarehouse()?.id||'';
