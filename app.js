@@ -795,7 +795,11 @@ function initializePageData(mainKey, options = {}) {
     hydratePageFromLocalCache(mainKey);
     if (!force && loadedMainPages.has(mainKey)) return;
     loadedMainPages.add(mainKey);
-    if (mainKey === 'forecast') ensureSalesListLoaded().then(() => loadForecasts(true));
+    if (mainKey === 'forecast') {
+        // Forecast 列表不依賴完整業務名單；先畫資料，人員下拉選單在背景補齊。
+        loadForecasts(true);
+        ensureSalesListLoaded().then(populateForecastSalesFilter).catch(err => console.warn('業務名單載入失敗：', err));
+    }
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
     if (mainKey === 'orders.list') {
@@ -806,10 +810,11 @@ function initializePageData(mainKey, options = {}) {
     }
     if (mainKey === 'orders.po') switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
     if (mainKey === 'inventory') loadInventory(true);
-    if (mainKey === 'equipment') ensureSalesListLoaded().then(() => {
-        populateEquipmentSalesDropdown();
+    if (mainKey === 'equipment') {
+        // 儀器列表先載入，避免 users collection 阻塞主要內容。
         loadEquipmentFromCloud();
-    });
+        ensureSalesListLoaded().then(populateEquipmentSalesDropdown).catch(err => console.warn('業務名單載入失敗：', err));
+    }
     if (mainKey === 'admin') reloadSalesFromUsers();
 }
 
@@ -837,17 +842,19 @@ function ensureClientHistoryLoaded() {
 function ensureQuoteFormInitialized() {
     if (quoteFormInitialized) return;
     quoteFormInitialized = true;
-    // 客戶建議已改由 Customer Master 按需查詢；估價單初始化不再額外讀最近 10 筆歷史估價。
-    ensureSalesListLoaded().finally(() => {
-        const draft = loadQuoteDraft();
+    // 表單與草稿本身不依賴完整業務名單；先顯示可操作畫面，人員選單在背景補齊。
+    const draft = loadQuoteDraft();
+    if (draft) restoreQuoteDraft(draft);
+    else {
+        const savedValidDays = localStorage.getItem('quote_valid_days');
+        if (savedValidDays) document.getElementById('validDays').value = savedValidDays;
+        if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
+        switchCompany('yushin');
+    }
+    ensureSalesListLoaded().then(() => {
+        populateSalesDropdown();
         if (draft) restoreQuoteDraft(draft);
-        else {
-            const savedValidDays = localStorage.getItem('quote_valid_days');
-            if (savedValidDays) document.getElementById('validDays').value = savedValidDays;
-            if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
-            switchCompany('yushin');
-        }
-    });
+    }).catch(err => console.warn('業務名單載入失敗：', err));
 }
 
 
