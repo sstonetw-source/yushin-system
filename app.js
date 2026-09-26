@@ -837,7 +837,8 @@ function ensureClientHistoryLoaded() {
 function ensureQuoteFormInitialized() {
     if (quoteFormInitialized) return;
     quoteFormInitialized = true;
-    Promise.all([ensureSalesListLoaded(), ensureClientHistoryLoaded()]).finally(() => {
+    // 客戶建議已改由 Customer Master 按需查詢；估價單初始化不再額外讀最近 10 筆歷史估價。
+    ensureSalesListLoaded().finally(() => {
         const draft = loadQuoteDraft();
         if (draft) restoreQuoteDraft(draft);
         else {
