@@ -6884,7 +6884,8 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
             const receivedQty=Number(supply.receivedQty||0)+qty;
             tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
-            tx.set(db.collection('receipts').doc(),{supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
+            const receiptId=`supply-${encodeURIComponent(supplyId)}-${receivedQty}`;
+            tx.set(db.collection('receipts').doc(receiptId),{receiptId,supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,cumulativeReceivedQty:receivedQty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
             return;
         }
         const productKey=supply.productKey||supply.productId||(supply.itemCode?`code:${normalizeHistoryItemCode(supply.itemCode)}`:'');
@@ -7194,14 +7195,21 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             completedAt:pendingRemaining>0?null:now, completedBy:pendingRemaining>0?'':actor, updatedAt:now
         }, { merge:true });
 
-        const warehouseItems = liveItems.filter(row => (row.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
-        const warehouseOrdered = warehouseItems.reduce((sum,row)=>sum+Number(row.qty||0),0);
-        const warehouseReceived = records.reduce((sum,row)=>sum+Number(row.qty||0),0);
-        const receiptComplete = warehouseOrdered > 0 && warehouseReceived >= warehouseOrdered;
+        // 混合 PO（入庫＋原廠直送）必須等每一個品項各自到齊才完成。
+        // 不能只加總倉庫品項，否則其中一條先到齊就可能把整張 PO 提前結案。
+        const allProgress=liveItems.map((row,index)=>{
+            const orderedQty=Math.max(0,Number(row.qty||0));
+            const receivedQty=records
+                .filter(record=>Number(record.itemIndex)===index)
+                .reduce((sum,record)=>sum+Number(record.qty||0),0);
+            return {orderedQty,receivedQty,complete:orderedQty>0&&receivedQty>=orderedQty};
+        });
+        const receiptComplete=allProgress.length>0&&allProgress.every(row=>row.complete);
+        const anyReceived=allProgress.some(row=>row.receivedQty>0);
         tx.update(poRef, {
             receiptRecords:records, updatedAt:now,
             status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,
-            receiptStatus:receiptComplete?'received':'partial'
+            receiptStatus:receiptComplete?'received':anyReceived?'partial':'pending'
         });
     });
     // Formal PO replenishment / surplus stock follows the same FIFO shortage allocation as self-order receipts.
@@ -7244,7 +7252,7 @@ window.savePoReceiptBatch = async function() {
         // 核心入庫 transaction 已完成後就結束使用者等待；跨模組列表改成背景同步。
         // 這些 reload 只是 UI refresh，不應延長「確認入庫」按鈕的完成時間。
         closePoReceiptBatch();
-        alert(`已完成 ${completed} 個品項的批量到貨入庫。`);
+        alert(`已完成 ${completed} 個品項的到貨確認。`);
         Promise.allSettled([
             loadMyPurchaseOrders(),
             canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
@@ -7259,7 +7267,7 @@ window.savePoReceiptBatch = async function() {
         // 部分成功時，已完成的 transaction 是正式資料；錯誤訊息不應再被次要列表 refresh 阻塞。
         if (completed > 0) {
             closePoReceiptBatch();
-            alert(`已成功入庫 ${completed} 個品項；後續品項中斷：${err.message}\n已成功的資料不會重複入庫，請重新開啟訂購單處理剩餘數量。`);
+            alert(`已成功確認 ${completed} 個品項到貨；後續品項中斷：${err.message}\n已成功的資料不會重複處理，請重新開啟訂購單處理剩餘數量。`);
         } else {
             alert('批量到貨入庫失敗：'+err.message);
         }
