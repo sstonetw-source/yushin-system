@@ -6666,34 +6666,56 @@ async function runPurchaseOrderHistorySearch() {
     if(purchasingView!=='history')return renderPoList();
     const keyword=document.getElementById('poListSearch')?.value||'';
     const status=document.getElementById('poHistorySearchStatus');
-    if(!normalizeFullHistorySearchValue(keyword)){
+    const normalized=normalizeFullHistorySearchValue(keyword);
+    if(!normalized){
         poHistorySearchActive=false;poHistorySearchResults=[];
         if(status)status.textContent='';
         renderPoList();return;
     }
     if(poHistorySearchLoading)return;
     poHistorySearchLoading=true;poHistorySearchActive=true;poHistorySearchResults=[];
-    if(status)status.textContent='搜尋全部訂購單中…';
+    const results=new Map();
+    if(status)status.textContent='快速搜尋訂購單索引中…';
     renderPoList();
     try{
+        // 新資料先走 searchTokens 索引；最多只讀符合 token 的資料，不掃整個 collection。
+        const token=fullHistoryServerToken(keyword);
+        if(token){
+            const indexedSnap=await firestoreReadWithTimeout(
+                db.collection('purchaseOrders').where('searchTokens','array-contains',token).limit(DEFAULT_LIST_LIMIT).get(),
+                '訂購單索引搜尋'
+            );
+            indexedSnap.docs.forEach(doc=>{
+                const po={id:doc.id,...doc.data()};
+                if(purchaseOrderHistoryMatches(po,keyword))results.set(po.id,po);
+            });
+            poHistorySearchResults=[...results.values()].sort((a,b)=>(b.poNo||'').localeCompare(a.poNo||''));
+            renderPoList();
+            if(status)status.textContent=`索引找到 ${results.size} 筆；正在相容搜尋舊訂購單…`;
+        }
+
+        // 舊資料建立時沒有 searchTokens；分頁 fallback 保證舊紀錄仍可被找到。
         let cursor=null,done=false,scanned=0;
         while(!done){
             let q=db.collection('purchaseOrders').orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT);
             if(cursor)q=q.startAfter(cursor);
-            const snap=await firestoreReadWithTimeout(q.get(),'訂購單歷史搜尋');
+            const snap=await firestoreReadWithTimeout(q.get(),'舊訂購單相容搜尋');
             scanned+=snap.size;
             snap.docs.forEach(doc=>{
-                const po={id:doc.id,...doc.data()};
-                if(purchaseOrderHistoryMatches(po,keyword))poHistorySearchResults.push(po);
+                const data=doc.data();
+                // 已有索引的新資料已由上面的快速搜尋負責，fallback 只掃舊資料。
+                if(Array.isArray(data.searchTokens)&&data.searchTokens.length)return;
+                const po={id:doc.id,...data};
+                if(purchaseOrderHistoryMatches(po,keyword))results.set(po.id,po);
             });
             cursor=snap.empty?null:snap.docs[snap.docs.length-1];
             done=snap.size<DEFAULT_LIST_LIMIT;
-            // 找到一頁結果就先回畫面；使用者可直接看到，不必等完整歷史掃完。
+            poHistorySearchResults=[...results.values()].sort((a,b)=>(b.poNo||'').localeCompare(a.poNo||''));
             renderPoList();
-            if(status)status.textContent=`已搜尋 ${scanned} 筆，找到 ${poHistorySearchResults.length} 筆${done?'':'…'}`;
+            if(status)status.textContent=`已相容檢查舊資料 ${scanned} 筆，找到 ${results.size} 筆${done?'':'…'}`;
             await Promise.resolve();
         }
-        if(status)status.textContent=`全歷史搜尋完成：找到 ${poHistorySearchResults.length} 筆`;
+        if(status)status.textContent=`全歷史搜尋完成：找到 ${results.size} 筆`;
     }catch(err){
         console.error('訂購單全歷史搜尋失敗：',err);
         if(status)status.textContent='搜尋失敗，請重試';
