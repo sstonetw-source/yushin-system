@@ -8876,10 +8876,14 @@ window.saveDeliveryRecord = async function() {
             const targetItem=orderItems.find(item=>item.itemId===requestedItemId)||orderItems[0];
             if(!targetItem)throw new Error('找不到送貨品項。');
             const itemOtherDelivered=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
-            if(itemOtherDelivered+qty>Number(targetItem.qty||0)+1e-9)throw new Error(`${targetItem.itemName||'品項'} 累計送貨數量超過訂購數量。`);
+            const itemReturned=savedReturnRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
+            // 退貨後補送必須以「有效送貨量」驗證，而不是歷史累計送貨量。
+            // 例如訂購10、曾送10、退2，可再補送2；歷史送貨會成為12，但有效送貨仍是10。
+            const itemOtherNetDelivered=Math.max(0,itemOtherDelivered-itemReturned);
+            if(itemOtherNetDelivered+qty>Number(targetItem.qty||0)+1e-9)throw new Error(`${targetItem.itemName||'品項'} 有效送貨數量將超過訂購數量。`);
             if((targetItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
                 const preparedQty=Number(targetItem.dispatchPreparedQty||0);
-                if(itemOtherDelivered+qty>preparedQty+1e-9)throw new Error(`${targetItem.itemName||'品項'} 目前已打單可出貨數量只有 ${Math.max(0,preparedQty-itemOtherDelivered)}。`);
+                if(itemOtherNetDelivered+qty>preparedQty+1e-9)throw new Error(`${targetItem.itemName||'品項'} 目前已打單可出貨數量只有 ${Math.max(0,preparedQty-itemOtherNetDelivered)}。`);
             }
             const record = previous
                 ? { ...previous, itemId:targetItem.itemId, date, qty, notes, updatedBy: actor, updatedAt: now }
@@ -8888,7 +8892,8 @@ window.saveDeliveryRecord = async function() {
             const totalDelivered = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const total = orderQuantity(order);
             if (!total) throw new Error('訂購數量必須大於 0，才能登錄送貨。');
-            if (totalDelivered > total + 1e-9) throw new Error(`累計送貨數量 ${totalDelivered} 超過訂購數量 ${total}。`);
+            const effectiveTotalDelivered=Math.max(0,totalDelivered-returnedQuantity(order));
+            if (effectiveTotalDelivered > total + 1e-9) throw new Error(`有效送貨數量 ${effectiveTotalDelivered} 超過訂購數量 ${total}。`);
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
             const action = previous ? 'edit' : 'create';
