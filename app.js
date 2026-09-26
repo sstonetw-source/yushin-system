@@ -6626,6 +6626,27 @@ function poActionHtml(po) {
     return reprint + ` <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">${receiptLabel}</button>`;
 }
 
+function purchaseOrderSearchTokens(po={}) {
+    const values=[
+        po.poNo,po.vendorName,po.buyerName,po.company,po.poDate,
+        ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId]):[])
+    ];
+    const tokens=new Set();
+    for(const raw of values){
+        const normalized=normalizeFullHistorySearchValue(raw);
+        if(!normalized)continue;
+        tokens.add(normalized);
+        const maxGram=Math.min(6,normalized.length);
+        for(let size=1;size<=maxGram;size++){
+            for(let i=0;i+size<=normalized.length;i++){
+                tokens.add(normalized.slice(i,i+size));
+                if(tokens.size>=300)return [...tokens];
+            }
+        }
+    }
+    return [...tokens];
+}
+
 function purchaseOrderHistoryMatches(po, keyword) {
     const needle=normalizeFullHistorySearchValue(keyword);
     if(!needle)return true;
@@ -7858,6 +7879,7 @@ window.printPurchaseOrder = async function() {
         createdAt: new Date().toISOString(),
         ...linkedDocumentFields(orderIds.length === 1 ? DOCUMENT_TYPES.ORDER : '', orderIds.length === 1 ? orderIds[0] : '', orderIds.map(orderId => documentLink(DOCUMENT_TYPES.ORDER, orderId, 'source')))
     };
+    poRecord.searchTokens=purchaseOrderSearchTokens(poRecord);
     const button = document.getElementById('printPurchaseOrderBtn');
     poSaveInProgress = true;
     if (button) {
