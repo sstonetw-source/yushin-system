@@ -6151,10 +6151,15 @@ window.renderOrdersList = function() {
     renderOrderWorkCards(baseOrders);
 
     baseOrders.forEach(o => {
-        const orderItems = normalizedItemsByOrder.get(o.id) || [];
+        const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
         const categories=orderWorkCategories(o);
         if(activeOrderWorkFilter!=='all'&&!categories.includes(activeOrderWorkFilter))return;
         if(!orderMatchesWorkPeriod(o,activeOrderWorkFilter==='all'?'all':activeOrderWorkFilter))return;
+        // 工作圖卡是以「品項」計數；套用狀態篩選後，產品欄也只顯示該狀態品項，
+        // 避免同一張多品項訂單把其他狀態的品項一起帶進來造成誤判。
+        const orderItems=activeOrderWorkFilter==='all'
+            ? allOrderItems
+            : allOrderItems.filter(item=>orderItemWorkCategory(o,item)===activeOrderWorkFilter);
         shown++;
 
         const tr = document.createElement('tr');
