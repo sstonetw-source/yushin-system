@@ -7244,8 +7244,14 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             receiptStatus:receiptComplete?'received':anyReceived?'partial':'pending'
         });
     });
+    // 原廠直送不進倉庫，因此不應執行入庫後的 FIFO 庫存分配。
+    const completedPoSnap=await db.collection('purchaseOrders').doc(poId).get();
+    const completedPo=completedPoSnap.data()||{};
+    const completedItem=purchaseItemsFromSavedPo(completedPo)[itemIndex]||{};
+    if((completedItem.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP') return;
+
     // Formal PO replenishment / surplus stock follows the same FIFO shortage allocation as self-order receipts.
-    const postPoSnap=await db.collection('purchaseOrders').doc(poId).get();
+    const postPoSnap=completedPoSnap;
     const postPo=postPoSnap.data()||{};
     const postItems=purchaseItemsFromSavedPo(postPo);
     const postItem=postItems[itemIndex]||{};
