@@ -7133,7 +7133,8 @@ window.receiveSupplyOrder = function(supplyId) {
 
 async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='') {
     let remaining=Math.max(0,Number(maxQty||0)),allocatedQty=0;
-    if(!remaining||!productKey||!warehouseId)return {allocatedQty:0,unallocatedQty:remaining};
+    const affectedOrderIds = new Set();
+    if(!remaining||!productKey||!warehouseId)return {allocatedQty:0,unallocatedQty:remaining,affectedOrderIds:[]};
     // Allocate one live shortage at a time. Re-reading candidates after every successful
     // transaction preserves oldest-first ordering even when multiple receipts run concurrently.
     while(remaining>0){
@@ -7187,7 +7188,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,candidate.orderId,productKey,actor,{warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE'}));
             took=take;
         });
-        if(took>0){allocatedQty+=took;remaining-=took;continue;}
+        if(took>0){allocatedQty+=took;remaining-=took;affectedOrderIds.add(candidate.orderId);continue;}
         if(skipCandidate){
             // Avoid repeatedly selecting a stale row during this invocation.
             // A later receipt will re-evaluate it after lifecycle/reservation cleanup.
@@ -7195,7 +7196,23 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
         }
         break;
     }
-    return {allocatedQty,unallocatedQty:remaining};
+    return {allocatedQty,unallocatedQty:remaining,affectedOrderIds:[...affectedOrderIds]};
+}
+
+async function refreshAffectedOrderCaches(orderIds = []) {
+    const ids=[...new Set(orderIds.filter(Boolean))];
+    if(!ids.length)return;
+    const snapshots=await Promise.all(ids.map(id=>db.collection('orders').doc(id).get()));
+    snapshots.forEach(snapshot=>{
+        if(!snapshot.exists)return;
+        const order={id:snapshot.id,...snapshot.data()};
+        const index=ordersCache.findIndex(row=>row.id===order.id);
+        if(index>=0)ordersCache[index]=order;else ordersCache.unshift(order);
+        syncOrderIntoPurchasingCaches(order);
+    });
+    ordersCache.sort((a,b)=>(b.orderDate||'').localeCompare(a.orderDate||''));
+    writeAppDataCache('orders',ordersCache);
+    renderOrdersList();
 }
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
