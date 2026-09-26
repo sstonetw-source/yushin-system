@@ -7293,7 +7293,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             const itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
             if(itemIndex<0)throw new Error('找不到來源訂單品項。');
             const item=items[itemIndex];
-            const delivered=Math.min(Number(item.orderedQty??item.qty||0),Number(item.deliveredQty||0)+qty);
+            const delivered=Math.min(Number((item.orderedQty ?? item.qty) || 0),Number(item.deliveredQty||0)+qty);
             items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,supplyReceivedQty:Number(item.supplyReceivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
             const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
@@ -7477,7 +7477,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             const sourceIndex=Number(item.orderItemIndex||0);
             const sourceItem=sourceItems[sourceIndex];
             if(!sourceItem)throw new Error('找不到來源訂單品項。');
-            const nextDelivered=Math.min(Number(sourceItem.orderedQty??sourceItem.qty||0),Number(sourceItem.deliveredQty||0)+qty);
+            const nextDelivered=Math.min(Number((sourceItem.orderedQty ?? sourceItem.qty) || 0),Number(sourceItem.deliveredQty||0)+qty);
             sourceItems[sourceIndex]={...sourceItem,receivedQty:Number(sourceItem.receivedQty||0)+qty,purchaseReceivedQty:Number(sourceItem.purchaseReceivedQty||0)+qty,deliveredQty:nextDelivered,directShipDeliveredQty:Number(sourceItem.directShipDeliveredQty||0)+qty};
             const nextOrder={...sourceOrder,items:sourceItems,itemCount:sourceItems.length,orderSchemaVersion:2,updatedAt:now};
             tx.update(db.collection('orders').doc(item.orderId),{items:sourceItems,itemCount:sourceItems.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
