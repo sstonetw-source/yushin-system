@@ -7260,7 +7260,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     const receiptRow=[...(postPo.receiptRecords||[])].reverse().find(row=>row.id===receiptId);
     // receiveSinglePoLine already reserved reserveFromReceipt inside its transaction.
     // Persist it on the receipt row in future writes; for this call use the exact transaction result captured above.
-    const freeQty=Math.max(0,Number(qty||0)-Number(receiptRow?.reservedQty??reserveFromReceipt??0));
+    const freeQty=Math.max(0,Number(qty||0)-Number(receiptRow?.reservedQty??0));
     if(freeQty>0&&postKey&&postWarehouse)await allocateFreeReceiptStockToShortages(postKey,postWarehouse,freeQty,actor,postItem.orderId||'');
 }
 
