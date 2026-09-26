@@ -5770,7 +5770,7 @@ function createOrderPaginationState() {
         sources.push({
             cursor: null,
             exhausted: false,
-            query: () => db.collection('orders').where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
+            query: () => db.collection('orders').orderBy('orderDate', 'desc')
         });
     } else if (currentUser?.uid) {
         // 新版訂單一律寫入 ownerUid。近期列表以 Firebase UID 為唯一權威歸屬，
@@ -5778,7 +5778,7 @@ function createOrderPaginationState() {
         sources.push({
             cursor: null,
             exhausted: false,
-            query: () => db.collection('orders').where('ownerUid', '==', currentUser.uid).where('status', '==', BUSINESS_STATUS.ACTIVE).orderBy('orderDate', 'desc')
+            query: () => db.collection('orders').where('ownerUid', '==', currentUser.uid).orderBy('orderDate', 'desc')
         });
     }
     return { sources, sourceIndex: 0 };
@@ -6156,7 +6156,6 @@ window.renderOrdersList = function() {
     // 同一次列表 render 每筆訂單只 normalize 一次，避免搜尋、廠牌篩選、狀態卡片與產品欄重複處理 items。
     const normalizedItemsByOrder = new Map(visibleOrderSource.map(o => [o.id, normalizedOrderItems(o)]));
     const baseOrders = visibleOrderSource.filter(o => {
-        if (!orderHistorySearchActive && o.status !== BUSINESS_STATUS.ACTIVE) return false;
         const orderItems = normalizedItemsByOrder.get(o.id) || [];
         const itemSearchable = orderItems.flatMap(item => [
             item.brand, item.itemCode, item.itemName, item.productLine, item.productType, item.spec
@@ -6537,7 +6536,7 @@ async function loadPurchaseOrderPage(reset) {
     const requestedRole = currentUserRole;
     updatePoLoadMoreButton();
     try {
-        let query = db.collection('purchaseOrders').where('receiptStatus','in',['pending','partial']).orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
+        let query = db.collection('purchaseOrders').orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
         if (poListCursor) query = query.startAfter(poListCursor);
         const [snapshot,supplySnapshot] = await Promise.all([
             query.get(),
