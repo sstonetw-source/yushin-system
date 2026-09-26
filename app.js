@@ -5476,8 +5476,9 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
                 customerName:order.customerName||'',itemCode:item.itemCode||'',itemName:item.itemName||'',
                 preparedByUid:currentUser?.uid||'',preparedBy:actor,createdAt:now
             });
-            tx.update(ref,{items,updatedAt:now});
-            saved={...order,items,updatedAt:now};
+            const nextOrder={...order,items,updatedAt:now};
+            tx.update(ref,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
+            saved=nextOrder;
         });
         const idx=ordersCache.findIndex(o=>o.id===orderId);
         if(idx>=0)ordersCache[idx]={id:orderId,...saved};
@@ -8575,6 +8576,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
                 deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history)
             };
             if (statusEntries.length) updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...statusEntries);
+            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = {
                 ...order, ...updates,
