@@ -6586,8 +6586,12 @@ function poWaitingDays(po) {
 
 function poActionHtml(po) {
     const reprint = `<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`;
-    if (poReceiptProgress(po).directShipOnly || poReceiptProgress(po).complete) return reprint;
-    return reprint + ` <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">📥 到貨入庫</button>`;
+    const progress=poReceiptProgress(po);
+    if (progress.complete) return reprint;
+    // 原廠直送仍需要確認實際到貨，才能讓來源訂單由「待到貨」推進到「待送貨」；
+    // 只是確認時不寫入倉庫庫存。
+    const receiptLabel=progress.directShipOnly?'📦 確認直送到貨':'📥 到貨入庫';
+    return reprint + ` <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">${receiptLabel}</button>`;
 }
 
 window.renderPoList = function() {
