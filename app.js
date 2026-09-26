@@ -6814,53 +6814,47 @@ window.receiveSupplyOrder = function(supplyId) {
 };
 
 async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='') {
-    let remaining=Math.max(0,Number(maxQty||0));
-    if(!remaining||!productKey||!warehouseId||!window.YushinReservation)return {allocatedQty:0,unallocatedQty:remaining};
-    // Read bounded candidate pages for both pure shortages and partially-reserved
-    // shortages. Sort all candidates by original order date before allocation so
-    // receipt stock is consistently assigned oldest-first rather than Firestore's
-    // unspecified query order.
-    const loadCandidates=async status=>{
-        const rows=[]; let cursor=null; let hasMore=true;
-        while(hasMore&&rows.length<500){
-            let q=db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==',status).limit(50);
-            if(cursor)q=q.startAfter(cursor);
-            const page=await q.get();
-            page.docs.forEach(doc=>rows.push({id:doc.id,...doc.data()}));
-            cursor=page.empty?null:page.docs[page.docs.length-1];
-            hasMore=page.size===50;
-        }
-        return rows;
-    };
-    const [shortageRows,activeRows]=await Promise.all([loadCandidates('shortage'),loadCandidates('active')]);
-    const candidates=[...shortageRows,...activeRows]
-        .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0)
-        .filter((row,index,all)=>all.findIndex(x=>x.id===row.id)===index)
-        .sort((a,b)=>String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))||String(a.id).localeCompare(String(b.id)));
-    const plan=window.YushinReservation.allocateReceiptToShortages(candidates,remaining);
-    let allocatedQty=0;
-    for(const allocation of plan.allocations){
-        const qty=Number(allocation.qty||0);
-        if(!qty)continue;
+    let remaining=Math.max(0,Number(maxQty||0)),allocatedQty=0;
+    if(!remaining||!productKey||!warehouseId)return {allocatedQty:0,unallocatedQty:remaining};
+    // Allocate one live shortage at a time. Re-reading candidates after every successful
+    // transaction preserves oldest-first ordering even when multiple receipts run concurrently.
+    while(remaining>0){
+        const loadCandidates=async status=>{
+            const rows=[]; let cursor=null,hasMore=true;
+            while(hasMore&&rows.length<500){
+                let q=db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==',status).limit(50);
+                if(cursor)q=q.startAfter(cursor);
+                const page=await q.get();
+                page.docs.forEach(doc=>rows.push({id:doc.id,...doc.data()}));
+                cursor=page.empty?null:page.docs[page.docs.length-1];
+                hasMore=page.size===50;
+            }
+            return rows;
+        };
+        const [shortageRows,activeRows]=await Promise.all([loadCandidates('shortage'),loadCandidates('active')]);
+        const candidate=[...shortageRows,...activeRows]
+            .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0)
+            .filter((row,index,all)=>all.findIndex(x=>x.id===row.id)===index)
+            .sort((a,b)=>String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))||String(a.id).localeCompare(String(b.id)))[0];
+        if(!candidate)break;
+        let took=0,skipCandidate=false;
         await db.runTransaction(async tx=>{
-            const orderRef=db.collection('orders').doc(allocation.orderId);
-            const reservationRef=db.collection('inventoryReservations').doc(allocation.id);
+            const orderRef=db.collection('orders').doc(candidate.orderId);
+            const reservationRef=db.collection('inventoryReservations').doc(candidate.id);
             const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
             const whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
             const [orderSnap,resSnap,invSnap,whSnap]=await Promise.all([tx.get(orderRef),tx.get(reservationRef),tx.get(invRef),tx.get(whRef)]);
-            if(!orderSnap.exists||!resSnap.exists||!invSnap.exists||!whSnap.exists)return;
+            if(!orderSnap.exists||!resSnap.exists||!invSnap.exists||!whSnap.exists){skipCandidate=true;return;}
             const reservation=resSnap.data();
             const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
-            const inv=inventoryNumbers(invSnap.data()),wh=inventoryNumbers(whSnap.data());
-            const take=Math.min(qty,liveShortage,Math.max(0,inv.available),Math.max(0,wh.available));
-            if(take<=0)return;
             const order={id:orderSnap.id,...orderSnap.data()};
-            // Candidate rows are read before allocation. Re-check lifecycle inside the
-            // transaction so stale/legacy reservations can never reclaim stock for a cancelled order.
-            if(normalizedOrderStatus(order)!=='normal')return;
+            if(normalizedOrderStatus(order)!=='normal'||liveShortage<=0){skipCandidate=true;return;}
+            const inv=inventoryNumbers(invSnap.data()),wh=inventoryNumbers(whSnap.data());
+            const take=Math.min(remaining,liveShortage,Math.max(0,inv.available),Math.max(0,wh.available));
+            if(take<=0){skipCandidate=true;return;}
             const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
-            if(index<0)return;
+            if(index<0){skipCandidate=true;return;}
             const item=items[index],oldReserved=Number(item.reservedQty??item.inventoryReservedQty??0);
             const oldShortage=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??liveShortage));
             items[index]={...item,reservedQty:oldReserved+take,inventoryReservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take),inventoryShortageQty:Math.max(0,oldShortage-take)};
@@ -6872,11 +6866,18 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
             tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
             tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
-            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,allocation.orderId,productKey,actor,{warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE'}));
-            allocatedQty+=take;
+            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,candidate.orderId,productKey,actor,{warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE'}));
+            took=take;
         });
+        if(took>0){allocatedQty+=took;remaining-=took;continue;}
+        if(skipCandidate){
+            // Avoid repeatedly selecting a stale row during this invocation.
+            // A later receipt will re-evaluate it after lifecycle/reservation cleanup.
+            break;
+        }
+        break;
     }
-    return {allocatedQty,unallocatedQty:Math.max(0,remaining-allocatedQty)};
+    return {allocatedQty,unallocatedQty:remaining};
 }
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
