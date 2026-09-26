@@ -4898,23 +4898,41 @@ async function runInventorySearch(){
  if(!normalized){inventorySearchActive=false;inventorySearchResults=[];if(status)status.textContent='';renderInventoryList();return;}
  if(inventorySearchLoading)return;
  inventorySearchLoading=true;inventorySearchActive=true;inventorySearchResults=[];
- if(status)status.textContent='搜尋全部庫存中…';
+ const results=new Map();
+ if(status)status.textContent='快速搜尋庫存索引中…';
  renderInventoryList();
  try{
+   const token=fullHistoryServerToken(keyword);
+   if(token){
+     const indexedSnap=await firestoreReadWithTimeout(
+       db.collection('inventory').where('searchTokens','array-contains',token).limit(DEFAULT_LIST_LIMIT).get(),
+       '庫存索引搜尋'
+     );
+     indexedSnap.docs.forEach(doc=>{const row={id:doc.id,...doc.data()};if(inventoryRecordMatches(row,keyword))results.set(row.id,row);});
+     inventorySearchResults=[...results.values()].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
+     renderInventoryList();
+     if(status)status.textContent=`索引找到 ${results.size} 筆；正在相容搜尋舊庫存…`;
+   }
    let cursor=null,done=false,scanned=0;
    while(!done){
      let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);
      if(cursor)q=q.startAfter(cursor);
-     const snap=await firestoreReadWithTimeout(q.get(),'庫存全庫搜尋');
+     const snap=await firestoreReadWithTimeout(q.get(),'舊庫存相容搜尋');
      scanned+=snap.size;
-     snap.docs.forEach(doc=>{const row={id:doc.id,...doc.data()};if(inventoryRecordMatches(row,keyword))inventorySearchResults.push(row);});
+     snap.docs.forEach(doc=>{
+       const data=doc.data();
+       if(Array.isArray(data.searchTokens)&&data.searchTokens.length)return;
+       const row={id:doc.id,...data};
+       if(inventoryRecordMatches(row,keyword))results.set(row.id,row);
+     });
      cursor=snap.empty?null:snap.docs[snap.docs.length-1];
      done=snap.size<DEFAULT_LIST_LIMIT;
+     inventorySearchResults=[...results.values()].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
      renderInventoryList();
-     if(status)status.textContent=`已搜尋 ${scanned} 筆，找到 ${inventorySearchResults.length} 筆${done?'':'…'}`;
+     if(status)status.textContent=`已相容檢查舊庫存 ${scanned} 筆，找到 ${results.size} 筆${done?'':'…'}`;
      await Promise.resolve();
    }
-   if(status)status.textContent=`全庫搜尋完成：找到 ${inventorySearchResults.length} 筆`;
+   if(status)status.textContent=`全庫搜尋完成：找到 ${results.size} 筆`;
  }catch(err){
    console.error('庫存全庫搜尋失敗：',err);
    if(status)status.textContent='搜尋失敗，請重試';
