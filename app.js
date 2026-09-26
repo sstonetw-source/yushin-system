@@ -6704,9 +6704,9 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     const requestedRole = currentUserRole;
     renderPendingPurchaseOrders();
     try {
-        // 採購頁只用 orderDate 做伺服器端排序／分頁，其餘工作狀態在已取回的近期 50 筆中篩選。
-        // 避免 status + array-contains + orderBy 形成 Composite Index 依賴，導致缺索引時整頁讀取失敗。
-        let query = db.collection('orders').orderBy('orderDate', 'desc').limit(DEFAULT_LIST_LIMIT);
+        // 待處理工作佇列不能受「最近 50 筆」限制：50 只作為每次 Firestore 讀取的批次大小。
+        // 逐批掃描仍在進行中的訂單，直到讀完；歷史／已完成資料才維持最近 50 筆。
+        let query = db.collection('orders').where('status', '==', BUSINESS_STATUS.ACTIVE).limit(DEFAULT_LIST_LIMIT);
         if (pendingPurchaseCursor) query = query.startAfter(pendingPurchaseCursor);
         const snapshot = await firestoreReadWithTimeout(query.get(), '待採購訂單');
         if (requestedRole !== currentUserRole || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
@@ -6736,6 +6736,11 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         pendingPurchaseLoading = false;
         writeAppDataCache('purchase-pending', pendingPurchaseCache);
         renderPendingPurchaseOrders();
+    }
+    // 進行中工作資料必須完整：若本批仍有下一頁，自動接續讀取。
+    // 每次仍只抓 DEFAULT_LIST_LIMIT，避免單次查詢過大。
+    if (pendingPurchaseHasMore) {
+        await loadPendingPurchaseOrders(false);
     }
 };
 
