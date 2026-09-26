@@ -1616,7 +1616,9 @@ window.renderForecastList = function() {
     body.innerHTML = '';
     let shown = 0;
 
-    forecastCache.forEach(item => {
+    // 搜尋模式必須使用後端全歷史結果，不能只迭代目前載入的 50 筆 forecastCache。
+    const forecastRows = forecastHistorySearchActive ? forecastHistorySearchResults : forecastCache;
+    forecastRows.forEach(item => {
         const brand = normalizeForecastBrand(item.brand || '');
         const salesName = stripPhoneSuffix(item.salesName || '');
 
