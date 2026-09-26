@@ -8229,8 +8229,10 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const outstanding = Math.max(0, ordered - delivered);
         // 已下 PO／自行訂購的數量屬於既有在途供應，恢復訂單時不能再拿同一數量占用現貨，
         // 否則會同時出現「待到貨」與庫存 reservation，造成供應量重複計算。
-        const alreadyOrdered = Math.min(outstanding, Math.max(0, Number(item.purchaseOrderedQty||0), Number(item.supplyOrderedQty||0)));
-        const needed = Math.max(0, outstanding - alreadyOrdered);
+        const orderedSupply = Math.max(0, Number(item.purchaseOrderedQty||0), Number(item.supplyOrderedQty||0));
+        const receivedSupply = Math.max(0, Number(item.receivedQty||0), Number(item.purchaseReceivedQty||0), Number(item.supplyReceivedQty||0));
+        const incomingSupply = Math.min(outstanding, Math.max(0, orderedSupply - receivedSupply));
+        const needed = Math.max(0, outstanding - incomingSupply);
         const reserve = invState && whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved),Math.max(0,invState.onHand-invState.reserved)) : 0;
         const shortage = Math.max(0, needed - reserve);
         if (reserve > 0) {
