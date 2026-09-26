@@ -6586,8 +6586,8 @@ window.renderPoList = function() {
         items.forEach((item,itemIndex)=>{
             const receipt=poItemReceiptProgress(po,item,itemIndex);
             const {received,ordered,complete,directShip}=receipt;
-            // 「待到貨」完全以單一品項為單位：已完成或原廠直送品項不留在待到貨清單。
-            if (purchasingView === 'receiving' && (complete || directShip || receipt.remaining<=0)) return;
+            // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。
+            if (purchasingView === 'receiving' && (complete || receipt.remaining<=0)) return;
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
             const tr = document.createElement('tr');
@@ -6601,7 +6601,7 @@ window.renderPoList = function() {
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
                 <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
-                <td data-th="操作" class="no-print">${complete?'<span>已完成</span>':`<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">📥 到貨入庫</button>`} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
+                <td data-th="操作" class="no-print">${complete?'<span>已完成</span>':`<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">${directShip?'確認直送到貨':'📥 到貨入庫'}</button>`} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -6677,18 +6677,16 @@ function receivedQuantityForPoItem(po, itemIndex) {
 function poItemReceiptProgress(po,item,itemIndex) {
     const ordered=Math.max(0,Number(item?.qty||0));
     const directShip=(item?.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
-    const received=directShip?0:Math.min(ordered,Math.max(0,receivedQuantityForPoItem(po,itemIndex)));
-    const remaining=directShip?0:Math.max(0,ordered-received);
-    return {ordered,received,remaining,complete:ordered>0&&!directShip&&received>=ordered,directShip};
+    const received=Math.min(ordered,Math.max(0,receivedQuantityForPoItem(po,itemIndex)));
+    const remaining=Math.max(0,ordered-received);
+    return {ordered,received,remaining,complete:ordered>0&&received>=ordered,directShip};
 }
 function poReceiptProgress(po) {
     const allItems = purchaseItemsFromSavedPo(po);
     const rows=allItems.map((item,index)=>poItemReceiptProgress(po,item,index));
-    const warehouseRows=rows.filter(row=>!row.directShip);
-    if (!warehouseRows.length) return { ordered:0, received:0, remaining:0, complete:false, directShipOnly:allItems.length>0 };
-    const ordered=warehouseRows.reduce((s,row)=>s+row.ordered,0);
-    const received=warehouseRows.reduce((s,row)=>s+row.received,0);
-    return { ordered, received, remaining:Math.max(0,ordered-received), complete:ordered>0&&received>=ordered, directShipOnly:false };
+    const ordered=rows.reduce((s,row)=>s+row.ordered,0);
+    const received=rows.reduce((s,row)=>s+row.received,0);
+    return { ordered, received, remaining:Math.max(0,ordered-received), complete:ordered>0&&received>=ordered, directShipOnly:allItems.length>0&&rows.every(row=>row.directShip) };
 }
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
@@ -6952,11 +6950,11 @@ window.receivePurchaseOrderItem = function(poId,itemIndex) {
     const received=receivedQuantityForPoItem(po,itemIndex);
     const remaining=Math.max(0,Number(item.qty||0)-received);
     if(remaining<=0){alert('此品項已全部到貨。');return;}
-    if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){alert('此品項為原廠直送，不需執行入庫。');return;}
+    const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
     poReceiptTargetId=poId;
     const body=document.getElementById('poReceiptBatchBody');
     const title=document.getElementById('poReceiptBatchTitle');
-    if(title)title.textContent=`到貨入庫｜${po.poNo||po.id}｜${item.itemCode||item.itemName||''}`;
+    if(title)title.textContent=directShip ? `原廠直送到貨｜${po.poNo||po.id}｜${item.itemCode||item.itemName||''}` : `到貨入庫｜${po.poNo||po.id}｜${item.itemCode||item.itemName||''}`;
     body.innerHTML=`
         <tr data-index="${itemIndex}">
             <td><input type="checkbox" class="po-receive-select" checked></td>
@@ -6980,10 +6978,9 @@ window.receivePurchaseOrder = function(poId) {
         index,
         received: receivedQuantityForPoItem(po, index),
         remaining: Math.max(0, Number(item.qty || 0) - receivedQuantityForPoItem(po, index))
-    })).filter(row => (row.item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP' && row.remaining > 0);
+    })).filter(row => row.remaining > 0);
     if (!rows.length) {
-        const directOnly = items.length && items.every(item => (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP');
-        alert(directOnly ? '這張訂購單為原廠直送，不需執行入庫。' : '這張訂購單已全部到貨。');
+        alert('這張訂購單已全部到貨。');
         return;
     }
 
@@ -7025,13 +7022,46 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
         const liveItems = purchaseItemsFromSavedPo(live);
         const item = liveItems[itemIndex];
         if (!item) throw new Error('找不到品項');
-        if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') throw new Error('原廠直送品項不需入庫');
+        const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
         const formalSupplyRef=db.collection('supplyOrders').doc(formalSupplyOrderId(poId,itemIndex));
         const formalSupplySnap=await tx.get(formalSupplyRef);
 
         const already = receivedQuantityForPoItem(live, itemIndex);
         const remaining = Math.max(0, Number(item.qty || 0) - already);
         if (!qty || qty <= 0 || qty > remaining) throw new Error(`${item.itemCode || item.itemName} 到貨數量不正確`);
+
+        if(directShip){
+            let sourceOrder=null;
+            if(item.orderId){
+                const orderSnap=await tx.get(db.collection('orders').doc(item.orderId));
+                if(orderSnap.exists)sourceOrder={id:orderSnap.id,...orderSnap.data()};
+            }
+            if(!sourceOrder)throw new Error('原廠直送品項缺少來源訂單。');
+            const sourceItems=normalizedOrderItems(sourceOrder);
+            const sourceIndex=Number(item.orderItemIndex||0);
+            const sourceItem=sourceItems[sourceIndex];
+            if(!sourceItem)throw new Error('找不到來源訂單品項。');
+            const nextDelivered=Math.min(Number(sourceItem.orderedQty??sourceItem.qty||0),Number(sourceItem.deliveredQty||0)+qty);
+            sourceItems[sourceIndex]={...sourceItem,receivedQty:Number(sourceItem.receivedQty||0)+qty,purchaseReceivedQty:Number(sourceItem.purchaseReceivedQty||0)+qty,deliveredQty:nextDelivered,directShipDeliveredQty:Number(sourceItem.directShipDeliveredQty||0)+qty};
+            const nextOrder={...sourceOrder,items:sourceItems,itemCount:sourceItems.length,orderSchemaVersion:2,updatedAt:now};
+            tx.update(db.collection('orders').doc(item.orderId),{items:sourceItems,itemCount:sourceItems.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
+            const record={id:receiptId,itemIndex,orderId:item.orderId,orderItemIndex:sourceIndex,itemCode:item.itemCode||'',itemName:item.itemName||'',qty,fulfillmentType:'DIRECT_SHIP',date:localDateString(),createdAt:now,createdBy:actor};
+            const records=[...(live.receiptRecords||[]),record];
+            const allProgress=liveItems.map((row,index)=>{
+                const orderedQty=Number(row.qty||0);
+                const got=records.filter(record=>Number(record.itemIndex)===index).reduce((sum,record)=>sum+Number(record.qty||0),0);
+                return orderedQty>0&&got>=orderedQty;
+            });
+            const receiptComplete=allProgress.length>0&&allProgress.every(Boolean);
+            tx.update(poRef,{receiptRecords:records,updatedAt:now,status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,receiptStatus:receiptComplete?'received':'partial'});
+            if(formalSupplySnap.exists){
+                const formalSupply=formalSupplySnap.data();
+                const formalReceived=Number(formalSupply.receivedQty||0)+qty;
+                tx.update(formalSupplyRef,{receivedQty:formalReceived,status:formalReceived>=Number(formalSupply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
+            }
+            tx.set(db.collection('receipts').doc(),{purchaseOrderId:poId,orderId:item.orderId,itemId:sourceItem.itemId||'',qty,fulfillmentType:'DIRECT_SHIP',sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,createdAt:now,createdBy:actor});
+            return;
+        }
 
         const key = poIncomingKey(item);
         if (!key) throw new Error(`${item.itemName || '品項'} 缺少貨號／Product ID`);
@@ -7700,7 +7730,7 @@ window.printPurchaseOrder = async function() {
                     type:'PURCHASING_PO',purchaseOrderId:poDocumentId,purchaseOrderNo:poNo,itemIndex,
                     orderId:item.orderId||'',itemId:item.itemId||'',orderItemIndex:Number(item.orderItemIndex||0),
                     productKey:poIncomingKey(item),productId:item.productId||'',itemCode:item.itemCode||'',itemName:item.itemName||'',brand:resolveBrandName(item.brand||''),
-                    supplier:vendorName,qty:Number(item.qty||0),receivedQty:previousReceived,unitCost:Number(item.unitPrice||0),warehouseId:item.warehouseId||defaultWarehouse()?.id||'',
+                    supplier:vendorName,qty:Number(item.qty||0),receivedQty:previousReceived,unitCost:Number(item.unitPrice||0),fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
                     status:previousReceived>=Number(item.qty||0)?'RECEIVED':previousReceived>0?'PARTIAL_RECEIPT':'ORDERED',
                     ownerUid:item.ownerUid||'',salesCode:item.salesCode||'',createdAt:previousPoForIncoming?.createdAt||poRecord.createdAt,updatedAt:new Date().toISOString()
                 },{merge:true});
