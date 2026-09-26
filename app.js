@@ -7250,6 +7250,9 @@ window.savePoReceiptBatch = async function() {
         alert(`已完成 ${completed} 個品項的到貨確認。`);
         Promise.allSettled([
             loadMyPurchaseOrders(),
+            // 到貨會改變來源訂單品項的工作狀態；同步近期訂單 cache，
+            // 讓訂單圖卡／列表立即由「待到貨」切換成「待送貨」，不必重新登入。
+            getDataScope('orders') !== 'none' ? loadOrderPage(true, { silent:true }) : Promise.resolve(),
             canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
             loadPurchasingDispatchOrders(true),
             (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
@@ -7268,6 +7271,9 @@ window.savePoReceiptBatch = async function() {
         }
         Promise.allSettled([
             loadMyPurchaseOrders(),
+            // 到貨會改變來源訂單品項的工作狀態；同步近期訂單 cache，
+            // 讓訂單圖卡／列表立即由「待到貨」切換成「待送貨」，不必重新登入。
+            getDataScope('orders') !== 'none' ? loadOrderPage(true, { silent:true }) : Promise.resolve(),
             canCreatePurchaseOrderCapability() ? loadPendingPurchaseOrders(true) : Promise.resolve(),
             loadPurchasingDispatchOrders(true),
             (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
