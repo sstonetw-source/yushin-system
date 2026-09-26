@@ -8325,40 +8325,62 @@ function renderOrderStatusLog(order) {
     return `<div style="line-height:1.45;min-width:116px;">${lines.join('<hr style="border:0;border-top:1px solid #ddd;margin:3px 0;">')}</div>`;
 }
 
-window.showCustomerOrderHistory = function(customerName) {
-    const customerKey = String(customerName || '').trim().toLocaleLowerCase('zh-TW');
-    const orders = ordersCache.filter(order => String(order.customerName || '').trim().toLocaleLowerCase('zh-TW') === customerKey)
-        .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
-    const quoteMap = new Map();
-    myQuotesCache.forEach(quote => {
-        const names = [quote.ordererName, quote.clientName].map(value => String(value || '').trim().toLocaleLowerCase('zh-TW'));
-        if (names.includes(customerKey)) quoteMap.set(quote.id || quote.quoteNo, quote);
-    });
-    const quotes = [...quoteMap.values()].sort((a, b) => String(b.quoteDate || b.quoteNo || '').localeCompare(String(a.quoteDate || a.quoteNo || '')));
-    const quoteItems = quotes.flatMap(quote => (quote.items || []).map(item => ({ quote, item })))
-        .sort((a, b) => String(b.quote.quoteDate || b.quote.quoteNo || '').localeCompare(String(a.quote.quoteDate || a.quote.quoteNo || '')));
-    const recentDates = [...orders.map(order => order.orderDate), ...quotes.map(quote => quote.quoteDate)].filter(Boolean).sort().reverse();
-    const latestOrder = orders[0];
-    const latestQuoteItem = quoteItems[0];
-    const latestPrice = latestOrder
-        ? `NT$ ${Number(parseFloat(String(latestOrder.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString()}`
-        : latestQuoteItem ? `NT$ ${Number(parseFloat(String(latestQuoteItem.item.price ?? '').replace(/,/g, '')) || 0).toLocaleString()}` : '－';
-    const latestProduct = latestOrder?.itemName || latestQuoteItem?.item?.nameCn || latestQuoteItem?.item?.nameEn || '－';
-    document.getElementById('customerOrderHistoryTitle').innerText = `客戶近期交易摘要：${customerName}`;
-    document.getElementById('customerTransactionSummary').innerHTML = `
-        <div class="customer-summary-card"><span>最近交易日</span><strong>${escapeHtml(recentDates[0] || '－')}</strong></div>
-        <div class="customer-summary-card"><span>最近購買／估價品項</span><strong>${escapeHtml(latestProduct)}</strong></div>
-        <div class="customer-summary-card"><span>上次單價</span><strong>${escapeHtml(latestPrice)}</strong></div>
-        <div class="customer-summary-card"><span>最近估價</span><strong>${escapeHtml(quotes[0] ? `${quotes[0].quoteNo || '－'}／${quotes[0].quoteDate || '－'}` : '－')}</strong></div>`;
+window.showCustomerOrderHistory = async function(customerName) {
+    const customerKey = normalizeFullHistorySearchValue(customerName);
+    if (!customerKey) return;
+    const overlay = document.getElementById('customerOrderHistoryOverlay');
+    const title = document.getElementById('customerOrderHistoryTitle');
+    const summary = document.getElementById('customerTransactionSummary');
     const tbody = document.getElementById('customerOrderHistoryBody');
-    tbody.innerHTML = orders.length ? orders.slice(0, 20).map(order => `
-        <tr><td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.brand || '')}</td><td>${escapeHtml(order.itemCode || '')}</td><td>${escapeHtml(order.itemName || '')}</td><td>${escapeHtml(String(order.qty || ''))}</td><td>${escapeHtml(String(order.totalPrice || ''))}</td><td>${deliveryProgressInfo(order).delivered>0 ? (deliveryProgressInfo(order).state==='complete'?'已送貨':'部分送貨') : fulfillmentProgressInfo(order).shippable>0 ? '可出貨' : fulfillmentProgressInfo(order).pendingDispatch>0 ? '待打單' : purchaseProgressInfo(order).label}</td></tr>
-    `).join('') : '<tr><td colspan="7" style="color:#888;">目前沒有採購紀錄。</td></tr>';
     const quoteTbody = document.getElementById('customerQuoteHistoryBody');
-    quoteTbody.innerHTML = quoteItems.length ? quoteItems.slice(0, 20).map(({ quote, item }) => `
-        <tr><td>${escapeHtml(quote.quoteDate || '')}</td><td>${escapeHtml(quote.quoteNo || '')}</td><td>${escapeHtml(item.nameCn || item.nameEn || item.model || '')}</td><td>${escapeHtml(String(item.qty || ''))}</td><td>${escapeHtml(String(item.price || ''))}</td><td>${quote.dealClosed ? '已成交' : '估價中'}</td></tr>
-    `).join('') : '<tr><td colspan="6" style="color:#888;">目前已載入資料中沒有相符估價紀錄。</td></tr>';
-    document.getElementById('customerOrderHistoryOverlay').classList.add('active');
+    if (title) title.innerText = `客戶近期交易摘要：${customerName}`;
+    if (summary) summary.innerHTML = '<div class="customer-summary-card"><span>資料狀態</span><strong>讀取完整歷史中…</strong></div>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:#888;">讀取訂單歷史中…</td></tr>';
+    if (quoteTbody) quoteTbody.innerHTML = '<tr><td colspan="6" style="color:#888;">讀取估價歷史中…</td></tr>';
+    if (overlay) overlay.classList.add('active');
+
+    try {
+        const orderToken = fullHistoryQueryToken('order', customerName);
+        const quoteToken = fullHistoryQueryToken('quote', customerName);
+        const [orderSnap, quoteSnap] = await Promise.all([
+            orderToken ? scopedHistorySearchQuery('orders', orderToken).limit(DEFAULT_LIST_LIMIT).get() : Promise.resolve({ docs: [] }),
+            quoteToken ? scopedHistorySearchQuery('quotes', quoteToken).limit(DEFAULT_LIST_LIMIT).get() : Promise.resolve({ docs: [] })
+        ]);
+        const exactCustomerKey = normalizeCustomerKey(customerName);
+        const orders = (orderSnap.docs || [])
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(order => normalizeCustomerKey(order.customerName || order.customer || '') === exactCustomerKey)
+            .sort((a, b) => String(b.orderDate || '').localeCompare(String(a.orderDate || '')));
+        const quotes = (quoteSnap.docs || [])
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(quote => [quote.ordererName, quote.clientName].some(value => normalizeCustomerKey(value) === exactCustomerKey))
+            .sort((a, b) => String(b.quoteDate || b.quoteNo || '').localeCompare(String(a.quoteDate || a.quoteNo || '')));
+        const quoteItems = quotes.flatMap(quote => (quote.items || []).map(item => ({ quote, item })))
+            .sort((a, b) => String(b.quote.quoteDate || b.quote.quoteNo || '').localeCompare(String(a.quote.quoteDate || a.quote.quoteNo || '')));
+        const recentDates = [...orders.map(order => order.orderDate), ...quotes.map(quote => quote.quoteDate)].filter(Boolean).sort().reverse();
+        const latestOrder = orders[0];
+        const latestQuoteItem = quoteItems[0];
+        const latestPrice = latestOrder
+            ? `NT$ ${Number(parseFloat(String(latestOrder.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString()}`
+            : latestQuoteItem ? `NT$ ${Number(parseFloat(String(latestQuoteItem.item.price ?? '').replace(/,/g, '')) || 0).toLocaleString()}` : '－';
+        const latestProduct = latestOrder?.itemName || latestQuoteItem?.item?.nameCn || latestQuoteItem?.item?.nameEn || '－';
+        if (summary) summary.innerHTML = `
+            <div class="customer-summary-card"><span>最近交易日</span><strong>${escapeHtml(recentDates[0] || '－')}</strong></div>
+            <div class="customer-summary-card"><span>最近購買／估價品項</span><strong>${escapeHtml(latestProduct)}</strong></div>
+            <div class="customer-summary-card"><span>上次單價</span><strong>${escapeHtml(latestPrice)}</strong></div>
+            <div class="customer-summary-card"><span>最近估價</span><strong>${escapeHtml(quotes[0] ? `${quotes[0].quoteNo || '－'}／${quotes[0].quoteDate || '－'}` : '－')}</strong></div>`;
+        if (tbody) tbody.innerHTML = orders.length ? orders.slice(0, 20).map(order => `
+            <tr><td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.brand || '')}</td><td>${escapeHtml(order.itemCode || '')}</td><td>${escapeHtml(order.itemName || '')}</td><td>${escapeHtml(String(order.qty || ''))}</td><td>${escapeHtml(String(order.totalPrice || ''))}</td><td>${deliveryProgressInfo(order).delivered>0 ? (deliveryProgressInfo(order).state==='complete'?'已送貨':'部分送貨') : fulfillmentProgressInfo(order).shippable>0 ? '可出貨' : fulfillmentProgressInfo(order).pendingDispatch>0 ? '待打單' : purchaseProgressInfo(order).label}</td></tr>
+        `).join('') : '<tr><td colspan="7" style="color:#888;">目前沒有訂單紀錄。</td></tr>';
+        if (quoteTbody) quoteTbody.innerHTML = quoteItems.length ? quoteItems.slice(0, 20).map(({ quote, item }) => `
+            <tr><td>${escapeHtml(quote.quoteDate || '')}</td><td>${escapeHtml(quote.quoteNo || '')}</td><td>${escapeHtml(item.nameCn || item.nameEn || item.model || '')}</td><td>${escapeHtml(String(item.qty || ''))}</td><td>${escapeHtml(String(item.price || ''))}</td><td>${quote.dealClosed ? '已成交' : '估價中'}</td></tr>
+        `).join('') : '<tr><td colspan="6" style="color:#888;">目前沒有估價紀錄。</td></tr>';
+    } catch (err) {
+        console.error('讀取客戶完整交易歷史失敗：', err);
+        if (summary) summary.innerHTML = '<div class="customer-summary-card"><span>資料狀態</span><strong>讀取失敗</strong></div>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:#888;">無法讀取完整訂單歷史。</td></tr>';
+        if (quoteTbody) quoteTbody.innerHTML = '<tr><td colspan="6" style="color:#888;">無法讀取完整估價歷史。</td></tr>';
+    }
 };
 
 window.closeCustomerOrderHistory = function() {
