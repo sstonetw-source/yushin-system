@@ -5443,14 +5443,19 @@ const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
     const orderItems=normalizedOrderItems(order);
-    const delivered=savedDeliveryRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===item.itemId))
+    const grossDelivered=savedDeliveryRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===item.itemId))
         .reduce((sum,r)=>sum+Number(r.qty||0),0);
+    const returned=savedReturnRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===item.itemId))
+        .reduce((sum,r)=>sum+Number(r.qty||0),0);
+    // 品項工作狀態使用有效送貨量。已送貨後若發生退貨，必須退出「已完成／待核銷」，
+    // 回到仍需補送的物流狀態；grossDelivered 保留給庫存與歷史追蹤。
+    const delivered=Math.max(0,grossDelivered-returned);
     const reserved=Number(item.reservedQty??item.inventoryReservedQty??0);
     const prepared=Number(item.dispatchPreparedQty||0);
     const shippable=Math.max(0,prepared-delivered);
     // reserved/prepared are cumulative quantities. Delivery consumes shippable
     // quantity but must not make an already-prepared item appear as "待打單" again.
-    return { delivered, reserved, prepared, shippable, pending:Math.max(0,reserved-prepared) };
+    return { delivered, grossDelivered, returned, reserved, prepared, shippable, pending:Math.max(0,reserved-prepared) };
 }
 
 function dispatchActionHtml(order) {
