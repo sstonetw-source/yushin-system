@@ -2699,18 +2699,36 @@ function defaultWarehouse() {
     return warehouseMasterCache.find(item => item.active !== false && item.isDefault) || warehouseMasterCache.find(item => item.active !== false) || null;
 }
 
+let warehouseMasterLoadPromise = null;
+
+async function loadWarehouseMaster(force = false) {
+    if (warehouseMasterLoadPromise && !force) return warehouseMasterLoadPromise;
+    warehouseMasterLoadPromise = db.collection('warehouses').limit(50).get().then(snapshot => {
+        warehouseMasterCache = snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter(item => item.active !== false)
+            .sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
+        renderWarehouseMasterAdmin();
+        populateOrderWarehouseOptions();
+        return warehouseMasterCache;
+    }).catch(err => {
+        warehouseMasterLoadPromise = null;
+        console.warn('讀取倉庫主檔失敗：', err);
+        return warehouseMasterCache;
+    });
+    return warehouseMasterLoadPromise;
+}
+
 async function loadSupplierWarehouseMasters(force = false) {
     if (supplierWarehouseLoadPromise && !force) return supplierWarehouseLoadPromise;
     supplierWarehouseLoadPromise = Promise.all([
         readCollectionInBatches('suppliers'),
         readCollectionInBatches('brandSupplierMappings'),
-        db.collection('warehouses').limit(50).get()
-    ]).then(([suppliers, mappings, warehouses]) => {
+        loadWarehouseMaster(force)
+    ]).then(([suppliers, mappings]) => {
         supplierMasterCache = suppliers.filter(item => item.active !== false);
         supplierMappingCache = mappings.filter(item => item.active !== false);
-        warehouseMasterCache = warehouses.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => item.active !== false);
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
-        warehouseMasterCache.sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
@@ -2878,7 +2896,7 @@ window.refreshOrderWarehouseStock = async function() {
     const match = findPriceItemByCodeValue(code);
     const key = match ? (match.productId || stableProductId(match)) : '';
     if (!key) { hint.innerText = '輸入貨號後會顯示各倉庫可用庫存。'; return; }
-    await loadSupplierWarehouseMasters();
+    await loadWarehouseMaster();
     const rows = [];
     for (const warehouse of warehouseMasterCache) {
         const stock = await warehouseStockSnapshot(key, warehouse.id);
@@ -4767,7 +4785,7 @@ function expiryDays(date){if(!date)return null;return Math.ceil((new Date(date+'
 function lotStatus(lot){const d=expiryDays(lot.expiryDate);if(d===null)return '';if(d<0)return '已過期';if(d<=30)return '30天內';if(d<=60)return '60天內';if(d<=90)return '90天內';return '';}
 function fefoLots(stock){return [...(stock.lots||[])].filter(l=>Number(l.qty||0)>0).sort((a,b)=>String(a.expiryDate||'9999-12-31').localeCompare(String(b.expiryDate||'9999-12-31')));}
 async function loadWarehouseStocksForInventoryPage() {
-    await loadSupplierWarehouseMasters();
+    await loadWarehouseMaster();
     const productKeys = [...new Set(inventoryCache
         .map(item => String(item.productKey || item.productId || '').trim())
         .filter(Boolean))];
@@ -5387,7 +5405,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     return result;
 }
 async function reserveInventoryForNewOrder(orderId, order) {
-    if(!warehouseMasterCache.length)await loadSupplierWarehouseMasters();
+    if(!warehouseMasterCache.length)await loadWarehouseMaster();
     const items=normalizedOrderItems(order);
     if(items.length<=1){
         const item=await reserveSingleOrderItem(orderId,order,items[0]||legacyOrderItemFromOrder(order),0);
@@ -9722,7 +9740,7 @@ window.openOrderModal = function(source = null) {
     if (currentUserRole === 'purchaser') {
         ensureSalesListLoaded().then(populateOrderOwnerSelect).catch(err => console.error('讀取負責業務名單失敗：', err));
     }
-    loadSupplierWarehouseMasters().then(() => {
+    loadWarehouseMaster().then(() => {
         populateOrderWarehouseOptions(source?.warehouseId || '');
         if (source?.fulfillmentType === 'WAREHOUSE' && source?.warehouseId) {
             const warehouse=document.getElementById('orderWarehouse');
