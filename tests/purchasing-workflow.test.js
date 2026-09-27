@@ -218,7 +218,7 @@ test('receiving queue includes sales self orders and new POs start pending',()=>
     assert.match(app,/receiptStatus: 'pending'/);
     assert.match(app,/const freshSupply=supplySnapshot\.docs\s*\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)\s*\.filter\(row=>row\.type==='SALES_SELF_ORDER'\)/);
     assert.match(app,/業務自行訂購/);
-    assert.match(app,/if\(purchasingView === 'receiving' && item\.orderId && receivingSourceOrderStatusCache\.get\(item\.orderId\) !== 'normal'\) return/);
+    assert.match(app,/sourceStatus!=='normal' && \(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\) return/);
 });
 
 test('loading another receiving page retains source status for earlier PO rows', async () => {
@@ -294,4 +294,64 @@ test('pending purchasing work loads one page at a time without losing older rows
     assert.equal(reads,2);
     assert.deepEqual(Array.from(context.pendingPurchaseCache,row=>row.id),['O1','O2','O3']);
     assert.equal(context.pendingPurchaseHasMore,false);
+});
+
+test('cancelled warehouse source stays in receiving while direct ship remains blocked', () => {
+    assert.match(app,/sourceStatus!=='normal' && \(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\) return/);
+    assert.match(app,/來源訂單已取消・入庫後為自由庫存/);
+    assert.match(app,/if\(normalizedOrderStatus\(sourceOrder\)!=='normal'\)throw new Error\('來源訂單已取消/);
+});
+
+test('cancelled warehouse PO receipt moves incoming to free stock exactly once', async () => {
+    const start=app.indexOf('async function receiveSinglePoLine(');
+    const end=app.indexOf('\nwindow.savePoReceiptBatch =',start);
+    assert.ok(start>=0&&end>start);
+    const order={status:'cancelled',orderStatus:'cancelled',items:[{itemId:'item-1',qty:3,inventoryReservedQty:0,inventoryShortageQty:0,receivedQty:0}]};
+    const docs=new Map([
+        ['purchaseOrders/PO1',{items:[{orderId:'O1',orderItemIndex:0,productId:'P1',warehouseId:'W1',qty:3,unitPrice:10}],receiptRecords:[],receiptStatus:'pending'}],
+        ['orders/O1',order],
+        ['inventory/P1',{onHand:0,reserved:0,incoming:3,lots:[]}],
+        ['warehouseStocks/W1__P1',{onHand:0,reserved:0,incoming:3}],
+        ['pendingInventoryItems/W1__P1',{incomingQty:3}]
+    ]);
+    let sequence=0,allocated=0;
+    const ref=(name,id)=>({key:`${name}/${id??++sequence}`,id});
+    const db={collection:name=>({doc:id=>ref(name,id)}),async runTransaction(callback){
+        const writes=[];
+        const tx={
+            get:async r=>({id:r.id,exists:docs.has(r.key),data:()=>docs.get(r.key)}),
+            set:(r,value,options)=>writes.push([r,value,options]),
+            update:(r,value)=>writes.push([r,value,{merge:true}])
+        };
+        await callback(tx);
+        writes.forEach(([r,value,options])=>docs.set(r.key,options?.merge?{...docs.get(r.key),...value}:value));
+    }};
+    const context=vm.createContext({
+        db,window:{},currentUserName:'採購',currentUser:null,
+        purchaseItemsFromSavedPo:po=>po.items,receivedQuantityForPoItem:(po,index)=>(po.receiptRecords||[]).filter(row=>row.itemIndex===index).reduce((sum,row)=>sum+row.qty,0),
+        formalSupplyOrderId:(po,index)=>`${po}_${index}`,normalizedOrderStatus:row=>row.status==='cancelled'?'cancelled':'normal',
+        normalizedOrderItems:row=>row.items,poIncomingKey:item=>item.productId,defaultWarehouse:()=>({id:'W1'}),
+        warehouseStockDocId:(warehouse,key)=>`${warehouse}__${key}`,inventoryNumbers:row=>({onHand:row.onHand||0,reserved:row.reserved||0,incoming:row.incoming||0}),
+        resolveBrandName:name=>name,buildInventorySearchTokens:()=>[],localDateString:()=> '2026-09-27',
+        DEFAULT_CURRENCY:'TWD',BUSINESS_STATUS:{ACTIVE:'active',COMPLETED:'completed'},DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
+        invalidateWarehouseStockCache:()=>{},allocateFreeReceiptStockToShortages:async()=>{allocated++;return {affectedOrderIds:[]};}
+    });
+    vm.runInContext(app.slice(start,end),context);
+    await context.receiveSinglePoLine('PO1',0,3,'LOT1','','receipt-1');
+    assert.equal(docs.get('inventory/P1').onHand,3);
+    assert.equal(docs.get('inventory/P1').incoming,0);
+    assert.equal(docs.get('inventory/P1').reserved,0);
+    assert.equal(docs.get('warehouseStocks/W1__P1').onHand,3);
+    assert.equal(docs.get('warehouseStocks/W1__P1').incoming,0);
+    assert.equal(docs.get('warehouseStocks/W1__P1').reserved,0);
+    assert.equal(docs.get('pendingInventoryItems/W1__P1').incomingQty,0);
+    assert.deepEqual(docs.get('orders/O1'),order);
+    assert.equal(allocated,0);
+    assert.equal(docs.get('purchaseOrders/PO1').receiptStatus,'received');
+    await context.receiveSinglePoLine('PO1',0,3,'LOT1','','receipt-1');
+    assert.equal(docs.get('inventory/P1').onHand,3);
+    assert.equal(docs.get('purchaseOrders/PO1').receiptRecords.length,1);
+    assert.equal([...docs.keys()].filter(key=>key.startsWith('inventoryLots/')).length,1);
+    await assert.rejects(context.receiveSinglePoLine('PO1',0,3,'LOT1','','receipt-2'),/到貨數量不正確/);
+    assert.equal(docs.get('inventory/P1').onHand,3);
 });

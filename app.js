@@ -6825,7 +6825,7 @@ async function loadPurchaseOrderPage(reset) {
             .filter(row=>row.type==='SALES_SELF_ORDER');
         const supplyRecords=new Map((reset?[]:supplyReceivingCache).map(row=>[row.id,row]));
         freshSupply.forEach(row=>supplyRecords.set(row.id,row));
-        // 待到貨仍保留原 PO／自行訂購歷史，但工作佇列只顯示來源訂單仍有效的品項。
+        // 倉庫型 PO 即使來源訂單取消仍待到貨；原廠直送與自行訂購維持原有篩選。
         const sourceOrderIds=purchasingView==='receiving'?[...new Set([
             ...snapshot.docs.flatMap(doc=>purchaseItemsFromSavedPo(doc.data()).map(item=>item.orderId).filter(Boolean)),
             ...freshSupply.map(row=>row.orderId).filter(Boolean)
@@ -7019,7 +7019,9 @@ window.renderPoList = function() {
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
         items.forEach((item,itemIndex)=>{
-            if(purchasingView === 'receiving' && item.orderId && receivingSourceOrderStatusCache.get(item.orderId) !== 'normal') return;
+            const sourceStatus=item.orderId?receivingSourceOrderStatusCache.get(item.orderId):'normal';
+            const sourceCancelled=sourceStatus==='cancelled';
+            if(purchasingView === 'receiving' && sourceStatus!=='normal' && (item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP') return;
             const receipt=poItemReceiptProgress(po,item,itemIndex);
             const {received,ordered,complete,directShip}=receipt;
             // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。
@@ -7036,7 +7038,7 @@ window.renderPoList = function() {
                 <td data-th="等待天數">${escapeHtml(complete?'—':(poWaitingDays(po)||'—'))}</td>
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
-                <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
+                <td data-th="到貨進度">${sourceCancelled?'來源訂單已取消・入庫後為自由庫存｜':''}${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
                 <td data-th="操作" class="no-print">${complete?'<span>已完成</span>':`<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">${directShip?'確認直送到貨':'📥 到貨入庫'}</button>`} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
             `;
             tbody.appendChild(tr);
@@ -7492,9 +7494,11 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     const receiptId = operationId || `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${itemIndex}`;
     let committedPo = null;
     let alreadyProcessed = false;
+    let cancelledWarehouseSource = false;
     const affectedOrderIds = new Set();
 
     await db.runTransaction(async tx => {
+        cancelledWarehouseSource = false;
         const receiptRef = db.collection('receipts').doc(receiptId);
         const receiptSnap = await tx.get(receiptRef);
         if (receiptSnap.exists) { alreadyProcessed = true; return; }
@@ -7571,13 +7575,13 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             const orderSnap = await tx.get(db.collection('orders').doc(item.orderId));
             if (orderSnap.exists) sourceOrder = { id: orderSnap.id, ...orderSnap.data() };
         }
-        if(sourceOrder&&normalizedOrderStatus(sourceOrder)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
+        cancelledWarehouseSource=!!sourceOrder&&normalizedOrderStatus(sourceOrder)!=='normal';
 
         let reserveFromReceipt=0;
         let sourceOrderItems=sourceOrder?normalizedOrderItems(sourceOrder):[];
         const sourceItemIndex=Number(item.orderItemIndex||0);
         const sourceItem=sourceOrderItems[sourceItemIndex]||null;
-        if(sourceItem&&(sourceItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
+        if(!cancelledWarehouseSource&&sourceItem&&(sourceItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
             const shortage=Math.max(0,Number(sourceItem.inventoryShortageQty||0));
             reserveFromReceipt=Math.min(qty,shortage);
         }
@@ -7617,7 +7621,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
             }, { merge:true });
         }
 
-        if(sourceOrder&&sourceItem){
+        if(sourceOrder&&!cancelledWarehouseSource&&sourceItem){
             const itemShortage=Math.max(0,Number(sourceItem.inventoryShortageQty||0));
             const sourceReceivedQty=Math.min(Number(sourceItem.qty||sourceItem.orderedQty||0),Number(sourceItem.receivedQty||0)+qty);
             const nextSourceItems=sourceOrderItems.map((row,index)=>index===sourceItemIndex?{
@@ -7723,7 +7727,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
     // Persist it on the receipt row in future writes; for this call use the exact transaction result captured above.
     const freeQty=Math.max(0,Number(qty||0)-Number(receiptRow?.reservedQty??0));
     if(postKey&&postWarehouse) invalidateWarehouseStockCache(postKey,postWarehouse);
-    if(freeQty>0&&postKey&&postWarehouse){
+    if(freeQty>0&&postKey&&postWarehouse&&!cancelledWarehouseSource){
         const allocation=await allocateFreeReceiptStockToShortages(postKey,postWarehouse,freeQty,actor,postItem.orderId||'');
         allocation.affectedOrderIds.forEach(id=>affectedOrderIds.add(id));
     }
