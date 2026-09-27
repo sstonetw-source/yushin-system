@@ -138,6 +138,9 @@ function writeAppDataCache(kind, records = []) {
         }));
     } catch (_) {}
 }
+function removeAppDataCache(kind) {
+    try { localStorage.removeItem(appDataCacheKey(kind)); } catch (_) {}
+}
 function clearAppDataCacheForCurrentUser() {
     const uid = currentUser?.uid;
     if (!uid) return;
@@ -13203,6 +13206,8 @@ window.rebuildOrderWorkIndexes = async function() {
     }finally{
         if(updated>0){
             pendingPurchaseCache=[];purchasingDispatchCache=[];
+            removeAppDataCache('purchase-pending');
+            removeAppDataCache('purchase-dispatch');
             purchasingViewLoaded.delete('ordering');
             purchasingViewLoaded.delete('dispatch');
         }

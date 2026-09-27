@@ -309,6 +309,7 @@ test('admin work-index preview is read only and rebuild updates only stale order
     const liveRecords=new Map(records.map(order=>[order.id,order]));
     const previewButton={disabled:false}, rebuildButton={disabled:true}, status={textContent:''};
     const updates=[];
+    const removedCaches=[];
     const purchasingViewLoaded=new Set(['ordering','dispatch']);
     let transactions=0;
     const context=vm.createContext({
@@ -322,6 +323,7 @@ test('admin work-index preview is read only and rebuild updates only stale order
             });}},
         orderWorkCategories:order=>order.expected,
         orderWorkIndexFields:order=>({workCategories:order.expected,workCategoryUpdatedAt:'now'}),
+        removeAppDataCache:kind=>removedCaches.push(kind),
         pendingPurchaseCache:[{}],purchasingDispatchCache:[{}],purchasingViewLoaded,
         confirm:()=>true, alert:message=>{throw new Error(message)},console
     });
@@ -340,4 +342,5 @@ test('admin work-index preview is read only and rebuild updates only stale order
     assert.equal(rebuildButton.disabled,true);
     assert.equal(purchasingViewLoaded.has('ordering'),false);
     assert.equal(purchasingViewLoaded.has('dispatch'),false);
+    assert.deepEqual(removedCaches,['purchase-pending','purchase-dispatch']);
 });
