@@ -204,9 +204,8 @@ test('purchasing queues use derived server-side work category queries',()=>{
     assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
 });
 
-test('shortage allocation and admin rebuild maintain work indexes',()=>{
+test('shortage allocation maintains work indexes',()=>{
     assert.match(app,/allocateFreeReceiptStockToShortages[\s\S]*?orderWorkIndexFields\(nextOrder\)/);
-    assert.match(app,/window\.rebuildOrderWorkIndexes = async function/);
 });
 
 
@@ -295,52 +294,4 @@ test('pending purchasing work loads one page at a time without losing older rows
     assert.equal(reads,2);
     assert.deepEqual(Array.from(context.pendingPurchaseCache,row=>row.id),['O1','O2','O3']);
     assert.equal(context.pendingPurchaseHasMore,false);
-});
-
-test('admin work-index preview is read only and rebuild updates only stale orders', async () => {
-    const source=app.match(/function orderWorkIndexNeedsUpdate\(order\) \{[\s\S]*?\n\};\n(?=\nconst TEST_DATA_RESET_DELETE_COLLECTIONS)/)?.[0];
-    assert.ok(source);
-    const records=[
-        {id:'A',expected:['ordering']},
-        {id:'B',expected:['delivery'],workCategories:['delivery']},
-        {id:'C',expected:['arrival'],workCategories:['ordering']}
-    ];
-    const docs=records.map(order=>({id:order.id,ref:{id:order.id},data:()=>order}));
-    const liveRecords=new Map(records.map(order=>[order.id,order]));
-    const previewButton={disabled:false}, rebuildButton={disabled:true}, status={textContent:''};
-    const updates=[];
-    const removedCaches=[];
-    const purchasingViewLoaded=new Set(['ordering','dispatch']);
-    let transactions=0;
-    const context=vm.createContext({
-        window:{}, trueUserRole:'admin', currentUserRole:'admin',
-        document:{getElementById:id=>({orderWorkIndexPreviewBtn:previewButton,orderWorkIndexRebuildBtn:rebuildButton,orderWorkIndexRebuildStatus:status})[id]},
-        firebase:{firestore:{FieldPath:{documentId:()=>({})}}},
-        db:{collection:()=>({orderBy(){return this;},limit(){return this;},async get(){return {docs,size:docs.length,empty:false};}}),
-            runTransaction:async callback=>{transactions++;return callback({
-                get:async ref=>({exists:true,data:()=>liveRecords.get(ref.id)}),
-                update:(ref,fields)=>updates.push({id:ref.id,fields})
-            });}},
-        orderWorkCategories:order=>order.expected,
-        orderWorkIndexFields:order=>({workCategories:order.expected,workCategoryUpdatedAt:'now'}),
-        removeAppDataCache:kind=>removedCaches.push(kind),
-        pendingPurchaseCache:[{}],purchasingDispatchCache:[{}],purchasingViewLoaded,
-        confirm:()=>true, alert:message=>{throw new Error(message)},console
-    });
-    vm.runInContext(source,context);
-    await context.window.previewOrderWorkIndexes();
-    assert.match(status.textContent,/共 3 筆訂單，2 筆/);
-    assert.equal(transactions,0);
-    assert.equal(rebuildButton.disabled,false);
-    liveRecords.set('C',{...records[2],workCategories:['arrival']});
-    await context.window.rebuildOrderWorkIndexes();
-    assert.equal(transactions,2);
-    assert.deepEqual(updates.map(row=>row.id),['A']);
-    assert.deepEqual(updates.map(row=>Object.keys(row.fields).sort()),[
-        ['workCategories','workCategoryUpdatedAt']
-    ]);
-    assert.equal(rebuildButton.disabled,true);
-    assert.equal(purchasingViewLoaded.has('ordering'),false);
-    assert.equal(purchasingViewLoaded.has('dispatch'),false);
-    assert.deepEqual(removedCaches,['purchase-pending','purchase-dispatch']);
 });

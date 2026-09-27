@@ -1258,16 +1258,6 @@
             </div>
 </div>
 
-            <h4 style="margin-top:28px;">訂單工作索引</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="orderWorkIndexPreviewBtn" type="button" onclick="previewOrderWorkIndexes()">檢查訂單工作索引</button>
-                <button id="orderWorkIndexRebuildBtn" type="button" onclick="rebuildOrderWorkIndexes()" disabled>補建缺少的索引</button>
-                <span style="font-size:12px;color:#666;">
-                    先唯讀檢查每筆訂單的 workCategories。補建時重新確認即時資料，只更新缺少或不一致的索引；每次讀取 200 筆，不修改訂單金額、狀態或庫存。
-                </span>
-                <div id="orderWorkIndexRebuildStatus" style="margin-top:8px;font-size:13px;"></div>
-            </div>
-
             <h4 style="margin-top:28px;color:#b42318;">系統初始化／清除測試營運資料</h4>
             <div class="toolbar no-print" style="display:block;border:1px solid #f0b4ae;padding:12px;border-radius:8px;">
                 <button id="testDataResetPreviewBtn" type="button" onclick="previewTestDataReset()">檢查待清除資料</button>
@@ -1372,6 +1362,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260925-1"></script>
-    <script src="app.js?v=20260927-7"></script>
+    <script src="app.js?v=20260927-8"></script>
 </body>
 </html>

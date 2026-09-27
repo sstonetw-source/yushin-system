@@ -138,9 +138,6 @@ function writeAppDataCache(kind, records = []) {
         }));
     } catch (_) {}
 }
-function removeAppDataCache(kind) {
-    try { localStorage.removeItem(appDataCacheKey(kind)); } catch (_) {}
-}
 function clearAppDataCacheForCurrentUser() {
     const uid = currentUser?.uid;
     if (!uid) return;
@@ -13122,100 +13119,6 @@ async function readQueryInBatches(baseQuery, batchSize = 500) {
 function systemAuditProductKey(record = {}) {
     return String(record.productKey || record.productId || '').trim();
 }
-
-function orderWorkIndexNeedsUpdate(order) {
-    if (!Array.isArray(order.workCategories)) return true;
-    const expected = [...new Set(orderWorkCategories(order))].sort();
-    const stored = [...new Set(order.workCategories)].sort();
-    return expected.length !== stored.length || expected.some((category,index)=>category!==stored[index]);
-}
-
-async function scanOrderWorkIndexPages(onPage) {
-    let scanned=0, cursor=null;
-    while (true) {
-        if (trueUserRole !== 'admin' || currentUserRole !== 'admin') throw new Error('管理員身分已切換，請重新開始。');
-        let query=db.collection('orders').orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
-        if (cursor) query=query.startAfter(cursor);
-        const snap=await query.get();
-        if (snap.empty) break;
-        await onPage(snap.docs,scanned);
-        scanned+=snap.size;
-        cursor=snap.docs[snap.docs.length-1];
-        if (snap.size<200) break;
-    }
-    return scanned;
-}
-
-let orderWorkIndexPreviewCount=null;
-window.previewOrderWorkIndexes = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以檢查訂單工作索引。');
-    const previewButton=document.getElementById('orderWorkIndexPreviewBtn');
-    const rebuildButton=document.getElementById('orderWorkIndexRebuildBtn');
-    const status=document.getElementById('orderWorkIndexRebuildStatus');
-    if (!previewButton || previewButton.disabled) return;
-    previewButton.disabled=true;
-    if (rebuildButton) rebuildButton.disabled=true;
-    orderWorkIndexPreviewCount=null;
-    let missing=0;
-    try {
-        const scanned=await scanOrderWorkIndexPages(async (docs,previous)=>{
-            docs.forEach(doc=>{if(orderWorkIndexNeedsUpdate({id:doc.id,...doc.data()}))missing++;});
-            if(status)status.textContent=`檢查中：已掃描 ${previous+docs.length} 筆，需補建 ${missing} 筆…`;
-        });
-        orderWorkIndexPreviewCount=missing;
-        if(status)status.textContent=`檢查完成：共 ${scanned} 筆訂單，${missing} 筆工作索引缺少或不一致。`;
-        if(rebuildButton)rebuildButton.disabled=missing===0;
-    } catch(err) {
-        if(status)status.textContent='檢查失敗：'+(err.message||err);
-    } finally { previewButton.disabled=false; }
-};
-
-window.rebuildOrderWorkIndexes = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以重建訂單工作索引。');
-    const button=document.getElementById('orderWorkIndexRebuildBtn');
-    const previewButton=document.getElementById('orderWorkIndexPreviewBtn');
-    const status=document.getElementById('orderWorkIndexRebuildStatus');
-    if(!button||button.disabled||!orderWorkIndexPreviewCount)return;
-    if(!confirm(`預覽發現 ${orderWorkIndexPreviewCount} 筆需要補建。將重新檢查每筆訂單，只更新仍缺少或不一致的工作索引。確定執行？`))return;
-    button.disabled=true;
-    if(previewButton)previewButton.disabled=true;
-    if(status)status.textContent='補建中：正在重新確認訂單即時資料…';
-    let updated=0;
-    try{
-        const scanned=await scanOrderWorkIndexPages(async (docs,previous)=>{
-            for(const [index,doc] of docs.entries()){
-                if(trueUserRole!=='admin'||currentUserRole!=='admin')throw new Error('管理員身分已切換');
-                if(!orderWorkIndexNeedsUpdate({id:doc.id,...doc.data()}))continue;
-                const changed=await db.runTransaction(async tx=>{
-                    const live=await tx.get(doc.ref);
-                    if(!live.exists)return false;
-                    const order={id:doc.id,...live.data()};
-                    if(!orderWorkIndexNeedsUpdate(order))return false;
-                    tx.update(doc.ref,orderWorkIndexFields(order));
-                    return true;
-                });
-                if(changed)updated++;
-                if(status && index%10===0)status.textContent=`處理中：已檢查 ${previous+index+1} 筆、補建 ${updated} 筆…`;
-            }
-            if(status)status.textContent=`處理中：已掃描 ${previous+docs.length} 筆、補建 ${updated} 筆…`;
-        });
-        if(status)status.textContent=`完成：已檢查 ${scanned} 筆，補建 ${updated} 筆訂單工作索引。`;
-    }catch(err){
-        console.error('重建訂單工作索引失敗：',err);
-        if(status)status.textContent=`中斷：已補建 ${updated} 筆，${err.message||err}。請重新預覽後再執行。`;
-    }finally{
-        if(updated>0){
-            pendingPurchaseCache=[];purchasingDispatchCache=[];
-            removeAppDataCache('purchase-pending');
-            removeAppDataCache('purchase-dispatch');
-            purchasingViewLoaded.delete('ordering');
-            purchasingViewLoaded.delete('dispatch');
-        }
-        orderWorkIndexPreviewCount=null;
-        if(previewButton)previewButton.disabled=false;
-        button.disabled=true;
-    }
-};
 
 const TEST_DATA_RESET_DELETE_COLLECTIONS = [
     'quotes','orders','purchaseOrders','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
