@@ -11,12 +11,19 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260927-1">
+        <link rel="stylesheet" href="styles.css?v=20260927-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
+    <div id="authStarting" role="status" aria-live="polite">
+        <div class="auth-starting-box">
+            <strong>正在開啟又鑫管理系統…</strong>
+            <p id="authStartingMessage">正在確認登入狀態</p>
+            <button id="authStartingRetry" type="button" onclick="location.reload()" hidden>重新連線</button>
+        </div>
+    </div>
     <!-- ============ 登入畫面 ============ -->
-    <div id="loginScreen">
+    <div id="loginScreen" style="display:none;">
         <div class="login-box">
             <h2>又鑫管理系統 登入</h2>
             <input type="email" id="loginEmail" placeholder="帳號 (Email)" autocomplete="username">
@@ -1352,16 +1359,26 @@
 
     <script>
     window.addEventListener('error', function(event) {
-        var errorEl = document.getElementById('loginError');
-        if (!errorEl || document.getElementById('appContainer')?.style.display !== 'none') return;
+        if (document.getElementById('appContainer')?.style.display !== 'none') return;
         var file = String(event.filename || '').split('/').pop();
-        errorEl.innerText = '主程式載入失敗：' + (event.message || 'JavaScript error') + (file ? '（' + file + ':' + (event.lineno || '?') + '）' : '');
+        var message = '主程式載入失敗：' + (event.message || 'JavaScript error') + (file ? '（' + file + ':' + (event.lineno || '?') + '）' : '');
+        var status = document.getElementById('authStartingMessage');
+        var retry = document.getElementById('authStartingRetry');
+        if (status) status.innerText = message;
+        if (retry) retry.hidden = false;
     });
+    window.setTimeout(function() {
+        var waiting = document.getElementById('authStarting');
+        if (waiting && getComputedStyle(waiting).display !== 'none') {
+            document.getElementById('authStartingMessage').innerText = '連線時間較久，請檢查網路後重新連線。';
+            document.getElementById('authStartingRetry').hidden = false;
+        }
+    }, 15000);
     </script>
     <script src="modules/fulfillment-core.js?v=20260922-4"></script>
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260925-1"></script>
-    <script src="app.js?v=20260927-10"></script>
+    <script src="app.js?v=20260927-11"></script>
 </body>
 </html>

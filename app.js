@@ -58,8 +58,7 @@ if (APP_ENVIRONMENT === 'preview') {
     });
 }
 
-// Firebase Auth 的瀏覽器 session 直接使用 SDK 預設持久化。
-// 不在 app 啟動時另外切換 persistence，避免 iOS Safari 初始化期間與手動登入競爭。
+// 啟動時由 SDK 還原既有 session；手動登入前才指定 LOCAL，避免 iOS 初始化競爭。
 
 let currentCompany = 'yushin';
 let restoringQuoteDraft = false;  // 還原本機草稿的過程中，暫停「重新產生單號」之類的副作用，避免蓋掉草稿裡存的資料
@@ -500,14 +499,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     if(authLabel)authLabel.title='Firestore 暫時無法連線；目前使用已快取的帳號資料，連線恢復後會重新驗證。';
                     return;
                 }
-                currentUserRole = null;
-                trueUserRole = null;
-                currentUserName = '';
-                currentUserPhone = '';
-                currentUserCode = '';
-                showLoginScreen();
-                const errorEl = document.getElementById('loginError');
-                if (errorEl) errorEl.innerText = '無法讀取帳號資料，請檢查網路後重新整理。';
+                showAuthWaiting('已保留登入狀態，但暫時無法讀取帳號資料。請檢查網路後重新連線。');
             });
         } else {
             currentUser = null;
@@ -668,8 +660,10 @@ function firstAccessibleMainPage() {
 }
 
 function showLoginScreen() {
+    const authStarting = document.getElementById('authStarting');
     const loginScreen = document.getElementById('loginScreen');
     const appContainer = document.getElementById('appContainer');
+    if (authStarting) authStarting.style.display = 'none';
     if (loginScreen) loginScreen.style.display = 'flex';
     if (appContainer) appContainer.style.display = 'none';
 
@@ -677,9 +671,24 @@ function showLoginScreen() {
     if (pwField) pwField.value = '';
 }
 
-function showApp() {
+function showAuthWaiting(message) {
+    const authStarting = document.getElementById('authStarting');
     const loginScreen = document.getElementById('loginScreen');
     const appContainer = document.getElementById('appContainer');
+    if (authStarting) authStarting.style.display = 'flex';
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (appContainer) appContainer.style.display = 'none';
+    const label = document.getElementById('authStartingMessage');
+    if (label) label.textContent = message;
+    const retry = document.getElementById('authStartingRetry');
+    if (retry) retry.hidden = false;
+}
+
+function showApp() {
+    const authStarting = document.getElementById('authStarting');
+    const loginScreen = document.getElementById('loginScreen');
+    const appContainer = document.getElementById('appContainer');
+    if (authStarting) authStarting.style.display = 'none';
     if (loginScreen) loginScreen.style.display = 'none';
     if (appContainer) appContainer.style.display = 'block';
 
@@ -976,7 +985,8 @@ window.handleLogin = async function() {
     if (errorEl) errorEl.innerText = '正在驗證帳號…';
     try {
         const credential = await Promise.race([
-            firebase.auth().signInWithEmailAndPassword(email, password),
+            firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+                .then(() => firebase.auth().signInWithEmailAndPassword(email, password)),
             new Promise((_, reject) => setTimeout(() => {
                 const err = new Error('Firebase Auth 登入逾時');
                 err.code = 'auth/login-timeout';

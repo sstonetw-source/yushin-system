@@ -8,6 +8,10 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 .auth-status { color: #fff; font-size: 12px; padding: 8px 10px; }
 .auth-status button { margin-left: 8px; }
 #loginScreen { position: fixed; inset: 0; background: linear-gradient(135deg, #003366, #001a33); display: flex; align-items: center; justify-content: center; z-index: 999; }
+#authStarting { position: fixed; inset: 0; background: linear-gradient(135deg, #003366, #001a33); display: flex; align-items: center; justify-content: center; z-index: 999; color: #003366; text-align: center; padding: 16px; box-sizing: border-box; }
+.auth-starting-box { background: #fff; border-radius: 10px; padding: 28px 32px; width: 300px; max-width: 100%; box-sizing: border-box; box-shadow: 0 8px 30px rgba(0,0,0,.3); }
+.auth-starting-box p { margin: 12px 0 0; font-size: 14px; }
+.auth-starting-box button { margin-top: 16px; padding: 9px 18px; border: 0; border-radius: 5px; background: #003366; color: #fff; cursor: pointer; }
 .login-box { background: #fff; padding: 36px 32px; border-radius: 10px; width: 300px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); text-align: center; }
 .login-box h2 { margin: 0 0 20px; color: #003366; font-size: 18px; }
 .login-box input { width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
