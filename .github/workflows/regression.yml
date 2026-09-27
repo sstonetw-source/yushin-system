@@ -23,14 +23,19 @@ jobs:
       - name: Phase 1 regression tests
         run: node --test tests/phase1.test.js
       - name: Purchasing workflow tests
+        if: always()
         run: node --test tests/purchasing-workflow.test.js
       - name: Fulfillment core tests
+        if: always()
         run: node --test tests/v2-fulfillment-core.test.js
       - name: Supply core tests
+        if: always()
         run: node --test tests/v2-supply-core.test.js
       - name: Reservation core tests
+        if: always()
         run: node --test tests/v2-reservation-core.test.js
       - name: Workflow core tests
+        if: always()
         run: node --test tests/v2-workflow-core.test.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
