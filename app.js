@@ -13197,11 +13197,15 @@ window.rebuildOrderWorkIndexes = async function() {
             if(status)status.textContent=`處理中：已掃描 ${previous+docs.length} 筆、補建 ${updated} 筆…`;
         });
         if(status)status.textContent=`完成：已檢查 ${scanned} 筆，補建 ${updated} 筆訂單工作索引。`;
-        pendingPurchaseCache=[];purchasingDispatchCache=[];
     }catch(err){
         console.error('重建訂單工作索引失敗：',err);
         if(status)status.textContent=`中斷：已補建 ${updated} 筆，${err.message||err}。請重新預覽後再執行。`;
     }finally{
+        if(updated>0){
+            pendingPurchaseCache=[];purchasingDispatchCache=[];
+            purchasingViewLoaded.delete('ordering');
+            purchasingViewLoaded.delete('dispatch');
+        }
         orderWorkIndexPreviewCount=null;
         if(previewButton)previewButton.disabled=false;
         button.disabled=true;
