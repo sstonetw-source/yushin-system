@@ -51,7 +51,7 @@
     const source=Array.isArray(item.supplyAllocations)?item.supplyAllocations:[];
     const supplyAllocations=source.map(row=>({
       ...row,
-      type:Object.values(SUPPLY_SOURCE_TYPES).includes(row?.type)?row.type:SUPPLY_SOURCE_TYPES.STANDARD_PURCHASE,
+      type:Object.values(SUPPLY_SOURCE_TYPES).includes(row?.type)?row.type:SUPPLY_SOURCE_TYPES.STOCK,
       qty:n(row?.qty)
     })).filter(row=>row.qty>0);
     return {orderedQty,supplyAllocations,allocatedQty:supplyAllocations.reduce((sum,row)=>sum+row.qty,0)};
@@ -101,3 +101,16 @@
   }
   return {SUPPLY_SOURCE_TYPES,RELEASE_MODES,ADVANCE_STATUSES,ITEM_WORK_CATEGORIES,itemWorkCategory,normalizeSupplyAllocations,validateSupplyAllocations,normalizeCommercialRelease,validateAdvanceRequest,canDeliver,canBill};
 });
+
+// app.js 載入完成後再掛上舊 PO 的 Product ID 修復層。
+// 使用獨立檔案可讓核心 workflow module 的 Node 測試維持純函式環境。
+if(typeof window!=='undefined'&&typeof document!=='undefined'){
+  window.addEventListener('load',()=>{
+    if(document.querySelector('script[data-product-identity-bridge]'))return;
+    const script=document.createElement('script');
+    script.src='modules/product-identity-bridge.js?v=20260927-1';
+    script.async=true;
+    script.dataset.productIdentityBridge='1';
+    document.head.appendChild(script);
+  },{once:true});
+}
