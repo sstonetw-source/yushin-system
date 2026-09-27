@@ -6576,9 +6576,13 @@ async function loadPurchasingDispatchOrders(reset=true) {
     purchasingDispatchLoading=true;
     renderPurchasingDispatchOrders();
     try {
-        // 與待採購清單一致：避免多條件 + orderBy 需要額外 Composite Index。
-        // 先快速取得近期訂單，再於前端判斷真正待打單的品項。
-        let q=db.collection('orders').orderBy('orderDate','desc').limit(DEFAULT_LIST_LIMIT);
+        // 由 Firestore 先篩出真正含「待送貨」品項的進行中訂單，避免只看近期 50 筆而漏掉舊待辦。
+        // 前端仍會用最新品項狀態再次確認是否真的尚待打單。
+        let q=db.collection('orders')
+            .where('status','==',BUSINESS_STATUS.ACTIVE)
+            .where('workCategories','array-contains','delivery')
+            .orderBy('orderDate','desc')
+            .limit(DEFAULT_LIST_LIMIT);
         if(purchasingDispatchCursor) q=q.startAfter(purchasingDispatchCursor);
         const snap=await firestoreReadWithTimeout(q.get(), '待打單訂單');
         if(!snap.empty)purchasingDispatchCursor=snap.docs[snap.docs.length-1];
@@ -6697,9 +6701,13 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     const requestedRole = currentUserRole;
     renderPendingPurchaseOrders();
     try {
-        // 待處理工作佇列不能受「最近 50 筆」限制：50 只作為每次 Firestore 讀取的批次大小。
-        // 逐批掃描仍在進行中的訂單，直到讀完；歷史／已完成資料才維持最近 50 筆。
-        let query = db.collection('orders').where('status', '==', BUSINESS_STATUS.ACTIVE).limit(DEFAULT_LIST_LIMIT);
+        // 由 Firestore 先篩出真正含「待採購」品項的進行中訂單，避免資料量增加後全量掃描。
+        // 前端仍會再用 pendingPurchaseLines() 驗證目前品項狀態，避免舊索引造成誤列。
+        let query = db.collection('orders')
+            .where('status', '==', BUSINESS_STATUS.ACTIVE)
+            .where('workCategories', 'array-contains', 'ordering')
+            .orderBy('orderDate', 'desc')
+            .limit(DEFAULT_LIST_LIMIT);
         if (pendingPurchaseCursor) query = query.startAfter(pendingPurchaseCursor);
         const snapshot = await firestoreReadWithTimeout(query.get(), '待採購訂單');
         if (requestedRole !== currentUserRole || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
