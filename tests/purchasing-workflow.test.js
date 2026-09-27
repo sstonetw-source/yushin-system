@@ -90,6 +90,42 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
     assert.equal(records.length,2);
 });
 
+test('retrying PO incoming registration gives feedback and ignores a second tap', async () => {
+    const start = app.indexOf('window.printPurchaseOrder = async function()');
+    const end = app.indexOf('    if (poItems.length === 0)', start);
+    assert.ok(start >= 0 && end > start);
+    const button = { disabled:false, innerText:'🖨️ 產生訂購單／輸出 PDF' };
+    const savedPo = { id:'PO1', poNo:'PO1', vendorName:'供應商', incomingRegistrationVersion:1 };
+    let releaseRegistration;
+    let registrationCalls = 0;
+    let printCalls = 0;
+    const alerts = [];
+    const context = vm.createContext({
+        window:{}, poEditingId:'PO1', poListCache:[savedPo],
+        canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
+        document:{getElementById:()=>button},
+        registerPurchaseIncoming:async () => { registrationCalls++; await new Promise(resolve => { releaseRegistration=resolve; }); },
+        reprintPurchaseOrder:()=>{}, printSavedPoDocument:()=>{printCalls++;}, alert:message=>alerts.push(message)
+    });
+    vm.runInContext(`let poSaveInProgress=false;\n${app.slice(start,end)}\n}`, context);
+    const first = context.window.printPurchaseOrder();
+    assert.equal(button.disabled, true);
+    assert.match(button.innerText, /同步在途庫存中/);
+    await context.window.printPurchaseOrder();
+    assert.equal(registrationCalls, 1);
+    releaseRegistration();
+    await first;
+    assert.equal(printCalls, 1);
+    assert.equal(button.disabled, false);
+    assert.deepEqual(alerts, []);
+
+    context.registerPurchaseIncoming = async () => { throw new Error('網路中斷'); };
+    await context.window.printPurchaseOrder();
+    assert.equal(printCalls, 1);
+    assert.equal(button.disabled, false);
+    assert.match(alerts[0], /在途庫存同步尚未完成.*網路中斷/);
+});
+
 
 test('order work cards and filters use item-level work states', () => {
     assert.match(app, /function orderItemWorkCategory\(order, item\)/);

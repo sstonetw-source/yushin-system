@@ -8129,16 +8129,21 @@ window.printPurchaseOrder = async function() {
     if (poEditingId) {
         const savedPo = poListCache.find(po => po.id === poEditingId);
         if (!savedPo) { alert('找不到已儲存的訂購單，請重新整理。'); return; }
-        if (savedPo.incomingRegistrationVersion === 1) {
-            try {
+        const button = document.getElementById('printPurchaseOrderBtn');
+        poSaveInProgress = true;
+        if (button) { button.disabled = true; button.innerText = '同步在途庫存中…'; }
+        try {
+            if (savedPo.incomingRegistrationVersion === 1) {
                 await registerPurchaseIncoming(savedPo.id, savedPo);
-            } catch (err) {
-                alert('在途庫存同步尚未完成，請稍後重新開啟訂購單重試：' + err.message);
-                return;
             }
+            reprintPurchaseOrder(poEditingId);
+            printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
+        } catch (err) {
+            alert('在途庫存同步尚未完成，請稍後重新開啟訂購單重試：' + err.message);
+        } finally {
+            poSaveInProgress = false;
+            if (button) { button.disabled = false; button.innerText = '🖨️ 產生訂購單／輸出 PDF'; }
         }
-        reprintPurchaseOrder(poEditingId);
-        printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
         return;
     }
     if (poItems.length === 0) {
