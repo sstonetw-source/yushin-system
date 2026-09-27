@@ -8216,6 +8216,7 @@ window.printPurchaseOrder = async function() {
         button.disabled = true;
         button.innerText = '檢查並儲存中…';
     }
+    let poCommitted = false;
     try {
         const poDocumentId = poNo;
         let previousPoForIncoming = null;
@@ -8270,6 +8271,8 @@ window.printPurchaseOrder = async function() {
                 }
             });
         });
+        poCommitted = true;
+        if (button) button.innerText = '同步在途庫存中…';
 
         // The PO + source-order linkage above is the authoritative commit.
         // Cache it before the separate incoming-stock registration so a transient
@@ -8293,7 +8296,9 @@ window.printPurchaseOrder = async function() {
         printSavedPoDocument(poNo, vendorName);
     } catch (err) {
         console.error('儲存訂購單紀錄失敗：', err);
-        alert('無法產生訂購單：' + err.message);
+        alert(poCommitted
+            ? '訂購單已儲存，但後續在途庫存同步或列印未完成。請重新開啟同一張訂購單重試，不要另建一張：' + err.message
+            : '無法產生訂購單：' + err.message);
     } finally {
         poSaveInProgress = false;
         if (button) {
