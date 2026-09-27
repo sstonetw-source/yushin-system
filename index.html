@@ -1260,9 +1260,10 @@
 
             <h4 style="margin-top:28px;">訂單工作索引</h4>
             <div class="toolbar no-print" style="display:block;">
-                <button id="orderWorkIndexRebuildBtn" onclick="rebuildOrderWorkIndexes()">重建訂單工作索引</button>
+                <button id="orderWorkIndexPreviewBtn" type="button" onclick="previewOrderWorkIndexes()">檢查訂單工作索引</button>
+                <button id="orderWorkIndexRebuildBtn" type="button" onclick="rebuildOrderWorkIndexes()" disabled>補建缺少的索引</button>
                 <span style="font-size:12px;color:#666;">
-                    重新依每筆訂單目前的品項、採購、到貨、送貨與核銷狀態建立 workCategories。每次讀取 200 筆並分批寫入；目前資料為測試資料時可直接執行。
+                    先唯讀檢查每筆訂單的 workCategories。補建時重新確認即時資料，只更新缺少或不一致的索引；每次讀取 200 筆，不修改訂單金額、狀態或庫存。
                 </span>
                 <div id="orderWorkIndexRebuildStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
@@ -1371,6 +1372,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260925-1"></script>
-    <script src="app.js?v=20260927-4"></script>
+    <script src="app.js?v=20260927-5"></script>
 </body>
 </html>
