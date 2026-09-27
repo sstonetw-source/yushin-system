@@ -117,13 +117,13 @@ test('product management uses server search without exposing protected cost data
 
 test('inventory product lookup debounces server search', () => {
     assert.match(indexSource, /id="businessProductSearch"[^>]+oninput="queueBusinessProductSearch\(\)"/);
-    assert.match(appSource, /businessProductSearchTimer=setTimeout\(\(\)=>searchBusinessProducts\(\),400\)/);
+    assert.match(appSource, /businessProductSearchTimer=scheduleListSearch\(businessProductSearchTimer,\(\)=>searchBusinessProducts\(\)\)/);
     assert.match(appSource, /db\.collection\('products'\).*limit\(25\)/s);
 });
 
 test('product management debounces full Product Master search', () => {
     assert.match(indexSource, /oninput="queueProductManagementSearch\(\)"/);
-    assert.match(appSource, /productManagementSearchTimer = setTimeout\(\(\) => searchProductManagement\(\), 400\)/);
+    assert.match(appSource, /productManagementSearchTimer = scheduleListSearch\(productManagementSearchTimer, \(\) => searchProductManagement\(\)\)/);
     assert.match(appSource, /db\.collection\('products'\).*limit\(50\)/s);
 });
 
@@ -147,7 +147,7 @@ test('purchaser order form assigns a salesperson while preserving creator identi
     const end = appSource.indexOf('\n};', start) + 3;
     const saveOrder = appSource.slice(start, end);
     assert.match(saveOrder, /currentUserRole === 'purchaser' && !assistedOwner/);
-    assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| currentUser\?\.uid/);
+    assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| window\._orderModalQuoteContext\?\.ownerUid \|\| currentUser\?\.uid/);
     assert.match(saveOrder, /\.\.\.commercialCreatorFields\(\)/);
 });
 
@@ -159,10 +159,10 @@ test('low-stock inventory can hand off to formal replenishment purchase flow', (
     assert.match(appSource, /generatePoNo\(\)/);
 });
 
-test('purchase workspace shows waiting days only for open warehouse receipts', () => {
+test('purchase workspace shows waiting days for open receipts, including direct shipment', () => {
     assert.match(indexSource, />等待天數</);
     assert.match(appSource, /function poWaitingDays\(po\)/);
-    assert.match(appSource, /progress\.complete \|\| progress\.directShipOnly/);
+    assert.match(appSource, /if \(progress\.complete\) return '';/);
     assert.match(appSource, /data-th="等待天數"/);
 });
 
@@ -267,7 +267,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
         canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => { throw new Error('billing must not depend on window.prompt'); }, alert: message => { throw new Error(message); },
-        currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {},
+        currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {}, writeAppDataCache: () => {},
         orderWorkIndexFields: () => ({ workCategories:['complete'], workCategoryUpdatedAt:'2026-09-17T00:00:00.000Z' }),
         currentDeliveryOrderId: null, renderDeliveryModal: () => {}, renderOrderLifecycleModal: () => {},
         firebase: { firestore: { FieldValue: { arrayUnion: (...entries) => ({ entries }) } } },
@@ -302,7 +302,7 @@ test('failed billing write restores the previous state and unlocks the button', 
         canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => '2026-09-17', alert: message => { alertMessage = message; },
-        currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {},
+        currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {}, writeAppDataCache: () => {},
         currentDeliveryOrderId: null, renderDeliveryModal: () => {}, renderOrderLifecycleModal: () => {},
         firebase: { firestore: { FieldValue: { arrayUnion: (...entries) => ({ entries }) } } },
         db: { collection: () => ({ doc: () => ({}) }), runTransaction: async () => { throw new Error('offline'); } },
@@ -398,7 +398,6 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     const saveOrderStart = appSource.indexOf('window.saveNewOrder =');
     const saveOrderEnd = appSource.indexOf('\n};', saveOrderStart) + 3;
     const saveOrder = appSource.slice(saveOrderStart, saveOrderEnd);
-    assert.match(saveOrder, /createdAt: new Date\(\)\.toISOString\(\)/);
     assert.match(saveOrder, /itemCodeKey: normalizeHistoryItemCode\(itemCode\)/);
     assert.match(saveOrder, /buildFullHistorySearchTokens\('order', data\)/);
 
@@ -411,8 +410,9 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
     const deal = appSource.slice(dealStart, dealEnd);
-    assert.match(deal, /createdAt\s*:\s*now/);
-    assert.match(deal, /itemCodeKey:\s*normalizeHistoryItemCode/);
+    assert.match(deal, /openOrderModal\(\{/);
+    assert.match(deal, /newOrderDraftItems=items\.slice\(1\)/);
+    assert.match(saveOrder, /createdAt: new Date\(\)\.toISOString\(\)/);
 });
 
 
@@ -465,8 +465,8 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
     const dealEnd = appSource.indexOf('window.unmarkQuoteAsDeal', dealStart);
     const deal = appSource.slice(dealStart, dealEnd);
     assert.match(deal, /DOCUMENT_TYPES\.QUOTE/);
-    assert.match(deal, /linkedDocuments/);
-    assert.match(deal, /DOCUMENT_TYPES\.ORDER/);
+    assert.match(deal, /sourceType:DOCUMENT_TYPES\.QUOTE/);
+    assert.match(appSource, /linkedDocuments:firebase\.firestore\.FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.ORDER,docRef\.id,'created'\)\)/);
 
     const poStart = appSource.indexOf('window.printPurchaseOrder =');
     const poEnd = appSource.indexOf("window.addEventListener('afterprint'", poStart);
@@ -776,7 +776,7 @@ test('phase 16 inventory analysis uses protected lot costs without copying cost 
     const start = appSource.indexOf('function inventoryAnalysisTotals');
     const end = appSource.indexOf('function renderInventoryAnalysisSummary', start);
     const source = appSource.slice(start, end);
-    assert.match(appSource, /readCollectionInBatches\('inventoryLotCosts'\)/);
+    assert.match(appSource, /readDocumentsByIds\('inventoryLotCosts', \[\.\.\.requiredLotIds\]\)/);
     assert.match(source, /inventoryAnalysisLotCosts\.get\(receipt\.lotId\)/);
     assert.match(source, /inventoryAnalysisLotCosts\.get\(lot\.id\)/);
     assert.doesNotMatch(source, /receipt\.unitCost|receipt\.purchaseNetAmount|stock\.unitCost/);
@@ -1227,8 +1227,8 @@ test('stock replenishment always uses a valid warehouse PO path', () => {
 test('batch receipt reports partial success and requires a warehouse', () => {
     assert.match(appSource, /尚未指定入庫倉庫/);
     assert.match(appSource, /let completed = 0/);
-    assert.match(appSource, /已成功入庫 \$\{completed\} 個品項/);
-    assert.match(appSource, /已成功的資料不會重複入庫/);
+    assert.match(appSource, /已成功確認 \$\{completed\} 個品項到貨/);
+    assert.match(appSource, /已成功的資料不會重複處理/);
 });
 
 test('partial delivery save blocks duplicate taps', () => {
@@ -1332,9 +1332,9 @@ test('admin storage exposes a read-only legacy-cost audit without an execution b
 });
 
 test('production HTML cache-busts local application assets after main deployments', () => {
-  assert.match(indexSource,/styles\.css\?v=20260923-\d+/);
+  assert.match(indexSource,/styles\.css\?v=\d{8}-\d+/);
   assert.match(indexSource,/modules\/workflow-core\.js\?v=20260925-\d+/);
-  assert.match(indexSource,/app\.js\?v=20260925-\d+/);
+  assert.match(indexSource,/app\.js\?v=\d{8}-\d+/);
   assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-\d+/);
 });
 
@@ -1343,7 +1343,7 @@ test('Forecast full-history search uses Firestore searchTokens', () => {
     assert.match(appSource, /buildFullHistorySearchTokens\('forecast', record\)/);
     assert.match(appSource, /scopedHistorySearchQuery\('forecasts', queryToken\)\.limit\(DEFAULT_LIST_LIMIT\)/);
     assert.match(appSource, /where\('searchTokens', 'array-contains', queryToken\)/);
-    assert.match(appSource, /forecastHistorySearchTimer = setTimeout\(\(\) => runForecastHistorySearch\(true\), 350\)/);
+    assert.match(appSource, /forecastHistorySearchTimer = scheduleListSearch\(forecastHistorySearchTimer, \(\) => runForecastHistorySearch\(true\)\)/);
 });
 
 

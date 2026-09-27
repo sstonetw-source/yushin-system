@@ -70,6 +70,7 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
         defaultWarehouse: () => ({id:'W1'}),
         warehouseStockDocId: (warehouse, key) => `${warehouse}__${key}`,
         inventoryNumbers: data => ({onHand:Number(data.onHand||0),reserved:Number(data.reserved||0),incoming:Number(data.incoming||0)}),
+        invalidateWarehouseStockCache: () => {},
         resolveBrandName: name => name,
         currentUserName:'採購',currentUser:null,
         DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
@@ -101,9 +102,9 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
     assert.match(app, /orderItemWorkCategory\(order,sourceItem\)==='ordering'/);
     assert.match(app, /orderItemWorkCategory\(order,item\)==='delivery'&&itemDispatchState\(order,item\)\.pending>0/);
-    assert.match(app, /<span class="order-progress-badge">品項狀態<\/span>/);
-    assert.match(app, /YushinWorkflow\?\.itemWorkCategory/);
-    assert.match(app, /if\(required>ordered\)return 'ordering';[\s\S]*if\(required>0&&received<required\)return 'arrival';[\s\S]*return 'delivery';/);
+    assert.match(app, /const itemStatus=orderItemWorkCategory\(o,item\)/);
+    assert.match(app, /if\(uncoveredShortage>0\)return 'ordering';/);
+    assert.match(app, /if\(shortage>0\|\|ordered>received\)return 'arrival';/);
 });
 
 
@@ -161,7 +162,7 @@ test('order lifecycle, delivery and return mutations refresh work category index
 
 
 test('purchasing queues use derived server-side work category queries',()=>{
-    assert.match(app,/where\('workCategories','array-contains','ordering'\)/);
+    assert.match(app,/where\('workCategories',\s*'array-contains',\s*'ordering'\)/);
     assert.match(app,/where\('workCategories','array-contains','delivery'\)/);
     assert.match(app,/where\('receiptStatus','in',\['pending','partial'\]\)/);
     assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
@@ -180,6 +181,6 @@ test('quote cancellation and legacy delivery cleanup refresh work category index
 
 test('receiving queue includes sales self orders and new POs start pending',()=>{
     assert.match(app,/receiptStatus: 'pending'/);
-    assert.match(app,/supplyReceivingCache=supplySnapshot\.docs\.map/);
+    assert.match(app,/supplyReceivingCache=supplySnapshot\.docs\s*\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)\s*\.filter\(row=>row\.type==='SALES_SELF_ORDER'\)/);
     assert.match(app,/業務自行訂購/);
 });
