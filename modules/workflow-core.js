@@ -51,7 +51,7 @@
     const source=Array.isArray(item.supplyAllocations)?item.supplyAllocations:[];
     const supplyAllocations=source.map(row=>({
       ...row,
-      type:Object.values(SUPPLY_SOURCE_TYPES).includes(row?.type)?row.type:SUPPLY_SOURCE_TYPES.STOCK,
+      type:Object.values(SUPPLY_SOURCE_TYPES).includes(row?.type)?row.type:SUPPLY_SOURCE_TYPES.STANDARD_PURCHASE,
       qty:n(row?.qty)
     })).filter(row=>row.qty>0);
     return {orderedQty,supplyAllocations,allocatedQty:supplyAllocations.reduce((sum,row)=>sum+row.qty,0)};
