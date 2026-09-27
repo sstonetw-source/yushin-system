@@ -12,6 +12,15 @@ test('one item can mix stock standard purchase and peer transfer quantities',()=
   assert.equal(result.allocatedQty,10);
 });
 
+test('legacy supply allocation without a valid type defaults to standard purchase, never stock',()=>{
+  const missing=w.normalizeSupplyAllocations({orderedQty:3,supplyAllocations:[{qty:3}]});
+  const invalid=w.normalizeSupplyAllocations({orderedQty:2,supplyAllocations:[{type:'LEGACY',qty:2}]});
+  const explicitStock=w.normalizeSupplyAllocations({orderedQty:1,supplyAllocations:[{type:'STOCK',qty:1}]});
+  assert.equal(missing.supplyAllocations[0].type,'STANDARD_PURCHASE');
+  assert.equal(invalid.supplyAllocations[0].type,'STANDARD_PURCHASE');
+  assert.equal(explicitStock.supplyAllocations[0].type,'STOCK');
+});
+
 test('peer transfer requires supplier actual cost and end customer',()=>{
   const result=w.validateSupplyAllocations({orderedQty:2,supplyAllocations:[{type:'PEER_TRANSFER',qty:2}]});
   assert.equal(result.valid,false);
