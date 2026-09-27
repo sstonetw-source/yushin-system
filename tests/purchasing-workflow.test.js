@@ -268,3 +268,31 @@ test('loading another receiving page retains source status for earlier PO rows',
     assert.equal(context.supplyReceivingCache.length,2,'older self-orders remain reachable');
     assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
 });
+
+test('pending purchasing work loads one page at a time without losing older rows', async () => {
+    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nwindow\.openOrderPurchaseDraft)/)?.[0];
+    assert.ok(source);
+    const docs = ['O1','O2','O3'].map(id=>({id,data:()=>({status:'active'})}));
+    let reads=0;
+    const query={
+        where(){return this;},orderBy(){return this;},limit(){return this;},startAfter(){return this;},
+        async get(){const page=++reads===1?docs.slice(0,2):docs.slice(2);return {docs:page,size:page.length,empty:!page.length,forEach:fn=>page.forEach(fn)};}
+    };
+    const context=vm.createContext({
+        window:{}, db:{collection:()=>query}, canCreatePurchaseOrderCapability:()=>true,
+        canAccessPage:()=>true, pendingPurchaseLoading:false, pendingPurchaseCursor:null,
+        pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
+        currentUserRole:'purchaser', BUSINESS_STATUS:{ACTIVE:'active'}, DEFAULT_LIST_LIMIT:2,
+        readAppDataCache:()=>null, writeAppDataCache:()=>{}, renderPendingPurchaseOrders:()=>{},
+        pendingPurchaseLines:()=>[{}], firestoreReadWithTimeout:promise=>promise
+    });
+    vm.runInContext(source,context);
+    await context.window.loadPendingPurchaseOrders(true);
+    assert.equal(reads,1);
+    assert.deepEqual(Array.from(context.pendingPurchaseCache,row=>row.id),['O1','O2']);
+    assert.equal(context.pendingPurchaseHasMore,true);
+    await context.window.loadPendingPurchaseOrders(false);
+    assert.equal(reads,2);
+    assert.deepEqual(Array.from(context.pendingPurchaseCache,row=>row.id),['O1','O2','O3']);
+    assert.equal(context.pendingPurchaseHasMore,false);
+});

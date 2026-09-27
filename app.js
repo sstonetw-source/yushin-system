@@ -6682,7 +6682,7 @@ function renderPendingPurchaseOrders() {
         }
     }
     const status = document.getElementById('purchasePendingStatus');
-    if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 筆待採購品項` : '目前沒有待採購品項');
+    if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 筆待採購品項${pendingPurchaseHasMore ? '；較舊待辦請按載入更多' : ''}` : pendingPurchaseHasMore ? '這一頁沒有待採購品項；請按載入更多檢查較舊待辦' : '目前沒有待採購品項');
     const count=document.getElementById('purchaseCountOrdering'); if(count)count.textContent=pendingPurchaseLoading?'…':String(body.children.length);
     const more = document.getElementById('purchasePendingMoreBtn');
     if (more) { more.style.display = pendingPurchaseHasMore ? '' : 'none'; more.disabled = pendingPurchaseLoading; }
@@ -6739,11 +6739,6 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         pendingPurchaseLoading = false;
         writeAppDataCache('purchase-pending', pendingPurchaseCache);
         renderPendingPurchaseOrders();
-    }
-    // 進行中工作資料必須完整：若本批仍有下一頁，自動接續讀取。
-    // 每次仍只抓 DEFAULT_LIST_LIMIT，避免單次查詢過大。
-    if (pendingPurchaseHasMore) {
-        await loadPendingPurchaseOrders(false);
     }
 };
 
