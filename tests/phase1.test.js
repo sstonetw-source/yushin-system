@@ -195,6 +195,52 @@ test('saving one new order updates the local cache without reloading the list', 
     assert.match(saveOrder, /findPriceItemForOrder\(data\)/);
 });
 
+test('new order reports committed success even when source quote update fails', async () => {
+    const start = appSource.indexOf("    let createdOrderId = '';", appSource.indexOf('window.saveNewOrder ='));
+    const end = appSource.indexOf('\n};', start);
+    assert.ok(start > 0 && end > start);
+    const saveChain = appSource.slice(start, end).replace("    db.collection('orders').add(data)", "    return db.collection('orders').add(data)");
+    const feedbackStart = appSource.indexOf('let actionFeedbackTimer = null;');
+    const feedbackEnd = appSource.indexOf('\nwindow.saveNewOrder =', feedbackStart);
+    const messages = [];
+    const elements = new Map();
+    const context = vm.createContext({
+        window:{_orderModalQuoteContext:null},
+        document:{getElementById:id=>elements.get(id)||null,createElement:()=>({setAttribute(){}}),body:{appendChild:node=>elements.set(node.id,node)}},
+        setTimeout:()=>1,clearTimeout:()=>{},
+        db:{collection:name=>name==='orders'?{
+            add:async()=>({id:'NEW-1'}),doc:()=>({set:async()=>{}})
+        }:{doc:()=>({set:async()=>{throw new Error('估價單更新失敗');}})}},
+        data:{sourceType:'QUOTE',sourceId:'Q-1',customerName:'Customer',orderDate:'2026-09-27'},
+        DOCUMENT_TYPES:{QUOTE:'QUOTE',FORECAST:'FORECAST',ORDER:'ORDER'},
+        BUSINESS_STATUS:{COMPLETED:'completed'},
+        firebase:{firestore:{FieldValue:{arrayUnion:()=>({})}}},
+        reserveInventoryForNewOrder:async()=>({reservedQty:1,shortageQty:0}),
+        inventoryProductKey:()=>'',rememberRecentCustomerName:()=>{},localDateString:()=>'',documentLink:()=>({}),
+        myQuotesCache:[],quoteHistorySearchResults:[],ordersCache:[],
+        clearSavedOrderDraft:()=>{},closeOrderModal:()=>{},writeAppDataCache:()=>{},renderOrdersList:()=>{},syncOrderIntoPurchasingCaches:()=>{},
+        saveButton:{disabled:true,innerText:'儲存中…'},newOrderSaveInProgress:true,
+        alert:message=>messages.push(message),console:{error:()=>{}}
+    });
+    vm.runInContext(appSource.slice(feedbackStart, feedbackEnd), context);
+    await vm.runInContext(`(async function(){${saveChain}})()`, context);
+    assert.equal(context.ordersCache[0].id,'NEW-1');
+    assert.equal(context.newOrderSaveInProgress,false);
+    assert.equal(messages.length,1);
+    assert.match(messages[0],/訂單已建立.*估價單未標記成交.*請勿重複建立/);
+    assert.doesNotMatch(messages[0],/新增失敗/);
+    context.data={sourceType:'',customerName:'Customer',orderDate:'2026-09-27'};
+    messages.length=0;
+    await vm.runInContext(`(async function(){${saveChain}})()`, context);
+    assert.equal(messages.length,0);
+    assert.match(elements.get('actionFeedback').textContent,/訂單已建立，庫存占用已同步/);
+    context.reserveInventoryForNewOrder=async()=>{throw new Error('庫存同步失敗');};
+    await vm.runInContext(`(async function(){${saveChain}})()`, context);
+    assert.equal(messages.length,1);
+    assert.match(messages[0],/訂單已建立.*請勿重複建立.*庫存同步失敗/);
+    assert.doesNotMatch(messages[0],/新增失敗/);
+});
+
 test('role changes cannot leave an older in-flight page in the cache', () => {
     assert.match(appSource, /const requestedRole = currentUserRole;/);
     assert.match(appSource, /requestedRole !== currentUserRole/);

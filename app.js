@@ -10147,6 +10147,22 @@ window.calcOrderTotal = function() {
 
 let newOrderSaveInProgress = false;
 
+let actionFeedbackTimer = null;
+function showActionFeedback(message, type = 'success') {
+    let status = document.getElementById('actionFeedback');
+    if (!status) {
+        status = document.createElement('div');
+        status.id = 'actionFeedback';
+        status.setAttribute('role', 'status');
+        document.body.appendChild(status);
+    }
+    status.className = `action-feedback ${type === 'warning' ? 'warning' : 'success'}`;
+    status.textContent = message;
+    status.hidden = false;
+    clearTimeout(actionFeedbackTimer);
+    actionFeedbackTimer = setTimeout(() => { status.hidden = true; }, 6000);
+}
+
 window.saveNewOrder = function() {
     if (newOrderSaveInProgress) return;
     const currentItem=currentOrderModalItem();
@@ -10234,7 +10250,9 @@ window.saveNewOrder = function() {
     const saveButton = document.getElementById('saveNewOrderBtn');
     newOrderSaveInProgress = true;
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
+    let createdOrderId = '';
     db.collection('orders').add(data).then(async docRef => {
+        createdOrderId = docRef.id;
         let reservation;
         try {
             if (saveButton) saveButton.innerText = '同步庫存中…';
@@ -10262,7 +10280,8 @@ window.saveNewOrder = function() {
         data.inventoryProductKey = inventoryProductKey(data);
         rememberRecentCustomerName(data.customerName);
         const quoteContext=window._orderModalQuoteContext;
-        if (data.sourceType === DOCUMENT_TYPES.QUOTE && data.sourceId) {
+        let quoteSyncError = null;
+        if (data.sourceType === DOCUMENT_TYPES.QUOTE && data.sourceId) try {
             const closedAt=localDateString();
             await db.collection('quotes').doc(data.sourceId).set({
                 dealClosed:true,
@@ -10274,6 +10293,9 @@ window.saveNewOrder = function() {
             const cachedQuote=myQuotesCache.find(q=>q.quoteNo===data.sourceId);if(cachedQuote)Object.assign(cachedQuote,patch);
             const searchedQuote=quoteHistorySearchResults.find(q=>q.quoteNo===data.sourceId);if(searchedQuote)Object.assign(searchedQuote,patch);
             writeAppDataCache('quotes',myQuotesCache);
+        } catch (err) {
+            quoteSyncError = err;
+            console.error('訂單已建立，但估價單狀態更新失敗：', err);
         }
         clearSavedOrderDraft({ silent:true });
         if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
@@ -10292,9 +10314,19 @@ window.saveNewOrder = function() {
         renderOrdersList();
         syncOrderIntoPurchasingCaches(savedOrder);
         if (saveButton) saveButton.innerText = '已完成';
-        showActionFeedback('訂單已建立，庫存占用已同步。', 'success');
+        if (quoteSyncError) {
+            alert('訂單已建立，庫存占用已同步，但來源估價單未標記成交。請勿重複建立訂單，請管理員檢查這筆關聯：' + quoteSyncError.message);
+        } else {
+            showActionFeedback('訂單已建立，庫存占用已同步。', 'success');
+        }
     }).catch(err => {
-        alert('新增失敗：' + err.message);
+        if (createdOrderId) {
+            clearSavedOrderDraft({ silent:true });
+            closeOrderModal();
+            alert(`訂單已建立（資料編號 ${createdOrderId}），但後續處理未完成。請勿重複建立，重新整理清單後檢查這筆訂單：${err.message}`);
+        } else {
+            alert('新增失敗：' + err.message);
+        }
     }).finally(() => {
         newOrderSaveInProgress = false;
         if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存'; }
