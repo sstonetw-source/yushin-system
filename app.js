@@ -6493,6 +6493,8 @@ let poHistorySearchActive = false;
 let poHistorySearchLoading = false;
 let poHistorySearchTimer = null;
 let supplyReceivingCache = [];
+let supplyReceivingCursor = null;
+let supplyReceivingHasMore = true;
 let receivingSourceOrderStatusCache = new Map();
 let purchasingView = 'ordering';
 let pendingPurchaseCursor = null;
@@ -6781,9 +6783,9 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
 function updatePoLoadMoreButton() {
     const button = document.getElementById('poLoadMoreBtn');
     if (!button) return;
-    button.style.display = poListHasMore ? '' : 'none';
+    button.style.display = (poListHasMore || (purchasingView === 'receiving' && supplyReceivingHasMore)) ? '' : 'none';
     button.disabled = poListPageLoading;
-    button.innerText = poListPageLoading ? '載入中…' : '載入更多（每次 50 筆）';
+    button.innerText = poListPageLoading ? '載入中…' : purchasingView === 'receiving' ? '載入更多待到貨資料' : '載入更多（每次 50 筆）';
 }
 
 async function loadPurchaseOrderPage(reset) {
@@ -6792,51 +6794,68 @@ async function loadPurchaseOrderPage(reset) {
     if (reset) {
         poListCursor = null;
         poListHasMore = true;
+        if (purchasingView === 'receiving') {
+            supplyReceivingCursor = null;
+            supplyReceivingHasMore = true;
+            supplyReceivingCache = [];
+        }
         if (!poListCache.length) {
             const cached = readAppDataCache('purchase-receiving');
             if (cached?.records?.length) poListCache = cached.records;
         }
     }
-    if (!poListHasMore) return;
+    if (!poListHasMore && (purchasingView !== 'receiving' || !supplyReceivingHasMore)) return;
     poListPageLoading = true;
     const requestedRole = currentUserRole;
+    const requestedView = purchasingView;
     updatePoLoadMoreButton();
     try {
-        let query = purchasingView === 'receiving'
+        let query = poListHasMore ? (purchasingView === 'receiving'
             ? db.collection('purchaseOrders').where('receiptStatus','in',['pending','partial']).orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT)
-            : db.collection('purchaseOrders').orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT);
-        if (poListCursor) query = query.startAfter(poListCursor);
+            : db.collection('purchaseOrders').orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT)) : null;
+        if (query && poListCursor) query = query.startAfter(poListCursor);
+        let supplyQuery = purchasingView === 'receiving' && supplyReceivingHasMore
+            // Keep this on the single-field status index; page through mixed PO and
+            // self-order documents rather than stopping at the first 50 matches.
+            ? db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(DEFAULT_LIST_LIMIT)
+            : null;
+        if (supplyQuery && supplyReceivingCursor) supplyQuery = supplyQuery.startAfter(supplyReceivingCursor);
         const [snapshot,supplySnapshot] = await Promise.all([
-            query.get(),
-            purchasingView === 'receiving'
-                // 單欄位狀態查詢即可使用 Firestore 自動索引；不要讓待到貨頁依賴
-                // type + status + orderDate 的 Composite Index，否則缺索引時整頁會被誤判成權限錯誤。
-                ? db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(DEFAULT_LIST_LIMIT).get()
-                : Promise.resolve({docs:[]})
+            query ? query.get() : Promise.resolve({docs:[],size:0,empty:true}),
+            supplyQuery ? supplyQuery.get() : Promise.resolve({docs:[],size:0,empty:true})
         ]);
-        supplyReceivingCache=supplySnapshot.docs
+        if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
+        const freshSupply=supplySnapshot.docs
             .map(doc=>({id:doc.id,...doc.data()}))
-            .filter(row=>row.type==='SALES_SELF_ORDER')
-            .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
+            .filter(row=>row.type==='SALES_SELF_ORDER');
+        const supplyRecords=new Map((reset?[]:supplyReceivingCache).map(row=>[row.id,row]));
+        freshSupply.forEach(row=>supplyRecords.set(row.id,row));
         // 待到貨仍保留原 PO／自行訂購歷史，但工作佇列只顯示來源訂單仍有效的品項。
-        const sourceOrderIds=[...new Set([
+        const sourceOrderIds=purchasingView==='receiving'?[...new Set([
             ...snapshot.docs.flatMap(doc=>purchaseItemsFromSavedPo(doc.data()).map(item=>item.orderId).filter(Boolean)),
-            ...supplyReceivingCache.map(row=>row.orderId).filter(Boolean)
-        ])];
-        receivingSourceOrderStatusCache=new Map();
+            ...freshSupply.map(row=>row.orderId).filter(Boolean)
+        ])]:[];
+        // Load More keeps earlier PO rows, so their source-order statuses must stay
+        // available until the receiving list is reset.
+        const nextSourceStatuses=reset?new Map():new Map(receivingSourceOrderStatusCache);
         for(let i=0;i<sourceOrderIds.length;i+=10){
             const batch=sourceOrderIds.slice(i,i+10);
             const sourceSnap=await db.collection('orders').where(firebase.firestore.FieldPath.documentId(),'in',batch).get();
-            sourceSnap.docs.forEach(doc=>receivingSourceOrderStatusCache.set(doc.id,normalizedOrderStatus(doc.data())));
+            sourceSnap.docs.forEach(doc=>nextSourceStatuses.set(doc.id,normalizedOrderStatus(doc.data())));
         }
-        if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return;
+        if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
+        receivingSourceOrderStatusCache=nextSourceStatuses;
+        supplyReceivingCache=[...supplyRecords.values()]
+            .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
         if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
+        if (!supplySnapshot.empty) supplyReceivingCursor = supplySnapshot.docs[supplySnapshot.docs.length - 1];
+        if (purchasingView === 'receiving') supplyReceivingHasMore = supplySnapshot.size === DEFAULT_LIST_LIMIT;
         const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const records = new Map((reset ? [] : poListCache).map(po => [po.id, po]));
         freshRecords.forEach(po => records.set(po.id, po));
         // reset 時雲端結果完整取代 stale cache；Load More 才追加。
         poListCache = [...records.values()].sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
-        poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
+        if (query) poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
         writeAppDataCache(purchasingView === 'history' ? 'purchase-history' : 'purchase-receiving', poListCache);
         renderPoList();
     } catch (err) {
@@ -7005,7 +7024,7 @@ window.renderPoList = function() {
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
         items.forEach((item,itemIndex)=>{
-            if(item.orderId && receivingSourceOrderStatusCache.get(item.orderId) !== 'normal') return;
+            if(purchasingView === 'receiving' && item.orderId && receivingSourceOrderStatusCache.get(item.orderId) !== 'normal') return;
             const receipt=poItemReceiptProgress(po,item,itemIndex);
             const {received,ordered,complete,directShip}=receipt;
             // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。

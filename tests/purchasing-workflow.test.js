@@ -217,6 +217,54 @@ test('quote cancellation and legacy delivery cleanup refresh work category index
 
 test('receiving queue includes sales self orders and new POs start pending',()=>{
     assert.match(app,/receiptStatus: 'pending'/);
-    assert.match(app,/supplyReceivingCache=supplySnapshot\.docs\s*\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)\s*\.filter\(row=>row\.type==='SALES_SELF_ORDER'\)/);
+    assert.match(app,/const freshSupply=supplySnapshot\.docs\s*\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)\s*\.filter\(row=>row\.type==='SALES_SELF_ORDER'\)/);
     assert.match(app,/業務自行訂購/);
+    assert.match(app,/if\(purchasingView === 'receiving' && item\.orderId && receivingSourceOrderStatusCache\.get\(item\.orderId\) !== 'normal'\) return/);
+});
+
+test('loading another receiving page retains source status for earlier PO rows', async () => {
+    const source = app.match(/async function loadPurchaseOrderPage\(reset\) \{[\s\S]*?\n\}\n(?=\nwindow\.loadMyPurchaseOrders)/)?.[0];
+    assert.ok(source);
+    const purchaseDocs = ['PO1','PO2'].map((id,index) => ({
+        id, data:() => ({poNo:id,items:[{orderId:`ORDER${index+1}`}]})
+    }));
+    const supplyDocs = [
+        {id:'FORMAL',data:()=>({type:'PURCHASING_PO',status:'ORDERED'})},
+        {id:'SELF',data:()=>({type:'SALES_SELF_ORDER',status:'ORDERED',orderId:'ORDER2',orderDate:'2026-09-27'})},
+        {id:'SELF-OLDER',data:()=>({type:'SALES_SELF_ORDER',status:'ORDERED',orderId:'ORDER1',orderDate:'2026-09-26'})}
+    ];
+    let page = 0;
+    let supplyPage = 0;
+    const purchaseQuery = {
+        where(){return this;}, orderBy(){return this;}, limit(){return this;}, startAfter(){return this;},
+        async get(){const docs=[purchaseDocs[page++]];return {docs,size:docs.length,empty:false};}
+    };
+    const context = vm.createContext({
+        window:{}, db:{collection:name => name==='purchaseOrders' ? purchaseQuery : name==='supplyOrders'
+            ? {where(){return this;},limit(){return this;},startAfter(){return this;},async get(){const doc=supplyDocs[supplyPage++];const docs=doc?[doc]:[];return {docs,size:docs.length,empty:!docs.length};}}
+            : {where(){return this;},async get(){return {docs:purchaseDocs.map((doc,index)=>({id:`ORDER${index+1}`,data:()=>({status:'active'})}))};}}},
+        firebase:{firestore:{FieldPath:{documentId:()=>({})}}},
+        canAccessPage:()=>true, currentUserRole:'purchaser', purchasingView:'receiving',
+        poListPageLoading:false, poListCursor:null, poListHasMore:true, poListCache:[],
+        supplyReceivingCache:[], supplyReceivingCursor:null, supplyReceivingHasMore:true,
+        receivingSourceOrderStatusCache:new Map(), DEFAULT_LIST_LIMIT:1,
+        BUSINESS_STATUS:{ACTIVE:'active'}, normalizedOrderStatus:()=> 'normal',
+        purchaseItemsFromSavedPo:po=>po.items, readAppDataCache:()=>null,
+        writeAppDataCache:()=>{}, renderPoList:()=>{}, updatePoLoadMoreButton:()=>{}, alert:message=>{throw new Error(message)}
+    });
+    vm.runInContext(source,context);
+    await context.loadPurchaseOrderPage(true);
+    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
+    assert.equal(context.supplyReceivingCache.length,0);
+    await context.loadPurchaseOrderPage(false);
+    assert.equal(context.poListCache.length,2);
+    assert.equal(context.supplyReceivingCache.length,1);
+    assert.equal(context.supplyReceivingCache[0].id,'SELF');
+    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
+    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER2'),'normal');
+    context.poListHasMore=false;
+    await context.loadPurchaseOrderPage(false);
+    assert.equal(page,2,'PO query should stop after its last page');
+    assert.equal(context.supplyReceivingCache.length,2,'older self-orders remain reachable');
+    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
 });
