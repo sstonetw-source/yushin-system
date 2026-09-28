@@ -11,14 +11,22 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260927-2">
+        <link rel="stylesheet" href="styles.css?v=20260928-3">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
     <div id="authStarting" role="status" aria-live="polite">
-        <div class="auth-starting-box">
-            <strong>正在開啟又鑫管理系統…</strong>
-            <p id="authStartingMessage">正在確認登入狀態</p>
+        <div class="auth-starting-nav" aria-hidden="true">
+            <span>又鑫管理系統</span>
+            <i></i><i></i><i></i>
+        </div>
+        <div class="auth-starting-main">
+            <div class="auth-starting-heading" aria-hidden="true"></div>
+            <div class="auth-starting-toolbar" aria-hidden="true"></div>
+            <div class="auth-starting-row" aria-hidden="true"></div>
+            <div class="auth-starting-row" aria-hidden="true"></div>
+            <div class="auth-starting-row" aria-hidden="true"></div>
+            <p id="authStartingMessage">正在確認登入狀態…</p>
             <button id="authStartingRetry" type="button" onclick="location.reload()" hidden>重新連線</button>
         </div>
     </div>

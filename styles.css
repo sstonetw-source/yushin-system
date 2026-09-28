@@ -8,10 +8,22 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 .auth-status { color: #fff; font-size: 12px; padding: 8px 10px; }
 .auth-status button { margin-left: 8px; }
 #loginScreen { position: fixed; inset: 0; background: linear-gradient(135deg, #003366, #001a33); display: flex; align-items: center; justify-content: center; z-index: 999; }
-#authStarting { position: fixed; inset: 0; background: linear-gradient(135deg, #003366, #001a33); display: flex; align-items: center; justify-content: center; z-index: 999; color: #003366; text-align: center; padding: 16px; box-sizing: border-box; }
-.auth-starting-box { background: #fff; border-radius: 10px; padding: 28px 32px; width: 300px; max-width: 100%; box-sizing: border-box; box-shadow: 0 8px 30px rgba(0,0,0,.3); }
-.auth-starting-box p { margin: 12px 0 0; font-size: 14px; }
-.auth-starting-box button { margin-top: 16px; padding: 9px 18px; border: 0; border-radius: 5px; background: #003366; color: #fff; cursor: pointer; }
+#authStarting { position: fixed; inset: 0; background: #f4f4f9; z-index: 999; color: #003366; box-sizing: border-box; overflow: auto; }
+.auth-starting-nav { display: flex; align-items: center; gap: 12px; min-height: 62px; padding: 10px 18px; box-sizing: border-box; background: #003366; color: #fff; font-size: 18px; font-weight: bold; }
+.auth-starting-nav span { margin-right: 12px; }
+.auth-starting-nav i { display: block; width: 86px; height: 36px; border-radius: 6px; background: #002244; }
+.auth-starting-main { max-width: 1150px; margin: 24px auto; padding: 0 16px; box-sizing: border-box; }
+.auth-starting-heading { width: 180px; height: 28px; margin-bottom: 18px; background: #dce3eb; border-radius: 6px; }
+.auth-starting-toolbar { height: 44px; margin-bottom: 16px; background: #e6ebf1; border-radius: 7px; }
+.auth-starting-row { height: 62px; margin-bottom: 8px; background: #fff; border: 1px solid #e6ebf1; border-radius: 7px; }
+#authStartingMessage { margin: 18px 0 0; font-size: 14px; color: #53657a; }
+#authStartingRetry { margin-top: 12px; padding: 9px 18px; border: 0; border-radius: 5px; background: #003366; color: #fff; cursor: pointer; }
+@media (max-width: 650px) {
+    .auth-starting-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; }
+    .auth-starting-nav span { grid-column: 1 / -1; margin: 0 0 4px; }
+    .auth-starting-nav i { width: 100%; height: 44px; }
+    .auth-starting-main { margin-top: 18px; }
+}
 .login-box { background: #fff; padding: 36px 32px; border-radius: 10px; width: 300px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); text-align: center; }
 .login-box h2 { margin: 0 0 20px; color: #003366; font-size: 18px; }
 .login-box input { width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }

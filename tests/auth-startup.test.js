@@ -13,7 +13,12 @@ const transitionSource = app.slice(start,end);
 
 test('startup never paints login form before Firebase resolves the session', () => {
     assert.match(html, /id="authStarting" role="status"/);
+    assert.match(html, /class="auth-starting-nav" aria-hidden="true"/);
+    assert.match(html, /class="auth-starting-row" aria-hidden="true"/);
     assert.match(html, /id="loginScreen" style="display:none;"/);
+    assert.match(html, /id="appContainer" style="display:none;"/);
+    const shell=html.slice(html.indexOf('id="authStarting"'),html.indexOf('id="loginScreen"'));
+    assert.doesNotMatch(shell, /訂單|客戶|admin@|localStorage/);
     assert.match(app, /firebase\.auth\(\)\.onAuthStateChanged\(function\(user\)/);
 });
 
