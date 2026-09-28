@@ -757,6 +757,43 @@ test('system unification uses a shared Brand Master compatibility layer', () => 
     assert.match(appSource, /getUnifiedBrandNames/);
 });
 
+test('order brand filter uses selectable brands and groups alternate spelling and custom brands', () => {
+    const start = appSource.indexOf('function orderBrandFilterValue(');
+    const end = appSource.indexOf('\nwindow.renderOrdersList =', start);
+    assert.ok(start >= 0 && end > start);
+    const controls = Object.fromEntries(['purchaserOrderFilters', 'orderSalesFilter', 'orderBrandFilter'].map(id =>
+        [id, { style: {}, value: '', innerHTML: '' }]));
+    const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s_-]+/g, '');
+    const context = {
+        document: { getElementById: id => controls[id] },
+        ordersCache: [
+            { salesName: '王先生', brand: 'Biorad' },
+            { salesName: '王先生', brand: 'B iorad' },
+            { salesName: '王先生', brand: '自行輸入品牌' }
+        ],
+        OTHER_BRAND_OPTION_KEY: '其他廠牌',
+        normalizeBrandLookupKey: normalize,
+        resolveBrandName: value => normalize(value) === 'biorad' ? 'Bio-Rad' : value,
+        getPriceListBrands: () => ['Beckman', 'Bio-Rad'],
+        canViewAllData: () => true,
+        stripPhoneSuffix: value => value,
+        escapeAttr: value => value,
+        escapeHtml: value => value
+    };
+    vm.createContext(context);
+    vm.runInContext(appSource.slice(start, end), context);
+    const brands = context.populatePurchaserOrderFilters();
+    assert.deepEqual(Array.from(brands), ['Beckman', 'Bio-Rad']);
+    assert.match(controls.orderBrandFilter.innerHTML, />Bio-Rad<\/option>/);
+    assert.doesNotMatch(controls.orderBrandFilter.innerHTML, />B iorad<\/option>|>Biorad<\/option>/);
+    assert.match(controls.orderBrandFilter.innerHTML, />其他廠牌<\/option>/);
+    assert.equal(context.orderBrandFilterValue('B iorad', brands), 'Bio-Rad');
+    assert.equal(context.orderBrandFilterValue('自行輸入品牌', brands), '其他廠牌');
+    assert.equal(context.orderBrandFilterValue('', brands), '');
+    assert.match(appSource, /loadBrandMaster\(\)\.then\(\(\) => \{\s*if \(canAccessPage\('orders\.list'\)\) renderOrdersList\(\)/);
+    assert.match(appSource, /orderItems\.some\(item => orderBrandFilterValue\(item\.brand, selectableBrands\) === brandFilter\)/);
+});
+
 test('Brand Master compatibility removal is guarded by a read-only full-source audit', () => {
     assert.match(indexSource, /id="brandMasterAuditBtn"/);
     assert.match(indexSource, /onclick="previewBrandMasterCompatibilityAudit\(\)"/);

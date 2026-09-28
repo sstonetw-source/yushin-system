@@ -823,6 +823,9 @@ function initializePageData(mainKey, options = {}) {
         // 都等待 Product Master 與大量 datalist DOM 建立完成才顯示資料。
         ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
         loadOrdersFromCloud();
+        loadBrandMaster().then(() => {
+            if (canAccessPage('orders.list')) renderOrdersList();
+        }).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
     if (mainKey === 'orders.po') switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
     if (mainKey === 'inventory') loadInventory(true);
@@ -6350,6 +6353,12 @@ window.updateOrderProfitDisplay = function(orderId, costValue) {
 };
 
 // 能查看所有人訂單的身份，可依業務與廠牌篩選。
+function orderBrandFilterValue(value, selectableBrands) {
+    const key = normalizeBrandLookupKey(resolveBrandName(value));
+    if (!key) return '';
+    return selectableBrands.find(brand => normalizeBrandLookupKey(brand) === key) || OTHER_BRAND_OPTION_KEY;
+}
+
 function populatePurchaserOrderFilters() {
     const wrap = document.getElementById('purchaserOrderFilters');
     const salesSelect = document.getElementById('orderSalesFilter');
@@ -6358,24 +6367,26 @@ function populatePurchaserOrderFilters() {
 
     const enabled = canViewAllData('orders');
     wrap.style.display = enabled ? '' : 'none';
-    if (!enabled) return;
+    if (!enabled) {
+        salesSelect.value = '';
+        brandSelect.value = '';
+        return;
+    }
 
     const salesValue = salesSelect.value;
     const brandValue = brandSelect.value;
     const sales = [...new Set(ordersCache.map(o => stripPhoneSuffix(o.salesName)).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    const brands = [...new Set(ordersCache.flatMap(o => [
-        (o.brand || '').trim(),
-        ...normalizedOrderItems(o).map(item => (item.brand || '').trim())
-    ]).filter(Boolean))]
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const brands = getPriceListBrands(true);
 
     salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
         `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
     brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
-        `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
+        `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+        + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
     if (sales.includes(salesValue)) salesSelect.value = salesValue;
-    if (brands.includes(brandValue)) brandSelect.value = brandValue;
+    if (brands.includes(brandValue) || brandValue === OTHER_BRAND_OPTION_KEY) brandSelect.value = brandValue;
+    return brands;
 }
 
 
@@ -6388,7 +6399,7 @@ window.renderOrdersList = function() {
     const costHeader = document.getElementById('orderCostHeader');
     if (costHeader) costHeader.style.display = canManageOrderOps ? '' : 'none';
 
-    populatePurchaserOrderFilters();
+    const selectableBrands = populatePurchaserOrderFilters() || [];
     const salesFilter = document.getElementById('orderSalesFilter')?.value || '';
     const brandFilter = document.getElementById('orderBrandFilter')?.value || '';
     const keyword = (searchInput.value || '').toLowerCase();
@@ -6406,7 +6417,8 @@ window.renderOrdersList = function() {
         const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''} ${itemSearchable}`.toLowerCase();
         if (!orderHistorySearchActive && keyword && !searchable.includes(keyword)) return false;
         if (salesFilter && stripPhoneSuffix(o.salesName) !== salesFilter) return false;
-        if (brandFilter && !orderItems.some(item => (item.brand || '') === brandFilter) && (o.brand || '') !== brandFilter) return false;
+        if (brandFilter && !orderItems.some(item => orderBrandFilterValue(item.brand, selectableBrands) === brandFilter)
+            && orderBrandFilterValue(o.brand, selectableBrands) !== brandFilter) return false;
         return true;
     });
     renderOrderWorkCards(baseOrders);
