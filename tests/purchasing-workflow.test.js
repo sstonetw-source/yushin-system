@@ -355,3 +355,30 @@ test('cancelled warehouse PO receipt moves incoming to free stock exactly once',
     await assert.rejects(context.receiveSinglePoLine('PO1',0,3,'LOT1','','receipt-2'),/到貨數量不正確/);
     assert.equal(docs.get('inventory/P1').onHand,3);
 });
+
+test('committed PO refreshes item quantities in order and purchasing views', () => {
+    const start=app.indexOf('function syncOrderIntoPurchasingCaches(order) {');
+    const end=app.indexOf('\nfunction renderPendingPurchaseOrders()',start);
+    assert.ok(start>=0&&end>start);
+    assert.match(app,/committedSourceOrders\.push\(\{id:snapshot\.id,\.\.\.orderData,\.\.\.orderUpdates\}\)/);
+    assert.match(app,/syncCommittedPurchaseOrderSources\(committedSourceOrders\)/);
+    const oldOrder={id:'O1',items:[{qty:5,purchaseOrderedQty:0}]};
+    const writes=[];
+    let listRenders=0;
+    const context=vm.createContext({
+        ordersCache:[oldOrder],pendingPurchaseCache:[oldOrder],purchasingDispatchCache:[],
+        purchasingView:'ordering',pendingPurchaseLines:order=>order.items[0].purchaseOrderedQty<5?[{}]:[],
+        normalizedOrderItems:order=>order.items,orderItemWorkCategory:()=>'',itemDispatchState:()=>({pending:0}),
+        writeAppDataCache:(kind,rows)=>writes.push([kind,Array.from(rows,row=>row.id)]),
+        renderPendingPurchaseOrders:()=>{},renderPurchasingDispatchOrders:()=>{},renderOrdersList:()=>{listRenders++;}
+    });
+    vm.runInContext(app.slice(start,end),context);
+    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,purchaseOrderedQty:3}]}])",context);
+    assert.equal(context.ordersCache[0].items[0].purchaseOrderedQty,3);
+    assert.equal(context.pendingPurchaseCache[0].items[0].purchaseOrderedQty,3);
+    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,purchaseOrderedQty:5}]}])",context);
+    assert.equal(context.pendingPurchaseCache.length,0);
+    assert.equal(listRenders,2);
+    assert.deepEqual(writes.at(-2),['purchase-dispatch',[]]);
+    assert.deepEqual(writes.at(-1),['orders',['O1']]);
+});

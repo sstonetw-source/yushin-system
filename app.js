@@ -6679,6 +6679,16 @@ function syncOrderIntoPurchasingCaches(order) {
     if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
 }
 
+function syncCommittedPurchaseOrderSources(orders) {
+    for (const order of orders) {
+        const index = ordersCache.findIndex(row => row.id === order.id);
+        if (index >= 0) ordersCache[index] = order;
+        syncOrderIntoPurchasingCaches(order);
+    }
+    writeAppDataCache('orders', ordersCache);
+    renderOrdersList();
+}
+
 function renderPendingPurchaseOrders() {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
@@ -8248,7 +8258,9 @@ window.printPurchaseOrder = async function() {
     try {
         const poDocumentId = poNo;
         let previousPoForIncoming = null;
+        let committedSourceOrders = [];
         await db.runTransaction(async transaction => {
+            committedSourceOrders = [];
             const poRef = db.collection('purchaseOrders').doc(poDocumentId);
             const orderRefs = orderIds.map(orderId => db.collection('orders').doc(orderId));
             const poSnapshot = await transaction.get(poRef);
@@ -8287,7 +8299,7 @@ window.printPurchaseOrder = async function() {
                     const totalNeeded=nextItems.reduce((sum,item)=>sum+requiredQty(item),0);
                     const totalOrdered=nextItems.reduce((sum,item)=>sum+Math.min(requiredQty(item),Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0))),0);
                     const nextOrderData={...orderData,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,purchaseOrderedQty:totalOrdered};
-                    transaction.update(orderRefs[index], {
+                    const orderUpdates = {
                         items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,
                         ...orderWorkIndexFields(nextOrderData),
                         purchaseOrderNo: poNo,
@@ -8295,7 +8307,9 @@ window.printPurchaseOrder = async function() {
                         purchaseOrderedQty:totalOrdered,
                         purchaseStatus:totalOrdered<=0?'pending':totalOrdered<totalNeeded?'partial':'ordered',
                         linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'created')])
-                    });
+                    };
+                    transaction.update(orderRefs[index], orderUpdates);
+                    committedSourceOrders.push({id:snapshot.id,...orderData,...orderUpdates});
                 }
             });
         });
@@ -8306,15 +8320,12 @@ window.printPurchaseOrder = async function() {
         // Cache it before the separate incoming-stock registration so a transient
         // failure can retry the same PO idempotently instead of attempting to
         // create another PO with the same number.
-        ordersCache.forEach(order => {
-            if (poItems.some(item => item.orderId === order.id)) order.purchaseOrderNo = poNo;
-        });
+        syncCommittedPurchaseOrderSources(committedSourceOrders);
         const savedPo = { id: poDocumentId, ...poRecord };
         const cachedIndex = poListCache.findIndex(po => po.id === savedPo.id);
         if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
-        renderOrdersList();
         renderPoList();
 
         await registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming);
