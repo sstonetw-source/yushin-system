@@ -1284,18 +1284,18 @@
             </div>
 </div>
 
-            <h4 style="margin-top:28px;color:#b42318;">系統初始化／清除測試營運資料</h4>
+            <h4 style="margin-top:28px;color:#b42318;">保留估價單／清除其他測試營運資料</h4>
             <div class="toolbar no-print" style="display:block;border:1px solid #f0b4ae;padding:12px;border-radius:8px;">
                 <button id="testDataResetPreviewBtn" type="button" onclick="previewTestDataReset()">檢查待清除資料</button>
                 <div id="testDataResetPreview" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
                 <div id="testDataResetConfirmWrap" style="display:none;margin-top:12px;">
-                    <label for="testDataResetConfirmInput">確認執行時請輸入 <strong>清除所有測試資料</strong></label>
-                    <input id="testDataResetConfirmInput" type="text" autocomplete="off" placeholder="清除所有測試資料" style="margin:6px 8px 6px 0;">
+                    <label for="testDataResetConfirmInput">確認執行時請輸入 <strong>保留估價單清除測試資料</strong></label>
+                    <input id="testDataResetConfirmInput" type="text" autocomplete="off" placeholder="保留估價單清除測試資料" style="margin:6px 8px 6px 0;">
                     <button id="testDataResetExecuteBtn" type="button" class="btn-danger" onclick="executeTestDataReset()">永久清除並初始化</button>
                 </div>
                 <div id="testDataResetStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
                 <span style="display:block;margin-top:8px;font-size:12px;color:#666;">
-                    僅真正管理員可執行。清除估價單、Forecast、訂單、採購、庫存交易／占用／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、Product／Supplier／Brand／Customer Master、倉庫與系統設定。
+                    僅真正管理員可執行。保留估價單；清除 Forecast、訂單、採購、庫存交易／占用／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、Product／Supplier／Brand／Customer Master、倉庫與系統設定。估價單中指向已清除資料的連結將無法開啟，原成交狀態不變。
                 </span>
             </div>
 

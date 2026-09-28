@@ -13319,7 +13319,7 @@ function systemAuditProductKey(record = {}) {
 }
 
 const TEST_DATA_RESET_DELETE_COLLECTIONS = [
-    'quotes','orders','purchaseOrders','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
+    'orders','purchaseOrders','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
     'receipts','dispatchRecords','deliveries','pendingInventoryItems','inventoryMovements','auditLogs'
 ];
 let testDataResetPreviewState = null;
@@ -13383,7 +13383,7 @@ window.previewTestDataReset = async function() {
     button.disabled=true;if(wrap)wrap.style.display='none';if(status)status.textContent='';
     try{
         const counts={};
-        for(const name of [...TEST_DATA_RESET_DELETE_COLLECTIONS,'forecasts','inventory','warehouseStocks']){
+        for(const name of ['quotes',...TEST_DATA_RESET_DELETE_COLLECTIONS,'forecasts','inventory','warehouseStocks']){
             if(preview)preview.textContent=`正在檢查 ${name}…`;
             counts[name]=await countCollectionDocuments(name);
         }
@@ -13397,9 +13397,10 @@ window.previewTestDataReset = async function() {
         const deleteTotal=TEST_DATA_RESET_DELETE_COLLECTIONS.reduce((sum,name)=>sum+(counts[name]||0),0)+(counts.forecasts||0)+progressCount;
         if(preview)preview.textContent=
             `待永久刪除：${deleteTotal} 筆營運文件\n`+
-            `估價單 ${counts.quotes||0}、Forecast ${counts.forecasts||0}（進度 ${progressCount}）、訂單 ${counts.orders||0}、採購單 ${counts.purchaseOrders||0}、供應／自購 ${counts.supplyOrders||0}\n`+
-            `庫存交易相關 ${deleteTotal-(counts.quotes||0)-(counts.forecasts||0)-progressCount-(counts.orders||0)-(counts.purchaseOrders||0)-(counts.supplyOrders||0)} 筆\n`+
-            `另將 inventory ${counts.inventory||0} 筆、warehouseStocks ${counts.warehouseStocks||0} 筆數量歸零。\nMaster Data、帳號、角色、倉庫與系統設定保留。`;
+            `Forecast ${counts.forecasts||0}（進度 ${progressCount}）、訂單 ${counts.orders||0}、採購單 ${counts.purchaseOrders||0}、供應／自購 ${counts.supplyOrders||0}\n`+
+            `庫存交易相關 ${deleteTotal-(counts.forecasts||0)-progressCount-(counts.orders||0)-(counts.purchaseOrders||0)-(counts.supplyOrders||0)} 筆\n`+
+            `另將 inventory ${counts.inventory||0} 筆、warehouseStocks ${counts.warehouseStocks||0} 筆數量歸零。\nMaster Data、帳號、角色、倉庫與系統設定保留。\n`+
+            `保留估價單 ${counts.quotes||0} 筆，內容與成交狀態維持原樣；其中指向已清除 Forecast／訂單的連結將無法開啟。`;
         if(wrap)wrap.style.display='';
     }catch(err){
         console.error('檢查測試資料失敗：',err);
@@ -13414,8 +13415,8 @@ window.executeTestDataReset = async function() {
     const button=document.getElementById('testDataResetExecuteBtn');
     const status=document.getElementById('testDataResetStatus');
     if(!testDataResetPreviewState)return alert('請先執行「檢查待清除資料」。');
-    if((input?.value||'').trim()!=='清除所有測試資料')return alert('確認文字不正確。');
-    if(!confirm('最後確認：永久清除所有測試營運資料並將庫存歸零？此操作無法復原。'))return;
+    if((input?.value||'').trim()!=='保留估價單清除測試資料')return alert('確認文字不正確。');
+    if(!confirm(`最後確認：保留 ${testDataResetPreviewState.counts.quotes||0} 筆估價單，永久清除其他測試營運資料並將庫存歸零？此操作無法復原。`))return;
     button.disabled=true;
     try{
         const forecasts=await readCollectionInBatches('forecasts');
@@ -13432,7 +13433,7 @@ window.executeTestDataReset = async function() {
         await resetStockCollection('inventory',status);
         await resetStockCollection('warehouseStocks',status);
 
-        myQuotesCache=[]; quoteHistorySearchResults=[]; forecastCache=[]; forecastHistorySearchResults=[];
+        forecastCache=[]; forecastHistorySearchResults=[];
         ordersCache=[]; orderHistorySearchResults=[]; pendingPurchaseCache=[]; purchasingDispatchCache=[];
         poListCache=[]; supplyReceivingCache=[]; receivingSourceOrderStatusCache=new Map(); inventoryCache=[]; pendingInventoryCache=[];
         orderPaginationState=null; loadedMainPages.clear();
@@ -13440,7 +13441,7 @@ window.executeTestDataReset = async function() {
         if(input)input.value='';
         document.getElementById('testDataResetConfirmWrap').style.display='none';
         document.getElementById('testDataResetPreview').textContent='';
-        if(status)status.textContent='初始化完成：測試營運資料已清除，庫存與分倉數量已歸零。重新整理後即可從零開始正式使用。';
+        if(status)status.textContent='初始化完成：估價單已保留，其他測試營運資料已清除，庫存與分倉數量已歸零。請重新整理以更新畫面。';
     }catch(err){
         console.error('系統初始化失敗：',err);
         if(status)status.textContent='初始化中斷：'+(err.message||err)+'\n請不要繼續建立新資料，先重新檢查剩餘資料後再執行一次。';
