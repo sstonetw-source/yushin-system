@@ -199,7 +199,7 @@ test('new order reports committed success even when source quote update fails', 
     const start = appSource.indexOf("    let createdOrderId = '';", appSource.indexOf('window.saveNewOrder ='));
     const end = appSource.indexOf('\n};', start);
     assert.ok(start > 0 && end > start);
-    const saveChain = appSource.slice(start, end).replace("    db.collection('orders').add(data)", "    return db.collection('orders').add(data)");
+    const saveChain = appSource.slice(start, end).replace('    createOrResumeNewOrder(data)', '    return createOrResumeNewOrder(data)');
     const feedbackStart = appSource.indexOf('let actionFeedbackTimer = null;');
     const feedbackEnd = appSource.indexOf('\nwindow.saveNewOrder =', feedbackStart);
     const messages = [];
@@ -209,8 +209,9 @@ test('new order reports committed success even when source quote update fails', 
         document:{getElementById:id=>elements.get(id)||null,createElement:()=>({setAttribute(){}}),body:{appendChild:node=>elements.set(node.id,node)}},
         setTimeout:()=>1,clearTimeout:()=>{},
         db:{collection:name=>name==='orders'?{
-            add:async()=>({id:'NEW-1'}),doc:()=>({set:async()=>{}})
+            doc:()=>({set:async()=>{}})
         }:{doc:()=>({set:async()=>{throw new Error('估價單更新失敗');}})}},
+        createOrResumeNewOrder:async data=>({id:'NEW-1',data}),
         data:{sourceType:'QUOTE',sourceId:'Q-1',customerName:'Customer',orderDate:'2026-09-27'},
         DOCUMENT_TYPES:{QUOTE:'QUOTE',FORECAST:'FORECAST',ORDER:'ORDER'},
         BUSINESS_STATUS:{COMPLETED:'completed'},
@@ -234,11 +235,87 @@ test('new order reports committed success even when source quote update fails', 
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
     assert.equal(messages.length,0);
     assert.match(elements.get('actionFeedback').textContent,/訂單已建立，庫存占用已同步/);
+    context.data={sourceType:'',customerName:'Customer',orderDate:'2026-09-27'};
     context.reserveInventoryForNewOrder=async()=>{throw new Error('庫存同步失敗');};
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
     assert.equal(messages.length,1);
-    assert.match(messages[0],/訂單已建立.*請勿重複建立.*庫存同步失敗/);
+    assert.match(messages[0],/訂單編號 NEW-1.*重試同一張訂單.*庫存同步失敗/);
     assert.doesNotMatch(messages[0],/新增失敗/);
+});
+
+test('new order creation keeps one document ID across uncertain writes and retries', async () => {
+    const start=appSource.indexOf('function orderDraftStorageKey()');
+    const end=appSource.indexOf('function orderDraftFieldValue(',start);
+    const stored=new Map();
+    const documents=new Map();
+    let writes=0, uncertain=false;
+    const context=vm.createContext({
+        ORDER_DRAFT_STORAGE_PREFIX:'order_draft_v2',currentUser:{uid:'USER-1'},
+        BUSINESS_STATUS:{ACTIVE:'active'},
+        localStorage:{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)},
+        db:{collection:()=>({doc:id=>({id:id||'ORDER-1'})}),runTransaction:async callback=>{
+            let pending;
+            await callback({get:async ref=>({exists:documents.has(ref.id),data:()=>documents.get(ref.id)}),
+                set:(ref,data)=>{pending={id:ref.id,data};}});
+            if(pending){documents.set(pending.id,pending.data);writes++;}
+            if(uncertain){uncertain=false;throw new Error('連線中斷，回覆不確定');}
+        }}
+    });
+    vm.runInContext(appSource.slice(start,end),context);
+    uncertain=true;
+    const order={createdByUid:'USER-1',status:'active',inventoryReservationStatus:'pending'};
+    await assert.rejects(context.createOrResumeNewOrder(order),/回覆不確定/);
+    assert.equal(stored.get('order_draft_v2:USER-1:pending_order_id'),'ORDER-1');
+    const resumed=await context.createOrResumeNewOrder({createdByUid:'USER-1',status:'active',customerName:'不同內容'});
+    assert.equal(resumed.id,'ORDER-1');
+    assert.equal(resumed.data.customerName,undefined,'retry uses the already committed order');
+    assert.equal(writes,1,'retry never creates a second order');
+    documents.get('ORDER-1').inventoryReservationStatus='completed';
+    assert.equal((await context.createOrResumeNewOrder(order)).data.inventoryReservationStatus,'completed');
+    assert.equal(writes,1);
+});
+
+test('retrying a partly reserved order does not reserve the same stock twice', async () => {
+    const start=appSource.indexOf('async function reserveSingleOrderItem(');
+    const end=appSource.indexOf('async function reserveInventoryForNewOrder(',start);
+    const rows=new Map([
+        ['inventory/P-1',{onHand:10,reserved:0}],
+        ['warehouseStocks/W-1__P-1',{onHand:10,reserved:0}]
+    ]);
+    let reserveMovements=0;
+    const db={collection:name=>({doc:id=>({id:`${name}/${id||'MOVEMENT'}`})}),runTransaction:async callback=>{
+        const writes=[];
+        const result=await callback({
+            get:async ref=>({exists:rows.has(ref.id),data:()=>rows.get(ref.id)}),
+            update:(ref,patch)=>writes.push(()=>rows.set(ref.id,{...rows.get(ref.id),...patch})),
+            set:(ref,patch)=>writes.push(()=>{
+                if(ref.id.startsWith('inventoryMovements/') && patch.type==='reserve')reserveMovements++;
+                rows.set(ref.id,{...rows.get(ref.id),...patch});
+            })
+        });
+        writes.forEach(write=>write());
+        return result;
+    }};
+    const context=vm.createContext({
+        db,currentUserName:'Staff',currentUser:{uid:'USER-1'},
+        inventoryProductKey:()=> 'P-1',defaultWarehouse:()=>({id:'W-1'}),
+        inventoryRefFor:()=>db.collection('inventory').doc('P-1'),
+        warehouseStockDocId:()=> 'W-1__P-1',
+        inventoryNumbers:row=>({onHand:row.onHand||0,reserved:row.reserved||0,available:(row.onHand||0)-(row.reserved||0)}),
+        inventoryMovementRecord:(type,quantity)=>({type,quantity}),
+        salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{}
+    });
+    vm.runInContext(appSource.slice(start,end),context);
+    const order={customerName:'Customer',orderDate:'2026-09-28',salesCode:'S1'};
+    const item={itemId:'item-1',qty:4,fulfillmentType:'WAREHOUSE',warehouseId:'W-1'};
+    const first=await context.reserveSingleOrderItem('ORDER-1',order,item,0);
+    const retry=await context.reserveSingleOrderItem('ORDER-1',order,item,0);
+    assert.equal(first.reservedQty,4);
+    assert.equal(retry.reservedQty,4);
+    assert.equal(rows.get('inventory/P-1').reserved,4);
+    assert.equal(rows.get('warehouseStocks/W-1__P-1').reserved,4);
+    assert.equal(rows.get('inventoryReservations/ORDER-1__item-1').quantity,4);
+    assert.equal(reserveMovements,1);
 });
 
 test('role changes cannot leave an older in-flight page in the cache', () => {
@@ -1364,7 +1441,7 @@ test('new order drafts are per-user, restorable and cleared only after successfu
   assert.match(appSource,/window\.clearSavedOrderDraft=function/);
   const saveStart=appSource.indexOf('window.saveNewOrder');
   const saveEnd=appSource.indexOf('// 匯出指定日期區間',saveStart);
-  assert.match(appSource.slice(saveStart,saveEnd),/clearSavedOrderDraft\(\{ silent:true \}\)/);
+  assert.match(appSource.slice(saveStart,saveEnd),/clearSavedOrderDraft\(\{ silent:true,clearPending:true \}\)/);
 });
 
 test('admin storage exposes a read-only legacy-cost audit without an execution button', () => {
