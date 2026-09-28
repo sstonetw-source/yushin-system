@@ -59,6 +59,16 @@ if (APP_ENVIRONMENT === 'preview') {
 }
 
 // 啟動時由 SDK 還原既有 session；手動登入前才指定 LOCAL，避免 iOS 初始化競爭。
+// iPhone 主畫面網站有自己的儲存空間；請求持續保存可降低系統回收登入資料的機率。
+let homeScreenStoragePersistencePromise = null;
+function requestHomeScreenStoragePersistence() {
+    const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+    if (!standalone || !navigator.storage?.persist || homeScreenStoragePersistencePromise) return;
+    homeScreenStoragePersistencePromise = Promise.resolve()
+        .then(() => navigator.storage.persisted?.() || false)
+        .then(persisted => persisted || navigator.storage.persist())
+        .catch(err => console.warn('主畫面網站儲存保留未啟用：', err));
+}
 
 let currentCompany = 'yushin';
 let restoringQuoteDraft = false;  // 還原本機草稿的過程中，暫停「重新產生單號」之類的副作用，避免蓋掉草稿裡存的資料
@@ -479,6 +489,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
                 applyUserProfile(d);
                 writeCachedUserProfile(user.uid,d);
+                requestHomeScreenStoragePersistence();
                 showApp();
                 if (mustChangePassword) openChangePasswordModal(true);
 
@@ -1014,6 +1025,7 @@ window.handleLogin = async function() {
         }
         applyUserProfile(d);
         writeCachedUserProfile(currentUser.uid, d);
+        requestHomeScreenStoragePersistence();
         showApp();
         if (mustChangePassword) openChangePasswordModal(true);
     } catch (err) {

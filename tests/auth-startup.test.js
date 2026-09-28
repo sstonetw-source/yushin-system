@@ -39,3 +39,26 @@ test('manual sign-in selects LOCAL persistence before password sign-in', () => {
     assert.match(app,/setPersistence\(firebase\.auth\.Auth\.Persistence\.LOCAL\)\s*\.then\(\(\) => firebase\.auth\(\)\.signInWithEmailAndPassword\(email, password\)\)/);
     assert.match(app,/window\.handleLogout = function\(\) \{[\s\S]*?firebase\.auth\(\)\.signOut\(\)/);
 });
+
+test('Home Screen app requests persistent origin storage only after authentication', async () => {
+    const start=app.indexOf('let homeScreenStoragePersistencePromise = null;');
+    const end=app.indexOf('\nlet currentCompany =',start);
+    assert.ok(start>=0&&end>start);
+    const source=app.slice(start,end);
+    let persistCalls=0;
+    const context=vm.createContext({
+        window:{matchMedia:()=>({matches:true})},
+        navigator:{standalone:false,storage:{persisted:async()=>false,persist:async()=>{persistCalls++;return true;}}},
+        console:{warn:()=>{}}
+    });
+    vm.runInContext(`${source}\nrequestHomeScreenStoragePersistence();requestHomeScreenStoragePersistence();`,context);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(persistCalls,1);
+    assert.match(app,/writeCachedUserProfile\(user\.uid,d\);\s*requestHomeScreenStoragePersistence\(\)/);
+    assert.match(app,/writeCachedUserProfile\(currentUser\.uid, d\);\s*requestHomeScreenStoragePersistence\(\)/);
+
+    const browser=vm.createContext({window:{matchMedia:()=>({matches:false})},navigator:{standalone:false,storage:{persist:()=>{persistCalls++;}}},console});
+    vm.runInContext(`${source}\nrequestHomeScreenStoragePersistence();`,browser);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(persistCalls,1,'ordinary browser views do not request storage persistence');
+});
