@@ -827,7 +827,11 @@ function initializePageData(mainKey, options = {}) {
             if (canAccessPage('orders.list')) renderOrdersList();
         }).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
-    if (mainKey === 'orders.po') switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
+    if (mainKey === 'orders.po') {
+        switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
+        ensureSalesListLoaded().then(renderPurchasingView).catch(err => console.warn('業務名單載入失敗：', err));
+        loadBrandMaster().then(renderPurchasingView).catch(err => console.warn('廠牌名單載入失敗：', err));
+    }
     if (mainKey === 'inventory') loadInventory(true);
     if (mainKey === 'equipment') {
         // 儀器列表先載入，避免 users collection 阻塞主要內容。
@@ -6543,11 +6547,80 @@ let purchasingDispatchLoading = false;
 
 const purchasingViewLoaded = new Set();
 
+function populatePurchasingFilters() {
+    const salesSelect = document.getElementById('purchaseSalesFilter');
+    const brandSelect = document.getElementById('purchaseBrandFilter');
+    if (!salesSelect || !brandSelect) return;
+    const salesValue = salesSelect.value;
+    const brandValue = brandSelect.value;
+    const sales = [...new Set(salesList.map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const brands = getPriceListBrands(true);
+    salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
+        `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+    brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
+        `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+        + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+    if (sales.includes(salesValue)) salesSelect.value = salesValue;
+    if (brands.includes(brandValue) || brandValue === OTHER_BRAND_OPTION_KEY) brandSelect.value = brandValue;
+}
+
+function purchasePeriodRange() {
+    const preset = document.getElementById('poPeriodFilter')?.value || 'this-year';
+    if (preset === 'custom') return {
+        start: document.getElementById('purchasePeriodStart')?.value || '',
+        end: document.getElementById('purchasePeriodEnd')?.value || ''
+    };
+    return unifiedPeriodRange(preset);
+}
+
+function purchaseLineMatchesFilters(date, salesName, brand) {
+    const { start, end } = purchasePeriodRange();
+    const businessDate = normalizeBusinessDate(date);
+    if ((start || end) && (!businessDate || (start && businessDate < start) || (end && businessDate > end))) return false;
+    const selectedSales = document.getElementById('purchaseSalesFilter')?.value || '';
+    if (selectedSales && stripPhoneSuffix(salesName) !== selectedSales) return false;
+    const selectedBrand = document.getElementById('purchaseBrandFilter')?.value || '';
+    return !selectedBrand || orderBrandFilterValue(brand, getPriceListBrands(true)) === selectedBrand;
+}
+
+window.renderPurchasingView = function() {
+    populatePurchasingFilters();
+    for (const [view, id] of [['ordering', 'purchaseCountOrdering'], ['receiving', 'purchaseCountReceiving'], ['dispatch', 'purchaseCountDispatch']]) {
+        if (view !== purchasingView) {
+            const count = document.getElementById(id);
+            if (count) count.textContent = '—';
+        }
+    }
+    if (purchasingView === 'ordering') renderPendingPurchaseOrders();
+    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
+    else renderPoList();
+};
+
+window.changePurchasePeriod = function(value) {
+    const custom = document.getElementById('purchaseCustomPeriod');
+    if (custom) custom.style.display = value === 'custom' ? 'flex' : 'none';
+    if (value === 'custom') {
+        const start = document.getElementById('purchasePeriodStart');
+        const end = document.getElementById('purchasePeriodEnd');
+        if (start && !start.value) start.value = `${new Date().getFullYear()}-01-01`;
+        if (end && !end.value) end.value = dateOnlyFromTimestamp(new Date().toISOString());
+    }
+    renderPurchasingView();
+};
+
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
     if (!['ordering', 'receiving', 'dispatch', 'history'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
+    populatePurchasingFilters();
+    for (const [otherView, id] of [['ordering', 'purchaseCountOrdering'], ['receiving', 'purchaseCountReceiving'], ['dispatch', 'purchaseCountDispatch']]) {
+        if (otherView !== view) {
+            const count = document.getElementById(id);
+            if (count) count.textContent = '—';
+        }
+    }
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
@@ -6659,6 +6732,7 @@ function renderPurchasingDispatchOrders() {
     purchasingDispatchCache.forEach(order=>{
         const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>orderItemWorkCategory(order,row.item)==='delivery'&&row.state.pending>0);
         pending.forEach(({item,state})=>{
+            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) return;
             const tr=document.createElement('tr');
             tr.innerHTML=`<td>${escapeHtml(order.orderDate||'')}</td><td>${escapeHtml(order.orderNo||order.id)}</td><td>${escapeHtml(order.customerName||order.customer||'')}</td><td>${escapeHtml(order.salesName||'')}</td><td>${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td><button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button></td>`;
             body.appendChild(tr);
@@ -6720,6 +6794,7 @@ function renderPendingPurchaseOrders() {
     for (const order of pendingPurchaseCache) {
         const items = pendingPurchaseLines(order);
         for (const item of items) {
+            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) continue;
             const row = document.createElement('tr');
             row.innerHTML = `<td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.orderNo || order.id)}</td><td>${escapeHtml(order.customer || order.customerName || '')}</td><td>${escapeHtml(order.salesName || '')}</td><td>${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">建立訂購單</button></td>`;
             body.appendChild(row);
@@ -7046,7 +7121,6 @@ window.renderPoList = function() {
     const searchInput = document.getElementById('poListSearch');
     if (!tbody || !searchInput) return;
     const keyword = (searchInput.value || '').toLowerCase();
-    const periodFilter = document.getElementById('poPeriodFilter')?.value || 'this-year';
     tbody.innerHTML = '';
     let shown = 0;
 
@@ -7070,6 +7144,7 @@ window.renderPoList = function() {
             const {received,ordered,complete,directShip}=receipt;
             // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。
             if (purchasingView === 'receiving' && (complete || receipt.remaining<=0)) return;
+            if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand)) return;
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
             const tr = document.createElement('tr');
@@ -7095,6 +7170,7 @@ window.renderPoList = function() {
         const received=Math.max(0,Number(supply.receivedQty||0));
         const remaining=Math.max(0,ordered-received);
         if(!remaining)return;
+        if (!purchaseLineMatchesFilters(supply.orderDate, supply.salesName, supply.brand)) return;
         shown++;
         const tr=document.createElement('tr');
         tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">業務自行訂購</td><td data-th="廠商">${escapeHtml(supply.vendorName||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">—</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">—</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">📥 到貨入庫</button></td>`;
@@ -7102,7 +7178,7 @@ window.renderPoList = function() {
     });
 
     document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
-    const count=document.getElementById('purchaseCountReceiving'); if(count)count.textContent=String(shown);
+    const count=document.getElementById('purchaseCountReceiving'); if(count && purchasingView === 'receiving')count.textContent=String(shown);
 };
 
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
@@ -7901,6 +7977,7 @@ function purchaseItemsFromOrder(order) {
             productLine: item.productLine || order.productLine || '',
             ownerUid: order.ownerUid || '',
             salesCode: order.salesCode || '',
+            salesName: order.salesName || '',
             fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
             warehouseId: item.warehouseId || order.warehouseId || '',
             unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0,

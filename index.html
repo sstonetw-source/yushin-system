@@ -811,6 +811,20 @@
             <button type="button" class="order-work-card" id="purchase-card-dispatch" onclick="switchPurchasingView('dispatch', this)"><span>待打單</span><strong id="purchaseCountDispatch">—</strong></button>
             <button type="button" class="order-work-card" id="purchase-card-history" onclick="switchPurchasingView('history', this)"><span>訂購單紀錄</span><strong>最近 50 筆</strong></button>
         </div>
+        <div class="order-period-toolbar no-print" aria-label="採購篩選條件">
+            <select id="purchaseSalesFilter" aria-label="採購負責業務" onchange="renderPurchasingView()"><option value="">全部業務</option></select>
+            <select id="purchaseBrandFilter" aria-label="採購廠牌" onchange="renderPurchasingView()"><option value="">全部廠牌</option></select>
+            <label for="poPeriodFilter">統計期間</label>
+            <select id="poPeriodFilter" onchange="changePurchasePeriod(this.value)">
+                <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="custom">自訂日期</option><option value="all">全部期間</option>
+            </select>
+            <div id="purchaseCustomPeriod" class="order-custom-period" style="display:none;">
+                <input type="date" id="purchasePeriodStart" aria-label="採購統計開始日期" onchange="renderPurchasingView()">
+                <span>至</span>
+                <input type="date" id="purchasePeriodEnd" aria-label="採購統計結束日期" onchange="renderPurchasingView()">
+            </div>
+            <span class="order-period-note">待採購、待打單依來源訂單日期；待到貨、訂購單紀錄依訂購日期。採購待辦僅計需採購人員處理的品項。</span>
+        </div>
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
                 <button type="button" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">🔄 重新整理</button>
@@ -828,9 +842,6 @@
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋全部訂購單：單號 / 廠商 / 採購人員" style="width:280px;" oninput="schedulePurchaseOrderHistorySearch()">
                 <span id="poHistorySearchStatus" role="status"></span>
-                <select id="poPeriodFilter" onchange="renderPoList()">
-                    <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
-                </select>
                 <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
             </div>
             <table>
@@ -1387,6 +1398,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260925-1"></script>
-    <script src="app.js?v=20260928-4"></script>
+    <script src="app.js?v=20260928-5"></script>
 </body>
 </html>

@@ -794,6 +794,53 @@ test('order brand filter uses selectable brands and groups alternate spelling an
     assert.match(appSource, /orderItems\.some\(item => orderBrandFilterValue\(item\.brand, selectableBrands\) === brandFilter\)/);
 });
 
+test('purchasing and orders share brand names and date range semantics across work queues', () => {
+    const start = appSource.indexOf('const purchasingViewLoaded = new Set();');
+    const end = appSource.indexOf('\nwindow.switchPurchasingView =', start);
+    assert.ok(start >= 0 && end > start);
+    const controls = {
+        poPeriodFilter: { value: 'this-year' },
+        purchaseSalesFilter: { value: '', innerHTML: '' },
+        purchaseBrandFilter: { value: '', innerHTML: '' },
+        purchasePeriodStart: { value: '' },
+        purchasePeriodEnd: { value: '' },
+        purchaseCustomPeriod: { style: {} }
+    };
+    const context = {
+        window: {}, document: { getElementById: id => controls[id] },
+        salesList: [{ name: '王先生' }],
+        getPriceListBrands: () => ['Bio-Rad', 'Beckman'],
+        OTHER_BRAND_OPTION_KEY: '其他廠牌',
+        escapeAttr: value => value, escapeHtml: value => value,
+        stripPhoneSuffix: value => value,
+        unifiedPeriodRange: key => key === 'this-year' ? { start: '2026-01-01', end: '2026-12-31' } : { start: '', end: '' },
+        normalizeBusinessDate: value => value,
+        orderBrandFilterValue: value => String(value || '').replace(/[\s-]/g, '').toLowerCase() === 'biorad' ? 'Bio-Rad' : value,
+        purchasingView: 'ordering',
+        renderPendingPurchaseOrders: () => {}, renderPurchasingDispatchOrders: () => {}, renderPoList: () => {},
+        dateOnlyFromTimestamp: value => value.slice(0, 10)
+    };
+    vm.createContext(context);
+    vm.runInContext(appSource.slice(start, end), context);
+    context.populatePurchasingFilters();
+    assert.match(controls.purchaseBrandFilter.innerHTML, />Bio-Rad<\/option>/);
+    controls.purchaseSalesFilter.value = '王先生';
+    controls.purchaseBrandFilter.value = 'Bio-Rad';
+    assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'B iorad'), true);
+    assert.equal(context.purchaseLineMatchesFilters('2025-09-28', '王先生', 'Biorad'), false);
+    assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '李先生', 'Biorad'), false);
+    assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'Beckman'), false);
+    controls.poPeriodFilter.value = 'custom';
+    controls.purchasePeriodStart.value = '2026-09-20';
+    controls.purchasePeriodEnd.value = '2026-09-25';
+    assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'Biorad'), false);
+    assert.equal(context.purchaseLineMatchesFilters('2026-09-24', '王先生', 'Biorad'), true);
+    assert.match(appSource, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand\)/);
+    assert.match(appSource, /purchaseLineMatchesFilters\(po\.poDate, item\.salesName, item\.brand\)/);
+    assert.match(appSource, /purchaseLineMatchesFilters\(supply\.orderDate, supply\.salesName, supply\.brand\)/);
+    assert.match(indexSource, /id="poPeriodFilter" onchange="changePurchasePeriod\(this\.value\)"/);
+});
+
 test('Brand Master compatibility removal is guarded by a read-only full-source audit', () => {
     assert.match(indexSource, /id="brandMasterAuditBtn"/);
     assert.match(indexSource, /onclick="previewBrandMasterCompatibilityAudit\(\)"/);
