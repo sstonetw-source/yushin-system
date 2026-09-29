@@ -589,6 +589,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 @media screen and (max-width: 640px) {
     /* 主系統入口固定為兩欄等寬按鍵；新增模組後仍維持手機可快速點選。 */
     .nav-tabs {
+        background-image: none;
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         align-items: stretch;
