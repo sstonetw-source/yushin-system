@@ -7316,6 +7316,7 @@ window.renderPoList = function() {
     const keyword = (searchInput.value || '').toLowerCase();
     tbody.innerHTML = '';
     let shown = 0;
+    let stockPending = 0;
 
     const poRows = poHistorySearchActive ? poHistorySearchResults : poListCache;
     poRows.forEach(po => {
@@ -7338,6 +7339,9 @@ window.renderPoList = function() {
             // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。
             if (purchasingView === 'receiving' && (complete || receipt.remaining<=0)) return;
             if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand)) return;
+            // 「待到貨」工作卡要與訂單頁完全同口徑，只顯示有來源訂單的品項。
+            // 原廠備貨沒有來源訂單，保留在「訂購單紀錄」中處理，避免工作卡數字與訂單頁不一致。
+            if (purchasingView === 'receiving' && !item.orderId) { stockPending++; return; }
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
             const tr = document.createElement('tr');
@@ -7364,6 +7368,7 @@ window.renderPoList = function() {
         const remaining=Math.max(0,ordered-received);
         if(!remaining)return;
         if (!purchaseLineMatchesFilters(supply.orderDate, supply.salesName, supply.brand)) return;
+        if (!supply.orderId) { stockPending++; return; }
         shown++;
         const tr=document.createElement('tr');
         tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">📥 到貨入庫</button> ${supply.type==='PURCHASING_MANUAL'?`<button type="button" class="btn-small" onclick="printSupplyOrderDocument('${escapeAttr(supply.id)}')">🖨️ 輸出訂購單 PDF</button>`:''}</td>`;
@@ -7371,6 +7376,12 @@ window.renderPoList = function() {
     });
 
     document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
+    const status = document.getElementById('poHistorySearchStatus');
+    if (status && purchasingView === 'receiving') {
+        status.textContent = stockPending > 0
+            ? `另有 ${stockPending} 筆原廠備貨待到貨；請到「訂購單紀錄」處理。`
+            : '';
+    }
 };
 
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
