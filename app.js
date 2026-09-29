@@ -5801,7 +5801,9 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
     if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return;
     const key=orderId+'__'+itemId;
     if(pendingDispatchOrderIds.has(key))return;
-    pendingDispatchOrderIds.add(key);renderOrdersList();
+    pendingDispatchOrderIds.add(key);
+    if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+    else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingDispatchOrders();
     try{
         let saved;
         await db.runTransaction(async tx=>{
@@ -5833,7 +5835,12 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
         syncOrderIntoPurchasingCaches(savedOrder);
         writeAppDataCache('orders', ordersCache);
     }catch(err){alert('標記已打單失敗：'+err.message);}
-    finally{pendingDispatchOrderIds.delete(key);renderOrdersList();if(currentDeliveryOrderId===orderId)renderDeliveryModal();}
+    finally{
+        pendingDispatchOrderIds.delete(key);
+        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+        if(currentDeliveryOrderId===orderId)renderDeliveryModal();
+    }
 };
 
 
@@ -8816,11 +8823,10 @@ window.printPurchaseOrder = async function() {
             });
         });
 
-        // 比照估價單：列印使用目前已經完成驗證的畫面資料，不等待 Firestore 往返。
-        // 核心 transaction 已先啟動；列印預覽立即開啟，資料儲存則在背景完成。
-        updatePoSaveStatus('正在儲存訂購單；列印預覽已開啟，請勿關閉頁面直到顯示儲存完成。');
-        printSavedPoDocument(poNo, vendorName);
-
+        // 訂購單會同時改寫來源訂單與供應紀錄，不能像估價單一樣「先印再存」：
+        // 若 iPhone 在列印畫面直接關閉頁面，背景 transaction 可能尚未完成，會造成紙本已下單但系統沒有紀錄。
+        // 只等待這個最小且必要的核心 transaction；在途庫存仍於列印後背景同步。
+        updatePoSaveStatus('正在確認並儲存訂購單…');
         await commitPromise;
         poCommitted = true;
         if (button) button.innerText = '同步在途庫存中…';
@@ -8837,10 +8843,11 @@ window.printPurchaseOrder = async function() {
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
-        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存；在途庫存正在背景同步…`);
+        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存；正在開啟列印，在途庫存於背景同步…`);
         renderPoList();
+        printSavedPoDocument(poNo, vendorName);
 
-        // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不必再等第二段在途庫存同步。
+        // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立訂購單。
         registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming)
             .then(() => {
