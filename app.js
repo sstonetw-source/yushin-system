@@ -832,7 +832,10 @@ function initializePageData(mainKey, options = {}) {
         ensureSalesListLoaded().then(renderPurchasingView).catch(err => console.warn('業務名單載入失敗：', err));
         loadBrandMaster().then(renderPurchasingView).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
-    if (mainKey === 'inventory') loadInventory(true);
+    if (mainKey === 'inventory') {
+        loadInventory(true);
+        loadBrandMaster().then(renderInventoryList).catch(err => console.warn('廠牌名單載入失敗：', err));
+    }
     if (mainKey === 'equipment') {
         // 儀器列表先載入，避免 users collection 阻塞主要內容。
         loadEquipmentFromCloud();
@@ -5060,13 +5063,28 @@ async function runInventorySearch(){
  }finally{inventorySearchLoading=false;renderInventoryList();}
 }
 
+function populateInventoryBrandFilter() {
+ const select=document.getElementById('inventoryBrandFilter');
+ if(!select)return [];
+ const selected=select.value;
+ const brands=getPriceListBrands(true);
+ select.innerHTML='<option value="">全部廠牌</option>'+brands.map(brand=>
+   `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+   +`<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+ if(brands.includes(selected)||selected===OTHER_BRAND_OPTION_KEY)select.value=selected;
+ return brands;
+}
+
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;
  const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();
  const stateFilter=document.getElementById('inventoryStateFilter')?.value||'all';
+ const brands=populateInventoryBrandFilter();
+ const brandFilter=document.getElementById('inventoryBrandFilter')?.value||'';
  body.innerHTML='';
  const inventoryRows=inventorySearchActive?inventorySearchResults:inventoryCache;
  inventoryRows.forEach(x=>{
+   if(brandFilter&&orderBrandFilterValue(x.brand,brands)!==brandFilter)return;
    const lots=fefoLots(x);
    const productKey=x.productKey||x.productId||'';
    const warehouseRows=warehouseMasterCache.map(warehouse=>{
