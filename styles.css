@@ -408,7 +408,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     }
     #purchasePendingPanel td, #purchaseDispatchPanel td { border:0; border-bottom:1px solid #eef1f4; padding:7px 0; text-align:left; overflow-wrap:anywhere; }
     #purchasePendingPanel td:last-child, #purchaseDispatchPanel td:last-child { border-bottom:0; }
-    #purchasePendingPanel td[data-th]::before, #purchaseDispatchPanel td[data-th]::before { content:attr(data-th) "："; display:block; margin-bottom:3px; color:#667584; font-size:11px; font-weight:700; }
+    #purchasePendingPanel td[data-th]::before, #purchaseDispatchPanel td[data-th]::before { content:attr(data-th) "："; display:block; margin-bottom:3px; color:#999; font-size:10.5px; font-weight:700; letter-spacing:.02em; }
     #purchasePendingPanel td button, #purchaseDispatchPanel td button { min-height:44px; }
     #purchasePendingPanel td[data-th="操作"],
     #purchaseDispatchPanel td[data-th="操作"] { display:flex; flex-wrap:wrap; gap:6px; }
@@ -954,13 +954,22 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     }
 
     #forecastTable tr,
-    #poListPanel table tbody tr,
     #inventory-system > .table-wrap table tbody tr,
     #inventory-system h3 + .table-wrap table tbody tr {
         border: 0;
         border-radius: 14px;
         padding: 14px;
         margin-bottom: 14px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+    }
+
+    /* 訂單／採購明細手機卡片採同一規格：16px 內距、16px 卡距、14px 圓角。 */
+    #poListPanel table tbody tr {
+        border: 0;
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 16px;
         background: #fff;
         box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
     }
@@ -988,9 +997,10 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         content: attr(data-th) "：";
         display: block;
         margin-bottom: 3px;
-        color: #8a8f94;
+        color: #999;
         font-size: 10.5px;
         font-weight: 700;
+        letter-spacing: .02em;
     }
 
     #forecastTable .forecast-actions,
@@ -1003,7 +1013,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     #forecastTable .forecast-actions button,
     #poListPanel td[data-th="操作"] button {
         flex: 1 1 120px;
-        min-height: 42px;
+        min-height: 44px;
     }
 
     /* 卡片化後不再需要橫向強制 760px。 */
