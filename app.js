@@ -6922,7 +6922,6 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         // 若索引寫入較舊或尚未同步，會造成「訂單頁有待採購、採購頁卻為 0」。
         // 這裡只讀近期進行中訂單，再用同一套即時計算判斷真正的待採購品項。
         let query = db.collection('orders')
-            .where('status', '==', BUSINESS_STATUS.ACTIVE)
             .orderBy('orderDate', 'desc')
             .limit(DEFAULT_LIST_LIMIT);
         if (pendingPurchaseCursor) query = query.startAfter(pendingPurchaseCursor);
@@ -6933,8 +6932,9 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         const freshOrders = [];
         snapshot.forEach(doc => {
             const order = { id:doc.id, ...doc.data() };
-            if (order.status !== BUSINESS_STATUS.ACTIVE) return;
-            // 不依賴可能延遲／舊版留下的 workCategories 索引欄位；
+            if (normalizedOrderStatus(order) !== 'normal') return;
+            // 不依賴 status / workCategories 等可能延遲或舊版留下的衍生欄位；
+            // 與訂單頁一樣，直接由 normalizedOrderStatus + 品項狀態即時計算。
             // 待採購清單與訂單圖卡一律以目前品項狀態即時計算，避免漏單。
             if (!pendingPurchaseLines(order).length) return;
             freshOrders.push(order);
