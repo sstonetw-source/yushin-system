@@ -7267,6 +7267,13 @@ async function loadPurchaseOrderPage(reset) {
         if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
         receivingSourceOrderStatusCache=nextSourceStatuses;
         receivingSourceOrderCache=nextSourceOrders;
+        if (purchasingView === 'receiving' && nextSourceOrders.size) {
+            const mergedOrders = new Map(ordersCache.map(order => [order.id, order]));
+            nextSourceOrders.forEach((order, id) => mergedOrders.set(id, order));
+            ordersCache = [...mergedOrders.values()].sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
+            writeAppDataCache('orders', ordersCache);
+            renderPurchasingWorkCards();
+        }
         supplyReceivingCache=[...supplyRecords.values()]
             .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
         if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
@@ -7448,10 +7455,12 @@ function receivingQueueContext(record, item) {
     if(!sourceOrder || normalizedOrderStatus(sourceOrder)!=='normal')return null;
     const sourceItem=receivingSourceItem(sourceOrder,item);
     if(!sourceItem || !orderItemDisplayCategories(sourceOrder,sourceItem).includes('arrival'))return null;
+    const sourceIndex = normalizedOrderItems(sourceOrder).indexOf(sourceItem);
     return {
         date:sourceOrder.orderDate||record.orderDate||record.poDate||'',
         salesName:sourceOrder.salesName||item.salesName||record.salesName||'',
-        brand:sourceItem.brand||item.brand||''
+        brand:sourceItem.brand||item.brand||'',
+        workKey:`${sourceOrder.id}::${sourceItem.itemId || sourceIndex}`
     };
 }
 
@@ -7464,6 +7473,7 @@ window.renderPoList = function() {
     tbody.innerHTML = '';
     let shown = 0;
     let stockPending = 0;
+    const receivingItemKeys = new Set();
 
     const poRows = poHistorySearchActive ? poHistorySearchResults : poListCache;
     poRows.forEach(po => {
@@ -7485,6 +7495,7 @@ window.renderPoList = function() {
                 const context=receivingQueueContext(po,item);
                 if(!context){stockPending++;return;}
                 if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
+                receivingItemKeys.add(context.workKey);
             } else if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
@@ -7513,6 +7524,7 @@ window.renderPoList = function() {
         const context=receivingQueueContext(supply,supply);
         if(!context){stockPending++;return;}
         if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
+        receivingItemKeys.add(context.workKey);
         shown++;
         const tr=document.createElement('tr');
         tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">📥 到貨入庫</button> ${supply.type==='PURCHASING_MANUAL'?`<button type="button" class="btn-small" onclick="printSupplyOrderDocument('${escapeAttr(supply.id)}')">🖨️ 輸出訂購單 PDF</button>`:''}</td>`;
@@ -7522,9 +7534,13 @@ window.renderPoList = function() {
     document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
     const status = document.getElementById('poHistorySearchStatus');
     if (status && purchasingView === 'receiving') {
-        status.textContent = stockPending > 0
-            ? `另有 ${stockPending} 筆不屬於目前訂單「待到貨」狀態的採購紀錄；不計入上方工作卡。`
-            : '';
+        const parts = [];
+        if (shown > 0) {
+            parts.push(`待到貨 ${receivingItemKeys.size} 個訂單品項；${shown} 筆採購紀錄`);
+            if (shown > receivingItemKeys.size) parts.push('同一品項有分批／多張採購紀錄');
+        }
+        if (stockPending > 0) parts.push(`另有 ${stockPending} 筆不屬於目前訂單「待到貨」狀態，不計入上方工作卡`);
+        status.textContent = parts.join('。');
     }
 };
 
