@@ -8836,7 +8836,6 @@ window.printPurchaseOrder = async function() {
         // failure can retry the same PO idempotently instead of attempting to
         // create another PO with the same number.
         syncCommittedPurchaseOrderSources(committedSourceOrders);
-        renderPurchasingWorkCards();
         const savedPo = { id: poDocumentId, ...poRecord };
         const cachedIndex = poListCache.findIndex(po => po.id === savedPo.id);
         if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;
@@ -8844,7 +8843,9 @@ window.printPurchaseOrder = async function() {
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
         updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存；正在開啟列印，在途庫存於背景同步…`);
-        renderPoList();
+
+        // 核心 transaction 一完成就直接進列印；不要在列印前重畫採購卡與整張 PO 清單。
+        // syncCommittedPurchaseOrderSources 已更新同一份 ordersCache；其餘畫面可在列印後／背景同步完成時再刷新。
         printSavedPoDocument(poNo, vendorName);
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
