@@ -6678,10 +6678,11 @@ function purchaseLineMatchesFilters(date, salesName, brand) {
 
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
+    // 非目前頁籤代表「尚未載入」，不是 0 筆；用 … 明確區分未知與真正的零。
     for (const [view, id] of [['ordering', 'purchaseCountOrdering'], ['receiving', 'purchaseCountReceiving'], ['dispatch', 'purchaseCountDispatch']]) {
         if (view !== purchasingView) {
             const count = document.getElementById(id);
-            if (count) count.textContent = '—';
+            if (count) count.textContent = '…';
         }
     }
     if (purchasingView === 'ordering') renderPendingPurchaseOrders();
@@ -6710,7 +6711,7 @@ window.switchPurchasingView = function(view, tab) {
     for (const [otherView, id] of [['ordering', 'purchaseCountOrdering'], ['receiving', 'purchaseCountReceiving'], ['dispatch', 'purchaseCountDispatch']]) {
         if (otherView !== view) {
             const count = document.getElementById(id);
-            if (count) count.textContent = '—';
+            if (count) count.textContent = '…';
         }
     }
     const orderingTab = document.getElementById('purchase-card-ordering');
