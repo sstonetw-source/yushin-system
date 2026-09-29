@@ -846,6 +846,7 @@ test('order brand filter uses selectable brands and groups alternate spelling an
             { salesName: '王先生', brand: 'B iorad' },
             { salesName: '王先生', brand: '自行輸入品牌' }
         ],
+        salesList: [{ name: '王先生' }],
         OTHER_BRAND_OPTION_KEY: '其他廠牌',
         normalizeBrandLookupKey: normalize,
         resolveBrandName: value => normalize(value) === 'biorad' ? 'Bio-Rad' : value,
@@ -888,6 +889,7 @@ test('purchasing and orders share brand names and date range semantics across wo
         OTHER_BRAND_OPTION_KEY: '其他廠牌',
         escapeAttr: value => value, escapeHtml: value => value,
         stripPhoneSuffix: value => value,
+        workflowSalesFilterNames: () => ['王先生'],
         unifiedPeriodRange: key => key === 'this-year' ? { start: '2026-01-01', end: '2026-12-31' } : { start: '', end: '' },
         normalizeBusinessDate: value => value,
         orderBrandFilterValue: value => String(value || '').replace(/[\s-]/g, '').toLowerCase() === 'biorad' ? 'Bio-Rad' : value,
