@@ -797,12 +797,19 @@ function hydratePageFromLocalCache(mainKey) {
         }
     }
     if (mainKey === 'orders.po') {
+        // 採購工作卡與訂單頁共用 ordersCache；先用同一份本機快取立即顯示，
+        // 再由 Firestore 背景更新，避免進採購頁時先看到「…」或另一套數字。
+        if (!ordersCache.length) {
+            const orderCache = readAppDataCache('orders');
+            if (orderCache?.records?.length) ordersCache = orderCache.records;
+        }
         const pending = readAppDataCache('purchase-pending');
         const receiving = readAppDataCache('purchase-receiving');
         const dispatch = readAppDataCache('purchase-dispatch');
         if (!pendingPurchaseCache.length && pending?.records?.length) pendingPurchaseCache = pending.records;
         if (!poListCache.length && receiving?.records?.length) poListCache = receiving.records;
         if (!purchasingDispatchCache.length && dispatch?.records?.length) purchasingDispatchCache = dispatch.records;
+        renderPurchasingWorkCards();
     }
 }
 
@@ -839,6 +846,9 @@ function initializePageData(mainKey, options = {}) {
     }
     if (mainKey === 'orders.po') {
         switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
+        // 與訂單頁使用同一份近期 50 筆 orders 資料：本機快取先顯示，雲端在背景更新。
+        // 不再為三張採購工作卡各跑一套獨立 Query。
+        loadOrderPage(true, { silent: true }).catch(err => console.warn('採購工作狀態更新失敗：', err));
         ensureSalesListLoaded().then(renderPurchasingView).catch(err => console.warn('業務名單載入失敗：', err));
         loadBrandMaster().then(renderPurchasingView).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
@@ -2386,6 +2396,7 @@ window.createOrderFromForecast = async function(id) {
         await createForecastOrdersDirectly(forecast, items);
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
+        if (canAccessPage('orders.po')) renderPurchasingWorkCards();
         alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單。`);
         if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
             loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
@@ -6676,15 +6687,42 @@ function purchaseLineMatchesFilters(date, salesName, brand) {
     return !selectedBrand || orderBrandFilterValue(brand, getPriceListBrands(true)) === selectedBrand;
 }
 
+function purchasingWorkflowItemMatches(order, item) {
+    // 採購工作卡與訂單工作卡使用相同狀態引擎；採購頁自己的業務／廠牌／期間篩選
+    // 只決定目前畫面要顯示哪一部分，不再改變狀態定義。
+    return purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand);
+}
+
+function renderPurchasingWorkCards() {
+    const definitions = [
+        ['ordering', 'purchaseCountOrdering', 'purchaseAmountOrdering'],
+        ['arrival', 'purchaseCountReceiving', 'purchaseAmountReceiving'],
+        ['dispatch', 'purchaseCountDispatch', 'purchaseAmountDispatch']
+    ];
+    const metrics = Object.fromEntries(definitions.map(([category]) => [category, { count: 0, amount: 0 }]));
+
+    ordersCache.forEach(order => {
+        normalizedOrderItems(order).forEach(item => {
+            if (!purchasingWorkflowItemMatches(order, item)) return;
+            orderItemDisplayCategories(order, item).forEach(category => {
+                if (!metrics[category]) return;
+                metrics[category].count++;
+                metrics[category].amount += orderItemWorkAmount(order, item, category);
+            });
+        });
+    });
+
+    definitions.forEach(([category, countId, amountId]) => {
+        const count = document.getElementById(countId);
+        const amount = document.getElementById(amountId);
+        if (count) count.textContent = `${metrics[category].count} 筆`;
+        if (amount) amount.textContent = formatStatsMoney(metrics[category].amount);
+    });
+}
+
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
-    // 非目前頁籤代表「尚未載入」，不是 0 筆；用 … 明確區分未知與真正的零。
-    for (const [view, id] of [['ordering', 'purchaseCountOrdering'], ['receiving', 'purchaseCountReceiving'], ['dispatch', 'purchaseCountDispatch']]) {
-        if (view !== purchasingView) {
-            const count = document.getElementById(id);
-            if (count) count.textContent = '…';
-        }
-    }
+    renderPurchasingWorkCards();
     if (purchasingView === 'ordering') renderPendingPurchaseOrders();
     else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
     else renderPoList();
@@ -6708,12 +6746,7 @@ window.switchPurchasingView = function(view, tab) {
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
     populatePurchasingFilters();
-    for (const [otherView, id] of [['ordering', 'purchaseCountOrdering'], ['receiving', 'purchaseCountReceiving'], ['dispatch', 'purchaseCountDispatch']]) {
-        if (otherView !== view) {
-            const count = document.getElementById(id);
-            if (count) count.textContent = '…';
-        }
-    }
+    renderPurchasingWorkCards();
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
@@ -6768,54 +6801,25 @@ window.switchPurchasingView = function(view, tab) {
 
 async function loadPurchasingDispatchOrders(reset=true) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
-    purchasingDispatchError='';
-    if (reset) {
-        purchasingDispatchCursor=null; purchasingDispatchHasMore=true;
-        if (!purchasingDispatchCache.length) {
-            const cached=readAppDataCache('purchase-dispatch');
-            if (cached?.records?.length) purchasingDispatchCache=cached.records;
-        }
-    }
-    purchasingDispatchLoading=true;
+    purchasingDispatchError = '';
+    purchasingDispatchLoading = true;
     renderPurchasingDispatchOrders();
     try {
-        // 一個品項可以一部分待採購／待到貨，另一部分已備妥待打單。
-        // 用獨立的 dispatch 工作索引載入，避免部分缺貨時漏掉已占用的數量。
-        let q=db.collection('orders')
-            .where('status','==',BUSINESS_STATUS.ACTIVE)
-            .where('workCategories','array-contains','dispatch')
-            .orderBy('orderDate','desc')
-            .limit(DEFAULT_LIST_LIMIT);
-        if(purchasingDispatchCursor) q=q.startAfter(purchasingDispatchCursor);
-        const snap=await firestoreReadWithTimeout(q.get(), '待打單訂單');
-        if(!snap.empty)purchasingDispatchCursor=snap.docs[snap.docs.length-1];
-        purchasingDispatchHasMore=snap.size===DEFAULT_LIST_LIMIT;
-        const freshOrders=[];
-        snap.forEach(doc=>{
-            const order={id:doc.id,...doc.data()};
-            if(normalizedOrderStatus(order)!=='normal')return;
-            const pendingItems=normalizedOrderItems(order).filter(item=>itemDispatchState(order,item).pending>0);
-            if(pendingItems.length)freshOrders.push(order);
-        });
-        if(reset){
-            purchasingDispatchCache=freshOrders;
-        }else{
-            freshOrders.forEach(order=>{
-                const index=purchasingDispatchCache.findIndex(x=>x.id===order.id);
-                if(index>=0)purchasingDispatchCache[index]=order;else purchasingDispatchCache.push(order);
-            });
-        }
-    } catch(err) {
-        console.error('採購發貨清單載入失敗：',err);
-        purchasingDispatchError = err.code === 'failed-precondition' || /query requires an index/i.test(err.message || '')
-            ? '待打單清單暫時無法讀取：資料庫索引尚未建立完成，請通知管理員。此時待辦數量無法確認。'
-            : `待打單清單讀取失敗，請重試：${String(err.message || err).replace(/https?:\/\/\S+/g, '（詳見瀏覽器錯誤紀錄）').slice(0, 160)}`;
-    } finally {
-        purchasingDispatchLoading=false;
+        if (reset) await loadOrderPage(true, { silent: true });
+        else await loadOrderPage(false, { silent: true });
+        purchasingDispatchCache = ordersCache.filter(order =>
+            normalizedOrderItems(order).some(item => itemDispatchState(order, item).pending > 0)
+        );
         writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
+        renderPurchasingWorkCards();
+    } catch (err) {
+        purchasingDispatchError = `待打單清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
+    } finally {
+        purchasingDispatchLoading = false;
         renderPurchasingDispatchOrders();
     }
 }
+
 window.loadPurchasingDispatchOrders=loadPurchasingDispatchOrders;
 
 function renderPurchasingDispatchOrders() {
@@ -6824,7 +6828,8 @@ function renderPurchasingDispatchOrders() {
     const more=document.getElementById('purchaseDispatchMoreBtn');
     if(!body)return;
     body.innerHTML='';
-    purchasingDispatchCache.forEach(order=>{
+    const sourceOrders = ordersCache.length ? ordersCache : purchasingDispatchCache;
+    sourceOrders.forEach(order=>{
         const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>row.state.pending>0);
         pending.forEach(({item,state})=>{
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) return;
@@ -6834,7 +6839,6 @@ function renderPurchasingDispatchOrders() {
         });
     });
     if(status)status.textContent=purchasingDispatchLoading?'載入中…':purchasingDispatchError||(body.children.length?`已顯示 ${body.children.length} 筆待打單品項`:'目前沒有待打單品項');
-    const count=document.getElementById('purchaseCountDispatch'); if(count)count.textContent=purchasingDispatchLoading?'…':purchasingDispatchError?'—':String(body.children.length);
     if(more){more.style.display=purchasingDispatchHasMore?'':'none';more.disabled=purchasingDispatchLoading;}
 }
 
@@ -6886,7 +6890,8 @@ function renderPendingPurchaseOrders() {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
     body.innerHTML = '';
-    for (const order of pendingPurchaseCache) {
+    const sourceOrders = ordersCache.length ? ordersCache : pendingPurchaseCache;
+    for (const order of sourceOrders) {
         const items = pendingPurchaseLines(order);
         for (const item of items) {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) continue;
@@ -6897,65 +6902,26 @@ function renderPendingPurchaseOrders() {
     }
     const status = document.getElementById('purchasePendingStatus');
     if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 筆待採購品項${pendingPurchaseHasMore ? '；較舊待辦請按載入更多' : ''}` : pendingPurchaseHasMore ? '這一頁沒有待採購品項；請按載入更多檢查較舊待辦' : '目前沒有待採購品項');
-    const count=document.getElementById('purchaseCountOrdering'); if(count)count.textContent=pendingPurchaseLoading?'…':pendingPurchaseError?'—':String(body.children.length);
     const more = document.getElementById('purchasePendingMoreBtn');
     if (more) { more.style.display = pendingPurchaseHasMore ? '' : 'none'; more.disabled = pendingPurchaseLoading; }
 }
 
 window.loadPendingPurchaseOrders = async function(reset = true) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po') || pendingPurchaseLoading) return;
-    if (reset) {
-        pendingPurchaseCursor = null; pendingPurchaseHasMore = true;
-        if (!pendingPurchaseCache.length) {
-            const cached = readAppDataCache('purchase-pending');
-            if (cached?.records?.length) pendingPurchaseCache = cached.records;
-        }
-    }
-    if (!pendingPurchaseHasMore) return;
     pendingPurchaseError = '';
     pendingPurchaseLoading = true;
-    const requestedRole = currentUserRole;
     renderPendingPurchaseOrders();
     try {
-        // 採購待辦與訂單頁共用 pendingPurchaseLines()/orderItemWorkCategory() 作為唯一狀態來源。
-        // 不先用 workCategories=ordering 篩選，因為該欄位是為查詢效能保存的衍生索引；
-        // 若索引寫入較舊或尚未同步，會造成「訂單頁有待採購、採購頁卻為 0」。
-        // 這裡只讀近期進行中訂單，再用同一套即時計算判斷真正的待採購品項。
-        let query = db.collection('orders')
-            .orderBy('orderDate', 'desc')
-            .limit(DEFAULT_LIST_LIMIT);
-        if (pendingPurchaseCursor) query = query.startAfter(pendingPurchaseCursor);
-        const snapshot = await firestoreReadWithTimeout(query.get(), '待採購訂單');
-        if (requestedRole !== currentUserRole || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-        if (!snapshot.empty) pendingPurchaseCursor = snapshot.docs[snapshot.docs.length - 1];
-        pendingPurchaseHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
-        const freshOrders = [];
-        snapshot.forEach(doc => {
-            const order = { id:doc.id, ...doc.data() };
-            if (normalizedOrderStatus(order) !== 'normal') return;
-            // 不依賴 status / workCategories 等可能延遲或舊版留下的衍生欄位；
-            // 與訂單頁一樣，直接由 normalizedOrderStatus + 品項狀態即時計算。
-            // 待採購清單與訂單圖卡一律以目前品項狀態即時計算，避免漏單。
-            if (!pendingPurchaseLines(order).length) return;
-            freshOrders.push(order);
-        });
-        if (reset) {
-            pendingPurchaseCache = freshOrders;
-        } else {
-            freshOrders.forEach(order => {
-                const index = pendingPurchaseCache.findIndex(row => row.id === order.id);
-                if (index >= 0) pendingPurchaseCache[index] = order; else pendingPurchaseCache.push(order);
-            });
-        }
+        // 直接沿用訂單頁同一個分頁載入器與 ordersCache，避免雙重 Query 與兩套數字。
+        if (reset) await loadOrderPage(true, { silent: true });
+        else await loadOrderPage(false, { silent: true });
+        pendingPurchaseCache = ordersCache.filter(order => pendingPurchaseLines(order).length > 0);
+        writeAppDataCache('purchase-pending', pendingPurchaseCache);
+        renderPurchasingWorkCards();
     } catch (err) {
-        const missingIndex = err.code === 'failed-precondition' || /query requires an index/i.test(err.message || '');
-        pendingPurchaseError = missingIndex
-            ? '待採購清單暫時無法讀取：資料庫索引尚未建立完成，請通知管理員。此時待辦數量無法確認。'
-            : `待採購清單讀取失敗，請重試：${String(err.message || err).replace(/https?:\/\/\S+/g, '（詳見瀏覽器錯誤紀錄）').slice(0, 160)}`;
-        return;
+        pendingPurchaseError = `待採購清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         pendingPurchaseLoading = false;
-        writeAppDataCache('purchase-pending', pendingPurchaseCache);
         renderPendingPurchaseOrders();
     }
 };
@@ -7398,7 +7364,6 @@ window.renderPoList = function() {
     });
 
     document.getElementById('poListEmptyHint').style.display = shown === 0 ? 'block' : 'none';
-    const count=document.getElementById('purchaseCountReceiving'); if(count && purchasingView === 'receiving')count.textContent=String(shown);
 };
 
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
@@ -8640,7 +8605,7 @@ window.printPurchaseOrder = async function() {
         const poDocumentId = poNo;
         let previousPoForIncoming = null;
         let committedSourceOrders = [];
-        await db.runTransaction(async transaction => {
+        const commitPromise = db.runTransaction(async transaction => {
             committedSourceOrders = [];
             const poRef = db.collection('purchaseOrders').doc(poDocumentId);
             const orderRefs = orderIds.map(orderId => db.collection('orders').doc(orderId));
@@ -8694,6 +8659,13 @@ window.printPurchaseOrder = async function() {
                 }
             });
         });
+
+        // 比照估價單：列印使用目前已經完成驗證的畫面資料，不等待 Firestore 往返。
+        // 核心 transaction 已先啟動；列印預覽立即開啟，資料儲存則在背景完成。
+        updatePoSaveStatus('正在儲存訂購單；列印預覽已開啟，請勿關閉頁面直到顯示儲存完成。');
+        printSavedPoDocument(poNo, vendorName);
+
+        await commitPromise;
         poCommitted = true;
         if (button) button.innerText = '同步在途庫存中…';
 
@@ -8702,6 +8674,7 @@ window.printPurchaseOrder = async function() {
         // failure can retry the same PO idempotently instead of attempting to
         // create another PO with the same number.
         syncCommittedPurchaseOrderSources(committedSourceOrders);
+        renderPurchasingWorkCards();
         const savedPo = { id: poDocumentId, ...poRecord };
         const cachedIndex = poListCache.findIndex(po => po.id === savedPo.id);
         if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;
@@ -8713,7 +8686,6 @@ window.printPurchaseOrder = async function() {
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不必再等第二段在途庫存同步。
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立訂購單。
-        printSavedPoDocument(poNo, vendorName);
         registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming)
             .then(() => {
                 poIncomingSyncPending = false;
