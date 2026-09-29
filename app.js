@@ -845,10 +845,8 @@ function initializePageData(mainKey, options = {}) {
         }).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
     if (mainKey === 'orders.po') {
+        // 採購頁只啟動一個共用 orders 背景更新；各工作分頁都沿用同一份 ordersCache。
         switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
-        // 與訂單頁使用同一份近期 50 筆 orders 資料：本機快取先顯示，雲端在背景更新。
-        // 不再為三張採購工作卡各跑一套獨立 Query。
-        loadOrderPage(true, { silent: true }).catch(err => console.warn('採購工作狀態更新失敗：', err));
         ensureSalesListLoaded().then(renderPurchasingView).catch(err => console.warn('業務名單載入失敗：', err));
         loadBrandMaster().then(renderPurchasingView).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
@@ -6517,6 +6515,7 @@ window.renderOrdersList = function() {
     const salesFilter = document.getElementById('orderSalesFilter')?.value || '';
     const brandFilter = document.getElementById('orderBrandFilter')?.value || '';
     const keyword = (searchInput.value || '').toLowerCase();
+    const filters = purchaseFilterContext();
     tbody.innerHTML = '';
     let shown = 0;
 
@@ -6646,6 +6645,8 @@ let supplyReceivingCache = [];
 let supplyReceivingCursor = null;
 let supplyReceivingHasMore = true;
 let receivingSourceOrderStatusCache = new Map();
+let receivingSourceOrderCache = new Map();
+let purchasingOrderRefreshPromise = null;
 let purchasingView = 'ordering';
 let pendingPurchaseCursor = null;
 let pendingPurchaseHasMore = true;
@@ -6659,6 +6660,13 @@ let purchasingDispatchLoading = false;
 let purchasingDispatchError = '';
 
 const purchasingViewLoaded = new Set();
+
+function refreshPurchasingOrderCache(reset = true) {
+    if (purchasingOrderRefreshPromise) return purchasingOrderRefreshPromise;
+    purchasingOrderRefreshPromise = Promise.resolve(loadOrderPage(reset, { silent: true }))
+        .finally(() => { purchasingOrderRefreshPromise = null; });
+    return purchasingOrderRefreshPromise;
+}
 
 let purchasingFilterOptionsSignature = '';
 
@@ -6848,9 +6856,13 @@ window.switchPurchasingView = function(view, tab) {
         renderPoList();
         if (!purchasingViewLoaded.has('receiving')) {
             purchasingViewLoaded.add('receiving');
-            Promise.resolve(loadMyPurchaseOrders()).catch(err => {
-                purchasingViewLoaded.delete('receiving');
-                console.error('待到貨首次載入失敗：', err);
+            Promise.allSettled([loadMyPurchaseOrders(), refreshPurchasingOrderCache(true)]).then(results => {
+                const failed=results.filter(result=>result.status==='rejected');
+                if(failed.length){
+                    purchasingViewLoaded.delete('receiving');
+                    console.error('待到貨首次載入部分失敗：', failed.map(result=>result.reason));
+                }
+                renderPurchasingView();
             });
         }
     } else if (view === 'history') {
@@ -6880,10 +6892,9 @@ async function loadPurchasingDispatchOrders(reset=true) {
     purchasingDispatchLoading = true;
     renderPurchasingDispatchOrders();
     try {
-        if (reset) await loadOrderPage(true, { silent: true });
-        else await loadOrderPage(false, { silent: true });
+        await refreshPurchasingOrderCache(reset);
         purchasingDispatchCache = ordersCache.filter(order =>
-            normalizedOrderItems(order).some(item => itemDispatchState(order, item).pending > 0)
+            normalizedOrderItems(order).some(item => orderItemDisplayCategories(order,item).includes('dispatch'))
         );
         purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
@@ -6905,10 +6916,13 @@ function renderPurchasingDispatchOrders() {
     if(!body)return;
     body.innerHTML='';
     const sourceOrders = ordersCache.length ? ordersCache : purchasingDispatchCache;
+    const filters=purchaseFilterContext();
     sourceOrders.forEach(order=>{
-        const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>row.state.pending>0);
+        const pending=normalizedOrderItems(order)
+            .filter(item=>orderItemDisplayCategories(order,item).includes('dispatch'))
+            .map(item=>({item,state:itemDispatchState(order,item)}));
         pending.forEach(({item,state})=>{
-            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) return;
+            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo||order.id)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作"><button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button></td>`;
             body.appendChild(tr);
@@ -6938,9 +6952,10 @@ function syncOrderIntoPurchasingCaches(order) {
     };
     sync(pendingPurchaseCache, pendingProcurementDisplayLines(order).length > 0);
     sync(purchasingDispatchCache, normalizedOrderItems(order).some(item =>
-        itemDispatchState(order, item).pending > 0
+        orderItemDisplayCategories(order,item).includes('dispatch')
     ));
     receivingSourceOrderStatusCache.set(order.id, normalizedOrderStatus(order));
+    receivingSourceOrderCache.set(order.id, order);
     writeAppDataCache('purchase-pending', pendingPurchaseCache);
     writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
     if (purchasingView === 'ordering') renderPendingPurchaseOrders();
@@ -6990,9 +7005,8 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     pendingPurchaseLoading = true;
     renderPendingPurchaseOrders();
     try {
-        // 直接沿用訂單頁同一個分頁載入器與 ordersCache，避免雙重 Query 與兩套數字。
-        if (reset) await loadOrderPage(true, { silent: true });
-        else await loadOrderPage(false, { silent: true });
+        // 直接沿用訂單頁同一個分頁載入器與 ordersCache；同一時間不重複發 orders Query。
+        await refreshPurchasingOrderCache(reset);
         pendingPurchaseCache = ordersCache.filter(order => pendingProcurementDisplayLines(order).length > 0);
         pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         writeAppDataCache('purchase-pending', pendingPurchaseCache);
@@ -7173,6 +7187,7 @@ async function loadPurchaseOrderPage(reset) {
             supplyReceivingCursor = null;
             supplyReceivingHasMore = true;
             supplyReceivingCache = [];
+            receivingSourceOrderCache = new Map();
         }
         if (!poListCache.length) {
             const cached = readAppDataCache('purchase-receiving');
@@ -7213,13 +7228,27 @@ async function loadPurchaseOrderPage(reset) {
         // Load More keeps earlier PO rows, so their source-order statuses must stay
         // available until the receiving list is reset.
         const nextSourceStatuses=reset?new Map():new Map(receivingSourceOrderStatusCache);
-        for(let i=0;i<sourceOrderIds.length;i+=10){
-            const batch=sourceOrderIds.slice(i,i+10);
+        const nextSourceOrders=reset?new Map():new Map(receivingSourceOrderCache);
+        const cachedOrders=new Map(ordersCache.map(order=>[order.id,order]));
+        sourceOrderIds.forEach(id=>{
+            const cached=cachedOrders.get(id);
+            if(!cached)return;
+            nextSourceOrders.set(id,cached);
+            nextSourceStatuses.set(id,normalizedOrderStatus(cached));
+        });
+        const missingSourceIds=sourceOrderIds.filter(id=>!nextSourceOrders.has(id));
+        for(let i=0;i<missingSourceIds.length;i+=10){
+            const batch=missingSourceIds.slice(i,i+10);
             const sourceSnap=await db.collection('orders').where(firebase.firestore.FieldPath.documentId(),'in',batch).get();
-            sourceSnap.docs.forEach(doc=>nextSourceStatuses.set(doc.id,normalizedOrderStatus(doc.data())));
+            sourceSnap.docs.forEach(doc=>{
+                const sourceOrder={id:doc.id,...doc.data()};
+                nextSourceOrders.set(doc.id,sourceOrder);
+                nextSourceStatuses.set(doc.id,normalizedOrderStatus(sourceOrder));
+            });
         }
         if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
         receivingSourceOrderStatusCache=nextSourceStatuses;
+        receivingSourceOrderCache=nextSourceOrders;
         supplyReceivingCache=[...supplyRecords.values()]
             .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
         if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
@@ -7381,6 +7410,33 @@ async function runPurchaseOrderHistorySearch() {
     }finally{poHistorySearchLoading=false;renderPoList();}
 }
 
+function receivingSourceOrderForItem(item) {
+    if (!item?.orderId) return null;
+    return ordersCache.find(order=>order.id===item.orderId)
+        || receivingSourceOrderCache.get(item.orderId)
+        || null;
+}
+
+function receivingSourceItem(order, item) {
+    if (!order || !item) return null;
+    const items=normalizedOrderItems(order);
+    return items.find(row=>item.itemId && row.itemId===item.itemId)
+        || items[Number(item.orderItemIndex)]
+        || null;
+}
+
+function receivingQueueContext(record, item) {
+    const sourceOrder=receivingSourceOrderForItem(item);
+    if(!sourceOrder || normalizedOrderStatus(sourceOrder)!=='normal')return null;
+    const sourceItem=receivingSourceItem(sourceOrder,item);
+    if(!sourceItem || !orderItemDisplayCategories(sourceOrder,sourceItem).includes('arrival'))return null;
+    return {
+        date:sourceOrder.orderDate||record.orderDate||record.poDate||'',
+        salesName:sourceOrder.salesName||item.salesName||record.salesName||'',
+        brand:sourceItem.brand||item.brand||''
+    };
+}
+
 window.renderPoList = function() {
     const tbody = document.getElementById('poListBody');
     const searchInput = document.getElementById('poListSearch');
@@ -7403,19 +7459,14 @@ window.renderPoList = function() {
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
         items.forEach((item,itemIndex)=>{
-            const sourceStatus=item.orderId?receivingSourceOrderStatusCache.get(item.orderId):'normal';
-            const sourceCancelled=sourceStatus==='cancelled';
-            if(purchasingView === 'receiving' && sourceStatus!=='normal' && (item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP') return;
             const receipt=poItemReceiptProgress(po,item,itemIndex);
             const {received,ordered,complete,directShip}=receipt;
-            // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。
-            if (purchasingView === 'receiving' && (complete || receipt.remaining<=0)) return;
-            const sourceOrder = item.orderId ? ordersCache.find(order => order.id === item.orderId) : null;
-            const workflowDate = sourceOrder?.orderDate || po.poDate;
-            if (!purchaseLineMatchesFilters(workflowDate, sourceOrder?.salesName || item.salesName, item.brand, purchaseFilterContext())) return;
-            // 「待到貨」工作卡要與訂單頁完全同口徑，只顯示有來源訂單的品項。
-            // 原廠備貨沒有來源訂單，保留在「訂購單紀錄」中處理，避免工作卡數字與訂單頁不一致。
-            if (purchasingView === 'receiving' && !item.orderId) { stockPending++; return; }
+            if (purchasingView === 'receiving') {
+                if (complete || receipt.remaining<=0) return;
+                const context=receivingQueueContext(po,item);
+                if(!context){stockPending++;return;}
+                if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
+            } else if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
             const tr = document.createElement('tr');
@@ -7428,7 +7479,7 @@ window.renderPoList = function() {
                 <td data-th="等待天數">${escapeHtml(complete?'—':(poWaitingDays(po)||'—'))}</td>
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
-                <td data-th="到貨進度">${sourceCancelled?'來源訂單已取消・入庫後為自由庫存｜':''}${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
+                <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
                 <td data-th="操作" class="no-print">${complete?'<span>已完成</span>':`<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">${directShip?'確認直送到貨':'📥 到貨入庫'}</button>`} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
             `;
             tbody.appendChild(tr);
@@ -7436,15 +7487,13 @@ window.renderPoList = function() {
     });
 
     if (purchasingView === 'receiving') supplyReceivingCache.forEach(supply=>{
-        if(supply.orderId && receivingSourceOrderStatusCache.get(supply.orderId) !== 'normal') return;
         const ordered=Math.max(0,Number(supply.qty||0));
         const received=Math.max(0,Number(supply.receivedQty||0));
         const remaining=Math.max(0,ordered-received);
         if(!remaining)return;
-        const sourceOrder = supply.orderId ? ordersCache.find(order => order.id === supply.orderId) : null;
-        const workflowDate = sourceOrder?.orderDate || supply.orderDate;
-        if (!purchaseLineMatchesFilters(workflowDate, sourceOrder?.salesName || supply.salesName, supply.brand, purchaseFilterContext())) return;
-        if (!supply.orderId) { stockPending++; return; }
+        const context=receivingQueueContext(supply,supply);
+        if(!context){stockPending++;return;}
+        if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
         shown++;
         const tr=document.createElement('tr');
         tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">📥 到貨入庫</button> ${supply.type==='PURCHASING_MANUAL'?`<button type="button" class="btn-small" onclick="printSupplyOrderDocument('${escapeAttr(supply.id)}')">🖨️ 輸出訂購單 PDF</button>`:''}</td>`;
@@ -7455,7 +7504,7 @@ window.renderPoList = function() {
     const status = document.getElementById('poHistorySearchStatus');
     if (status && purchasingView === 'receiving') {
         status.textContent = stockPending > 0
-            ? `另有 ${stockPending} 筆原廠備貨待到貨；請到「訂購單紀錄」處理。`
+            ? `另有 ${stockPending} 筆不屬於目前訂單「待到貨」狀態的採購紀錄；不計入上方工作卡。`
             : '';
     }
 };
