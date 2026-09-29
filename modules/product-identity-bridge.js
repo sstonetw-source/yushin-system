@@ -136,6 +136,8 @@
 (function () {
     'use strict';
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    // 新版介面已由正式 HTML / app.js 提供；舊版部署才需要以下相容補丁。
+    if (document.getElementById('purchaseCompletedPanel')) return;
 
     const PATCH_ID = 'yushin-ux-patch-20260930';
     const raf = fn => window.requestAnimationFrame ? window.requestAnimationFrame(fn) : setTimeout(fn, 0);

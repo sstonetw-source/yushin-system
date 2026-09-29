@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260929-6">
+        <link rel="stylesheet" href="styles.css?v=20260930-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -730,6 +730,10 @@
     <!-- ============ 訂單管理系統 ============ -->
     <div id="order-system" class="content-section">
         <div id="orderListPanel">
+        <div class="module-header no-print">
+            <h2>訂單管理</h2>
+            <button onclick="openOrderModal()">＋ 新增訂單</button>
+        </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
         <div class="order-period-toolbar no-print">
             <span id="purchaserOrderFilters" class="order-scope-filters" style="display:none;">
@@ -758,7 +762,6 @@
             <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
             <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
             <button type="button" id="orderHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrderHistorySearch()">載入更多搜尋結果</button>
-            <button onclick="openOrderModal()">＋ 新增訂單</button>
             <details class="order-export-tools">
                 <summary>⬇️ 匯出資料</summary>
                 <div class="order-export-panel">
@@ -808,11 +811,19 @@
 
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
+        <div class="module-header no-print">
+            <h2>採購管理</h2>
+            <button type="button" onclick="openDirectStockPurchase()">＋ 新增採購單</button>
+        </div>
+        <div class="purchase-view-tabs no-print" aria-label="採購頁面">
+            <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購工作</button>
+            <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">全部採購單</button>
+        </div>
         <div id="purchaseWorkCards" class="order-work-cards no-print" aria-label="採購工作狀態">
             <button type="button" class="order-work-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)"><span>待採購</span><strong id="purchaseCountOrdering">0 筆</strong><small id="purchaseAmountOrdering">NT$ 0</small></button>
             <button type="button" class="order-work-card" id="purchase-card-receiving" onclick="switchPurchasingView('receiving', this)"><span>待到貨</span><strong id="purchaseCountReceiving">0 筆</strong><small id="purchaseAmountReceiving">NT$ 0</small></button>
             <button type="button" class="order-work-card" id="purchase-card-dispatch" onclick="switchPurchasingView('dispatch', this)"><span>待打單</span><strong id="purchaseCountDispatch">0 筆</strong><small id="purchaseAmountDispatch">NT$ 0</small></button>
-            <button type="button" class="order-work-card" id="purchase-card-history" onclick="switchPurchasingView('history', this)"><span>訂購單紀錄</span><strong>最近 50 筆</strong><small>正式訂購單</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-completed" onclick="switchPurchasingView('completed', this)"><span>已完成</span><strong id="purchaseCountCompleted">0 筆</strong><small id="purchaseAmountCompleted">NT$ 0</small></button>
         </div>
         <div class="order-period-toolbar no-print" aria-label="採購篩選條件">
             <select id="purchaseSalesFilter" aria-label="採購負責業務" onchange="renderPurchasingView()"><option value="">全部業務</option></select>
@@ -831,11 +842,10 @@
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
                 <button type="button" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">🔄 重新整理</button>
-                <button type="button" onclick="openDirectStockPurchase()">＋ 原廠備貨採購</button>
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
             <div class="table-wrap"><table>
-                <thead><tr><th>訂單日期</th><th>來源訂單</th><th>客戶</th><th>負責業務</th><th>待採購品項</th><th>操作</th></tr></thead>
+                <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待採購品項</th><th>操作</th></tr></thead>
                 <tbody id="purchasePendingBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -861,10 +871,15 @@
             </div>
             <div class="inventory-summary-note">顯示已到貨、尚有待打單數量的訂單。完成出貨單後按「已打單」，訂單即進入可出貨狀態。</div>
             <div class="table-wrap"><table>
-                <thead><tr><th>訂單日期</th><th>訂單</th><th>客戶</th><th>負責業務</th><th>待打單品項</th><th>操作</th></tr></thead>
+                <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待打單品項</th><th>操作</th></tr></thead>
                 <tbody id="purchaseDispatchBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseDispatchMoreBtn" class="btn-secondary" style="display:none" onclick="loadPurchasingDispatchOrders(false)">載入更多（每次 50 筆）</button></div>
+        </div>
+        <div id="purchaseCompletedPanel" style="display:none">
+            <div class="toolbar no-print"><button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">🔄 重新整理</button><span id="purchaseCompletedStatus" role="status"></span></div>
+            <div class="inventory-summary-note">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div>
+            <div class="table-wrap"><table><thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>已完成採購品項</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
         </div>
     </div>
 
@@ -1070,7 +1085,7 @@
 
             <div class="no-print" style="margin-top:16px;text-align:right;border-top:1px solid #eee;padding-top:12px;">
                 <p id="poSaveStatus" role="status" aria-live="polite" style="text-align:left;margin:0 0 10px;"></p>
-                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">確認已訂購／儲存訂購單</button>
+                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">🖨️ 列印 / 存為 PDF（自動同步雲端）</button>
             </div>
         </div>
     </div>
@@ -1403,6 +1418,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260925-1"></script>
-    <script src="app.js?v=20260929-10"></script>
+    <script src="app.js?v=20260930-1"></script>
 </body>
 </html>

@@ -108,7 +108,7 @@ if(typeof window!=='undefined'&&typeof document!=='undefined'){
   window.addEventListener('load',()=>{
     if(document.querySelector('script[data-product-identity-bridge]'))return;
     const script=document.createElement('script');
-    script.src='modules/product-identity-bridge.js?v=20260927-1';
+    script.src='modules/product-identity-bridge.js?v=20260930-1';
     script.async=true;
     script.dataset.productIdentityBridge='1';
     document.head.appendChild(script);

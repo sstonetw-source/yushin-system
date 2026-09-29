@@ -688,3 +688,22 @@ test('order and purchasing sales filters use the same stable staff source', () =
     assert.doesNotMatch(orderFilters, /ordersCache\.map/);
     assert.match(orderFilters, /orderFilterOptionsSignature/);
 });
+
+test('purchasing workspace exposes work and history tabs with four order-derived queues', () => {
+    assert.match(html, /id="purchase-tab-work"[^>]*>採購工作</);
+    assert.match(html, /id="purchase-tab-history"[^>]*>全部採購單</);
+    for (const id of ['purchase-card-ordering','purchase-card-receiving','purchase-card-dispatch','purchase-card-completed']) {
+        assert.match(html, new RegExp(`id="${id}"`));
+    }
+    assert.doesNotMatch(html.match(/id="purchasePendingPanel"[\s\S]*?<\/div>\s*<\/div>/)?.[0] || '', /<th>來源訂單<\/th>/);
+});
+
+test('purchase identity fields stay editable and save-print keeps the secure transaction first', () => {
+    const render = app.match(/function renderPoItemsTable\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+    assert.match(render, /onchange="updateDirectPoText\(\$\{idx\},'itemName'/);
+    assert.match(render, /onchange="onDirectPoCodeChange\(\$\{idx\},this\.value\)"/);
+    assert.match(render, /onchange="updateDirectPoText\(\$\{idx\},'brand'/);
+    assert.match(app, /'🖨️ 列印 \/ 存為 PDF（自動同步雲端）'/);
+    const save = app.match(/window\.printPurchaseOrder = async function\(\) \{[\s\S]*?\n\};/)?.[0] || '';
+    assert.ok(save.indexOf('await commitPromise') < save.indexOf('printSavedPoDocument(poNo, vendorName)'));
+});

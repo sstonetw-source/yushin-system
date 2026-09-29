@@ -366,6 +366,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-scope-filters { display:inline-flex; gap:8px; flex-wrap:wrap; }
 .order-custom-period { display:flex; align-items:center; gap:7px; }
 .order-period-note { flex:1 1 320px; color:#5d6a76; font-size:12px; line-height:1.5; }
+.module-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex:1 1 100%; width:100%; margin:0 0 12px; }
+.module-header h2 { margin:0; color:#203040; font-size:22px; }
+.purchase-view-tabs { display:flex; gap:8px; margin-bottom:12px; border-bottom:1px solid #d5dde5; }
+.purchase-view-tabs button { border-radius:7px 7px 0 0; background:#edf1f5; color:#334; }
+.purchase-view-tabs button.active { background:#003366; color:#fff; }
 #purchasePendingStatus, #purchaseDispatchStatus { overflow-wrap:anywhere; }
 #purchasePendingPanel .table-wrap, #purchaseDispatchPanel .table-wrap { max-width:100%; overflow-x:auto; }
 .order-work-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin:0 0 14px; }
@@ -389,6 +394,9 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 @media (max-width: 900px) { .order-work-cards { grid-template-columns:repeat(3,1fr); } }
 @media (max-width: 520px) { .order-work-cards { grid-template-columns:repeat(2,1fr); } }
 @media (max-width: 640px) {
+    .module-header { align-items:stretch; flex-direction:column; }
+    .module-header h2 { font-size:18px; }
+    .module-header button { width:100%; min-height:44px; }
     .order-scope-filters { flex-direction:column; width:100%; }
     .order-period-toolbar, .order-custom-period { align-items:stretch; flex-direction:column; }
     .order-period-toolbar select, .order-period-toolbar input { width:100%; min-height:44px; }

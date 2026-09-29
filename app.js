@@ -6812,6 +6812,35 @@ function renderPurchasingWorkCards() {
         if (count) count.textContent = `${metrics[category].count} 筆`;
         if (amount) amount.textContent = formatStatsMoney(metrics[category].amount);
     });
+    const completed = purchasingCompletedRows();
+    const completedCount = document.getElementById('purchaseCountCompleted');
+    const completedAmount = document.getElementById('purchaseAmountCompleted');
+    if (completedCount) completedCount.textContent = `${completed.length} 筆`;
+    if (completedAmount) completedAmount.textContent = formatStatsMoney(completed.reduce((sum, row) =>
+        sum + Number(row.item.unitPrice || row.item.salesPrice || 0) * Number(row.item.qty || row.item.orderedQty || 0), 0));
+}
+
+function purchasingCompletedRows() {
+    const rows = [];
+    const filters = purchaseFilterContext();
+    ordersCache.forEach(order => normalizedOrderItems(order).forEach(item => {
+        if (normalizedOrderStatus(order) !== 'normal') return;
+        if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
+        const state = itemDispatchState(order, item);
+        if (Number(item.dispatchPreparedQty || 0) <= 0 || Number(state.pending || 0) > 0) return;
+        if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
+        rows.push({ order, item, state });
+    }));
+    return rows;
+}
+
+function renderPurchasingCompletedOrders() {
+    const body = document.getElementById('purchaseCompletedBody');
+    const status = document.getElementById('purchaseCompletedStatus');
+    if (!body) return;
+    const rows = purchasingCompletedRows();
+    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項">${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openDeliveryModal('${escapeAttr(order.id)}')">查看訂單進度</button></td></tr>`).join('');
+    if (status) status.textContent = rows.length ? `已顯示 ${rows.length} 筆採購已完成品項` : '目前沒有採購已完成品項';
 }
 
 window.renderPurchasingView = function() {
@@ -6819,6 +6848,7 @@ window.renderPurchasingView = function() {
     renderPurchasingWorkCards();
     if (purchasingView === 'ordering') renderPendingPurchaseOrders();
     else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
+    else if (purchasingView === 'completed') renderPurchasingCompletedOrders();
     else renderPoList();
 };
 
@@ -6836,7 +6866,7 @@ window.changePurchasePeriod = function(value) {
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['ordering', 'receiving', 'dispatch', 'history'].includes(view)) return;
+    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     purchasingView = view;
     populatePurchasingFilters();
@@ -6844,12 +6874,18 @@ window.switchPurchasingView = function(view, tab) {
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
+    document.getElementById('purchase-tab-work')?.classList.toggle('active', view !== 'history');
+    document.getElementById('purchase-tab-history')?.classList.toggle('active', view === 'history');
+    const cards = document.getElementById('purchaseWorkCards');
+    if (cards) cards.style.display = view === 'history' ? 'none' : '';
     const pendingPanel=document.getElementById('purchasePendingPanel');
     const poPanel=document.getElementById('poListPanel');
     const dispatchPanel=document.getElementById('purchaseDispatchPanel');
+    const completedPanel=document.getElementById('purchaseCompletedPanel');
     if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
     if(poPanel)poPanel.style.display=(view==='receiving'||view==='history')?'':'none';
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
+    if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
     if (view === 'ordering') {
         const cached=readAppDataCache('purchase-pending');
         if(!pendingPurchaseCache.length && cached?.records?.length) pendingPurchaseCache=cached.records;
@@ -6883,7 +6919,7 @@ window.switchPurchasingView = function(view, tab) {
         poListHasMore = true;
         renderPoList();
         loadPurchaseOrderPage(true).catch(err => console.error('訂購單紀錄首次載入失敗：', err));
-    } else {
+    } else if (view === 'dispatch') {
         const cached=readAppDataCache('purchase-dispatch');
         if(!purchasingDispatchCache.length && cached?.records?.length) purchasingDispatchCache=cached.records;
         renderPurchasingDispatchOrders();
@@ -6894,14 +6930,15 @@ window.switchPurchasingView = function(view, tab) {
                 console.error('待打單首次載入失敗：', err);
             });
         }
-    }
+    } else renderPurchasingCompletedOrders();
 };
 
 async function loadPurchasingDispatchOrders(reset=true) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
     purchasingDispatchError = '';
     purchasingDispatchLoading = true;
-    renderPurchasingDispatchOrders();
+    if (purchasingView === 'completed') renderPurchasingCompletedOrders();
+    else renderPurchasingDispatchOrders();
     try {
         await refreshPurchasingOrderCache(reset);
         purchasingDispatchCache = ordersCache.filter(order =>
@@ -6914,7 +6951,8 @@ async function loadPurchasingDispatchOrders(reset=true) {
         purchasingDispatchError = `待打單清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         purchasingDispatchLoading = false;
-        renderPurchasingDispatchOrders();
+        if (purchasingView === 'completed') renderPurchasingCompletedOrders();
+        else renderPurchasingDispatchOrders();
     }
 }
 
@@ -6939,7 +6977,7 @@ function renderPurchasingDispatchOrders() {
                 ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">已打單 × ${state.pending}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
-            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo||order.id)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
+            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
             body.appendChild(tr);
         });
     });
@@ -7017,7 +7055,7 @@ function renderPendingPurchaseOrders() {
                     : '<span class="order-progress-badge">業務自行訂貨・由負責業務處理</span>')
                 : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}',this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
             const row = document.createElement('tr');
-            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '業務自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
+            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '業務自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
             body.appendChild(row);
         }
     }
@@ -7184,7 +7222,7 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         switchPoCompany(bestPurchaseOrderCompany([order], items, order.company), null, true);
         renderPoItemsTable();
         updatePoModeUI();
-        updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，按「確認已訂購／儲存訂購單」。');
+        updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，即可列印 / 存為 PDF 並自動同步雲端。');
     } catch (err) { alert('無法開啟訂購單：' + err.message); }
     finally { if (button) { button.disabled = false; button.textContent = '產生訂購單'; } }
 };
@@ -7627,10 +7665,10 @@ function updatePoSaveButton() {
     const waitingForNumber = !poEditingId && !poNoReady;
     button.disabled = poSaveInProgress || waitingForNumber;
     button.textContent = poEditingId
-        ? (poIncomingSyncPending ? '重試同步在途庫存' : '🖨️ 列印／輸出 PDF')
+        ? (poIncomingSyncPending ? '重試同步在途庫存' : '🖨️ 列印 / 存為 PDF')
         : waitingForNumber
             ? (poNoLoading ? '產生單號中…' : '單號未就緒')
-            : poDirectStockMode ? '儲存備貨訂購單' : '確認已訂購／儲存訂購單';
+            : '🖨️ 列印 / 存為 PDF（自動同步雲端）';
 }
 
 function receivedQuantityForPoItem(po, itemIndex) {
@@ -8527,7 +8565,7 @@ function updatePoModeUI() {
     if (hint) hint.textContent = poEditingId
         ? '重新列印會使用已儲存的訂購單內容；畫面修改不會覆蓋原單。'
         : poDirectStockMode
-            ? '原廠備貨採購：可一次加入多個品項；完成後會正式產生訂購單並列入在途庫存。'
+            ? '新增採購單：可一次加入多個品項；完成後會正式產生訂購單並列入在途庫存。'
             : '訂單採購：品項來自業務訂單，可調整採購數量與進貨單價。';
     updatePoSaveButton();
 }
@@ -8673,9 +8711,9 @@ function renderPoItemsTable() {
             `;
         } else {
             tr.innerHTML = `
-                <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.itemName)}</td>
-                <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.itemCode)}</td>
-                <td style="border:1px solid #999;padding:4px;">${escapeHtml(item.brand)}</td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" value="${escapeAttr(item.itemName||'')}" placeholder="品名" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'itemName',this.value)"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" list="poBrandList" value="${escapeAttr(item.brand||'')}" placeholder="廠牌" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'brand',this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" step="1" value="${item.qty}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'qty', this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.01" step="0.01" value="${missingPrice ? '' : item.unitPrice}" placeholder="請填進貨單價" class="${missingPrice ? 'po-missing-price' : ''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'unitPrice', this.value)">${missingPrice ? '<small class="po-missing-price-hint">缺少成本</small>' : ''}</td>
                 <td style="border:1px solid #999;padding:4px;text-align:right;">${(item.qty * item.unitPrice).toFixed(0)}</td>
