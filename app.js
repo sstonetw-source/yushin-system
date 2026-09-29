@@ -7015,7 +7015,7 @@ function renderPendingPurchaseOrders() {
                 ? (canBusinessSelfOrder(order)
                     ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記業務自行訂貨</button>`
                     : '<span class="order-progress-badge">業務自行訂貨・由負責業務處理</span>')
-                : `<button type="button" class="btn-small" onclick="openManualPurchaseOrder('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
+                : `<button type="button" class="btn-small" onclick="openManualPurchaseOrder('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
             const row = document.createElement('tr');
             row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '業務自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
             body.appendChild(row);
@@ -7147,10 +7147,12 @@ window.saveManualPurchaseOrder = async function() {
         if (savedSupply && !supplyReceivingCache.some(row => row.id === savedSupply.id)) supplyReceivingCache.unshift(savedSupply);
         writeAppDataCache('orders', ordersCache);
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         closeManualPurchaseOrder();
         manualPurchaseDraftId = '';
-        alert(`已訂購 ${qty}：${internalNo}。採購頁「待到貨」可追蹤，正式訂購單可視需要另行輸出。`);
+        if (document.getElementById('purchasing-system')?.classList.contains('active')) {
+            switchPurchasingView('receiving', document.getElementById('purchase-card-receiving'));
+        }
+        alert(`已訂購 ${qty}：${internalNo}。已移至採購頁「待到貨」，正式訂購單可視需要另行輸出。`);
     } catch (err) {
         status.textContent = '未完成訂購紀錄：' + err.message;
         alert('記錄已訂購失敗：' + err.message);

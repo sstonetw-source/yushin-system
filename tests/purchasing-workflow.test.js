@@ -369,7 +369,7 @@ test('manual ordered action records supply and source item only once after an un
         normalizedOrderItems:record=>record.items,orderWorkIndexFields:()=>({workCategories:['arrival']}),
         ordersCache:[],supplyReceivingCache:[],purchasingView:'ordering',
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},renderOrdersList:()=>{},
-        renderPendingPurchaseOrders:()=>{},alert:()=>{}
+        switchPurchasingView:()=>{},renderPendingPurchaseOrders:()=>{},alert:()=>{}
     });
     vm.runInContext(source,context);
     await context.window.saveManualPurchaseOrder();
@@ -381,6 +381,15 @@ test('manual ordered action records supply and source item only once after an un
     await context.window.saveManualPurchaseOrder();
     assert.equal(documentIds,1,'retry must reuse the existing supply ID');
     assert.equal(updates,1,'retry must not increase ordered quantity twice');
+});
+
+test('manual ordered action moves the active purchasing page to receiving', () => {
+    const actionSource = app.match(/function renderPendingPurchaseOrders\(\) \{[\s\S]*?\n\}/)?.[0];
+    const saveSource = app.match(/window\.saveManualPurchaseOrder = async function\(\) \{[\s\S]*?\n\};/)?.[0];
+    assert.ok(actionSource && saveSource);
+    assert.match(actionSource, />登記已訂購<\/button>/);
+    assert.match(saveSource, /switchPurchasingView\('receiving', document\.getElementById\('purchase-card-receiving'\)\)/);
+    assert.match(saveSource, /已移至採購頁「待到貨」/);
 });
 
 test('loading another receiving page retains source status for earlier PO rows', async () => {
