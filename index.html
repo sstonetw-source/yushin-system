@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260929-3">
+        <link rel="stylesheet" href="styles.css?v=20260929-4">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -727,29 +727,12 @@
     <!-- ============ 訂單管理系統 ============ -->
     <div id="order-system" class="content-section">
         <div id="orderListPanel">
-        <div class="toolbar no-print order-primary-toolbar">
-            <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" style="width:260px;" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
-            <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
-            <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
-            <button type="button" id="orderHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrderHistorySearch()">載入更多搜尋結果</button>
-            <span id="purchaserOrderFilters" style="display:none;">
-                <select id="orderSalesFilter" onchange="renderOrdersList()"><option value="">全部業務</option></select>
-                <select id="orderBrandFilter" onchange="renderOrdersList()"><option value="">全部廠牌</option></select>
-            </span>
-            <button onclick="openOrderModal()">＋ 新增訂單</button>
-            <details class="order-export-tools">
-                <summary>⬇️ 匯出資料</summary>
-                <div class="order-export-panel">
-                    <label for="exportStartDate">訂單日期</label>
-                    <input type="date" id="exportStartDate">
-                    <span>至</span>
-                    <input type="date" id="exportEndDate" aria-label="匯出結束日期">
-                    <button type="button" onclick="exportOrdersByDate()">匯出 Excel（供採購下單）</button>
-                </div>
-            </details>
-            <button class="btn-secondary" onclick="loadOrdersFromCloud()">🔄 重新整理</button>
-        </div>
+        <div id="orderWorkCards" class="order-work-cards no-print"></div>
         <div class="order-period-toolbar no-print">
+            <span id="purchaserOrderFilters" class="order-scope-filters" style="display:none;">
+                <select id="orderSalesFilter" aria-label="訂單負責業務" onchange="renderOrdersList()"><option value="">全部業務</option></select>
+                <select id="orderBrandFilter" aria-label="訂單廠牌" onchange="renderOrdersList()"><option value="">全部廠牌</option></select>
+            </span>
             <label for="orderPeriodPreset">統計期間</label>
             <select id="orderPeriodPreset" onchange="changeOrderPeriod(this.value)">
                 <option value="this-month">本月</option>
@@ -767,7 +750,24 @@
             </div>
             <span class="order-period-note">訂單進度依訂單日期；待報帳包含跨年度；已完成依開發票日期。</span>
         </div>
-        <div id="orderWorkCards" class="order-work-cards no-print"></div>
+        <div class="toolbar no-print order-primary-toolbar">
+            <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
+            <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
+            <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
+            <button type="button" id="orderHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrderHistorySearch()">載入更多搜尋結果</button>
+            <button onclick="openOrderModal()">＋ 新增訂單</button>
+            <details class="order-export-tools">
+                <summary>⬇️ 匯出資料</summary>
+                <div class="order-export-panel">
+                    <label for="exportStartDate">訂單日期</label>
+                    <input type="date" id="exportStartDate">
+                    <span>至</span>
+                    <input type="date" id="exportEndDate" aria-label="匯出結束日期">
+                    <button type="button" onclick="exportOrdersByDate()">匯出 Excel（供採購下單）</button>
+                </div>
+            </details>
+            <button class="btn-secondary" onclick="loadOrdersFromCloud()">🔄 重新整理</button>
+        </div>
         <table id="ordersTable">
             <thead>
                 <tr>
@@ -840,7 +840,7 @@
         <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
         <div id="poListPanel" style="display:none">
             <div class="toolbar no-print">
-                <input type="text" id="poListSearch" placeholder="搜尋全部訂購單：單號 / 廠商 / 採購人員" style="width:280px;" oninput="schedulePurchaseOrderHistorySearch()">
+                <input type="text" id="poListSearch" placeholder="搜尋全部訂購單：單號 / 廠商 / 採購人員" oninput="schedulePurchaseOrderHistorySearch()">
                 <span id="poHistorySearchStatus" role="status"></span>
                 <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
             </div>

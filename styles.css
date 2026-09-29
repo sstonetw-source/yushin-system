@@ -282,8 +282,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;
 }
 .order-primary-toolbar { position:relative; }
-.order-primary-toolbar #purchaserOrderFilters { gap:8px; align-items:center; }
-.order-primary-toolbar #purchaserOrderFilters:not([style*="display:none"]):not([style*="display: none"]) { display:flex !important; }
+#orderSearch, #poListSearch { flex:1 1 260px; max-width:440px; min-width:0; }
 .order-export-tools { position:relative; }
 .order-export-tools > summary { list-style:none; padding:8px 16px; border-radius:4px; background:#003366; color:#fff; font-size:14px; cursor:pointer; user-select:none; }
 .order-export-tools > summary::-webkit-details-marker { display:none; }
@@ -364,11 +363,12 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-period-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 10px; padding:10px 12px; border:1px solid #d8e4f2; border-radius:7px; background:#f7faff; }
 .order-period-toolbar label { color:#334; font-size:13px; font-weight:bold; }
 .order-period-toolbar select, .order-period-toolbar input { min-height:36px; padding:6px 8px; border:1px solid #bfcbd7; border-radius:5px; box-sizing:border-box; }
+.order-scope-filters { display:inline-flex; gap:8px; flex-wrap:wrap; }
 .order-custom-period { display:flex; align-items:center; gap:7px; }
 .order-period-note { flex:1 1 320px; color:#5d6a76; font-size:12px; line-height:1.5; }
 #purchasePendingStatus, #purchaseDispatchStatus { overflow-wrap:anywhere; }
 #purchasePendingPanel .table-wrap, #purchaseDispatchPanel .table-wrap { max-width:100%; overflow-x:auto; }
-.order-work-cards { display:grid; grid-template-columns:repeat(7,minmax(105px,1fr)); gap:8px; margin:0 0 14px; }
+.order-work-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin:0 0 14px; }
 .order-work-card { border:1px solid #d5dde5; background:#f7f9fb; color:#334; border-radius:8px; padding:10px 8px; text-align:left; min-width:0; }
 .order-work-card:hover { background:#edf3f8; }
 .order-work-card.active { background:#003366; border-color:#003366; color:#fff; }
@@ -389,6 +389,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 @media (max-width: 900px) { .order-work-cards { grid-template-columns:repeat(3,1fr); } }
 @media (max-width: 520px) { .order-work-cards { grid-template-columns:repeat(2,1fr); } }
 @media (max-width: 640px) {
+    .order-scope-filters { flex-direction:column; width:100%; }
     .order-period-toolbar, .order-custom-period { align-items:stretch; flex-direction:column; }
     .order-period-toolbar select, .order-period-toolbar input { width:100%; min-height:44px; }
     .order-period-note { flex-basis:auto; }
@@ -804,7 +805,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         width: 100%;
         box-sizing: border-box;
     }
-    .order-primary-toolbar #purchaserOrderFilters { width:100%; flex-direction:column; }
+    #orderSearch, #poListSearch { max-width:none; flex-basis:auto; }
     .order-export-tools { width:100%; }
     .order-export-tools > summary { text-align:center; }
     .order-export-panel { position:static; display:grid; grid-template-columns:1fr; width:auto; max-width:none; margin-top:8px; box-shadow:none; }
