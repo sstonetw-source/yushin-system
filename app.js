@@ -6547,7 +6547,7 @@ window.renderOrdersList = function() {
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
                             ${selfOrderActionHtml(o)}
-                            ${canCreatePurchaseOrderCapability() && canAccessPage('orders.po') && pendingPurchaseLines(o).length ? `<button type="button" onclick="openOrderPurchaseDraft('${escapeAttr(o.id)}')">案件訂購</button>` : ''}
+                            ${canCreatePurchaseOrderCapability() && canAccessPage('orders.po') && pendingPurchaseLines(o).length ? `<button type="button" onclick="openOrderPurchaseDraft('${escapeAttr(o.id)}')">已訂購</button>` : ''}
                             ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
@@ -6866,7 +6866,7 @@ function renderPendingPurchaseOrders() {
         for (const item of items) {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) continue;
             const row = document.createElement('tr');
-            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td data-th="操作"><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">案件訂購</button></td>`;
+            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td data-th="操作"><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">已訂購</button></td>`;
             body.appendChild(row);
         }
     }
@@ -6962,10 +6962,10 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         generatePoNo();
         renderPoItemsTable();
         updatePoModeUI();
-        updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，按「儲存案件訂購單」。');
+        updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，按「確認已訂購／儲存訂購單」。');
         document.getElementById('poModalOverlay').classList.add('active');
-    } catch (err) { alert('無法開啟案件訂購：' + err.message); }
-    finally { if (button) { button.disabled = false; button.textContent = '案件訂購'; } }
+    } catch (err) { alert('無法開啟訂購單：' + err.message); }
+    finally { if (button) { button.disabled = false; button.textContent = '已訂購'; } }
 };
 
 // 「採購訂單」列出所有已經產生過的訂購單紀錄（不分是誰產生的，只要是採購／管理員都看得到全部）
@@ -7321,7 +7321,7 @@ function updatePoSaveButton() {
     if (!button) return;
     button.textContent = poEditingId
         ? (poIncomingSyncPending ? '重試同步在途庫存' : '🖨️ 列印／輸出 PDF')
-        : poDirectStockMode ? '儲存備貨訂購單' : '儲存案件訂購單';
+        : poDirectStockMode ? '儲存備貨訂購單' : '確認已訂購／儲存訂購單';
 }
 
 function receivedQuantityForPoItem(po, itemIndex) {

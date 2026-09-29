@@ -1518,7 +1518,7 @@ test('case purchasing is a separate optional order action with visible save conf
     const end = appSource.indexOf('window.retryOrderInventoryReservation', start);
     const actions = appSource.slice(start, end);
     assert.match(actions, /pendingPurchaseLines\(o\)\.length \? `<button type="button" onclick="openOrderPurchaseDraft/);
-    assert.match(actions, /案件訂購/);
+    assert.match(actions, /已訂購/);
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
