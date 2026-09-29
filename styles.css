@@ -616,6 +616,10 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     body.printing-po #poItemsTable th:nth-child(4) { width: 10% !important; }
     body.printing-po #poItemsTable th:nth-child(5) { width: 16% !important; }
     body.printing-po #poItemsTable th:nth-child(6) { width: 18% !important; }
+    /* no-print 的第 7 欄在 iOS 列印引擎中仍可能參與 table-layout 計算；
+       直接從訂購單列印表格移除，避免右側小計／總計被裁掉。 */
+    body.printing-po #poItemsTable th.no-print,
+    body.printing-po #poItemsTable td.no-print { display: none !important; width: 0 !important; padding: 0 !important; border: 0 !important; }
     body.printing-po #poItemsTable input {
         width: 100% !important;
         min-width: 0 !important;
