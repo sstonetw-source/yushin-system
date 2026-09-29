@@ -809,10 +809,10 @@
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
         <div id="purchaseWorkCards" class="order-work-cards no-print" aria-label="採購工作狀態">
-            <button type="button" class="order-work-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)"><span>待採購</span><strong id="purchaseCountOrdering">—</strong></button>
-            <button type="button" class="order-work-card" id="purchase-card-receiving" onclick="switchPurchasingView('receiving', this)"><span>待到貨</span><strong id="purchaseCountReceiving">—</strong></button>
-            <button type="button" class="order-work-card" id="purchase-card-dispatch" onclick="switchPurchasingView('dispatch', this)"><span>待打單</span><strong id="purchaseCountDispatch">—</strong></button>
-            <button type="button" class="order-work-card" id="purchase-card-history" onclick="switchPurchasingView('history', this)"><span>訂購單紀錄</span><strong>最近 50 筆</strong></button>
+            <button type="button" class="order-work-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)"><span>待採購</span><strong id="purchaseCountOrdering">0 筆</strong><small id="purchaseAmountOrdering">NT$ 0</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-receiving" onclick="switchPurchasingView('receiving', this)"><span>待到貨</span><strong id="purchaseCountReceiving">0 筆</strong><small id="purchaseAmountReceiving">NT$ 0</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-dispatch" onclick="switchPurchasingView('dispatch', this)"><span>待打單</span><strong id="purchaseCountDispatch">0 筆</strong><small id="purchaseAmountDispatch">NT$ 0</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-history" onclick="switchPurchasingView('history', this)"><span>訂購單紀錄</span><strong>最近 50 筆</strong><small>正式訂購單</small></button>
         </div>
         <div class="order-period-toolbar no-print" aria-label="採購篩選條件">
             <select id="purchaseSalesFilter" aria-label="採購負責業務" onchange="renderPurchasingView()"><option value="">全部業務</option></select>
@@ -826,7 +826,7 @@
                 <span>至</span>
                 <input type="date" id="purchasePeriodEnd" aria-label="採購統計結束日期" onchange="renderPurchasingView()">
             </div>
-            <span class="order-period-note">待採購、待打單依來源訂單日期；待到貨、訂購單紀錄依訂購日期。採購待辦僅計需採購人員處理的品項。</span>
+            <span class="order-period-note">待採購、待到貨、待打單與訂單頁共用同一套品項狀態與來源訂單日期；訂購單紀錄另外依正式訂購日期查詢。</span>
         </div>
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
