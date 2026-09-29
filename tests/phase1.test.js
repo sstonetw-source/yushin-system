@@ -1527,8 +1527,10 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
     assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?訂購單 \$\{poNo\} 已建立並儲存/);
-    assert.match(save, /列印預覽已開啟/);
-    assert.match(save, /printSavedPoDocument\(poNo, vendorName\);[\s\S]*?await commitPromise/);
+    // PO 會同時更新來源訂單與採購資料；核心 transaction 必須先成功，才可開啟可對外使用的列印文件。
+    assert.match(save, /await commitPromise;[\s\S]*?printSavedPoDocument\(poNo, vendorName\);/);
+    assert.doesNotMatch(save, /printSavedPoDocument\(poNo, vendorName\);[\s\S]*?await commitPromise/);
+    // 在途庫存仍維持背景同步，不阻塞列印。
     assert.doesNotMatch(save, /await registerPurchaseIncoming\(poDocumentId, poRecord, previousPoForIncoming\);[\s\S]*?printSavedPoDocument\(poNo, vendorName\)/);
     assert.match(indexSource, /id="poSaveStatus" role="status"/);
 });
