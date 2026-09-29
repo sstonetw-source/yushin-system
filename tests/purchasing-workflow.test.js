@@ -62,7 +62,10 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
         })
     };
     let sequence = 0;
-    db.collection = name => ({ doc: id => ({key:`${name}/${id ?? ++sequence}`}) });
+    db.collection = name => ({ doc: id => {
+        const key = `${name}/${id ?? ++sequence}`;
+        return {key, set:async data => { docs.set(key, {...docs.get(key), ...data}); }};
+    }});
     const register = vm.runInNewContext(`${source}\nregisterPurchaseIncoming`, {
         db,
         purchaseItemsFromSavedPo: po => po.items,
@@ -87,14 +90,15 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
     assert.equal(docs.get('inventory/P2').incoming,2);
     assert.equal(docs.get('warehouseStocks/W1__P1').incoming,3);
     assert.equal(docs.get('pendingInventoryItems/W1__P1').incomingQty,3);
+    assert.equal(docs.get('purchaseOrders/PO1').incomingRegistrationStatus,'completed');
     assert.equal(records.length,2);
 });
 
-test('retrying PO incoming registration gives feedback and ignores a second tap', async () => {
+test('saved PO prints on a separate tap; pending inventory sync retries once', async () => {
     const start = app.indexOf('window.printPurchaseOrder = async function()');
     const end = app.indexOf('    if (poItems.length === 0)', start);
     assert.ok(start >= 0 && end > start);
-    const button = { disabled:false, innerText:'🖨️ 產生訂購單／輸出 PDF' };
+    const button = { disabled:false, innerText:'🖨️ 列印／輸出 PDF' };
     const savedPo = { id:'PO1', poNo:'PO1', vendorName:'供應商', incomingRegistrationVersion:1 };
     let releaseRegistration;
     let registrationCalls = 0;
@@ -105,9 +109,14 @@ test('retrying PO incoming registration gives feedback and ignores a second tap'
         canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
         document:{getElementById:()=>button},
         registerPurchaseIncoming:async () => { registrationCalls++; await new Promise(resolve => { releaseRegistration=resolve; }); },
-        reprintPurchaseOrder:()=>{}, printSavedPoDocument:()=>{printCalls++;}, alert:message=>alerts.push(message)
+        printSavedPoDocument:()=>{printCalls++;}, updatePoSaveStatus:message=>alerts.push(message),
+        updatePoSaveButton:()=>{button.innerText='🖨️ 列印／輸出 PDF';}, alert:message=>alerts.push(message)
     });
-    vm.runInContext(`let poSaveInProgress=false;\n${app.slice(start,end)}\n}`, context);
+    vm.runInContext(`let poSaveInProgress=false; let poIncomingSyncPending=false;\n${app.slice(start,end)}\n}`, context);
+    await context.window.printPurchaseOrder();
+    assert.equal(printCalls, 1);
+    assert.equal(registrationCalls, 0);
+    vm.runInContext('poIncomingSyncPending=true', context);
     const first = context.window.printPurchaseOrder();
     assert.equal(button.disabled, true);
     assert.match(button.innerText, /同步在途庫存中/);
@@ -117,13 +126,28 @@ test('retrying PO incoming registration gives feedback and ignores a second tap'
     await first;
     assert.equal(printCalls, 1);
     assert.equal(button.disabled, false);
-    assert.deepEqual(alerts, []);
+    assert.match(alerts[0], /同步完成/);
+    await context.window.printPurchaseOrder();
+    assert.equal(printCalls, 2);
 
+    vm.runInContext('poIncomingSyncPending=true', context);
     context.registerPurchaseIncoming = async () => { throw new Error('網路中斷'); };
     await context.window.printPurchaseOrder();
-    assert.equal(printCalls, 1);
+    assert.equal(printCalls, 2);
     assert.equal(button.disabled, false);
-    assert.match(alerts[0], /在途庫存同步尚未完成.*網路中斷/);
+    assert.match(alerts.at(-1), /在途庫存同步仍未完成.*網路中斷/);
+});
+
+test('PO print opens directly from the user action', () => {
+    const start = app.indexOf('function printSavedPoDocument(poNo, vendorName)');
+    const end = app.indexOf('\n}\n', start) + 2;
+    const calls = [];
+    const doc = { title:'訂單', body:{classList:{add:name=>calls.push(name)}} };
+    const context = vm.createContext({ document:doc, window:{ print:()=>calls.push('print') } });
+    vm.runInContext(app.slice(start,end),context);
+    context.printSavedPoDocument('PO-1','供應商');
+    assert.deepEqual(calls,['printing-po','print']);
+    assert.equal(doc.title,'PO-1＋供應商');
 });
 
 

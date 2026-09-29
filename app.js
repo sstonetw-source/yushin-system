@@ -6547,6 +6547,7 @@ window.renderOrdersList = function() {
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
                             ${selfOrderActionHtml(o)}
+                            ${canCreatePurchaseOrderCapability() && canAccessPage('orders.po') && pendingPurchaseLines(o).length ? `<button type="button" onclick="openOrderPurchaseDraft('${escapeAttr(o.id)}')">案件訂購</button>` : ''}
                             ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
@@ -6865,7 +6866,7 @@ function renderPendingPurchaseOrders() {
         for (const item of items) {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) continue;
             const row = document.createElement('tr');
-            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td data-th="操作"><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">建立訂購單</button></td>`;
+            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td data-th="操作"><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">案件訂購</button></td>`;
             body.appendChild(row);
         }
     }
@@ -6949,6 +6950,7 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         if (!items.length) throw new Error('此品項已無待採購數量');
         poDirectStockMode = false;
         poEditingId = null;
+        poIncomingSyncPending = false;
         poItems = items;
         poAllItems = items;
         populatePoVendorSuggestions();
@@ -6960,9 +6962,10 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         generatePoNo();
         renderPoItemsTable();
         updatePoModeUI();
+        updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，按「儲存案件訂購單」。');
         document.getElementById('poModalOverlay').classList.add('active');
-    } catch (err) { alert('無法建立訂購單：' + err.message); }
-    finally { if (button) { button.disabled = false; button.textContent = '建立訂購單'; } }
+    } catch (err) { alert('無法開啟案件訂購：' + err.message); }
+    finally { if (button) { button.disabled = false; button.textContent = '案件訂購'; } }
 };
 
 // 「採購訂單」列出所有已經產生過的訂購單紀錄（不分是誰產生的，只要是採購／管理員都看得到全部）
@@ -7263,6 +7266,7 @@ window.reprintPurchaseOrder = function(poId) {
     poItems = purchaseItemsFromSavedPo(po);
     poAllItems = poItems;
     poEditingId = po.id;
+    poIncomingSyncPending = po.incomingRegistrationVersion === 1 && po.incomingRegistrationStatus !== 'completed';
     switchPoCompany(po.company || 'yushin', null, true);
 
     document.getElementById('poVendorName').value = po.vendorName || '';
@@ -7272,6 +7276,10 @@ window.reprintPurchaseOrder = function(poId) {
 
     renderPoItemsTable();
     updatePoModeUI();
+    updatePoSaveStatus(poIncomingSyncPending
+        ? `訂購單 ${po.poNo || po.id} 已儲存，請先重試同步在途庫存。`
+        : `已儲存訂購單 ${po.poNo || po.id}。按下方按鈕列印或輸出 PDF。`);
+    updatePoSaveButton();
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
@@ -7299,6 +7307,22 @@ let poCurrentCompany = 'yushin';
 let poEditingId = null;
 let poSaveInProgress = false;
 let poDirectStockMode = false;
+let poIncomingSyncPending = false;
+
+function updatePoSaveStatus(message = '', isError = false) {
+    const status = document.getElementById('poSaveStatus');
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = isError ? '#b42318' : '#12502b';
+}
+
+function updatePoSaveButton() {
+    const button = document.getElementById('printPurchaseOrderBtn');
+    if (!button) return;
+    button.textContent = poEditingId
+        ? (poIncomingSyncPending ? '重試同步在途庫存' : '🖨️ 列印／輸出 PDF')
+        : poDirectStockMode ? '儲存備貨訂購單' : '儲存案件訂購單';
+}
 
 function receivedQuantityForPoItem(po, itemIndex) {
     return (Array.isArray(po?.receiptRecords) ? po.receiptRecords : [])
@@ -7400,6 +7424,10 @@ async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
         });
         if(warehouseId) invalidateWarehouseStockCache(key,warehouseId);
     }
+    await db.collection('purchaseOrders').doc(poId).set({
+        incomingRegistrationStatus:'completed', incomingRegistrationAt:new Date().toISOString()
+    }, { merge:true });
+    poRecord.incomingRegistrationStatus = 'completed';
 }
 
 let poReceiptTargetId = '';
@@ -8073,6 +8101,7 @@ window.openDirectStockPurchase = async function() {
     await loadSupplierWarehouseMasters();
     poDirectStockMode = true;
     poEditingId = null;
+    poIncomingSyncPending = false;
     poAllItems = [];
     poItems = [];
     populatePoVendorSuggestions();
@@ -8084,6 +8113,7 @@ window.openDirectStockPurchase = async function() {
     generatePoNo();
     addDirectPoItem();
     updatePoModeUI();
+    updatePoSaveStatus('這張備貨訂購單尚未建立。確認品項、廠商與單價後再儲存。');
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
@@ -8150,6 +8180,7 @@ function updatePoModeUI() {
         : poDirectStockMode
             ? '原廠備貨採購：可一次加入多個品項；完成後會正式產生訂購單並列入在途庫存。'
             : '訂單採購：品項來自業務訂單，可調整採購數量與進貨單價。';
+    updatePoSaveButton();
 }
 
 
@@ -8331,7 +8362,8 @@ function printSavedPoDocument(poNo, vendorName) {
     document.title = `${poNo}＋${vendorName}`.replace(/[\\/:*?"<>|]/g, '_').replace(/[\u0000-\u001F]/g, '').trim();
     document.body.classList.add('printing-po');
     window._poOriginalTitle = originalTitle;
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+    // iPhone requires the print dialog to open in the user's tap handler.
+    window.print();
 }
 
 window.printPurchaseOrder = async function() {
@@ -8340,20 +8372,28 @@ window.printPurchaseOrder = async function() {
     if (poEditingId) {
         const savedPo = poListCache.find(po => po.id === poEditingId);
         if (!savedPo) { alert('找不到已儲存的訂購單，請重新整理。'); return; }
+        if (!poIncomingSyncPending) {
+            try { printSavedPoDocument(savedPo.poNo, savedPo.vendorName); }
+            catch (err) {
+                document.body.classList.remove('printing-po');
+                if (window._poOriginalTitle !== undefined) document.title = window._poOriginalTitle;
+                updatePoSaveStatus('無法開啟列印視窗：' + err.message, true);
+            }
+            return;
+        }
         const button = document.getElementById('printPurchaseOrderBtn');
         poSaveInProgress = true;
         if (button) { button.disabled = true; button.innerText = '同步在途庫存中…'; }
         try {
-            if (savedPo.incomingRegistrationVersion === 1) {
-                await registerPurchaseIncoming(savedPo.id, savedPo);
-            }
-            reprintPurchaseOrder(poEditingId);
-            printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
+            await registerPurchaseIncoming(savedPo.id, savedPo);
+            poIncomingSyncPending = false;
+            updatePoSaveStatus(`訂購單 ${savedPo.poNo} 已儲存，在途庫存同步完成。請再按「列印／輸出 PDF」。`);
         } catch (err) {
-            alert('在途庫存同步尚未完成，請稍後重新開啟訂購單重試：' + err.message);
+            updatePoSaveStatus(`訂購單已儲存，在途庫存同步仍未完成：${err.message}`, true);
         } finally {
             poSaveInProgress = false;
-            if (button) { button.disabled = false; button.innerText = '🖨️ 產生訂購單／輸出 PDF'; }
+            if (button) button.disabled = false;
+            updatePoSaveButton();
         }
         return;
     }
@@ -8415,6 +8455,7 @@ window.printPurchaseOrder = async function() {
         receiptStatus: 'pending',
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
         incomingRegistrationVersion:1,
+        incomingRegistrationStatus:'pending',
         items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
         ...netAmountMetadata(poNetTotal),
         createdAt: new Date().toISOString(),
@@ -8427,6 +8468,7 @@ window.printPurchaseOrder = async function() {
         button.disabled = true;
         button.innerText = '檢查並儲存中…';
     }
+    updatePoSaveStatus('正在建立訂購單…');
     let poCommitted = false;
     try {
         const poDocumentId = poNo;
@@ -8499,24 +8541,29 @@ window.printPurchaseOrder = async function() {
         if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
+        poIncomingSyncPending = true;
+        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存。正在同步在途庫存…`);
         renderPoList();
 
         await registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming);
+        poIncomingSyncPending = false;
+        savedPo.incomingRegistrationStatus = 'completed';
         if (purchasingView === 'ordering') loadPendingPurchaseOrders(true);
-
-        // 雲端確認沒有重複下單後才開啟列印。
-        printSavedPoDocument(poNo, vendorName);
+        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存，可在「採購訂單」查看。按下方按鈕列印或輸出 PDF。`);
     } catch (err) {
         console.error('儲存訂購單紀錄失敗：', err);
+        updatePoSaveStatus(poCommitted
+            ? `訂購單已儲存，但在途庫存同步未完成：${err.message}`
+            : `訂購單未建立：${err.message}`, true);
         alert(poCommitted
-            ? '訂購單已儲存，但後續在途庫存同步或列印未完成。請重新開啟同一張訂購單重試，不要另建一張：' + err.message
+            ? '訂購單已儲存，但在途庫存同步未完成。請在這張訂購單按「重試同步在途庫存」，不要另建一張：' + err.message
             : '無法產生訂購單：' + err.message);
     } finally {
         poSaveInProgress = false;
         if (button) {
             button.disabled = false;
-            button.innerText = '🖨️ 產生訂購單／輸出 PDF';
         }
+        updatePoSaveButton();
     }
 };
 

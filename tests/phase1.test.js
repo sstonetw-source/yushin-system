@@ -1513,6 +1513,21 @@ test('stock replenishment always uses a valid warehouse PO path', () => {
     assert.match(source, /db\.collection\('supplyOrders'\)/);
 });
 
+test('case purchasing is a separate optional order action with visible save confirmation', () => {
+    const start = appSource.indexOf('window.renderOrdersList = function()');
+    const end = appSource.indexOf('window.retryOrderInventoryReservation', start);
+    const actions = appSource.slice(start, end);
+    assert.match(actions, /pendingPurchaseLines\(o\)\.length \? `<button type="button" onclick="openOrderPurchaseDraft/);
+    assert.match(actions, /案件訂購/);
+    const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
+    const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
+    const save = appSource.slice(saveStart, saveEnd);
+    assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?訂購單 \$\{poNo\} 已建立並儲存/);
+    assert.match(save, /按下方按鈕列印或輸出 PDF/);
+    assert.doesNotMatch(save, /await registerPurchaseIncoming\(poDocumentId, poRecord, previousPoForIncoming\);[\s\S]*?printSavedPoDocument\(poNo, vendorName\)/);
+    assert.match(indexSource, /id="poSaveStatus" role="status"/);
+});
+
 
 test('batch receipt reports partial success and requires a warehouse', () => {
     assert.match(appSource, /尚未指定入庫倉庫/);
