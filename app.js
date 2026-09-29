@@ -5940,8 +5940,13 @@ window.saveSelfOrder = async function() {
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(savedOrder),updatedAt:now});
         });
         const index=ordersCache.findIndex(row=>row.id===orderId);
-        if(index>=0)ordersCache[index]={id:orderId,...savedOrder};
-        closeSelfOrderModal();renderOrdersList();
+        const committedOrder={id:orderId,...savedOrder};
+        if(index>=0)ordersCache[index]=committedOrder;else ordersCache.unshift(committedOrder);
+        syncOrderIntoPurchasingCaches(committedOrder);
+        writeAppDataCache('orders', ordersCache);
+        closeSelfOrderModal();
+        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         alert(`自行訂貨已建立：${internalNo}`);
     }catch(err){alert('自行訂貨失敗：'+err.message);}
     finally{button.disabled=false;button.innerText='確認自行訂貨';}
@@ -6655,6 +6660,8 @@ let purchasingDispatchError = '';
 
 const purchasingViewLoaded = new Set();
 
+let purchasingFilterOptionsSignature = '';
+
 function populatePurchasingFilters() {
     const salesSelect = document.getElementById('purchaseSalesFilter');
     const brandSelect = document.getElementById('purchaseBrandFilter');
@@ -6664,13 +6671,21 @@ function populatePurchasingFilters() {
     const sales = [...new Set(salesList.map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     const brands = getPriceListBrands(true);
-    salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
-        `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
-    brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
-        `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
-        + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+    const signature = JSON.stringify([sales, brands]);
+
+    // renderPurchasingView 會在切頁、篩選、背景更新時反覆呼叫；選項沒變就不要重建整個 select DOM。
+    if (signature !== purchasingFilterOptionsSignature) {
+        salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
+            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+        brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
+            `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+            + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+        purchasingFilterOptionsSignature = signature;
+    }
     if (sales.includes(salesValue)) salesSelect.value = salesValue;
+    else if (salesSelect.value && !sales.includes(salesSelect.value)) salesSelect.value = '';
     if (brands.includes(brandValue) || brandValue === OTHER_BRAND_OPTION_KEY) brandSelect.value = brandValue;
+    else if (brandSelect.value && !brands.includes(brandSelect.value)) brandSelect.value = '';
 }
 
 function purchasePeriodRange() {
@@ -6682,20 +6697,62 @@ function purchasePeriodRange() {
     return unifiedPeriodRange(preset);
 }
 
-function purchaseLineMatchesFilters(date, salesName, brand) {
+function purchaseFilterContext() {
     const { start, end } = purchasePeriodRange();
-    const businessDate = normalizeBusinessDate(date);
-    if ((start || end) && (!businessDate || (start && businessDate < start) || (end && businessDate > end))) return false;
-    const selectedSales = document.getElementById('purchaseSalesFilter')?.value || '';
-    if (selectedSales && stripPhoneSuffix(salesName) !== selectedSales) return false;
-    const selectedBrand = document.getElementById('purchaseBrandFilter')?.value || '';
-    return !selectedBrand || orderBrandFilterValue(brand, getPriceListBrands(true)) === selectedBrand;
+    return {
+        start,
+        end,
+        selectedSales: document.getElementById('purchaseSalesFilter')?.value || '',
+        selectedBrand: document.getElementById('purchaseBrandFilter')?.value || '',
+        selectableBrands: getPriceListBrands(true)
+    };
 }
 
-function purchasingWorkflowItemMatches(order, item) {
-    // 採購工作卡與訂單工作卡使用相同狀態引擎；採購頁自己的業務／廠牌／期間篩選
-    // 只決定目前畫面要顯示哪一部分，不再改變狀態定義。
-    return purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand);
+function purchaseLineMatchesFilters(date, salesName, brand, context = null) {
+    const filters = context || purchaseFilterContext();
+    const businessDate = normalizeBusinessDate(date);
+    if ((filters.start || filters.end) && (!businessDate || (filters.start && businessDate < filters.start) || (filters.end && businessDate > filters.end))) return false;
+    if (filters.selectedSales && stripPhoneSuffix(salesName) !== filters.selectedSales) return false;
+    return !filters.selectedBrand || orderBrandFilterValue(brand, filters.selectableBrands) === filters.selectedBrand;
+}
+
+function remainingProcurementQty(order, item) {
+    const qty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
+    const ordered = Math.max(Number(item.purchaseOrderedQty || 0), Number(item.supplyOrderedQty || 0));
+    if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
+        return Math.max(0, qty - ordered);
+    }
+    const shortage = Math.max(0, Number(item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
+    const received = Math.max(Number(item.receivedQty || 0), Number(item.purchaseReceivedQty || 0), Number(item.supplyReceivedQty || 0));
+    const outstandingSupply = Math.max(0, ordered - received);
+    return Math.max(0, shortage - outstandingSupply);
+}
+
+function pendingProcurementDisplayLines(order) {
+    if (normalizedOrderStatus(order) !== 'normal') return [];
+    const sourceItems = normalizedOrderItems(order);
+    const formalByIndex = new Map(purchaseItemsFromOrder(order).map(line => [Number(line.orderItemIndex), line]));
+    return sourceItems.map((item, index) => {
+        if (orderItemWorkCategory(order, item) !== 'ordering') return null;
+        const qty = remainingProcurementQty(order, item);
+        if (!(qty > 0)) return null;
+        const procurementType = item.procurementType || order.procurementType || 'PURCHASING_PO';
+        const formal = formalByIndex.get(index);
+        return {
+            ...(formal || {}),
+            orderId: order.id,
+            orderItemIndex: index,
+            itemId: item.itemId || formal?.itemId || `item-${index + 1}`,
+            itemName: item.itemName || formal?.itemName || '',
+            itemCode: item.itemCode || formal?.itemCode || '',
+            productId: item.productId || formal?.productId || '',
+            brand: item.brand || formal?.brand || '',
+            qty,
+            salesName: order.salesName || '',
+            fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
+            procurementType
+        };
+    }).filter(Boolean);
 }
 
 function renderPurchasingWorkCards() {
@@ -6705,15 +6762,28 @@ function renderPurchasingWorkCards() {
         ['dispatch', 'purchaseCountDispatch', 'purchaseAmountDispatch']
     ];
     const metrics = Object.fromEntries(definitions.map(([category]) => [category, { count: 0, amount: 0 }]));
+    const filters = purchaseFilterContext();
 
     ordersCache.forEach(order => {
-        normalizedOrderItems(order).forEach(item => {
-            if (!purchasingWorkflowItemMatches(order, item)) return;
-            orderItemDisplayCategories(order, item).forEach(category => {
-                if (!metrics[category]) return;
+        const items = normalizedOrderItems(order);
+
+        // 待採購的卡片和下方待採購明細共用同一份 display lines，
+        // 包含「採購下單」與「業務自行訂貨」，避免卡片有數字、明細卻是空的。
+        pendingProcurementDisplayLines(order).forEach(line => {
+            const sourceItem = items[line.orderItemIndex];
+            if (!sourceItem || !purchaseLineMatchesFilters(order.orderDate, order.salesName, line.brand, filters)) return;
+            metrics.ordering.count++;
+            metrics.ordering.amount += orderItemWorkAmount(order, sourceItem, 'ordering');
+        });
+
+        items.forEach(item => {
+            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
+            const categories = orderItemDisplayCategories(order, item);
+            for (const category of ['arrival', 'dispatch']) {
+                if (!categories.includes(category)) continue;
                 metrics[category].count++;
                 metrics[category].amount += orderItemWorkAmount(order, item, category);
-            });
+            }
         });
     });
 
@@ -6849,16 +6919,10 @@ function renderPurchasingDispatchOrders() {
 }
 
 function pendingPurchaseLines(order) {
-    if (normalizedOrderStatus(order) !== 'normal') return [];
-    const itemById=new Map(normalizedOrderItems(order).map(item=>[item.itemId,item]));
-    return purchaseItemsFromOrder(order).filter(line=>{
-        const sourceItem=itemById.get(line.itemId);
-        if (!sourceItem) return false;
-        // 採購頁只接手「採購下單」品項；業務自行訂購即使仍是 ordering，
-        // 也留在業務自己的自行訂貨流程，避免採購誤建立 PO。
-        const procurementType=sourceItem.procurementType||order.procurementType||'PURCHASING_PO';
-        return procurementType==='PURCHASING_PO' && orderItemWorkCategory(order,sourceItem)==='ordering';
-    });
+    // 這個函式只代表「採購人員可以建立正式 PO 的品項」；
+    // 畫面顯示請用 pendingProcurementDisplayLines()，兩者用途分開避免再混淆。
+    return pendingProcurementDisplayLines(order)
+        .filter(line => line.procurementType === 'PURCHASING_PO');
 }
 
 function syncOrderIntoPurchasingCaches(order) {
@@ -6872,10 +6936,11 @@ function syncOrderIntoPurchasingCaches(order) {
             cache.splice(index, 1);
         }
     };
-    sync(pendingPurchaseCache, pendingPurchaseLines(order).length > 0);
+    sync(pendingPurchaseCache, pendingProcurementDisplayLines(order).length > 0);
     sync(purchasingDispatchCache, normalizedOrderItems(order).some(item =>
         itemDispatchState(order, item).pending > 0
     ));
+    receivingSourceOrderStatusCache.set(order.id, normalizedOrderStatus(order));
     writeAppDataCache('purchase-pending', pendingPurchaseCache);
     writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
     if (purchasingView === 'ordering') renderPendingPurchaseOrders();
@@ -6897,12 +6962,19 @@ function renderPendingPurchaseOrders() {
     if (!body) return;
     body.innerHTML = '';
     const sourceOrders = ordersCache.length ? ordersCache : pendingPurchaseCache;
+    const filters = purchaseFilterContext();
     for (const order of sourceOrders) {
-        const items = pendingPurchaseLines(order);
+        const items = pendingProcurementDisplayLines(order);
         for (const item of items) {
-            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) continue;
+            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) continue;
+            const selfOrder = item.procurementType === 'SALES_SELF_ORDER';
+            const actionHtml = selfOrder
+                ? (canBusinessSelfOrder(order)
+                    ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記業務自行訂貨</button>`
+                    : '<span class="order-progress-badge">業務自行訂貨・由負責業務處理</span>')
+                : `<button type="button" class="btn-small" onclick="openManualPurchaseOrder('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
             const row = document.createElement('tr');
-            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td data-th="操作"><button type="button" class="btn-small" onclick="openManualPurchaseOrder('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button></td>`;
+            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '業務自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
             body.appendChild(row);
         }
     }
@@ -6921,7 +6993,7 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         // 直接沿用訂單頁同一個分頁載入器與 ordersCache，避免雙重 Query 與兩套數字。
         if (reset) await loadOrderPage(true, { silent: true });
         else await loadOrderPage(false, { silent: true });
-        pendingPurchaseCache = ordersCache.filter(order => pendingPurchaseLines(order).length > 0);
+        pendingPurchaseCache = ordersCache.filter(order => pendingProcurementDisplayLines(order).length > 0);
         pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         writeAppDataCache('purchase-pending', pendingPurchaseCache);
         renderPurchasingWorkCards();
@@ -7338,7 +7410,9 @@ window.renderPoList = function() {
             const {received,ordered,complete,directShip}=receipt;
             // 「待到貨」以單一品項為單位；原廠直送也必須確認到貨，才可推進來源訂單。
             if (purchasingView === 'receiving' && (complete || receipt.remaining<=0)) return;
-            if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand)) return;
+            const sourceOrder = item.orderId ? ordersCache.find(order => order.id === item.orderId) : null;
+            const workflowDate = sourceOrder?.orderDate || po.poDate;
+            if (!purchaseLineMatchesFilters(workflowDate, sourceOrder?.salesName || item.salesName, item.brand, purchaseFilterContext())) return;
             // 「待到貨」工作卡要與訂單頁完全同口徑，只顯示有來源訂單的品項。
             // 原廠備貨沒有來源訂單，保留在「訂購單紀錄」中處理，避免工作卡數字與訂單頁不一致。
             if (purchasingView === 'receiving' && !item.orderId) { stockPending++; return; }
@@ -7367,7 +7441,9 @@ window.renderPoList = function() {
         const received=Math.max(0,Number(supply.receivedQty||0));
         const remaining=Math.max(0,ordered-received);
         if(!remaining)return;
-        if (!purchaseLineMatchesFilters(supply.orderDate, supply.salesName, supply.brand)) return;
+        const sourceOrder = supply.orderId ? ordersCache.find(order => order.id === supply.orderId) : null;
+        const workflowDate = sourceOrder?.orderDate || supply.orderDate;
+        if (!purchaseLineMatchesFilters(workflowDate, sourceOrder?.salesName || supply.salesName, supply.brand, purchaseFilterContext())) return;
         if (!supply.orderId) { stockPending++; return; }
         shown++;
         const tr=document.createElement('tr');
