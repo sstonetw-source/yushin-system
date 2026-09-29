@@ -644,3 +644,16 @@ test('closing or reprinting a PO invalidates any pending PO number request', () 
     assert.match(reprintSource, /poNoGeneration\+\+/);
     assert.match(reprintSource, /poNoReady = true/);
 });
+
+
+test('order and purchasing sales filters use the same stable staff source', () => {
+    const helper = app.match(/function workflowSalesFilterNames\(\) \{[\s\S]*?\n\}/)?.[0];
+    const orderFilters = app.match(/function populatePurchaserOrderFilters\(\) \{[\s\S]*?\n\}/)?.[0];
+    const purchaseFilters = app.match(/function populatePurchasingFilters\(\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(helper && orderFilters && purchaseFilters);
+    assert.match(helper, /salesList\.map\(person => stripPhoneSuffix\(person\.name\)\)/);
+    assert.match(orderFilters, /workflowSalesFilterNames\(\)/);
+    assert.match(purchaseFilters, /workflowSalesFilterNames\(\)/);
+    assert.doesNotMatch(orderFilters, /ordersCache\.map/);
+    assert.match(orderFilters, /orderFilterOptionsSignature/);
+});

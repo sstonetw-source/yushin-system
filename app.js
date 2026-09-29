@@ -6487,6 +6487,13 @@ function orderBrandFilterValue(value, selectableBrands) {
     return selectableBrands.find(brand => normalizeBrandLookupKey(brand) === key) || OTHER_BRAND_OPTION_KEY;
 }
 
+let orderFilterOptionsSignature = '';
+
+function workflowSalesFilterNames() {
+    return [...new Set(salesList.map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+}
+
 function populatePurchaserOrderFilters() {
     const wrap = document.getElementById('purchaserOrderFilters');
     const salesSelect = document.getElementById('orderSalesFilter');
@@ -6501,19 +6508,26 @@ function populatePurchaserOrderFilters() {
 
     const salesValue = salesSelect.value;
     const brandValue = brandSelect.value;
-    const sales = [...new Set(ordersCache.map(o => stripPhoneSuffix(o.salesName)).filter(Boolean))]
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const sales = workflowSalesFilterNames();
     const brands = getPriceListBrands(true);
+    const signature = JSON.stringify([enabled, sales, brands]);
 
-    if (enabled) {
-        salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
-            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+    // 訂單頁與採購頁都用正式人員名單，不再依目前載入的 50 筆訂單臨時產生選項。
+    // 選項沒變時也不要每次 render 都重建 select DOM。
+    if (signature !== orderFilterOptionsSignature) {
+        if (enabled) {
+            salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
+                `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+        }
+        brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
+            `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+            + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+        orderFilterOptionsSignature = signature;
     }
-    brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
-        `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
-        + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
     if (enabled && sales.includes(salesValue)) salesSelect.value = salesValue;
+    else if (enabled && salesSelect.value && !sales.includes(salesSelect.value)) salesSelect.value = '';
     if (brands.includes(brandValue) || brandValue === OTHER_BRAND_OPTION_KEY) brandSelect.value = brandValue;
+    else if (brandSelect.value && !brands.includes(brandSelect.value)) brandSelect.value = '';
     return brands;
 }
 
@@ -6691,8 +6705,7 @@ function populatePurchasingFilters() {
     if (!salesSelect || !brandSelect) return;
     const salesValue = salesSelect.value;
     const brandValue = brandSelect.value;
-    const sales = [...new Set(salesList.map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const sales = workflowSalesFilterNames();
     const brands = getPriceListBrands(true);
     const signature = JSON.stringify([sales, brands]);
 
