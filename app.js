@@ -7514,7 +7514,11 @@ window.renderPoList = function() {
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
                 <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
-                <td data-th="操作" class="no-print">${complete?'<span>已完成</span>':`<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">${directShip?'確認直送到貨':'📥 到貨入庫'}</button>`} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
+                <td data-th="操作" class="no-print">${complete
+                    ? '<span>已完成</span>'
+                    : canEditPage('orders.po')
+                        ? `<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">${directShip?'確認直送到貨':'📥 到貨入庫'}</button>`
+                        : '<span class="order-progress-badge">唯讀</span>'} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -7530,8 +7534,11 @@ window.renderPoList = function() {
         if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
         receivingItemKeys.add(context.workKey);
         shown++;
+        const receiveAction = canEditPage('orders.po')
+            ? `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">${(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'確認直送到貨':'📥 到貨入庫'}</button>`
+            : '<span class="order-progress-badge">唯讀</span>';
         const tr=document.createElement('tr');
-        tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">📥 到貨入庫</button> ${supply.type==='PURCHASING_MANUAL'?`<button type="button" class="btn-small" onclick="printSupplyOrderDocument('${escapeAttr(supply.id)}')">🖨️ 輸出訂購單 PDF</button>`:''}</td>`;
+        tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print">${receiveAction} ${supply.type==='PURCHASING_MANUAL'?`<button type="button" class="btn-small" onclick="printSupplyOrderDocument('${escapeAttr(supply.id)}')">🖨️ 輸出訂購單 PDF</button>`:''}</td>`;
         tbody.appendChild(tr);
     });
 
@@ -7946,6 +7953,36 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
     return [...affectedOrderIds];
 }
 
+window.openSupplyReceipt = function(supplyId) {
+    if (!canEditPage('orders.po')) return;
+    const supply = supplyReceivingCache.find(row => row.id === supplyId);
+    if (!supply) { alert('找不到這筆待到貨紀錄，請重新整理。'); return; }
+
+    const ordered = Math.max(0, Number(supply.qty || 0));
+    const received = Math.max(0, Number(supply.receivedQty || 0));
+    const remaining = Math.max(0, ordered - received);
+    if (remaining <= 0) { alert('此品項已全部到貨。'); return; }
+
+    const directShip = (supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
+    poReceiptTargetId = `supply:${supply.id}`;
+    const body = document.getElementById('poReceiptBatchBody');
+    const title = document.getElementById('poReceiptBatchTitle');
+    if (title) title.textContent = directShip
+        ? `原廠直送到貨｜${supply.internalNo || supply.id}｜${supply.itemCode || supply.itemName || ''}`
+        : `到貨入庫｜${supply.internalNo || supply.id}｜${supply.itemCode || supply.itemName || ''}`;
+    body.innerHTML = `
+        <tr data-index="0">
+            <td><input type="checkbox" class="po-receive-select" checked></td>
+            <td>${escapeHtml(supply.itemCode || '')}</td>
+            <td>${escapeHtml(supply.itemName || '')}</td>
+            <td>${ordered}</td><td>${received}</td><td>${remaining}</td>
+            <td><input type="number" class="po-receive-qty" min="0" max="${remaining}" step="any" value="${remaining}" style="width:85px;"></td>
+            <td><input type="text" class="po-receive-lot" placeholder="批號" ${directShip ? 'disabled' : ''}></td>
+            <td><input type="date" class="po-receive-expiry" ${directShip ? 'disabled' : ''}></td>
+        </tr>`;
+    document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
+};
+
 window.receivePurchaseOrderItem = function(poId,itemIndex) {
     if (!canEditPage('orders.po')) return;
     const po=poListCache.find(p=>p.id===poId);
@@ -8261,7 +8298,7 @@ async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate 
 }
 
 window.savePoReceiptBatch = async function() {
-    if (poReceiptSaveInProgress) return;
+    if (!canEditPage('orders.po') || poReceiptSaveInProgress) return;
     const poId = poReceiptTargetId;
     const button = document.getElementById('savePoReceiptBatchBtn');
     const rows = [...document.querySelectorAll('#poReceiptBatchBody tr')];
