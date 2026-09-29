@@ -334,22 +334,19 @@ test('receiving queue includes self orders but follows the source order arrival 
 });
 
 test('manual ordered action records supply and source item only once after an uncertain response', async () => {
-    const source = app.match(/let manualPurchaseSaveInProgress = false;[\s\S]*?\n(?=window\.openOrderPurchaseDraft)/)?.[0];
+    const source = app.match(/const pendingPurchaseOrderKeys = new Set\(\);[\s\S]*?\n(?=window\.openOrderPurchaseDraft)/)?.[0];
     assert.ok(source);
-    const fields = Object.fromEntries([
-        ['manualPurchaseOrderId','O1'],['manualPurchaseItemId','I1'],
-        ['manualPurchaseSupplier','Vendor'],['manualPurchaseDate','2026-09-29'],
-        ['manualPurchaseQty','2'],['manualPurchaseCost','100']
-    ].map(([id,value])=>[id,{value}]));
-    for (const id of ['saveManualPurchaseBtn','manualPurchaseStatus','manualPurchaseOverlay'])
-        fields[id] = {disabled:false,textContent:'',classList:{remove(){},add(){}}};
     const order = {items:[{itemId:'I1',itemCode:'P1',itemName:'Product',qty:2,
+        productId:'P1',supplier:'Vendor',costPrice:100,warehouseId:'W1',
         procurementType:'PURCHASING_PO',purchaseOrderedQty:0,inventoryShortageQty:2}],orderNo:'O1'};
-    let supply, updates = 0, uncertain = true, documentIds = 0;
-    const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'S1'};
+    let supply, updates = 0;
+    const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
+    const button={disabled:false,textContent:'已訂購',isConnected:false};
+    const page={classList:{contains:()=>true}},card={};
+    const switched=[];
     const context = vm.createContext({
-        window:{},document:{getElementById:id=>fields[id]},
-        db:{collection:name=>({doc:id=> name==='orders' ? orderRef : (id ? supplyRef : (documentIds++,supplyRef))}),
+        window:{},document:{getElementById:id=>id==='purchasing-system'?page:id==='purchase-card-receiving'?card:null},
+        db:{collection:name=>({doc:()=> name==='orders' ? orderRef : supplyRef}),
             async runTransaction(callback){
                 await callback({
                     async get(ref){return ref.kind==='order'
@@ -358,38 +355,40 @@ test('manual ordered action records supply and source item only once after an un
                     set(ref,data){supply=data;},
                     update(ref,data){Object.assign(order,data);updates++;}
                 });
-                if (uncertain) { uncertain=false; throw new Error('network response lost'); }
             }},
         canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
         currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
-        pendingPurchaseLines:record=>record.items[0].purchaseOrderedQty ? [] : [{
-            orderItemIndex:0,itemId:'I1',itemCode:'P1',itemName:'Product',qty:2,
-            productId:'P1',fulfillmentType:'DIRECT_SHIP'}],
-        assertPurchaseLinesAvailable:()=>{},poIncomingKey:()=> 'P1',
+        remainingProcurementQty:(record,item)=>Math.max(0,2-Number(item.purchaseOrderedQty||0)),
+        poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-09-29',
+        normalizedOrderStatus:()=> 'normal',
         normalizedOrderItems:record=>record.items,orderWorkIndexFields:()=>({workCategories:['arrival']}),
         ordersCache:[],supplyReceivingCache:[],purchasingView:'ordering',
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},renderOrdersList:()=>{},
-        switchPurchasingView:()=>{},renderPendingPurchaseOrders:()=>{},alert:()=>{}
+        switchPurchasingView:(view,tab)=>switched.push([view,tab]),alert:()=>{}
     });
     vm.runInContext(source,context);
-    await context.window.saveManualPurchaseOrder();
+    await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1);
     assert.equal(order.items[0].purchaseOrderedQty,2);
+    assert.equal(order.items[0].supplyOrderedQty,2);
     assert.equal(supply.type,'PURCHASING_MANUAL');
     assert.equal(supply.status,'ORDERED');
     assert.equal(supply.orderDate,'2026-09-29');
-    await context.window.saveManualPurchaseOrder();
-    assert.equal(documentIds,1,'retry must reuse the existing supply ID');
+    assert.deepEqual(switched,[['receiving',card]]);
+    await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1,'retry must not increase ordered quantity twice');
 });
 
-test('manual ordered action moves the active purchasing page to receiving', () => {
+test('ordered action is a direct snapshot-based state change without a data-entry modal or product lookup', () => {
     const actionSource = app.match(/function renderPendingPurchaseOrders\(\) \{[\s\S]*?\n\}/)?.[0];
-    const saveSource = app.match(/window\.saveManualPurchaseOrder = async function\(\) \{[\s\S]*?\n\};/)?.[0];
+    const saveSource = app.match(/window\.markPurchaseItemOrdered = async function\(orderId, itemId, button\) \{[\s\S]*?\n\};/)?.[0];
     assert.ok(actionSource && saveSource);
-    assert.match(actionSource, />登記已訂購<\/button>/);
+    assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>已訂購<\/button>/);
     assert.match(saveSource, /switchPurchasingView\('receiving', document\.getElementById\('purchase-card-receiving'\)\)/);
-    assert.match(saveSource, /已移至採購頁「待到貨」/);
+    assert.match(saveSource, /remainingProcurementQty\(order, item\)/);
+    assert.doesNotMatch(saveSource, /Product|findProduct|preloadPurchaseCosts|loadSupplierWarehouseMasters|supplierForProduct/);
+    assert.doesNotMatch(html, /id="manualPurchaseOverlay"/);
+    assert.doesNotMatch(app, /printSupplyOrderDocument/);
 });
 
 test('loading another receiving page retains source status for earlier PO rows', async () => {
@@ -446,7 +445,7 @@ test('loading another receiving page retains source status for earlier PO rows',
 
 test('pending purchasing work loads one shared order page at a time without losing older rows', async () => {
     const refreshSource = app.match(/function refreshPurchasingOrderCache\(reset = true\) \{[\s\S]*?\n\}/)?.[0];
-    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nlet manualPurchaseSaveInProgress)/)?.[0];
+    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nconst pendingPurchaseOrderKeys)/)?.[0];
     assert.ok(refreshSource && source);
     let reads=0;
     const context=vm.createContext({
@@ -476,7 +475,7 @@ test('pending purchasing work loads one shared order page at a time without losi
 
 test('pending purchasing work reports a shared order-load failure without overwriting the card count', async () => {
     const refreshSource = app.match(/function refreshPurchasingOrderCache\(reset = true\) \{[\s\S]*?\n\}/)?.[0];
-    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nlet manualPurchaseSaveInProgress)/)?.[0];
+    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nconst pendingPurchaseOrderKeys)/)?.[0];
     const renderSource = app.match(/function renderPendingPurchaseOrders\(\) \{[\s\S]*?\n\}\n(?=\nwindow\.loadPendingPurchaseOrders)/)?.[0];
     assert.ok(refreshSource && source && renderSource);
     const context = vm.createContext({

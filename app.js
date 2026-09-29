@@ -7015,7 +7015,7 @@ function renderPendingPurchaseOrders() {
                 ? (canBusinessSelfOrder(order)
                     ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記業務自行訂貨</button>`
                     : '<span class="order-progress-badge">業務自行訂貨・由負責業務處理</span>')
-                : `<button type="button" class="btn-small" onclick="openManualPurchaseOrder('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
+                : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}',this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
             const row = document.createElement('tr');
             row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '業務自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
             body.appendChild(row);
@@ -7047,61 +7047,22 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     }
 };
 
-let manualPurchaseSaveInProgress = false;
-let manualPurchaseDraftId = '';
+const pendingPurchaseOrderKeys = new Set();
 
-window.closeManualPurchaseOrder = function() {
-    document.getElementById('manualPurchaseOverlay')?.classList.remove('active');
-    if (!manualPurchaseSaveInProgress) manualPurchaseDraftId = '';
-};
+function quickPurchaseSupplyId(orderId, itemId) {
+    return `manual-${encodeURIComponent(String(orderId || ''))}-${encodeURIComponent(String(itemId || ''))}`;
+}
 
-window.openManualPurchaseOrder = async function(orderId, itemId) {
+window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-    try {
-        const snapshot = await db.collection('orders').doc(orderId).get();
-        if (!snapshot.exists) throw new Error('找不到來源訂單。');
-        const order = { id:snapshot.id, ...snapshot.data() };
-        await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCosts([order])]);
-        const line = pendingPurchaseLines(order).find(item => item.itemId === itemId);
-        if (!line) throw new Error('此品項目前沒有待採購數量。');
-        manualPurchaseDraftId = db.collection('supplyOrders').doc().id;
-        document.getElementById('manualPurchaseOrderId').value = orderId;
-        document.getElementById('manualPurchaseItemId').value = itemId;
-        document.getElementById('manualPurchaseSummary').textContent = `${order.orderNo || order.id}｜${line.itemCode || line.itemName}｜待訂購 ${line.qty}`;
-        const supplier = supplierForProduct(line.brand, line.productLine);
-        document.getElementById('manualPurchaseSupplier').value = supplier?.purchaseHeaderName || supplier?.supplierName || line.supplier || '';
-        document.getElementById('manualPurchaseDate').value = localDateString();
-        document.getElementById('manualPurchaseQty').value = line.qty;
-        document.getElementById('manualPurchaseQty').max = line.qty;
-        document.getElementById('manualPurchaseCost').value = line.unitPrice > 0 ? line.unitPrice : '';
-        document.getElementById('manualPurchaseStatus').textContent = '確認後會記錄已訂購並轉入待到貨；此操作不產生正式訂購單。';
-        document.getElementById('manualPurchaseOverlay').classList.add('active');
-    } catch (err) { alert('無法開啟訂購紀錄：' + err.message); }
-};
-
-window.saveManualPurchaseOrder = async function() {
-    if (manualPurchaseSaveInProgress || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-    const orderId = document.getElementById('manualPurchaseOrderId').value;
-    const itemId = document.getElementById('manualPurchaseItemId').value;
-    const supplier = document.getElementById('manualPurchaseSupplier').value.trim();
-    const orderDate = document.getElementById('manualPurchaseDate').value;
-    const qty = Number(document.getElementById('manualPurchaseQty').value);
-    const unitCost = Number(document.getElementById('manualPurchaseCost').value);
-    if (!supplier || !orderDate || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(unitCost) || unitCost <= 0) {
-        alert('請填寫廠商、訂購日期，以及大於 0 的數量與進貨單價。'); return;
-    }
-    const button = document.getElementById('saveManualPurchaseBtn');
-    const status = document.getElementById('manualPurchaseStatus');
-    // Keep the same document ID after an uncertain network response, so a retry
-    // can recognize an already committed transaction instead of duplicating it.
-    if (!manualPurchaseDraftId) manualPurchaseDraftId = db.collection('supplyOrders').doc().id;
-    const supplyRef = db.collection('supplyOrders').doc(manualPurchaseDraftId);
-    const internalNo = `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(0, 6).toUpperCase()}`;
-    manualPurchaseSaveInProgress = true;
-    button.disabled = true;
-    button.textContent = '儲存中…';
+    const actionKey = `${orderId}::${itemId}`;
+    if (pendingPurchaseOrderKeys.has(actionKey)) return;
+    pendingPurchaseOrderKeys.add(actionKey);
+    const originalLabel = button?.textContent || '已訂購';
+    if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
         let savedOrder, savedSupply;
+        const supplyRef = db.collection('supplyOrders').doc(quickPurchaseSupplyId(orderId, itemId));
         await db.runTransaction(async tx => {
             const orderRef = db.collection('orders').doc(orderId);
             const [orderSnapshot, supplySnapshot] = await Promise.all([tx.get(orderRef), tx.get(supplyRef)]);
@@ -7112,30 +7073,39 @@ window.saveManualPurchaseOrder = async function() {
             }
             if (!orderSnapshot.exists) throw new Error('來源訂單已不存在。');
             const order = { id:orderId, ...orderSnapshot.data() };
-            const line = pendingPurchaseLines(order).find(item => item.itemId === itemId);
-            if (!line) throw new Error('此品項已無待採購數量，請重新整理。');
-            assertPurchaseLinesAvailable(order, [{...line, qty}]);
-            const productKey = poIncomingKey(line);
-            const warehouseId = line.fulfillmentType === 'DIRECT_SHIP' ? '' : (line.warehouseId || defaultWarehouse()?.id || '');
-            if (line.fulfillmentType !== 'DIRECT_SHIP' && (!productKey || !warehouseId))
-                throw new Error('倉庫到貨需要貨號與入庫倉庫，請先補齊。');
+            if (normalizedOrderStatus(order) !== 'normal') throw new Error('來源訂單已取消或作廢。');
+            const items = normalizedOrderItems(order);
+            const itemIndex = items.findIndex(item => item.itemId === itemId);
+            if (itemIndex < 0) throw new Error('找不到來源訂單品項。');
+            const item = items[itemIndex];
+            const qty = remainingProcurementQty(order, item);
+            if (!(qty > 0)) throw new Error('此品項已無待採購數量，請重新整理。');
+            const productKey = poIncomingKey(item);
+            const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
+            const warehouseId = directShip ? '' : (item.warehouseId || defaultWarehouse()?.id || '');
+            if (!directShip && (!productKey || !warehouseId)) throw new Error('訂單快照缺少貨號或入庫倉庫，請先修正來源訂單。');
+            const orderDate = localDateString();
+            const internalNo = `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(-8).toUpperCase()}`;
+            const alreadyOrdered = Math.max(Number(item.purchaseOrderedQty || 0), Number(item.supplyOrderedQty || 0));
+            const nextOrdered = alreadyOrdered + qty;
             const now = new Date().toISOString();
             savedSupply = {
                 id:supplyRef.id, type:'PURCHASING_MANUAL', internalNo, status:'ORDERED',
-                orderId, itemId, orderItemIndex:line.orderItemIndex,
+                orderId, itemId, orderItemIndex:itemIndex,
                 ownerUid:order.ownerUid||'', salesCode:order.salesCode||'', salesName:order.salesName||'',
                 customerName:order.customerName||'', company:order.company||'yushin',
-                productId:line.productId||'', productKey, itemCode:line.itemCode||'', itemName:line.itemName||'',
-                brand:line.brand||'', productLine:line.productLine||'',
-                qty, receivedQty:0, supplier, unitCost, orderDate,
-                fulfillmentType:line.fulfillmentType||'WAREHOUSE', warehouseId,
+                productId:item.productId||'', productKey, itemCode:item.itemCode||'', itemName:item.itemName||'',
+                brand:item.brand||'', productLine:item.productLine||'',
+                qty, receivedQty:0, supplier:item.supplier||order.supplier||'',
+                unitCost:Number(item.costPrice??item.unitCost??item.purchasePrice??order.costPrice??0), orderDate,
+                fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE', warehouseId,
                 createdAt:now, createdByUid:currentUser?.uid||'', createdBy:currentUserName||currentUser?.email||'', createdByRole:currentUserRole
             };
-            const items = normalizedOrderItems(order).map(item => item.itemId === itemId ? {
-                ...item, purchaseOrderedQty:Number(item.purchaseOrderedQty||0)+qty,
+            items[itemIndex] = {
+                ...item, purchaseOrderedQty:nextOrdered, supplyOrderedQty:nextOrdered,
                 manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])],
                 orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate
-            } : item);
+            };
             savedOrder = { ...order, items, itemCount:items.length, orderSchemaVersion:2, updatedAt:now };
             tx.set(supplyRef, (({id, ...record}) => record)(savedSupply));
             tx.update(orderRef, {items, itemCount:items.length, orderSchemaVersion:2,
@@ -7147,19 +7117,15 @@ window.saveManualPurchaseOrder = async function() {
         if (savedSupply && !supplyReceivingCache.some(row => row.id === savedSupply.id)) supplyReceivingCache.unshift(savedSupply);
         writeAppDataCache('orders', ordersCache);
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-        closeManualPurchaseOrder();
-        manualPurchaseDraftId = '';
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
             switchPurchasingView('receiving', document.getElementById('purchase-card-receiving'));
         }
-        alert(`已訂購 ${qty}：${internalNo}。已移至採購頁「待到貨」，正式訂購單可視需要另行輸出。`);
+        alert('已更新為「待到貨」。');
     } catch (err) {
-        status.textContent = '未完成訂購紀錄：' + err.message;
-        alert('記錄已訂購失敗：' + err.message);
+        alert('切換為已訂購失敗：' + err.message);
     } finally {
-        manualPurchaseSaveInProgress = false;
-        button.disabled = false;
-        button.textContent = '確認已訂購';
+        pendingPurchaseOrderKeys.delete(actionKey);
+        if (button?.isConnected) { button.disabled = false; button.textContent = originalLabel; }
     }
 };
 
@@ -7571,7 +7537,7 @@ window.renderPoList = function() {
             ? `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">${(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'確認直送到貨':'📥 到貨入庫'}</button>`
             : '<span class="order-progress-badge">唯讀</span>';
         const tr=document.createElement('tr');
-        tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print">${receiveAction} ${supply.type==='PURCHASING_MANUAL'?`<button type="button" class="btn-small" onclick="printSupplyOrderDocument('${escapeAttr(supply.id)}')">🖨️ 輸出訂購單 PDF</button>`:''}</td>`;
+        tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print">${receiveAction}</td>`;
         tbody.appendChild(tr);
     });
 
@@ -7594,7 +7560,7 @@ window.reprintPurchaseOrder = function(poId) {
     poNoGeneration++;
     poNoLoading = false;
     poNoReady = true;
-    const po = poListCache.find(p => p.id === poId) || (poPrintablePreview?.id === poId ? poPrintablePreview : null);
+    const po = poListCache.find(p => p.id === poId);
     if (!po) return;
 
     populatePoVendorSuggestions();
@@ -7616,18 +7582,6 @@ window.reprintPurchaseOrder = function(poId) {
         : `已儲存訂購單 ${po.poNo || po.id}。按下方按鈕列印或輸出 PDF。`);
     updatePoSaveButton();
     document.getElementById('poModalOverlay').classList.add('active');
-};
-
-window.printSupplyOrderDocument = function(supplyId) {
-    const supply = supplyReceivingCache.find(row => row.id === supplyId && row.type === 'PURCHASING_MANUAL');
-    if (!supply) { alert('找不到已訂購紀錄，請重新整理待到貨清單。'); return; }
-    poPrintablePreview = {
-        id:`manual:${supply.id}`, poNo:supply.internalNo || supply.id,
-        company:supply.company || 'yushin', vendorName:supply.supplier || '',
-        buyerName:supply.createdBy || '', poDate:supply.orderDate || '',
-        items:[{...supply, unitPrice:Number(supply.unitCost||0)}], incomingRegistrationVersion:0
-    };
-    reprintPurchaseOrder(poPrintablePreview.id);
 };
 
 // 從原始訂單上的訂購單號直接開啟該張訂購單，避免還要切分頁搜尋。
@@ -7655,7 +7609,6 @@ let poEditingId = null;
 let poSaveInProgress = false;
 let poDirectStockMode = false;
 let poIncomingSyncPending = false;
-let poPrintablePreview = null;
 let poNoGeneration = 0;
 let poDirectStockOpenGeneration = 0;
 let poNoReady = false;
@@ -8823,8 +8776,7 @@ window.printPurchaseOrder = async function() {
         return;
     }
     if (poEditingId) {
-        const savedPo = poListCache.find(po => po.id === poEditingId)
-            || (poPrintablePreview?.id === poEditingId ? poPrintablePreview : null);
+        const savedPo = poListCache.find(po => po.id === poEditingId);
         if (!savedPo) { alert('找不到已儲存的訂購單，請重新整理。'); return; }
         if (!poIncomingSyncPending) {
             try { printSavedPoDocument(savedPo.poNo, savedPo.vendorName); }
