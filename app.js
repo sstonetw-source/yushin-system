@@ -104,13 +104,13 @@ const rolePermissions = Object.freeze({
     sales: Object.freeze({ forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none' }),
     purchaser: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'edit', inventory:'edit', equipment:'none', admin:'none' }),
     warehouse: Object.freeze({ forecast:'none', quote:'none', 'quote.create':'none', 'quote.my':'none', products:'view', orders:'view', 'orders.list':'view', 'orders.po':'view', inventory:'edit', equipment:'none', admin:'none' }),
-    engineer: Object.freeze({ forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none' })
+    engineer: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none' })
 });
 const roleDataScopes = Object.freeze({
     sales: Object.freeze({ quotes:'own', forecasts:'own', orders:'own', equipment:'own' }),
     purchaser: Object.freeze({ quotes:'all', forecasts:'none', orders:'all', equipment:'none' }),
     warehouse: Object.freeze({ quotes:'none', forecasts:'none', orders:'all', equipment:'none' }),
-    engineer: Object.freeze({ quotes:'own', forecasts:'own', orders:'own', equipment:'own' })
+    engineer: Object.freeze({ quotes:'own', forecasts:'none', orders:'own', equipment:'own' })
 });
 let currentUserName = '';    // 目前登入者自己的業務姓名（來自 users 集合）
 let currentUserPhone = '';   // 目前登入者自己的電話
@@ -554,7 +554,7 @@ function canCreateOrderCapability(role = currentUserRole) {
     return hasBusinessCapability(role) || role === 'purchaser';
 }
 function canCreateForecastCapability(role = currentUserRole) {
-    return hasBusinessCapability(role);
+    return role === 'admin' || role === 'sales';
 }
 function canSelfOrderCapability(role = currentUserRole) {
     return hasBusinessCapability(role);
@@ -811,6 +811,16 @@ function initializePageData(mainKey, options = {}) {
     hydratePageFromLocalCache(mainKey);
     if (!force && loadedMainPages.has(mainKey)) return;
     loadedMainPages.add(mainKey);
+    if (['quote', 'forecast', 'orders.list', 'orders.po', 'inventory', 'equipment', 'admin'].includes(mainKey)) {
+        ensureBrandSettingsLoaded().then(() => {
+            if (mainKey === 'quote') populateQuoteBrandDropdowns();
+            if (mainKey === 'forecast' && canAccessPage('forecast')) renderForecastList();
+            if (mainKey === 'orders.list' && canAccessPage('orders.list')) renderOrdersList();
+            if (mainKey === 'orders.po' && canAccessPage('orders.po')) renderPurchasingView();
+            if (mainKey === 'inventory' && canAccessPage('inventory')) renderInventoryList();
+            if (mainKey === 'equipment' && canAccessPage('equipment')) renderEquipmentList();
+        }).catch(err => console.warn('廠牌設定載入失敗：', err));
+    }
     if (mainKey === 'forecast') {
         // Forecast 列表不依賴完整業務名單；先畫資料，人員下拉選單在背景補齊。
         loadForecasts(true);
@@ -2518,22 +2528,21 @@ window.onSalesChange = function() {
     updateSalesPhoneDisplay();
 };
 
-// 建立估價單時，「負責業務」只顯示業務角色；工程師／採購可協助建立，但商業歸屬仍必須指定業務。
-// 管理員與其他角色不會出現在這個選單中。舊版沒有 role 資料時仍視為業務以保留相容性。
+// 估價單可歸屬業務或工程師；本人登入時只選自己，採購／管理員可代兩種角色建立。
 function populateSalesDropdown() {
     const select = document.getElementById('salesName');
     if (!select) return;
 
     const visibleList = salesList.filter(s => {
         const role = (s.role || 'sales').toLowerCase();
-        return currentUserRole === 'engineer'
+        return currentUserRole === 'sales' || currentUserRole === 'engineer'
             ? s.uid === currentUser?.uid
-            : role === 'sales';
+            : role === 'sales' || role === 'engineer';
     });
 
-    if (currentUserRole === 'engineer' && currentUser?.uid && currentUserName
+    if ((currentUserRole === 'sales' || currentUserRole === 'engineer') && currentUser?.uid && currentUserName
         && !visibleList.some(s => s.uid === currentUser.uid)) {
-        visibleList.push({ uid: currentUser.uid, name: currentUserName, code: currentUserCode, role: 'engineer' });
+        visibleList.push({ uid: currentUser.uid, name: currentUserName, code: currentUserCode, role: currentUserRole });
     }
 
     const currentValue = select.value;
@@ -2553,9 +2562,9 @@ function populateSalesDropdown() {
         valueToApply = window._pendingDraftSalesName;
         delete window._pendingDraftSalesName;
     }
-    // 若原本選的人仍在名單裡就保留選擇，否則清空，絕不自動帶入
+    // 保留有效的草稿選擇；本人登入時預設帶入自己，採購／管理員保持未選擇。
     select.value = visibleList.some(s => s.name === valueToApply) ? valueToApply
-        : (currentUserRole === 'engineer' ? currentUserName : '');
+        : ((currentUserRole === 'sales' || currentUserRole === 'engineer') ? currentUserName : '');
 
     // 還原草稿的過程中不要重新產生單號，沿用草稿裡存的那組
     if (!restoringQuoteDraft) generateQuoteNo();
@@ -2642,6 +2651,26 @@ function loadSalesStatisticsSettings() {
     });
 }
 
+let brandSettingsLoadPromise = null;
+function ensureBrandSettingsLoaded() {
+    if (!brandSettingsLoadPromise) {
+        brandSettingsLoadPromise = Promise.all([
+            loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()
+        ]).then(() => {
+            populateQuoteBrandDropdowns();
+            populateOrderBrandDropdown();
+            populateEquipmentBrandDropdown();
+            if (typeof populateForecastBrandDropdown === 'function')
+                populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+            renderCompanyAgencyBrandSettings();
+        }).catch(err => {
+            brandSettingsLoadPromise = null;
+            throw err;
+        });
+    }
+    return brandSettingsLoadPromise;
+}
+
 function refreshPriceDatalists() {
     rebuildPriceItemLookup();
     const cnList = document.getElementById('priceNameCnList');
@@ -2697,61 +2726,34 @@ function normalizeBrandMasterRecord(id, data = {}) {
 }
 
 function getUnifiedBrandEntries(includeMaintenance = false) {
+    // 唯一可選來源為管理員設定的主要代理廠牌；Product Master、歷史訂單、
+    // 供應商對應及分公司勾選都不會自行擴大一般廠牌下拉選單。
     const entries = new Map();
-
-    const upsert = (name, patch = {}) => {
-        const cleanName = String(name || '').trim();
-        if (!cleanName) return;
-        if (!includeMaintenance && normalizeBrandLookupKey(cleanName) === normalizeBrandLookupKey('維修')) return;
-
-        // Brand Master 先載入；後續價目表／舊設定若只是 master alias，
-        // 直接歸到 canonical entry，不再產生第二個看似不同的廠牌。
-        const cleanKey = normalizeBrandLookupKey(cleanName);
-        const aliasOwner = [...entries.values()].find(entry =>
-            (entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === cleanKey)
-        );
-        const canonicalName = aliasOwner?.name || cleanName;
-        const key = normalizeBrandLookupKey(canonicalName);
-        const existing = entries.get(key) || aliasOwner || {
-            id: '',
-            name: canonicalName,
-            aliases: [],
-            isKeyBrand: false,
-            companies: [],
+    keyStatisticBrands.forEach(configuredName => {
+        const name = String(configuredName || '').trim();
+        const key = normalizeBrandLookupKey(name);
+        if (!key || key === normalizeBrandLookupKey('維修') || entries.has(key)) return;
+        const master = brandMasterCache.find(item => item.active !== false && (
+            normalizeBrandLookupKey(item.name) === key ||
+            (item.aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)
+        ));
+        const canonicalName = master?.name || name;
+        entries.set(normalizeBrandLookupKey(canonicalName), {
+            id: master?.id || '', name: canonicalName,
+            aliases: dedupeBrandsCaseInsensitive([name, ...(master?.aliases || []), ...(keyStatisticBrandAliases[name] || [])])
+                .filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(canonicalName)),
+            isKeyBrand: true,
+            companies: ['yushin', 'morningstar', 'MULTI-LIFE'].filter(company =>
+                includesBrandCaseInsensitive(companyAgencyBrands[company], canonicalName) ||
+                includesBrandCaseInsensitive(companyAgencyBrands[company], name)
+            ),
             active: true
-        };
-
-        if (patch.id && !existing.id) existing.id = patch.id;
-        if (patch.name && patch.preferName) existing.name = String(patch.name).trim() || existing.name;
-        existing.aliases = dedupeBrandsCaseInsensitive([...(existing.aliases || []), ...(patch.aliases || [])])
-            .filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(existing.name));
-        existing.isKeyBrand = existing.isKeyBrand || patch.isKeyBrand === true;
-        existing.companies = [...new Set([...(existing.companies || []), ...(patch.companies || [])])];
-        if (patch.active === false) existing.active = false;
-        entries.set(key, existing);
-    };
-
-    // 正式 Brand Master 優先決定顯示名稱。
-    brandMasterCache.filter(item => item && item.active !== false).forEach(item => {
-        upsert(item.name, { ...item, preferName: true });
-    });
-
-    // 一般介面以正式 Brand Master 與已保存設定為來源；舊價目表僅供遷移／稽核工具使用。
-    keyStatisticBrands.forEach(name => upsert(name, {
-        isKeyBrand: true,
-        aliases: keyStatisticBrandAliases[name] || []
-    }));
-    Object.entries(keyStatisticBrandAliases).forEach(([name, aliases]) => upsert(name, { aliases }));
-
-    ['yushin', 'morningstar', 'MULTI-LIFE'].forEach(company => {
-        (companyAgencyBrands[company] || []).forEach(name => {
-            if (name !== OTHER_BRAND_OPTION_KEY && name !== '其他') upsert(name, { companies: [company] });
         });
     });
-
-    if (includeMaintenance) upsert('維修');
+    if (includeMaintenance) entries.set(normalizeBrandLookupKey('維修'), {
+        id: '', name: '維修', aliases: [], isKeyBrand: false, companies: [], active: true
+    });
     return [...entries.values()]
-        .filter(item => item.active !== false)
         .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hant'));
 }
 
@@ -3213,12 +3215,11 @@ function isCompanyBrandAllowed(company, brand) {
 }
 
 function isCompanyOtherOptionAllowed(company) {
-    if (!companyAgencyBrandsConfigured) return true;
-    return (companyAgencyBrands[company] || []).includes(OTHER_BRAND_OPTION_KEY);
+    return true;
 }
 
 function getCompanySelectableBrands(company) {
-    return getPriceListBrands(true).filter(brand => isCompanyBrandAllowed(company, brand));
+    return getPriceListBrands(true);
 }
 
 // 估價單的廠牌只使用價目表中已有的廠牌；載入舊估價單時若廠牌已不在價目表，
@@ -3226,17 +3227,18 @@ function getCompanySelectableBrands(company) {
 function quoteBrandOptions(selectedBrand) {
     const selected = (selectedBrand || '').trim();
     const brands = getCompanySelectableBrands(currentCompany);
-    if (selected && selected !== '其他' && !brands.includes(selected)) brands.push(selected);
-    const showOtherOption = isCompanyOtherOptionAllowed(currentCompany) || selected === '其他';
+    const selectedOption = selected && !brands.includes(selected) ? '其他' : selected;
     return ['<option value="">請選擇廠牌</option>']
-        .concat(brands.map(brand => `<option value="${escapeAttr(brand)}"${brand === selected ? ' selected' : ''}>${escapeHtml(brand)}</option>`))
-        .concat(showOtherOption ? `<option value="其他"${selected === '其他' ? ' selected' : ''}>其他（自行輸入）</option>` : '')
+        .concat(brands.map(brand => `<option value="${escapeAttr(brand)}"${brand === selectedOption ? ' selected' : ''}>${escapeHtml(brand)}</option>`))
+        .concat(`<option value="其他"${selectedOption === '其他' ? ' selected' : ''}>其他（自行輸入）</option>`)
         .join('');
 }
 
 function populateBrandSelect(select, placeholderText, includeMaintenance = false) {
     if (!select) return;
-    const currentValue = select.value;
+    const otherInput = select.id === 'orderBrand' ? document.getElementById('orderBrandOther')
+        : select.id === 'eqBrand' ? document.getElementById('eqBrandOther') : null;
+    const currentValue = select.value === '其他' ? (otherInput?.value || '其他') : select.value;
     select.innerHTML = `<option value="">${placeholderText}</option>`;
     getPriceListBrands(includeMaintenance).forEach(b => {
         const opt = document.createElement('option');
@@ -3248,21 +3250,28 @@ function populateBrandSelect(select, placeholderText, includeMaintenance = false
     otherOpt.value = '其他';
     otherOpt.text = '其他（自行輸入）';
     select.appendChild(otherOpt);
-    if ([...select.options].some(o => o.value === currentValue)) select.value = currentValue;
+    const canonical = resolveBrandName(currentValue);
+    const isMain = [...select.options].some(o => o.value === canonical);
+    select.value = isMain ? canonical : (currentValue ? '其他' : '');
+    if (otherInput) {
+        otherInput.value = !isMain && currentValue !== '其他' ? currentValue : '';
+        otherInput.style.display = select.value === '其他' ? '' : 'none';
+    }
 }
 
-// 依價格表比對到的廠牌，補進下拉選單（如果原本不在清單裡）並選取，永遠排在「其他」之前
+// 價目表可能包含非主要廠牌；只在「其他」文字框帶入實際名稱，不擴大下拉選單。
 function selectBrandInDropdown(select, brandName) {
     if (!select || !brandName) return;
-    if (![...select.options].some(o => o.value === brandName)) {
-        const opt = document.createElement('option');
-        opt.value = brandName;
-        opt.text = brandName;
-        const otherOption = [...select.options].find(o => o.value === '其他');
-        if (otherOption) select.insertBefore(opt, otherOption);
-        else select.appendChild(opt);
+    const canonical = resolveBrandName(brandName);
+    const isMain = [...select.options].some(o => o.value === canonical);
+    select.value = isMain ? canonical : '其他';
+    const otherInput = select.id === 'orderBrand' ? document.getElementById('orderBrandOther')
+        : select.id === 'eqBrand' ? document.getElementById('eqBrandOther')
+        : select.closest('tr')?.querySelector('.item-brand-other');
+    if (otherInput) {
+        otherInput.value = isMain ? '' : brandName;
+        otherInput.style.display = isMain ? 'none' : '';
     }
-    select.value = brandName;
 }
 
 function populateOrderBrandDropdown() {
@@ -3272,9 +3281,19 @@ function populateOrderBrandDropdown() {
 
 function populateQuoteBrandDropdowns() {
     document.querySelectorAll('#quoteItems .item-brand').forEach(select => {
-        const currentValue = select.value;
+        const row = select.closest('tr');
+        const currentValue = select.value === '其他'
+            ? row?.querySelector('.item-brand-other')?.value || '其他'
+            : select.value;
         select.innerHTML = quoteBrandOptions(currentValue);
-        select.value = currentValue;
+        const canonical = resolveBrandName(currentValue);
+        const isMain = [...select.options].some(option => option.value === canonical);
+        select.value = isMain ? canonical : (currentValue ? '其他' : '');
+        const otherInput = row?.querySelector('.item-brand-other');
+        if (otherInput) {
+            otherInput.value = !isMain && currentValue !== '其他' ? currentValue : '';
+            otherInput.style.display = select.value === '其他' ? '' : 'none';
+        }
     });
 }
 
@@ -3369,6 +3388,7 @@ window.onOrderItemCodeChange = async function(input) {
     }
 
     input.dataset.productLine = match.productLine || '';
+    document.getElementById('orderProductLine').value = match.productLine || '';
     input.dataset.productType = match.productType || '';
 
     // 成本與庫存彼此獨立；平行查詢，避免成本讀取阻塞庫存提示。
@@ -3438,7 +3458,7 @@ window.addQuoteRow = function(itemData = {}) {
                         <label>廠牌：</label>
                         <select class="item-brand" onchange="onQuoteBrandSelectChange(this)">${quoteBrandOptions(itemData.brand)}</select>
                         <input type="text" class="item-brand-other" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
-                        <input type="hidden" class="item-product-line" value="${itemData.productLine || ''}">
+                        <div class="field-row"><label>產品線（選填）：</label><input type="text" class="item-product-line" value="${escapeAttr(itemData.productLine || '')}" placeholder="例如：儀器、試劑、耗材"></div>
                         <input type="hidden" class="item-product-type" value="${itemData.productType || ''}">
                         <input type="hidden" class="item-product-id" value="${itemData.productId || ''}">
                     </div>
@@ -3458,6 +3478,8 @@ window.addQuoteRow = function(itemData = {}) {
     `;
 
     tbody.appendChild(tr);
+    if (itemData.brand && tr.querySelector('.item-brand').value === '其他')
+        tr.querySelector('.item-brand-other').value = itemData.brand;
     onQuoteBrandSelectChange(tr.querySelector('.item-brand'));
     calculateTotals();
 };
@@ -3669,7 +3691,7 @@ function numberToChineseWords(num) {
 
 function currentQuoteOutputValidation() {
     if (!document.getElementById('quoteNo').value.trim()) return '請先填寫估價單號。';
-    if (!document.getElementById('salesName').value) return '請先從下拉選單選擇負責業務。';
+    if (!document.getElementById('salesName').value) return '請先從下拉選單選擇負責人。';
     const rows = [...document.querySelectorAll('#quoteItems tr')];
     if (!rows.some(row => (row.querySelector('.item-cn')?.value || row.querySelector('.item-en')?.value || row.querySelector('.item-model')?.value).trim())) return '請至少填寫一個品項。';
     if (rows.some(row => row.querySelector('.item-brand')?.value === '其他' && !quoteRowBrandValue(row))) return '已選擇「其他」廠牌，請輸入廠牌名稱。';
@@ -3877,7 +3899,7 @@ window.handleSaveAndPrint = function() {
     }
 
     if (!document.getElementById('salesName').value) {
-        alert('請從下拉選單選擇負責業務！');
+        alert('請從下拉選單選擇負責人！');
         return;
     }
 
@@ -9999,7 +10021,7 @@ function collectOrderDraft() {
         savedAt:new Date().toISOString(),
         ownerUid:orderDraftFieldValue('orderOwnerUid'),
         date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
-        itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),itemNameEn:orderDraftFieldValue('orderItemNameEn'),spec:orderDraftFieldValue('orderSpec'),
+        itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),itemNameEn:orderDraftFieldValue('orderItemNameEn'),productLine:orderDraftFieldValue('orderProductLine'),spec:orderDraftFieldValue('orderSpec'),
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
         unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
         procurementType:orderDraftFieldValue('orderProcurementType')||'PURCHASING_PO',
@@ -10053,6 +10075,7 @@ function setOrderModalItem(item={}) {
     document.getElementById('orderItemName').value=normalized.itemName||'';
     const nameEn=document.getElementById('orderItemNameEn');if(nameEn)nameEn.value=normalized.itemNameEn||'';
     const spec=document.getElementById('orderSpec');if(spec)spec.value=normalized.spec||'';
+    document.getElementById('orderProductLine').value=normalized.productLine||'';
     if(normalized.brand)selectBrandInDropdown(document.getElementById('orderBrand'),normalized.brand);
     else document.getElementById('orderBrand').value='';
     onOrderBrandSelectChange();
@@ -10097,7 +10120,7 @@ function normalizeNewOrderItem(item = {}) {
         ...item,itemId:item.itemId||`item-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
         brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
-        productId:item.productId||match?.productId||stableProductId(match||item),productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
+        productId:item.productId||match?.productId||stableProductId(match||item),productLine:item.productLine||match?.productLine||'',productType:match?.productType||item.productType||'',
         authorizationType:match?authorizationTypeForProduct(match):(item.authorizationType||''),supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
         warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' ? String(item.warehouseId||'') : ''
@@ -10105,7 +10128,7 @@ function normalizeNewOrderItem(item = {}) {
 }
 
 function currentOrderModalItem() {
-    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:document.getElementById('orderProductLine').value.trim(),spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     const cost=document.getElementById('orderCostPrice').value;if(item.procurementType==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
@@ -10130,7 +10153,7 @@ window.addCurrentOrderItemToDraft=function(){
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>(existing.productId&&item.productId&&existing.productId===item.productId)||(!existing.productId&&!item.productId&&normalizeHistoryItemCode(existing.itemCode)===normalizeHistoryItemCode(item.itemCode)));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
-    ['orderItemCode','orderItemName','orderItemNameEn','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
+    ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
 };
 
 window.openOrderModal = function(source = null) {
@@ -10153,7 +10176,7 @@ window.openOrderModal = function(source = null) {
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderItemNameEn', 'orderSpec', 'orderInvoiceTitle'].forEach(id => {
+    ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderItemNameEn', 'orderProductLine', 'orderSpec', 'orderInvoiceTitle'].forEach(id => {
         document.getElementById(id).value = '';
     });
     onOrderBrandSelectChange();
@@ -10181,6 +10204,7 @@ window.openOrderModal = function(source = null) {
         document.getElementById('orderItemName').value = source.itemName || '';
         const nameEn=document.getElementById('orderItemNameEn');if(nameEn)nameEn.value=source.itemNameEn||source.nameEn||'';
         const spec=document.getElementById('orderSpec');if(spec)spec.value=source.spec||source.specification||'';
+        document.getElementById('orderProductLine').value=source.productLine||'';
         document.getElementById('orderQty').value = source.qty || 1;
         document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
         if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
@@ -10322,6 +10346,7 @@ window.copyOrderAsNew = function(orderId) {
     newOrderDraftItems=copiedItems.slice(1);renderNewOrderDraftItems();
     document.getElementById('orderItemCode').value = first.itemCode || '';
     document.getElementById('orderItemName').value = first.itemName || '';
+    document.getElementById('orderProductLine').value = first.productLine || '';
     if (first.brand) selectBrandInDropdown(document.getElementById('orderBrand'), first.brand);
     onOrderBrandSelectChange();
     document.getElementById('orderQty').value = first.qty || 1;
@@ -10400,7 +10425,7 @@ window.saveNewOrder = function() {
         itemCode: itemCode,
         itemCodeKey: normalizeHistoryItemCode(itemCode),
         itemName: firstItem.itemName,
-        productLine: '',
+        productLine: firstItem.productLine || '',
         productType: '',
         fulfillmentType:firstItem.fulfillmentType,warehouseId:firstItem.warehouseId||'',qty:firstItem.qty,unitPrice:firstItem.unitPrice,
         totalPrice:items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0),items,itemCount:items.length,orderSchemaVersion:2,
@@ -10446,7 +10471,7 @@ window.saveNewOrder = function() {
 
     data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode });
     const priceMatch = findPriceItemForOrder(data);
-    data.productLine = (priceMatch && priceMatch.productLine) || '';
+    data.productLine = firstItem.productLine || (priceMatch && priceMatch.productLine) || '';
     data.productType = (priceMatch && priceMatch.productType) || '';
     data.authorizationType = priceMatch ? authorizationTypeForProduct(priceMatch) : '';
     if (priceMatch) {
@@ -11395,14 +11420,14 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'sales') reloadSalesFromUsers();
     if (tab === 'prices') loadPriceCatalogSummary();
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
-    if (tab === 'agencies') Promise.all([loadBrandMaster(), loadSupplierWarehouseMasters()]).then(() => {
+    if (tab === 'agencies') Promise.all([ensureBrandSettingsLoaded(), loadSupplierWarehouseMasters()]).then(() => {
         renderKeyStatisticBrands();
         renderCompanyAgencyBrandSettings();
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
     });
     // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
-    if (tab === 'statistics') salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics();
+    if (tab === 'statistics') ensureBrandSettingsLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
     if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
 };
@@ -11442,13 +11467,14 @@ function statisticBrandAliasLookup() {
 
 function rawBrandsWithOrderCounts() {
     const entries = new Map();
-    [...brandMasterCache.map(item => item.name), ...salesStatisticsOrders.map(order => order.brand)].forEach(value => {
+    const lines = salesStatisticsOrders.flatMap(salesStatisticOrderLines);
+    lines.map(order => order.brand).forEach(value => {
         const brand = String(value || '').trim();
         if (!brand || brand === '維修') return;
         const key = normalizeStatisticBrandKey(brand);
         if (!entries.has(key)) entries.set(key, { name: brand, count: 0 });
     });
-    salesStatisticsOrders.forEach(order => {
+    lines.forEach(order => {
         const key = normalizeStatisticBrandKey(order.brand);
         if (entries.has(key)) entries.get(key).count++;
     });
@@ -11494,6 +11520,11 @@ window.saveKeyStatisticBrands = async function() {
         keyStatisticBrands = selected;
         keyStatisticBrandAliases = aliases;
         await syncLegacyBrandSettingsToMaster();
+        populateQuoteBrandDropdowns();
+        populateOrderBrandDropdown();
+        populateEquipmentBrandDropdown();
+        if (typeof populateForecastBrandDropdown === 'function')
+            populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
         if (salesStatisticsOrders.length) renderSalesStatistics();
         renderKeyStatisticBrands();
         renderCompanyAgencyBrandSettings();
@@ -11514,8 +11545,7 @@ function renderCompanyAgencyBrandSettings() {
         const brandChoices = brands.length ? brands.map(brand =>
             `<label style="display:inline-block;margin:5px 12px 5px 0;font-size:13px;"><input type="checkbox" class="company-agency-brand" data-company="${company}" value="${escapeAttr(brand)}" ${includesBrandCaseInsensitive(selected, brand) ? 'checked' : ''}> ${escapeHtml(brand)}</label>`
         ).join('') : '<span style="color:#888;font-size:13px;">請先建立 Brand Master 廠牌。</span>';
-        const otherChoice = `<label style="display:inline-block;margin:5px 12px 5px 0;font-size:13px;padding-left:10px;border-left:2px solid #ccc;"><input type="checkbox" class="company-agency-brand" data-company="${company}" value="${escapeAttr(OTHER_BRAND_OPTION_KEY)}" ${selected.includes(OTHER_BRAND_OPTION_KEY) ? 'checked' : ''}> 其他廠牌（開放自行輸入）</label>`;
-        return `<div style="padding:12px 0;border-bottom:1px solid #ddd;"><strong>${escapeHtml(info.title)}（${escapeHtml(info.prefix)}）</strong><div style="margin-top:6px;">${brandChoices}${otherChoice}</div></div>`;
+        return `<div style="padding:12px 0;border-bottom:1px solid #ddd;"><strong>${escapeHtml(info.title)}（${escapeHtml(info.prefix)}）</strong><div style="margin-top:6px;">${brandChoices}</div></div>`;
     }).join('');
 }
 
@@ -11691,7 +11721,7 @@ function inventoryAnalysisTotals(start,end) {
             .filter(item => (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP')
             .forEach(item => { purchase += Number(item.qty || 0) * Number(item.unitPrice || 0); });
     });
-    const sales = salesStatisticsOrders.reduce((sum, order) => {
+    const sales = salesStatisticsOrders.flatMap(salesStatisticOrderLines).reduce((sum, order) => {
         const contribution = calculateOrderStatsContribution(order, start, end);
         return sum + contribution.actualSales;
     }, 0);
@@ -12258,6 +12288,22 @@ function statisticBrandForOrder(order) {
     return statisticBrandAliasLookup().get(normalizeStatisticBrandKey(brand)) || '其他廠牌';
 }
 
+function salesStatisticOrderLines(order) {
+    const items = normalizedOrderItems(order);
+    if (items.length <= 1) return [order];
+    return items.map(item => ({
+        ...order,
+        items: [item], orderSchemaVersion: 2,
+        itemId: item.itemId, itemCode: item.itemCode || '', itemName: item.itemName || '',
+        brand: item.brand || '', productLine: item.productLine || '', productType: item.productType || '',
+        qty: Number(item.qty || 0), unitPrice: Number(item.unitPrice || 0),
+        totalPrice: Number(item.totalPrice || 0), costPrice: item.costPrice,
+        deliveryRecords: savedDeliveryRecords(order).filter(row => row.itemId === item.itemId),
+        returnRecords: savedReturnRecords(order).filter(row => row.itemId === item.itemId),
+        isDelivered: false
+    }));
+}
+
 function newSalesStatsMetric() {
     return { actualSales: 0, pendingSales: 0, totalSales: 0, actualCost: 0, pendingCost: 0, totalCost: 0, profit: 0, missingCostIds: new Set(), orderIds: new Set(), estimatedSales: 0, estimatedIds: new Set() };
 }
@@ -12299,11 +12345,15 @@ function calculateOrderStatsContribution(order, start, end) {
         if (dateInStatsRange(legacyDate, start, end)) { actualQty += totalQty; estimatedQty += totalQty; }
         if (legacyDate && legacyDate <= cutoff) deliveredByCutoff += totalQty;
     }
+    let returnedByCutoff = 0;
     savedReturnRecords(order).forEach(record => {
-        if (dateInStatsRange(record.date, start, end)) actualQty -= parseFloat(record.qty) || 0;
+        const qty = parseFloat(record.qty) || 0;
+        if (dateInStatsRange(record.date, start, end)) actualQty -= qty;
+        if (record.date && record.date <= cutoff) returnedByCutoff += qty;
     });
     const orderExistsByCutoff = !order.orderDate || order.orderDate <= cutoff;
-    const pendingQty = orderExistsByCutoff ? Math.max(0, totalQty - Math.min(totalQty, deliveredByCutoff)) : 0;
+    const effectiveDelivered = Math.max(0, deliveredByCutoff - returnedByCutoff);
+    const pendingQty = orderExistsByCutoff ? Math.max(0, totalQty - Math.min(totalQty, effectiveDelivered)) : 0;
     return {
         actualQty, pendingQty,
         actualSales: actualQty * unitSales,
@@ -12352,11 +12402,12 @@ function renderSalesStatsRows(tbodyId, values, grandTotal) {
 }
 
 function populateSalesStatisticsFilters() {
+    const orderLines = salesStatisticsOrders.flatMap(salesStatisticOrderLines);
     const selects = [
         { id: 'salesStatsSalesFilter', label: '全部業務', values: salesStatisticsOrders.map(o => stripPhoneSuffix(o.salesName) || '未指定業務') },
         { id: 'salesStatsBrandFilter', label: '全部廠牌', values: [...keyStatisticBrands, '其他廠牌', '維修'] },
-        { id: 'salesStatsTypeFilter', label: '全部類型', values: salesStatisticsOrders.map(productTypeForOrder) },
-        { id: 'salesStatsLineFilter', label: '全部產品線', values: salesStatisticsOrders.map(productLineForOrder) }
+        { id: 'salesStatsTypeFilter', label: '全部類型', values: orderLines.map(productTypeForOrder) },
+        { id: 'salesStatsLineFilter', label: '全部產品線', values: orderLines.map(productLineForOrder) }
     ];
     selects.forEach(({ id, label, values }) => {
         const select = document.getElementById(id);
@@ -12401,7 +12452,7 @@ function buildSalesStatisticsReport() {
     const total = newSalesStatsMetric();
     const details = [];
 
-    salesStatisticsOrders.forEach(order => {
+    salesStatisticsOrders.flatMap(salesStatisticOrderLines).forEach(order => {
         const sales = stripPhoneSuffix(order.salesName) || '未指定業務';
         const line = productLineForOrder(order);
         const type = productTypeForOrder(order);

@@ -542,7 +542,7 @@
                 <div class="meta-row"><label>抬頭：</label><input type="text" id="clientName" list="clientList"></div>
                 <div class="meta-row no-print"><label>客戶名稱：</label><input type="text" id="ordererName" placeholder="訂購人姓名（僅供內部管理，不會印在估價單上）"></div>
                 <div class="meta-row-three">
-                    <div><label>負責業務：</label><select id="salesName" onchange="onSalesChange()"><option value="">請選擇業務</option></select><span id="salesPhone" style="margin-left:6px;font-size:11px;color:#333;"></span></div>
+                    <div><label>負責人：</label><select id="salesName" onchange="onSalesChange()"><option value="">請選擇負責人</option></select><span id="salesPhone" style="margin-left:6px;font-size:11px;color:#333;"></span></div>
                     <div><label>估價日期：</label><input type="text" id="quoteDate"></div>
                     <div><label>單號：</label><input type="text" id="quoteNo" style="font-weight:bold;"></div>
                 </div>
@@ -890,6 +890,7 @@
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
                     <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
                 </div>
+                <div><label>產品線（選填）</label><input type="text" id="orderProductLine" placeholder="例如：儀器、試劑、耗材"></div>
                 <div><label>規格</label><input type="text" id="orderSpec"></div>
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
                 <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
@@ -1138,18 +1139,18 @@
 
         <div id="admin-agencies" class="admin-panel" style="display:none;">
             <div class="panel">
-                <strong>統計廠牌設定</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">設定需要獨立統計的廠牌；未列入的廠牌統一歸入「其他廠牌」。英文大小寫、空白、連字號及常見寫法會自動合併。</p>
+                <strong>主要代理廠牌</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">只有這裡儲存的主要代理廠牌會出現在一般廠牌選單並獨立統計；不需要先上傳價目表。未列入與未填的廠牌歸入「其他廠牌」，維修獨立統計。產品線可在建立訂單時填寫，不會產生新廠牌。</p>
                 <div class="stat-brand-manager">
-                    <div><h4>獨立統計廠牌</h4><div id="keyStatisticBrands"></div></div>
+                    <div><h4>下拉選單與獨立統計廠牌</h4><div id="keyStatisticBrands"></div></div>
                     <div><h4>目前歸入其他廠牌</h4><div id="otherStatisticBrands"></div></div>
                 </div>
-                <div class="stat-brand-add"><input type="text" id="newStatisticBrandName" placeholder="新廠牌名稱"><button type="button" class="btn-secondary" onclick="addStatisticBrand()">＋ 新增獨立廠牌</button></div>
-                <button style="margin-top:10px;" onclick="saveKeyStatisticBrands()">💾 儲存統計廠牌設定</button>
+                <div class="stat-brand-add"><input type="text" id="newStatisticBrandName" placeholder="主要代理廠牌名稱"><button type="button" class="btn-secondary" onclick="addStatisticBrand()">＋ 新增主要廠牌</button></div>
+                <button style="margin-top:10px;" onclick="saveKeyStatisticBrands()">💾 儲存主要廠牌</button>
             </div>
             <div class="panel" style="margin-top:16px;">
                 <strong>分公司代理廠牌設定</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">勾選各分公司可開立估價單及產生訂購單的代理廠牌。未儲存任何設定前，為相容既有資料，暫時不限制廠牌。</p>
+                <p style="font-size:12px;color:#666;margin:6px 0;">標記各分公司代理的主要廠牌，用於採購與代理產品判斷；一般估價單仍可選其他廠牌，不會因此新增到主要廠牌選單。</p>
                 <div id="companyAgencyBrandSettings"></div>
                 <button style="margin-top:12px;" onclick="saveCompanyAgencyBrands()">💾 儲存分公司代理廠牌</button>
             </div>

@@ -47,17 +47,21 @@ test('inactive user is denied', async () => {
   await assertFails(getDoc(doc(db('off1'), 'settings/company')));
 });
 
-test('engineer owns and can edit own quote, forecast and order', async () => {
+test('engineer owns and can edit own quote and order, but cannot access Forecast', async () => {
   const quote = {
     ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   };
   await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/q1'), quote));
   await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...quote, orderDate:'2026-09-20' }));
-  await assertSucceeds(setDoc(doc(db('eng1'), 'forecasts/f1'), quote));
+  await assertFails(setDoc(doc(db('eng1'), 'forecasts/f1'), quote));
+  await seed('forecasts/f1', quote);
   await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/q1'), { quoteDate:'2026-09-21' }));
   await assertSucceeds(updateDoc(doc(db('eng1'), 'orders/o1'), { orderDate:'2026-09-21' }));
-  await assertSucceeds(updateDoc(doc(db('eng1'), 'forecasts/f1'), { quoteDate:'2026-09-21' }));
+  await assertFails(getDoc(doc(db('eng1'), 'forecasts/f1')));
+  await assertFails(updateDoc(doc(db('eng1'), 'forecasts/f1'), { quoteDate:'2026-09-21' }));
+  await assertFails(setDoc(doc(db('eng1'), 'forecasts/f1/progress/p1'), { text:'update' }));
+  await assertSucceeds(getDoc(doc(db('admin'), 'forecasts/f1')));
 });
 
 test('engineer cannot create documents for salesperson; purchaser assistance requires matching owner code', async () => {
@@ -68,6 +72,22 @@ test('engineer cannot create documents for salesperson; purchaser assistance req
   await assertFails(setDoc(doc(db('buyer1'), 'orders/bad-owner-code'), {
     ownerUid:'sales1', salesCode:'S02', orderDate:'2026-09-20',
     createdByUid:'buyer1', createdByName:'Buyer', createdByRole:'purchaser'
+  }));
+});
+
+test('purchaser may create quotes for sales and engineers but not reassign commercial orders to engineer', async () => {
+  const createdBy = { createdByUid:'buyer1', createdByName:'Buyer', createdByRole:'purchaser' };
+  await assertSucceeds(setDoc(doc(db('buyer1'), 'quotes/assisted-sales'), {
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20', ...createdBy
+  }));
+  await assertSucceeds(setDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {
+    ownerUid:'eng1', salesCode:'E01', quoteDate:'2026-09-20', ...createdBy
+  }));
+  await assertFails(setDoc(doc(db('buyer1'), 'quotes/wrong-engineer-code'), {
+    ownerUid:'eng1', salesCode:'S01', quoteDate:'2026-09-20', ...createdBy
+  }));
+  await assertFails(setDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {
+    ownerUid:'eng1', salesCode:'E01', orderDate:'2026-09-20', ...createdBy
   }));
 });
 

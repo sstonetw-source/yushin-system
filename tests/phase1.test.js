@@ -135,10 +135,84 @@ test('preview host selects isolated Firebase project and exposes a visible envir
     assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
 });
 
-test('engineer quote selector uses own identity; purchaser selects responsible salesperson', () => {
+test('quote owner selector defaults to self and lets purchaser choose sales or engineer', () => {
     assert.match(appSource, /function populateSalesDropdown\(\)/);
-    assert.match(appSource, /currentUserRole === 'engineer'\s*\? s\.uid === currentUser\?\.uid\s*: role === 'sales'/);
-    assert.match(appSource, /currentUserRole === 'engineer' \? currentUserName : ''/);
+    const start = appSource.indexOf('function populateSalesDropdown()');
+    const end = appSource.indexOf('\n}\n', start) + 2;
+    const selector = appSource.slice(start, end);
+    assert.match(selector, /currentUserRole === 'sales' \|\| currentUserRole === 'engineer'/);
+    assert.match(selector, /s\.uid === currentUser\?\.uid/);
+    assert.match(selector, /role === 'sales' \|\| role === 'engineer'/);
+    assert.match(selector, /\? currentUserName : ''/);
+    assert.match(rulesSource, /match \/quotes\/\{id\}[\s\S]*?purchaser\(\) && validQuoteOwner\(request\.resource\.data\)/);
+});
+
+test('main brand list ignores Product Master and non-key Brand Master entries', () => {
+    assert.match(appSource, /function initializePageData\(mainKey, options = \{\}\)[\s\S]*?ensureBrandSettingsLoaded\(\)/);
+    assert.match(appSource, /function ensureBrandSettingsLoaded\(\)[\s\S]*?loadSalesStatisticsSettings\(\), loadCompanyAgencyBrandSettings\(\), loadBrandMaster\(\)/);
+    const start = appSource.indexOf('function getUnifiedBrandEntries(includeMaintenance = false)');
+    const end = appSource.indexOf('\n}\n', start) + 2;
+    const context = vm.createContext({
+        keyStatisticBrands:['Roche', 'Thermo'],
+        brandMasterCache:[{ id:'r', name:'Roche', aliases:['Roche Diagnostics'], active:true }, { id:'x', name:'Unlisted Excel Brand', active:true }],
+        keyStatisticBrandAliases:{}, companyAgencyBrands:{ yushin:[], morningstar:[], 'MULTI-LIFE':[] },
+        normalizeBrandLookupKey:value => String(value || '').trim().toLowerCase(),
+        dedupeBrandsCaseInsensitive:values => [...new Set(values)],
+        includesBrandCaseInsensitive:(values, name) => values.includes(name)
+    });
+    vm.runInContext(appSource.slice(start, end), context);
+    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Thermo']);
+    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Thermo', '維修']));
+    const classificationStart = appSource.indexOf('function statisticBrandForOrder(order)');
+    const classificationEnd = appSource.indexOf('\n}\n', classificationStart) + 2;
+    Object.assign(context, {
+        statisticBrandAliasLookup:() => new Map([['roche', 'Roche'], ['thermo', 'Thermo']]),
+        normalizeStatisticBrandKey:value => String(value || '').trim().toLowerCase()
+    });
+    vm.runInContext(appSource.slice(classificationStart, classificationEnd), context);
+    assert.equal(context.statisticBrandForOrder({ brand:'Roche' }), 'Roche');
+    assert.equal(context.statisticBrandForOrder({ brand:'Unlisted Excel Brand' }), '其他廠牌');
+    assert.equal(context.statisticBrandForOrder({ brand:'' }), '其他廠牌');
+    assert.equal(context.statisticBrandForOrder({ brand:'維修' }), '維修');
+});
+
+test('multi-brand sales statistics split delivery and returns by item without duplicating amounts', () => {
+    const start = appSource.indexOf('function salesStatisticOrderLines(order)');
+    const end = appSource.indexOf('\n}\n', start) + 2;
+    const context = vm.createContext({
+        normalizedOrderItems:order => order.items,
+        savedDeliveryRecords:order => order.deliveryRecords || [],
+        savedReturnRecords:order => order.returnRecords || []
+    });
+    vm.runInContext(appSource.slice(start, end), context);
+    const order = { id:'O-1', brand:'Roche', totalPrice:350,
+        items:[
+            { itemId:'a', itemName:'A', brand:'Roche', productLine:'試劑', qty:2, unitPrice:100, totalPrice:200 },
+            { itemId:'b', itemName:'B', brand:'Other', productLine:'耗材', qty:3, unitPrice:50, totalPrice:150 }
+        ],
+        deliveryRecords:[{ itemId:'a', qty:1, date:'2026-09-29' }, { itemId:'b', qty:2, date:'2026-09-29' }],
+        returnRecords:[{ itemId:'b', qty:1, date:'2026-09-29' }]
+    };
+    const lines = context.salesStatisticOrderLines(order);
+    assert.deepEqual(Array.from(lines, line => line.brand), ['Roche', 'Other']);
+    assert.equal(lines.reduce((sum, line) => sum + line.totalPrice, 0), 350);
+    assert.deepEqual(Array.from(lines, line => line.deliveryRecords.length), [1, 1]);
+    assert.deepEqual(Array.from(lines, line => line.returnRecords.length), [0, 1]);
+    assert.deepEqual(Array.from(lines, line => line.productLine), ['試劑', '耗材']);
+    const contributionStart = appSource.indexOf('function calculateOrderStatsContribution(order, start, end)');
+    const contributionEnd = appSource.indexOf('\n}\n', contributionStart) + 2;
+    Object.assign(context, {
+        normalizedOrderStatus:() => 'normal',
+        orderQuantity:line => Number(line.qty || 0),
+        orderUnitSalesAmount:line => line.totalPrice / line.qty,
+        dateInStatsRange:(date, start, end) => !!date && date >= start && date <= end,
+        localDateString:() => '2026-09-29'
+    });
+    vm.runInContext(appSource.slice(contributionStart, contributionEnd), context);
+    const contributions = lines.map(line => context.calculateOrderStatsContribution(line, '2026-09-01', '2026-09-30'));
+    assert.equal(contributions.reduce((sum, row) => sum + row.actualSales, 0), 150);
+    assert.equal(contributions.reduce((sum, row) => sum + row.pendingSales, 0), 200);
+    assert.equal(contributions.reduce((sum, row) => sum + row.actualSales + row.pendingSales, 0), 350);
 });
 
 test('purchaser order form assigns a salesperson while preserving creator identity', () => {
@@ -1318,6 +1392,15 @@ test('V2 personnel UI uses fixed role permissions and removes product-line respo
     assert.doesNotMatch(appSource, /saveAdminUserCapabilities/);
     assert.doesNotMatch(appSource, /productLineIds/);
     assert.match(appSource, /const rolePermissions = Object\.freeze/);
+});
+
+test('engineer cannot open or create Forecast while sales and admin retain access', () => {
+    const engineerPermissions = appSource.match(/engineer: Object\.freeze\(\{ forecast:'([^']+)'/);
+    const engineerScope = appSource.match(/engineer: Object\.freeze\(\{ quotes:'own', forecasts:'([^']+)'/);
+    assert.equal(engineerPermissions?.[1], 'none');
+    assert.equal(engineerScope?.[1], 'none');
+    assert.match(appSource, /function canCreateForecastCapability\(role = currentUserRole\) \{\s*return role === 'admin' \|\| role === 'sales';/);
+    assert.match(rulesSource, /match \/forecasts\/\{id\} \{\s*allow read: if admin\(\) \|\| \(sales\(\) && owns\(resource\.data\)\);/);
 });
 
 test('personnel screen omits duplicate dashboard while safety stock remains available', () => {

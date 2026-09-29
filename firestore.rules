@@ -92,6 +92,19 @@ service cloud.firestore {
         ) == data.salesCode;
     }
 
+    function validQuoteOwner(data) {
+      return validSalesOwner(data) || (
+        data.ownerUid != null
+        && data.salesCode != null
+        && exists(/databases/$(database)/documents/users/$(data.ownerUid))
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'engineer'
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
+          'salesCode',
+          get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
+        ) == data.salesCode
+      );
+    }
+
     function validOwnedCommercialCreate(data) {
       return admin() ||
         (commercialDocumentOwner() &&
@@ -301,7 +314,11 @@ service cloud.firestore {
 
     match /quotes/{id} {
       allow read: if admin() || purchaser() || owns(resource.data);
-      allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
+      allow create: if canCreateCommercialDoc() && (
+        validOwnedCommercialCreate(request.resource.data)
+        || (purchaser() && validQuoteOwner(request.resource.data)
+          && request.resource.data.ownerUid != request.auth.uid)
+      );
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || (purchaser() && sameCommercialOwner() && preservesCreator());
@@ -309,10 +326,10 @@ service cloud.firestore {
     }
 
     match /forecasts/{id} {
-      allow read: if admin() || owns(resource.data);
-      allow create: if (admin() || commercialDocumentOwner()) && validOwnedCommercialCreate(request.resource.data);
+      allow read: if admin() || (sales() && owns(resource.data));
+      allow create: if (admin() || sales()) && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
-        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
+        || (sales() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
       allow delete: if admin();
     }
 
@@ -320,8 +337,8 @@ service cloud.firestore {
       function parentForecast() {
         return get(/databases/$(database)/documents/forecasts/$(forecastId));
       }
-      allow read: if admin() || owns(parentForecast().data);
-      allow create: if admin() || (commercialDocumentOwner() && owns(parentForecast().data));
+      allow read: if admin() || (sales() && owns(parentForecast().data));
+      allow create: if admin() || (sales() && owns(parentForecast().data));
       allow update: if false;
       allow delete: if admin();
     }
