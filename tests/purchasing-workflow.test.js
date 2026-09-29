@@ -158,13 +158,43 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /metrics\[category\]\.count\+\+/);
     assert.match(app, /categories\.includes\(activeOrderWorkFilter\)/);
     assert.match(app, /shown\.map\(category=>map\[category\]\?\.label\)/);
-    assert.match(app, /const itemStatus=orderItemWorkCategory\(o,item\)/);
+    assert.match(app, /const itemStatus=orderItemDisplayCategory\(o,item\)/);
     assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
     assert.match(app, /orderItemWorkCategory\(order,sourceItem\)==='ordering'/);
     assert.match(app, /orderItemWorkCategory\(order,item\)==='delivery'&&itemDispatchState\(order,item\)\.pending>0/);
-    assert.match(app, /const itemStatus=orderItemWorkCategory\(o,item\)/);
+    assert.match(app, /\['dispatch', '待打單'\]/);
+    assert.match(app, /\['shipping', '待出貨'\]/);
+    assert.match(app, /allOrderItems\.filter\(item=>orderItemDisplayCategory\(o,item\)===activeOrderWorkFilter\)/);
     assert.match(app, /if\(uncoveredShortage>0\)return 'ordering';/);
     assert.match(app, /if\(shortage>0\|\|ordered>received\)return 'arrival';/);
+});
+
+test('stock order shows dispatch, shipping, billing and complete as work advances', () => {
+    const dispatchSource = app.match(/function itemDispatchState\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderContextActionState)/)?.[0];
+    const categorySource = app.match(/function orderItemWorkCategory\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderWorkCategories)/)?.[0];
+    assert.ok(dispatchSource && categorySource);
+    const ctx = vm.createContext({
+        normalizedOrderItems:order=>order.items,
+        savedDeliveryRecords:order=>order.deliveryRecords||[],
+        savedReturnRecords:()=>[],
+        orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0})
+    });
+    vm.runInContext(`${dispatchSource}\n${categorySource}`,ctx);
+    const order={items:[{itemId:'I1',qty:3,orderedQty:3,inventoryShortageQty:0,
+        fulfillmentType:'WAREHOUSE',reservedQty:3,dispatchPreparedQty:0}],isBilled:false,deliveryRecords:[]};
+    const current=()=>ctx.orderItemDisplayCategory(order,order.items[0]);
+    assert.equal(current(),'dispatch');
+    order.items[0].dispatchPreparedQty=1;
+    assert.equal(current(),'dispatch','a partly prepared line still has a dispatch task');
+    assert.equal(ctx.itemDispatchState(order,order.items[0]).shippable,1);
+    order.items[0].dispatchPreparedQty=3;
+    assert.equal(current(),'shipping');
+    order.deliveryRecords=[{itemId:'I1',qty:3}];
+    assert.equal(current(),'billing');
+    order.isBilled=true;
+    assert.equal(current(),'complete');
+    order.deliveryRecords=[];
+    assert.equal(current(),'shipping','billing before shipment does not complete the order');
 });
 
 

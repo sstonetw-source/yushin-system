@@ -6002,6 +6002,15 @@ function orderItemWorkCategory(order, item) {
     return 'delivery';
 }
 
+// 倉庫品項的採購／到貨／送貨仍共用原本的資料狀態；訂單頁依已打單量
+// 把可出貨前的工作分成待打單與待出貨，不另建會與庫存紀錄脫節的旗標。
+function orderItemDisplayCategory(order, item) {
+    const category = orderItemWorkCategory(order, item);
+    if (category !== 'delivery') return category;
+    if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return 'shipping';
+    return itemDispatchState(order, item).pending > 0 ? 'dispatch' : 'shipping';
+}
+
 function orderWorkCategories(order) {
     const lifecycle=orderLifecycleInfo(order);
     if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return ['closed'];
@@ -6019,11 +6028,12 @@ function orderWorkIndexFields(order) {
 }
 
 function orderWorkStatusInfo(order) {
-    const categories=orderWorkCategories(order);
+    const categories=[...new Set(normalizedOrderItems(order).map(item=>orderItemDisplayCategory(order,item)))];
     const map={
         ordering:{label:'待採購',css:'pending'},
         arrival:{label:'待到貨',css:'pending'},
-        delivery:{label:'待送貨',css:'active'},
+        dispatch:{label:'待打單',css:'pending'},
+        shipping:{label:'待出貨',css:'active'},
         billing:{label:'待核銷',css:'active'},
         complete:{label:'已完成',css:'complete'},
         closed:{label:orderLifecycleInfo(order).label,css:'invalid'}
@@ -6041,14 +6051,14 @@ function orderItemWorkAmount(order, item, category) {
     const totalQty=orderQuantity(order);
     const unitSales=Number(item.unitPrice||item.salesPrice||0)||(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
     const state=itemDispatchState(order,item);
-    if(category==='delivery')return Math.max(0,qty-state.delivered)*unitSales;
+    if(category==='delivery'||category==='dispatch'||category==='shipping')return Math.max(0,qty-state.delivered)*unitSales;
     if(category==='billing'||category==='complete')return Math.min(qty,state.delivered)*unitSales;
     return qty*unitSales;
 }
 
 function orderWorkAmount(order, category) {
     return normalizedOrderItems(order)
-        .filter(item=>orderItemWorkCategory(order,item)===category)
+        .filter(item=>orderItemDisplayCategory(order,item)===category)
         .reduce((sum,item)=>sum+orderItemWorkAmount(order,item,category),0);
 }
 
@@ -6063,14 +6073,15 @@ function renderOrderWorkCards(orders) {
     const definitions = [
         ['ordering', '待採購'],
         ['arrival', '待到貨'],
-        ['delivery', '待送貨'],
+        ['dispatch', '待打單'],
+        ['shipping', '待出貨'],
         ['billing', '待核銷'],
         ['complete', '已完成']
     ];
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
     orders.forEach(order => {
         normalizedOrderItems(order).forEach(item => {
-            const category=orderItemWorkCategory(order,item);
+            const category=orderItemDisplayCategory(order,item);
             if(metrics[category]&&orderMatchesWorkPeriod(order,category)){
                 metrics[category].count++;
                 metrics[category].amount+=orderItemWorkAmount(order,item,category);
@@ -6495,14 +6506,14 @@ window.renderOrdersList = function() {
 
     baseOrders.forEach(o => {
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
-        const categories=orderWorkCategories(o);
+        const categories=[...new Set(allOrderItems.map(item=>orderItemDisplayCategory(o,item)))];
         if(activeOrderWorkFilter!=='all'&&!categories.includes(activeOrderWorkFilter))return;
         if(!orderMatchesWorkPeriod(o,activeOrderWorkFilter==='all'?'all':activeOrderWorkFilter))return;
         // 工作圖卡是以「品項」計數；套用狀態篩選後，產品欄也只顯示該狀態品項，
         // 避免同一張多品項訂單把其他狀態的品項一起帶進來造成誤判。
         const orderItems=activeOrderWorkFilter==='all'
             ? allOrderItems
-            : allOrderItems.filter(item=>orderItemWorkCategory(o,item)===activeOrderWorkFilter);
+            : allOrderItems.filter(item=>orderItemDisplayCategory(o,item)===activeOrderWorkFilter);
         shown++;
 
         const tr = document.createElement('tr');
@@ -6515,7 +6526,7 @@ window.renderOrdersList = function() {
             <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory('${escapeAttr(o.customerName)}')">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const itemStatus=orderItemWorkCategory(o,item);const itemStatusMap={ordering:'待採購',arrival:'待到貨',delivery:'待送貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=itemStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}</small></div>`}).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const itemStatus=orderItemDisplayCategory(o,item);const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待出貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=itemStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const ready=itemStatus==='dispatch'?itemDispatchState(o,item).shippable:0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${ready>0?`・已有 ${escapeHtml(ready)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
             ${canManageOrderOps ? `
             <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" value="${o.costPrice != null ? o.costPrice : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
@@ -6533,7 +6544,7 @@ window.renderOrdersList = function() {
             <td class="no-print" data-th="操作">
                 <div class="order-compact-actions">
                     
-                    ${!canManageOrderOps ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
+                    ${!canManageOrderOps ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? `確認已送貨（可出 ${fulfillmentProgressInfo(o).shippable}）` : '待打單'}</button>` : ''}
                     ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
