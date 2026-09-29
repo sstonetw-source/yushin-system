@@ -615,3 +615,32 @@ test('purchase cost preload preserves already resolved costs across repeated PO 
     assert.doesNotMatch(source, /purchaseCostCache = new Map\(\)/);
     assert.match(source, /if \(purchaseCostCache\.has\(id\)\) return;/);
 });
+
+
+test('new PO cannot be saved until its number is ready', () => {
+    const buttonSource = app.match(/function updatePoSaveButton\(\) \{[\s\S]*?\n\}/)?.[0];
+    const saveStart = app.indexOf('window.printPurchaseOrder = async function()');
+    const saveEnd = app.indexOf('    if (poEditingId) {', saveStart);
+    assert.ok(buttonSource && saveStart >= 0 && saveEnd > saveStart);
+    assert.match(buttonSource, /waitingForNumber = !poEditingId && !poNoReady/);
+    assert.match(buttonSource, /button\.disabled = poSaveInProgress \|\| waitingForNumber/);
+    assert.match(app.slice(saveStart, saveEnd), /!poEditingId && !poNoReady/);
+});
+
+test('PO number generation ignores stale async results and never falls back to sequence 01 after an error', () => {
+    const source = app.match(/window\.generatePoNo = async function\(\) \{[\s\S]*?\n\};/)?.[0];
+    assert.ok(source);
+    assert.match(source, /const generation = \+\+poNoGeneration/);
+    assert.match(source, /if \(generation !== poNoGeneration\) return ''/);
+    assert.match(source, /查不到目前最大流水號時不能直接假設 01/);
+    assert.doesNotMatch(source, /catch \(e\)[\s\S]*?prefix\}01/);
+});
+
+test('closing or reprinting a PO invalidates any pending PO number request', () => {
+    const closeSource = app.match(/window\.closePurchaseOrderModal = function\(\) \{[\s\S]*?\n\};/)?.[0];
+    const reprintSource = app.match(/window\.reprintPurchaseOrder = function\(poId\) \{[\s\S]*?\n\};/)?.[0];
+    assert.ok(closeSource && reprintSource);
+    assert.match(closeSource, /poNoGeneration\+\+/);
+    assert.match(reprintSource, /poNoGeneration\+\+/);
+    assert.match(reprintSource, /poNoReady = true/);
+});

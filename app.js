@@ -7576,6 +7576,9 @@ window.renderPoList = function() {
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
 window.reprintPurchaseOrder = function(poId) {
     poDirectStockMode = false;
+    poNoGeneration++;
+    poNoLoading = false;
+    poNoReady = true;
     const po = poListCache.find(p => p.id === poId) || (poPrintablePreview?.id === poId ? poPrintablePreview : null);
     if (!po) return;
 
@@ -7638,6 +7641,9 @@ let poSaveInProgress = false;
 let poDirectStockMode = false;
 let poIncomingSyncPending = false;
 let poPrintablePreview = null;
+let poNoGeneration = 0;
+let poNoReady = false;
+let poNoLoading = false;
 
 function updatePoSaveStatus(message = '', isError = false) {
     const status = document.getElementById('poSaveStatus');
@@ -7649,9 +7655,13 @@ function updatePoSaveStatus(message = '', isError = false) {
 function updatePoSaveButton() {
     const button = document.getElementById('printPurchaseOrderBtn');
     if (!button) return;
+    const waitingForNumber = !poEditingId && !poNoReady;
+    button.disabled = poSaveInProgress || waitingForNumber;
     button.textContent = poEditingId
         ? (poIncomingSyncPending ? '重試同步在途庫存' : '🖨️ 列印／輸出 PDF')
-        : poDirectStockMode ? '儲存備貨訂購單' : '確認已訂購／儲存訂購單';
+        : waitingForNumber
+            ? (poNoLoading ? '產生單號中…' : '單號未就緒')
+            : poDirectStockMode ? '儲存備貨訂購單' : '確認已訂購／儲存訂購單';
 }
 
 function receivedQuantityForPoItem(po, itemIndex) {
@@ -8579,6 +8589,9 @@ function populatePoVendorSuggestions() {
 }
 
 window.closePurchaseOrderModal = function() {
+    poNoGeneration++;
+    poNoLoading = false;
+    poNoReady = false;
     document.getElementById('poModalOverlay').classList.remove('active');
 };
 
@@ -8614,10 +8627,17 @@ window.switchPoCompany = function(compKey, el, skipNoGen) {
 // 邏輯跟估價單的 generateQuoteNo 一致，這樣才能保證同一天同一間公司不會撞號
 window.generatePoNo = async function() {
     const info = companyData[poCurrentCompany];
-    if (!info) return;
+    if (!info) return '';
+    const generation = ++poNoGeneration;
     const dateStr = getFormattedDateCode();
     const purchaserCode = currentUserCode || '01';
     const prefix = `PO-${info.prefix}-${dateStr}-${purchaserCode}-`;
+    const numberEl = document.getElementById('poNo');
+
+    poNoReady = false;
+    poNoLoading = true;
+    if (numberEl) numberEl.innerText = '產生中…';
+    updatePoSaveButton();
 
     try {
         const snapshot = await db.collection('purchaseOrders')
@@ -8627,15 +8647,32 @@ window.generatePoNo = async function() {
             .limit(1)
             .get();
 
+        // 使用者可能在查詢尚未回來時切換公司、關閉視窗或開啟另一張單。
+        // 舊查詢結果不得再覆蓋目前畫面。
+        if (generation !== poNoGeneration) return '';
+
         let maxSeq = 0;
         snapshot.forEach(doc => {
             const seqStr = (doc.data().poNo || '').split('-').pop();
             const seq = parseInt(seqStr, 10);
             if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
         });
-        document.getElementById('poNo').innerText = `${prefix}${String(maxSeq + 1).padStart(2, '0')}`;
+        const nextNo = `${prefix}${String(maxSeq + 1).padStart(2, '0')}`;
+        if (numberEl) numberEl.innerText = nextNo;
+        poNoReady = true;
+        return nextNo;
     } catch (e) {
-        document.getElementById('poNo').innerText = `${prefix}01`;
+        if (generation !== poNoGeneration) return '';
+        // 查不到目前最大流水號時不能直接假設 01；那可能撞到已存在的正式 PO。
+        if (numberEl) numberEl.innerText = '—';
+        poNoReady = false;
+        updatePoSaveStatus('訂購單號讀取失敗，請切換公司或重新開啟後再試。', true);
+        return '';
+    } finally {
+        if (generation === poNoGeneration) {
+            poNoLoading = false;
+            updatePoSaveButton();
+        }
     }
 };
 
@@ -8737,6 +8774,10 @@ function printSavedPoDocument(poNo, vendorName) {
 window.printPurchaseOrder = async function() {
     if (poSaveInProgress) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
+    if (!poEditingId && !poNoReady) {
+        updatePoSaveStatus(poNoLoading ? '訂購單號仍在產生中，完成後即可儲存。' : '訂購單號尚未就緒，請切換公司或重新開啟後再試。', !poNoLoading);
+        return;
+    }
     if (poEditingId) {
         const savedPo = poListCache.find(po => po.id === poEditingId)
             || (poPrintablePreview?.id === poEditingId ? poPrintablePreview : null);
@@ -8808,8 +8849,8 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const poNo = document.getElementById('poNo').innerText.trim();
-    if (!poNo) {
-        alert('訂購單號尚未產生，請稍候再試。');
+    if (!poNo || poNo === '產生中…' || poNo === '—') {
+        updatePoSaveStatus('訂購單號尚未就緒，請切換公司或重新開啟後再試。', true);
         return;
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
