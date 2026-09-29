@@ -6096,6 +6096,21 @@ function orderWorkAmount(order, category) {
         .reduce((sum,item)=>sum+orderItemWorkAmount(order,item,category),0);
 }
 
+function buildOrderItemWorkMetrics(orders, categories, include = null) {
+    const metrics = Object.fromEntries(categories.map(category => [category, { count:0, amount:0 }]));
+    (orders || []).forEach(order => {
+        normalizedOrderItems(order).forEach(item => {
+            orderItemDisplayCategories(order,item).forEach(category => {
+                if (!metrics[category]) return;
+                if (include && !include(order,item,category)) return;
+                metrics[category].count++;
+                metrics[category].amount += orderItemWorkAmount(order,item,category);
+            });
+        });
+    });
+    return metrics;
+}
+
 window.setOrderWorkFilter = function(filter) {
     activeOrderWorkFilter = activeOrderWorkFilter === filter && filter !== 'all' ? 'all' : filter;
     renderOrdersList();
@@ -6112,17 +6127,11 @@ function renderOrderWorkCards(orders) {
         ['billing', '待核銷'],
         ['complete', '已完成']
     ];
-    const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
-    orders.forEach(order => {
-        normalizedOrderItems(order).forEach(item => {
-            orderItemDisplayCategories(order,item).forEach(category=>{
-                if(metrics[category]&&orderMatchesWorkPeriod(order,category)){
-                    metrics[category].count++;
-                    metrics[category].amount+=orderItemWorkAmount(order,item,category);
-                }
-            });
-        });
-    });
+    const metrics = buildOrderItemWorkMetrics(
+        orders,
+        definitions.map(([key]) => key),
+        (order, item, category) => orderMatchesWorkPeriod(order, category)
+    );
     container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
 }
 
@@ -6775,31 +6784,14 @@ function renderPurchasingWorkCards() {
         ['arrival', 'purchaseCountReceiving', 'purchaseAmountReceiving'],
         ['dispatch', 'purchaseCountDispatch', 'purchaseAmountDispatch']
     ];
-    const metrics = Object.fromEntries(definitions.map(([category]) => [category, { count: 0, amount: 0 }]));
     const filters = purchaseFilterContext();
-
-    ordersCache.forEach(order => {
-        const items = normalizedOrderItems(order);
-
-        // 待採購的卡片和下方待採購明細共用同一份 display lines，
-        // 包含「採購下單」與「業務自行訂貨」，避免卡片有數字、明細卻是空的。
-        pendingProcurementDisplayLines(order).forEach(line => {
-            const sourceItem = items[line.orderItemIndex];
-            if (!sourceItem || !purchaseLineMatchesFilters(order.orderDate, order.salesName, line.brand, filters)) return;
-            metrics.ordering.count++;
-            metrics.ordering.amount += orderItemWorkAmount(order, sourceItem, 'ordering');
-        });
-
-        items.forEach(item => {
-            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
-            const categories = orderItemDisplayCategories(order, item);
-            for (const category of ['arrival', 'dispatch']) {
-                if (!categories.includes(category)) continue;
-                metrics[category].count++;
-                metrics[category].amount += orderItemWorkAmount(order, item, category);
-            }
-        });
-    });
+    // 訂單頁與採購頁共用完全相同的品項狀態與金額統計核心；
+    // 採購頁只額外套自己的日期／業務／廠牌篩選，避免兩頁各算各的再次出現數字不一致。
+    const metrics = buildOrderItemWorkMetrics(
+        ordersCache,
+        definitions.map(([category]) => category),
+        (order, item) => purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)
+    );
 
     definitions.forEach(([category, countId, amountId]) => {
         const count = document.getElementById(countId);
@@ -7158,18 +7150,27 @@ window.saveManualPurchaseOrder = async function() {
 
 window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-    const button = [...document.querySelectorAll('#purchasePendingBody button')].find(el => el.getAttribute('onclick')?.includes(`'${orderId}'`));
-    if (button) { button.disabled = true; button.textContent = '載入中…'; }
+    const button = [...document.querySelectorAll('#purchasePendingBody button')].find(el => {
+        const action = el.getAttribute('onclick') || '';
+        return action.includes('openOrderPurchaseDraft(') && action.includes(`'${orderId}'`);
+    });
+    if (button) { button.disabled = true; button.textContent = '開啟中…'; }
     try {
-        const snapshot = await db.collection('orders').doc(orderId).get();
-        if (!snapshot.exists) throw new Error('找不到來源訂單');
-        const order = { id:snapshot.id, ...snapshot.data() };
+        // 待採購清單本身就是由 ordersCache 畫出來的，點擊時先直接使用同一筆資料。
+        // 正式儲存 PO 的 transaction 仍會重新讀取來源訂單並 assertPurchaseLinesAvailable，
+        // 因此不需要為了「開視窗」先做一個重複 Firestore read。
+        let order = ordersCache.find(row => row.id === orderId) || null;
+        if (!order) {
+            const snapshot = await db.collection('orders').doc(orderId).get();
+            if (!snapshot.exists) throw new Error('找不到來源訂單');
+            order = { id:snapshot.id, ...snapshot.data() };
+        }
         if (normalizedOrderStatus(order) !== 'normal') throw new Error('訂單已取消或作廢');
-        await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCosts([order])]);
-        if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-        const pendingItems = pendingPurchaseLines(order);
-        const items = itemId ? pendingItems.filter(item => item.itemId === itemId) : pendingItems.slice(0, 1);
+
+        let pendingItems = pendingPurchaseLines(order);
+        let items = itemId ? pendingItems.filter(item => item.itemId === itemId) : pendingItems.slice(0, 1);
         if (!items.length) throw new Error('此品項已無待採購數量');
+
         poDirectStockMode = false;
         poEditingId = null;
         poIncomingSyncPending = false;
@@ -7177,17 +7178,34 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         poAllItems = items;
         populatePoVendorSuggestions();
         document.getElementById('poVendorName').value = '';
-        await autoFillPoSupplier(items);
         document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
         document.getElementById('poDate').value = localDateString();
         switchPoCompany(bestPurchaseOrderCompany([order], items, order.company), null, true);
         generatePoNo();
         renderPoItemsTable();
         updatePoModeUI();
-        updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，按「確認已訂購／儲存訂購單」。');
+        updatePoSaveStatus('正在載入供應商與進貨成本…');
         document.getElementById('poModalOverlay').classList.add('active');
+
+        // 視窗先出現，供應商／成本再補齊；重複開單時 preloadPurchaseCosts 會沿用快取。
+        await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCosts([order])]);
+        if (!document.getElementById('poModalOverlay')?.classList.contains('active')) return;
+        pendingItems = pendingPurchaseLines(order);
+        items = itemId ? pendingItems.filter(item => item.itemId === itemId) : pendingItems.slice(0, 1);
+        if (!items.length) {
+            closePurchaseOrderModal();
+            throw new Error('此品項已無待採購數量');
+        }
+        poItems = items;
+        poAllItems = items;
+        document.getElementById('poVendorName').value = '';
+        await autoFillPoSupplier(items);
+        switchPoCompany(bestPurchaseOrderCompany([order], items, order.company), null, true);
+        renderPoItemsTable();
+        updatePoModeUI();
+        updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，按「確認已訂購／儲存訂購單」。');
     } catch (err) { alert('無法開啟訂購單：' + err.message); }
-    finally { if (button) { button.disabled = false; button.textContent = '已訂購'; } }
+    finally { if (button) { button.disabled = false; button.textContent = '產生訂購單'; } }
 };
 
 // 「採購訂單」列出所有已經產生過的訂購單紀錄（不分是誰產生的，只要是採購／管理員都看得到全部）
@@ -12342,7 +12360,9 @@ async function findProductForPurchaseItem(item) {
 }
 
 async function preloadPurchaseCosts(orders) {
-    purchaseCostCache = new Map();
+    // 不要每次開訂購單都把已解析的成本快取清空。
+    // productCosts 本身另有「角色＋productId」快取；這裡保留本次登入期間已解析結果，
+    // 讓第二次以後開啟訂購單不必重跑同一批 Product Master / 成本讀取。
     const purchaseItems = (orders || []).flatMap(order => purchaseItemsFromOrder(order));
     const resolved = await Promise.all(purchaseItems.map(async item => ({
         item,
@@ -12355,6 +12375,7 @@ async function preloadPurchaseCosts(orders) {
         if (id) products.set(id, product);
     });
     await Promise.all([...products.entries()].map(async ([id, item]) => {
+        if (purchaseCostCache.has(id)) return;
         const cost = await loadVisibleProductCost(item);
         if (cost !== null && Number.isFinite(cost)) purchaseCostCache.set(id, cost);
     }));

@@ -575,3 +575,32 @@ test('committed PO refreshes item quantities in order and purchasing views', () 
     assert.deepEqual(writes.at(-2),['purchase-dispatch',[]]);
     assert.deepEqual(writes.at(-1),['orders',['O1']]);
 });
+
+
+test('order and purchasing cards use the same item-level metric calculator', () => {
+    const helper = app.match(/function buildOrderItemWorkMetrics\(orders, categories, include = null\) \{[\s\S]*?\n\}/)?.[0];
+    const orderCards = app.match(/function renderOrderWorkCards\(orders\) \{[\s\S]*?\n\}/)?.[0];
+    const purchasingCards = app.match(/function renderPurchasingWorkCards\(\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(helper && orderCards && purchasingCards);
+    assert.match(orderCards, /buildOrderItemWorkMetrics\(/);
+    assert.match(purchasingCards, /buildOrderItemWorkMetrics\(/);
+    assert.match(purchasingCards, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand, filters\)/);
+});
+
+test('formal PO draft opens from the loaded order before secure purchase metadata finishes loading', () => {
+    const source = app.match(/window\.openOrderPurchaseDraft = async function\(orderId, itemId = ''\) \{[\s\S]*?\n\};/)?.[0];
+    assert.ok(source);
+    assert.match(source, /ordersCache\.find\(row => row\.id === orderId\)/);
+    assert.match(source, /action\.includes\('openOrderPurchaseDraft\('/);
+    const openIndex = source.indexOf("poModalOverlay').classList.add('active')");
+    const preloadIndex = source.indexOf('await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCosts([order])])');
+    assert.ok(openIndex >= 0 && preloadIndex > openIndex, 'modal should be visible before purchase metadata preload completes');
+    assert.match(app, /assertPurchaseLinesAvailable\(snapshot\.data\(\), poRecord\.items\.filter/);
+});
+
+test('purchase cost preload preserves already resolved costs across repeated PO opens', () => {
+    const source = app.match(/async function preloadPurchaseCosts\(orders\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(source);
+    assert.doesNotMatch(source, /purchaseCostCache = new Map\(\)/);
+    assert.match(source, /if \(purchaseCostCache\.has\(id\)\) return;/);
+});
