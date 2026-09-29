@@ -20,7 +20,11 @@ test('purchasing has three item-level work queues and no legacy number function'
     assert.match(html, /id="purchaseCountOrdering"/);
     assert.match(html, /id="purchaseCountReceiving"/);
     assert.match(html, /id="purchaseCountDispatch"/);
+    assert.match(html, /id="purchaseAmountOrdering"/);
+    assert.match(html, /id="purchaseAmountReceiving"/);
+    assert.match(html, /id="purchaseAmountDispatch"/);
     assert.match(app, /switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
+    assert.match(app, /function refreshPurchasingOrderCache\(reset = true\)/);
     assert.match(app, /loadPendingPurchaseOrders\(true\)/);
     assert.match(app, /loadMyPurchaseOrders\(\)/);
     assert.match(app, /loadPurchasingDispatchOrders\(true\)/);
@@ -143,7 +147,11 @@ test('PO print opens directly from the user action', () => {
     const end = app.indexOf('\n}\n', start) + 2;
     const calls = [];
     const doc = { title:'訂單', body:{classList:{add:name=>calls.push(name)}} };
-    const context = vm.createContext({ document:doc, window:{ print:()=>calls.push('print') } });
+    const context = vm.createContext({
+        document:doc,
+        window:{ print:()=>calls.push('print') },
+        requestAnimationFrame:callback=>callback()
+    });
     vm.runInContext(app.slice(start,end),context);
     context.printSavedPoDocument('PO-1','供應商');
     assert.deepEqual(calls,['printing-po','print']);
@@ -160,8 +168,8 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /shown\.map\(category=>map\[category\]\?\.label\)/);
     assert.match(app, /const primaryStatus=orderItemDisplayCategory\(o,item\)/);
     assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
-    assert.match(app, /orderItemWorkCategory\(order,sourceItem\)==='ordering'/);
-    assert.match(app, /const pending=normalizedOrderItems\(order\)\.map\(item=>\(\{item,state:itemDispatchState\(order,item\)\}\)\)\.filter\(row=>row\.state\.pending>0\)/);
+    assert.match(app, /function pendingProcurementDisplayLines\(order\)/);
+    assert.match(app, /orderItemDisplayCategories\(order,item\)\.includes\('dispatch'\)/);
     assert.match(app, /\['dispatch', '待打單'\]/);
     assert.match(app, /\['shipping', '待出貨'\]/);
     assert.match(app, /allOrderItems\.filter\(item=>orderItemDisplayCategories\(o,item\)\.includes\(activeOrderWorkFilter\)\)/);
@@ -274,9 +282,12 @@ test('order lifecycle, delivery and return mutations refresh work category index
 });
 
 
-test('purchasing queues use derived server-side work category queries',()=>{
-    assert.match(app,/where\('workCategories',\s*'array-contains',\s*'ordering'\)/);
-    assert.match(app,/where\('workCategories','array-contains','dispatch'\)/);
+test('purchasing work cards reuse the shared recent order cache',()=>{
+    assert.match(app,/function refreshPurchasingOrderCache\(reset = true\)/);
+    assert.match(app,/pendingPurchaseCache = ordersCache\.filter\(order => pendingProcurementDisplayLines\(order\)\.length > 0\)/);
+    assert.match(app,/orderItemDisplayCategories\(order,item\)\.includes\('dispatch'\)/);
+    assert.doesNotMatch(app,/where\('workCategories',\s*'array-contains',\s*'ordering'\)/);
+    assert.doesNotMatch(app,/where\('workCategories','array-contains','dispatch'\)/);
     assert.match(app,/where\('receiptStatus','in',\['pending','partial'\]\)/);
     assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
 });
@@ -291,11 +302,12 @@ test('quote cancellation and legacy delivery cleanup refresh work category index
     assert.match(app,/clearLegacyDelivery[\s\S]*?Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\)/);
 });
 
-test('receiving queue includes sales self orders and new POs start pending',()=>{
+test('receiving queue includes self orders but follows the source order arrival state',()=>{
     assert.match(app,/receiptStatus: 'pending'/);
     assert.match(app,/const freshSupply=supplySnapshot\.docs\s*\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)\s*\.filter\(row=>row\.type==='SALES_SELF_ORDER'\|\|row\.type==='PURCHASING_MANUAL'\)/);
     assert.match(app,/業務自行訂購/);
-    assert.match(app,/sourceStatus!=='normal' && \(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\) return/);
+    assert.match(app,/function receivingQueueContext\(record, item\)/);
+    assert.match(app,/orderItemDisplayCategories\(sourceOrder,sourceItem\)\.includes\('arrival'\)/);
 });
 
 test('manual ordered action records supply and source item only once after an uncertain response', async () => {
@@ -373,7 +385,7 @@ test('loading another receiving page retains source status for earlier PO rows',
         canAccessPage:()=>true, currentUserRole:'purchaser', purchasingView:'receiving',
         poListPageLoading:false, poListCursor:null, poListHasMore:true, poListCache:[],
         supplyReceivingCache:[], supplyReceivingCursor:null, supplyReceivingHasMore:true,
-        receivingSourceOrderStatusCache:new Map(), DEFAULT_LIST_LIMIT:1,
+        receivingSourceOrderStatusCache:new Map(), receivingSourceOrderCache:new Map(), ordersCache:[], DEFAULT_LIST_LIMIT:1,
         BUSINESS_STATUS:{ACTIVE:'active'}, normalizedOrderStatus:()=> 'normal',
         purchaseItemsFromSavedPo:po=>po.items, readAppDataCache:()=>null,
         writeAppDataCache:()=>{}, renderPoList:()=>{}, updatePoLoadMoreButton:()=>{}, alert:message=>{throw new Error(message)}
@@ -395,24 +407,25 @@ test('loading another receiving page retains source status for earlier PO rows',
     assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
 });
 
-test('pending purchasing work loads one page at a time without losing older rows', async () => {
+test('pending purchasing work loads one shared order page at a time without losing older rows', async () => {
+    const refreshSource = app.match(/function refreshPurchasingOrderCache\(reset = true\) \{[\s\S]*?\n\}/)?.[0];
     const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nlet manualPurchaseSaveInProgress)/)?.[0];
-    assert.ok(source);
-    const docs = ['O1','O2','O3'].map(id=>({id,data:()=>({status:'active'})}));
+    assert.ok(refreshSource && source);
     let reads=0;
-    const query={
-        where(){return this;},orderBy(){return this;},limit(){return this;},startAfter(){return this;},
-        async get(){const page=++reads===1?docs.slice(0,2):docs.slice(2);return {docs:page,size:page.length,empty:!page.length,forEach:fn=>page.forEach(fn)};}
-    };
     const context=vm.createContext({
-        window:{}, db:{collection:()=>query}, canCreatePurchaseOrderCapability:()=>true,
-        canAccessPage:()=>true, pendingPurchaseLoading:false, pendingPurchaseCursor:null,
-        pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
-        currentUserRole:'purchaser', BUSINESS_STATUS:{ACTIVE:'active'}, DEFAULT_LIST_LIMIT:2,
-        readAppDataCache:()=>null, writeAppDataCache:()=>{}, renderPendingPurchaseOrders:()=>{},
-        pendingPurchaseLines:()=>[{}], firestoreReadWithTimeout:promise=>promise
+        window:{}, canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
+        pendingPurchaseLoading:false, pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
+        purchasingOrderRefreshPromise:null, ordersCache:[], orderPaginationState:null,
+        loadOrderPage:async reset=>{
+            reads++;
+            if(reset) context.ordersCache=[{id:'O1'},{id:'O2'}];
+            else context.ordersCache.push({id:'O3'});
+            context.orderPaginationState={sourceIndex:reads===1?0:1,sources:[{}]};
+        },
+        pendingProcurementDisplayLines:()=>[{}], writeAppDataCache:()=>{},
+        renderPendingPurchaseOrders:()=>{}, renderPurchasingWorkCards:()=>{}
     });
-    vm.runInContext(source,context);
+    vm.runInContext(`${refreshSource}\n${source}`,context);
     await context.window.loadPendingPurchaseOrders(true);
     assert.equal(reads,1);
     assert.deepEqual(Array.from(context.pendingPurchaseCache,row=>row.id),['O1','O2']);
@@ -423,44 +436,30 @@ test('pending purchasing work loads one page at a time without losing older rows
     assert.equal(context.pendingPurchaseHasMore,false);
 });
 
-test('missing purchasing index reports an actionable error without showing a misleading zero or console URL', async () => {
+
+test('pending purchasing work reports a shared order-load failure without overwriting the card count', async () => {
+    const refreshSource = app.match(/function refreshPurchasingOrderCache\(reset = true\) \{[\s\S]*?\n\}/)?.[0];
     const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nlet manualPurchaseSaveInProgress)/)?.[0];
-    assert.ok(source);
-    const query = {
-        where(){return this;}, orderBy(){return this;}, limit(){return this;},
-        async get(){throw Object.assign(new Error('The query requires an index. You can create it here: https://console.firebase.google.com/long-index-url'), {code:'failed-precondition'});}
-    };
-    const context = vm.createContext({
-        window:{}, db:{collection:()=>query}, canCreatePurchaseOrderCapability:()=>true,
-        canAccessPage:()=>true, pendingPurchaseLoading:false, pendingPurchaseCursor:null,
-        pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
-        currentUserRole:'purchaser', BUSINESS_STATUS:{ACTIVE:'active'}, DEFAULT_LIST_LIMIT:50,
-        readAppDataCache:()=>null, writeAppDataCache:()=>{}, renderPendingPurchaseOrders:()=>{},
-        firestoreReadWithTimeout:promise=>promise
-    });
-    vm.runInContext(source,context);
-    await context.window.loadPendingPurchaseOrders(true);
-    assert.match(context.pendingPurchaseError,/索引尚未建立/);
-    assert.doesNotMatch(context.pendingPurchaseError,/https?:\/\//);
     const renderSource = app.match(/function renderPendingPurchaseOrders\(\) \{[\s\S]*?\n\}\n(?=\nwindow\.loadPendingPurchaseOrders)/)?.[0];
-    assert.ok(renderSource);
-    const elements = {
-        purchasePendingBody:{innerHTML:'',children:[]},
-        purchasePendingStatus:{textContent:''},
-        purchaseCountOrdering:{textContent:''},
-        purchasePendingMoreBtn:{style:{},disabled:false}
-    };
-    context.document = {getElementById:id=>elements[id]};
-    context.renderPendingPurchaseOrders = undefined;
-    vm.runInContext(renderSource,context);
-    context.renderPendingPurchaseOrders();
-    assert.equal(elements.purchaseCountOrdering.textContent,'—');
-    assert.match(elements.purchasePendingStatus.textContent,/索引尚未建立/);
+    assert.ok(refreshSource && source && renderSource);
+    const context = vm.createContext({
+        window:{}, canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
+        pendingPurchaseLoading:false, pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
+        purchasingOrderRefreshPromise:null, ordersCache:[], orderPaginationState:null,
+        loadOrderPage:async()=>{throw new Error('網路中斷');},
+        pendingProcurementDisplayLines:()=>[], writeAppDataCache:()=>{},
+        renderPendingPurchaseOrders:()=>{}, renderPurchasingWorkCards:()=>{}
+    });
+    vm.runInContext(`${refreshSource}\n${source}`,context);
+    await context.window.loadPendingPurchaseOrders(true);
+    assert.match(context.pendingPurchaseError,/網路中斷/);
+    assert.doesNotMatch(renderSource,/purchaseCountOrdering/);
 });
 
-test('cancelled warehouse source stays in receiving while direct ship remains blocked', () => {
-    assert.match(app,/sourceStatus!=='normal' && \(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\) return/);
-    assert.match(app,/來源訂單已取消・入庫後為自由庫存/);
+
+test('cancelled source is excluded from the order-aligned receiving queue', () => {
+    assert.match(app,/if\(!sourceOrder \|\| normalizedOrderStatus\(sourceOrder\)!=='normal'\)return null/);
+    assert.match(app,/不屬於目前訂單「待到貨」狀態的採購紀錄/);
     assert.match(app,/if\(normalizedOrderStatus\(sourceOrder\)!=='normal'\)throw new Error\('來源訂單已取消/);
 });
 
