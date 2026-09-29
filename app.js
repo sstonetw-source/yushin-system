@@ -8518,8 +8518,15 @@ function printSavedPoDocument(poNo, vendorName) {
     document.title = `${poNo}＋${vendorName}`.replace(/[\\/:*?"<>|]/g, '_').replace(/[\u0000-\u001F]/g, '').trim();
     document.body.classList.add('printing-po');
     window._poOriginalTitle = originalTitle;
-    // iPhone requires the print dialog to open in the user's tap handler.
-    window.print();
+
+    // 跟估價單相同：先把列印專用內容與版面更新完成，再等瀏覽器完成兩次重繪後開啟列印。
+    // 不直接同步 print()，避免 iPhone Safari 還拿著手機版 modal 的欄寬去產生預覽，
+    // 造成右側欄位／總計被裁掉，也避免使用者點下按鈕後長時間看不到任何回饋。
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            window.print();
+        });
+    });
 }
 
 window.printPurchaseOrder = async function() {
