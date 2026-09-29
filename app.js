@@ -6916,11 +6916,12 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     const requestedRole = currentUserRole;
     renderPendingPurchaseOrders();
     try {
-        // 由 Firestore 先篩出真正含「待採購」品項的進行中訂單，避免資料量增加後全量掃描。
-        // 前端仍會再用 pendingPurchaseLines() 驗證目前品項狀態，避免舊索引造成誤列。
+        // 採購待辦與訂單頁共用 pendingPurchaseLines()/orderItemWorkCategory() 作為唯一狀態來源。
+        // 不先用 workCategories=ordering 篩選，因為該欄位是為查詢效能保存的衍生索引；
+        // 若索引寫入較舊或尚未同步，會造成「訂單頁有待採購、採購頁卻為 0」。
+        // 這裡只讀近期進行中訂單，再用同一套即時計算判斷真正的待採購品項。
         let query = db.collection('orders')
             .where('status', '==', BUSINESS_STATUS.ACTIVE)
-            .where('workCategories', 'array-contains', 'ordering')
             .orderBy('orderDate', 'desc')
             .limit(DEFAULT_LIST_LIMIT);
         if (pendingPurchaseCursor) query = query.startAfter(pendingPurchaseCursor);
