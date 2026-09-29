@@ -6373,8 +6373,6 @@ function populatePurchaserOrderFilters() {
     wrap.style.display = enabled ? '' : 'none';
     if (!enabled) {
         salesSelect.value = '';
-        brandSelect.value = '';
-        return;
     }
 
     const salesValue = salesSelect.value;
@@ -6383,12 +6381,14 @@ function populatePurchaserOrderFilters() {
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     const brands = getPriceListBrands(true);
 
-    salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
-        `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+    if (enabled) {
+        salesSelect.innerHTML = '<option value="">全部業務</option>' + sales.map(name =>
+            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+    }
     brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
         `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
         + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
-    if (sales.includes(salesValue)) salesSelect.value = salesValue;
+    if (enabled && sales.includes(salesValue)) salesSelect.value = salesValue;
     if (brands.includes(brandValue) || brandValue === OTHER_BRAND_OPTION_KEY) brandSelect.value = brandValue;
     return brands;
 }
