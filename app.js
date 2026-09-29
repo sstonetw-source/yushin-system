@@ -5832,7 +5832,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
         const idx=ordersCache.findIndex(o=>o.id===orderId);
         const savedOrder={id:orderId,...saved};
         if(idx>=0)ordersCache[idx]=savedOrder;
-        syncOrderIntoPurchasingCaches(savedOrder);
+        syncOrderIntoPurchasingCaches(savedOrder, { render:false });
         writeAppDataCache('orders', ordersCache);
     }catch(err){alert('標記已打單失敗：'+err.message);}
     finally{
@@ -5947,7 +5947,7 @@ window.saveSelfOrder = async function() {
         const index=ordersCache.findIndex(row=>row.id===orderId);
         const committedOrder={id:orderId,...savedOrder};
         if(index>=0)ordersCache[index]=committedOrder;else ordersCache.unshift(committedOrder);
-        syncOrderIntoPurchasingCaches(committedOrder);
+        syncOrderIntoPurchasingCaches(committedOrder, { render:false });
         writeAppDataCache('orders', ordersCache);
         closeSelfOrderModal();
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
@@ -7818,7 +7818,7 @@ async function refreshAffectedOrderCaches(orderIds = []) {
         const order={id:snapshot.id,...snapshot.data()};
         const index=ordersCache.findIndex(row=>row.id===order.id);
         if(index>=0)ordersCache[index]=order;else ordersCache.unshift(order);
-        syncOrderIntoPurchasingCaches(order);
+        syncOrderIntoPurchasingCaches(order, { render:false });
     });
     ordersCache.sort((a,b)=>(b.orderDate||'').localeCompare(a.orderDate||''));
     writeAppDataCache('orders',ordersCache);
