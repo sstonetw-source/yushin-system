@@ -6160,7 +6160,8 @@ async function loadOrderPage(reset, options = {}) {
     if (getDataScope('orders') === 'none') {
         ordersCache = [];
         orderPaginationState = null;
-        renderOrdersList();
+        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
         updateOrderLoadMoreButton();
         return;
     }
@@ -6201,14 +6202,16 @@ async function loadOrderPage(reset, options = {}) {
         if (generation !== orderLoadGeneration) return;
         ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         writeAppDataCache('orders', ordersCache);
-        renderOrdersList();
+        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
     } catch (err) {
         if (generation !== orderLoadGeneration) return;
         console.error("讀取訂單失敗：", err);
         if (records.size) {
             ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         }
-        renderOrdersList();
+        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
         if (err?.code === 'firestore-read-timeout') {
             orderLoadErrorMessage = '連線逾時，點此重試';
         } else {
