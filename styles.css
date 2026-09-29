@@ -581,6 +581,48 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         margin: 0 auto !important;
         padding: 0 !important;
         border-radius: 0 !important;
+        overflow: visible !important;
+    }
+    /* 訂購單比照估價單：真正列印的文件本體固定為 A4 可列印寬度。
+       modal 只負責編輯，列印時不再讓手機版 modal / table-wrap 的 overflow 參與排版。 */
+    body.printing-po #printablePO {
+        display: block !important;
+        width: 190mm !important;
+        min-width: 190mm !important;
+        max-width: 190mm !important;
+        margin: 0 auto !important;
+        overflow: visible !important;
+        box-sizing: border-box !important;
+    }
+    body.printing-po #poItemsTable {
+        display: table !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        table-layout: fixed !important;
+        overflow: visible !important;
+    }
+    body.printing-po #poItemsTable th,
+    body.printing-po #poItemsTable td {
+        box-sizing: border-box !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+    }
+    body.printing-po #poItemsTable th:nth-child(1) { width: 28% !important; }
+    body.printing-po #poItemsTable th:nth-child(2) { width: 15% !important; }
+    body.printing-po #poItemsTable th:nth-child(3) { width: 13% !important; }
+    body.printing-po #poItemsTable th:nth-child(4) { width: 10% !important; }
+    body.printing-po #poItemsTable th:nth-child(5) { width: 16% !important; }
+    body.printing-po #poItemsTable th:nth-child(6) { width: 18% !important; }
+    body.printing-po #poItemsTable input {
+        width: 100% !important;
+        min-width: 0 !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        color: #000 !important;
+        -webkit-text-fill-color: #000 !important;
     }
 }
 
