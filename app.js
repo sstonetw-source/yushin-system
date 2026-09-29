@@ -7655,6 +7655,7 @@ let poDirectStockMode = false;
 let poIncomingSyncPending = false;
 let poPrintablePreview = null;
 let poNoGeneration = 0;
+let poDirectStockOpenGeneration = 0;
 let poNoReady = false;
 let poNoLoading = false;
 
@@ -8482,15 +8483,13 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
 
 window.openDirectStockPurchase = async function() {
     if (!canEditPage('orders.po')) return;
-    await loadSupplierWarehouseMasters();
+    const openingGeneration = ++poDirectStockOpenGeneration;
     poDirectStockMode = true;
     poEditingId = null;
     poIncomingSyncPending = false;
     poAllItems = [];
     poItems = [];
-    populatePoVendorSuggestions();
     document.getElementById('poVendorName').value = '';
-    await autoFillPoSupplier(poItems);
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
     switchPoCompany(currentCompany || 'yushin', null, true);
@@ -8499,6 +8498,17 @@ window.openDirectStockPurchase = async function() {
     updatePoModeUI();
     updatePoSaveStatus('這張備貨訂購單尚未建立。確認品項、廠商與單價後再儲存。');
     document.getElementById('poModalOverlay').classList.add('active');
+
+    // 備貨單的空白表單不依賴雲端主檔，先立即顯示；供應商與預設倉庫在背景補齊。
+    // 不重畫使用者已經開始輸入的表格，避免慢網路回來時洗掉尚未觸發 change 的文字。
+    await loadSupplierWarehouseMasters();
+    if (openingGeneration !== poDirectStockOpenGeneration || !poDirectStockMode || poEditingId) return;
+    const warehouseId = defaultWarehouse()?.id || '';
+    poItems.forEach(item => {
+        if (!item.warehouseId) item.warehouseId = warehouseId;
+    });
+    populatePoVendorSuggestions();
+    updatePoModeUI();
 };
 
 function emptyDirectPoItem() {
@@ -8602,6 +8612,7 @@ function populatePoVendorSuggestions() {
 }
 
 window.closePurchaseOrderModal = function() {
+    poDirectStockOpenGeneration++;
     poNoGeneration++;
     poNoLoading = false;
     poNoReady = false;
@@ -8778,9 +8789,27 @@ function printSavedPoDocument(poNo, vendorName) {
     // 不直接同步 print()，避免 iPhone Safari 還拿著手機版 modal 的欄寬去產生預覽，
     // 造成右側欄位／總計被裁掉，也避免使用者點下按鈕後長時間看不到任何回饋。
     requestAnimationFrame(() => {
+        preparePurchaseOrderForPrint();
         requestAnimationFrame(() => {
             window.print();
         });
+    });
+}
+
+function preparePurchaseOrderForPrint() {
+    const root = document.getElementById('printablePO');
+    if (!root) return;
+
+    // 與估價單相同，列印時改用純文字鏡像，避免手機 Safari 裁切 input 內的長廠商名、貨號或數字。
+    root.querySelectorAll('input').forEach(input => {
+        input.setAttribute('value', input.value);
+        let mirror = input.nextElementSibling;
+        if (!mirror || !mirror.classList.contains('po-print-field-mirror')) {
+            mirror = document.createElement('span');
+            mirror.className = 'po-print-field-mirror';
+            input.insertAdjacentElement('afterend', mirror);
+        }
+        mirror.textContent = input.value || '';
     });
 }
 

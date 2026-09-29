@@ -431,6 +431,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .missing-cost-save-state { display:block; min-height:14px; margin-top:3px; color:#666; font-size:10px; }
 .po-missing-price { border:2px solid #c62828 !important; background:#fff3f3; }
 .po-missing-price-hint { display:block; margin-top:3px; color:#c62828; font-size:10px; font-weight:bold; }
+.po-print-field-mirror { display:none; }
 .sales-stats-table { min-width:850px; }
 .stat-brand-manager { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:14px; }
 .stat-brand-manager h4 { margin:0 0 8px; color:#003366; }
@@ -639,6 +640,23 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         color: #000 !important;
         -webkit-text-fill-color: #000 !important;
     }
+    body.printing-po #printablePO input { display:none !important; }
+    body.printing-po #printablePO .po-print-field-mirror {
+        display:block !important;
+        min-width:0 !important;
+        color:#000 !important;
+        -webkit-text-fill-color:#000 !important;
+        white-space:normal !important;
+        overflow-wrap:anywhere !important;
+        word-break:break-word !important;
+        line-height:1.25 !important;
+    }
+    body.printing-po #poItemsTable tr,
+    body.printing-po .po-total-section {
+        break-inside:avoid !important;
+        page-break-inside:avoid !important;
+    }
+    body.printing-po #poItemsTable thead { display:table-header-group !important; }
 }
 
 /* ============ 手機版：建立估價單改成由上到下垂直輸入 ============

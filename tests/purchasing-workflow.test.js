@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
 const validation = app.match(/function assertPurchaseLinesAvailable\(order, lines\) \{[\s\S]*?\n\}\n(?=\nfunction printSavedPoDocument)/)?.[0];
 assert.ok(validation, 'The PO transaction must validate the live source order');
 const validate = vm.runInNewContext(`${validation}\nassertPurchaseLinesAvailable`, {
@@ -150,12 +151,34 @@ test('PO print opens directly from the user action', () => {
     const context = vm.createContext({
         document:doc,
         window:{ print:()=>calls.push('print') },
+        preparePurchaseOrderForPrint:()=>calls.push('prepare'),
         requestAnimationFrame:callback=>callback()
     });
     vm.runInContext(app.slice(start,end),context);
     context.printSavedPoDocument('PO-1','供應商');
-    assert.deepEqual(calls,['printing-po','print']);
+    assert.deepEqual(calls,['printing-po','prepare','print']);
     assert.equal(doc.title,'PO-1＋供應商');
+});
+
+test('direct stock PO opens before supplier and warehouse masters finish loading', () => {
+    const source = app.match(/window\.openDirectStockPurchase = async function\(\) \{[\s\S]*?\n\};/)?.[0];
+    assert.ok(source);
+    const openIndex = source.indexOf("poModalOverlay').classList.add('active')");
+    const awaitIndex = source.indexOf('await loadSupplierWarehouseMasters()');
+    assert.ok(openIndex >= 0 && awaitIndex > openIndex, 'blank stock PO should be visible before master data finishes loading');
+    assert.match(source, /if \(!item\.warehouseId\) item\.warehouseId = warehouseId/);
+    assert.doesNotMatch(source.slice(awaitIndex), /renderPoItemsTable\(/);
+});
+
+test('PO print prepares text mirrors and keeps rows and totals together', () => {
+    const helper = app.match(/function preparePurchaseOrderForPrint\(\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(helper);
+    assert.match(helper, /po-print-field-mirror/);
+    assert.match(helper, /input\.setAttribute\('value', input\.value\)/);
+    assert.match(styles, /body\.printing-po #printablePO input \{ display:none !important; \}/);
+    assert.match(styles, /body\.printing-po \.po-total-section/);
+    assert.match(styles, /page-break-inside:avoid !important/);
+    assert.match(html, /class="po-total-section"/);
 });
 
 
