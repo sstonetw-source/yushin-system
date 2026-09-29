@@ -1513,12 +1513,14 @@ test('stock replenishment always uses a valid warehouse PO path', () => {
     assert.match(source, /db\.collection\('supplyOrders'\)/);
 });
 
-test('case purchasing is a separate optional order action with visible save confirmation', () => {
+test('ordered action belongs to purchasing while the order list only shows progress', () => {
     const start = appSource.indexOf('window.renderOrdersList = function()');
     const end = appSource.indexOf('window.retryOrderInventoryReservation', start);
     const actions = appSource.slice(start, end);
-    assert.match(actions, /pendingPurchaseLines\(o\)\.length \? `<button type="button" onclick="openOrderPurchaseDraft/);
-    assert.match(actions, /已訂購/);
+    assert.doesNotMatch(actions, /openOrderPurchaseDraft/);
+    const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders()');
+    const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
+    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?已訂購/);
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);

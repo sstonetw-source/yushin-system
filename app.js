@@ -6547,7 +6547,6 @@ window.renderOrdersList = function() {
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
                             ${selfOrderActionHtml(o)}
-                            ${canCreatePurchaseOrderCapability() && canAccessPage('orders.po') && pendingPurchaseLines(o).length ? `<button type="button" onclick="openOrderPurchaseDraft('${escapeAttr(o.id)}')">已訂購</button>` : ''}
                             ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
