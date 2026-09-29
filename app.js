@@ -6011,10 +6011,23 @@ function orderItemDisplayCategory(order, item) {
     return itemDispatchState(order, item).pending > 0 ? 'dispatch' : 'shipping';
 }
 
+function orderItemDisplayCategories(order, item) {
+    const category=orderItemDisplayCategory(order,item);
+    const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
+    return warehouse && (category==='ordering'||category==='arrival') && itemDispatchState(order,item).pending>0
+        ? [category,'dispatch'] : [category];
+}
+
 function orderWorkCategories(order) {
     const lifecycle=orderLifecycleInfo(order);
     if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return ['closed'];
-    const categories=[...new Set(normalizedOrderItems(order).map(item=>orderItemWorkCategory(order,item)))];
+    const items=normalizedOrderItems(order);
+    const categories=[...new Set(items.flatMap(item=>{
+        const category=orderItemWorkCategory(order,item);
+        const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
+        return warehouse && ['ordering','arrival','delivery'].includes(category) && itemDispatchState(order,item).pending>0
+            ? [category,'dispatch'] : [category];
+    }))];
     if(!categories.length)return ['ordering'];
     return categories;
 }
@@ -6028,7 +6041,7 @@ function orderWorkIndexFields(order) {
 }
 
 function orderWorkStatusInfo(order) {
-    const categories=[...new Set(normalizedOrderItems(order).map(item=>orderItemDisplayCategory(order,item)))];
+    const categories=[...new Set(normalizedOrderItems(order).flatMap(item=>orderItemDisplayCategories(order,item)))];
     const map={
         ordering:{label:'待採購',css:'pending'},
         arrival:{label:'待到貨',css:'pending'},
@@ -6058,7 +6071,7 @@ function orderItemWorkAmount(order, item, category) {
 
 function orderWorkAmount(order, category) {
     return normalizedOrderItems(order)
-        .filter(item=>orderItemDisplayCategory(order,item)===category)
+        .filter(item=>orderItemDisplayCategories(order,item).includes(category))
         .reduce((sum,item)=>sum+orderItemWorkAmount(order,item,category),0);
 }
 
@@ -6081,11 +6094,12 @@ function renderOrderWorkCards(orders) {
     const metrics = Object.fromEntries(definitions.map(([key]) => [key, { count: 0, amount: 0 }]));
     orders.forEach(order => {
         normalizedOrderItems(order).forEach(item => {
-            const category=orderItemDisplayCategory(order,item);
-            if(metrics[category]&&orderMatchesWorkPeriod(order,category)){
-                metrics[category].count++;
-                metrics[category].amount+=orderItemWorkAmount(order,item,category);
-            }
+            orderItemDisplayCategories(order,item).forEach(category=>{
+                if(metrics[category]&&orderMatchesWorkPeriod(order,category)){
+                    metrics[category].count++;
+                    metrics[category].amount+=orderItemWorkAmount(order,item,category);
+                }
+            });
         });
     });
     container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
@@ -6506,14 +6520,14 @@ window.renderOrdersList = function() {
 
     baseOrders.forEach(o => {
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
-        const categories=[...new Set(allOrderItems.map(item=>orderItemDisplayCategory(o,item)))];
+        const categories=[...new Set(allOrderItems.flatMap(item=>orderItemDisplayCategories(o,item)))];
         if(activeOrderWorkFilter!=='all'&&!categories.includes(activeOrderWorkFilter))return;
         if(!orderMatchesWorkPeriod(o,activeOrderWorkFilter==='all'?'all':activeOrderWorkFilter))return;
         // 工作圖卡是以「品項」計數；套用狀態篩選後，產品欄也只顯示該狀態品項，
         // 避免同一張多品項訂單把其他狀態的品項一起帶進來造成誤判。
         const orderItems=activeOrderWorkFilter==='all'
             ? allOrderItems
-            : allOrderItems.filter(item=>orderItemDisplayCategory(o,item)===activeOrderWorkFilter);
+            : allOrderItems.filter(item=>orderItemDisplayCategories(o,item).includes(activeOrderWorkFilter));
         shown++;
 
         const tr = document.createElement('tr');
@@ -6526,7 +6540,7 @@ window.renderOrdersList = function() {
             <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory('${escapeAttr(o.customerName)}')">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const itemStatus=orderItemDisplayCategory(o,item);const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待出貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=itemStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const ready=itemStatus==='dispatch'?itemDispatchState(o,item).shippable:0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${ready>0?`・已有 ${escapeHtml(ready)} 可出貨`:''}</small></div>`}).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const primaryStatus=orderItemDisplayCategory(o,item);const itemStatus=activeOrderWorkFilter==='dispatch'&&orderItemDisplayCategories(o,item).includes('dispatch')?'dispatch':primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待出貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
             ${canManageOrderOps ? `
             <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" value="${o.costPrice != null ? o.costPrice : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
@@ -6764,11 +6778,11 @@ async function loadPurchasingDispatchOrders(reset=true) {
     purchasingDispatchLoading=true;
     renderPurchasingDispatchOrders();
     try {
-        // 由 Firestore 先篩出真正含「待送貨」品項的進行中訂單，避免只看近期 50 筆而漏掉舊待辦。
-        // 前端仍會用最新品項狀態再次確認是否真的尚待打單。
+        // 一個品項可以一部分待採購／待到貨，另一部分已備妥待打單。
+        // 用獨立的 dispatch 工作索引載入，避免部分缺貨時漏掉已占用的數量。
         let q=db.collection('orders')
             .where('status','==',BUSINESS_STATUS.ACTIVE)
-            .where('workCategories','array-contains','delivery')
+            .where('workCategories','array-contains','dispatch')
             .orderBy('orderDate','desc')
             .limit(DEFAULT_LIST_LIMIT);
         if(purchasingDispatchCursor) q=q.startAfter(purchasingDispatchCursor);
@@ -6779,7 +6793,7 @@ async function loadPurchasingDispatchOrders(reset=true) {
         snap.forEach(doc=>{
             const order={id:doc.id,...doc.data()};
             if(normalizedOrderStatus(order)!=='normal')return;
-            const pendingItems=normalizedOrderItems(order).filter(item=>orderItemWorkCategory(order,item)==='delivery'&&itemDispatchState(order,item).pending>0);
+            const pendingItems=normalizedOrderItems(order).filter(item=>itemDispatchState(order,item).pending>0);
             if(pendingItems.length)freshOrders.push(order);
         });
         if(reset){
@@ -6810,7 +6824,7 @@ function renderPurchasingDispatchOrders() {
     if(!body)return;
     body.innerHTML='';
     purchasingDispatchCache.forEach(order=>{
-        const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>orderItemWorkCategory(order,row.item)==='delivery'&&row.state.pending>0);
+        const pending=normalizedOrderItems(order).map(item=>({item,state:itemDispatchState(order,item)})).filter(row=>row.state.pending>0);
         pending.forEach(({item,state})=>{
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) return;
             const tr=document.createElement('tr');
@@ -6849,7 +6863,7 @@ function syncOrderIntoPurchasingCaches(order) {
     };
     sync(pendingPurchaseCache, pendingPurchaseLines(order).length > 0);
     sync(purchasingDispatchCache, normalizedOrderItems(order).some(item =>
-        orderItemWorkCategory(order, item) === 'delivery' && itemDispatchState(order, item).pending > 0
+        itemDispatchState(order, item).pending > 0
     ));
     writeAppDataCache('purchase-pending', pendingPurchaseCache);
     writeAppDataCache('purchase-dispatch', purchasingDispatchCache);

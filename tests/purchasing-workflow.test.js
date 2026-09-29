@@ -158,13 +158,13 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /metrics\[category\]\.count\+\+/);
     assert.match(app, /categories\.includes\(activeOrderWorkFilter\)/);
     assert.match(app, /shown\.map\(category=>map\[category\]\?\.label\)/);
-    assert.match(app, /const itemStatus=orderItemDisplayCategory\(o,item\)/);
+    assert.match(app, /const primaryStatus=orderItemDisplayCategory\(o,item\)/);
     assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
     assert.match(app, /orderItemWorkCategory\(order,sourceItem\)==='ordering'/);
-    assert.match(app, /orderItemWorkCategory\(order,item\)==='delivery'&&itemDispatchState\(order,item\)\.pending>0/);
+    assert.match(app, /const pending=normalizedOrderItems\(order\)\.map\(item=>\(\{item,state:itemDispatchState\(order,item\)\}\)\)\.filter\(row=>row\.state\.pending>0\)/);
     assert.match(app, /\['dispatch', '待打單'\]/);
     assert.match(app, /\['shipping', '待出貨'\]/);
-    assert.match(app, /allOrderItems\.filter\(item=>orderItemDisplayCategory\(o,item\)===activeOrderWorkFilter\)/);
+    assert.match(app, /allOrderItems\.filter\(item=>orderItemDisplayCategories\(o,item\)\.includes\(activeOrderWorkFilter\)\)/);
     assert.match(app, /if\(uncoveredShortage>0\)return 'ordering';/);
     assert.match(app, /if\(shortage>0\|\|ordered>received\)return 'arrival';/);
 });
@@ -195,6 +195,29 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
     assert.equal(current(),'complete');
     order.deliveryRecords=[];
     assert.equal(current(),'shipping','billing before shipment does not complete the order');
+});
+
+test('a partly stocked order keeps its shortage and exposes reserved stock to dispatch', () => {
+    const dispatchSource = app.match(/function itemDispatchState\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderContextActionState)/)?.[0];
+    const categorySource = app.match(/function orderItemWorkCategory\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderWorkIndexFields)/)?.[0];
+    assert.ok(dispatchSource && categorySource);
+    const context = vm.createContext({
+        normalizedOrderItems:order=>order.items,
+        savedDeliveryRecords:()=>[],savedReturnRecords:()=>[],
+        orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0})
+    });
+    vm.runInContext(`${dispatchSource}\n${categorySource}`,context);
+    const order={items:[{itemId:'I1',qty:10,orderedQty:10,inventoryShortageQty:5,
+        purchaseRequiredQty:5,fulfillmentType:'WAREHOUSE',reservedQty:5,dispatchPreparedQty:0}]};
+    const item=order.items[0];
+    assert.equal(context.orderItemWorkCategory(order,item),'ordering');
+    assert.deepEqual(Array.from(context.orderItemDisplayCategories(order,item)),['ordering','dispatch']);
+    assert.deepEqual(Array.from(context.orderWorkCategories(order)),['ordering','dispatch']);
+    item.dispatchPreparedQty=5;
+    assert.deepEqual(Array.from(context.orderWorkCategories(order)),['ordering']);
+    item.purchaseOrderedQty=5;
+    assert.equal(context.orderItemWorkCategory(order,item),'arrival');
+    assert.deepEqual(Array.from(context.orderItemDisplayCategories(order,item)),['arrival']);
 });
 
 
@@ -253,7 +276,7 @@ test('order lifecycle, delivery and return mutations refresh work category index
 
 test('purchasing queues use derived server-side work category queries',()=>{
     assert.match(app,/where\('workCategories',\s*'array-contains',\s*'ordering'\)/);
-    assert.match(app,/where\('workCategories','array-contains','delivery'\)/);
+    assert.match(app,/where\('workCategories','array-contains','dispatch'\)/);
     assert.match(app,/where\('receiptStatus','in',\['pending','partial'\]\)/);
     assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
 });

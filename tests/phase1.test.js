@@ -237,7 +237,7 @@ test('purchase workspace shows waiting days for open receipts, including direct 
     assert.match(indexSource, />等待天數</);
     assert.match(appSource, /function poWaitingDays\(po\)/);
     assert.match(appSource, /poReceiptProgress\(po\)\.complete \? '' : waitingDaysFromDate\(po\.poDate\)/);
-    assert.match(appSource, /itemStatus==='arrival'\?waitingDaysFromDate\(item\.orderedAt\)/);
+    assert.match(appSource, /primaryStatus==='arrival'\?waitingDaysFromDate\(item\.orderedAt\)/);
     assert.match(appSource, /data-th="等待天數"/);
 });
 
