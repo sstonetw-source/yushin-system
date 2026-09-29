@@ -517,8 +517,32 @@ test('cancelled warehouse PO receipt moves incoming to free stock exactly once',
     assert.equal(docs.get('inventory/P1').onHand,3);
 });
 
+test('purchasing pending card and detail use the same display-line source', () => {
+    const cardStart=app.indexOf('function renderPurchasingWorkCards()');
+    const cardEnd=app.indexOf('window.renderPurchasingView',cardStart);
+    const detailStart=app.indexOf('function renderPendingPurchaseOrders()');
+    const detailEnd=app.indexOf('window.loadPendingPurchaseOrders',detailStart);
+    const formalStart=app.indexOf('function pendingPurchaseLines(order)');
+    const formalEnd=app.indexOf('function syncOrderIntoPurchasingCaches',formalStart);
+    assert.ok(cardStart>=0&&detailStart>=0&&formalStart>=0);
+    assert.match(app.slice(cardStart,cardEnd),/pendingProcurementDisplayLines\(order\)/);
+    assert.match(app.slice(detailStart,detailEnd),/pendingProcurementDisplayLines\(order\)/);
+    assert.match(app.slice(detailStart,detailEnd),/業務自行訂貨/);
+    assert.match(app.slice(formalStart,formalEnd),/procurementType === 'PURCHASING_PO'/);
+});
+
+test('PO core transaction commits before the print dialog opens', () => {
+    const start=app.indexOf('window.printPurchaseOrder = async function()');
+    const end=app.indexOf("window.addEventListener('afterprint'",start);
+    const source=app.slice(start,end);
+    const awaitIndex=source.indexOf('await commitPromise;');
+    const printIndex=source.indexOf('printSavedPoDocument(poNo, vendorName);');
+    assert.ok(awaitIndex>=0&&printIndex>awaitIndex,'core PO transaction must finish before print');
+    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord, previousPoForIncoming\)\s*\.then/);
+});
+
 test('committed PO refreshes item quantities in order and purchasing views', () => {
-    const start=app.indexOf('function syncOrderIntoPurchasingCaches(order) {');
+    const start=app.indexOf('function syncOrderIntoPurchasingCaches(order, options = {}) {');
     const end=app.indexOf('\nfunction renderPendingPurchaseOrders()',start);
     assert.ok(start>=0&&end>start);
     assert.match(app,/committedSourceOrders\.push\(\{id:snapshot\.id,\.\.\.orderData,\.\.\.orderUpdates\}\)/);
@@ -536,7 +560,10 @@ test('committed PO refreshes item quantities in order and purchasing views', () 
         receivingSourceOrderStatusCache:new Map(),
         receivingSourceOrderCache:new Map(),
         writeAppDataCache:(kind,rows)=>writes.push([kind,Array.from(rows,row=>row.id)]),
-        renderPendingPurchaseOrders:()=>{},renderPurchasingDispatchOrders:()=>{},renderOrdersList:()=>{listRenders++;}
+        document:{getElementById:id=>({classList:{contains:()=>id==='order-system'}})},
+        renderPurchasingWorkCards:()=>{},renderPurchasingView:()=>{},
+        renderPendingPurchaseOrders:()=>{},renderPurchasingDispatchOrders:()=>{},renderPoList:()=>{},
+        renderOrdersList:()=>{listRenders++;}
     });
     vm.runInContext(app.slice(start,end),context);
     vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,purchaseOrderedQty:3}]}])",context);
