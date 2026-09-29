@@ -839,7 +839,8 @@ function initializePageData(mainKey, options = {}) {
     if (mainKey === 'equipment') {
         // 儀器列表先載入，避免 users collection 阻塞主要內容。
         loadEquipmentFromCloud();
-        ensureSalesListLoaded().then(populateEquipmentSalesDropdown).catch(err => console.warn('業務名單載入失敗：', err));
+        ensureSalesListLoaded().then(() => { populateEquipmentSalesDropdown(); renderEquipmentList(); }).catch(err => console.warn('業務名單載入失敗：', err));
+        loadBrandMaster().then(renderEquipmentList).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
     if (mainKey === 'admin') reloadSalesFromUsers();
 }
@@ -4296,6 +4297,11 @@ window.switchQuoteView = function(view, el, options = {}) {
     if (view === 'my' && !options.skipReload && myQuotesCache.length === 0) {
         loadMyQuotesFromCloud();
     }
+    if (view === 'my' && canViewAllData('quotes')) {
+        ensureSalesListLoaded().then(() => {
+            if (document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
+        }).catch(err => console.warn('業務名單載入失敗：', err));
+    }
     updateReadonlyNotice();
 };
 
@@ -4394,6 +4400,23 @@ window.loadMoreMyQuotes = function() {
     return loadMyQuotesPage(false);
 };
 
+function populateMyQuoteSalesFilter() {
+    const select = document.getElementById('myQuoteSalesFilter');
+    if (!select) return;
+    const canSeeAll = canViewAllData('quotes');
+    select.style.display = canSeeAll ? '' : 'none';
+    if (!canSeeAll) { select.value = ''; return; }
+    const selected = select.value;
+    const names = [...new Set([
+        ...salesList.filter(person => String(person.role || 'sales').toLowerCase() === 'sales').map(person => stripPhoneSuffix(person.name || '')),
+        ...myQuotesCache.map(quote => stripPhoneSuffix(quote.salesName || '')),
+        ...quoteHistorySearchResults.map(quote => stripPhoneSuffix(quote.salesName || ''))
+    ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    select.innerHTML = '<option value="">全部業務</option>' + names.map(name =>
+        `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+    if (names.includes(selected)) select.value = selected;
+}
+
 window.renderMyQuotesList = function() {
     const tbody = document.getElementById('myQuotesBody');
     const searchInput = document.getElementById('myQuoteSearch');
@@ -4403,6 +4426,8 @@ window.renderMyQuotesList = function() {
     let shown = 0;
 
     const isAdminViewingAll = canViewAllData('quotes');
+    populateMyQuoteSalesFilter();
+    const salesFilter = document.getElementById('myQuoteSalesFilter')?.value || '';
     const salesHeader = document.getElementById('myQuotesSalesHeader');
     if (salesHeader) salesHeader.style.display = isAdminViewingAll ? '' : 'none';
 
@@ -4411,6 +4436,7 @@ window.renderMyQuotesList = function() {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
         if (!quoteHistorySearchActive && keyword && !searchable.includes(keyword)) return;
+        if (salesFilter && stripPhoneSuffix(q.salesName || '') !== salesFilter) return;
         if (q.dealClosed && !dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
         shown++;
 
@@ -10746,10 +10772,41 @@ window.scheduleEquipmentSearch = function() {
     equipmentSearchTimer = scheduleListSearch(equipmentSearchTimer, () => runEquipmentSearch(true));
 };
 
+function populateEquipmentListFilters() {
+    const salesSelect = document.getElementById('eqSalesFilter');
+    const brandSelect = document.getElementById('eqBrandFilter');
+    if (!salesSelect || !brandSelect) return [];
+    const canSeeAll = canViewAllEquipment();
+    salesSelect.style.display = canSeeAll ? '' : 'none';
+    if (!canSeeAll) salesSelect.value = '';
+    const selectedSales = salesSelect.value;
+    const names = [...new Set([
+        ...salesList.filter(person => String(person.role || 'sales').toLowerCase() === 'sales').map(person => stripPhoneSuffix(person.name || '')),
+        ...equipmentList.map(item => stripPhoneSuffix(item.salesName || ''))
+    ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    if (canSeeAll) {
+        salesSelect.innerHTML = '<option value="">全部業務</option>' + names.map(name =>
+            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+        if (names.includes(selectedSales)) salesSelect.value = selectedSales;
+    }
+    const selectedBrand = brandSelect.value;
+    const brands = dedupeBrandsCaseInsensitive([
+        ...getPriceListBrands(true), ...equipmentList.map(item => resolveBrandName(item.brand || ''))
+    ]).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
+        `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+        + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+    if (brands.includes(selectedBrand) || selectedBrand === OTHER_BRAND_OPTION_KEY) brandSelect.value = selectedBrand;
+    return brands;
+}
+
 window.renderEquipmentList = function() {
     const tbody = document.getElementById('eqListBody');
     const keyword = (document.getElementById('eqSearchInput').value || '').toLowerCase();
     const statusFilter = document.getElementById('eqStatusFilter').value;
+    const brands = populateEquipmentListFilters();
+    const salesFilter = document.getElementById('eqSalesFilter')?.value || '';
+    const brandFilter = document.getElementById('eqBrandFilter')?.value || '';
 
     tbody.innerHTML = '';
     let shown = 0;
@@ -10759,6 +10816,8 @@ window.renderEquipmentList = function() {
         const searchable = `${eq.customerName || ''} ${eq.brand || ''} ${eq.salesName || ''} ${eq.model || ''} ${eq.serialNo || ''} ${eq.assetId || ''} ${eq.location || ''} ${eq.notes || ''}`.toLowerCase();
         // 全資料搜尋已由 searchTokens + fullHistoryRecordMatches 完成，不再以畫面欄位二次縮小結果。
         if (!equipmentSearchActive && keyword && !searchable.includes(keyword)) return;
+        if (salesFilter && stripPhoneSuffix(eq.salesName || '') !== salesFilter) return;
+        if (brandFilter && orderBrandFilterValue(eq.brand, brands) !== brandFilter) return;
 
         const { status, dueDate } = getEquipmentStatus(eq);
         if (statusFilter !== 'all' && status !== statusFilter) return;

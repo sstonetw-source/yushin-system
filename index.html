@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260929-4">
+        <link rel="stylesheet" href="styles.css?v=20260929-5">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -581,10 +581,11 @@
         <!-- 我的估價單：只列出目前登入者自己名下的估價單 -->
         <div id="myQuotesPanel" style="display:none;">
             <div class="toolbar no-print">
-                <input type="text" id="myQuoteSearch" placeholder="搜尋全部歷史：單號 / 抬頭 / 客戶 / 廠牌 / 品項" style="width:260px;" oninput="scheduleQuoteHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();scheduleQuoteHistorySearch();}">
+                <input type="text" id="myQuoteSearch" placeholder="搜尋全部歷史：單號 / 抬頭 / 客戶 / 廠牌 / 品項" oninput="scheduleQuoteHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();scheduleQuoteHistorySearch();}">
                 <button type="button" class="btn-secondary" onclick="clearQuoteHistorySearch()">清除搜尋</button>
                 <span id="quoteHistorySearchStatus" style="font-size:12px;color:#666;"></span>
                 <button type="button" id="quoteHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreQuoteHistorySearch()">載入更多搜尋結果</button>
+                <select id="myQuoteSalesFilter" aria-label="估價單負責業務" onchange="renderMyQuotesList()" style="display:none;"><option value="">全部業務</option></select>
                 <select id="myQuotePeriodFilter" onchange="renderMyQuotesList()">
                     <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
                 </select>
@@ -632,7 +633,9 @@
     <!-- ============ 儀器管理系統：客戶儀器維修保養／校正紀錄 ============ -->
     <div id="equipment-system" class="content-section">
         <div class="toolbar no-print">
-            <input type="text" id="eqSearchInput" placeholder="搜尋全部儀器：客戶 / 廠牌 / 業務 / 型號 / 序號 / 編號" style="width:280px;" oninput="scheduleEquipmentSearch()">
+            <input type="text" id="eqSearchInput" placeholder="搜尋全部儀器：客戶 / 廠牌 / 業務 / 型號 / 序號 / 編號" oninput="scheduleEquipmentSearch()">
+            <select id="eqSalesFilter" aria-label="儀器負責業務" onchange="renderEquipmentList()" style="display:none;"><option value="">全部業務</option></select>
+            <select id="eqBrandFilter" aria-label="儀器廠牌" onchange="renderEquipmentList()"><option value="">全部廠牌</option></select>
             <select id="eqStatusFilter" onchange="renderEquipmentList()">
                 <option value="all">全部狀態</option>
                 <option value="overdue">已逾期</option>
@@ -1398,6 +1401,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260925-1"></script>
-    <script src="app.js?v=20260929-3"></script>
+    <script src="app.js?v=20260929-4"></script>
 </body>
 </html>
