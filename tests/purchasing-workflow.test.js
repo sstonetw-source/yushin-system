@@ -296,6 +296,41 @@ test('pending purchasing work loads one page at a time without losing older rows
     assert.equal(context.pendingPurchaseHasMore,false);
 });
 
+test('missing purchasing index reports an actionable error without showing a misleading zero or console URL', async () => {
+    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nwindow\.openOrderPurchaseDraft)/)?.[0];
+    assert.ok(source);
+    const query = {
+        where(){return this;}, orderBy(){return this;}, limit(){return this;},
+        async get(){throw Object.assign(new Error('The query requires an index. You can create it here: https://console.firebase.google.com/long-index-url'), {code:'failed-precondition'});}
+    };
+    const context = vm.createContext({
+        window:{}, db:{collection:()=>query}, canCreatePurchaseOrderCapability:()=>true,
+        canAccessPage:()=>true, pendingPurchaseLoading:false, pendingPurchaseCursor:null,
+        pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
+        currentUserRole:'purchaser', BUSINESS_STATUS:{ACTIVE:'active'}, DEFAULT_LIST_LIMIT:50,
+        readAppDataCache:()=>null, writeAppDataCache:()=>{}, renderPendingPurchaseOrders:()=>{},
+        firestoreReadWithTimeout:promise=>promise
+    });
+    vm.runInContext(source,context);
+    await context.window.loadPendingPurchaseOrders(true);
+    assert.match(context.pendingPurchaseError,/索引尚未建立/);
+    assert.doesNotMatch(context.pendingPurchaseError,/https?:\/\//);
+    const renderSource = app.match(/function renderPendingPurchaseOrders\(\) \{[\s\S]*?\n\}\n(?=\nwindow\.loadPendingPurchaseOrders)/)?.[0];
+    assert.ok(renderSource);
+    const elements = {
+        purchasePendingBody:{innerHTML:'',children:[]},
+        purchasePendingStatus:{textContent:''},
+        purchaseCountOrdering:{textContent:''},
+        purchasePendingMoreBtn:{style:{},disabled:false}
+    };
+    context.document = {getElementById:id=>elements[id]};
+    context.renderPendingPurchaseOrders = undefined;
+    vm.runInContext(renderSource,context);
+    context.renderPendingPurchaseOrders();
+    assert.equal(elements.purchaseCountOrdering.textContent,'—');
+    assert.match(elements.purchasePendingStatus.textContent,/索引尚未建立/);
+});
+
 test('cancelled warehouse source stays in receiving while direct ship remains blocked', () => {
     assert.match(app,/sourceStatus!=='normal' && \(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\) return/);
     assert.match(app,/來源訂單已取消・入庫後為自由庫存/);

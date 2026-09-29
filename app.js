@@ -6544,6 +6544,7 @@ let purchasingDispatchCache = [];
 let purchasingDispatchCursor = null;
 let purchasingDispatchHasMore = true;
 let purchasingDispatchLoading = false;
+let purchasingDispatchError = '';
 
 const purchasingViewLoaded = new Set();
 
@@ -6675,6 +6676,7 @@ window.switchPurchasingView = function(view, tab) {
 
 async function loadPurchasingDispatchOrders(reset=true) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
+    purchasingDispatchError='';
     if (reset) {
         purchasingDispatchCursor=null; purchasingDispatchHasMore=true;
         if (!purchasingDispatchCache.length) {
@@ -6713,8 +6715,9 @@ async function loadPurchasingDispatchOrders(reset=true) {
         }
     } catch(err) {
         console.error('採購發貨清單載入失敗：',err);
-        const status=document.getElementById('purchaseDispatchStatus');
-        if(status)status.textContent='載入失敗：'+(err.message||err);
+        purchasingDispatchError = err.code === 'failed-precondition' || /query requires an index/i.test(err.message || '')
+            ? '待打單清單暫時無法讀取：資料庫索引尚未建立完成，請通知管理員。此時待辦數量無法確認。'
+            : `待打單清單讀取失敗，請重試：${String(err.message || err).replace(/https?:\/\/\S+/g, '（詳見瀏覽器錯誤紀錄）').slice(0, 160)}`;
     } finally {
         purchasingDispatchLoading=false;
         writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
@@ -6734,12 +6737,12 @@ function renderPurchasingDispatchOrders() {
         pending.forEach(({item,state})=>{
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) return;
             const tr=document.createElement('tr');
-            tr.innerHTML=`<td>${escapeHtml(order.orderDate||'')}</td><td>${escapeHtml(order.orderNo||order.id)}</td><td>${escapeHtml(order.customerName||order.customer||'')}</td><td>${escapeHtml(order.salesName||'')}</td><td>${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td><button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button></td>`;
+            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo||order.id)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作"><button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}').then(()=>loadPurchasingDispatchOrders(true))">已打單 × ${state.pending}</button></td>`;
             body.appendChild(tr);
         });
     });
-    if(status)status.textContent=purchasingDispatchLoading?'載入中…':(body.children.length?`已顯示 ${body.children.length} 筆待打單品項`:'目前沒有待打單品項');
-    const count=document.getElementById('purchaseCountDispatch'); if(count)count.textContent=purchasingDispatchLoading?'…':String(body.children.length);
+    if(status)status.textContent=purchasingDispatchLoading?'載入中…':purchasingDispatchError||(body.children.length?`已顯示 ${body.children.length} 筆待打單品項`:'目前沒有待打單品項');
+    const count=document.getElementById('purchaseCountDispatch'); if(count)count.textContent=purchasingDispatchLoading?'…':purchasingDispatchError?'—':String(body.children.length);
     if(more){more.style.display=purchasingDispatchHasMore?'':'none';more.disabled=purchasingDispatchLoading;}
 }
 
@@ -6796,13 +6799,13 @@ function renderPendingPurchaseOrders() {
         for (const item of items) {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand)) continue;
             const row = document.createElement('tr');
-            row.innerHTML = `<td>${escapeHtml(order.orderDate || '')}</td><td>${escapeHtml(order.orderNo || order.id)}</td><td>${escapeHtml(order.customer || order.customerName || '')}</td><td>${escapeHtml(order.salesName || '')}</td><td>${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">建立訂購單</button></td>`;
+            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="來源訂單">${escapeHtml(order.orderNo || order.id)}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}</td><td data-th="操作"><button type="button" class="btn-small" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">建立訂購單</button></td>`;
             body.appendChild(row);
         }
     }
     const status = document.getElementById('purchasePendingStatus');
     if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 筆待採購品項${pendingPurchaseHasMore ? '；較舊待辦請按載入更多' : ''}` : pendingPurchaseHasMore ? '這一頁沒有待採購品項；請按載入更多檢查較舊待辦' : '目前沒有待採購品項');
-    const count=document.getElementById('purchaseCountOrdering'); if(count)count.textContent=pendingPurchaseLoading?'…':String(body.children.length);
+    const count=document.getElementById('purchaseCountOrdering'); if(count)count.textContent=pendingPurchaseLoading?'…':pendingPurchaseError?'—':String(body.children.length);
     const more = document.getElementById('purchasePendingMoreBtn');
     if (more) { more.style.display = pendingPurchaseHasMore ? '' : 'none'; more.disabled = pendingPurchaseLoading; }
 }
@@ -6852,7 +6855,10 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
             });
         }
     } catch (err) {
-        pendingPurchaseError = `讀取失敗：${err.message}`;
+        const missingIndex = err.code === 'failed-precondition' || /query requires an index/i.test(err.message || '');
+        pendingPurchaseError = missingIndex
+            ? '待採購清單暫時無法讀取：資料庫索引尚未建立完成，請通知管理員。此時待辦數量無法確認。'
+            : `待採購清單讀取失敗，請重試：${String(err.message || err).replace(/https?:\/\/\S+/g, '（詳見瀏覽器錯誤紀錄）').slice(0, 160)}`;
         return;
     } finally {
         pendingPurchaseLoading = false;
