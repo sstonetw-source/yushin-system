@@ -388,7 +388,12 @@ test('loading another receiving page retains source status for earlier PO rows',
         receivingSourceOrderStatusCache:new Map(), receivingSourceOrderCache:new Map(), ordersCache:[], DEFAULT_LIST_LIMIT:1,
         BUSINESS_STATUS:{ACTIVE:'active'}, normalizedOrderStatus:()=> 'normal',
         purchaseItemsFromSavedPo:po=>po.items, readAppDataCache:()=>null,
-        writeAppDataCache:()=>{}, renderPoList:()=>{}, updatePoLoadMoreButton:()=>{}, alert:message=>{throw new Error(message)}
+        compareBusinessRecordsNewestFirst:(a,b,dateField,numberField)=>{
+            const dateCompare=String(b?.[dateField]||'').localeCompare(String(a?.[dateField]||''));
+            return dateCompare || String(b?.[numberField]||'').localeCompare(String(a?.[numberField]||''));
+        },
+        writeAppDataCache:()=>{}, renderPoList:()=>{}, renderPurchasingWorkCards:()=>{},
+        updatePoLoadMoreButton:()=>{}, alert:message=>{throw new Error(message)}
     });
     vm.runInContext(source,context);
     await context.loadPurchaseOrderPage(true);
@@ -459,7 +464,7 @@ test('pending purchasing work reports a shared order-load failure without overwr
 
 test('cancelled source is excluded from the order-aligned receiving queue', () => {
     assert.match(app,/if\(!sourceOrder \|\| normalizedOrderStatus\(sourceOrder\)!=='normal'\)return null/);
-    assert.match(app,/不屬於目前訂單「待到貨」狀態的採購紀錄/);
+    assert.match(app,/不屬於目前訂單「待到貨」狀態，不計入上方工作卡/);
     assert.match(app,/if\(normalizedOrderStatus\(sourceOrder\)!=='normal'\)throw new Error\('來源訂單已取消/);
 });
 
@@ -517,15 +522,21 @@ test('cancelled warehouse PO receipt moves incoming to free stock exactly once',
     assert.equal(docs.get('inventory/P1').onHand,3);
 });
 
-test('purchasing pending card and detail use the same display-line source', () => {
+test('purchasing pending card and detail share the same item work-state engine', () => {
     const cardStart=app.indexOf('function renderPurchasingWorkCards()');
     const cardEnd=app.indexOf('window.renderPurchasingView',cardStart);
     const detailStart=app.indexOf('function renderPendingPurchaseOrders()');
     const detailEnd=app.indexOf('window.loadPendingPurchaseOrders',detailStart);
+    const helperStart=app.indexOf('function buildOrderItemWorkMetrics(');
+    const helperEnd=app.indexOf('window.setOrderWorkFilter',helperStart);
+    const displayStart=app.indexOf('function pendingProcurementDisplayLines(order)');
+    const displayEnd=app.indexOf('function renderPurchasingWorkCards()',displayStart);
     const formalStart=app.indexOf('function pendingPurchaseLines(order)');
     const formalEnd=app.indexOf('function syncOrderIntoPurchasingCaches',formalStart);
-    assert.ok(cardStart>=0&&detailStart>=0&&formalStart>=0);
-    assert.match(app.slice(cardStart,cardEnd),/pendingProcurementDisplayLines\(order\)/);
+    assert.ok(cardStart>=0&&detailStart>=0&&helperStart>=0&&displayStart>=0&&formalStart>=0);
+    assert.match(app.slice(cardStart,cardEnd),/buildOrderItemWorkMetrics\(/);
+    assert.match(app.slice(helperStart,helperEnd),/orderItemDisplayCategories\(order,item\)/);
+    assert.match(app.slice(displayStart,displayEnd),/orderItemWorkCategory\(order, item\) !== 'ordering'/);
     assert.match(app.slice(detailStart,detailEnd),/pendingProcurementDisplayLines\(order\)/);
     assert.match(app.slice(detailStart,detailEnd),/業務自行訂貨/);
     assert.match(app.slice(formalStart,formalEnd),/procurementType === 'PURCHASING_PO'/);
