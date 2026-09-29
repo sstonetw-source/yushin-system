@@ -8708,14 +8708,26 @@ window.printPurchaseOrder = async function() {
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
-        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存。正在同步在途庫存…`);
+        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存。正在開啟列印；在途庫存會繼續同步…`);
         renderPoList();
 
-        await registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming);
-        poIncomingSyncPending = false;
-        savedPo.incomingRegistrationStatus = 'completed';
-        if (purchasingView === 'ordering') loadPendingPurchaseOrders(true);
-        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存，可在「採購訂單」查看。按下方按鈕列印或輸出 PDF。`);
+        // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不必再等第二段在途庫存同步。
+        // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立訂購單。
+        printSavedPoDocument(poNo, vendorName);
+        registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming)
+            .then(() => {
+                poIncomingSyncPending = false;
+                savedPo.incomingRegistrationStatus = 'completed';
+                if (purchasingView === 'ordering') loadPendingPurchaseOrders(true);
+                updatePoSaveStatus(`訂購單 ${poNo} 已建立；在途庫存同步完成。`);
+                updatePoSaveButton();
+            })
+            .catch(err => {
+                console.error('訂購單在途庫存背景同步失敗：', err);
+                poIncomingSyncPending = true;
+                updatePoSaveStatus(`訂購單已儲存，但在途庫存同步未完成：${err.message}。請由這張訂購單重試同步，不要另建一張。`, true);
+                updatePoSaveButton();
+            });
     } catch (err) {
         console.error('儲存訂購單紀錄失敗：', err);
         updatePoSaveStatus(poCommitted
