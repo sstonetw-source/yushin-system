@@ -910,9 +910,9 @@ test('purchasing and orders share brand names and date range semantics across wo
     controls.purchasePeriodEnd.value = '2026-09-25';
     assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'Biorad'), false);
     assert.equal(context.purchaseLineMatchesFilters('2026-09-24', '王先生', 'Biorad'), true);
-    assert.match(appSource, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand\)/);
-    assert.match(appSource, /purchaseLineMatchesFilters\(po\.poDate, item\.salesName, item\.brand\)/);
-    assert.match(appSource, /purchaseLineMatchesFilters\(supply\.orderDate, supply\.salesName, supply\.brand\)/);
+    assert.match(appSource, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand, filters\)/);
+    assert.match(appSource, /receivingQueueContext\(po,item\)/);
+    assert.match(appSource, /receivingQueueContext\(supply,supply\)/);
     assert.match(indexSource, /id="poPeriodFilter" onchange="changePurchasePeriod\(this\.value\)"/);
 });
 
@@ -1527,7 +1527,8 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
     assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?訂購單 \$\{poNo\} 已建立並儲存/);
-    assert.match(save, /按下方按鈕列印或輸出 PDF/);
+    assert.match(save, /列印預覽已開啟/);
+    assert.match(save, /printSavedPoDocument\(poNo, vendorName\);[\s\S]*?await commitPromise/);
     assert.doesNotMatch(save, /await registerPurchaseIncoming\(poDocumentId, poRecord, previousPoForIncoming\);[\s\S]*?printSavedPoDocument\(poNo, vendorName\)/);
     assert.match(indexSource, /id="poSaveStatus" role="status"/);
 });
