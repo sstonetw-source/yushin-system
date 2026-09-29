@@ -6595,6 +6595,8 @@ window.renderOrdersList = function() {
         tbody.appendChild(tr);
     });
     document.getElementById('ordersEmptyHint').style.display = shown === 0 ? 'block' : 'none';
+    // 訂單一有任何狀態異動，採購工作卡立刻使用同一份 ordersCache 重算。
+    if (canAccessPage('orders.po')) renderPurchasingWorkCards();
 };
 
 window.retryOrderInventoryReservation = async function(orderId) {
@@ -6810,6 +6812,7 @@ async function loadPurchasingDispatchOrders(reset=true) {
         purchasingDispatchCache = ordersCache.filter(order =>
             normalizedOrderItems(order).some(item => itemDispatchState(order, item).pending > 0)
         );
+        purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
         renderPurchasingWorkCards();
     } catch (err) {
@@ -6916,6 +6919,7 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         if (reset) await loadOrderPage(true, { silent: true });
         else await loadOrderPage(false, { silent: true });
         pendingPurchaseCache = ordersCache.filter(order => pendingPurchaseLines(order).length > 0);
+        pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         writeAppDataCache('purchase-pending', pendingPurchaseCache);
         renderPurchasingWorkCards();
     } catch (err) {
@@ -8681,7 +8685,7 @@ window.printPurchaseOrder = async function() {
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
-        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存。正在開啟列印；在途庫存會繼續同步…`);
+        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存；在途庫存正在背景同步…`);
         renderPoList();
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不必再等第二段在途庫存同步。
