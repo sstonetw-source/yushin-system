@@ -1,9 +1,10 @@
 body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 0; }
 @keyframes resume-repaint-frame { from { opacity: .999; } to { opacity: 1; } }
 #appContainer.resume-repaint { animation: resume-repaint-frame .12s linear; }
-.nav-tabs { background: #003366; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; align-items: center; }
-.nav-tab { color: #fff; padding: 10px 20px; cursor: pointer; border-radius: 5px 5px 0 0; margin-right: 5px; background: #002244; }
+.nav-tabs { background-color: #003366; background-image: url('assets/city-skyline.svg'); background-repeat: no-repeat; background-position: right bottom; background-size: auto 100%; display: flex; flex-wrap: wrap; padding: 10px 10px 0 10px; align-items: center; }
+.nav-tab { display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: #fff; padding: 10px 20px; cursor: pointer; border-radius: 5px 5px 0 0; margin-right: 5px; background: rgba(0, 34, 68, .92); }
 .nav-tab.active { background: #fff; color: #003366; font-weight: bold; }
+.nav-icon { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .nav-spacer { flex-grow: 1; }
 .auth-status { color: #fff; font-size: 12px; padding: 8px 10px; }
 .auth-status button { margin-left: 8px; }
