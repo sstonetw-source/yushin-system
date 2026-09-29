@@ -528,8 +528,13 @@ test('committed PO refreshes item quantities in order and purchasing views', () 
     let listRenders=0;
     const context=vm.createContext({
         ordersCache:[oldOrder],pendingPurchaseCache:[oldOrder],purchasingDispatchCache:[],
-        purchasingView:'ordering',pendingPurchaseLines:order=>order.items[0].purchaseOrderedQty<5?[{}]:[],
-        normalizedOrderItems:order=>order.items,orderItemWorkCategory:()=>'',itemDispatchState:()=>({pending:0}),
+        purchasingView:'ordering',
+        pendingProcurementDisplayLines:order=>order.items[0].purchaseOrderedQty<5?[{}]:[],
+        normalizedOrderItems:order=>order.items,
+        orderItemDisplayCategories:()=>[],
+        normalizedOrderStatus:()=> 'normal',
+        receivingSourceOrderStatusCache:new Map(),
+        receivingSourceOrderCache:new Map(),
         writeAppDataCache:(kind,rows)=>writes.push([kind,Array.from(rows,row=>row.id)]),
         renderPendingPurchaseOrders:()=>{},renderPurchasingDispatchOrders:()=>{},renderOrdersList:()=>{listRenders++;}
     });
