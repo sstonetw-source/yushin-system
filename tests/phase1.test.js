@@ -236,7 +236,8 @@ test('low-stock inventory can hand off to formal replenishment purchase flow', (
 test('purchase workspace shows waiting days for open receipts, including direct shipment', () => {
     assert.match(indexSource, />等待天數</);
     assert.match(appSource, /function poWaitingDays\(po\)/);
-    assert.match(appSource, /if \(progress\.complete\) return '';/);
+    assert.match(appSource, /poReceiptProgress\(po\)\.complete \? '' : waitingDaysFromDate\(po\.poDate\)/);
+    assert.match(appSource, /itemStatus==='arrival'\?waitingDaysFromDate\(item\.orderedAt\)/);
     assert.match(appSource, /data-th="等待天數"/);
 });
 
@@ -1520,7 +1521,8 @@ test('ordered action belongs to purchasing while the order list only shows progr
     assert.doesNotMatch(actions, /openOrderPurchaseDraft/);
     const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders()');
     const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
-    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?已訂購/);
+    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openManualPurchaseOrder[\s\S]*?已訂購/);
+    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?產生訂購單/);
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
