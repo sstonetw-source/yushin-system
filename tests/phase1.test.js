@@ -604,6 +604,23 @@ test('quote optional item fields stay collapsed, persist, print only when filled
 });
 
 
+test('quote PDF document is rendered directly from quote data without cloning the editor DOM', () => {
+    const renderStart = appSource.indexOf('function renderQuotePdfDocument(quoteData = {})');
+    const renderEnd = appSource.indexOf('\n}\n\nfunction createQuotePdfStage', renderStart) + 2;
+    const renderSource = appSource.slice(renderStart, renderEnd);
+    const stageStart = appSource.indexOf('function createQuotePdfStage(quoteData)');
+    const stageEnd = appSource.indexOf('\n}\n\nfunction quotePdfSafePageEnd', stageStart) + 2;
+    const stageSource = appSource.slice(stageStart, stageEnd);
+    assert.match(renderSource, /quoteData\.items/);
+    assert.match(renderSource, /companyData/);
+    assert.match(renderSource, /quote-pdf-table/);
+    assert.match(stageSource, /renderQuotePdfDocument\(quoteData\)/);
+    assert.doesNotMatch(stageSource, /cloneNode/);
+    assert.doesNotMatch(stageSource, /prepareQuoteForPrint/);
+    assert.match(appSource, /\.quote-pdf-items tr, \.quote-summary-block/);
+});
+
+
 test('primary quote export generates PDF directly without browser print', () => {
     assert.match(indexSource, /html2canvas@1\.4\.1/);
     assert.match(indexSource, /jspdf@2\.5\.2/);
