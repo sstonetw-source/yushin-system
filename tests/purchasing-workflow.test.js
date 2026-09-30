@@ -385,7 +385,8 @@ test('self-order receipt uses fulfillment core receivedQty without adding it twi
 
 
 test('self-order receipt keeps reservation from fulfillment core without adding reserveQty twice',()=>{
-    assert.match(app,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty,inventoryReservedQty:next\.reservedQty\}/);
+    assert.match(app,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
+    assert.doesNotMatch(app,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty,inventoryReservedQty:/);
     assert.doesNotMatch(app,/reservedQty:Number\(item\.reservedQty\?\?item\.inventoryReservedQty\?\?0\)\+reserveQty/);
     assert.match(app,/reserved:inv\.reserved\+reserveQty/);
 });
