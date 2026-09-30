@@ -8152,6 +8152,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         const productKey=supply.productKey||supply.productId||(supply.itemCode?`code:${normalizeHistoryItemCode(supply.itemCode)}`:'');
         if(!productKey)throw new Error('此品項缺少 Product ID／貨號。');
         const warehouseId=supply.warehouseId||defaultWarehouse()?.id||'';
+        if(!warehouseId)throw new Error('此供應紀錄尚未指定入庫倉庫，無法安全入庫。');
         receivedProductKey=productKey;receivedWarehouseId=warehouseId;sourceOrderId=supply.orderId||'';
         const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
         const whRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
