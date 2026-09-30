@@ -40,7 +40,7 @@ test('purchasing has three item-level work queues and no legacy number function'
 });
 
 test('a PO cannot exceed the remaining need even when lines split the same item', () => {
-    const order = { items:[{ itemCode:'A', qty:8, purchaseRequiredQty:5, purchaseOrderedQty:2 }] };
+    const order = { items:[{ itemCode:'A', qty:8, shortageQty:5, supplyOrderedQty:2 }] };
     validate(order, [{orderItemIndex:0,itemCode:'A',qty:2},{orderItemIndex:0,itemCode:'A',qty:1}]);
     assert.throws(() => validate(order, [{orderItemIndex:0,itemCode:'A',qty:2},{orderItemIndex:0,itemCode:'A',qty:2}]), /待採購數量/);
     assert.throws(() => validate({...order,status:'cancelled'}, [{orderItemIndex:0,itemCode:'A',qty:1}]), /取消/);
@@ -48,7 +48,7 @@ test('a PO cannot exceed the remaining need even when lines split the same item'
 });
 
 test('a self order reduces the quantity available to the formal PO', () => {
-    const order = { items:[{ itemCode:'A', qty:8, purchaseRequiredQty:5, supplyOrderedQty:4 }] };
+    const order = { items:[{ itemCode:'A', qty:8, shortageQty:5, supplyOrderedQty:4 }] };
     validate(order, [{orderItemIndex:0,itemCode:'A',qty:1}]);
     assert.throws(() => validate(order, [{orderItemIndex:0,itemCode:'A',qty:2}]), /待採購數量/);
 });
@@ -218,7 +218,7 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
         YushinWorkflow:workflow
     });
     vm.runInContext(`${dispatchSource}\n${categorySource}`,ctx);
-    const order={items:[{itemId:'I1',qty:3,orderedQty:3,inventoryShortageQty:0,
+    const order={items:[{itemId:'I1',qty:3,orderedQty:3,shortageQty:0,
         fulfillmentType:'WAREHOUSE',reservedQty:3,dispatchPreparedQty:0}],isBilled:false,deliveryRecords:[]};
     const current=()=>ctx.orderItemDisplayCategory(order,order.items[0]);
     assert.equal(current(),'dispatch');
@@ -246,15 +246,15 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
         YushinWorkflow:workflow
     });
     vm.runInContext(`${dispatchSource}\n${categorySource}`,context);
-    const order={items:[{itemId:'I1',qty:10,orderedQty:10,inventoryShortageQty:5,
-        purchaseRequiredQty:5,fulfillmentType:'WAREHOUSE',reservedQty:5,dispatchPreparedQty:0}]};
+    const order={items:[{itemId:'I1',qty:10,orderedQty:10,shortageQty:5,
+        fulfillmentType:'WAREHOUSE',reservedQty:5,dispatchPreparedQty:0}]};
     const item=order.items[0];
     assert.equal(context.orderItemWorkCategory(order,item),'ordering');
     assert.deepEqual(Array.from(context.orderItemDisplayCategories(order,item)),['ordering','dispatch']);
     assert.deepEqual(Array.from(context.orderWorkCategories(order)),['ordering','dispatch']);
     item.dispatchPreparedQty=5;
     assert.deepEqual(Array.from(context.orderWorkCategories(order)),['ordering']);
-    item.purchaseOrderedQty=5;
+    item.supplyOrderedQty=5;
     assert.equal(context.orderItemWorkCategory(order,item),'arrival');
     assert.deepEqual(Array.from(context.orderItemDisplayCategories(order,item)),['arrival']);
 });
@@ -453,7 +453,7 @@ test('manual ordered action records supply and source item only once after an un
     assert.ok(source);
     const order = {items:[{itemId:'I1',itemCode:'P1',itemName:'Product',qty:2,
         productId:'P1',supplier:'Vendor',costPrice:100,warehouseId:'W1',
-        procurementType:'PURCHASING_PO',purchaseOrderedQty:0,inventoryShortageQty:2}],orderNo:'O1'};
+        procurementType:'PURCHASING_PO',supplyOrderedQty:0,shortageQty:2}],orderNo:'O1'};
     let supply, updates = 0;
     const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
     const button={disabled:false,textContent:'已訂購',isConnected:false};
@@ -484,7 +484,6 @@ test('manual ordered action records supply and source item only once after an un
     vm.runInContext(source,context);
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1);
-    assert.equal(order.items[0].purchaseOrderedQty,0);
     assert.equal(order.items[0].supplyOrderedQty,2);
     assert.equal(supply.type,'PURCHASING_MANUAL');
     assert.equal(supply.status,'ORDERED');
@@ -499,7 +498,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
     assert.ok(source);
     const order = {items:[{itemId:'I1',itemCode:'P1',itemName:'Product',qty:2,
         productId:'P1',supplier:'Vendor',costPrice:100,warehouseId:'W1',
-        procurementType:'PURCHASING_PO',purchaseOrderedQty:0,supplyOrderedQty:0,receivedQty:0,inventoryShortageQty:2}],orderNo:'O1'};
+        procurementType:'PURCHASING_PO',supplyOrderedQty:0,receivedQty:0,shortageQty:2}],orderNo:'O1'};
     let supply, updates = 0;
     const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
     const button={disabled:false,textContent:'已訂購',isConnected:false};
@@ -518,9 +517,9 @@ test('manual ordered action can add a later genuine shortage without duplicating
         canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
         currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
         remainingProcurementQty:(record,item)=>{
-            const ordered=Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0));
+            const ordered=Number(item.supplyOrderedQty||0);
             const received=Number(item.receivedQty||0);
-            return Math.max(0,Number(item.inventoryShortageQty||0)-Math.max(0,ordered-received));
+            return Math.max(0,Number(item.shortageQty||0)-Math.max(0,ordered-received));
         },
         poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-09-30',
         normalizedOrderStatus:()=> 'normal',normalizedOrderItems:record=>record.items,
@@ -537,11 +536,10 @@ test('manual ordered action can add a later genuine shortage without duplicating
     assert.equal(supply.qty,2,'plain retry must remain idempotent');
     assert.equal(supply.orderEvents.length,1);
     assert.equal(updates,1);
-    order.items[0].inventoryShortageQty=5;
+    order.items[0].shortageQty=5;
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(supply.qty,5,'new uncovered shortage is added to the existing manual supply');
     assert.equal(supply.orderEvents.length,2);
-    assert.equal(order.items[0].purchaseOrderedQty,0);
     assert.equal(order.items[0].supplyOrderedQty,5);
     assert.equal(updates,2);
 });
