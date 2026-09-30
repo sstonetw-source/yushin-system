@@ -618,6 +618,9 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         break-before: page !important;
         page-break-before: always !important;
     }
+    /* 有效期限、印章與合計是一個正式文件尾段；空間不足時整組移到下一頁，
+       不讓有效期限單獨留在上一頁、金額與印章掉到下一頁。 */
+    #printableQuote .quote-summary-block,
     #printableQuote .footer-note,
     #printableQuote .bottom-layout,
     #printableQuote .total-section {

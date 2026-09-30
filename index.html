@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260930-5">
+        <link rel="stylesheet" href="styles.css?v=20260930-6">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -557,15 +557,17 @@
                 <button type="button" onclick="addQuoteRow()">＋ 新增品項</button>
                 <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依目前價目表更新所有品項單價</button>
             </div>
-            <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
-            <div class="bottom-layout">
-                <div class="stamp-section"><img id="companyStamp" src=""></div>
-                <div class="total-section">
-                    <p>銷售額合計：NT$ <span id="subtotalAmount">0</span></p>
-                    <p>營業稅 (5%)：NT$ <span id="taxAmount">0</span></p>
-                    <p id="discountRow">優惠折扣：<input type="number" id="discountRateInput" class="discount-input" value="0" min="0" max="100" onclick="if(this.value=='0')this.value='';" oninput="calculateTotals()"> %</p>
-                    <p style="font-size: 14px; color: #003366;">總計金額：NT$ <span id="grandTotal">0</span></p>
-                    <p id="chineseTotal">合計新台幣 零元整</p>
+            <div class="quote-summary-block">
+                <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
+                <div class="bottom-layout">
+                    <div class="stamp-section"><img id="companyStamp" src=""></div>
+                    <div class="total-section">
+                        <p>銷售額合計：NT$ <span id="subtotalAmount">0</span></p>
+                        <p>營業稅 (5%)：NT$ <span id="taxAmount">0</span></p>
+                        <p id="discountRow">優惠折扣：<input type="number" id="discountRateInput" class="discount-input" value="0" min="0" max="100" onclick="if(this.value=='0')this.value='';" oninput="calculateTotals()"> %</p>
+                        <p style="font-size: 14px; color: #003366;">總計金額：NT$ <span id="grandTotal">0</span></p>
+                        <p id="chineseTotal">合計新台幣 零元整</p>
+                    </div>
                 </div>
             </div>
         </div>

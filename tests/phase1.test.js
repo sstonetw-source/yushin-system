@@ -572,6 +572,8 @@ test('quote print pagination uses the real print layout and keeps rows/footer in
     assert.match(appSource, /markQuotePrintPagination\(\)/);
     assert.match(cssSource, /thead \{ display: table-header-group; \}/);
     assert.match(cssSource, /table tr \{[\s\S]*?break-inside: avoid/);
+    assert.match(indexSource, /class="quote-summary-block"[\s\S]*class="footer-note"[\s\S]*class="bottom-layout"/);
+    assert.match(cssSource, /#printableQuote \.quote-summary-block/);
     assert.match(cssSource, /#printableQuote \.bottom-layout/);
 });
 
