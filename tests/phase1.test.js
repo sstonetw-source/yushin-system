@@ -604,6 +604,20 @@ test('quote optional item fields stay collapsed, persist, print only when filled
 });
 
 
+test('quote PDF uses an isolated fixed grid so mobile card CSS cannot reshape it', () => {
+    const renderStart = appSource.indexOf('function renderQuotePdfDocument(quoteData = {})');
+    const renderEnd = appSource.indexOf('\n}\n\nfunction createQuotePdfStage', renderStart) + 2;
+    const renderSource = appSource.slice(renderStart, renderEnd);
+    assert.match(renderSource, /quote-pdf-grid-row quote-pdf-grid-head/);
+    assert.match(renderSource, /quote-pdf-grid-row quote-pdf-item-row/);
+    assert.match(renderSource, /quote-pdf-bottom/);
+    assert.doesNotMatch(renderSource, /<table class="quote-pdf-table">/);
+    assert.match(cssSource, /grid-template-columns:4% minmax\(0, 1fr\) 9% 9% 9% 9% !important/);
+    assert.match(cssSource, /\.quote-pdf-stage \.quote-pdf-bottom \{/);
+    assert.match(appSource, /querySelectorAll\('\.quote-pdf-item-row, \.quote-summary-block'\)/);
+});
+
+
 test('quote PDF document is rendered directly from quote data without cloning the editor DOM', () => {
     const renderStart = appSource.indexOf('function renderQuotePdfDocument(quoteData = {})');
     const renderEnd = appSource.indexOf('\n}\n\nfunction createQuotePdfStage', renderStart) + 2;
