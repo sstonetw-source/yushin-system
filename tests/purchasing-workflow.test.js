@@ -820,6 +820,17 @@ test('direct-ship returns create replacement supply demand', () => {
     assert.match(app.slice(selfStart,selfEnd),/remainingProcurementQty\(order,item\)/);
 });
 
+test('restoring an order uses net delivered quantity after returns', () => {
+    const start=app.indexOf('async function adjustInventoryReservationForLifecycle');
+    const end=app.indexOf('\nwindow.quickSetOrderLifecycle',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const grossDelivered = deliveries/);
+    assert.match(source,/const returned = savedReturnRecords\(order\)/);
+    assert.match(source,/const delivered = Math\.max\(0, grossDelivered - returned\)/);
+    assert.match(source,/const outstanding = Math\.max\(0, ordered - delivered\)/);
+});
+
 test('full returns stay in fulfillment instead of closing the order', () => {
     const workflow=require('../modules/workflow-core.js');
     assert.equal(workflow.itemWorkCategory({
