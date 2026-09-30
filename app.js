@@ -6014,7 +6014,7 @@ window.saveSelfOrder = async function() {
             const item=items[index];
             if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，業務不可自行訂貨。');
             const required=Math.max(0,Number(item.shortageQty||0));
-            const already=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+            const already=Math.max(0,Number(item.supplyOrderedQty||0));
             const remaining=Math.max(0,required-already);
             if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
             const supplyRef=db.collection('supplyOrders').doc();
@@ -6861,7 +6861,7 @@ function purchaseLineMatchesFilters(date, salesName, brand, context = null) {
 
 function remainingProcurementQty(order, item) {
     const qty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
-    const ordered = Math.max(0, Number(item.supplyOrderedQty ?? item.purchaseOrderedQty ?? 0));
+    const ordered = Math.max(0, Number(item.supplyOrderedQty || 0));
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
         return Math.max(0, qty - ordered);
     }
@@ -7263,7 +7263,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             if (!directShip && (!productKey || !warehouseId)) throw new Error('訂單快照缺少貨號或入庫倉庫，請先修正來源訂單。');
             const orderDate = localDateString();
             const internalNo = existingSupply?.internalNo || `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(-8).toUpperCase()}`;
-            const alreadyOrdered = Math.max(Number(item.purchaseOrderedQty || 0), Number(item.supplyOrderedQty || 0));
+            const alreadyOrdered = Math.max(0, Number(item.supplyOrderedQty || 0));
             const nextOrdered = alreadyOrdered + qty;
             const now = new Date().toISOString();
             const previousSupplyQty = Math.max(0, Number(existingSupply?.qty || 0));
@@ -8354,7 +8354,7 @@ function purchaseItemsFromOrder(order) {
         const procurementType=item.procurementType||order.procurementType||'PURCHASING_PO';
         if(procurementType==='SALES_SELF_ORDER') return null;
         const procurementRequired=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
-            ? fullQty : Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??fullQty));
+            ? fullQty : Math.max(0,Number(item.shortageQty||0));
         const remainingPurchase=Math.max(0,procurementRequired-Math.max(0,Number(item.supplyOrderedQty||0)));
         return {
             orderId: order.id,
@@ -8679,7 +8679,7 @@ function assertPurchaseLinesAvailable(order, lines) {
         const source = sourceItems[index];
         const required = (source.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
             ? Number(source.qty || 0)
-            : Math.max(0, Number(source.shortageQty ?? source.inventoryShortageQty ?? source.purchaseRequiredQty ?? source.qty ?? 0));
+            : Math.max(0, Number(source.shortageQty || 0));
         const remaining = Math.max(0, required - Math.max(0, Number(source.supplyOrderedQty || 0)));
         if (!(qty > 0) || qty > remaining + 1e-9) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
     }
