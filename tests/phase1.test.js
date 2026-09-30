@@ -754,8 +754,10 @@ test('phase 5 order creation reserves only available stock and records shortage'
     const s=appSource.slice(start,end);
     assert.match(s,/Math\.min\(additionalNeeded,warehouse\.available\)/);
     assert.doesNotMatch(s,/Math\.min\(additionalNeeded,warehouse\.available,aggregate\.available\)/);
-    assert.match(s,/inventoryReservedQty/);
-    assert.match(s,/inventoryShortageQty/);
+    assert.match(s,/reservedQty/);
+    assert.match(s,/shortageQty/);
+    assert.doesNotMatch(s,/inventoryReservedQty:reservable/);
+    assert.doesNotMatch(s,/inventoryShortageQty:shortage/);
     assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
 });
 
