@@ -5083,11 +5083,10 @@ window.loadInventory=async function(reset=true){
  }
  inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
  if(reset){
- const [m,pending,supplies]=await Promise.all([
+ const [m,supplies]=await Promise.all([
  db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
- db.collection('pendingInventoryItems').where('status','==','pending-arrival').limit(100).get(),
- db.collection('supplyOrders').where('type','==','SALES_SELF_ORDER').where('status','in',['ORDERED','PARTIAL_RECEIPT']).orderBy('orderDate','desc').limit(100).get().catch(()=>({docs:[]}))
- ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=pending.docs.map(d=>({id:d.id,...d.data()}));pendingSupplyCache=supplies.docs.map(d=>({id:d.id,...d.data()}));
+ db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(100).get().catch(()=>({docs:[]}))
+ ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=[];pendingSupplyCache=supplies.docs.map(d=>({id:d.id,...d.data()})).filter(row=>(row.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP').sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
  }
  await loadWarehouseStocksForInventoryPage();
  writeAppDataCache('inventory', inventoryCache);
@@ -5333,7 +5332,7 @@ window.setInventorySafetyStock=async function(inventoryId){
  const safetyStock=Number(raw);if(!Number.isFinite(safetyStock)||safetyStock<0){alert('安全庫存必須是 0 以上數字。');return;}
  try{await db.collection('inventory').doc(inventoryId).update({safetyStock,updatedAt:new Date().toISOString()});item.safetyStock=safetyStock;renderInventoryList();}catch(err){alert('安全庫存更新失敗：'+err.message);}
 };
-window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;const legacy=pendingInventoryCache.map(x=>`<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${Number(x.incomingQty||0)}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">待到貨／待建檔</td></tr>`);const supplies=pendingSupplyCache.map(x=>{const remaining=Math.max(0,Number(x.qty||0)-Number(x.receivedQty||0));return `<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${remaining}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態"><button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(x.internalNo||'自行訂貨')}・入庫</button></td></tr>`;});body.innerHTML=[...supplies,...legacy].join('');if(hint)hint.style.display=(pendingInventoryCache.length||pendingSupplyCache.length)?'none':'block';};
+window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;const supplies=pendingSupplyCache.map(x=>{const remaining=Math.max(0,Number(x.qty||0)-Number(x.receivedQty||0));const label=x.purchaseDocumentNo||x.internalNo||'供應紀錄';return `<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${remaining}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態"><button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(label)}・入庫</button></td></tr>`;});body.innerHTML=supplies.join('');if(hint)hint.style.display=supplies.length?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
 
@@ -8203,10 +8202,13 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         receivedProductKey=productKey;receivedWarehouseId=warehouseId;sourceOrderId=supply.orderId||'';
         const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
         const whRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
+        const pendingRef=db.collection('pendingInventoryItems').doc(warehouseId?warehouseStockDocId(warehouseId,productKey):encodeURIComponent(productKey));
         const invSnap=await tx.get(invRef);
         const whSnap=whRef?await tx.get(whRef):null;
+        const pendingSnap=await tx.get(pendingRef);
         const inv=inventoryNumbers(invSnap.exists?invSnap.data():{});
         const wh=inventoryNumbers(whSnap?.exists?whSnap.data():{});
+        const pendingIncoming=Math.max(0,Number(pendingSnap.exists?pendingSnap.data().incomingQty:0)||0);
         let order=null,items=[],itemIndex=-1,reserveQty=0;
         if(supply.orderId){
             const orderRef=db.collection('orders').doc(supply.orderId);
@@ -8238,11 +8240,13 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         if(embeddedIndex>=0)embeddedLots[embeddedIndex]={...embeddedLots[embeddedIndex],qty:Number(embeddedLots[embeddedIndex].qty||0)+qty};
         else embeddedLots.push({lotNo,expiryDate,qty,receivedAt:now,sourceSupplyId:supplyId});
         {
-          const nextInventory={...(invSnap.exists?invSnap.data():{}),productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:inv.incoming,lots:embeddedLots,updatedAt:now};
+          const nextInventory={...(invSnap.exists?invSnap.data():{}),productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:Math.max(0,inv.incoming-qty),lots:embeddedLots,updatedAt:now};
           nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
           tx.set(invRef,nextInventory,{merge:true});
         }
-        if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:wh.incoming,updatedAt:now},{merge:true});
+        if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:Math.max(0,wh.incoming-qty),updatedAt:now},{merge:true});
+        const nextPendingIncoming=Math.max(0,pendingIncoming-qty);
+        if(pendingSnap.exists)tx.set(pendingRef,{incomingQty:nextPendingIncoming,status:nextPendingIncoming>0?'pending-arrival':'completed',completedAt:nextPendingIncoming>0?null:now,completedBy:nextPendingIncoming>0?'':actor,updatedAt:now},{merge:true});
         const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
