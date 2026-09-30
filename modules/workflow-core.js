@@ -34,14 +34,14 @@
     const delivered=n(input.deliveredQty);
     if(qty>0&&delivered>=qty)return input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
-    const ordered=n(input.supplyOrderedQty??input.purchaseOrderedQty);
-    const received=n(input.receivedQty??input.purchaseReceivedQty??input.supplyReceivedQty);
+    const ordered=n(input.supplyOrderedQty);
+    const received=n(input.receivedQty);
     if(fulfillmentType==='DIRECT_SHIP'){
       if(qty>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
       if(received<qty)return ITEM_WORK_CATEGORIES.ARRIVAL;
       return ITEM_WORK_CATEGORIES.DELIVERY;
     }
-    const shortage=n(input.shortageQty??input.inventoryShortageQty??input.purchaseRequiredQty);
+    const shortage=n(input.shortageQty);
     // shortage 仍包含「已發單但尚未到貨」的缺口，因此先扣掉尚在途的供應。
     // 只有在途數量覆蓋不了的部分才仍屬於待採購；已被 PO 覆蓋但未收貨則是待到貨。
     const outstandingSupply=Math.max(0,ordered-received);
