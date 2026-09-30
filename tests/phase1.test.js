@@ -569,7 +569,7 @@ test('quote owner wording stays consistently labeled as responsible sales', () =
     assert.match(indexSource, /負責業務：<\/label><select id="salesName"/);
 });
 
-test('quote optional item fields stay collapsed, persist, print only when filled and remember customer preferences', () => {
+test('quote optional item fields stay collapsed, persist, export only when filled and remember customer preferences', () => {
     assert.match(indexSource, /applyCurrentQuoteCustomerPreferences\(\)/);
     assert.match(appSource, /function quoteExtraDataFromRow\(row\)/);
     assert.match(appSource, /item-origin/);
@@ -582,7 +582,10 @@ test('quote optional item fields stay collapsed, persist, print only when filled
     assert.match(appSource, /quote-custom-field-row/);
     assert.match(appSource, /quoteOptionalFields/);
     assert.match(appSource, /FieldValue\.arrayUnion\(\.\.\.quoteOptionalFields\)/);
-    assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
+    const exportStart = appSource.indexOf('window.exportCurrentQuotePdf = async function()');
+    const exportEnd = appSource.indexOf('\n};', exportStart) + 3;
+    const exportSource = appSource.slice(exportStart, exportEnd);
+    assert.match(exportSource, /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
     assert.match(appSource, /renderComparisonExtraFields\(item\.extra, variant\)/);
     assert.match(appSource, /item\.hospitalItemCode/);
 });
@@ -598,7 +601,7 @@ test('quote PDF uses an isolated fixed grid so mobile card CSS cannot reshape it
     assert.doesNotMatch(renderSource, /<table class="quote-pdf-table">/);
     assert.match(cssSource, /grid-template-columns:4% minmax\(0, 1fr\) 9% 9% 9% 9% !important/);
     assert.match(cssSource, /\.quote-pdf-stage \.quote-pdf-bottom \{/);
-    assert.match(appSource, /querySelectorAll\('\.quote-pdf-item-row'\)/);
+    assert.match(appSource, /source\.querySelectorAll\('\.quote-pdf-item-row'\)/);
 });
 
 
@@ -637,7 +640,9 @@ test('quote PDF paginates by item rows and repeats the column header on each pag
     assert.match(appSource, /quote-pdf-grid-head/);
     assert.match(appSource, /current\.page\.scrollHeight > maxHeight/);
     assert.match(appSource, /summaryClone/);
-    assert.match(appSource, /finalPage\.items\.prepend/);
+    assert.match(appSource, /finalPage\.page\.appendChild\(summaryClone\)/);
+    assert.match(appSource, /finalPage\.items\.prepend\(candidate\)/);
+    assert.match(appSource, /donor\.items\.appendChild\(candidate\)/);
     assert.match(appSource, /function addQuotePagesToPdf\(pdf, pages, scale\)/);
 });
 
@@ -708,7 +713,7 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     assert.match(saveOrder, /buildFullHistorySearchTokens\('order', data\)/);
 
     const quoteStart = appSource.indexOf('function collectCurrentQuoteRecord()');
-    const quoteEnd = appSource.indexOf('\n}', quoteStart) + 2;
+    const quoteEnd = appSource.indexOf('\n\nfunction comparisonBaseTotal', quoteStart);
     const quoteSave = appSource.slice(quoteStart, quoteEnd);
     assert.match(quoteSave, /createdAt: new Date\(\)\.toISOString\(\)/);
     const persistStart = appSource.indexOf('function persistQuoteOutputRecord');
@@ -1312,7 +1317,9 @@ test('quote optional-field preferences belong to the customer name before the in
     assert.match(appSource, /document\.getElementById\('ordererName'\)\?\.value[\s\S]*document\.getElementById\('clientName'\)\?\.value/);
     assert.match(indexSource, /id="clientName"[^>]+onchange="applyCurrentQuoteCustomerPreferences\(\)"/);
     assert.match(indexSource, /id="ordererName"[^>]+onchange="applyCurrentQuoteCustomerPreferences\(\)"/);
-    assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
+    const exportStart = appSource.indexOf('window.exportCurrentQuotePdf = async function()');
+    const exportEnd = appSource.indexOf('\n};', exportStart) + 3;
+    assert.match(appSource.slice(exportStart, exportEnd), /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
 });
 
 test('quote item-code auto-fill waits for Product Master and reacts while typing', () => {
