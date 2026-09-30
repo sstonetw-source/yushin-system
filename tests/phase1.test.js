@@ -635,6 +635,16 @@ test('quote PDF document is rendered directly from quote data without cloning th
 });
 
 
+test('quote primary actions keep PDF prominent and move browser printing under more actions', () => {
+    assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
+    assert.match(indexSource, /<details class="quote-more-actions">/);
+    assert.match(indexSource, /<summary>更多操作<\/summary>/);
+    assert.match(indexSource, /id="legacyQuotePrintBtn"[^>]*onclick="handleSaveAndPrint\(\)"[^>]*>🖨️ 列印／瀏覽器存 PDF<\/button>/);
+    assert.match(cssSource, /\.quote-more-actions-menu/);
+    assert.match(cssSource, /\.quote-primary-actions \.quote-more-actions/);
+});
+
+
 test('primary quote export generates PDF directly without browser print', () => {
     assert.match(indexSource, /html2canvas@1\.4\.1/);
     assert.match(indexSource, /jspdf@2\.5\.2/);
