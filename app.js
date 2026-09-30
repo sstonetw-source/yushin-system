@@ -8017,6 +8017,32 @@ async function registerPurchaseIncoming(poId, poRecord) {
 
 let poReceiptTargetId = '';
 let poReceiptSaveInProgress = false;
+let poReceiptOperationId = '';
+
+function receiptOperationStorageKey(supplyId) {
+    return `yushin-receipt-operation:${String(supplyId || '')}`;
+}
+function ensureReceiptOperationId(supplyId) {
+    const key=receiptOperationStorageKey(supplyId);
+    let operationId='';
+    try { operationId=sessionStorage.getItem(key)||''; } catch (_) {}
+    if(!operationId){
+        operationId=`receipt-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
+        try { sessionStorage.setItem(key,operationId); } catch (_) {}
+    }
+    poReceiptOperationId=operationId;
+    return operationId;
+}
+function clearReceiptOperationId(supplyId) {
+    try { sessionStorage.removeItem(receiptOperationStorageKey(supplyId)); } catch (_) {}
+    poReceiptOperationId='';
+}
+window.closePoReceiptBatch = function() {
+    document.getElementById('poReceiptBatchOverlay')?.classList.remove('active');
+    const body=document.getElementById('poReceiptBatchBody');
+    if(body)body.innerHTML='';
+    poReceiptTargetId='';
+};
 
 
 window.receiveSupplyOrder = function(supplyId) {
@@ -8025,6 +8051,7 @@ window.receiveSupplyOrder = function(supplyId) {
     const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
     if(remaining<=0){alert('這筆訂貨已全部入庫。');return;}
     poReceiptTargetId='supply:'+supplyId;
+    ensureReceiptOperationId(supplyId);
     const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
     const title=document.getElementById('poReceiptBatchTitle');
     if(title)title.textContent=directShip ? `原廠直送到貨｜${supply.internalNo||supplyId}` : `到貨入庫｜${supply.internalNo||supplyId}`;
@@ -8126,16 +8153,25 @@ async function refreshAffectedOrderCaches(orderIds = []) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 }
 
-async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
+async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='') {
     const now=new Date().toISOString(),actor=deliveryActor();
-    let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',sourceOrderStatus='',reservedForSource=0;
+    const operationKey=String(operationId||'').trim();
+    if(!operationKey)throw new Error('缺少到貨操作識別碼，請重新開啟待到貨視窗後再試。');
+    let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',sourceOrderStatus='',reservedForSource=0,alreadyProcessed=false;
     const affectedOrderIds = new Set();
     await db.runTransaction(async tx=>{
         const supplyRef=db.collection('supplyOrders').doc(supplyId);
+        const receiptRef=db.collection('receipts').doc(operationKey);
         const supplySnap=await tx.get(supplyRef);
-        if(!supplySnap.exists)throw new Error('找不到自行訂貨紀錄。');
+        const receiptSnap=await tx.get(receiptRef);
+        if(!supplySnap.exists)throw new Error('找不到供應紀錄。');
         const supply=supplySnap.data();
         if (supply.orderId) affectedOrderIds.add(supply.orderId);
+        if(receiptSnap.exists){
+            if(String(receiptSnap.data().supplyOrderId||'')!==String(supplyId))throw new Error('到貨操作識別碼衝突，請重新開啟待到貨視窗。');
+            alreadyProcessed=true;
+            return;
+        }
         const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
         if(qty<=0||qty>remaining)throw new Error(`本次到貨數量不可超過 ${remaining}。`);
         const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
@@ -8156,8 +8192,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
             const receivedQty=Number(supply.receivedQty||0)+qty;
             tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
-            const receiptId=`supply-${encodeURIComponent(supplyId)}-${receivedQty}`;
-            tx.set(db.collection('receipts').doc(receiptId),{receiptId,supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,cumulativeReceivedQty:receivedQty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
+            tx.set(receiptRef,{receiptId:operationKey,operationId:operationKey,supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,cumulativeReceivedQty:receivedQty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
             return;
         }
         const productKey=supply.productKey||supply.productId||(supply.itemCode?`code:${normalizeHistoryItemCode(supply.itemCode)}`:'');
@@ -8221,9 +8256,8 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
-        const receiptRef=db.collection('receipts').doc();
-        tx.set(receiptRef,{supplyOrderId:supplyId,orderId:supply.orderId||'',itemId:supply.itemId||'',sourceOrderStatus,productKey,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor});
-        tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:receiptRef.id,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
+        tx.set(receiptRef,{receiptId:operationKey,operationId:operationKey,supplyOrderId:supplyId,orderId:supply.orderId||'',itemId:supply.itemId||'',sourceOrderStatus,productKey,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor});
+        tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
         const receivedQty=Number(supply.receivedQty||0)+qty;
         tx.update(supplyRef,{
             receivedQty,
@@ -8232,6 +8266,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             updatedAt:now
         });
     });
+    if(alreadyProcessed)return [...affectedOrderIds];
     if (receivedProductKey && receivedWarehouseId) invalidateWarehouseStockCache(receivedProductKey, receivedWarehouseId);
     // Replenishment / excess receipt stock automatically serves oldest outstanding shortages.
     // Stock already reserved to the source order is excluded from this second allocation pass.
@@ -8255,6 +8290,7 @@ window.openSupplyReceipt = function(supplyId) {
 
     const directShip = (supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
     poReceiptTargetId = `supply:${supply.id}`;
+    ensureReceiptOperationId(supply.id);
     const body = document.getElementById('poReceiptBatchBody');
     const title = document.getElementById('poReceiptBatchTitle');
     if (title) title.textContent = directShip
@@ -8293,11 +8329,15 @@ window.savePoReceiptBatch = async function() {
     try {
         if(!poId.startsWith('supply:')) throw new Error('到貨必須從供應紀錄進入，請重新整理待到貨頁面。');
         const supplyId=poId.slice(7);
+        const operationBase=poReceiptOperationId||ensureReceiptOperationId(supplyId);
         for(const entry of entries){
-            const ids=await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate);
+            const operationId=`${operationBase}-${entry.itemIndex}`;
+            const ids=await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate,operationId);
             ids.forEach(id=>affectedOrderIds.add(id));
             completed++;
         }
+        // 只有確認 transaction 已完成後才清除冪等鍵；若網路錯誤，保留同一 key 供重試。
+        clearReceiptOperationId(supplyId);
         // 核心入庫 transaction 已完成後就結束使用者等待；跨模組列表改成背景同步。
         // 這些 reload 只是 UI refresh，不應延長「確認入庫」按鈕的完成時間。
         closePoReceiptBatch();
