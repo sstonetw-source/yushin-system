@@ -627,11 +627,11 @@ test('quote PDF document is rendered directly from quote data without cloning th
     const stageSource = appSource.slice(stageStart, stageEnd);
     assert.match(renderSource, /quoteData\.items/);
     assert.match(renderSource, /companyData/);
-    assert.match(renderSource, /quote-pdf-table/);
+    assert.match(renderSource, /quote-pdf-grid/);
     assert.match(stageSource, /renderQuotePdfDocument\(quoteData\)/);
     assert.doesNotMatch(stageSource, /cloneNode/);
     assert.doesNotMatch(stageSource, /prepareQuoteForPrint/);
-    assert.match(appSource, /\.quote-pdf-items tr, \.quote-summary-block/);
+    assert.match(appSource, /\.quote-pdf-item-row, \.quote-summary-block/);
 });
 
 
