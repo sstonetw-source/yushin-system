@@ -1874,7 +1874,7 @@ test('cached session restore does not initialize the same active page twice',()=
 
 test('three-quote output compacts layout as item count grows', () => {
     const start = appSource.indexOf('function renderComparisonQuotePage(companyKey, percent, variant)');
-    const end = appSource.indexOf('\n}\n\nfunction preloadQuoteImage', start) + 2;
+    const end = appSource.indexOf('\n}\n\nconst quoteImagePreloadCache', start) + 2;
     assert.ok(start >= 0 && end > start);
     const source = appSource.slice(start, end);
     assert.match(source, /items\.length >= 7 \? ' comparison-quote-dense' : items\.length >= 4 \? ' comparison-quote-compact'/);
