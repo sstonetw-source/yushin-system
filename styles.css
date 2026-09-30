@@ -173,6 +173,56 @@ input[type="number"] {
 .total-section { text-align: right; font-size: 13px; font-weight: bold; }
 .discount-input { width: 50px; padding: 2px 4px; font-size: 12px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
 #comparisonQuotePrintPages { display:none; }
+
+/* 直接 PDF 匯出：建立一份離開畫面的 A4 文件副本，只讓 html2canvas 處理正式文件，
+   不依賴 Safari/Chrome 的列印引擎，也不把整個管理系統一起送去排版。 */
+.quote-pdf-stage {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 190mm;
+    background: #fff;
+    z-index: -1;
+    pointer-events: none;
+}
+.quote-pdf-stage .quote-pdf-document {
+    width: 190mm !important;
+    max-width: 190mm !important;
+    min-width: 190mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    color: #000 !important;
+}
+.quote-pdf-stage .print-text-mirror,
+.quote-pdf-stage .sales-name-print-mirror {
+    display: block !important;
+    color: #000 !important;
+    -webkit-text-fill-color: #000 !important;
+}
+.quote-pdf-stage .sales-name-print-mirror { display: inline !important; font-size: 12px; }
+.quote-pdf-stage .quote-extra-print {
+    display: block !important;
+    margin-top: 2px;
+    text-align: left;
+    font-size: 10px;
+    line-height: 1.2;
+}
+.quote-pdf-stage .quote-extra-print-row { display:flex; align-items:flex-start; gap:3px; margin-top:1px; }
+.quote-pdf-stage .quote-extra-print-row strong { flex:0 0 auto; white-space:nowrap; }
+.quote-pdf-stage .quote-extra-print-row span { min-width:0; overflow-wrap:anywhere; }
+.quote-pdf-stage .quote-pdf-value {
+    color:#000;
+    -webkit-text-fill-color:#000;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+}
+.quote-pdf-stage .field-row .quote-pdf-value { flex:1; min-width:0; }
+.quote-pdf-stage #itemTable tr { break-inside:avoid; page-break-inside:avoid; }
+.quote-pdf-stage .quote-summary-block,
+.quote-pdf-stage .bottom-layout { break-inside:avoid; page-break-inside:avoid; }
+
 .three-quote-dialog { max-width:760px; }
 .three-quote-options { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 .three-quote-option-card { padding:14px; border:1px solid #d6dde5; border-radius:8px; background:#fafbfd; }
