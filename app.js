@@ -5817,7 +5817,7 @@ function purchaseProgressInfo(order) {
     const warehouse=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
     if(items.length&&direct.length===items.length)return {state:'direct',label:'原廠直送'};
     const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0)),0);
-    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0)),Number(item.purchaseOrderedQty||0)),0);
+    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0)),Number(item.supplyOrderedQty??item.purchaseOrderedQty??0)),0);
     if(required<=0)return {state:'not_required',label:'無需採購'};
     if(ordered>=required)return {state:'ordered',label:`已訂貨 ${ordered}/${required}`};
     if(ordered>0)return {state:'partial',label:`部分訂貨 ${ordered}/${required}`};
@@ -5868,7 +5868,7 @@ function orderContextActionState(order) {
     // 全數到貨走一般送貨流程；尚未到貨則不提供分批交貨，避免操作選單過早出現。
     const hasPartialArrival = items.some((item, index) => {
         const ordered = Math.max(0, Number(item.orderedQty || item.qty || 0));
-        const received = Math.max(0, Number(item.purchaseReceivedQty ?? item.receivedQty ?? item.supplyReceivedQty ?? 0));
+        const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
         const state = states[index];
         // 分批交貨不只要「部分到貨」，還必須真的有尚未交付、目前可出貨的數量。
         // 避免部分到貨紀錄存在，但該批已全數送出時仍顯示無效操作。
@@ -6866,12 +6866,12 @@ function purchaseLineMatchesFilters(date, salesName, brand, context = null) {
 
 function remainingProcurementQty(order, item) {
     const qty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
-    const ordered = Math.max(Number(item.purchaseOrderedQty || 0), Number(item.supplyOrderedQty || 0));
+    const ordered = Math.max(0, Number(item.supplyOrderedQty ?? item.purchaseOrderedQty ?? 0));
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
         return Math.max(0, qty - ordered);
     }
     const shortage = Math.max(0, Number(item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
-    const received = Math.max(Number(item.receivedQty || 0), Number(item.purchaseReceivedQty || 0), Number(item.supplyReceivedQty || 0));
+    const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
     const outstandingSupply = Math.max(0, ordered - received);
     return Math.max(0, shortage - outstandingSupply);
 }
@@ -7684,8 +7684,8 @@ function receivingWorkProgress(order, item) {
     const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
     const orderedQty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
     const shortage = Math.max(0, Number(item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
-    const supplyOrdered = Math.max(Number(item.purchaseOrderedQty || 0), Number(item.supplyOrderedQty || 0));
-    const received = Math.max(Number(item.receivedQty || 0), Number(item.purchaseReceivedQty || 0), Number(item.supplyReceivedQty || 0));
+    const supplyOrdered = Math.max(0, Number(item.supplyOrderedQty ?? item.purchaseOrderedQty ?? 0));
+    const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
     const target = directShip ? orderedQty : Math.max(shortage, supplyOrdered);
     return { target, received:Math.min(target, received), remaining:Math.max(0, target - received), directShip };
 }
@@ -9042,7 +9042,7 @@ function assertPurchaseLinesAvailable(order, lines) {
         const required = (source.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
             ? Number(source.qty || 0)
             : Math.max(0, Number(source.purchaseRequiredQty ?? source.inventoryShortageQty ?? source.qty ?? 0));
-        const remaining = Math.max(0, required - Math.max(Number(source.purchaseOrderedQty || 0), Number(source.supplyOrderedQty || 0)));
+        const remaining = Math.max(0, required - Math.max(0, Number(source.supplyOrderedQty ?? source.purchaseOrderedQty ?? 0)));
         if (!(qty > 0) || qty > remaining + 1e-9) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
     }
 }
@@ -9249,7 +9249,7 @@ window.printPurchaseOrder = async function() {
                     const nextItems=normalizedOrderItems(orderData).map((item,itemIndex)=>{
                         const matches=orderedLines.filter(line=>Number(line.orderItemIndex)===itemIndex);
                         const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
-                        const currentSupplyOrdered=Math.max(Number(item.supplyOrderedQty||0),Number(item.purchaseOrderedQty||0));
+                        const currentSupplyOrdered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
                         const cumulative=currentSupplyOrdered+orderedQty;
                         return orderedQty>0?{
                             ...item,
@@ -9753,8 +9753,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const outstanding = Math.max(0, ordered - delivered);
         // 已下 PO／自行訂購的數量屬於既有在途供應，恢復訂單時不能再拿同一數量占用現貨，
         // 否則會同時出現「待到貨」與庫存 reservation，造成供應量重複計算。
-        const orderedSupply = Math.max(0, Number(item.purchaseOrderedQty||0), Number(item.supplyOrderedQty||0));
-        const receivedSupply = Math.max(0, Number(item.receivedQty||0), Number(item.purchaseReceivedQty||0), Number(item.supplyReceivedQty||0));
+        const orderedSupply = Math.max(0, Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+        const receivedSupply = Math.max(0, Number(item.receivedQty??item.purchaseReceivedQty??item.supplyReceivedQty??0));
         const incomingSupply = Math.min(outstanding, Math.max(0, orderedSupply - receivedSupply));
         const needed = Math.max(0, outstanding - incomingSupply);
         const reserve = invState && whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved),Math.max(0,invState.onHand-invState.reserved)) : 0;
