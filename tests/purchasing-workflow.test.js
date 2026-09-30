@@ -689,6 +689,9 @@ test('cancelled warehouse source still receives into free stock while direct shi
     const warehouseSource=source.slice(warehouseStart,registeredStart);
     assert.match(warehouseSource,/sourceOrderStatus=normalizedOrderStatus\(order\)/);
     assert.match(warehouseSource,/if\(sourceOrderStatus==='normal'\)\{/);
+    assert.match(warehouseSource,/const receivedForOrder=Math\.min\(qty,Math\.max\(0,orderedQty-currentReceived\)\)/);
+    assert.match(warehouseSource,/items\[itemIndex\]=\{\.\.\.item,receivedQty:currentReceived\+receivedForOrder\}/);
+    assert.match(warehouseSource,/orderWorkIndexFields\(nextOrder\)/);
     assert.doesNotMatch(warehouseSource,/來源訂單已取消，不能繼續確認到貨/);
     assert.match(source,/sourceOrderStatus,productKey,warehouseId,qty/);
 });
