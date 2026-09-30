@@ -4032,45 +4032,110 @@ function waitForQuoteImages() {
     }));
 }
 
-window.printThreeQuotes = async function() {
-    const validationMessage = currentQuoteOutputValidation();
-    if (validationMessage) { alert(validationMessage); return; }
-    const company2 = document.getElementById('comparisonCompany2').value;
-    const company3 = document.getElementById('comparisonCompany3').value;
-    if (!company2 || !company3 || company2 === company3 || company2 === currentCompany || company3 === currentCompany) {
-        alert('三張估價單必須選擇不同公司。'); return;
-    }
-    const percent2 = Math.max(0, parseFloat(document.getElementById('comparisonPercent2').value) || 0);
-    const percent3 = Math.max(0, parseFloat(document.getElementById('comparisonPercent3').value) || 0);
-    const quoteData = collectCurrentQuoteRecord();
-    rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
-    const printButton = document.getElementById('threeQuotePrintBtn');
-    printButton.disabled = true;
-    printButton.innerText = '準備列印中…';
-    document.getElementById('comparisonQuotePrintPages').innerHTML = renderComparisonQuotePage(company2, percent2, 'a') + renderComparisonQuotePage(company3, percent3, 'b');
+async function fallbackPrintThreeQuotes(company2, percent2, company3, percent3, quoteData) {
+    document.getElementById('comparisonQuotePrintPages').innerHTML =
+        renderComparisonQuotePage(company2, percent2, 'a') + renderComparisonQuotePage(company3, percent3, 'b');
     prepareQuoteForPrint();
-    const imageResults = await waitForQuoteImages();
-    printButton.disabled = false;
-    printButton.innerText = '列印三頁／存為 PDF';
-    const failedImages = imageResults.filter(result => !result.ok);
-    if (failedImages.length) {
-        const labels = failedImages.map(result => result.img.alt || result.img.getAttribute('src') || '未知圖片');
-        alert(`以下圖片未能載入，已暫停列印：\n${labels.join('\n')}\n\n請重新整理頁面後再試。`);
-        return;
-    }
+    await waitForQuoteImages();
     closeThreeQuoteDialog();
     document.body.classList.add('printing-quote', 'printing-three-quotes');
     const originalTitle = document.title;
     document.title = `${quoteData.quoteNo}-${quoteData.ordererName || quoteData.clientName || ''}-三家估價`;
     window._quoteOriginalTitle = originalTitle;
     requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
-    quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
-    db.collection('quotes').doc(quoteData.quoteNo).set(quoteData).catch(err => {
-        console.error('儲存第一張正式估價單失敗：', err);
-        alert('提醒：三頁列印內容不受影響，但第一張正式估價單存入雲端失敗，請稍後再試。');
-    });
-};
+}
 
+window.printThreeQuotes = async function() {
+    const validationMessage = currentQuoteOutputValidation();
+    if (validationMessage) { alert(validationMessage); return; }
+
+    const company2 = document.getElementById('comparisonCompany2').value;
+    const company3 = document.getElementById('comparisonCompany3').value;
+    if (!company2 || !company3 || company2 === company3 || company2 === currentCompany || company3 === currentCompany) {
+        alert('三張估價單必須選擇不同公司。');
+        return;
+    }
+
+    const percent2 = Math.max(0, parseFloat(document.getElementById('comparisonPercent2').value) || 0);
+    const percent3 = Math.max(0, parseFloat(document.getElementById('comparisonPercent3').value) || 0);
+    const button = document.getElementById('threeQuotePrintBtn');
+    const originalLabel = button?.innerText || '匯出三頁 PDF';
+    if (button) {
+        button.disabled = true;
+        button.innerText = '正在產生三頁 PDF…';
+    }
+
+    let firstStage = null;
+    let comparisonStage = null;
+    let quoteData = null;
+    try {
+        if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
+            throw new Error('PDF 元件尚未載入');
+        }
+
+        quoteData = quoteDataForPdfExport();
+        rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
+        persistQuoteOutputRecord(quoteData, '三家估價 PDF');
+
+        const first = createQuotePdfStage();
+        firstStage = first.stage;
+        await waitForPdfImages(first.clone);
+
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const scale = isMobile ? 1.35 : 1.75;
+        const firstCanvas = await window.html2canvas(first.clone, {
+            backgroundColor:'#ffffff', scale, logging:false, useCORS:true, allowTaint:false,
+            width:Math.ceil(first.clone.scrollWidth), height:Math.ceil(first.clone.scrollHeight), windowWidth:794
+        });
+
+        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
+        addQuoteCanvasToPdf(pdf, firstCanvas, first.clone);
+        firstStage.remove();
+        firstStage = null;
+
+        comparisonStage = document.createElement('div');
+        comparisonStage.className = 'quote-pdf-stage comparison-pdf-stage';
+        comparisonStage.innerHTML =
+            renderComparisonQuotePage(company2, percent2, 'a') +
+            renderComparisonQuotePage(company3, percent3, 'b');
+        document.body.appendChild(comparisonStage);
+        await waitForPdfImages(comparisonStage);
+
+        const comparisonPages = [...comparisonStage.querySelectorAll('.comparison-quote-page')];
+        for (const page of comparisonPages) {
+            const canvas = await window.html2canvas(page, {
+                backgroundColor:'#ffffff', scale, logging:false, useCORS:true, allowTaint:false,
+                width:Math.ceil(page.scrollWidth), height:Math.ceil(page.scrollHeight), windowWidth:794
+            });
+            pdf.addPage('a4', 'p');
+            const maxWidthMm = 190;
+            const maxHeightMm = 277;
+            const naturalHeightMm = canvas.height * maxWidthMm / canvas.width;
+            const renderHeightMm = Math.min(maxHeightMm, naturalHeightMm);
+            const renderWidthMm = renderHeightMm === naturalHeightMm
+                ? maxWidthMm
+                : canvas.width * renderHeightMm / canvas.height;
+            const x = (210 - renderWidthMm) / 2;
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.96), 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
+        }
+
+        const threeQuoteName = quotePdfFileName(quoteData).replace(/\.pdf$/i, '-三家估價.pdf');
+        pdf.save(threeQuoteName);
+        closeThreeQuoteDialog();
+    } catch (err) {
+        console.error('匯出三家估價 PDF 失敗：', err);
+        if (!quoteData) quoteData = collectCurrentQuoteRecord();
+        const fallback = confirm('直接產生三家估價 PDF 失敗（' + (err?.message || err) + '）。\n是否改用瀏覽器列印／存為 PDF？');
+        if (fallback) await fallbackPrintThreeQuotes(company2, percent2, company3, percent3, quoteData);
+    } finally {
+        firstStage?.remove();
+        comparisonStage?.remove();
+        if (button) {
+            button.disabled = false;
+            button.innerText = originalLabel;
+        }
+    }
+};
 function quotePdfFileName(quoteData = {}) {
     const raw = [quoteData.quoteNo, quoteData.ordererName || quoteData.clientName].filter(Boolean).join('-') || '估價單';
     return raw.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
