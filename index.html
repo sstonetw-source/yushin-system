@@ -1005,6 +1005,7 @@
                 <h4 id="returnFormTitle" style="margin:0 0 10px;">新增退貨紀錄</h4>
                 <input type="hidden" id="returnEditId">
                 <div class="form-grid" style="margin-bottom:6px;">
+                    <div><label>退貨品項</label><select id="returnItemId" onchange="updateReturnFormHint()"></select></div>
                     <div><label>退貨日期</label><input type="date" id="returnDate"></div>
                     <div><label>本次退貨數量</label><input type="number" id="returnQty" min="0" step="any"></div>
                     <div><label>原因／備註（選填）</label><input type="text" id="returnReason" placeholder="可不填寫"></div>
@@ -1419,6 +1420,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20260930-46"></script>
+    <script src="app.js?v=20260930-47"></script>
 </body>
 </html>
