@@ -195,6 +195,56 @@ input[type="number"] {
     box-shadow: none !important;
     color: #000 !important;
 }
+.quote-pdf-stage .quote-pdf-logo {
+    display:block !important;
+    width:125px;
+    max-height:92px;
+}
+.quote-pdf-stage .quote-pdf-title {
+    margin-top:3px !important;
+    text-decoration:underline;
+}
+.quote-pdf-stage .quote-pdf-table th:nth-child(1),
+.quote-pdf-stage .quote-pdf-table td:nth-child(1) { width:4%; }
+.quote-pdf-stage .quote-pdf-table th:nth-child(3),
+.quote-pdf-stage .quote-pdf-table td:nth-child(3),
+.quote-pdf-stage .quote-pdf-table th:nth-child(4),
+.quote-pdf-stage .quote-pdf-table td:nth-child(4),
+.quote-pdf-stage .quote-pdf-table th:nth-child(5),
+.quote-pdf-stage .quote-pdf-table td:nth-child(5),
+.quote-pdf-stage .quote-pdf-table th:nth-child(6),
+.quote-pdf-stage .quote-pdf-table td:nth-child(6) { width:9%; }
+.quote-pdf-stage .quote-pdf-item-detail {
+    display:flex;
+    flex-direction:column;
+    gap:1px;
+    text-align:left;
+    font-size:10.5px;
+    color:#333;
+}
+.quote-pdf-stage .quote-pdf-item-detail > div {
+    overflow-wrap:anywhere;
+    line-height:1.15;
+}
+.quote-pdf-stage .quote-pdf-prewrap { white-space:pre-wrap; }
+.quote-pdf-stage .quote-pdf-extra { font-size:10px; }
+.quote-pdf-stage .quote-pdf-no { font-weight:bold; }
+.quote-pdf-stage .quote-pdf-grand-total { font-size:14px; color:#003366; }
+.quote-pdf-stage .quote-summary-block { margin-top:2px; }
+.quote-pdf-stage.theme-yushin { font-family:"Microsoft JhengHei", Arial, sans-serif; }
+.quote-pdf-stage .quote-pdf-document.theme-yushin table th { background-color:#dbe9ff; }
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE { font-family:"SimSun", "PMingLiU", "細明體", serif; }
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE table { border:3px double #000; background-color:#fff; }
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE th,
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE td { border:1px solid #000; background-color:#fff; }
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE table th { background-color:#000; color:#fff; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar { font-family:"Yuanti SC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar .table-wrap { border-radius:10px; overflow:hidden; border:1px solid #1b4d3e; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar table { border-collapse:separate; border-spacing:0; border:none; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar th,
+.quote-pdf-stage .quote-pdf-document.theme-morningstar td { border:none; border-bottom:1px solid #cfe3d8; border-right:1px solid #cfe3d8; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar table th { background-color:#1b4d3e; color:#fff; }
+
 .quote-pdf-stage .print-text-mirror,
 .quote-pdf-stage .sales-name-print-mirror {
     display: block !important;
