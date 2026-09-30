@@ -1644,7 +1644,8 @@ test('cancel and restore reservations are item-aware', () => {
   assert.match(source,/order_cancelled/);
   assert.match(source,/order_restored/);
   assert.match(source,/stockStates = new Map/);
-  assert.match(source,/transaction\.set\(reservationDocRef\(orderId\)/);
+  assert.match(source,/db\.collection\('inventoryReservations'\)\.doc\(\`\$\{orderId\}__\$\{itemId\}\`\)/);
+  assert.doesNotMatch(source,/reservationDocRef\(orderId\)/);
   assert.match(source,/items:nextItems,updatedAt:now/);
   assert.doesNotMatch(source,/inventoryReservedQty/);
   assert.doesNotMatch(source,/inventoryShortageQty/);
