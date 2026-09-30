@@ -174,43 +174,6 @@ input[type="number"] {
 .discount-input { width: 50px; padding: 2px 4px; font-size: 12px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
 #comparisonQuotePrintPages { display:none; }
 
-.quote-more-actions {
-    position:relative;
-    display:inline-block;
-    vertical-align:middle;
-}
-.quote-more-actions > summary {
-    list-style:none;
-    cursor:pointer;
-    padding:10px 18px;
-    border:1px solid #aeb8c2;
-    border-radius:5px;
-    background:#fff;
-    color:#334;
-    font-size:14px;
-    font-weight:700;
-    user-select:none;
-}
-.quote-more-actions > summary::-webkit-details-marker { display:none; }
-.quote-more-actions > summary::after { content:" ▾"; }
-.quote-more-actions[open] > summary::after { content:" ▴"; }
-.quote-more-actions-menu {
-    position:absolute;
-    right:0;
-    bottom:calc(100% + 6px);
-    min-width:230px;
-    padding:7px;
-    border:1px solid #cbd4dd;
-    border-radius:8px;
-    background:#fff;
-    box-shadow:0 8px 24px rgba(0,0,0,.16);
-    z-index:30;
-}
-.quote-more-actions-menu button {
-    width:100%;
-    margin:0;
-    white-space:nowrap;
-}
 
 
 /* 直接 PDF 匯出：建立一份離開畫面的 A4 文件副本，只讓 html2canvas 處理正式文件，
@@ -1071,28 +1034,6 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         font-size: 16px !important;
         line-height: 1.35;
         touch-action: manipulation;
-    }
-    .quote-primary-actions .quote-more-actions {
-        width:100%;
-        display:block;
-    }
-    .quote-primary-actions .quote-more-actions > summary {
-        width:100%;
-        min-height:52px;
-        padding:12px 16px;
-        box-sizing:border-box;
-        font-size:16px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-    }
-    .quote-primary-actions .quote-more-actions-menu {
-        position:static;
-        width:100%;
-        min-width:0;
-        margin-top:8px;
-        box-sizing:border-box;
-        box-shadow:none;
     }
 
     .bottom-layout { flex-direction: column; align-items: stretch; gap: 10px; }
