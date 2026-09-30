@@ -252,6 +252,23 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
 });
 
 
+test('receiving waits for both order work state and purchase evidence before declaring empty', () => {
+    assert.match(app, /function loadPurchasingReceivingQueue\(reset = true\)/);
+    assert.match(app, /Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset\)[\s\S]*?refreshPurchasingOrderCache\(reset\)/);
+    assert.match(app, /function purchasingArrivalWorkKeys\(filters = purchaseFilterContext\(\)\)/);
+    assert.match(app, /採購紀錄載入中/);
+    assert.match(app, /尚未找到對應採購紀錄/);
+});
+
+test('purchase-order history search does not scan legacy unindexed history', () => {
+    const start = app.indexOf('async function runPurchaseOrderHistorySearch()');
+    const end = app.indexOf('function receivingSourceOrderForItem', start);
+    const source = app.slice(start, end);
+    assert.match(source, /where\('searchTokens','array-contains',token\)/);
+    assert.doesNotMatch(source, /舊訂購單相容搜尋/);
+    assert.doesNotMatch(source, /while\(!done\)/);
+});
+
 test('purchase receiving queue calculates progress per PO item',()=>{
     assert.match(app,/function poItemReceiptProgress\(po,item,itemIndex\)/);
     assert.match(app,/const receipt=poItemReceiptProgress\(po,item,itemIndex\)/);
