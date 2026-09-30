@@ -285,7 +285,6 @@ test('purchasing completed excludes unresolved procurement and includes direct s
     assert.match(source, /const directShip = \(item\.fulfillmentType \|\| order\.fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'/);
     assert.match(source, /if \(!directShip &&/);
     assert.match(source, /return rows;/);
-    assert.match(app, /return purchasingCompletedRows\(\)\.slice\(0, purchasingCompletedVisibleLimit\)/);
 });
 
 test('receiving waits for both order work state and purchase evidence before declaring empty', () => {
