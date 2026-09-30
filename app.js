@@ -4004,47 +4004,6 @@ function preloadComparisonQuoteImages() {
     sources.forEach(src => preloadQuoteImage(src));
 }
 
-function waitForQuoteImages() {
-    const printableQuote = document.getElementById('printableQuote');
-    const activeMainLogo = [...printableQuote.querySelectorAll('.company-logo')]
-        .find(img => getComputedStyle(img).display !== 'none');
-    const mainStamp = document.getElementById('companyStamp');
-    const images = [
-        activeMainLogo,
-        mainStamp?.getAttribute('src') ? mainStamp : null,
-        ...document.querySelectorAll('#comparisonQuotePrintPages img')
-    ].filter(Boolean);
-    return Promise.all(images.map(img => {
-        img.loading = 'eager';
-        if (img.complete && img.naturalWidth > 0) return Promise.resolve({ ok: true, img });
-        return new Promise(resolve => {
-            let timer;
-            const done = ok => {
-                clearTimeout(timer);
-                img.onload = null;
-                img.onerror = null;
-                resolve({ ok, img });
-            };
-            img.onload = () => done(true);
-            img.onerror = () => done(false);
-            timer = setTimeout(() => done(img.complete && img.naturalWidth > 0), 300);
-        });
-    }));
-}
-
-async function fallbackPrintThreeQuotes(company2, percent2, company3, percent3, quoteData) {
-    document.getElementById('comparisonQuotePrintPages').innerHTML =
-        renderComparisonQuotePage(company2, percent2, 'a') + renderComparisonQuotePage(company3, percent3, 'b');
-    prepareQuoteForPrint();
-    await waitForQuoteImages();
-    closeThreeQuoteDialog();
-    document.body.classList.add('printing-quote', 'printing-three-quotes');
-    const originalTitle = document.title;
-    document.title = `${quoteData.quoteNo}-${quoteData.ordererName || quoteData.clientName || ''}-三家估價`;
-    window._quoteOriginalTitle = originalTitle;
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
-}
-
 window.printThreeQuotes = async function() {
     const validationMessage = currentQuoteOutputValidation();
     if (validationMessage) { alert(validationMessage); return; }
@@ -4079,17 +4038,15 @@ window.printThreeQuotes = async function() {
 
         const first = createQuotePdfStage(quoteData);
         firstStage = first.stage;
-        await waitForPdfImages(first.clone);
+        await waitForPdfImages(first.documentNode);
 
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         const scale = isMobile ? 1.35 : 1.75;
-        const firstCanvas = await window.html2canvas(first.clone, {
-            backgroundColor:'#ffffff', scale, logging:false, useCORS:true, allowTaint:false,
-            width:Math.ceil(first.clone.scrollWidth), height:Math.ceil(first.clone.scrollHeight), windowWidth:794
-        });
+        const firstPages = paginateQuotePdfDocument(first.stage, first.documentNode);
+        await waitForPdfImages(first.stage);
 
         const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
-        addQuoteCanvasToPdf(pdf, firstCanvas, first.clone);
+        await addQuotePagesToPdf(pdf, firstPages, scale);
         firstStage.remove();
         firstStage = null;
 
@@ -4124,9 +4081,7 @@ window.printThreeQuotes = async function() {
         closeThreeQuoteDialog();
     } catch (err) {
         console.error('匯出三家估價 PDF 失敗：', err);
-        if (!quoteData) quoteData = collectCurrentQuoteRecord();
-        const fallback = confirm('直接產生三家估價 PDF 失敗（' + (err?.message || err) + '）。\n是否改用瀏覽器列印／存為 PDF？');
-        if (fallback) await fallbackPrintThreeQuotes(company2, percent2, company3, percent3, quoteData);
+        alert('產生三家估價 PDF 失敗：' + (err?.message || err) + '。請確認網路後再試一次。');
     } finally {
         firstStage?.remove();
         comparisonStage?.remove();
@@ -4283,53 +4238,115 @@ function createQuotePdfStage(quoteData) {
     const documentNode = renderQuotePdfDocument(quoteData);
     stage.appendChild(documentNode);
     document.body.appendChild(stage);
-    return { stage, clone: documentNode };
+    return { stage, documentNode };
 }
 
-function quotePdfSafePageEnd(clone, canvas, startY, desiredEndY) {
-    const rootRect = clone.getBoundingClientRect();
-    const scale = canvas.width / Math.max(1, clone.getBoundingClientRect().width);
-    const ranges = [...clone.querySelectorAll('.quote-pdf-item-row, .quote-summary-block')].map(el => {
-        const rect = el.getBoundingClientRect();
-        return {
-            top: Math.max(0, (rect.top - rootRect.top) * scale),
-            bottom: Math.max(0, (rect.bottom - rootRect.top) * scale)
-        };
-    });
-    const crossing = ranges.find(range => range.top < desiredEndY && range.bottom > desiredEndY && range.top > startY);
-    if (!crossing) return desiredEndY;
-    const candidate = Math.floor(crossing.top);
-    return candidate - startY >= (desiredEndY - startY) * 0.55 ? candidate : desiredEndY;
+function quotePdfPageHeightPx(stage) {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;visibility:hidden;width:1px;height:277mm;';
+    stage.appendChild(probe);
+    const height = probe.getBoundingClientRect().height;
+    probe.remove();
+    return height;
 }
 
-function addQuoteCanvasToPdf(pdf, canvas, clone) {
-    const pageWidthMm = 190;
-    const pageHeightMm = 277;
-    const marginMm = 10;
-    const nominalPageHeightPx = canvas.width * (pageHeightMm / pageWidthMm);
-    let startY = 0;
-    let pageIndex = 0;
+function createQuotePdfPage(stage, source, includeHeader = false) {
+    const page = document.createElement('div');
+    page.className = source.className + ' quote-pdf-page';
+    if (includeHeader) {
+        const header = source.querySelector('.header-container');
+        const meta = source.querySelector('.meta-section');
+        if (header) page.appendChild(header.cloneNode(true));
+        if (meta) page.appendChild(meta.cloneNode(true));
+    }
 
-    while (startY < canvas.height - 1) {
-        const desiredEnd = Math.min(canvas.height, startY + nominalPageHeightPx);
-        let endY = desiredEnd < canvas.height ? quotePdfSafePageEnd(clone, canvas, startY, desiredEnd) : desiredEnd;
-        if (endY <= startY) endY = desiredEnd;
-        const sliceHeight = Math.max(1, Math.round(endY - startY));
+    const grid = document.createElement('div');
+    grid.className = 'quote-pdf-grid';
+    const head = source.querySelector('.quote-pdf-grid-head');
+    if (head) grid.appendChild(head.cloneNode(true));
+    const items = document.createElement('div');
+    items.className = 'quote-pdf-items';
+    grid.appendChild(items);
+    page.appendChild(grid);
+    stage.appendChild(page);
+    return { page, items };
+}
 
-        const pageCanvas = document.createElement('canvas');
-        pageCanvas.width = canvas.width;
-        pageCanvas.height = sliceHeight;
-        const ctx = pageCanvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-        ctx.drawImage(canvas, 0, startY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+function paginateQuotePdfDocument(stage, source) {
+    const rows = [...source.querySelectorAll('.quote-pdf-item-row')];
+    const summary = source.querySelector('.quote-summary-block');
+    const maxHeight = quotePdfPageHeightPx(stage);
 
-        if (pageIndex > 0) pdf.addPage('a4', 'p');
-        const renderHeightMm = sliceHeight * pageWidthMm / canvas.width;
-        pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.96), 'JPEG', marginMm, marginMm, pageWidthMm, renderHeightMm, undefined, 'FAST');
+    source.style.display = 'none';
+    const pages = [];
+    let current = createQuotePdfPage(stage, source, true);
+    pages.push(current);
 
-        startY = endY;
-        pageIndex += 1;
+    for (const row of rows) {
+        const clone = row.cloneNode(true);
+        current.items.appendChild(clone);
+        if (current.page.scrollHeight > maxHeight && current.items.children.length > 1) {
+            clone.remove();
+            current = createQuotePdfPage(stage, source, false);
+            pages.push(current);
+            current.items.appendChild(clone);
+        }
+        // 單一品項若本身超過一頁，不拆開；後續輸出會等比例縮小該頁。
+    }
+
+    if (summary) {
+        const summaryClone = summary.cloneNode(true);
+        current.page.appendChild(summaryClone);
+
+        if (current.page.scrollHeight > maxHeight) {
+            summaryClone.remove();
+            const donor = current;
+            const finalPage = createQuotePdfPage(stage, source, false);
+            pages.push(finalPage);
+
+            // 讓最後一頁同時帶至少一個品項與合計。若空間仍不足，就逐步把前一頁末端品項移過來。
+            while (donor.items.lastElementChild) {
+                finalPage.items.prepend(donor.items.lastElementChild);
+                finalPage.page.appendChild(summaryClone);
+                if (finalPage.page.scrollHeight <= maxHeight) break;
+                summaryClone.remove();
+            }
+
+            if (!summaryClone.parentNode) {
+                // 極端情況：單一品項 + 合計本身已高於一頁。品項保持完整，合計獨立成最後一頁。
+                while (finalPage.items.firstElementChild) donor.items.appendChild(finalPage.items.firstElementChild);
+                finalPage.page.appendChild(summaryClone);
+            }
+        }
+    }
+
+    source.remove();
+    return pages.map(entry => entry.page);
+}
+
+async function addQuotePagesToPdf(pdf, pages, scale) {
+    for (let index = 0; index < pages.length; index += 1) {
+        const page = pages[index];
+        const canvas = await window.html2canvas(page, {
+            backgroundColor:'#ffffff',
+            scale,
+            logging:false,
+            useCORS:true,
+            allowTaint:false,
+            width:Math.ceil(page.scrollWidth),
+            height:Math.ceil(page.scrollHeight),
+            windowWidth:794
+        });
+        if (index > 0) pdf.addPage('a4', 'p');
+        const maxWidthMm = 190;
+        const maxHeightMm = 277;
+        const naturalHeightMm = canvas.height * maxWidthMm / canvas.width;
+        const renderHeightMm = Math.min(maxHeightMm, naturalHeightMm);
+        const renderWidthMm = naturalHeightMm <= maxHeightMm
+            ? maxWidthMm
+            : canvas.width * renderHeightMm / canvas.height;
+        const x = (210 - renderWidthMm) / 2;
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.96), 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
     }
 }
 
@@ -4360,29 +4377,20 @@ window.exportCurrentQuotePdf = async function() {
 
         const exportDom = createQuotePdfStage(quoteData);
         stage = exportDom.stage;
-        const clone = exportDom.clone;
-        await waitForPdfImages(clone);
+        await waitForPdfImages(exportDom.documentNode);
 
         // 手機降低 Canvas 倍率以減少記憶體與等待時間；桌機維持較高解析度。
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        const canvas = await window.html2canvas(clone, {
-            backgroundColor: '#ffffff',
-            scale: isMobile ? 1.35 : 1.75,
-            logging: false,
-            useCORS: true,
-            allowTaint: false,
-            width: Math.ceil(clone.scrollWidth),
-            height: Math.ceil(clone.scrollHeight),
-            windowWidth: 794
-        });
+        const scale = isMobile ? 1.35 : 1.75;
+        const pages = paginateQuotePdfDocument(stage, exportDom.documentNode);
+        await waitForPdfImages(stage);
 
         const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
-        addQuoteCanvasToPdf(pdf, canvas, clone);
+        await addQuotePagesToPdf(pdf, pages, scale);
         pdf.save(quotePdfFileName(quoteData));
     } catch (err) {
         console.error('匯出估價單 PDF 失敗：', err);
-        const fallback = confirm('直接產生 PDF 失敗（' + (err?.message || err) + '）。\n是否改用瀏覽器列印／存為 PDF？');
-        if (fallback) handleSaveAndPrint();
+        alert('產生估價單 PDF 失敗：' + (err?.message || err) + '。請確認網路後再試一次。');
     } finally {
         stage?.remove();
         if (button) {
@@ -4391,204 +4399,6 @@ window.exportCurrentQuotePdf = async function() {
         }
     }
 };
-
-window.handleSaveAndPrint = function() {
-    const quoteNo = document.getElementById('quoteNo').value.trim();
-    const clientName = document.getElementById('clientName').value;
-    const ordererName = document.getElementById('ordererName').value.trim();
-
-    if (!quoteNo) {
-        alert('請填寫估價單號！');
-        return;
-    }
-
-    if (!document.getElementById('salesName').value) {
-        alert('請從下拉選單選擇負責業務！');
-        return;
-    }
-
-    const quoteBrandOtherMissing = [...document.querySelectorAll('#quoteItems tr')]
-        .some(row => row.querySelector('.item-brand')?.value === '其他' && !quoteRowBrandValue(row));
-    if (quoteBrandOtherMissing) {
-        alert('已選擇「其他」廠牌，請輸入廠牌名稱。');
-        return;
-    }
-    const quoteHasUnassignedBrand = [...document.querySelectorAll('#quoteItems tr')]
-        .some(row => {
-            const brand = quoteRowBrandValue(row);
-            if (!brand) return false;
-            // 這個品項當初是用「其他（自行輸入）」填的自訂廠牌名稱（例如 EMS），不是價目表裡的正式廠牌，
-            // 只要目前公司有開放「其他廠牌」，這種自訂名稱本來就不會出現在正式廠牌清單裡，不能當作違規
-            return !isCompanyBrandAllowed(currentCompany, brand) && !isCompanyOtherOptionAllowed(currentCompany);
-        });
-    if (quoteHasUnassignedBrand) {
-        alert('此估價單含有不屬於目前分公司代理的廠牌，請切換分公司或更換廠牌。');
-        return;
-    }
-
-    // PDF/列印輸出的檔名：單號 + 客戶名稱（訂購人），客戶名稱本身不會出現在印出的內容裡
-    // 檔名格式：YS/DS/MS-日期-業務代號-估價單編號-客戶名稱（quoteNo 本身已經是前四段，這裡補上客戶名稱）
-    const originalQuoteTitle = document.title;
-    document.title = ordererName ? `${quoteNo}-${ordererName}` : quoteNo;
-
-    const selectedSalesName = document.getElementById('salesName').value;
-    const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(selectedSalesName));
-    const quoteData = {
-        quoteNo: quoteNo,
-        company: currentCompany,
-        clientName: clientName,
-        ordererName: ordererName,
-        customerId: syncCustomerMaster(ordererName || clientName, { salesCode: selectedSales?.code || salesCodeForName(selectedSalesName) }),
-        salesName: selectedSalesName,
-        salesCode: selectedSales?.code || salesCodeForName(selectedSalesName),
-        ownerUid: selectedSales?.uid || (belongsToCurrentUser(selectedSalesName, '', selectedSales?.code || salesCodeForName(selectedSalesName)) ? currentUser?.uid || '' : ''),
-        quoteDate: document.getElementById('quoteDate').value,
-        createdAt: new Date().toISOString(),
-        ...commercialCreatorFields(),
-        ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
-        validDays: document.getElementById('validDays').value,
-        discountRate: document.getElementById('discountRateInput').value,
-        grandTotal: document.getElementById('grandTotal').innerText,
-        status: BUSINESS_STATUS.ACTIVE,
-        ...grossAmountMetadata(document.getElementById('grandTotal').innerText),
-        items: []
-    };
-
-    document.querySelectorAll('#quoteItems tr').forEach(row => {
-        quoteData.items.push({
-            nameEn: row.querySelector('.item-en').value,
-            nameCn: row.querySelector('.item-cn').value,
-            model: row.querySelector('.item-model').value,
-            brand: quoteRowBrandValue(row),
-            productLine: row.querySelector('.item-product-line').value,
-            productType: row.querySelector('.item-product-type').value,
-            productId: row.querySelector('.item-product-id')?.value || '',
-            spec: row.querySelector('.item-spec').value,
-            ...quoteExtraDataFromRow(row),
-            qty: row.querySelector('.qty').value,
-            price: row.querySelector('.inc-price').value,
-            exPrice: row.querySelector('.ex-price').value,
-            subtotal: row.querySelector('.subtotal-inc').value
-        });
-    });
-    rememberQuoteCustomerPreferences(ordererName || clientName, quoteData.items);
-
-    // 列印時只讓瀏覽器排版估價單本身，不讓 iPhone Safari 同時計算整個管理系統。
-    document.body.classList.add('printing-quote');
-    prepareQuoteForPrint();
-
-    // 列印用的內容本來就是畫面上現有的資料，不需要等雲端存檔完成才印出來——
-    // 之前的寫法是「等 Firestore 寫入完成（不管成功或失敗）才 print()」，
-    // 遇到網路慢或 Firestore 回應慢時，點下去要等好幾秒才會跳出列印/PDF視窗，感覺速度很慢。
-    // 改成：立刻列印，雲端存檔在背景進行；如果存檔失敗才另外提示，不會再讓列印被網路卡住。
-    //
-    // 這裡用兩次 requestAnimationFrame 而不是完全同步呼叫 window.print()：
-    // 剛剛把 document.title 改成單號、也才剛用 JS 插入/更新完負責業務的鏡像文字，
-    // 如果馬上同步呼叫 print()，手機瀏覽器有時候來不及把這些變動畫面「刷新」出來，
-    // 存出來的 PDF 檔名還是用最原始的網頁標題、內容也可能是修改前的舊畫面。
-    // 等兩次畫面重繪（約一兩個影格、感覺不出延遲）以後才印，能確保標題與畫面都已經更新好。
-    window._quoteOriginalTitle = originalQuoteTitle;
-
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            window.print();
-        });
-    });
-
-    persistQuoteOutputRecord(quoteData, '列印');
-};
-
-// 列印前的整理工作：
-// 1) 同步每個 input 的 value「屬性」= 目前實際輸入值
-//    （CSS 的 :has(input[value=""]) 只認 HTML 屬性，屬性從建立輸入框當下就凍結了，
-//     使用者之後打的字只會更新瀏覽器內部的值、不會回寫屬性，導致有填品名/貨號的列印時仍被誤判為空而整列隱藏）
-// 2) 讓「規格」文字框依實際內容自動撐高，避免固定高度把多行文字裁切、疊在一起
-// 3) 英文品名/中文品名/貨號/廠牌需要保留原本的輸入／選擇功能，
-//    太長的文字會被裁掉看不見，所以在旁邊插入一份可換行、顯示完整內容的鏡像文字，
-//    列印時蓋過輸入框顯示（純 CSS @media print 控制顯示/隱藏，不用另外還原）
-function markQuotePrintPagination() {
-    const root = document.getElementById('printableQuote');
-    const tbody = document.getElementById('quoteItems');
-    if (!root || !tbody) return;
-
-    // Do not calculate A4 page breaks from the live screen layout. On phones the
-    // editor is rendered as stacked cards, so those screen heights are much taller
-    // than the actual 190 mm print table and used to force one short item per page.
-    // The print engine already repeats the table header and keeps each row intact;
-    // let it paginate naturally from the real print layout.
-    root.classList.remove('quote-multipage-print');
-    tbody.querySelectorAll('tr').forEach(row => row.classList.remove('quote-print-page-break'));
-}
-
-function prepareQuoteForPrint() {
-    const root = document.getElementById('printableQuote');
-    if (!root) return;
-
-    root.querySelectorAll('input').forEach(el => {
-        el.setAttribute('value', el.value);
-    });
-
-    root.querySelectorAll('textarea').forEach(el => {
-        el.style.height = 'auto';
-        el.style.height = (el.scrollHeight + 2) + 'px';
-    });
-
-    ['.item-en', '.item-cn', '.item-model', '.item-brand'].forEach(sel => {
-        root.querySelectorAll(sel).forEach(input => {
-            let mirror = input.nextElementSibling;
-            if (!mirror || !mirror.classList.contains('print-text-mirror')) {
-                mirror = document.createElement('span');
-                mirror.className = 'print-text-mirror';
-                input.insertAdjacentElement('afterend', mirror);
-            }
-            mirror.textContent = sel === '.item-brand' ? quoteRowBrandValue(input.closest('tr')) : input.value;
-        });
-    });
-
-    // 只在列印時隱藏沒有內容的品項資訊，編輯畫面仍保留所有輸入欄位。
-    root.querySelectorAll('#quoteItems tr').forEach(row => {
-        const toggleEmpty = (element, value) => element?.classList.toggle('print-empty-field', !String(value || '').trim());
-        toggleEmpty(row.querySelector('.item-en')?.closest('.field-row'), row.querySelector('.item-en')?.value);
-        toggleEmpty(row.querySelector('.item-cn')?.closest('.field-row'), row.querySelector('.item-cn')?.value);
-        toggleEmpty(row.querySelector('.item-model')?.closest('.item-row-pair > div'), row.querySelector('.item-model')?.value);
-        toggleEmpty(row.querySelector('.item-brand-field'), quoteRowBrandValue(row));
-        toggleEmpty(row.querySelector('.item-spec')?.closest('.field-row'), row.querySelector('.item-spec')?.value);
-        const extra = quoteExtraDataFromRow(row);
-        const printRows = [
-            ['產地', extra.origin],
-            ['交貨期', extra.leadTime],
-            ['院內料號', extra.hospitalItemCode],
-            ['備註', extra.remarks],
-            ...extra.customFields.map(field => [field.label, field.value])
-        ].filter(([, value]) => String(value || '').trim());
-        const printExtra = row.querySelector('.quote-extra-print');
-        if (printExtra) {
-            printExtra.innerHTML = printRows.map(([label, value]) =>
-                `<div class="quote-extra-print-row"><strong>${escapeHtml(label)}：</strong><span>${escapeHtml(value)}</span></div>`
-            ).join('');
-            printExtra.classList.toggle('print-empty-field', !printRows.length);
-        }
-    });
-
-    markQuotePrintPagination();
-
-    const clientRow = document.getElementById('clientName')?.closest('.meta-row');
-    clientRow?.classList.toggle('print-empty-field', !document.getElementById('clientName').value.trim());
-
-    // 「負責業務」是下拉選單，原生 select 版面寬度不受控，列印時容易跟旁邊的電話號碼中間拉開一大段空白，
-    // 看起來像「隔了很遠」而不是緊接在名字後面；改成插入一份純文字鏡像（名字＋電話會排在同一行、緊接著）
-    const salesSelect = document.getElementById('salesName');
-    if (salesSelect) {
-        let salesMirror = salesSelect.nextElementSibling;
-        if (!salesMirror || !salesMirror.classList.contains('sales-name-print-mirror')) {
-            salesMirror = document.createElement('span');
-            salesMirror.className = 'sales-name-print-mirror';
-            salesSelect.insertAdjacentElement('afterend', salesMirror);
-        }
-        salesMirror.textContent = salesSelect.value || '';
-        salesSelect.closest('.meta-row-three > div')?.classList.toggle('print-empty-field', !salesSelect.value.trim());
-    }
-}
 
 window.loadQuoteFromCloud = function() {
     const qNo = document.getElementById('searchQuoteNo').value.trim();
@@ -9472,30 +9282,12 @@ window.addEventListener('afterprint', () => {
     }
 });
 
-// 列印/存 PDF 之後，只還原瀏覽器分頁標題，不再自動清空表單——
-// 瀏覽器沒辦法告訴網頁「使用者是真的按了列印，還是按了取消」，這兩種情況都會觸發同一個事件，
-// 如果自動清空，不小心點到取消也會被清空，很不方便。改成用下面「製作下一張估價單」按鈕，
-// 由使用者自己決定什麼時候真的要開始寫下一張
-window.addEventListener('afterprint', () => {
-    document.body.classList.remove('printing-quote');
-});
-
-window.addEventListener('afterprint', () => {
-    document.body.classList.remove('printing-three-quotes');
-    const comparisonPages = document.getElementById('comparisonQuotePrintPages');
-    if (comparisonPages) comparisonPages.innerHTML = '';
-    if (window._quoteOriginalTitle !== undefined) {
-        document.title = window._quoteOriginalTitle;
-        delete window._quoteOriginalTitle;
-    }
-});
-
 // 「製作下一張估價單」：手動觸發，不會因為誤按列印視窗的取消鈕就被清空。
 // 按下後會先確認，避免不小心點到把還沒印的內容洗掉；確認後清空表單、單號跳下一號，
 // 並且立刻把這個「全新、還是空的」狀態存成本機草稿，這樣萬一使用者按完馬上關網頁，
 // 重開時看到的會是這張全新的空白單，而不是被清掉的上一張。
 window.startNextQuote = function() {
-    if (!confirm('確定要開始製作下一張估價單嗎？目前畫面上的內容將會被清空（如果還沒列印/存檔，請先確認已經處理好）。')) return;
+    if (!confirm('確定要開始製作下一張估價單嗎？目前畫面上的內容將會被清空（如果還沒匯出 PDF，請先確認已經處理好）。')) return;
     resetQuoteFormForNextOne();
     saveQuoteDraft();
 };
