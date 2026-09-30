@@ -12934,7 +12934,7 @@ function dateInStatsRange(date, start, end) {
 
 function calculateOrderStatsContribution(order, start, end) {
     const empty = { actualQty: 0, pendingQty: 0, actualSales: 0, pendingSales: 0, actualCost: 0, pendingCost: 0, estimatedSales: 0, estimated: false };
-    if (normalizedOrderStatus(order) !== 'normal') return empty;
+    const cancelled = normalizedOrderStatus(order) !== 'normal';
     const totalQty = orderQuantity(order);
     if (!totalQty) return empty;
     const unitSales = orderUnitSalesAmount(order);
@@ -12964,7 +12964,8 @@ function calculateOrderStatsContribution(order, start, end) {
     });
     const orderExistsByCutoff = !order.orderDate || order.orderDate <= cutoff;
     const effectiveDelivered = Math.max(0, deliveredByCutoff - returnedByCutoff);
-    const pendingQty = orderExistsByCutoff ? Math.max(0, totalQty - Math.min(totalQty, effectiveDelivered)) : 0;
+    // 取消／作廢只終止尚未履約的餘額；取消前已實際送貨、退貨仍屬正式歷史。
+    const pendingQty = !cancelled && orderExistsByCutoff ? Math.max(0, totalQty - Math.min(totalQty, effectiveDelivered)) : 0;
     return {
         actualQty, pendingQty,
         actualSales: actualQty * unitSales,
