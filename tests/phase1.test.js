@@ -233,12 +233,12 @@ test('low-stock inventory can hand off to formal replenishment purchase flow', (
     assert.match(appSource, /generatePoNo\(\)/);
 });
 
-test('purchase workspace shows waiting days for open receipts, including direct shipment', () => {
-    assert.match(indexSource, />等待天數</);
+test('purchase document history shows document age while arrival work uses supply timing', () => {
     assert.match(appSource, /function poWaitingDays\(po\)/);
-    assert.match(appSource, /poReceiptProgress\(po\)\.complete \? '' : waitingDaysFromDate\(po\.poDate\)/);
+    assert.match(appSource, /return waitingDaysFromDate\(po\.poDate\)/);
     assert.match(appSource, /primaryStatus==='arrival'\?waitingDaysFromDate\(item\.orderedAt\)/);
-    assert.match(appSource, /data-th="等待天數"/);
+    assert.match(appSource, /data-th="建立天數"/);
+    assert.match(appSource, /data-th="文件狀態">已建立/);
 });
 
 test('main navigation exposes focused order and purchasing workspaces', () => {
@@ -795,17 +795,19 @@ test('phase 6 purchase orders create incoming or pending items without increasin
     assert.match(s,/purchase_incoming/);
 });
 
-test('phase 6 receipt transaction decreases incoming and increases on-hand with partial receipts', () => {
-    const start=appSource.indexOf('window.receivePurchaseOrder');
-    const end=appSource.indexOf('function purchaseItemsFromSavedPo',start);
+test('phase 6 supply receipt decreases incoming and increases warehouse stock with partial receipts', () => {
+    const start=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const end=appSource.indexOf('window.openSupplyReceipt',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/onHand:\s*stock\.onHand\s*\+\s*qty/);
-    assert.match(s,/incoming:\s*Math\.max\(0,\s*stock\.incoming\s*-\s*qty\)/);
-    assert.match(s,/receiptRecords/);
-    assert.match(s,/receiptStatus/);
-    assert.match(s,/type:\s*'receipt'/);
+    assert.match(s,/onHand:inv\.onHand\+qty/);
+    assert.match(s,/incoming:Math\.max\(0,inv\.incoming-qty\)/);
+    assert.match(s,/onHand:wh\.onHand\+qty/);
+    assert.match(s,/incoming:Math\.max\(0,wh\.incoming-qty\)/);
+    assert.match(s,/collection\('receipts'\)/);
     assert.match(s,/pendingInventoryItems/);
-    assert.match(s,/inventoryShortageQty/);
+    assert.match(s,/supplyRef,\{receivedQty,status:/);
+    assert.doesNotMatch(s,/receiptRecords/);
+    assert.doesNotMatch(s,/receiptStatus/);
 });
 
 test('phase 6 supports direct stock purchase independent of customer orders and new Product Master items', () => {
@@ -942,7 +944,7 @@ test('purchasing and orders share brand names and date range semantics across wo
     assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'Biorad'), false);
     assert.equal(context.purchaseLineMatchesFilters('2026-09-24', '王先生', 'Biorad'), true);
     assert.match(appSource, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand, filters\)/);
-    assert.match(appSource, /receivingQueueContext\(po,item\)/);
+    assert.doesNotMatch(appSource, /receivingQueueContext\(po,item\)/);
     assert.match(appSource, /receivingQueueContext\(supply,supply\)/);
     assert.match(indexSource, /id="poPeriodFilter" onchange="changePurchasePeriod\(this\.value\)"/);
 });
@@ -1253,11 +1255,12 @@ test('direct stock purchase uses the formal PO modal and supports batch items', 
     assert.match(appSource, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
 });
 
-test('PO receiving is a batch modal with partial quantity lot and expiry', () => {
+test('supply receiving uses the shared batch modal with quantity lot and expiry', () => {
     assert.match(indexSource, /id="poReceiptBatchOverlay"/);
     assert.match(indexSource, /id="poReceiptBatchBody"/);
     assert.match(appSource, /window\.savePoReceiptBatch/);
-    assert.match(appSource, /receiveSinglePoLine/);
+    assert.match(appSource, /receiveSupplyOrderRecord/);
+    assert.doesNotMatch(appSource, /receiveSinglePoLine/);
     assert.match(appSource, /lotNo/);
     assert.match(appSource, /expiryDate/);
 });
@@ -1521,6 +1524,15 @@ test('warehouse master save has immediate feedback and duplicate-submit guard', 
 });
 
 
+test('new purchase documents do not persist receipt workflow state', () => {
+    const start=appSource.indexOf('window.printPurchaseOrder = async function()');
+    const end=appSource.indexOf("window.addEventListener('afterprint'",start);
+    const source=appSource.slice(start,end);
+    assert.doesNotMatch(source,/receiptStatus:/);
+    assert.doesNotMatch(source,/receiptRecords:/);
+    assert.match(source,/poRecord\.supplyOrderIds=supplyOrderIds/);
+});
+
 test('formal purchase document derives ordered progress from supplyOrders only', () => {
     assert.match(appSource, /supplyOrderedQty:cumulative/);
     assert.doesNotMatch(appSource, /purchaseOrderedQty:cumulative/);
@@ -1571,11 +1583,12 @@ test('ordered action belongs to purchasing while the order list only shows progr
 });
 
 
-test('batch receipt reports partial success and requires a warehouse', () => {
+test('batch supply receipt reports partial success and requires a warehouse', () => {
     assert.match(appSource, /尚未指定入庫倉庫/);
     assert.match(appSource, /let completed = 0/);
     assert.match(appSource, /已成功確認 \$\{completed\} 個品項到貨/);
     assert.match(appSource, /已成功的資料不會重複處理/);
+    assert.match(appSource, /到貨必須從供應紀錄進入/);
 });
 
 test('partial delivery save blocks duplicate taps', () => {
