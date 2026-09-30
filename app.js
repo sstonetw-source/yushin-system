@@ -379,7 +379,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     const printBtn = document.getElementById('printBtn');
     if (printBtn) {
-        printBtn.addEventListener('click', handleSaveAndPrint);
+        printBtn.addEventListener('click', exportCurrentQuotePdf);
     }
 
     const pwInput = document.getElementById('loginPassword');
@@ -4071,6 +4071,204 @@ window.printThreeQuotes = async function() {
     });
 };
 
+function quotePdfFileName(quoteData = {}) {
+    const raw = [quoteData.quoteNo, quoteData.ordererName || quoteData.clientName].filter(Boolean).join('-') || '估價單';
+    return raw.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
+}
+
+function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
+    quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
+    db.collection('quotes').doc(quoteData.quoteNo).set(quoteData).then(() => {
+        if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
+            return db.collection('forecasts').doc(quoteData.sourceId).set({
+                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.QUOTE, quoteData.quoteNo, 'created')),
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        }
+    }).catch(err => {
+        console.error('儲存估價單到雲端失敗：', err);
+        alert('提醒：估價單存到雲端失敗（' + err.message + '）。' + outputLabel + '內容不受影響，請稍後確認網路後再重新同步。');
+    });
+}
+
+function quoteDataForPdfExport() {
+    const quoteData = collectCurrentQuoteRecord();
+    const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(quoteData.salesName));
+    quoteData.customerId = syncCustomerMaster(quoteData.ordererName || quoteData.clientName, {
+        salesCode: selectedSales?.code || quoteData.salesCode || salesCodeForName(quoteData.salesName)
+    });
+    quoteData.status = BUSINESS_STATUS.ACTIVE;
+    Object.assign(quoteData, grossAmountMetadata(quoteData.grandTotal));
+    return quoteData;
+}
+
+function waitForPdfImages(root) {
+    const images = [...root.querySelectorAll('img')].filter(img => getComputedStyle(img).display !== 'none');
+    return Promise.all(images.map(img => {
+        img.loading = 'eager';
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve(true);
+        return new Promise(resolve => {
+            let settled = false;
+            const done = ok => {
+                if (settled) return;
+                settled = true;
+                img.onload = null;
+                img.onerror = null;
+                resolve(ok);
+            };
+            img.onload = () => done(true);
+            img.onerror = () => done(false);
+            window.setTimeout(() => done(img.complete && img.naturalWidth > 0), 700);
+        });
+    }));
+}
+
+function createQuotePdfStage() {
+    prepareQuoteForPrint();
+    const source = document.getElementById('printableQuote');
+    if (!source) throw new Error('找不到估價單內容');
+
+    const stage = document.createElement('div');
+    stage.className = 'quote-pdf-stage';
+    const clone = source.cloneNode(true);
+    clone.classList.add('quote-pdf-document');
+    stage.appendChild(clone);
+    document.body.appendChild(stage);
+
+    clone.querySelectorAll('.no-print, .quote-extra-fields, button, [type="hidden"]').forEach(el => el.remove());
+    clone.querySelectorAll('.print-empty-field').forEach(el => el.remove());
+
+    const discount = clone.querySelector('#discountRateInput');
+    if (discount && !(parseFloat(discount.value) || 0)) {
+        clone.querySelector('#discountRow')?.remove();
+    }
+
+    // 品名、貨號、廠牌已有 prepareQuoteForPrint 建立的完整文字鏡像，PDF 只保留文字，避免表單控制項拖慢擷取。
+    clone.querySelectorAll('.item-en, .item-cn, .item-model, .item-brand, .item-brand-other').forEach(el => el.remove());
+
+    clone.querySelectorAll('input, select, textarea').forEach(el => {
+        const span = document.createElement('span');
+        span.className = 'quote-pdf-value';
+        span.textContent = el.tagName === 'SELECT'
+            ? (el.options?.[el.selectedIndex]?.textContent || el.value || '')
+            : (el.value || '');
+        el.replaceWith(span);
+    });
+
+    // 非目前公司的隱藏 Logo 不需要交給 canvas 解碼。
+    clone.querySelectorAll('img').forEach(img => {
+        if (getComputedStyle(img).display === 'none') img.remove();
+    });
+
+    return { stage, clone };
+}
+
+function quotePdfSafePageEnd(clone, canvas, startY, desiredEndY) {
+    const rootRect = clone.getBoundingClientRect();
+    const scale = canvas.width / Math.max(1, clone.getBoundingClientRect().width);
+    const ranges = [...clone.querySelectorAll('#quoteItems tr, .quote-summary-block')].map(el => {
+        const rect = el.getBoundingClientRect();
+        return {
+            top: Math.max(0, (rect.top - rootRect.top) * scale),
+            bottom: Math.max(0, (rect.bottom - rootRect.top) * scale)
+        };
+    });
+    const crossing = ranges.find(range => range.top < desiredEndY && range.bottom > desiredEndY && range.top > startY);
+    if (!crossing) return desiredEndY;
+    const candidate = Math.floor(crossing.top);
+    return candidate - startY >= (desiredEndY - startY) * 0.55 ? candidate : desiredEndY;
+}
+
+function addQuoteCanvasToPdf(pdf, canvas, clone) {
+    const pageWidthMm = 190;
+    const pageHeightMm = 277;
+    const marginMm = 10;
+    const nominalPageHeightPx = canvas.width * (pageHeightMm / pageWidthMm);
+    let startY = 0;
+    let pageIndex = 0;
+
+    while (startY < canvas.height - 1) {
+        const desiredEnd = Math.min(canvas.height, startY + nominalPageHeightPx);
+        let endY = desiredEnd < canvas.height ? quotePdfSafePageEnd(clone, canvas, startY, desiredEnd) : desiredEnd;
+        if (endY <= startY) endY = desiredEnd;
+        const sliceHeight = Math.max(1, Math.round(endY - startY));
+
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceHeight;
+        const ctx = pageCanvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+        ctx.drawImage(canvas, 0, startY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
+        if (pageIndex > 0) pdf.addPage('a4', 'p');
+        const renderHeightMm = sliceHeight * pageWidthMm / canvas.width;
+        pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.96), 'JPEG', marginMm, marginMm, pageWidthMm, renderHeightMm, undefined, 'FAST');
+
+        startY = endY;
+        pageIndex += 1;
+    }
+}
+
+window.exportCurrentQuotePdf = async function() {
+    const validationMessage = currentQuoteOutputValidation();
+    if (validationMessage) {
+        alert(validationMessage);
+        return;
+    }
+
+    const button = document.getElementById('printBtn');
+    const originalLabel = button?.innerText || '📄 匯出 PDF（自動同步雲端）';
+    if (button) {
+        button.disabled = true;
+        button.innerText = '正在產生 PDF…';
+    }
+
+    let stage = null;
+    try {
+        if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
+            throw new Error('PDF 元件尚未載入');
+        }
+
+        const quoteData = quoteDataForPdfExport();
+        rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
+        // 雲端同步與 PDF 產生平行執行，不讓 Firestore 網路速度阻塞使用者。
+        persistQuoteOutputRecord(quoteData, 'PDF');
+
+        const exportDom = createQuotePdfStage();
+        stage = exportDom.stage;
+        const clone = exportDom.clone;
+        await waitForPdfImages(clone);
+
+        // 手機降低 Canvas 倍率以減少記憶體與等待時間；桌機維持較高解析度。
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const canvas = await window.html2canvas(clone, {
+            backgroundColor: '#ffffff',
+            scale: isMobile ? 1.35 : 1.75,
+            logging: false,
+            useCORS: true,
+            allowTaint: false,
+            width: Math.ceil(clone.scrollWidth),
+            height: Math.ceil(clone.scrollHeight),
+            windowWidth: 794
+        });
+
+        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+        addQuoteCanvasToPdf(pdf, canvas, clone);
+        pdf.save(quotePdfFileName(quoteData));
+    } catch (err) {
+        console.error('匯出估價單 PDF 失敗：', err);
+        const fallback = confirm('直接產生 PDF 失敗（' + (err?.message || err) + '）。\n是否改用瀏覽器列印／存為 PDF？');
+        if (fallback) handleSaveAndPrint();
+    } finally {
+        stage?.remove();
+        if (button) {
+            button.disabled = false;
+            button.innerText = originalLabel;
+        }
+    }
+};
+
 window.handleSaveAndPrint = function() {
     const quoteNo = document.getElementById('quoteNo').value.trim();
     const clientName = document.getElementById('clientName').value;
@@ -4174,18 +4372,7 @@ window.handleSaveAndPrint = function() {
         });
     });
 
-    quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
-    db.collection('quotes').doc(quoteNo).set(quoteData).then(() => {
-        if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
-            return db.collection('forecasts').doc(quoteData.sourceId).set({
-                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.QUOTE, quoteNo, 'created')),
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-        }
-    }).catch(err => {
-        console.error('儲存估價單到雲端失敗：', err);
-        alert('提醒：這張估價單剛剛存到雲端失敗（' + err.message + '）。列印內容不受影響，但建議稍後檢查網路連線後，再按一次「存檔並列印」，確保雲端資料庫也有存到這筆紀錄。');
-    });
+    persistQuoteOutputRecord(quoteData, '列印');
 };
 
 // 列印前的整理工作：
