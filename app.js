@@ -7702,9 +7702,7 @@ function renderPurchasingReceivingWorkList() {
                 : evidence.length
                     ? evidence.map((entry, index) => {
                         const suffix = evidence.length > 1 ? ` ${index + 1}/${evidence.length}` : '';
-                        return entry.type === 'po'
-                            ? `<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(entry.id)}',${entry.itemIndex})">📥 到貨入庫${suffix}</button>`
-                            : `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(entry.id)}')">📥 到貨入庫${suffix}</button>`;
+                        return `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(entry.id)}')">📥 到貨入庫${suffix}</button>`;
                     }).join(' ')
                     : '<span class="order-progress-badge order-progress-warning">找不到採購紀錄</span>';
 
