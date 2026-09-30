@@ -157,7 +157,7 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
         printSavedPoDocument:()=>{printCalls++;}, updatePoSaveStatus:message=>messages.push(message),
         updatePoSaveButton:()=>{button.innerText='🖨️ 列印 / 存為 PDF（自動同步雲端）';}, alert:message=>messages.push(message)
     });
-    vm.runInContext(`let poSaveInProgress=false; let poIncomingSyncPending=false;\n${app.slice(start,end)}\n`, context);
+    vm.runInContext(`let poSaveInProgress=false; let poIncomingSyncPending=false;\n${app.slice(start,end)}\n}`, context);
 
     await context.window.printPurchaseOrder();
     assert.equal(printCalls, 1);
