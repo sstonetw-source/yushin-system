@@ -14064,12 +14064,13 @@ window.runSystemDataAudit = async function() {
     status.textContent = '讀取主檔與關聯資料中…';
     results.innerHTML = '';
     try {
-        const [products, users, warehouses, orders, purchaseOrders, inventory, warehouseStocks, reservations] = await Promise.all([
+        const [products, users, warehouses, orders, purchaseOrders, supplyOrders, inventory, warehouseStocks, reservations] = await Promise.all([
             readCollectionInBatches('products'),
             readCollectionInBatches('users'),
             readCollectionInBatches('warehouses'),
             readCollectionInBatches('orders'),
             readCollectionInBatches('purchaseOrders'),
+            readCollectionInBatches('supplyOrders'),
             readCollectionInBatches('inventory'),
             readCollectionInBatches('warehouseStocks'),
             readCollectionInBatches('inventoryReservations')
@@ -14114,9 +14115,29 @@ window.runSystemDataAudit = async function() {
             }
         });
 
+        const supplyIds = new Set(supplyOrders.map(row => String(row.id || '').trim()).filter(Boolean));
+
         purchaseOrders.forEach(po => {
-            const sourceOrderId = String(po.orderId || po.sourceOrderId || '').trim();
-            if (sourceOrderId && !orderIds.has(sourceOrderId)) issues.push({ type:'採購來源訂單不存在', detail:`${po.poNo || po.id}｜${sourceOrderId}` });
+            const itemOrderIds=[...new Set(purchaseItemsFromSavedPo(po).map(item=>String(item.orderId||'').trim()).filter(Boolean))];
+            itemOrderIds.forEach(sourceOrderId => {
+                if (!orderIds.has(sourceOrderId)) issues.push({ type:'訂購單文件來源訂單不存在', detail:`${po.poNo || po.id}｜${sourceOrderId}` });
+            });
+            (Array.isArray(po.supplyOrderIds)?po.supplyOrderIds:[]).forEach(supplyId => {
+                const id=String(supplyId||'').trim();
+                if(id&&!supplyIds.has(id))issues.push({ type:'訂購單文件找不到供應紀錄', detail:`${po.poNo || po.id}｜${id}` });
+            });
+        });
+
+        supplyOrders.forEach(supply => {
+            const sourceOrderId=String(supply.orderId||'').trim();
+            if(sourceOrderId&&!orderIds.has(sourceOrderId))issues.push({ type:'供應紀錄來源訂單不存在', detail:`${supply.internalNo || supply.id}｜${sourceOrderId}` });
+            if(!knownProduct(supply))issues.push({ type:'供應紀錄找不到 Product', detail:`${supply.internalNo || supply.id}｜${supply.itemCode || supply.productKey || ''}` });
+            const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+            const warehouseId=String(supply.warehouseId||'').trim();
+            if(!directShip&&(!warehouseId||!warehouseIds.has(warehouseId)))issues.push({ type:'供應紀錄倉庫異常', detail:`${supply.internalNo || supply.id}｜${warehouseId || '未指定'}` });
+            const qty=Math.max(0,Number(supply.qty||0));
+            const received=Math.max(0,Number(supply.receivedQty||0));
+            if(!(qty>0)||received>qty)issues.push({ type:'供應紀錄數量異常', detail:`${supply.internalNo || supply.id}｜訂購 ${qty}／已到 ${received}` });
         });
 
         inventory.forEach(item => {
@@ -14138,7 +14159,7 @@ window.runSystemDataAudit = async function() {
             if (!knownProduct(reservation)) issues.push({ type:'庫存占用找不到 Product', detail:`${reservation.orderNo || reservation.id}｜${reservation.productKey || reservation.itemCode || ''}` });
         });
 
-        const counts = `Product ${products.length}、人員 ${users.length}、訂單 ${orders.length}、採購單 ${purchaseOrders.length}、庫存 ${inventory.length}、分倉 ${warehouseStocks.length}、占用 ${reservations.length}`;
+        const counts = `Product ${products.length}、人員 ${users.length}、訂單 ${orders.length}、訂購單文件 ${purchaseOrders.length}、供應紀錄 ${supplyOrders.length}、庫存索引 ${inventory.length}、分倉 ${warehouseStocks.length}、占用 ${reservations.length}`;
         status.textContent = issues.length ? `檢查完成：${counts}。發現 ${issues.length} 項需確認。` : `檢查完成：${counts}。未發現上述關聯異常。`;
         results.innerHTML = issues.length
             ? '<div class="table-wrap"><table><thead><tr><th>類型</th><th>內容</th></tr></thead><tbody>' + issues.slice(0,500).map(issue => `<tr><td>${escapeHtml(issue.type)}</td><td>${escapeHtml(issue.detail)}</td></tr>`).join('') + '</tbody></table></div>' + (issues.length > 500 ? `<div style="font-size:12px;color:#666;margin-top:6px;">畫面只顯示前 500 項，共 ${issues.length} 項。</div>` : '')
