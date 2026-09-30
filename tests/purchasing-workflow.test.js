@@ -301,6 +301,26 @@ test('receiving work list renders one row per order item and keeps PO records in
     assert.match(renderSource, /const poRows = poHistorySearchActive \? poHistorySearchResults : poListCache/);
 });
 
+test('receiving evidence does not show a formal PO and its supply mirror twice', () => {
+    const source = app.match(/function receivingEvidenceForWorkItem\(order, item, itemIndex\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(source);
+    const context = vm.createContext({
+        poListCache:[{id:'PO1',poNo:'PO1',items:[{orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1}]}],
+        supplyReceivingCache:[
+            {id:'po-PO1-0',type:'PURCHASING_PO',purchaseOrderId:'PO1',orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1,receivedQty:0},
+            {id:'SELF1',type:'SALES_SELF_ORDER',orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1,receivedQty:0}
+        ],
+        purchaseItemsFromSavedPo:po=>po.items,
+        poItemReceiptProgress:()=>({ordered:1,received:0,remaining:1,complete:false})
+    });
+    const fn=vm.runInContext(`${source}\nreceivingEvidenceForWorkItem`,context);
+    const evidence=fn({id:'O1'},{itemId:'I1'},0);
+    assert.equal(evidence.length,2);
+    assert.equal(evidence.filter(entry=>entry.type==='po').length,1);
+    assert.equal(evidence.filter(entry=>entry.type==='supply').length,1);
+    assert.equal(evidence.find(entry=>entry.type==='supply').id,'SELF1');
+});
+
 test('receiving waits for both order work state and purchase evidence before declaring empty', () => {
     assert.match(app, /function loadPurchasingReceivingQueue\(reset = true\)/);
     assert.match(app, /Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset\)[\s\S]*?refreshPurchasingOrderCache\(reset\)/);
