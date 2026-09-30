@@ -576,6 +576,11 @@ test('quote print pagination uses the real print layout and keeps rows/footer in
 });
 
 
+test('quote owner wording stays consistently labeled as responsible sales', () => {
+    assert.doesNotMatch(appSource, /請選擇負責人/);
+    assert.match(indexSource, /負責業務：<\/label><select id="salesName"/);
+});
+
 test('quote optional item fields stay collapsed, persist, print only when filled and remember customer preferences', () => {
     assert.match(indexSource, /applyCustomerQuotePreferences\(this\.value\)/);
     assert.match(appSource, /function quoteExtraDataFromRow\(row\)/);

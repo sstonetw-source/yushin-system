@@ -2556,7 +2556,7 @@ function populateSalesDropdown() {
     }
 
     const currentValue = select.value;
-    select.innerHTML = '<option value="">請選擇負責人</option>';
+    select.innerHTML = '<option value="">請選擇負責業務</option>';
     visibleList.forEach(s => {
         if (s.name) {
             const option = document.createElement('option');
