@@ -39,18 +39,18 @@ function loadSavedPurchaseMapper() {
     return context.purchaseItemsFromSavedPo;
 }
 
-test('purchase mapper supports legacy single-item orders', () => {
-    const items = loadPurchaseMapper()({ id: 'old', itemName: 'Legacy', itemCode: 'A-1', brand: 'Acme', qty: '3' });
+test('purchase mapper supports canonical single-item orders', () => {
+    const items = loadPurchaseMapper()({ id: 'one', itemName: 'Single', itemCode: 'A-1', brand: 'Acme', qty: '3', shortageQty: 3 });
     assert.equal(items.length, 1);
-    assert.deepEqual({ name: items[0].itemName, qty: items[0].qty, cost: items[0].unitPrice }, { name: 'Legacy', qty: 3, cost: 25 });
+    assert.deepEqual({ name: items[0].itemName, qty: items[0].qty, cost: items[0].unitPrice }, { name: 'Single', qty: 3, cost: 25 });
 });
 
 test('purchase mapper expands modern multi-item orders and field aliases', () => {
     const items = loadPurchaseMapper()({
         id: 'new',
         items: [
-            { productName: 'First', productCode: 'A-1', quantity: 2 },
-            { name: 'Second', model: 'B-2', manufacturer: 'Acme', count: '4' }
+            { productName: 'First', productCode: 'A-1', quantity: 2, shortageQty: 2 },
+            { name: 'Second', model: 'B-2', manufacturer: 'Acme', count: '4', shortageQty: 4 }
         ]
     });
     assert.equal(items.length, 2);
@@ -61,7 +61,7 @@ test('purchase mapper expands modern multi-item orders and field aliases', () =>
 });
 
 test('purchase mapper supports products and embedded purchase prices', () => {
-    const [item] = loadPurchaseMapper()({ id: 'alt', products: [{ nameCn: 'Third', code: 'C-3', qty: 5, purchasePrice: 12 }] });
+    const [item] = loadPurchaseMapper()({ id: 'alt', products: [{ nameCn: 'Third', code: 'C-3', qty: 5, shortageQty: 5, purchasePrice: 12 }] });
     assert.deepEqual([item.itemName, item.itemCode, item.qty, item.unitPrice], ['Third', 'C-3', 5, 12]);
 });
 
