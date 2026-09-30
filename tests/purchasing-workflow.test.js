@@ -438,6 +438,17 @@ test('purchasing work cards reuse the shared recent order cache',()=>{
     assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
 });
 
+test('shortage allocation trusts warehouse stock even when aggregate inventory cache is missing',()=>{
+    const start=app.indexOf('async function allocateFreeReceiptStockToShortages');
+    const end=app.indexOf('\nasync function refreshAffectedOrderCaches',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/if\(!orderSnap\.exists\|\|!resSnap\.exists\|\|!whSnap\.exists\)/);
+    assert.doesNotMatch(source,/!invSnap\.exists\|\|!whSnap\.exists/);
+    assert.match(source,/inventoryNumbers\(invSnap\.exists\?invSnap\.data\(\):\{\}\)/);
+    assert.match(source,/if\(invSnap\.exists\)tx\.update\(invRef/);
+});
+
 test('shortage allocation maintains work indexes',()=>{
     assert.match(app,/allocateFreeReceiptStockToShortages[\s\S]*?orderWorkIndexFields\(nextOrder\)/);
 });
