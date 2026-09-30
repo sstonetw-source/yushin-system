@@ -695,6 +695,37 @@ test('receiving queue keeps standalone stock and cancelled-order warehouse suppl
     assert.match(source,/openSupplyReceipt\('/);
 });
 
+test('supply receipt retries are idempotent by operation id', () => {
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('window.openSupplyReceipt',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/operationKey=String\(operationId\|\|''\)\.trim\(\)/);
+    assert.match(source,/const receiptRef=db\.collection\('receipts'\)\.doc\(operationKey\)/);
+    assert.match(source,/const receiptSnap=await tx\.get\(receiptRef\)/);
+    assert.match(source,/if\(receiptSnap\.exists\)\{/);
+    assert.match(source,/alreadyProcessed=true/);
+    assert.match(source,/if\(alreadyProcessed\)return \[\.\.\.affectedOrderIds\]/);
+    assert.match(source,/operationId:operationKey/);
+
+    const saveStart=app.indexOf('window.savePoReceiptBatch = async function()');
+    const saveEnd=app.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
+    const save=app.slice(saveStart,saveEnd);
+    assert.match(save,/operationBase=poReceiptOperationId\|\|ensureReceiptOperationId\(supplyId\)/);
+    assert.match(save,/receiveSupplyOrderRecord\(supplyId,entry\.qty,entry\.lotNo,entry\.expiryDate,operationId\)/);
+    assert.match(save,/clearReceiptOperationId\(supplyId\)/);
+});
+
+test('receipt modal close function exists and does not discard retry key', () => {
+    const start=app.indexOf('window.closePoReceiptBatch = function()');
+    const end=app.indexOf('\n\nwindow.receiveSupplyOrder',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/poReceiptBatchOverlay/);
+    assert.match(source,/poReceiptTargetId=''/);
+    assert.doesNotMatch(source,/clearReceiptOperationId/);
+});
+
 test('warehouse receiving no longer mutates purchase-order receipt state', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
