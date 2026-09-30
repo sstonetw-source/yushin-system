@@ -15,6 +15,12 @@ const validate = vm.runInNewContext(`${validation}\nassertPurchaseLinesAvailable
     normalizedOrderItems: order => order.items
 });
 
+test('purchasing user-facing copy avoids legacy stock-order and source-order wording', () => {
+    assert.doesNotMatch(html, /來源訂單日期/);
+    assert.doesNotMatch(app, /原廠備貨是公司庫存採購/);
+    assert.match(html, /全部採購單則依正式訂購日期查詢/);
+});
+
 test('purchasing has three item-level work queues and no legacy number function', () => {
     for (const view of ['ordering', 'receiving', 'dispatch']) {
         assert.match(html, new RegExp(`id="purchase-card-${view}"`));

@@ -8988,11 +8988,11 @@ window.printPurchaseOrder = async function() {
         return;
     }
     if (poDirectStockMode && poItems.some(item => (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP')) {
-        alert('原廠備貨是公司庫存採購，不能設定為原廠直送。');
+        alert('新增庫存採購單是公司庫存採購，不能設定為原廠直送。');
         return;
     }
     if (poDirectStockMode && poItems.some(item => !String(item.warehouseId || defaultWarehouse()?.id || '').trim())) {
-        alert('原廠備貨必須指定入庫倉庫，請先建立或選擇倉庫。');
+        alert('新增庫存採購單必須指定入庫倉庫，請先建立或選擇倉庫。');
         return;
     }
     if (poItems.some(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP' && !String(item.warehouseId || defaultWarehouse()?.id || '').trim())) {
