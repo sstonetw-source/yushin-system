@@ -613,9 +613,19 @@ test('quote printing avoids long blocking image waits on mobile', () => {
     const waitSource = appSource.slice(waitStart, waitEnd);
     assert.match(openSource, /preloadComparisonQuoteImages\(\)/);
     assert.match(appSource, /function preloadComparisonQuoteImages\(\)/);
-    assert.match(waitSource, /1200/);
-    assert.doesNotMatch(waitSource, /5000/);
+    assert.match(waitSource, /300/);
+    assert.doesNotMatch(waitSource, /5000|1200/);
 });
+
+test('quote print mode isolates the printable quote from the rest of the app', () => {
+    assert.match(appSource, /document\.body\.classList\.add\('printing-quote'\)/);
+    assert.match(appSource, /classList\.add\('printing-quote', 'printing-three-quotes'\)/);
+    assert.match(appSource, /classList\.remove\('printing-quote'\)/);
+    assert.match(cssSource, /body\.printing-quote \.content-section \{ display: none !important; \}/);
+    assert.match(cssSource, /body\.printing-quote #quote-system \{ display: block !important; \}/);
+    assert.match(cssSource, /#quoteCreatePanel > \*:not\(#printableQuote\):not\(#comparisonQuotePrintPages\)/);
+});
+
 
 test('quote and order search-index migration is admin-only batched and idempotent', () => {
     const start = appSource.indexOf('window.backfillOrderSearchIndex =');
