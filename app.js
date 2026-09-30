@@ -12195,9 +12195,10 @@ function inventoryAnalysisTotals(start,end) {
         const lotCost = inventoryAnalysisLotCosts.get(receipt.lotId);
         purchase += Number(receipt.qty || 0) * Number(lotCost?.unitCost || 0);
     });
-    // 原廠直送不進倉庫，因此採購成本直接由 supplyOrders 的直送紀錄計入。
+    // 原廠直送不進倉庫，因此採購成本直接由 supplyOrders 的實際到貨量計入；
+    // 未到貨的訂購量仍是在途，不能提前算成期間採購。
     inventoryAnalysisDirectShipSupplyOrders.forEach(supply => {
-        purchase += Number(supply.qty || 0) * Number(supply.unitCost || 0);
+        purchase += Number(supply.receivedQty || 0) * Number(supply.unitCost || 0);
     });
     const sales = salesStatisticsOrders.flatMap(salesStatisticOrderLines).reduce((sum, order) => {
         const contribution = calculateOrderStatsContribution(order, start, end);

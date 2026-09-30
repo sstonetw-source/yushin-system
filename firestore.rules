@@ -57,13 +57,6 @@ service cloud.firestore {
       return admin() || purchaser() || warehouse();
     }
 
-    function warehousePurchaseReceiptUpdate() {
-      return warehouse()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'receiptRecords', 'receiptStatus', 'status', 'updatedAt'
-        ]);
-    }
-
     function canManageEquipment() {
       return admin() || engineer();
     }
@@ -359,7 +352,9 @@ service cloud.firestore {
     match /purchaseOrders/{id} {
       allow read: if admin() || purchaser() || warehouse();
       allow create: if canPurchase();
-      allow update: if canPurchase() || warehousePurchaseReceiptUpdate();
+      // The PO is an immutable document snapshot for warehouse users. Receiving
+      // progress belongs to supplyOrders and receipts, never back on the PO.
+      allow update: if canPurchase();
       allow delete: if admin();
     }
 
@@ -377,7 +372,7 @@ service cloud.firestore {
       allow update: if admin() || purchaser()
         || (warehouse()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'receivedQty', 'status', 'updatedAt'
+            'receivedQty', 'incomingRegisteredQty', 'status', 'updatedAt'
           ]))
         || (sales()
           && resource.data.type == 'SALES_SELF_ORDER'

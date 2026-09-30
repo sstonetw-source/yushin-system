@@ -360,7 +360,7 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     const transactionEnd = printSource.indexOf('await commitPromise');
     const coreTransaction = printSource.slice(transactionStart, transactionEnd);
     assert.match(coreTransaction, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
-    assert.match(coreTransaction, /type:'PURCHASING_PO'/);
+    assert.match(coreTransaction, /type:item\.orderId\?'PURCHASING_PO':'STOCK_REPLENISHMENT'/);
     assert.match(coreTransaction, /purchaseDocumentId:poDocumentId/);
     assert.match(coreTransaction, /poRecord\.supplyOrderIds=supplyOrderIds/);
     assert.match(coreTransaction, /supplyOrderedQty:cumulative/);

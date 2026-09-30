@@ -1371,6 +1371,15 @@ test('Phase 2-6 completion integrates supplier mapping, warehouses and direct sh
     assert.match(appSource, /WAREHOUSE/);
 });
 
+test('direct-ship purchase analysis counts only received supply quantity', () => {
+    const start = appSource.indexOf('function inventoryAnalysisTotals');
+    const end = appSource.indexOf('function renderInventoryAnalysisSummary', start);
+    const source = appSource.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    assert.match(source, /Number\(supply\.receivedQty \|\| 0\) \* Number\(supply\.unitCost \|\| 0\)/);
+    assert.doesNotMatch(source, /Number\(supply\.qty \|\| 0\) \* Number\(supply\.unitCost \|\| 0\)/);
+});
+
 test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receiving', () => {
     const reserveStart = appSource.indexOf('async function reserveSingleOrderItem');
     const reserveEnd = appSource.indexOf('async function reserveInventoryForNewOrder', reserveStart);
@@ -1405,7 +1414,7 @@ test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership c
 test('V2 formal purchase documents create authoritative supply lines', () => {
     assert.match(appSource, /function formalSupplyOrderId/);
     assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
-    assert.match(appSource, /type:'PURCHASING_PO'/);
+    assert.match(appSource, /type:item\.orderId\?'PURCHASING_PO':'STOCK_REPLENISHMENT'/);
     assert.match(appSource, /purchaseDocumentId:poDocumentId/);
     assert.match(appSource, /purchaseDocumentNo:poNo/);
     assert.match(appSource, /poRecord\.supplyOrderIds=supplyOrderIds/);

@@ -324,14 +324,24 @@ test('shared stock documents reject embedded cost fields', async () => {
   await assertFails(setDoc(doc(db('wh1'), 'warehouseStocks/newCost'), { onHand:1, reserved:0, cost:50 }));
 });
 
-test('warehouse purchase order update is limited to receipt workflow fields', async () => {
+test('warehouse cannot mutate purchase-order snapshots; receiving state lives on supply orders', async () => {
   await seed('purchaseOrders/po-receive', {
     poNo:'PO-1', vendorName:'Vendor', items:[{ itemCode:'A', qty:5, unitPrice:100 }],
     status:'active', receiptStatus:'pending', receiptRecords:[]
   });
-  await assertSucceeds(updateDoc(doc(db('wh1'), 'purchaseOrders/po-receive'), {
+  await seed('supplyOrders/supply-receive', {
+    type:'PURCHASING_PO', qty:5, receivedQty:0, incomingRegisteredQty:5,
+    status:'ORDERED', purchaseDocumentId:'po-receive'
+  });
+  await assertFails(updateDoc(doc(db('wh1'), 'purchaseOrders/po-receive'), {
     receiptRecords:[{ itemIndex:0, qty:2 }],
     receiptStatus:'partial',
+    updatedAt:'2026-09-21T00:00:00Z'
+  }));
+  await assertSucceeds(updateDoc(doc(db('wh1'), 'supplyOrders/supply-receive'), {
+    receivedQty:2,
+    incomingRegisteredQty:3,
+    status:'PARTIAL_RECEIPT',
     updatedAt:'2026-09-21T00:00:00Z'
   }));
   await assertFails(updateDoc(doc(db('wh1'), 'purchaseOrders/po-receive'), {
