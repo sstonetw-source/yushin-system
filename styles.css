@@ -543,6 +543,17 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     .no-print, button, .sub-nav, .nav-tabs { display: none !important; }
     .print-empty-field { display: none !important; }
 
+    /* 估價單快速列印模式：只讓列印引擎處理估價單本體。
+       iPhone Safari 即使其他模組畫面上未顯示，仍可能為大型 DOM 做 print layout；
+       明確排除可大幅降低產生 PDF 預覽前的等待。 */
+    body.printing-quote .content-section { display: none !important; }
+    body.printing-quote #quote-system { display: block !important; }
+    body.printing-quote #quote-system > .sub-nav,
+    body.printing-quote #quote-system > #myQuotesPanel { display: none !important; }
+    body.printing-quote #quoteCreatePanel > .sub-nav,
+    body.printing-quote #quoteCreatePanel > .quote-primary-actions { display: none !important; }
+    body.printing-quote #quoteCreatePanel > *:not(#printableQuote):not(#comparisonQuotePrintPages) { display: none !important; }
+
     /* 列印估價單時完全排除其他大型系統區塊，減少 Chrome 排版與列印預覽的處理量。 */
     body:not(.printing-po) #order-system,
     body:not(.printing-po) #equipment-system,
