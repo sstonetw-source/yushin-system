@@ -6952,10 +6952,6 @@ function purchasingCompletedRows() {
     return rows;
 }
 
-function visiblePurchasingCompletedRows() {
-    return purchasingCompletedRows().slice(0, purchasingCompletedVisibleLimit);
-}
-
 function renderPurchasingCompletedOrders() {
     const body = document.getElementById('purchaseCompletedBody');
     const status = document.getElementById('purchaseCompletedStatus');

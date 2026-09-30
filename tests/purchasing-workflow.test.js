@@ -271,7 +271,6 @@ test('purchasing completed card is not capped by the visible 50-row page', () =>
 test('purchasing completed starts at 50 rows and supports loading more', () => {
     assert.match(html, /id="purchaseCompletedMoreBtn"/);
     assert.match(app, /let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT/);
-    assert.match(app, /function visiblePurchasingCompletedRows\(\)/);
     assert.match(app, /window\.loadMorePurchasingCompleted = async function\(\)/);
     assert.match(app, /purchasingCompletedVisibleLimit \+= DEFAULT_LIST_LIMIT/);
     assert.match(app, /await loadPurchasingDispatchOrders\(false\)/);
