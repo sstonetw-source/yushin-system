@@ -10219,6 +10219,45 @@ window.onOrderLifecycleStatusChange = function() {
     document.getElementById('orderLifecycleReason').placeholder = status === 'normal' ? '恢復說明（選填）' : '取消原因（選填）';
 };
 
+function returnItemDeliveredQty(order,itemId) {
+    const items=normalizedOrderItems(order);
+    return savedDeliveryRecords(order)
+        .filter(record=>(record.itemId||((items.length===1&&items[0]?.itemId)||''))===itemId)
+        .reduce((sum,record)=>sum+Number(record.qty||0),0);
+}
+
+function returnItemReturnedQty(order,itemId,excludeRecordId='') {
+    const items=normalizedOrderItems(order);
+    return savedReturnRecords(order)
+        .filter(record=>record.id!==excludeRecordId&&(record.itemId||((items.length===1&&items[0]?.itemId)||''))===itemId)
+        .reduce((sum,record)=>sum+Number(record.qty||0),0);
+}
+
+function populateReturnItemOptions(order,selectedItemId='') {
+    const select=document.getElementById('returnItemId');
+    if(!select||!order)return;
+    const items=normalizedOrderItems(order);
+    const options=items.filter(item=>returnItemDeliveredQty(order,item.itemId)>0);
+    select.innerHTML=options.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||item.itemName||item.itemId)}｜${escapeHtml(item.itemName||'')}</option>`).join('');
+    const preferred=selectedItemId||options[0]?.itemId||'';
+    if(preferred&&options.some(item=>item.itemId===preferred))select.value=preferred;
+    select.disabled=!!document.getElementById('returnEditId')?.value;
+}
+
+window.updateReturnFormHint = function() {
+    const order=ordersCache.find(item=>item.id===currentLifecycleOrderId);
+    const hint=document.getElementById('returnFormHint');
+    if(!order||!hint)return;
+    const items=normalizedOrderItems(order);
+    const selectedItemId=document.getElementById('returnItemId')?.value||(items.length===1?items[0]?.itemId:'');
+    const editId=document.getElementById('returnEditId')?.value||'';
+    if(!selectedItemId){hint.innerText='請先選擇要退貨的品項。';return;}
+    const item=items.find(row=>row.itemId===selectedItemId);
+    const delivered=returnItemDeliveredQty(order,selectedItemId);
+    const otherReturned=returnItemReturnedQty(order,selectedItemId,editId);
+    hint.innerText=`${item?.itemName||item?.itemCode||'此品項'}目前最多還可登錄 ${Math.max(0,delivered-otherReturned)} 個退貨。`;
+};
+
 window.resetReturnForm = function() {
     document.getElementById('returnEditId').value = '';
     document.getElementById('returnDate').value = localDateString();
@@ -10226,6 +10265,9 @@ window.resetReturnForm = function() {
     document.getElementById('returnReason').value = '';
     document.getElementById('returnFormTitle').innerText = '新增退貨紀錄';
     document.getElementById('returnCancelEditBtn').style.display = 'none';
+    const order=ordersCache.find(item=>item.id===currentLifecycleOrderId);
+    populateReturnItemOptions(order);
+    updateReturnFormHint();
 };
 
 function renderOrderLifecycleModal() {
@@ -10247,7 +10289,9 @@ function renderOrderLifecycleModal() {
         <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
         <td>${editable ? `<button type="button" class="btn-small" onclick="editReturnRecord('${escapeAttr(record.id)}')">編輯</button> <button type="button" class="btn-danger" onclick="deleteReturnRecord('${escapeAttr(record.id)}')">刪除</button>` : '僅可查看'}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:#888;">尚無退貨紀錄。</td></tr>';
-    document.getElementById('returnFormHint').innerText = `目前最多還可登錄 ${Math.max(0, info.delivered - info.returned)} 個退貨。`;
+    const editingRecord=records.find(record=>record.id===document.getElementById('returnEditId')?.value);
+    populateReturnItemOptions(order,editingRecord?.itemId||'');
+    updateReturnFormHint();
     onOrderLifecycleStatusChange();
 }
 
@@ -10307,14 +10351,15 @@ window.editReturnRecord = function(recordId) {
     const record = savedReturnRecords(order).find(item => item.id === recordId);
     if (!record) return;
     document.getElementById('returnEditId').value = record.id;
+    populateReturnItemOptions(order,record.itemId||'');
+    const returnItemSelect=document.getElementById('returnItemId');if(returnItemSelect)returnItemSelect.disabled=true;
     document.getElementById('returnDate').value = record.date || localDateString();
     document.getElementById('returnQty').value = record.qty;
     document.getElementById('returnReason').value = record.reason || '';
     document.getElementById('returnFormTitle').innerText = '編輯退貨紀錄';
     document.getElementById('returnCancelEditBtn').style.display = '';
     document.getElementById('returnFormPanel').style.display = '';
-    const otherQty = savedReturnRecords(order).filter(item => item.id !== recordId).reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-    document.getElementById('returnFormHint').innerText = `此筆最多可改為 ${Math.max(0, deliveredQuantity(order) - otherQty)} 個。`;
+    updateReturnFormHint();
 };
 
 window.saveReturnRecord = async function() {
@@ -10349,7 +10394,7 @@ window.saveReturnRecord = async function() {
                 const id=row.itemId || (orderItems.length===1?orderItems[0]?.itemId:'');
                 if(id)deliveredByItem.set(id,Number(deliveredByItem.get(id)||0)+Number(row.qty||0));
             });
-            const requestedItemId=previous?.itemId || (orderItems.length===1?orderItems[0]?.itemId:'');
+            const requestedItemId=previous?.itemId || document.getElementById('returnItemId')?.value || (orderItems.length===1?orderItems[0]?.itemId:'');
             const targetItem=orderItems.find(item=>item.itemId===requestedItemId) || (orderItems.length===1?orderItems[0]:null);
             if(!targetItem)throw new Error('多品項訂單的退貨必須指定原送貨品項。');
             const otherReturned=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((sum,row)=>sum+Number(row.qty||0),0);
