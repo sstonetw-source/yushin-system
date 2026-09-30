@@ -730,6 +730,26 @@ test('supply receipt retries are idempotent by operation id', () => {
     assert.match(save,/clearReceiptOperationId\(supplyId\)/);
 });
 
+test('delivery progress uses net delivered quantity after returns', () => {
+    const start=app.indexOf('function deliveryProgressInfo');
+    const end=app.indexOf('\nfunction savedReturnRecords',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    const context=vm.createContext({
+        orderQuantity:()=>10,
+        deliveredQuantity:()=>10,
+        returnedQuantity:()=>2,
+        savedDeliveryRecords:()=>[{qty:10}]
+    });
+    vm.runInContext(source,context);
+    const progress=context.deliveryProgressInfo({isDelivered:true});
+    assert.equal(progress.grossDelivered,10);
+    assert.equal(progress.returned,2);
+    assert.equal(progress.delivered,8);
+    assert.equal(progress.remaining,2);
+    assert.equal(progress.state,'partial');
+});
+
 test('dispatch readiness uses live reservation and supports later receipt batches', () => {
     const start=app.indexOf('function itemDispatchState');
     const end=app.indexOf('\nfunction orderContextActionState',start);
