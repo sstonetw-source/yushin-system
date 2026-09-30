@@ -5112,13 +5112,19 @@ window.searchBusinessProducts=async function(){
    ]);
    const map=new Map();[...(codeSnap.docs||[]),...(nameSnap.docs||[])].forEach(doc=>map.set(doc.id,{id:doc.id,...doc.data()}));
    const products=[...map.values()].slice(0,25);
-   const inventoryIds=products.map(product=>encodeURIComponent(product.productId||product.id));
-   const stockById=new Map();
-   if(inventoryIds.length){
-     const stockSnap=await db.collection('inventory').where(firebase.firestore.FieldPath.documentId(),'in',inventoryIds).get();
-     stockSnap.docs.forEach(doc=>stockById.set(doc.id,doc.data()));
+   const productKeys=[...new Set(products.map(product=>String(product.productId||product.id||'').trim()).filter(Boolean))];
+   const stockByProduct=new Map();
+   if(productKeys.length){
+     const stockSnap=await db.collection('warehouseStocks').where('productKey','in',productKeys).get();
+     stockSnap.docs.forEach(doc=>{
+       const row=doc.data(),key=String(row.productKey||row.productId||'').trim();
+       if(!key)return;
+       const current=stockByProduct.get(key)||{onHand:0,reserved:0,incoming:0};
+       const n=inventoryNumbers(row);
+       stockByProduct.set(key,{onHand:current.onHand+n.onHand,reserved:current.reserved+n.reserved,incoming:current.incoming+n.incoming});
+     });
    }
-   body.innerHTML=products.map(product=>{const inventoryId=encodeURIComponent(product.productId||product.id);const n=inventoryNumbers(stockById.get(inventoryId)||{});return `<tr><td>${escapeHtml(product.manufacturerPartNo||'')}</td><td>${escapeHtml(product.productName||'')}</td><td>${escapeHtml(product.brandName||'')}</td><td>${Number(product.listPrice||0).toLocaleString()}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td></tr>`;}).join('')||'<tr><td colspan="7">查無結果</td></tr>';
+   body.innerHTML=products.map(product=>{const key=String(product.productId||product.id||'').trim();const rawStock=stockByProduct.get(key)||{};const n=inventoryNumbers(rawStock);return `<tr><td>${escapeHtml(product.manufacturerPartNo||'')}</td><td>${escapeHtml(product.productName||'')}</td><td>${escapeHtml(product.brandName||'')}</td><td>${Number(product.listPrice||0).toLocaleString()}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td></tr>`;}).join('')||'<tr><td colspan="7">查無結果</td></tr>';
    if(wrap)wrap.style.display='';if(status)status.textContent=`完成，共 ${products.length} 筆`;
  }catch(err){if(status)status.textContent='查詢失敗';alert('產品查詢失敗：'+err.message);}
  finally{if(input)input.disabled=false;}
