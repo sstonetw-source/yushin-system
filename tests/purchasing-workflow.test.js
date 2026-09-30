@@ -793,9 +793,19 @@ test('PO number generation ignores stale async results and never falls back to s
     assert.doesNotMatch(source, /catch \(e\)[\s\S]*?prefix\}01/);
 });
 
+test('reopening a saved PO derives incoming sync state from supplyOrders', () => {
+    const helper = app.match(/async function purchaseIncomingSyncPending\(po\) \{[\s\S]*?\n\}/)?.[0];
+    const reprint = app.match(/window\.reprintPurchaseOrder = async function\(poId\) \{[\s\S]*?\n\};/)?.[0];
+    assert.ok(helper && reprint);
+    assert.match(helper,/readDocumentsByIds\('supplyOrders', supplyIds\)/);
+    assert.match(helper,/incomingRegisteredQty/);
+    assert.match(helper,/registeredQty < targetQty/);
+    assert.match(reprint,/await purchaseIncomingSyncPending\(po\)/);
+});
+
 test('closing or reprinting a PO invalidates any pending PO number request', () => {
     const closeSource = app.match(/window\.closePurchaseOrderModal = function\(\) \{[\s\S]*?\n\};/)?.[0];
-    const reprintSource = app.match(/window\.reprintPurchaseOrder = function\(poId\) \{[\s\S]*?\n\};/)?.[0];
+    const reprintSource = app.match(/window\.reprintPurchaseOrder = async function\(poId\) \{[\s\S]*?\n\};/)?.[0];
     assert.ok(closeSource && reprintSource);
     assert.match(closeSource, /poNoGeneration\+\+/);
     assert.match(reprintSource, /poNoGeneration\+\+/);
