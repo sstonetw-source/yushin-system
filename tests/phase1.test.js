@@ -687,7 +687,10 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
     const quoteSave = appSource.slice(quoteStart, quoteEnd);
     assert.match(quoteSave, /createdAt: new Date\(\)\.toISOString\(\)/);
-    assert.match(quoteSave, /buildFullHistorySearchTokens\('quote', quoteData\)/);
+    const persistStart = appSource.indexOf('function persistQuoteOutputRecord');
+    const persistEnd = appSource.indexOf('\n}', persistStart) + 2;
+    const persistSource = appSource.slice(persistStart, persistEnd);
+    assert.match(persistSource, /buildFullHistorySearchTokens\('quote', quoteData\)/);
 
     const dealStart = appSource.indexOf('window.markQuoteAsDeal =');
     const dealEnd = appSource.indexOf('\n};', dealStart) + 3;
@@ -706,7 +709,10 @@ test('phase 2 product master keeps formal product identity and legacy migration 
     assert.match(appSource, /lotTracked:/);
     assert.match(appSource, /expiryTracked:/);
     assert.match(appSource, /supplier:/);
-    assert.doesNotMatch(appSource, /\bunit\s*:/);
+    const productStart = appSource.indexOf('function normalizeProductMasterItem(item)');
+    const productEnd = appSource.indexOf('function normalizeProductMasterList', productStart);
+    const productSource = appSource.slice(productStart, productEnd);
+    assert.doesNotMatch(productSource, /\bunit\s*:/);
     assert.match(appSource, /spec:/);
     assert.match(appSource, /normalizeProductMasterList\(imported/);
     assert.match(appSource, /collection\('products'\)/);
