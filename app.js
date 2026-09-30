@@ -4077,7 +4077,7 @@ window.printThreeQuotes = async function() {
         rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
         persistQuoteOutputRecord(quoteData, '三家估價 PDF');
 
-        const first = createQuotePdfStage();
+        const first = createQuotePdfStage(quoteData);
         firstStage = first.stage;
         await waitForPdfImages(first.clone);
 
@@ -4188,44 +4188,102 @@ function waitForPdfImages(root) {
     }));
 }
 
-function createQuotePdfStage() {
-    prepareQuoteForPrint();
-    const source = document.getElementById('printableQuote');
-    if (!source) throw new Error('找不到估價單內容');
+function quotePdfExtraRows(item = {}) {
+    return [
+        ['產地', item.origin],
+        ['交貨期', item.leadTime],
+        ['院內料號', item.hospitalItemCode],
+        ['備註', item.remarks],
+        ...(Array.isArray(item.customFields) ? item.customFields.map(field => [field.label, field.value]) : [])
+    ].filter(([label, value]) => String(label || '').trim() && String(value || '').trim());
+}
 
+function renderQuotePdfDocument(quoteData = {}) {
+    const companyKey = quoteData.company || currentCompany;
+    const info = comparisonCompanyData[companyKey] || companyData[companyKey] || companyData.yushin;
+    const logo = comparisonCompanyData[companyKey]?.logo || '';
+    const stamp = info?.stamp || '';
+    const total = parseFloat(String(quoteData.grandTotal || '0').replace(/,/g, '')) || 0;
+    const subtotal = Math.round(total / 1.05);
+    const tax = Math.round(total - total / 1.05);
+    const discountRate = parseFloat(quoteData.discountRate) || 0;
+    const validDays = String(quoteData.validDays ?? '').trim();
+    const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(quoteData.salesName));
+    const salesPhone = selectedSales?.phone || '';
+    const items = Array.isArray(quoteData.items) ? quoteData.items : [];
+
+    const root = document.createElement('div');
+    root.className = `quote-pdf-document theme-${escapeAttr(companyKey)}`;
+    root.innerHTML = `
+        <div class="header-container">
+            ${logo ? `<img class="company-logo quote-pdf-logo" src="${escapeAttr(logo)}" alt="${escapeAttr(info?.title || '')} Logo">` : ''}
+            <div class="header-info">
+                <h1>${escapeHtml(info?.title || '')}</h1>
+                <h2>${escapeHtml(info?.sub || '')}</h2>
+                ${info?.addr ? `<p>${escapeHtml(info.addr)}</p>` : ''}
+                ${info?.contact ? `<p>${info.contact}</p>` : ''}
+                <h2 class="quote-pdf-title">估 價 單</h2>
+            </div>
+        </div>
+        <div class="meta-section">
+            ${quoteData.clientName ? `<div class="meta-row"><label>抬頭：</label><span class="quote-pdf-value">${escapeHtml(quoteData.clientName)}</span></div>` : ''}
+            <div class="meta-row-three">
+                <div><label>負責業務：</label><span class="quote-pdf-value">${escapeHtml(quoteData.salesName || '')}${salesPhone ? '　' + escapeHtml(salesPhone) : ''}</span></div>
+                <div><label>估價日期：</label><span class="quote-pdf-value">${escapeHtml(quoteData.quoteDate || '')}</span></div>
+                <div><label>單號：</label><span class="quote-pdf-value quote-pdf-no">${escapeHtml(quoteData.quoteNo || '')}</span></div>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="quote-pdf-table">
+                <thead><tr><th>項次</th><th>品名 / 規格 / 型號說明</th><th>數量</th><th>含稅單價</th><th>未稅單價</th><th>含稅小計</th></tr></thead>
+                <tbody class="quote-pdf-items">
+                    ${items.map((item, index) => {
+                        const extras = quotePdfExtraRows(item);
+                        return `<tr>
+                            <td>${index + 1}</td>
+                            <td>
+                                <div class="quote-pdf-item-detail">
+                                    ${item.nameEn ? `<div><b>英文品名：</b>${escapeHtml(item.nameEn)}</div>` : ''}
+                                    ${item.nameCn ? `<div><b>中文品名：</b>${escapeHtml(item.nameCn)}</div>` : ''}
+                                    ${item.model ? `<div><b>貨號：</b>${escapeHtml(item.model)}</div>` : ''}
+                                    ${item.brand ? `<div><b>廠牌：</b>${escapeHtml(item.brand)}</div>` : ''}
+                                    ${item.spec ? `<div><b>規格：</b><span class="quote-pdf-prewrap">${escapeHtml(item.spec)}</span></div>` : ''}
+                                    ${extras.map(([label, value]) => `<div class="quote-pdf-extra"><b>${escapeHtml(label)}：</b>${escapeHtml(value)}</div>`).join('')}
+                                </div>
+                            </td>
+                            <td>${escapeHtml(String(item.qty ?? ''))}</td>
+                            <td>${Number(item.price || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td>
+                            <td>${Number(item.exPrice || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td>
+                            <td>${Number(item.subtotal || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div class="quote-summary-block">
+            ${validDays ? `<div class="footer-note">* 本估價單有效期限 ${escapeHtml(validDays)} 天。</div>` : ''}
+            <div class="bottom-layout">
+                <div class="stamp-section">${stamp ? `<img src="${escapeAttr(stamp)}" alt="${escapeAttr(info?.title || '')} 估價單章">` : ''}</div>
+                <div class="total-section">
+                    <p>銷售額合計：NT$ <span>${subtotal.toLocaleString()}</span></p>
+                    <p>營業稅 (5%)：NT$ <span>${tax.toLocaleString()}</span></p>
+                    ${discountRate ? `<p>優惠折扣：${discountRate}%</p>` : ''}
+                    <p class="quote-pdf-grand-total">總計金額：NT$ <span>${Math.round(total).toLocaleString()}</span></p>
+                    <p>合計新台幣 ${numberToChineseWords(Math.round(total))}元整</p>
+                </div>
+            </div>
+        </div>
+    `;
+    return root;
+}
+
+function createQuotePdfStage(quoteData) {
     const stage = document.createElement('div');
     stage.className = 'quote-pdf-stage';
-    const clone = source.cloneNode(true);
-    clone.classList.add('quote-pdf-document');
-    stage.appendChild(clone);
+    const documentNode = renderQuotePdfDocument(quoteData);
+    stage.appendChild(documentNode);
     document.body.appendChild(stage);
-
-    clone.querySelectorAll('.no-print, .quote-extra-fields, button, [type="hidden"]').forEach(el => el.remove());
-    clone.querySelectorAll('.print-empty-field').forEach(el => el.remove());
-
-    const discount = clone.querySelector('#discountRateInput');
-    if (discount && !(parseFloat(discount.value) || 0)) {
-        clone.querySelector('#discountRow')?.remove();
-    }
-
-    // 品名、貨號、廠牌已有 prepareQuoteForPrint 建立的完整文字鏡像，PDF 只保留文字，避免表單控制項拖慢擷取。
-    clone.querySelectorAll('.item-en, .item-cn, .item-model, .item-brand, .item-brand-other').forEach(el => el.remove());
-
-    clone.querySelectorAll('input, select, textarea').forEach(el => {
-        const span = document.createElement('span');
-        span.className = 'quote-pdf-value';
-        span.textContent = el.tagName === 'SELECT'
-            ? (el.options?.[el.selectedIndex]?.textContent || el.value || '')
-            : (el.value || '');
-        el.replaceWith(span);
-    });
-
-    // 非目前公司的隱藏 Logo 不需要交給 canvas 解碼。
-    clone.querySelectorAll('img').forEach(img => {
-        if (getComputedStyle(img).display === 'none') img.remove();
-    });
-
-    return { stage, clone };
+    return { stage, clone: documentNode };
 }
 
 function quotePdfSafePageEnd(clone, canvas, startY, desiredEndY) {
@@ -4300,7 +4358,7 @@ window.exportCurrentQuotePdf = async function() {
         // 雲端同步與 PDF 產生平行執行，不讓 Firestore 網路速度阻塞使用者。
         persistQuoteOutputRecord(quoteData, 'PDF');
 
-        const exportDom = createQuotePdfStage();
+        const exportDom = createQuotePdfStage(quoteData);
         stage = exportDom.stage;
         const clone = exportDom.clone;
         await waitForPdfImages(clone);
