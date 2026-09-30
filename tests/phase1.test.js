@@ -1130,13 +1130,14 @@ test('phase 19 Firestore rules enforce role boundaries for PO inventory reservat
 
 test('phase 20 core workflow contracts are all represented in regression coverage', () => {
     const required = [
-        'forecasts', 'quotes', 'orders', 'purchaseOrders', 'inventoryReservations',
+        'forecasts', 'quotes', 'orders', 'supplyOrders', 'purchaseOrders', 'inventoryReservations',
         'pendingInventoryItems', 'inventoryMovements', 'salesCodes', 'brands', 'customers'
     ];
     required.forEach(name => assert.match(appSource, new RegExp(name)));
     assert.match(appSource, /reserveInventoryForNewOrder/);
     assert.match(appSource, /registerPurchaseIncoming/);
-    assert.match(appSource, /receivePurchaseOrder/);
+    assert.match(appSource, /receiveSupplyOrderRecord/);
+    assert.doesNotMatch(appSource, /window\.receivePurchaseOrder/);
     assert.match(appSource, /applyInventoryDeliveryInTransaction/);
     assert.match(appSource, /syncLegacyBrandSettingsToMaster/);
     assert.match(appSource, /executeSalesTransfer/);
