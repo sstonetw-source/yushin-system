@@ -9548,9 +9548,9 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
 
     const invSnap = await transaction.get(invRef);
     const whSnap = await transaction.get(whRef);
-    if (!invSnap.exists || !whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
+    if (!whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
 
-    const inv = inventoryNumbers(invSnap.data()), wh = inventoryNumbers(whSnap.data());
+    const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {}), wh = inventoryNumbers(whSnap.data());
     const initialReserved = Number(order.reservedQty || 0);
     const oldDelivered = savedDeliveryRecords(order).reduce((sum,row)=>sum+Number(row.qty||0),0);
     const newDelivered = Math.max(0, oldDelivered + deltaQty);
@@ -9585,7 +9585,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         cogs=-reversal.totalCost;
     }
 
-    transaction.set(invRef,{onHand:Math.max(0,inv.onHand-deltaQty),reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
+    if (invSnap.exists) transaction.set(invRef,{onHand:Math.max(0,inv.onHand-deltaQty),reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand-deltaQty,reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
         warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
@@ -9610,8 +9610,8 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     if (!invRef || !whRef) throw new Error('此訂單沒有可追蹤的出貨倉庫。');
     const invSnap = await transaction.get(invRef);
     const whSnap = await transaction.get(whRef);
-    if (!invSnap.exists || !whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
-    const inv=inventoryNumbers(invSnap.data()), wh=inventoryNumbers(whSnap.data());
+    if (!whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
+    const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}), wh=inventoryNumbers(whSnap.data());
     if (deltaQty < 0 && wh.onHand < Math.abs(deltaQty)) {
         throw new Error('刪除／縮減退貨後會造成庫存小於 0。');
     }
@@ -9642,7 +9642,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const reservationDelta=deltaQty;
     const nextReserved=Math.max(0,inv.reserved+reservationDelta);
     const nextWarehouseReserved=Math.max(0,wh.reserved+reservationDelta);
-    transaction.set(invRef,{onHand:Math.max(0,inv.onHand+deltaQty),reserved:nextReserved,incoming:inv.incoming,updatedAt:now},{merge:true});
+    if (invSnap.exists) transaction.set(invRef,{onHand:Math.max(0,inv.onHand+deltaQty),reserved:nextReserved,incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:nextWarehouseReserved,incoming:wh.incoming,updatedAt:now},{merge:true});
     const deliveryItemId=order.itemId||'';
     const reservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
