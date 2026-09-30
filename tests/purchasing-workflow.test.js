@@ -362,19 +362,23 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     assert.ok(printSource.indexOf('await commitPromise') < printSource.indexOf('printSavedPoDocument(poNo, vendorName)'));
 });
 
-test('purchase receiving queue calculates progress per PO item',()=>{
-    assert.match(app,/function poItemReceiptProgress\(po,item,itemIndex\)/);
-    assert.match(app,/const receipt=poItemReceiptProgress\(po,item,itemIndex\)/);
-    assert.match(app,/receipt\.remaining<=0/);
-    assert.match(app,/receivePurchaseOrderItem\('\$\{escapeAttr\(po\.id\)\}',\$\{itemIndex\}\)/);
+test('purchase receiving queue calculates progress from supply orders only',()=>{
+    assert.match(app,/function receivingEvidenceForWorkItem\(order, item, itemIndex\)/);
+    assert.match(app,/supplyReceivingCache\.forEach\(supply =>/);
+    assert.match(app,/openSupplyReceipt\('\$\{escapeAttr\(entry\.id\)\}'\)/);
+    assert.doesNotMatch(app,/receivePurchaseOrderItem/);
+    assert.doesNotMatch(app,/poItemReceiptProgress/);
 });
 
 
-test('purchase receipt synchronizes received quantity back to the source order item',()=>{
-    assert.match(app,/const sourceReceivedQty=Math\.min\(Number\(sourceItem\.qty\|\|sourceItem\.orderedQty\|\|0\),Number\(sourceItem\.receivedQty\|\|0\)\+qty\)/);
-    assert.match(app,/\.\.\.row,receivedQty:sourceReceivedQty,/);
-    assert.match(app,/inventoryReservedQty:Number\(row\.inventoryReservedQty\|\|0\)\+reserveFromReceipt/);
-    assert.match(app,/if\(reserveFromReceipt>0\)\{/);
+test('supply receipt synchronizes received quantity back to the source order item',()=>{
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('window.openSupplyReceipt',start);
+    const source=app.slice(start,end);
+    assert.match(source,/const next=window\.YushinFulfillment\.applyReceipt\(item,qty\)/);
+    assert.match(source,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
+    assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
+    assert.match(source,/tx\.update\(supplyRef,\{receivedQty,status:/);
 });
 
 
@@ -403,7 +407,7 @@ test('purchasing state transitions refresh the derived order work index',()=>{
     assert.match(app,/const nextOrderData=\{\.\.\.orderData,items:nextItems[\s\S]*?\.\.\.orderWorkIndexFields\(nextOrderData\)/);
     assert.match(app,/savedOrder=\{\.\.\.order,items,itemCount:items\.length[\s\S]*?\.\.\.orderWorkIndexFields\(savedOrder\)/);
     assert.match(app,/const nextOrder=\{\.\.\.order,items,itemCount:items\.length[\s\S]*?\.\.\.orderWorkIndexFields\(nextOrder\)/);
-    assert.match(app,/const nextSourceOrder=\{\.\.\.sourceOrder,items:nextSourceItems[\s\S]*?\.\.\.orderWorkIndexFields\(nextSourceOrder\)/);
+    assert.match(app,/const nextOrder=\{\.\.\.order,items,itemCount:items\.length[\s\S]*?\.\.\.orderWorkIndexFields\(nextOrder\)/);
 });
 
 
@@ -651,62 +655,25 @@ test('pending purchasing work reports a shared order-load failure without overwr
 test('cancelled source is excluded from the order-aligned receiving queue', () => {
     assert.match(app,/if\(!sourceOrder \|\| normalizedOrderStatus\(sourceOrder\)!=='normal'\)return null/);
     assert.match(app,/不屬於目前訂單「待到貨」狀態，不計入上方工作卡/);
-    assert.match(app,/if\(normalizedOrderStatus\(sourceOrder\)!=='normal'\)throw new Error\('來源訂單已取消/);
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('window.openSupplyReceipt',start);
+    assert.match(app.slice(start,end),/來源訂單已取消，不能繼續確認到貨/);
 });
 
-test('cancelled warehouse PO receipt moves incoming to free stock exactly once', async () => {
-    const start=app.indexOf('async function receiveSinglePoLine(');
-    const end=app.indexOf('\nwindow.savePoReceiptBatch =',start);
+test('warehouse receiving no longer mutates purchase-order receipt state', () => {
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('window.openSupplyReceipt',start);
+    const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    const order={status:'cancelled',orderStatus:'cancelled',items:[{itemId:'item-1',qty:3,inventoryReservedQty:0,inventoryShortageQty:0,receivedQty:0}]};
-    const docs=new Map([
-        ['purchaseOrders/PO1',{items:[{orderId:'O1',orderItemIndex:0,productId:'P1',warehouseId:'W1',qty:3,unitPrice:10}],receiptRecords:[],receiptStatus:'pending'}],
-        ['orders/O1',order],
-        ['inventory/P1',{onHand:0,reserved:0,incoming:3,lots:[]}],
-        ['warehouseStocks/W1__P1',{onHand:0,reserved:0,incoming:3}],
-        ['pendingInventoryItems/W1__P1',{incomingQty:3}]
-    ]);
-    let sequence=0,allocated=0;
-    const ref=(name,id)=>({key:`${name}/${id??++sequence}`,id});
-    const db={collection:name=>({doc:id=>ref(name,id)}),async runTransaction(callback){
-        const writes=[];
-        const tx={
-            get:async r=>({id:r.id,exists:docs.has(r.key),data:()=>docs.get(r.key)}),
-            set:(r,value,options)=>writes.push([r,value,options]),
-            update:(r,value)=>writes.push([r,value,{merge:true}])
-        };
-        await callback(tx);
-        writes.forEach(([r,value,options])=>docs.set(r.key,options?.merge?{...docs.get(r.key),...value}:value));
-    }};
-    const context=vm.createContext({
-        db,window:{},currentUserName:'採購',currentUser:null,
-        purchaseItemsFromSavedPo:po=>po.items,receivedQuantityForPoItem:(po,index)=>(po.receiptRecords||[]).filter(row=>row.itemIndex===index).reduce((sum,row)=>sum+row.qty,0),
-        formalSupplyOrderId:(po,index)=>`${po}_${index}`,normalizedOrderStatus:row=>row.status==='cancelled'?'cancelled':'normal',
-        normalizedOrderItems:row=>row.items,poIncomingKey:item=>item.productId,defaultWarehouse:()=>({id:'W1'}),
-        warehouseStockDocId:(warehouse,key)=>`${warehouse}__${key}`,inventoryNumbers:row=>({onHand:row.onHand||0,reserved:row.reserved||0,incoming:row.incoming||0}),
-        resolveBrandName:name=>name,buildInventorySearchTokens:()=>[],localDateString:()=> '2026-09-27',
-        DEFAULT_CURRENCY:'TWD',BUSINESS_STATUS:{ACTIVE:'active',COMPLETED:'completed'},DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
-        invalidateWarehouseStockCache:()=>{},allocateFreeReceiptStockToShortages:async()=>{allocated++;return {affectedOrderIds:[]};}
-    });
-    vm.runInContext(app.slice(start,end),context);
-    await context.receiveSinglePoLine('PO1',0,3,'LOT1','','receipt-1');
-    assert.equal(docs.get('inventory/P1').onHand,3);
-    assert.equal(docs.get('inventory/P1').incoming,0);
-    assert.equal(docs.get('inventory/P1').reserved,0);
-    assert.equal(docs.get('warehouseStocks/W1__P1').onHand,3);
-    assert.equal(docs.get('warehouseStocks/W1__P1').incoming,0);
-    assert.equal(docs.get('warehouseStocks/W1__P1').reserved,0);
-    assert.equal(docs.get('pendingInventoryItems/W1__P1').incomingQty,0);
-    assert.deepEqual(docs.get('orders/O1'),order);
-    assert.equal(allocated,0);
-    assert.equal(docs.get('purchaseOrders/PO1').receiptStatus,'received');
-    await context.receiveSinglePoLine('PO1',0,3,'LOT1','','receipt-1');
-    assert.equal(docs.get('inventory/P1').onHand,3);
-    assert.equal(docs.get('purchaseOrders/PO1').receiptRecords.length,1);
-    assert.equal([...docs.keys()].filter(key=>key.startsWith('inventoryLots/')).length,1);
-    await assert.rejects(context.receiveSinglePoLine('PO1',0,3,'LOT1','','receipt-2'),/到貨數量不正確/);
-    assert.equal(docs.get('inventory/P1').onHand,3);
+    assert.match(source,/collection\('supplyOrders'\)/);
+    assert.match(source,/collection\('receipts'\)/);
+    assert.match(source,/warehouseStocks/);
+    assert.match(source,/pendingInventoryItems/);
+    assert.doesNotMatch(source,/purchaseOrders/);
+    assert.doesNotMatch(source,/receiptRecords/);
+    assert.doesNotMatch(source,/receiptStatus/);
 });
+
 
 test('purchasing pending card and detail share the same item work-state engine', () => {
     const cardStart=app.indexOf('function renderPurchasingWorkCards()');
