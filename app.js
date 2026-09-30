@@ -6747,6 +6747,7 @@ let poHistorySearchResults = [];
 let poHistorySearchActive = false;
 let poHistorySearchLoading = false;
 let poHistorySearchTimer = null;
+let poHistorySearchGeneration = 0;
 let supplyReceivingCache = [];
 let supplyReceivingCursor = null;
 let supplyReceivingHasMore = true;
@@ -7556,42 +7557,58 @@ window.schedulePurchaseOrderHistorySearch = function() {
 };
 
 async function runPurchaseOrderHistorySearch() {
+    const generation = ++poHistorySearchGeneration;
     if(purchasingView!=='history')return renderPoList();
     const keyword=document.getElementById('poListSearch')?.value||'';
     const status=document.getElementById('poHistorySearchStatus');
     const normalized=normalizeFullHistorySearchValue(keyword);
     if(!normalized){
-        poHistorySearchActive=false;poHistorySearchResults=[];
+        poHistorySearchActive=false;poHistorySearchResults=[];poHistorySearchLoading=false;
         if(status)status.textContent='';
         renderPoList();return;
     }
-    if(poHistorySearchLoading)return;
     poHistorySearchLoading=true;poHistorySearchActive=true;poHistorySearchResults=[];
     const results=new Map();
-    if(status)status.textContent='快速搜尋訂購單索引中…';
+    if(status)status.textContent='正在搜尋全部採購單…';
     renderPoList();
     try{
-        // 新資料先走 searchTokens 索引；最多只讀符合 token 的資料，不掃整個 collection。
+        // searchTokens 先把候選資料縮小，再逐頁讀完所有候選，避免只搜尋目前畫面的 50 筆。
+        // 這不是掃描整個 collection；只有符合索引 token 的文件會被讀取。
         const token=fullHistoryServerToken(keyword);
+        let checked=0;
+        let cursor=null;
         if(token){
-            const indexedSnap=await firestoreReadWithTimeout(
-                db.collection('purchaseOrders').where('searchTokens','array-contains',token).limit(DEFAULT_LIST_LIMIT).get(),
-                '訂購單索引搜尋'
-            );
-            indexedSnap.docs.forEach(doc=>{
-                const po={id:doc.id,...doc.data()};
-                if(purchaseOrderHistoryMatches(po,keyword))results.set(po.id,po);
-            });
-            poHistorySearchResults=[...results.values()].sort((a,b)=>(b.poNo||'').localeCompare(a.poNo||''));
-            renderPoList();
-            if(status)status.textContent=`全歷史搜尋：已找到 ${results.size} 筆`;
+            while(true){
+                let query=db.collection('purchaseOrders')
+                    .where('searchTokens','array-contains',token)
+                    .limit(DEFAULT_LIST_LIMIT);
+                if(cursor)query=query.startAfter(cursor);
+                const snapshot=await firestoreReadWithTimeout(query.get(),'訂購單索引搜尋');
+                if(generation!==poHistorySearchGeneration)return;
+                checked+=snapshot.size;
+                snapshot.docs.forEach(doc=>{
+                    const po={id:doc.id,...doc.data()};
+                    if(purchaseOrderHistoryMatches(po,keyword))results.set(po.id,po);
+                });
+                poHistorySearchResults=[...results.values()].sort((a,b)=>(b.poNo||'').localeCompare(a.poNo||''));
+                renderPoList();
+                if(status)status.textContent=`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${results.size} 筆…`;
+                if(snapshot.size<DEFAULT_LIST_LIMIT)break;
+                cursor=snapshot.docs[snapshot.docs.length-1];
+            }
         }
-
+        if(generation!==poHistorySearchGeneration)return;
         if(status)status.textContent=`全歷史搜尋完成：找到 ${results.size} 筆`;
     }catch(err){
+        if(generation!==poHistorySearchGeneration)return;
         console.error('訂購單全歷史搜尋失敗：',err);
         if(status)status.textContent='搜尋失敗，請重試';
-    }finally{poHistorySearchLoading=false;renderPoList();}
+    }finally{
+        if(generation===poHistorySearchGeneration){
+            poHistorySearchLoading=false;
+            renderPoList();
+        }
+    }
 }
 
 function receivingSourceOrderForItem(item) {

@@ -289,6 +289,18 @@ test('receiving waits for both order work state and purchase evidence before dec
     assert.match(app, /尚未找到對應採購紀錄/);
 });
 
+test('purchase-order history search reads every indexed match instead of stopping at 50', () => {
+    const start = app.indexOf('async function runPurchaseOrderHistorySearch()');
+    const end = app.indexOf('function receivingSourceOrderForItem', start);
+    const source = app.slice(start, end);
+    assert.match(source, /while\(true\)/);
+    assert.match(source, /\.where\('searchTokens','array-contains',token\)/);
+    assert.match(source, /if\(snapshot\.size<DEFAULT_LIST_LIMIT\)break/);
+    assert.match(source, /cursor=snapshot\.docs\[snapshot\.docs\.length-1\]/);
+    assert.match(source, /generation!==poHistorySearchGeneration/);
+    assert.match(source, /全歷史搜尋中：已檢查/);
+});
+
 test('purchase-order history search does not scan legacy unindexed history', () => {
     const start = app.indexOf('async function runPurchaseOrderHistorySearch()');
     const end = app.indexOf('function receivingSourceOrderForItem', start);

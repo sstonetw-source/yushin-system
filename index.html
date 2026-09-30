@@ -853,7 +853,7 @@
         <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
         <div id="poListPanel" style="display:none">
             <div class="toolbar no-print">
-                <input type="text" id="poListSearch" placeholder="搜尋全部訂購單：單號 / 廠商 / 採購人員" oninput="schedulePurchaseOrderHistorySearch()">
+                <input type="text" id="poListSearch" placeholder="搜尋全部採購單：單號 / 廠商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
                 <span id="poHistorySearchStatus" role="status"></span>
                 <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
             </div>
@@ -1419,6 +1419,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-2"></script>
-    <script src="app.js?v=20260930-10"></script>
+    <script src="app.js?v=20260930-11"></script>
 </body>
 </html>
