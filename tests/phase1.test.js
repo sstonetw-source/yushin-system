@@ -635,21 +635,21 @@ test('quote PDF document is rendered directly from quote data without cloning th
 });
 
 
-test('quote primary actions keep PDF prominent and move browser printing under more actions', () => {
+test('quote primary actions focus on PDF delivery workflow without a print button', () => {
     assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
-    assert.match(indexSource, /<details class="quote-more-actions">/);
-    assert.match(indexSource, /<summary>更多操作<\/summary>/);
-    assert.match(indexSource, /id="legacyQuotePrintBtn"[^>]*onclick="handleSaveAndPrint\(\)"[^>]*>🖨️ 列印／瀏覽器存 PDF<\/button>/);
-    assert.match(cssSource, /\.quote-more-actions-menu/);
-    assert.match(cssSource, /\.quote-primary-actions \.quote-more-actions/);
+    assert.match(indexSource, /產生三家估價單/);
+    assert.match(indexSource, /製作下一張估價單/);
+    assert.doesNotMatch(indexSource, /legacyQuotePrintBtn/);
+    assert.doesNotMatch(indexSource, /quote-more-actions/);
 });
+
+
 
 
 test('primary quote export generates PDF directly without browser print', () => {
     assert.match(indexSource, /html2canvas@1\.4\.1/);
     assert.match(indexSource, /jspdf@2\.5\.2/);
     assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
-    assert.match(indexSource, /id="legacyQuotePrintBtn"[^>]*onclick="handleSaveAndPrint\(\)"/);
     assert.match(appSource, /printBtn\.addEventListener\('click', exportCurrentQuotePdf\)/);
     assert.match(appSource, /window\.exportCurrentQuotePdf = async function/);
     assert.match(appSource, /window\.html2canvas\(clone/);
