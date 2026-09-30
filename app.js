@@ -10095,6 +10095,8 @@ window.saveDeliveryRecord = async function() {
             const itemReturned=savedReturnRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
             // 退貨後補送必須以「有效送貨量」驗證，而不是歷史累計送貨量。
             // 例如訂購10、曾送10、退2，可再補送2；歷史送貨會成為12，但有效送貨仍是10。
+            const itemGrossAfter=itemOtherDelivered+qty;
+            if(itemGrossAfter+1e-9<itemReturned)throw new Error(`${targetItem.itemName||'品項'} 累計送貨數量不能低於已登錄的退貨數量 ${itemReturned}。`);
             const itemOtherNetDelivered=Math.max(0,itemOtherDelivered-itemReturned);
             if(itemOtherNetDelivered+qty>Number(targetItem.qty||0)+1e-9)throw new Error(`${targetItem.itemName||'品項'} 有效送貨數量將超過訂購數量。`);
             if((targetItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
@@ -10183,6 +10185,11 @@ window.deleteDeliveryRecord = async function(recordId) {
             const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
             if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
             const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
+            const itemGrossAfter=itemRecords.filter(r=>r.id!==recordId).reduce((sum,row)=>sum+Number(row.qty||0),0);
+            const itemReturned=savedReturnRecords(order)
+                .filter(row=>((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId))
+                .reduce((sum,row)=>sum+Number(row.qty||0),0);
+            if(itemGrossAfter+1e-9<itemReturned)throw new Error(`${targetItem.itemName||'品項'} 刪除後的送貨數量會低於已登錄的退貨數量 ${itemReturned}，請先更正退貨紀錄。`);
             const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
             const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
             const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
