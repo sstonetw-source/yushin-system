@@ -2000,7 +2000,7 @@ window.permanentlyDeleteOrder = async function(orderId) {
     const order=ordersCache.find(row=>row.id===orderId);
     if(!order)return alert('找不到這筆訂單，請重新整理。');
     const hasFlow=savedDeliveryRecords(order).length>0||savedReturnRecords(order).length>0||
-        normalizedOrderItems(order).some(item=>Number(item.purchaseOrderedQty||0)>0||Number(item.purchaseReceivedQty||item.receivedQty||0)>0);
+        normalizedOrderItems(order).some(item=>Number(item.supplyOrderedQty||0)>0||Number(item.receivedQty||0)>0);
     if(hasFlow)return alert('這筆訂單已有採購／到貨／送貨／退貨紀錄。為避免庫存帳失真，請使用「系統初始化」清除整批測試資料，或先處理相關流程。');
     if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？系統會先釋放未使用的庫存占用。此操作無法復原。`))return;
     try{
@@ -5815,8 +5815,8 @@ function purchaseProgressInfo(order) {
     const direct=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP');
     const warehouse=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
     if(items.length&&direct.length===items.length)return {state:'direct',label:'原廠直送'};
-    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0)),0);
-    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0)),Number(item.supplyOrderedQty??item.purchaseOrderedQty??0)),0);
+    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.shortageQty||0)),0);
+    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.shortageQty||0)),Math.max(0,Number(item.supplyOrderedQty||0))),0);
     if(required<=0)return {state:'not_required',label:'無需採購'};
     if(ordered>=required)return {state:'ordered',label:`已訂貨 ${ordered}/${required}`};
     if(ordered>0)return {state:'partial',label:`部分訂貨 ${ordered}/${required}`};
@@ -5849,7 +5849,7 @@ function itemDispatchState(order, item) {
     // 品項工作狀態使用有效送貨量。已送貨後若發生退貨，必須退出「已完成／待核銷」，
     // 回到仍需補送的物流狀態；grossDelivered 保留給庫存與歷史追蹤。
     const delivered=Math.max(0,grossDelivered-returned);
-    const reserved=Number(item.reservedQty??item.inventoryReservedQty??0);
+    const reserved=Math.max(0,Number(item.reservedQty||0));
     const prepared=Number(item.dispatchPreparedQty||0);
     const shippable=Math.max(0,prepared-delivered);
     // reserved/prepared are cumulative quantities. Delivery consumes shippable
@@ -5867,7 +5867,7 @@ function orderContextActionState(order) {
     // 全數到貨走一般送貨流程；尚未到貨則不提供分批交貨，避免操作選單過早出現。
     const hasPartialArrival = items.some((item, index) => {
         const ordered = Math.max(0, Number(item.orderedQty || item.qty || 0));
-        const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
+        const received = Math.max(0, Number(item.receivedQty || 0));
         const state = states[index];
         // 分批交貨不只要「部分到貨」，還必須真的有尚未交付、目前可出貨的數量。
         // 避免部分到貨紀錄存在，但該批已全數送出時仍顯示無效操作。
@@ -5950,8 +5950,8 @@ function selfOrderActionHtml(order) {
     return normalizedOrderItems(order)
         .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
         .map(item => {
-            const required=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0));
-            const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+            const required=Math.max(0,Number(item.shortageQty||0));
+            const ordered=Math.max(0,Number(item.supplyOrderedQty||0));
             const remaining=Math.max(0,required-ordered);
             return {item,remaining};
         })
@@ -5964,8 +5964,8 @@ window.openSelfOrderModal = function(orderId,itemId) {
     const order=ordersCache.find(row=>row.id===orderId);
     const item=normalizedOrderItems(order||{}).find(row=>row.itemId===itemId);
     if(!order||!item||!canBusinessSelfOrder(order))return;
-    const required=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0));
-    const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+    const required=Math.max(0,Number(item.shortageQty||0));
+    const ordered=Math.max(0,Number(item.supplyOrderedQty||0));
     const remaining=Math.max(0,required-ordered);
     if(remaining<=0){alert('此品項目前沒有尚未訂貨的缺貨數量。');return;}
     document.getElementById('selfOrderOrderId').value=orderId;
@@ -6013,7 +6013,7 @@ window.saveSelfOrder = async function() {
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
             if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，業務不可自行訂貨。');
-            const required=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0));
+            const required=Math.max(0,Number(item.shortageQty||0));
             const already=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
             const remaining=Math.max(0,required-already);
             if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
@@ -6085,13 +6085,9 @@ function orderItemWorkCategory(order, item) {
         deliveredQty:dispatch.delivered,
         isBilled:!!order.isBilled,
         fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
-        purchaseRequiredQty:item.purchaseRequiredQty,
-        inventoryShortageQty:item.inventoryShortageQty,
-        purchaseOrderedQty:item.purchaseOrderedQty,
+        shortageQty:item.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
-        receivedQty:item.receivedQty,
-        purchaseReceivedQty:item.purchaseReceivedQty,
-        supplyReceivedQty:item.supplyReceivedQty
+        receivedQty:item.receivedQty
     };
     // 單一權威來源：畫面、圖卡、採購與 workCategories 全部交給 workflow-core 判斷。
     return YushinWorkflow.itemWorkCategory(input);
@@ -6869,8 +6865,8 @@ function remainingProcurementQty(order, item) {
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
         return Math.max(0, qty - ordered);
     }
-    const shortage = Math.max(0, Number(item.shortageQty ?? item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
-    const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
+    const shortage = Math.max(0, Number(item.shortageQty || 0));
+    const received = Math.max(0, Number(item.receivedQty || 0));
     const outstandingSupply = Math.max(0, ordered - received);
     return Math.max(0, shortage - outstandingSupply);
 }
@@ -7665,9 +7661,9 @@ function receivingEvidenceForWorkItem(order, item, itemIndex) {
 function receivingWorkProgress(order, item) {
     const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
     const orderedQty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
-    const shortage = Math.max(0, Number(item.shortageQty ?? item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
-    const supplyOrdered = Math.max(0, Number(item.supplyOrderedQty ?? item.purchaseOrderedQty ?? 0));
-    const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
+    const shortage = Math.max(0, Number(item.shortageQty || 0));
+    const supplyOrdered = Math.max(0, Number(item.supplyOrderedQty || 0));
+    const received = Math.max(0, Number(item.receivedQty || 0));
     const target = directShip ? orderedQty : Math.max(shortage, supplyOrdered);
     return { target, received:Math.min(target, received), remaining:Math.max(0, target - received), directShip };
 }
@@ -8171,7 +8167,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
                 items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
                 if(itemIndex>=0){
                     const item=items[itemIndex];
-                    const shortage=Math.max(0,Number(item.inventoryShortageQty??item.shortageQty??0));
+                    const shortage=Math.max(0,Number(item.shortageQty||0));
                     reserveQty=Math.min(qty,shortage);reservedForSource=reserveQty;
                     const next=window.YushinFulfillment.applyReceipt(item,qty);
                     items[itemIndex]={...next,reservedQty:next.reservedQty};
@@ -8359,7 +8355,7 @@ function purchaseItemsFromOrder(order) {
         if(procurementType==='SALES_SELF_ORDER') return null;
         const procurementRequired=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
             ? fullQty : Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??fullQty));
-        const remainingPurchase=Math.max(0,procurementRequired-Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0)));
+        const remainingPurchase=Math.max(0,procurementRequired-Math.max(0,Number(item.supplyOrderedQty||0)));
         return {
             orderId: order.id,
             orderItemIndex: index,
@@ -8684,7 +8680,7 @@ function assertPurchaseLinesAvailable(order, lines) {
         const required = (source.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
             ? Number(source.qty || 0)
             : Math.max(0, Number(source.shortageQty ?? source.inventoryShortageQty ?? source.purchaseRequiredQty ?? source.qty ?? 0));
-        const remaining = Math.max(0, required - Math.max(0, Number(source.supplyOrderedQty ?? source.purchaseOrderedQty ?? 0)));
+        const remaining = Math.max(0, required - Math.max(0, Number(source.supplyOrderedQty || 0)));
         if (!(qty > 0) || qty > remaining + 1e-9) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
     }
 }
@@ -8890,7 +8886,7 @@ window.printPurchaseOrder = async function() {
                     const nextItems=normalizedOrderItems(orderData).map((item,itemIndex)=>{
                         const matches=orderedLines.filter(line=>Number(line.orderItemIndex)===itemIndex);
                         const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
-                        const currentSupplyOrdered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
+                        const currentSupplyOrdered=Math.max(0,Number(item.supplyOrderedQty||0));
                         const cumulative=currentSupplyOrdered+orderedQty;
                         return orderedQty>0?{
                             ...item,
@@ -9396,8 +9392,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const outstanding = Math.max(0, ordered - delivered);
         // 已下 PO／自行訂購的數量屬於既有在途供應，恢復訂單時不能再拿同一數量占用現貨，
         // 否則會同時出現「待到貨」與庫存 reservation，造成供應量重複計算。
-        const orderedSupply = Math.max(0, Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
-        const receivedSupply = Math.max(0, Number(item.receivedQty??item.purchaseReceivedQty??item.supplyReceivedQty??0));
+        const orderedSupply = Math.max(0, Number(item.supplyOrderedQty||0));
+        const receivedSupply = Math.max(0, Number(item.receivedQty||0));
         const incomingSupply = Math.min(outstanding, Math.max(0, orderedSupply - receivedSupply));
         const needed = Math.max(0, outstanding - incomingSupply);
         const reserve = whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved)) : 0;
