@@ -381,7 +381,8 @@ test('supply receipt synchronizes received quantity back to the source order ite
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
     const source=app.slice(start,end);
-    assert.match(source,/const next=window\.YushinFulfillment\.applyReceipt\(item,qty\)/);
+    assert.match(source,/const next=window\.YushinFulfillment\.applyReceipt\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
+    assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
     assert.match(source,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
     assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
     assert.match(source,/tx\.update\(supplyRef,\{receivedQty,status:/);
@@ -389,7 +390,8 @@ test('supply receipt synchronizes received quantity back to the source order ite
 
 
 test('self-order receipt uses fulfillment core receivedQty without adding it twice',()=>{
-    assert.match(app,/const next=window\.YushinFulfillment\.applyReceipt\(item,qty\);/);
+    assert.match(app,/const next=window\.YushinFulfillment\.applyReceipt\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
+    assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存占用紀錄/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
 });
 
