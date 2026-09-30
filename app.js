@@ -4289,7 +4289,7 @@ function createQuotePdfStage(quoteData) {
 function quotePdfSafePageEnd(clone, canvas, startY, desiredEndY) {
     const rootRect = clone.getBoundingClientRect();
     const scale = canvas.width / Math.max(1, clone.getBoundingClientRect().width);
-    const ranges = [...clone.querySelectorAll('#quoteItems tr, .quote-summary-block')].map(el => {
+    const ranges = [...clone.querySelectorAll('.quote-pdf-items tr, .quote-summary-block')].map(el => {
         const rect = el.getBoundingClientRect();
         return {
             top: Math.max(0, (rect.top - rootRect.top) * scale),
