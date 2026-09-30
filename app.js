@@ -7991,11 +7991,9 @@ function updatePoSaveButton() {
     if (!button) return;
     const waitingForNumber = !poEditingId && !poNoReady;
     button.disabled = poSaveInProgress || waitingForNumber;
-    button.textContent = poEditingId
-        ? (poIncomingSyncPending ? '重試同步在途庫存' : '🖨️ 列印 / 存為 PDF')
-        : waitingForNumber
-            ? (poNoLoading ? '產生單號中…' : '單號未就緒')
-            : '🖨️ 列印 / 存為 PDF（自動同步雲端）';
+    button.textContent = waitingForNumber
+        ? (poNoLoading ? '產生單號中…' : '單號未就緒')
+        : '🖨️ 列印 / 存為 PDF（自動同步雲端）';
 }
 
 function poIncomingKey(item) {
@@ -8883,11 +8881,12 @@ window.printPurchaseOrder = async function() {
         }
         const button = document.getElementById('printPurchaseOrderBtn');
         poSaveInProgress = true;
-        if (button) { button.disabled = true; button.innerText = '同步在途庫存中…'; }
+        if (button) { button.disabled = true; button.innerText = '同步雲端後開啟列印…'; }
         try {
             await registerPurchaseIncoming(savedPo.id, savedPo);
             poIncomingSyncPending = false;
-            updatePoSaveStatus(`訂購單 ${savedPo.poNo} 已同步雲端，在途庫存同步完成。請再按「列印 / 存為 PDF」。`);
+            updatePoSaveStatus(`訂購單 ${savedPo.poNo} 已同步雲端，正在開啟列印 / PDF…`);
+            printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
         } catch (err) {
             updatePoSaveStatus(`訂購單已同步雲端，但在途庫存同步仍未完成：${err.message}`, true);
         } finally {

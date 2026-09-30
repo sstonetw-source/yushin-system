@@ -15,6 +15,14 @@ const validate = vm.runInNewContext(`${validation}\nassertPurchaseLinesAvailable
     normalizedOrderItems: order => order.items
 });
 
+test('purchase order action always uses the one-click print and cloud-sync label', () => {
+    const start = app.indexOf('function updatePoSaveButton()');
+    const end = app.indexOf('function poIncomingKey', start);
+    const source = app.slice(start, end);
+    assert.match(source, /列印 \/ 存為 PDF（自動同步雲端）/);
+    assert.doesNotMatch(source, /重試同步在途庫存/);
+});
+
 test('purchasing user-facing copy avoids legacy stock-order and source-order wording', () => {
     assert.doesNotMatch(html, /來源訂單日期/);
     assert.doesNotMatch(app, /原廠備貨是公司庫存採購/);
@@ -131,48 +139,48 @@ test('repeating an incoming-stock update does not count the same supply twice', 
 });
 
 
-test('saved PO prints on a separate tap; pending inventory sync retries once', async () => {
+test('saved PO keeps one-click print behavior while repairing pending incoming sync', async () => {
     const start = app.indexOf('window.printPurchaseOrder = async function()');
     const end = app.indexOf('    if (poItems.length === 0)', start);
     assert.ok(start >= 0 && end > start);
-    const button = { disabled:false, innerText:'🖨️ 列印／輸出 PDF' };
-    const savedPo = { id:'PO1', poNo:'PO1', vendorName:'供應商', incomingRegistrationVersion:1 };
+    const button = { disabled:false, innerText:'🖨️ 列印 / 存為 PDF（自動同步雲端）' };
+    const savedPo = { id:'PO1', poNo:'PO1', vendorName:'供應商' };
     let releaseRegistration;
     let registrationCalls = 0;
     let printCalls = 0;
-    const alerts = [];
+    const messages = [];
     const context = vm.createContext({
         window:{}, poEditingId:'PO1', poListCache:[savedPo],
         canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
         document:{getElementById:()=>button},
         registerPurchaseIncoming:async () => { registrationCalls++; await new Promise(resolve => { releaseRegistration=resolve; }); },
-        printSavedPoDocument:()=>{printCalls++;}, updatePoSaveStatus:message=>alerts.push(message),
-        updatePoSaveButton:()=>{button.innerText='🖨️ 列印／輸出 PDF';}, alert:message=>alerts.push(message)
+        printSavedPoDocument:()=>{printCalls++;}, updatePoSaveStatus:message=>messages.push(message),
+        updatePoSaveButton:()=>{button.innerText='🖨️ 列印 / 存為 PDF（自動同步雲端）';}, alert:message=>messages.push(message)
     });
-    vm.runInContext(`let poSaveInProgress=false; let poIncomingSyncPending=false;\n${app.slice(start,end)}\n}`, context);
+    vm.runInContext(`let poSaveInProgress=false; let poIncomingSyncPending=false;\n${app.slice(start,end)}\n`, context);
+
     await context.window.printPurchaseOrder();
     assert.equal(printCalls, 1);
     assert.equal(registrationCalls, 0);
+
     vm.runInContext('poIncomingSyncPending=true', context);
-    const first = context.window.printPurchaseOrder();
+    const pendingPrint = context.window.printPurchaseOrder();
     assert.equal(button.disabled, true);
-    assert.match(button.innerText, /同步在途庫存中/);
+    assert.match(button.innerText, /同步雲端後開啟列印/);
     await context.window.printPurchaseOrder();
-    assert.equal(registrationCalls, 1);
+    assert.equal(registrationCalls, 1, 'double tap while syncing must not start another sync');
     releaseRegistration();
-    await first;
-    assert.equal(printCalls, 1);
+    await pendingPrint;
+    assert.equal(printCalls, 2, 'successful repair should continue directly to print');
     assert.equal(button.disabled, false);
-    assert.match(alerts[0], /同步完成/);
-    await context.window.printPurchaseOrder();
-    assert.equal(printCalls, 2);
+    assert.match(messages.at(-1), /正在開啟列印/);
 
     vm.runInContext('poIncomingSyncPending=true', context);
     context.registerPurchaseIncoming = async () => { throw new Error('網路中斷'); };
     await context.window.printPurchaseOrder();
-    assert.equal(printCalls, 2);
+    assert.equal(printCalls, 2, 'failed sync must not silently print an unsynchronized PO');
     assert.equal(button.disabled, false);
-    assert.match(alerts.at(-1), /在途庫存同步仍未完成.*網路中斷/);
+    assert.match(messages.at(-1), /在途庫存同步仍未完成.*網路中斷/);
 });
 
 test('PO print opens directly from the user action', () => {
