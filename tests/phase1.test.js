@@ -646,13 +646,34 @@ test('quote primary actions focus on PDF delivery workflow without a print butto
 
 
 
+test('quote PDF paginates by item rows and repeats the column header on each page', () => {
+    assert.match(appSource, /function paginateQuotePdfDocument\(stage, source\)/);
+    assert.match(appSource, /createQuotePdfPage\(stage, source, true\)/);
+    assert.match(appSource, /createQuotePdfPage\(stage, source, false\)/);
+    assert.match(appSource, /quote-pdf-grid-head/);
+    assert.match(appSource, /current\.page\.scrollHeight > maxHeight/);
+    assert.match(appSource, /summaryClone/);
+    assert.match(appSource, /finalPage\.items\.prepend/);
+    assert.match(appSource, /function addQuotePagesToPdf\(pdf, pages, scale\)/);
+});
+
+test('quote browser-print code is removed while purchase-order printing remains', () => {
+    assert.doesNotMatch(appSource, /handleSaveAndPrint/);
+    assert.doesNotMatch(appSource, /printing-quote/);
+    assert.doesNotMatch(appSource, /printing-three-quotes/);
+    assert.doesNotMatch(appSource, /prepareQuoteForPrint/);
+    assert.doesNotMatch(appSource, /markQuotePrintPagination/);
+    assert.match(appSource, /window\.printPurchaseOrder = async function/);
+    assert.match(appSource, /body\.classList\.add\('printing-po'\)/);
+});
+
 test('primary quote export generates PDF directly without browser print', () => {
     assert.match(indexSource, /html2canvas@1\.4\.1/);
     assert.match(indexSource, /jspdf@2\.5\.2/);
     assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
     assert.match(appSource, /printBtn\.addEventListener\('click', exportCurrentQuotePdf\)/);
     assert.match(appSource, /window\.exportCurrentQuotePdf = async function/);
-    assert.match(appSource, /window\.html2canvas\(clone/);
+    assert.match(appSource, /addQuotePagesToPdf/);
     assert.match(appSource, /new window\.jspdf\.jsPDF/);
     assert.match(appSource, /pdf\.save\(quotePdfFileName\(quoteData\)\)/);
     assert.match(appSource, /persistQuoteOutputRecord\(quoteData, 'PDF'\)/);
@@ -667,35 +688,13 @@ test('three-quote export uses the same direct PDF engine', () => {
     const end = appSource.indexOf('\n};', start) + 3;
     const source = appSource.slice(start, end);
     assert.match(source, /new window\.jspdf\.jsPDF/);
-    assert.match(source, /window\.html2canvas\(first\.clone/);
+    assert.match(source, /paginateQuotePdfDocument/);
     assert.match(source, /comparisonStage\.querySelectorAll\('\.comparison-quote-page'\)/);
     assert.match(source, /pdf\.addPage\('a4', 'p'\)/);
     assert.match(source, /-三家估價\.pdf/);
     assert.doesNotMatch(source, /window\.print\(\)/);
 });
 
-
-test('quote printing avoids long blocking image waits on mobile', () => {
-    const openStart = appSource.indexOf('window.openThreeQuoteDialog = function()');
-    const openEnd = appSource.indexOf('window.closeThreeQuoteDialog', openStart);
-    const openSource = appSource.slice(openStart, openEnd);
-    const waitStart = appSource.indexOf('function waitForQuoteImages()');
-    const waitEnd = appSource.indexOf('window.printThreeQuotes', waitStart);
-    const waitSource = appSource.slice(waitStart, waitEnd);
-    assert.match(openSource, /preloadComparisonQuoteImages\(\)/);
-    assert.match(appSource, /function preloadComparisonQuoteImages\(\)/);
-    assert.match(waitSource, /300/);
-    assert.doesNotMatch(waitSource, /5000|1200/);
-});
-
-test('quote print mode isolates the printable quote from the rest of the app', () => {
-    assert.match(appSource, /document\.body\.classList\.add\('printing-quote'\)/);
-    assert.match(appSource, /classList\.add\('printing-quote', 'printing-three-quotes'\)/);
-    assert.match(appSource, /classList\.remove\('printing-quote'\)/);
-    assert.match(cssSource, /body\.printing-quote \.content-section \{ display: none !important; \}/);
-    assert.match(cssSource, /body\.printing-quote #quote-system \{ display: block !important; \}/);
-    assert.match(cssSource, /#quoteCreatePanel > \*:not\(#printableQuote\):not\(#comparisonQuotePrintPages\)/);
-});
 
 
 test('quote and order search-index migration is admin-only batched and idempotent', () => {
