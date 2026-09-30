@@ -8201,8 +8201,25 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             const item=items[itemIndex];
             const delivered=Math.min(Number((item.orderedQty ?? item.qty) || 0),Number(item.deliveredQty||0)+qty);
             items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
-            const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
-            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
+            const deliveryRecord={
+                id:`direct-${operationKey}`,itemId:supply.itemId,date:localDateString(),qty,
+                notes:'原廠直送到貨確認',createdBy:actor,createdAt:now,sourceType:'DIRECT_SHIP_RECEIPT',sourceId:supplyId
+            };
+            const deliveryRecords=[...savedDeliveryRecords(order),deliveryRecord];
+            const grossDelivered=deliveryRecords.reduce((sum,row)=>sum+Number(row.qty||0),0);
+            const returned=returnedQuantity(order);
+            const total=orderQuantity({...order,items});
+            const nextOrder={
+                ...order,items,itemCount:items.length,orderSchemaVersion:2,
+                deliveryRecords,deliveredQty:grossDelivered,
+                isDelivered:Math.max(0,grossDelivered-returned)>=total&&total>0,
+                updatedAt:now
+            };
+            tx.update(orderRef,{
+                items,itemCount:items.length,orderSchemaVersion:2,
+                deliveryRecords,deliveredQty:grossDelivered,isDelivered:nextOrder.isDelivered,
+                ...orderWorkIndexFields(nextOrder),updatedAt:now
+            });
             const receivedQty=Number(supply.receivedQty||0)+qty;
             tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
             tx.set(receiptRef,{receiptId:operationKey,operationId:operationKey,supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,cumulativeReceivedQty:receivedQty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
