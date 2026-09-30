@@ -5674,8 +5674,8 @@ async function reserveInventoryForNewOrder(orderId, order) {
         const item=await reserveSingleOrderItem(orderId,order,items[0]||legacyOrderItemFromOrder(order),0);
         const updates={
             items:[item],itemCount:1,orderSchemaVersion:2,
-            inventoryReservedQty:Number(item.reservedQty??item.inventoryReservedQty??0),
-            inventoryShortageQty:Number(item.shortageQty??item.inventoryShortageQty??0),
+            inventoryReservedQty:Number(item.reservedQty||0),
+            inventoryShortageQty:Number(item.shortageQty||0),
             inventoryProductKey:item.inventoryProductKey||'',
             fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:item.warehouseId||''
         };
@@ -5686,8 +5686,8 @@ async function reserveInventoryForNewOrder(orderId, order) {
     }
     const reservedItems=[];
     for(let i=0;i<items.length;i++) reservedItems.push(await reserveSingleOrderItem(orderId,order,items[i],i));
-    const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.reservedQty??item.inventoryReservedQty??0),0);
-    const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.shortageQty??item.inventoryShortageQty??0),0);
+    const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.reservedQty||0),0);
+    const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.shortageQty||0),0);
     const updates={items:reservedItems,itemCount:reservedItems.length,orderSchemaVersion:2,inventoryReservedQty:reservedQty,inventoryShortageQty:shortageQty};
     Object.assign(order,updates);
     Object.assign(updates,orderWorkIndexFields(order));
@@ -8067,11 +8067,11 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
             if(index<0){skipCandidate=true;return;}
-            const item=items[index],oldReserved=Number(item.reservedQty??item.inventoryReservedQty??0);
-            const oldShortage=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??liveShortage));
+            const item=items[index],oldReserved=Number(item.reservedQty||0);
+            const oldShortage=Math.max(0,Number(item.shortageQty??liveShortage));
             items[index]={...item,reservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take)};
-            const totalReserved=items.reduce((s,row)=>s+Number(row.reservedQty??row.inventoryReservedQty??0),0);
-            const totalShortage=items.reduce((s,row)=>s+Number(row.shortageQty??row.inventoryShortageQty??0),0);
+            const totalReserved=items.reduce((s,row)=>s+Number(row.reservedQty||0),0);
+            const totalShortage=items.reduce((s,row)=>s+Number(row.shortageQty||0),0);
             const now=new Date().toISOString();
             const nextOrder={...order,items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now};
             tx.update(orderRef,{items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,...orderWorkIndexFields(nextOrder),updatedAt:now});
@@ -9372,7 +9372,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const whState = whRef ? stockStates.get(whRef.path) : null;
         if (nextStatus === 'cancelled') {
             const reservationData = reservationSnap?.exists ? reservationSnap.data() : null;
-            const reservedRemaining = Math.max(0, Number(reservationData?.quantity ?? item.reservedQty ?? item.inventoryReservedQty ?? 0));
+            const reservedRemaining = Math.max(0, Number(reservationData?.quantity ?? item.reservedQty ?? 0));
             const release = Math.min(reservedRemaining, whState?.reserved || 0);
             if (release > 0) {
                 invState.reserved = Math.max(0, invState.reserved - release);
@@ -10016,7 +10016,7 @@ window.saveDeliveryRecord = async function() {
             const deliveryDelta = qty - Number(previous?.qty || 0);
             if(deliveryDelta){
                 const itemRecords=records.filter(r=>r.itemId===targetItem.itemId);
-                const itemOrder={...order,...targetItem,qty:Number(targetItem.qty||0),inventoryReservedQty:Number(targetItem.inventoryReservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
+                const itemOrder={...order,...targetItem,qty:Number(targetItem.qty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
                 const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId,deliveryDelta<0&&previous?[previous]:null);
                 if(deliveryDelta>0){
                     record.lotAllocations=inventoryResult.lotAllocations||[];
@@ -10079,7 +10079,7 @@ window.deleteDeliveryRecord = async function(recordId) {
             const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
             if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
             const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
-            const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty??targetItem.inventoryReservedQty??0),inventoryReservedQty:Number(targetItem.reservedQty??targetItem.inventoryReservedQty??0),deliveryRecords:itemRecords,isDelivered:false};
+            const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
             await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
             const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
