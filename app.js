@@ -7806,7 +7806,20 @@ window.renderPoList = function() {
 };
 
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
-window.reprintPurchaseOrder = function(poId) {
+async function purchaseIncomingSyncPending(po) {
+    const supplyIds = Array.isArray(po?.supplyOrderIds) ? po.supplyOrderIds.filter(Boolean) : [];
+    if (!supplyIds.length) return false;
+    const supplies = await readDocumentsByIds('supplyOrders', supplyIds);
+    if (supplies.length !== new Set(supplyIds).size) return true;
+    return supplies.some(supply => {
+        if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return false;
+        const targetQty = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
+        const registeredQty = Math.max(0, Number(supply.incomingRegisteredQty || 0));
+        return registeredQty < targetQty;
+    });
+}
+
+window.reprintPurchaseOrder = async function(poId) {
     poDirectStockMode = false;
     poNoGeneration++;
     poNoLoading = false;
@@ -7828,11 +7841,23 @@ window.reprintPurchaseOrder = function(poId) {
 
     renderPoItemsTable();
     updatePoModeUI();
-    updatePoSaveStatus(poIncomingSyncPending
-        ? `訂購單 ${po.poNo || po.id} 已儲存，請先重試同步在途庫存。`
-        : `已儲存訂購單 ${po.poNo || po.id}。按下方按鈕列印或輸出 PDF。`);
-    updatePoSaveButton();
     document.getElementById('poModalOverlay').classList.add('active');
+
+    poSaveInProgress = true;
+    updatePoSaveStatus(`正在確認訂購單 ${po.poNo || po.id} 的在途同步狀態…`);
+    updatePoSaveButton();
+    try {
+        poIncomingSyncPending = await purchaseIncomingSyncPending(po);
+        updatePoSaveStatus(poIncomingSyncPending
+            ? `訂購單 ${po.poNo || po.id} 已儲存，但供應紀錄仍需同步在途庫存。`
+            : `已儲存訂購單 ${po.poNo || po.id}。按下方按鈕列印或輸出 PDF。`);
+    } catch (err) {
+        poIncomingSyncPending = true;
+        updatePoSaveStatus(`無法確認供應紀錄的在途同步狀態：${err.message}`, true);
+    } finally {
+        poSaveInProgress = false;
+        updatePoSaveButton();
+    }
 };
 
 // 從原始訂單上的訂購單號直接開啟該張訂購單，避免還要切分頁搜尋。
