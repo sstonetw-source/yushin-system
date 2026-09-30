@@ -14025,11 +14025,9 @@ window.runSystemDataAudit = async function() {
         });
 
         inventory.forEach(item => {
-            if (!knownProduct(item)) issues.push({ type:'庫存找不到 Product', detail:`${item.itemCode || item.id}` });
-            const n = inventoryNumbers(item);
-            if (n.onHand < 0 || n.reserved < 0 || n.reserved > n.onHand) {
-                issues.push({ type:'庫存數量異常', detail:`${item.itemCode || item.id}｜現有 ${n.onHand}／占用 ${n.reserved}` });
-            }
+            // inventory 只保留產品索引／總覽快取；實際數量以 warehouseStocks 為準。
+            // 健康檢查不可再把 aggregate cache 的 onHand / reserved 當成正式庫存錯誤。
+            if (!knownProduct(item)) issues.push({ type:'庫存索引找不到 Product', detail:`${item.itemCode || item.id}` });
         });
 
         warehouseStocks.forEach(stock => {
