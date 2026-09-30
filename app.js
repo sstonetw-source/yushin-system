@@ -3449,7 +3449,7 @@ function quoteExtraDataFromRow(row) {
         origin: String(row.querySelector('.item-origin')?.value || '').trim(),
         leadTime: String(row.querySelector('.item-lead-time')?.value || '').trim(),
         hospitalItemCode: String(row.querySelector('.item-hospital-code')?.value || '').trim(),
-        manufacturer: String(row.querySelector('.item-manufacturer')?.value || '').trim(),
+        remarks: String(row.querySelector('.item-remarks')?.value || '').trim(),
         customFields
     };
 }
@@ -3460,7 +3460,7 @@ function quoteOptionalFieldKeysFromItems(items = []) {
         if (String(item.origin || '').trim()) keys.add('origin');
         if (String(item.leadTime || '').trim()) keys.add('leadTime');
         if (String(item.hospitalItemCode || '').trim()) keys.add('hospitalItemCode');
-        if (String(item.manufacturer || '').trim()) keys.add('manufacturer');
+        if (String(item.remarks || '').trim()) keys.add('remarks');
     });
     return [...keys];
 }
@@ -3503,7 +3503,9 @@ window.applyCustomerQuotePreferences = async function(customerName) {
         const fields = snapshot.exists && Array.isArray(snapshot.data()?.quoteOptionalFields)
             ? snapshot.data().quoteOptionalFields
             : [];
-        activeQuoteOptionalFields = new Set(fields);
+        // 估價單目前只保留仍可編輯的「更多資訊」欄位；舊偏好不再讓已移除欄位自動展開。
+        const supportedFields = new Set(['origin','leadTime','hospitalItemCode','remarks']);
+        activeQuoteOptionalFields = new Set(fields.filter(field => supportedFields.has(field)));
         if (!fields.length) return;
         document.querySelectorAll('#quoteItems tr').forEach(row => {
             const details = row.querySelector('.quote-extra-fields');
@@ -3560,7 +3562,7 @@ window.addQuoteRow = function(itemData = {}) {
                         <label>廠牌：</label>
                         <select class="item-brand" onchange="onQuoteBrandSelectChange(this)">${quoteBrandOptions(itemData.brand)}</select>
                         <input type="text" class="item-brand-other" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
-                        <div class="field-row"><label>產品線（選填）：</label><input type="text" class="item-product-line" value="${escapeAttr(itemData.productLine || '')}" placeholder="例如：儀器、試劑、耗材"></div>
+                        <input type="hidden" class="item-product-line" value="${escapeAttr(itemData.productLine || '')}">
                         <input type="hidden" class="item-product-type" value="${itemData.productType || ''}">
                         <input type="hidden" class="item-product-id" value="${itemData.productId || ''}">
                     </div>
@@ -3576,7 +3578,7 @@ window.addQuoteRow = function(itemData = {}) {
                         <label>產地<input type="text" class="item-origin" value="${escapeAttr(itemData.origin || '')}" placeholder="例如：USA"></label>
                         <label>交貨期<input type="text" class="item-lead-time" value="${escapeAttr(itemData.leadTime || '')}" placeholder="例如：下單後 4–6 週"></label>
                         <label>院內料號<input type="text" class="item-hospital-code" value="${escapeAttr(itemData.hospitalItemCode || '')}"></label>
-                        <label>製造商<input type="text" class="item-manufacturer" value="${escapeAttr(itemData.manufacturer || '')}"></label>
+                        <label>備註<input type="text" class="item-remarks" value="${escapeAttr(itemData.remarks || '')}" placeholder="例如：客戶指定條件、包裝或其他說明"></label>
                     </div>
                     <div class="quote-custom-fields"></div>
                     <button type="button" class="btn-small btn-secondary quote-add-custom-field" onclick="addQuoteCustomField(this)">＋ 自訂欄位</button>
@@ -3593,7 +3595,7 @@ window.addQuoteRow = function(itemData = {}) {
 
     tbody.appendChild(tr);
     const extraDetails = tr.querySelector('.quote-extra-fields');
-    const hasExtraData = ['origin','leadTime','hospitalItemCode','manufacturer'].some(key => String(itemData[key] || '').trim())
+    const hasExtraData = ['origin','leadTime','hospitalItemCode','remarks'].some(key => String(itemData[key] || '').trim())
         || (Array.isArray(itemData.customFields) && itemData.customFields.length);
     if (extraDetails && (hasExtraData || activeQuoteOptionalFields.size)) extraDetails.open = true;
     const customButton = tr.querySelector('.quote-add-custom-field');
@@ -3868,6 +3870,9 @@ function setComparisonCompanyOptions(select, selected, blocked) {
 window.openThreeQuoteDialog = function() {
     const validationMessage = currentQuoteOutputValidation();
     if (validationMessage) { alert(validationMessage); return; }
+    // 使用者在選公司／比例時先把比較估價需要的 Logo 與印章載入，
+    // 不把圖片下載時間留到按下「列印」之後才開始。
+    preloadComparisonQuoteImages();
     const available = COMPARISON_COMPANY_ORDER.filter(key => key !== currentCompany);
     document.getElementById('comparisonPercent2').value = 10;
     document.getElementById('comparisonPercent3').value = 15;
@@ -3924,13 +3929,13 @@ function formatComparisonMoney(value) {
 
 function renderComparisonExtraFields(extra = {}, variant = 'b') {
     const labels = variant === 'a'
-        ? { origin:'ORIGIN', leadTime:'LEAD TIME', hospitalItemCode:'HOSPITAL ITEM', manufacturer:'MANUFACTURER' }
-        : { origin:'產地', leadTime:'交貨期', hospitalItemCode:'院內料號', manufacturer:'製造商' };
+        ? { origin:'ORIGIN', leadTime:'LEAD TIME', hospitalItemCode:'HOSPITAL ITEM', remarks:'REMARKS' }
+        : { origin:'產地', leadTime:'交貨期', hospitalItemCode:'院內料號', remarks:'備註' };
     const rows = [
         [labels.origin, extra.origin],
         [labels.leadTime, extra.leadTime],
         [labels.hospitalItemCode, extra.hospitalItemCode],
-        [labels.manufacturer, extra.manufacturer],
+        [labels.remarks, extra.remarks],
         ...(Array.isArray(extra.customFields) ? extra.customFields.map(field => [field.label, field.value]) : [])
     ].filter(([label, value]) => String(label || '').trim() && String(value || '').trim());
     if (!rows.length) return '';
@@ -3963,6 +3968,42 @@ function renderComparisonQuotePage(companyKey, percent, variant) {
     </section>`;
 }
 
+const quoteImagePreloadCache = new Map();
+
+function preloadQuoteImage(src) {
+    const url = String(src || '').trim();
+    if (!url) return Promise.resolve(true);
+    if (quoteImagePreloadCache.has(url)) return quoteImagePreloadCache.get(url);
+    const promise = new Promise(resolve => {
+        const img = new Image();
+        let settled = false;
+        const done = ok => {
+            if (settled) return;
+            settled = true;
+            img.onload = null;
+            img.onerror = null;
+            resolve(ok);
+        };
+        img.onload = () => done(true);
+        img.onerror = () => done(false);
+        img.src = url;
+        if (img.complete && img.naturalWidth > 0) done(true);
+        window.setTimeout(() => done(img.complete && img.naturalWidth > 0), 1500);
+    });
+    quoteImagePreloadCache.set(url, promise);
+    return promise;
+}
+
+function preloadComparisonQuoteImages() {
+    const sources = new Set();
+    COMPARISON_COMPANY_ORDER.forEach(key => {
+        const company = comparisonCompanyData[key];
+        if (company?.logo) sources.add(company.logo);
+        if (company?.stamp) sources.add(company.stamp);
+    });
+    sources.forEach(src => preloadQuoteImage(src));
+}
+
 function waitForQuoteImages() {
     const printableQuote = document.getElementById('printableQuote');
     const activeMainLogo = [...printableQuote.querySelectorAll('.company-logo')]
@@ -3986,7 +4027,7 @@ function waitForQuoteImages() {
             };
             img.onload = () => done(true);
             img.onerror = () => done(false);
-            timer = setTimeout(() => done(img.complete && img.naturalWidth > 0), 5000);
+            timer = setTimeout(() => done(img.complete && img.naturalWidth > 0), 1200);
         });
     }));
 }
@@ -4005,7 +4046,7 @@ window.printThreeQuotes = async function() {
     rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
     const printButton = document.getElementById('threeQuotePrintBtn');
     printButton.disabled = true;
-    printButton.innerText = '準備 Logo 與印章中…';
+    printButton.innerText = '準備列印中…';
     document.getElementById('comparisonQuotePrintPages').innerHTML = renderComparisonQuotePage(company2, percent2, 'a') + renderComparisonQuotePage(company3, percent3, 'b');
     prepareQuoteForPrint();
     const imageResults = await waitForQuoteImages();
@@ -4205,7 +4246,7 @@ function prepareQuoteForPrint() {
             ['產地', extra.origin],
             ['交貨期', extra.leadTime],
             ['院內料號', extra.hospitalItemCode],
-            ['製造商', extra.manufacturer],
+            ['備註', extra.remarks],
             ...extra.customFields.map(field => [field.label, field.value])
         ].filter(([, value]) => String(value || '').trim());
         const printExtra = row.querySelector('.quote-extra-print');
@@ -6368,7 +6409,7 @@ function fullHistorySearchValues(type, record = {}) {
             record.quoteNo, record.clientName, record.ordererName, record.salesName,
             ...(Array.isArray(record.items) ? record.items.flatMap(item => [
                 item.brand, item.model, item.nameCn, item.nameEn, item.spec,
-                item.origin, item.leadTime, item.hospitalItemCode, item.manufacturer,
+                item.origin, item.leadTime, item.hospitalItemCode, item.remarks,
                 ...(Array.isArray(item.customFields) ? item.customFields.flatMap(field => [field.label, field.value]) : [])
             ]) : [])
         ];
