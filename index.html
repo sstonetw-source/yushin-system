@@ -11,7 +11,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260930-2">
+        <link rel="stylesheet" href="styles.css?v=20260930-3">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -539,7 +539,7 @@
                 </div>
             </div>
             <div class="meta-section">
-                <div class="meta-row"><label>抬頭：</label><input type="text" id="clientName" list="clientList"></div>
+                <div class="meta-row"><label>抬頭：</label><input type="text" id="clientName" list="clientList" onchange="applyCustomerQuotePreferences(this.value)"></div>
                 <div class="meta-row no-print"><label>客戶名稱：</label><input type="text" id="ordererName" placeholder="訂購人姓名（僅供內部管理，不會印在估價單上）"></div>
                 <div class="meta-row-three">
                     <div><label>負責業務：</label><select id="salesName" onchange="onSalesChange()"><option value="">請選擇負責業務</option></select><span id="salesPhone" style="margin-left:6px;font-size:11px;color:#333;"></span></div>
@@ -1418,6 +1418,6 @@
     <script src="modules/supply-core.js?v=20260922-4"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-1"></script>
-    <script src="app.js?v=20260930-2"></script>
+    <script src="app.js?v=20260930-3"></script>
 </body>
 </html>

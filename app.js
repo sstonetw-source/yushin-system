@@ -72,6 +72,7 @@ function requestHomeScreenStoragePersistence() {
 
 let currentCompany = 'yushin';
 let restoringQuoteDraft = false;  // 還原本機草稿的過程中，暫停「重新產生單號」之類的副作用，避免蓋掉草稿裡存的資料
+let activeQuoteOptionalFields = new Set();
 let restoringOrderDraft = false;
 let salesList = [
     { name: "預設業務", code: "01", phone: "0912345678" }
@@ -3440,6 +3441,87 @@ window.saveToStorage = function() {
     localStorage.setItem('quote_valid_days', validDays);
 };
 
+
+function quoteExtraDataFromRow(row) {
+    const customFields = [...row.querySelectorAll('.quote-custom-field-row')].map(fieldRow => ({
+        label: String(fieldRow.querySelector('.quote-custom-label')?.value || '').trim(),
+        value: String(fieldRow.querySelector('.quote-custom-value')?.value || '').trim()
+    })).filter(field => field.label || field.value);
+    return {
+        origin: String(row.querySelector('.item-origin')?.value || '').trim(),
+        leadTime: String(row.querySelector('.item-lead-time')?.value || '').trim(),
+        hospitalItemCode: String(row.querySelector('.item-hospital-code')?.value || '').trim(),
+        manufacturer: String(row.querySelector('.item-manufacturer')?.value || '').trim(),
+        customFields
+    };
+}
+
+function quoteOptionalFieldKeysFromItems(items = []) {
+    const keys = new Set();
+    items.forEach(item => {
+        if (String(item.origin || '').trim()) keys.add('origin');
+        if (String(item.leadTime || '').trim()) keys.add('leadTime');
+        if (String(item.hospitalItemCode || '').trim()) keys.add('hospitalItemCode');
+        if (String(item.manufacturer || '').trim()) keys.add('manufacturer');
+    });
+    return [...keys];
+}
+
+function rememberQuoteCustomerPreferences(customerName, items = []) {
+    const name = String(customerName || '').trim();
+    const customerId = customerIdForName(name);
+    if (!customerId || !currentUser || !hasBusinessCapability()) return;
+    const quoteOptionalFields = quoteOptionalFieldKeysFromItems(items);
+    if (!quoteOptionalFields.length) return;
+    db.collection('customers').doc(customerId).set({
+        customerId,
+        name,
+        active: true,
+        quoteOptionalFields,
+        updatedAt: new Date().toISOString()
+    }, { merge: true }).catch(err => console.warn('客戶估價欄位偏好儲存失敗：', err));
+}
+
+window.applyCustomerQuotePreferences = async function(customerName) {
+    const name = String(customerName || '').trim();
+    activeQuoteOptionalFields = new Set();
+    const customerId = customerIdForName(name);
+    if (!customerId || !currentUser) return;
+    try {
+        const snapshot = await db.collection('customers').doc(customerId).get();
+        const fields = snapshot.exists && Array.isArray(snapshot.data()?.quoteOptionalFields)
+            ? snapshot.data().quoteOptionalFields
+            : [];
+        activeQuoteOptionalFields = new Set(fields);
+        if (!fields.length) return;
+        document.querySelectorAll('#quoteItems tr').forEach(row => {
+            const details = row.querySelector('.quote-extra-fields');
+            if (details) details.open = true;
+        });
+    } catch (err) {
+        console.warn('客戶估價欄位偏好讀取失敗：', err);
+    }
+};
+
+window.addQuoteCustomField = function(button, data = {}) {
+    const row = button?.closest?.('tr');
+    const container = row?.querySelector('.quote-custom-fields');
+    if (!container) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'quote-custom-field-row';
+    wrapper.innerHTML = `
+        <input type="text" class="quote-custom-label" placeholder="欄位名稱，例如：許可證字號" value="${escapeAttr(data.label || '')}">
+        <input type="text" class="quote-custom-value" placeholder="內容" value="${escapeAttr(data.value || '')}">
+        <button type="button" class="btn-small btn-secondary" onclick="removeQuoteCustomField(this)">移除</button>
+    `;
+    container.appendChild(wrapper);
+};
+
+window.removeQuoteCustomField = function(button) {
+    button?.closest?.('.quote-custom-field-row')?.remove();
+    saveQuoteDraft();
+};
+
 window.addQuoteRow = function(itemData = {}) {
     const tbody = document.getElementById('quoteItems');
     const rowCount = tbody.rows.length + 1;
@@ -3477,6 +3559,18 @@ window.addQuoteRow = function(itemData = {}) {
                     <label>規格：</label>
                     <textarea class="item-spec" placeholder=" ">${itemData.spec || ''}</textarea>
                 </div>
+                <details class="quote-extra-fields no-print">
+                    <summary>＋ 更多資訊</summary>
+                    <div class="quote-extra-grid">
+                        <label>產地<input type="text" class="item-origin" value="${escapeAttr(itemData.origin || '')}" placeholder="例如：USA"></label>
+                        <label>交貨期<input type="text" class="item-lead-time" value="${escapeAttr(itemData.leadTime || '')}" placeholder="例如：下單後 4–6 週"></label>
+                        <label>院內料號<input type="text" class="item-hospital-code" value="${escapeAttr(itemData.hospitalItemCode || '')}"></label>
+                        <label>製造商<input type="text" class="item-manufacturer" value="${escapeAttr(itemData.manufacturer || '')}"></label>
+                    </div>
+                    <div class="quote-custom-fields"></div>
+                    <button type="button" class="btn-small btn-secondary quote-add-custom-field" onclick="addQuoteCustomField(this)">＋ 自訂欄位</button>
+                </details>
+                <div class="quote-extra-print"></div>
             </div>
         </td>
         <td data-th="數量"><input type="number" class="qty" value="${itemData.qty || 1}" min="1" oninput="calculateTotals()"></td>
@@ -3487,6 +3581,12 @@ window.addQuoteRow = function(itemData = {}) {
     `;
 
     tbody.appendChild(tr);
+    const extraDetails = tr.querySelector('.quote-extra-fields');
+    const hasExtraData = ['origin','leadTime','hospitalItemCode','manufacturer'].some(key => String(itemData[key] || '').trim())
+        || (Array.isArray(itemData.customFields) && itemData.customFields.length);
+    if (extraDetails && (hasExtraData || activeQuoteOptionalFields.size)) extraDetails.open = true;
+    const customButton = tr.querySelector('.quote-add-custom-field');
+    (Array.isArray(itemData.customFields) ? itemData.customFields : []).forEach(field => addQuoteCustomField(customButton, field));
     if (itemData.brand && tr.querySelector('.item-brand').value === '其他')
         tr.querySelector('.item-brand-other').value = itemData.brand;
     onQuoteBrandSelectChange(tr.querySelector('.item-brand'));
@@ -3624,6 +3724,7 @@ function saveQuoteDraft() {
             productLine: row.querySelector('.item-product-line')?.value || '',
             productType: row.querySelector('.item-product-type')?.value || '',
             spec: row.querySelector('.item-spec')?.value || '',
+            ...quoteExtraDataFromRow(row),
             qty: row.querySelector('.qty')?.value || '',
             price: row.querySelector('.inc-price')?.value || '',
             exPrice: row.querySelector('.ex-price')?.value || '',
@@ -3700,7 +3801,7 @@ function numberToChineseWords(num) {
 
 function currentQuoteOutputValidation() {
     if (!document.getElementById('quoteNo').value.trim()) return '請先填寫估價單號。';
-    if (!document.getElementById('salesName').value) return '請先從下拉選單選擇負責人。';
+    if (!document.getElementById('salesName').value) return '請先從下拉選單選擇負責業務。';
     const rows = [...document.querySelectorAll('#quoteItems tr')];
     if (!rows.some(row => (row.querySelector('.item-cn')?.value || row.querySelector('.item-en')?.value || row.querySelector('.item-model')?.value).trim())) return '請至少填寫一個品項。';
     if (rows.some(row => row.querySelector('.item-brand')?.value === '其他' && !quoteRowBrandValue(row))) return '已選擇「其他」廠牌，請輸入廠牌名稱。';
@@ -3731,7 +3832,8 @@ function collectCurrentQuoteRecord() {
         nameEn: row.querySelector('.item-en').value, nameCn: row.querySelector('.item-cn').value,
         model: row.querySelector('.item-model').value, brand: quoteRowBrandValue(row),
         productLine: row.querySelector('.item-product-line').value, productType: row.querySelector('.item-product-type').value,
-        productId: row.querySelector('.item-product-id')?.value || '', spec: row.querySelector('.item-spec').value, qty: row.querySelector('.qty').value,
+        productId: row.querySelector('.item-product-id')?.value || '', spec: row.querySelector('.item-spec').value,
+        ...quoteExtraDataFromRow(row), qty: row.querySelector('.qty').value,
         price: row.querySelector('.inc-price').value, exPrice: row.querySelector('.ex-price').value,
         subtotal: row.querySelector('.subtotal-inc').value
     }));
@@ -3908,7 +4010,7 @@ window.handleSaveAndPrint = function() {
     }
 
     if (!document.getElementById('salesName').value) {
-        alert('請從下拉選單選擇負責人！');
+        alert('請從下拉選單選擇負責業務！');
         return;
     }
 
@@ -3969,12 +4071,14 @@ window.handleSaveAndPrint = function() {
             productType: row.querySelector('.item-product-type').value,
             productId: row.querySelector('.item-product-id')?.value || '',
             spec: row.querySelector('.item-spec').value,
+            ...quoteExtraDataFromRow(row),
             qty: row.querySelector('.qty').value,
             price: row.querySelector('.inc-price').value,
             exPrice: row.querySelector('.ex-price').value,
             subtotal: row.querySelector('.subtotal-inc').value
         });
     });
+    rememberQuoteCustomerPreferences(clientName, quoteData.items);
 
     prepareQuoteForPrint();
 
@@ -4065,6 +4169,21 @@ function prepareQuoteForPrint() {
         toggleEmpty(row.querySelector('.item-model')?.closest('.item-row-pair > div'), row.querySelector('.item-model')?.value);
         toggleEmpty(row.querySelector('.item-brand-field'), quoteRowBrandValue(row));
         toggleEmpty(row.querySelector('.item-spec')?.closest('.field-row'), row.querySelector('.item-spec')?.value);
+        const extra = quoteExtraDataFromRow(row);
+        const printRows = [
+            ['產地', extra.origin],
+            ['交貨期', extra.leadTime],
+            ['院內料號', extra.hospitalItemCode],
+            ['製造商', extra.manufacturer],
+            ...extra.customFields.map(field => [field.label, field.value])
+        ].filter(([, value]) => String(value || '').trim());
+        const printExtra = row.querySelector('.quote-extra-print');
+        if (printExtra) {
+            printExtra.innerHTML = printRows.map(([label, value]) =>
+                `<div class="quote-extra-print-row"><strong>${escapeHtml(label)}：</strong><span>${escapeHtml(value)}</span></div>`
+            ).join('');
+            printExtra.classList.toggle('print-empty-field', !printRows.length);
+        }
     });
 
     markQuotePrintPagination();
@@ -6242,7 +6361,9 @@ function fullHistorySearchValues(type, record = {}) {
         return [
             record.quoteNo, record.clientName, record.ordererName, record.salesName,
             ...(Array.isArray(record.items) ? record.items.flatMap(item => [
-                item.brand, item.model, item.nameCn, item.nameEn, item.spec
+                item.brand, item.model, item.nameCn, item.nameEn, item.spec,
+                item.origin, item.leadTime, item.hospitalItemCode, item.manufacturer,
+                ...(Array.isArray(item.customFields) ? item.customFields.flatMap(field => [field.label, field.value]) : [])
             ]) : [])
         ];
     }

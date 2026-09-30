@@ -141,6 +141,15 @@ input[type="number"] {
 .field-row { display: flex; align-items: center; gap: 4px; margin-bottom: 0; }
 .field-row:has(.item-spec) { align-items: flex-start; }
 .field-row:has(.item-spec) > label { padding-top: 2px; }
+.quote-extra-fields { margin-top:4px; padding-top:3px; border-top:1px dashed #d8dee6; }
+.quote-extra-fields summary { cursor:pointer; color:#47627e; font-size:11px; font-weight:700; user-select:none; }
+.quote-extra-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 10px; margin-top:7px; }
+.quote-extra-grid label { display:flex; flex-direction:column; gap:3px; min-width:0; font-size:10.5px; font-weight:700; }
+.quote-extra-grid input { width:100%; box-sizing:border-box; }
+.quote-custom-fields { display:flex; flex-direction:column; gap:5px; margin-top:7px; }
+.quote-custom-field-row { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) auto; gap:6px; align-items:center; }
+.quote-add-custom-field { margin-top:6px; }
+.quote-extra-print { display:none; }
 .field-row label { font-weight: bold; white-space: nowrap; min-width: 60px; flex-shrink: 0; }
 .field-row input, .field-row textarea { flex: 1; width: auto; min-width: 0; }
 
@@ -528,6 +537,17 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         font-size: 10.5px;
         line-height: 1.15;
     }
+    .quote-extra-print {
+        display:block !important;
+        margin-top:2px;
+        text-align:left;
+        font-size:10px;
+        line-height:1.2;
+    }
+    .quote-extra-print.print-empty-field { display:none !important; }
+    .quote-extra-print-row { display:flex; align-items:flex-start; gap:3px; margin-top:1px; }
+    .quote-extra-print-row strong { flex:0 0 auto; white-space:nowrap; }
+    .quote-extra-print-row span { min-width:0; overflow-wrap:anywhere; }
 
     /* 避免品項表格的每一列被分頁攔腰切斷：放不下就整列移到下一頁 */
     table tr {
@@ -876,6 +896,9 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     .item-row-pair > div { width: 100%; }
     .field-row { margin-bottom: 6px; }
     .item-input-group { gap: 6px; }
+    .quote-extra-grid { grid-template-columns:1fr; }
+    .quote-custom-field-row { grid-template-columns:1fr; }
+    .quote-custom-field-row button { width:100%; min-height:40px; }
 
     #ordersTable td[data-th="操作"], #eqListTable td[data-th="操作"] {
         display: flex;

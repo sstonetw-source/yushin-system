@@ -576,6 +576,21 @@ test('quote print pagination uses the real print layout and keeps rows/footer in
 });
 
 
+test('quote optional item fields stay collapsed, persist, print only when filled and remember customer preferences', () => {
+    assert.match(indexSource, /applyCustomerQuotePreferences\(this\.value\)/);
+    assert.match(appSource, /function quoteExtraDataFromRow\(row\)/);
+    assert.match(appSource, /item-origin/);
+    assert.match(appSource, /item-lead-time/);
+    assert.match(appSource, /item-hospital-code/);
+    assert.match(appSource, /item-manufacturer/);
+    assert.match(appSource, /quote-custom-field-row/);
+    assert.match(appSource, /quoteOptionalFields/);
+    assert.match(appSource, /rememberQuoteCustomerPreferences\(clientName, quoteData\.items\)/);
+    assert.match(appSource, /item\.hospitalItemCode/);
+    assert.match(cssSource, /\.quote-extra-print/);
+});
+
+
 test('quote and order search-index migration is admin-only batched and idempotent', () => {
     const start = appSource.indexOf('window.backfillOrderSearchIndex =');
     const end = appSource.indexOf('\n};', start) + 3;
