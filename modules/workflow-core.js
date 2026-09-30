@@ -29,7 +29,6 @@
   });
   function itemWorkCategory(input={}){
     if(input.lifecycleStatus&&input.lifecycleStatus!=='normal')return ITEM_WORK_CATEGORIES.CLOSED;
-    if(n(input.returnedQty)>0&&n(input.effectiveDeliveredQty)<=0)return ITEM_WORK_CATEGORIES.CLOSED;
     const qty=n(input.orderedQty??input.qty);
     const delivered=n(input.deliveredQty);
     if(qty>0&&delivered>=qty)return input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
