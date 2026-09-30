@@ -1196,8 +1196,7 @@ window.switchViewRole = function(role) {
     inventoryCache = [];
     inventoryCursor = null;
     inventoryHasMore = true;
-    pendingInventoryCache = [];
-    pendingPurchaseCache = [];
+        pendingPurchaseCache = [];
     pendingPurchaseCursor = null;
     pendingPurchaseHasMore = true;
     poListCache = [];
@@ -5015,7 +5014,7 @@ window.changeOrderPeriod = function(value) {
     renderOrdersList();
 };
 
-let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[], pendingInventoryCache=[], pendingSupplyCache=[];
+let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[], pendingSupplyCache=[];
 let warehouseStockCache = new Map();
 function invalidateWarehouseStockCache(productKey = '', warehouseId = '') {
     if (productKey && warehouseId) {
@@ -5086,7 +5085,7 @@ window.loadInventory=async function(reset=true){
  const [m,supplies]=await Promise.all([
  db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
  db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(100).get().catch(()=>({docs:[]}))
- ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingInventoryCache=[];pendingSupplyCache=supplies.docs.map(d=>({id:d.id,...d.data()})).filter(row=>(row.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP').sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
+ ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingSupplyCache=supplies.docs.map(d=>({id:d.id,...d.data()})).filter(row=>(row.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP').sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
  }
  await loadWarehouseStocksForInventoryPage();
  writeAppDataCache('inventory', inventoryCache);
@@ -13947,7 +13946,7 @@ window.executeTestDataReset = async function() {
 
         forecastCache=[]; forecastHistorySearchResults=[];
         ordersCache=[]; orderHistorySearchResults=[]; pendingPurchaseCache=[]; purchasingDispatchCache=[];
-        poListCache=[]; supplyReceivingCache=[]; receivingSourceOrderStatusCache=new Map(); inventoryCache=[]; pendingInventoryCache=[];
+        poListCache=[]; supplyReceivingCache=[]; receivingSourceOrderStatusCache=new Map(); inventoryCache=[];
         orderPaginationState=null; loadedMainPages.clear();
         testDataResetPreviewState=null;
         if(input)input.value='';
