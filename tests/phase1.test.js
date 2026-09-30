@@ -1766,3 +1766,17 @@ test('cached session restore does not initialize the same active page twice',()=
   assert.match(appSource,/if \(lastShowAppInitKey !== initKey\) \{\s*lastShowAppInitKey = initKey;\s*initializePageData\(activeMainKey\);/);
   assert.match(appSource,/lastShowAppInitKey = '';\s*showLoginScreen\(\);/);
 });
+
+
+test('three-quote output compacts layout as item count grows', () => {
+    const start = appSource.indexOf('function renderComparisonQuotePage(companyKey, percent, variant)');
+    const end = appSource.indexOf('\n}\n\nfunction waitForQuoteImages', start) + 2;
+    assert.ok(start >= 0 && end > start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /items\.length >= 7 \? ' comparison-quote-dense' : items\.length >= 4 \? ' comparison-quote-compact'/);
+    assert.match(source, /comparison-style-\$\{variant\}\$\{densityClass\}/);
+    assert.match(cssSource, /\.comparison-quote-page\.comparison-quote-compact/);
+    assert.match(cssSource, /\.comparison-quote-page\.comparison-quote-dense/);
+    assert.match(cssSource, /\.comparison-style-b\.comparison-quote-compact \.comparison-product-list \{ gap:1\.5mm; margin-top:2mm; \}/);
+    assert.match(cssSource, /\.comparison-style-a\.comparison-quote-dense \.comparison-product-item \{ min-height:7\.5mm; padding:1mm 0; \}/);
+});

@@ -261,6 +261,58 @@ input[type="number"] {
 .comparison-style-b .comparison-quote-stamp { margin-left:auto; }
 .comparison-style-b .comparison-quote-stamp img { margin-left:auto; object-position:right center; }
 
+/* 三家估價單依品項數自動收斂垂直空間：1–3 項維持原版，4–6 項 compact，7 項以上 dense。
+   只調整間距與區塊高度，不把正式文件字縮到難以閱讀。 */
+.comparison-quote-page.comparison-quote-compact { padding-top:8mm; padding-bottom:8mm; }
+.comparison-quote-compact .comparison-quote-header { min-height:22mm; gap:8mm; }
+.comparison-quote-compact .comparison-company-logo { max-height:20mm; margin-bottom:1.5mm; }
+.comparison-quote-compact .comparison-quote-meta { margin:2.5mm 0 3mm; }
+.comparison-quote-compact .comparison-quote-meta span { margin-bottom:1mm; }
+.comparison-quote-compact .comparison-product-list { margin-top:1.5mm; }
+.comparison-quote-compact .comparison-product-item { min-height:9mm; padding:1.5mm .5mm; gap:2mm; }
+.comparison-quote-compact .comparison-product-extra { margin-top:.5mm; }
+.comparison-quote-compact .comparison-quote-total-row { margin-top:3.5mm; }
+.comparison-quote-compact .comparison-quote-chinese-total { margin-top:1.5mm; }
+.comparison-quote-compact .comparison-quote-stamp { margin-top:3mm; min-height:20mm; }
+.comparison-quote-compact .comparison-quote-stamp img { max-height:25mm; }
+.comparison-style-a.comparison-quote-compact { padding-left:10mm; padding-right:10mm; }
+.comparison-style-a.comparison-quote-compact .comparison-product-list { margin-top:2mm; }
+.comparison-style-a.comparison-quote-compact .comparison-product-item { min-height:9mm; padding:1.4mm 0; }
+.comparison-style-a.comparison-quote-compact .comparison-quote-total-row { padding-top:3mm; }
+.comparison-style-b.comparison-quote-compact { padding-left:10mm; padding-right:10mm; }
+.comparison-style-b.comparison-quote-compact .comparison-quote-header { min-height:20mm; }
+.comparison-style-b.comparison-quote-compact .comparison-company-identity { min-height:18mm; }
+.comparison-style-b.comparison-quote-compact .comparison-quote-meta { margin-top:3mm; }
+.comparison-style-b.comparison-quote-compact .comparison-product-list { gap:1.5mm; margin-top:2mm; }
+.comparison-style-b.comparison-quote-compact .comparison-product-item { min-height:9mm; padding:2mm; }
+.comparison-style-b.comparison-quote-compact .comparison-quote-total-row { gap:1mm; }
+
+.comparison-quote-page.comparison-quote-dense { padding-top:6mm; padding-bottom:6mm; }
+.comparison-quote-dense .comparison-quote-header { min-height:18mm; gap:6mm; }
+.comparison-quote-dense .comparison-company-logo { max-height:17mm; margin-bottom:1mm; }
+.comparison-quote-dense .comparison-quote-header p { margin:1px 0; }
+.comparison-quote-dense .comparison-quote-meta { margin:1.5mm 0 2mm; }
+.comparison-quote-dense .comparison-quote-meta span { margin-bottom:.5mm; }
+.comparison-quote-dense .comparison-product-list { margin-top:1mm; }
+.comparison-quote-dense .comparison-product-item { min-height:7.5mm; padding:1mm 0; gap:1.5mm; }
+.comparison-quote-dense .comparison-product-extra { margin-top:.3mm; gap:.3mm 2mm; }
+.comparison-quote-dense .comparison-quote-total-row { margin-top:2.5mm; }
+.comparison-quote-dense .comparison-quote-chinese-total { margin-top:1mm; }
+.comparison-quote-dense .comparison-quote-stamp { margin-top:2mm; min-height:18mm; }
+.comparison-quote-dense .comparison-quote-stamp img { max-height:22mm; }
+.comparison-style-a.comparison-quote-dense { padding-left:8mm; padding-right:8mm; }
+.comparison-style-a.comparison-quote-dense .comparison-document-title { margin-top:1mm; font-size:27px; }
+.comparison-style-a.comparison-quote-dense .comparison-product-list { margin-top:1mm; }
+.comparison-style-a.comparison-quote-dense .comparison-product-item { min-height:7.5mm; padding:1mm 0; }
+.comparison-style-a.comparison-quote-dense .comparison-quote-total-row { padding-top:2mm; }
+.comparison-style-b.comparison-quote-dense { padding-left:8mm; padding-right:8mm; }
+.comparison-style-b.comparison-quote-dense .comparison-quote-header { min-height:17mm; }
+.comparison-style-b.comparison-quote-dense .comparison-company-identity { min-height:16mm; }
+.comparison-style-b.comparison-quote-dense .comparison-quote-meta { margin-top:2mm; }
+.comparison-style-b.comparison-quote-dense .comparison-product-list { gap:1mm; margin-top:1mm; }
+.comparison-style-b.comparison-quote-dense .comparison-product-item { min-height:7.5mm; padding:1.4mm 1.8mm; }
+.comparison-style-b.comparison-quote-dense .comparison-quote-total-row { gap:.5mm; }
+
 #printableQuote.theme-yushin { font-family: "Microsoft JhengHei", Arial, sans-serif; }
 #printableQuote.theme-yushin table th { background-color: #dbe9ff; }
 #printableQuote.theme-yushin table, #printableQuote.theme-yushin th, #printableQuote.theme-yushin td { border: 1px solid #333; }
