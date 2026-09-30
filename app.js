@@ -3583,7 +3583,6 @@ window.addQuoteRow = function(itemData = {}) {
                     <div class="quote-custom-fields"></div>
                     <button type="button" class="btn-small btn-secondary quote-add-custom-field" onclick="addQuoteCustomField(this)">＋ 自訂欄位</button>
                 </details>
-                <div class="quote-extra-print"></div>
             </div>
         </td>
         <td data-th="數量"><input type="number" class="qty" value="${itemData.qty || 1}" min="1" oninput="calculateTotals()"></td>
