@@ -5640,7 +5640,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         const existingSameStock=existing.productKey===productKey&&(existing.warehouseId||'')===warehouseId;
         const preservedQty=existingSameStock?Math.min(existingQty,requested):0;
         const additionalNeeded=Math.max(0,requested-preservedQty);
-        const additionalReservable=Math.max(0,Math.min(additionalNeeded,warehouse.available,aggregate.available));
+        const additionalReservable=Math.max(0,Math.min(additionalNeeded,warehouse.available));
         const reservable=preservedQty+additionalReservable;
         const shortage=Math.max(0,requested-reservable);
         const now=new Date().toISOString();
@@ -8116,7 +8116,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const order={id:orderSnap.id,...orderSnap.data()};
             if(normalizedOrderStatus(order)!=='normal'||liveShortage<=0){skipCandidate=true;return;}
             const inv=inventoryNumbers(invSnap.data()),wh=inventoryNumbers(whSnap.data());
-            const take=Math.min(remaining,liveShortage,Math.max(0,inv.available),Math.max(0,wh.available));
+            const take=Math.min(remaining,liveShortage,Math.max(0,wh.available));
             if(take<=0){skipCandidate=true;return;}
             const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
@@ -9696,9 +9696,11 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const warehouseId = directShip ? '' : (item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '');
         const invRef = !directShip && productKey ? inventoryRefFor(item) : null;
         const whRef = !directShip && warehouseId && productKey ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey)) : null;
+        const reservationRef = db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
         const invSnap = invRef ? await transaction.get(invRef) : null;
         const whSnap = whRef ? await transaction.get(whRef) : null;
-        contexts.push({item,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap});
+        const reservationSnap = await transaction.get(reservationRef);
+        contexts.push({item,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap});
     }
 
     const nextItems = [];
@@ -9711,8 +9713,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     });
 
     for (const ctx of contexts) {
-        const {item,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap} = ctx;
-        const reservationRef = db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
+        const {item,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap} = ctx;
 
         if (directShip || !productKey) {
             const shortage = directShip ? 0 : Math.max(0, ordered - delivered);
@@ -9733,8 +9734,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const invState = invRef ? stockStates.get(invRef.path) : null;
         const whState = whRef ? stockStates.get(whRef.path) : null;
         if (nextStatus === 'cancelled') {
-            const reservedRemaining = Math.max(0, Number(item.inventoryReservedQty ?? item.reservedQty ?? 0) - delivered);
-            const release = Math.min(reservedRemaining, whState?.reserved || 0, invState?.reserved || 0);
+            const reservationData = reservationSnap?.exists ? reservationSnap.data() : null;
+            const reservedRemaining = Math.max(0, Number(reservationData?.quantity ?? item.reservedQty ?? item.inventoryReservedQty ?? 0));
+            const release = Math.min(reservedRemaining, whState?.reserved || 0);
             if (release > 0) {
                 invState.reserved = Math.max(0, invState.reserved - release);
                 whState.reserved = Math.max(0, whState.reserved - release);
@@ -9757,7 +9759,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const receivedSupply = Math.max(0, Number(item.receivedQty??item.purchaseReceivedQty??item.supplyReceivedQty??0));
         const incomingSupply = Math.min(outstanding, Math.max(0, orderedSupply - receivedSupply));
         const needed = Math.max(0, outstanding - incomingSupply);
-        const reserve = invState && whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved),Math.max(0,invState.onHand-invState.reserved)) : 0;
+        const reserve = whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved)) : 0;
         const shortage = Math.max(0, needed - reserve);
         if (reserve > 0) {
             invState.reserved += reserve;
@@ -9979,7 +9981,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     let lotAllocations=[],cogs=0;
 
     if (deltaQty > 0) {
-        if (inv.onHand < deltaQty || wh.onHand < deltaQty) throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
+        if (wh.onHand < deltaQty) throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
         const lotQuery=await transaction.get(db.collection('inventoryLots').where('productKey','==',productKey).where('warehouseId','==',warehouseId));
         const lotDocs=lotQuery.docs.map(doc=>({id:doc.id,...doc.data()})).filter(l=>Number(l.remainingQty||0)>0);
         if(!lotDocs.length)throw new Error('此庫存尚未建立批次成本資料，請先完成入庫／期初庫存批次建檔後再送貨。');
@@ -10003,7 +10005,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         cogs=-reversal.totalCost;
     }
 
-    transaction.set(invRef,{onHand:inv.onHand-deltaQty,reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(invRef,{onHand:Math.max(0,inv.onHand-deltaQty),reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand-deltaQty,reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
         warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
@@ -10030,7 +10032,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const whSnap = await transaction.get(whRef);
     if (!invSnap.exists || !whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
     const inv=inventoryNumbers(invSnap.data()), wh=inventoryNumbers(whSnap.data());
-    if (deltaQty < 0 && (inv.onHand < Math.abs(deltaQty) || wh.onHand < Math.abs(deltaQty))) {
+    if (deltaQty < 0 && wh.onHand < Math.abs(deltaQty)) {
         throw new Error('刪除／縮減退貨後會造成庫存小於 0。');
     }
     const now=new Date().toISOString();
@@ -10060,7 +10062,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const reservationDelta=deltaQty;
     const nextReserved=Math.max(0,inv.reserved+reservationDelta);
     const nextWarehouseReserved=Math.max(0,wh.reserved+reservationDelta);
-    transaction.set(invRef,{onHand:inv.onHand+deltaQty,reserved:nextReserved,incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(invRef,{onHand:Math.max(0,inv.onHand+deltaQty),reserved:nextReserved,incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:nextWarehouseReserved,incoming:wh.incoming,updatedAt:now},{merge:true});
     const deliveryItemId=order.itemId||'';
     const reservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
