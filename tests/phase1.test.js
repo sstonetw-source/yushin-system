@@ -752,7 +752,8 @@ test('phase 5 order creation reserves only available stock and records shortage'
     const start=appSource.indexOf('async function reserveSingleOrderItem');
     const end=appSource.indexOf('async function reserveInventoryForNewOrder',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/Math\.min\(additionalNeeded,warehouse\.available,aggregate\.available\)/);
+    assert.match(s,/Math\.min\(additionalNeeded,warehouse\.available\)/);
+    assert.doesNotMatch(s,/Math\.min\(additionalNeeded,warehouse\.available,aggregate\.available\)/);
     assert.match(s,/inventoryReservedQty/);
     assert.match(s,/inventoryShortageQty/);
     assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
@@ -764,7 +765,7 @@ test('phase 5 shipment consumes both aggregate and selected warehouse stock tran
     const s=appSource.slice(start,end);
     assert.match(s,/warehouseId/);
     assert.match(s,/warehouseStocks/);
-    assert.match(s,/onHand:\s*inv\.onHand\s*-\s*deltaQty/);
+    assert.match(s,/onHand:\s*Math\.max\(0,inv\.onHand-deltaQty\)/);
     assert.match(s,/onHand:\s*wh\.onHand\s*-\s*deltaQty/);
     assert.match(s,/reserved:\s*Math\.max\(0,\s*inv\.reserved\s*\+\s*reservedDelta\)/);
     assert.match(s,/'ship'/);
