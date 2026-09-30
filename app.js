@@ -5819,11 +5819,13 @@ function itemDispatchState(order, item) {
     // 回到仍需補送的物流狀態；grossDelivered 保留給庫存與歷史追蹤。
     const delivered=Math.max(0,grossDelivered-returned);
     const reserved=Math.max(0,Number(item.reservedQty||0));
-    const prepared=Number(item.dispatchPreparedQty||0);
-    const shippable=Math.max(0,prepared-delivered);
-    // reserved/prepared are cumulative quantities. Delivery consumes shippable
-    // quantity but must not make an already-prepared item appear as "待打單" again.
-    return { delivered, grossDelivered, returned, reserved, prepared, shippable, pending:Math.max(0,reserved-prepared) };
+    const prepared=Math.max(0,Number(item.dispatchPreparedQty||0));
+    // reservedQty 是「目前尚未出貨、仍被此訂單占用的數量」；dispatchPreparedQty / grossDelivered
+    // 則是累計量。兩者不能直接相減，否則第一批送完、第二批到貨後會漏掉新的待打單數量。
+    const preparedOutstanding=Math.max(0,prepared-grossDelivered);
+    const shippable=Math.max(0,Math.min(reserved,preparedOutstanding));
+    const pending=Math.max(0,reserved-shippable);
+    return { delivered, grossDelivered, returned, reserved, prepared, preparedOutstanding, shippable, pending };
 }
 
 function orderContextActionState(order) {
@@ -9645,7 +9647,7 @@ function renderOrderStatusHistory(order) {
 }
 
 async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, reversalRecords) {
-    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0,lotAllocations:[],cogs:0 };
+    if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0,newReservedQty:Math.max(0,Number(order.reservedQty||0)),lotAllocations:[],cogs:0 };
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
     const invRef = inventoryRefFor(order);
@@ -9700,7 +9702,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     }));
 
     transaction.set(deliveryReservationRef,{...inventoryReservationPayload(sourceId,order,newReservedRemaining,newReservedRemaining>0?'active':'fulfilled'),itemId:deliveryItemId,warehouseId},{merge:true});
-    return { reservedDelta,lotAllocations,cogs };
+    return { reservedDelta,newReservedQty:newReservedRemaining,lotAllocations,cogs };
 }
 function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
     return applyInventoryDeliveryDeltaInTransaction(transaction, order, deliveryQty, actor, sourceId);
@@ -9761,7 +9763,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
         createdAt:now,createdBy:actor,lotAllocations,costPending:true,reservationDelta,
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     });
-    return {lotAllocations,cogs,reservationDelta};
+    return {lotAllocations,cogs,reservationDelta,newReservedQty:nextReservation};
 }
 
 window.quickCompleteDelivery = async function(orderIdOverride) {
@@ -9829,8 +9831,9 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             record.lotAllocations=inventoryResult?.lotAllocations||[];
             record.cogs=Number(inventoryResult?.cogs||0);
             records[records.length-1]=record;
+            const nextItems=transactionItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
             const updates = {
-                deliveryRecords: records, deliveredQty: total, isDelivered: true,
+                items:nextItems, deliveryRecords: records, deliveredQty: total, isDelivered: true,
                 deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history)
             };
             if (statusEntries.length) updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...statusEntries);
@@ -9899,8 +9902,10 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
                 ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
                 : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
-            await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
-            const updates = { deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
+            const currentItems=normalizedOrderItems(order);
+            const nextItems=currentItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
+            const updates = { items:nextItems, deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -10066,6 +10071,8 @@ window.saveDeliveryRecord = async function() {
                 const itemRecords=records.filter(r=>r.itemId===targetItem.itemId);
                 const itemOrder={...order,...targetItem,qty:Number(targetItem.qty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
                 const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId,deliveryDelta<0&&previous?[previous]:null);
+                const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
+                updates.items=syncedItems;
                 if(deliveryDelta>0){
                     record.lotAllocations=inventoryResult.lotAllocations||[];
                     record.cogs=Number(inventoryResult.cogs||0);
@@ -10128,8 +10135,9 @@ window.deleteDeliveryRecord = async function(recordId) {
             if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
             const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
             const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
-            await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
-            const updates = { deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
+            const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
+            const updates = { items:syncedItems, deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -10332,11 +10340,13 @@ window.saveReturnRecord = async function() {
             if (totalReturned > delivered + 1e-9) throw new Error(`累計退貨數量 ${totalReturned} 超過已送貨數量 ${delivered}。`);
             const history = { action: previous ? 'edit' : 'create', recordId: record.id, before: previous, after: record, by: actor, at: now };
             const returnDelta = qty - Number(previous?.qty || 0);
+            let syncedReservedQty=null;
             if (returnDelta){
                 const itemDeliveries=savedDeliveryRecords(order).filter(row=>((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
                 const itemReturns=savedReturnRecords(order).filter(row=>row.id!==editId&&((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
                 const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),deliveryRecords:itemDeliveries,returnRecords:itemReturns};
                 const inventoryResult=await applyInventoryReturnDeltaInTransaction(transaction, itemOrder, returnDelta, actor, orderId, previous);
+                syncedReservedQty=Number(inventoryResult?.newReservedQty??targetItem.reservedQty??0);
                 if(returnDelta>0){
                     record.lotAllocations=[...(previous?.lotAllocations||[]),...(inventoryResult.lotAllocations||[])];
                 }else if(previous){
@@ -10346,7 +10356,8 @@ window.saveReturnRecord = async function() {
                 record.cogs=record.lotAllocations.reduce((sum,row)=>sum+Number(row.cost??(Number(row.qty||0)*Number(row.unitCost||0))),0);
                 if(existingIndex>=0)records[existingIndex]=record;else records[records.length-1]=record;
             }
-            const updates = { returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const syncedItems=syncedReservedQty===null?orderItems:orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:syncedReservedQty}:item);
+            const updates = { items:syncedItems, returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
@@ -10391,8 +10402,9 @@ window.deleteReturnRecord = async function(recordId) {
             const itemDeliveries=savedDeliveryRecords(order).filter(row=>((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
             const itemReturns=records.filter(row=>row.id!==recordId&&((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId));
             const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),deliveryRecords:itemDeliveries,returnRecords:itemReturns};
-            await applyInventoryReturnDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, removed);
-            const updates = { returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const inventoryResult=await applyInventoryReturnDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, removed);
+            const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
+            const updates = { items:syncedItems, returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
