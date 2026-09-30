@@ -1377,12 +1377,13 @@ test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership c
     assert.match(rulesSource, /function owns\(data\)/);
 });
 
-test('V2 formal purchase orders normalize supply lines and receipts update them', () => {
+test('V2 formal purchase documents create authoritative supply lines', () => {
     assert.match(appSource, /function formalSupplyOrderId/);
-    assert.match(appSource, /async function syncFormalPurchaseSupplyOrders/);
-    assert.match(appSource, /type:'PURCHASING_PO'[\s\S]*?purchaseOrderId/);
-    assert.match(appSource, /formalSupplyReceived|formalReceived/);
-    assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(formalSupplyOrderId/);
+    assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
+    assert.match(appSource, /type:'PURCHASING_PO'/);
+    assert.match(appSource, /purchaseDocumentId:poDocumentId/);
+    assert.match(appSource, /purchaseDocumentNo:poNo/);
+    assert.match(appSource, /poRecord\.supplyOrderIds=supplyOrderIds/);
 });
 
 test('V2 initial stock separates operational lot from protected cost', () => {
@@ -1516,8 +1517,9 @@ test('warehouse master save has immediate feedback and duplicate-submit guard', 
 });
 
 
-test('formal purchase order automatically derives ordered progress on linked order items', () => {
-    assert.match(appSource, /purchaseOrderedQty:cumulative/);
+test('formal purchase document derives ordered progress from supplyOrders only', () => {
+    assert.match(appSource, /supplyOrderedQty:cumulative/);
+    assert.doesNotMatch(appSource, /purchaseOrderedQty:cumulative/);
     assert.match(appSource, /purchaseStatus:totalOrdered<=0\?'pending':totalOrdered<totalNeeded\?'partial':'ordered'/);
     assert.match(appSource, /function purchaseProgressInfo/);
     assert.match(appSource, /已訂貨 \$\{ordered\}\/\$\{required\}/);
@@ -1533,16 +1535,15 @@ test('V2 order history presents derived purchase and fulfillment progress instea
     assert.doesNotMatch(source, /\['isOrdered', '訂貨'\], \['isArrived', '到貨'\]/);
 });
 
-test('stock replenishment always uses a valid warehouse PO path', () => {
+test('stock replenishment always creates a valid warehouse supply path', () => {
     const start = appSource.indexOf('window.printPurchaseOrder');
     const end = appSource.indexOf('window.closePurchaseOrderModal', start);
     const source = appSource.slice(start, end);
     assert.match(source, /新增庫存採購單是公司庫存採購，不能設定為原廠直送/);
     assert.match(source, /新增庫存採購單必須指定入庫倉庫/);
     assert.match(source, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
-    const helperStart = appSource.indexOf('async function syncFormalPurchaseSupplyOrders');
-    const helperEnd = appSource.indexOf('async function registerPurchaseIncoming', helperStart);
-    assert.match(appSource.slice(helperStart, helperEnd), /db\.collection\('supplyOrders'\)/);
+    assert.match(source, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
+    assert.match(source, /warehouseId:\(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\?'':/);
 });
 
 test('ordered action belongs to purchasing while the order list only shows progress', () => {
