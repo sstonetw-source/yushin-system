@@ -8911,7 +8911,8 @@ window.printPurchaseOrder = async function() {
                 const supplyRef=db.collection('supplyOrders').doc(supplyId);
                 supplyOrderIds.push(supplyId);
                 transaction.set(supplyRef,{
-                    type:'PURCHASING_PO',
+                    // 客戶訂單採購與公司備貨是兩種不同供應來源；purchaseOrders 只保存文件快照。
+                    type:item.orderId?'PURCHASING_PO':'STOCK_REPLENISHMENT',
                     internalNo:poNo,
                     purchaseDocumentId:poDocumentId,
                     purchaseDocumentNo:poNo,
