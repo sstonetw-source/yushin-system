@@ -743,8 +743,8 @@ test('supply receipt retries are idempotent by operation id', () => {
 });
 
 test('multi-item returns require and use an explicit return item selector', () => {
-    assert.match(indexSource,/id="returnItemId"/);
-    assert.match(indexSource,/onchange="updateReturnFormHint\(\)"/);
+    assert.match(html,/id="returnItemId"/);
+    assert.match(html,/onchange="updateReturnFormHint\(\)"/);
     const resetStart=app.indexOf('function returnItemDeliveredQty');
     const saveStart=app.indexOf('window.saveReturnRecord = async function');
     const saveEnd=app.indexOf('window.deleteReturnRecord',saveStart);
