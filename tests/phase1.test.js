@@ -573,7 +573,7 @@ test('quote print pagination uses the real print layout and keeps rows/footer in
     assert.match(cssSource, /thead \{ display: table-header-group; \}/);
     assert.match(cssSource, /table tr \{[\s\S]*?break-inside: avoid/);
     assert.match(indexSource, /class="quote-summary-block"[\s\S]*class="footer-note"[\s\S]*class="bottom-layout"/);
-    assert.match(cssSource, /#printableQuote \.quote-summary-block/);
+    assert.doesNotMatch(cssSource, /#printableQuote \.quote-summary-block,[\s\S]{0,180}break-inside:\s*avoid/);
     assert.match(cssSource, /#printableQuote \.bottom-layout/);
 });
 
@@ -589,7 +589,10 @@ test('quote optional item fields stay collapsed, persist, print only when filled
     assert.match(appSource, /item-origin/);
     assert.match(appSource, /item-lead-time/);
     assert.match(appSource, /item-hospital-code/);
-    assert.match(appSource, /item-manufacturer/);
+    assert.match(appSource, /item-remarks/);
+    assert.doesNotMatch(appSource, /class="item-manufacturer"/);
+    assert.match(appSource, /type="hidden" class="item-product-line"/);
+    assert.doesNotMatch(appSource, /產品線（選填）/);
     assert.match(appSource, /quote-custom-field-row/);
     assert.match(appSource, /quoteOptionalFields/);
     assert.match(appSource, /FieldValue\.arrayUnion\(\.\.\.quoteOptionalFields\)/);
@@ -600,6 +603,19 @@ test('quote optional item fields stay collapsed, persist, print only when filled
     assert.match(cssSource, /\.quote-extra-print/);
 });
 
+
+test('quote printing avoids long blocking image waits on mobile', () => {
+    const openStart = appSource.indexOf('window.openThreeQuoteDialog = function()');
+    const openEnd = appSource.indexOf('window.closeThreeQuoteDialog', openStart);
+    const openSource = appSource.slice(openStart, openEnd);
+    const waitStart = appSource.indexOf('function waitForQuoteImages()');
+    const waitEnd = appSource.indexOf('window.printThreeQuotes', waitStart);
+    const waitSource = appSource.slice(waitStart, waitEnd);
+    assert.match(openSource, /preloadComparisonQuoteImages\(\)/);
+    assert.match(appSource, /function preloadComparisonQuoteImages\(\)/);
+    assert.match(waitSource, /1200/);
+    assert.doesNotMatch(waitSource, /5000/);
+});
 
 test('quote and order search-index migration is admin-only batched and idempotent', () => {
     const start = appSource.indexOf('window.backfillOrderSearchIndex =');
