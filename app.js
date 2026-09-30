@@ -6766,6 +6766,7 @@ let purchasingDispatchCursor = null;
 let purchasingDispatchHasMore = true;
 let purchasingDispatchLoading = false;
 let purchasingDispatchError = '';
+let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
 
 const purchasingViewLoaded = new Set();
 
@@ -6922,7 +6923,7 @@ function renderPurchasingWorkCards() {
         if (count) count.textContent = `${metrics[category].count} 筆`;
         if (amount) amount.textContent = formatStatsMoney(metrics[category].amount);
     });
-    const completed = purchasingCompletedRows();
+    const completed = visiblePurchasingCompletedRows();
     const completedCount = document.getElementById('purchaseCountCompleted');
     const completedAmount = document.getElementById('purchaseAmountCompleted');
     if (completedCount) completedCount.textContent = `${completed.length} 筆`;
@@ -6945,17 +6946,41 @@ function purchasingCompletedRows() {
         if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
         rows.push({ order, item, state });
     }));
-    return rows.slice(0, DEFAULT_LIST_LIMIT);
+    return rows;
+}
+
+function visiblePurchasingCompletedRows() {
+    return purchasingCompletedRows().slice(0, purchasingCompletedVisibleLimit);
 }
 
 function renderPurchasingCompletedOrders() {
     const body = document.getElementById('purchaseCompletedBody');
     const status = document.getElementById('purchaseCompletedStatus');
     if (!body) return;
-    const rows = purchasingCompletedRows();
+    const allRows = purchasingCompletedRows();
+    const rows = allRows.slice(0, purchasingCompletedVisibleLimit);
     body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項">${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openDeliveryModal('${escapeAttr(order.id)}')">查看訂單進度</button></td></tr>`).join('');
-    if (status) status.textContent = rows.length ? `已顯示 ${rows.length} 筆採購已完成品項` : '目前沒有採購已完成品項';
+    if (status) status.textContent = rows.length
+        ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
+        : '目前沒有採購已完成品項';
+    const more = document.getElementById('purchaseCompletedMoreBtn');
+    if (more) {
+        more.style.display = (allRows.length > rows.length || purchasingDispatchHasMore) ? '' : 'none';
+        more.disabled = purchasingDispatchLoading;
+        more.textContent = purchasingDispatchLoading ? '載入中…' : '載入更多（每次 50 筆）';
+    }
 }
+
+window.loadMorePurchasingCompleted = async function() {
+    if (purchasingDispatchLoading) return;
+    purchasingCompletedVisibleLimit += DEFAULT_LIST_LIMIT;
+    const loadedRows = purchasingCompletedRows();
+    if (loadedRows.length < purchasingCompletedVisibleLimit && purchasingDispatchHasMore) {
+        await loadPurchasingDispatchOrders(false);
+    }
+    renderPurchasingWorkCards();
+    renderPurchasingCompletedOrders();
+};
 
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
@@ -6982,7 +7007,9 @@ window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
     if (!['ordering', 'receiving', 'dispatch', 'completed', 'history'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
+    const previousPurchasingView = purchasingView;
     purchasingView = view;
+    if (view === 'completed' && previousPurchasingView !== 'completed') purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
     populatePurchasingFilters();
     renderPurchasingWorkCards();
     const orderingTab = document.getElementById('purchase-card-ordering');

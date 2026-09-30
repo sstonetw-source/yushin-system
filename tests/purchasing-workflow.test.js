@@ -254,6 +254,15 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
 });
 
 
+test('purchasing completed starts at 50 rows and supports loading more', () => {
+    assert.match(html, /id="purchaseCompletedMoreBtn"/);
+    assert.match(app, /let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT/);
+    assert.match(app, /function visiblePurchasingCompletedRows\(\)/);
+    assert.match(app, /window\.loadMorePurchasingCompleted = async function\(\)/);
+    assert.match(app, /purchasingCompletedVisibleLimit \+= DEFAULT_LIST_LIMIT/);
+    assert.match(app, /await loadPurchasingDispatchOrders\(false\)/);
+});
+
 test('purchasing completed excludes unresolved procurement and includes direct ship after arrival', () => {
     const start = app.indexOf('function purchasingCompletedRows()');
     const end = app.indexOf('function renderPurchasingCompletedOrders()', start);
