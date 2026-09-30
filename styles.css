@@ -231,7 +231,7 @@ input[type="number"] {
 .quote-pdf-stage .quote-pdf-no { font-weight:bold; }
 .quote-pdf-stage .quote-pdf-grand-total { font-size:14px; color:#003366; }
 .quote-pdf-stage .quote-summary-block { margin-top:2px; }
-.quote-pdf-stage.theme-yushin { font-family:"Microsoft JhengHei", Arial, sans-serif; }
+.quote-pdf-stage .quote-pdf-document.theme-yushin { font-family:"Microsoft JhengHei", Arial, sans-serif; }
 .quote-pdf-stage .quote-pdf-document.theme-yushin table th { background-color:#dbe9ff; }
 .quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE { font-family:"SimSun", "PMingLiU", "細明體", serif; }
 .quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE table { border:3px double #000; background-color:#fff; }
