@@ -2335,7 +2335,7 @@ async function createForecastOrdersDirectly(forecast, items) {
     const orderDate = localDateString();
     const normalizedItems = items.map((item, index) => {
         const source = forecastItemToOrderSource(forecast, item);
-        return { ...legacyOrderItemFromOrder(source, 0), itemId:'item-1', sourceItemIndex:index };
+        return { ...normalizeNewOrderItem(source), itemId:'item-1', sourceItemIndex:index };
     }).filter(item => item.itemName || item.itemCode);
     if (!normalizedItems.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
 
@@ -5670,8 +5670,9 @@ function orderReservationSummary(order) {
 async function reserveInventoryForNewOrder(orderId, order) {
     if(!warehouseMasterCache.length)await loadWarehouseMaster();
     const items=normalizedOrderItems(order);
-    if(items.length<=1){
-        const item=await reserveSingleOrderItem(orderId,order,items[0]||legacyOrderItemFromOrder(order),0);
+    if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
+    if(items.length===1){
+        const item=await reserveSingleOrderItem(orderId,order,items[0],0);
         const updates={
             items:[item],itemCount:1,orderSchemaVersion:2,
             inventoryProductKey:item.inventoryProductKey||'',
@@ -5693,41 +5694,8 @@ async function reserveInventoryForNewOrder(orderId, order) {
     return {reservedQty,shortageQty,items:reservedItems};
 }
 
-function legacyOrderItemFromOrder(order, index = 0) {
-    const item = {
-        itemId: String(order?.itemId || `item-${index + 1}`),
-        productId: order?.productId || '',
-        itemCode: order?.itemCode || '',
-        itemCodeKey: order?.itemCodeKey || normalizeHistoryItemCode(order?.itemCode || ''),
-        itemName: order?.itemName || '',
-        brand: resolveBrandName(order?.brand || ''),
-        productLine: order?.productLine || '',
-        productType: order?.productType || '',
-        spec: order?.spec || '',
-        supplier: order?.supplier || '',
-        qty: Number(order?.qty || 0),
-        unitPrice: parseMoney(order?.unitPrice || 0),
-        totalPrice: parseMoney(order?.totalPrice || 0),
-        fulfillmentType: order?.fulfillmentType || 'WAREHOUSE',
-        warehouseId: order?.warehouseId || ''
-    };
-    if (Object.prototype.hasOwnProperty.call(order || {}, 'costPrice')) item.costPrice = order.costPrice;
-    return item;
-}
-
-// Phase 1 相容層：舊訂單沒有 items 時，從既有單品欄位即時計算出一筆明細。
-// 目前仍保留所有 top-level 單品欄位，讓既有 PO／庫存／送貨流程完全不受影響。
 function normalizedOrderItems(order) {
-    // V2 是目前唯一正式寫入格式。已是 V2 的訂單直接使用 items，
-    // 不再執行舊 top-level 單品欄位判斷；尚未 migration 的舊資料才走 fallback。
-    const isV2 = Number(order?.orderSchemaVersion || 0) === 2
-        && Array.isArray(order?.items)
-        && order.items.length > 0;
-    const source = isV2
-        ? order.items
-        : (Array.isArray(order?.items) && order.items.length
-            ? order.items
-            : (order?.itemCode || order?.itemName || order?.productId ? [legacyOrderItemFromOrder(order)] : []));
+    const source = Array.isArray(order?.items) ? order.items : [];
     return source.map((item, index) => {
         const base = {
             ...item,
@@ -5753,10 +5721,8 @@ function ensureOrderItemCompatibility(order) {
 }
 
 function orderQuantity(order) {
-    const items=normalizedOrderItems(order);
-    if(items.length>1)return items.reduce((sum,item)=>sum+Math.max(0,Number(item.qty||0)),0);
-    const qty=parseFloat(order?.qty ?? items[0]?.qty);
-    return Number.isFinite(qty)&&qty>0?qty:0;
+    return normalizedOrderItems(order)
+        .reduce((sum,item)=>sum+Math.max(0,Number(item.qty||0)),0);
 }
 
 function savedDeliveryRecords(order) {
