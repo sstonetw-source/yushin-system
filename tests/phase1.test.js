@@ -582,7 +582,7 @@ test('quote owner wording stays consistently labeled as responsible sales', () =
 });
 
 test('quote optional item fields stay collapsed, persist, print only when filled and remember customer preferences', () => {
-    assert.match(indexSource, /applyCustomerQuotePreferences\(this\.value\)/);
+    assert.match(indexSource, /applyCurrentQuoteCustomerPreferences\(\)/);
     assert.match(appSource, /function quoteExtraDataFromRow\(row\)/);
     assert.match(appSource, /item-origin/);
     assert.match(appSource, /item-lead-time/);
@@ -591,8 +591,8 @@ test('quote optional item fields stay collapsed, persist, print only when filled
     assert.match(appSource, /quote-custom-field-row/);
     assert.match(appSource, /quoteOptionalFields/);
     assert.match(appSource, /FieldValue\.arrayUnion\(\.\.\.quoteOptionalFields\)/);
-    assert.match(appSource, /rememberQuoteCustomerPreferences\(clientName, quoteData\.items\)/);
-    assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.clientName, quoteData\.items\)/);
+    assert.match(appSource, /rememberQuoteCustomerPreferences\(ordererName \|\| clientName, quoteData\.items\)/);
+    assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
     assert.match(appSource, /renderComparisonExtraFields\(item\.extra, variant\)/);
     assert.match(appSource, /item\.hospitalItemCode/);
     assert.match(cssSource, /\.quote-extra-print/);
