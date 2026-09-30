@@ -5743,12 +5743,15 @@ function deliveredQuantity(order) {
 
 function deliveryProgressInfo(order) {
     const total = orderQuantity(order);
-    const delivered = Math.min(deliveredQuantity(order), total || deliveredQuantity(order));
+    const grossDelivered = deliveredQuantity(order);
+    const returned = Math.min(returnedQuantity(order), grossDelivered);
+    const effectiveDelivered = Math.max(0, grossDelivered - returned);
+    const delivered = Math.min(effectiveDelivered, total || effectiveDelivered);
     const remaining = Math.max(0, total - delivered);
     const isLegacyEstimated = !!order?.isDelivered && savedDeliveryRecords(order).length === 0;
     const state = total > 0 && delivered >= total ? 'complete' : delivered > 0 ? 'partial' : 'none';
     const label = state === 'complete' ? `已送 ${delivered}/${total}` : state === 'partial' ? `部分 ${delivered}/${total}` : `未送 0/${total || 0}`;
-    return { total, delivered, remaining, state, label, isLegacyEstimated };
+    return { total, delivered, grossDelivered, returned, remaining, state, label, isLegacyEstimated };
 }
 
 function savedReturnRecords(order) {
