@@ -5216,6 +5216,20 @@ function populateInventoryBrandFilter() {
  return brands;
 }
 
+function warehouseStockRowsForProduct(productKey) {
+ return warehouseMasterCache.filter(warehouse=>warehouse.active!==false).map(warehouse=>{
+   const stock=warehouseStockCache.get(warehouse.id+'||'+productKey);
+   return {warehouse,n:inventoryNumbers(stock||{})};
+ });
+}
+function warehouseStockTotals(productKey) {
+ const rows=warehouseStockRowsForProduct(productKey);
+ const onHand=rows.reduce((sum,row)=>sum+row.n.onHand,0);
+ const reserved=rows.reduce((sum,row)=>sum+row.n.reserved,0);
+ const incoming=rows.reduce((sum,row)=>sum+row.n.incoming,0);
+ return {rows,onHand,reserved,available:onHand-reserved,incoming};
+}
+
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;
  const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase();
@@ -5228,29 +5242,19 @@ window.renderInventoryList=function(){
    if(brandFilter&&orderBrandFilterValue(x.brand,brands)!==brandFilter)return;
    const lots=fefoLots(x);
    const productKey=x.productKey||x.productId||'';
-   const warehouseRows=warehouseMasterCache.map(warehouse=>{
-      const stock=warehouseStockCache.get(warehouse.id+'||'+productKey);
-      const n=inventoryNumbers(stock||{});
-      return {warehouse,n};
-   });
+   const warehouseState=warehouseStockTotals(productKey);
+   const warehouseRows=warehouseState.rows;
    const warehouseSearch=warehouseRows.map(row=>row.warehouse.warehouseName||'').join(' ');
    const text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();
    if(!inventorySearchActive&&k&&!text.includes(k))return;
-   const n=inventoryNumbers(x);
+   const n=warehouseState;
    const safetyStock=Number(x.safetyStock||0);
    if(stateFilter==='low' && !(safetyStock>0 && n.available<=safetyStock))return;
    if(stateFilter==='out' && n.available>0)return;
    if(stateFilter==='reserved' && n.reserved<=0)return;
-   const assignedOnHand=warehouseRows.reduce((sum,row)=>sum+row.n.onHand,0);
-   const assignedReserved=warehouseRows.reduce((sum,row)=>sum+row.n.reserved,0);
-   const assignedIncoming=warehouseRows.reduce((sum,row)=>sum+row.n.incoming,0);
-   const unallocated=Math.max(0,n.onHand-assignedOnHand);
-   const warehouseHtml=[
-      ...warehouseRows.filter(row=>row.n.onHand||row.n.reserved||row.n.incoming).map(row=>
-         `<div><strong>${escapeHtml(row.warehouse.warehouseName||row.warehouse.id)}</strong>：現有 ${row.n.onHand}／占用 ${row.n.reserved}／可用 ${row.n.available}／在途 ${row.n.incoming}</div>`
-      ),
-      ...(unallocated>0?[ `<div style="color:#a65b00;">未分倉：${unallocated}</div>` ]:[])
-   ].join('') || '<span style="color:#888;">尚未分倉</span>';
+   const warehouseHtml=warehouseRows.filter(row=>row.n.onHand||row.n.reserved||row.n.incoming).map(row=>
+      `<div><strong>${escapeHtml(row.warehouse.warehouseName||row.warehouse.id)}</strong>：現有 ${row.n.onHand}／占用 ${row.n.reserved}／可用 ${row.n.available}／在途 ${row.n.incoming}</div>`
+   ).join('') || '<span style="color:#888;">目前沒有分倉庫存</span>';
    const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');
    const reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails('${escapeAttr(x.productKey||x.id||'')}')">${n.reserved}</button>`:'0';
    body.insertAdjacentHTML('beforeend',`<tr>
@@ -5282,7 +5286,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
     const item = inventoryCache.find(x => x.id === inventoryId);
     if (!item) { alert('找不到庫存品項。'); return; }
     await loadSupplierWarehouseMasters();
-    const stock = inventoryNumbers(item);
+    const stock = warehouseStockTotals(item.productKey||item.productId||'');
     const safetyStock = Math.max(0, Number(item.safetyStock || 0));
     const suggestedQty = Math.max(1, safetyStock - stock.available);
     const match = await findProductByCode(item.itemCode || '');
