@@ -53,50 +53,51 @@ test('a self order reduces the quantity available to the formal PO', () => {
     assert.throws(() => validate(order, [{orderItemIndex:0,itemCode:'A',qty:2}]), /待採購數量/);
 });
 
-test('repeating an incoming-stock update does not count the same PO twice', async () => {
-    const source = app.match(/async function registerPurchaseIncoming\(poId, poRecord, previousPo = null\) \{[\s\S]*?\n\}\n(?=\nlet poReceiptTargetId)/)?.[0];
+test('repeating an incoming-stock update does not count the same supply twice', async () => {
+    const source = app.match(/async function registerPurchaseIncoming\(poId, poRecord\) \{[\s\S]*?\n\}\n(?=\nlet poReceiptTargetId)/)?.[0];
     assert.ok(source);
-    const docs = new Map();
+    const docs = new Map([
+        ['supplyOrders/S1',{productKey:'P1',productId:'P1',warehouseId:'W1',qty:3,incomingRegisteredQty:0,itemCode:'A',itemName:'產品',brand:'品牌',fulfillmentType:'WAREHOUSE'}],
+        ['supplyOrders/S2',{productKey:'P2',productId:'P2',warehouseId:'W1',qty:2,incomingRegisteredQty:0,itemCode:'B',itemName:'產品二',brand:'品牌',fulfillmentType:'WAREHOUSE'}]
+    ]);
     const records = [];
     let failSecondItemOnce = true;
-    const collection = name => ({ doc: id => ({ key:`${name}/${id}` }) });
-    const db = {
-        collection,
-        runTransaction: async callback => callback({
-            get: async ref => {
-                if (ref.key === 'inventory/P2' && failSecondItemOnce) { failSecondItemOnce = false; throw new Error('網路中斷'); }
-                return { exists:docs.has(ref.key), data:() => docs.get(ref.key) };
-            },
-            set: (ref, data, options) => {
-                if (ref.key.startsWith('inventoryMovements/')) records.push(data);
-                else docs.set(ref.key, options?.merge ? {...docs.get(ref.key),...data} : data);
-            }
-        })
-    };
     let sequence = 0;
-    db.collection = name => ({ doc: id => {
-        const key = `${name}/${id ?? ++sequence}`;
-        return {key, set:async data => { docs.set(key, {...docs.get(key), ...data}); }};
-    }});
+    const db = {
+        collection:name=>({doc:id=>({key:`${name}/${id ?? ++sequence}`})}),
+        async runTransaction(callback){
+            const writes=[];
+            const tx={
+                get:async ref=>{
+                    if(ref.key==='inventory/P2'&&failSecondItemOnce){failSecondItemOnce=false;throw new Error('網路中斷');}
+                    return {exists:docs.has(ref.key),data:()=>docs.get(ref.key)};
+                },
+                set:(ref,data,options)=>writes.push([ref,data,options]),
+                update:(ref,data)=>writes.push([ref,data,{merge:true}])
+            };
+            await callback(tx);
+            writes.forEach(([ref,data,options])=>{
+                if(ref.key.startsWith('inventoryMovements/')) records.push(data);
+                else docs.set(ref.key,options?.merge?{...docs.get(ref.key),...data}:data);
+            });
+        }
+    };
     const register = vm.runInNewContext(`${source}\nregisterPurchaseIncoming`, {
         db,
-        purchaseItemsFromSavedPo: po => po.items,
-        poIncomingKey: item => item.productId,
-        defaultWarehouse: () => ({id:'W1'}),
-        warehouseStockDocId: (warehouse, key) => `${warehouse}__${key}`,
-        inventoryNumbers: data => ({onHand:Number(data.onHand||0),reserved:Number(data.reserved||0),incoming:Number(data.incoming||0)}),
-        invalidateWarehouseStockCache: () => {},
-        resolveBrandName: name => name,
-        buildInventorySearchTokens: row => [String(row.itemCode||'').toLowerCase()],
-        currentUserName:'採購',currentUser:null,
-        DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
-        firebase:{firestore:{FieldValue:{arrayUnion:(...values) => values}}}
+        defaultWarehouse:()=>({id:'W1'}),
+        warehouseStockDocId:(warehouse,key)=>`${warehouse}__${key}`,
+        inventoryNumbers:data=>({onHand:Number(data.onHand||0),reserved:Number(data.reserved||0),incoming:Number(data.incoming||0)}),
+        invalidateWarehouseStockCache:()=>{},
+        resolveBrandName:name=>name,
+        buildInventorySearchTokens:row=>[String(row.itemCode||'').toLowerCase()],
+        poIncomingKey:item=>item.productId,
+        currentUserName:'採購',currentUser:null
     });
-    const po = {vendorName:'供應商',items:[
-        {productId:'P1',warehouseId:'W1',qty:3,itemCode:'A',itemName:'產品',brand:'品牌'},
-        {productId:'P2',warehouseId:'W1',qty:2,itemCode:'B',itemName:'產品二',brand:'品牌'}
+    const po={supplyOrderIds:['S1','S2'],items:[
+        {productId:'P1',warehouseId:'W1'},
+        {productId:'P2',warehouseId:'W1'}
     ]};
-    await assert.rejects(register('PO1',po), /網路中斷/);
+    await assert.rejects(register('PO1',po),/網路中斷/);
     await register('PO1',po);
     await register('PO1',po);
     assert.equal(docs.get('inventory/P1').incoming,3);
@@ -104,10 +105,12 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
     assert.equal(docs.get('inventory/P2').incoming,2);
     assert.deepEqual(docs.get('inventory/P2').searchTokens,['b']);
     assert.equal(docs.get('warehouseStocks/W1__P1').incoming,3);
-    assert.equal(docs.get('pendingInventoryItems/W1__P1').incomingQty,3);
-    assert.equal(docs.get('purchaseOrders/PO1').incomingRegistrationStatus,'completed');
+    assert.equal(docs.get('supplyOrders/S1').incomingRegisteredQty,3);
+    assert.equal(docs.get('supplyOrders/S2').incomingRegisteredQty,2);
+    assert.equal([...docs.keys()].some(key=>key.startsWith('pendingInventoryItems/')),false);
     assert.equal(records.length,2);
 });
+
 
 test('saved PO prints on a separate tap; pending inventory sync retries once', async () => {
     const start = app.indexOf('window.printPurchaseOrder = async function()');
@@ -669,7 +672,7 @@ test('warehouse receiving no longer mutates purchase-order receipt state', () =>
     assert.match(source,/collection\('supplyOrders'\)/);
     assert.match(source,/collection\('receipts'\)/);
     assert.match(source,/warehouseStocks/);
-    assert.match(source,/pendingInventoryItems/);
+    assert.doesNotMatch(source,/pendingInventoryItems/);
     assert.doesNotMatch(source,/purchaseOrders/);
     assert.doesNotMatch(source,/receiptRecords/);
     assert.doesNotMatch(source,/receiptStatus/);
@@ -703,7 +706,7 @@ test('PO core transaction commits before the print dialog opens', () => {
     const awaitIndex=source.indexOf('await commitPromise;');
     const printIndex=source.indexOf('printSavedPoDocument(poNo, vendorName);');
     assert.ok(awaitIndex>=0&&printIndex>awaitIndex,'core PO transaction must finish before print');
-    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord, previousPoForIncoming\)\s*\.then/);
+    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord\)\s*\.then/);
 });
 
 test('committed PO refreshes item quantities in order and purchasing views', () => {
