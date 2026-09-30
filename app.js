@@ -2011,7 +2011,6 @@ window.permanentlyDeleteOrder = async function(orderId) {
             });
         }
         const refs=normalizedOrderItems(order).map((item,index)=>db.collection('inventoryReservations').doc(`${orderId}__${String(item.itemId||`item-${index+1}`)}`));
-        refs.push(reservationDocRef(orderId));
         const batch=db.batch();refs.forEach(ref=>batch.delete(ref));batch.delete(db.collection('orders').doc(orderId));await batch.commit();
         ordersCache=ordersCache.filter(row=>row.id!==orderId);orderHistorySearchResults=orderHistorySearchResults.filter(row=>row.id!==orderId);renderOrdersList();
     }catch(err){alert('永久刪除失敗：'+(err.message||err));}
@@ -5571,10 +5570,6 @@ function inventoryReservationPayload(orderId, order, reservedQty, status = 'acti
         status,
         updatedAt: new Date().toISOString()
     };
-}
-
-function reservationDocRef(orderId) {
-    return db.collection('inventoryReservations').doc(String(orderId));
 }
 
 window.openInventoryReservationDetails = async function(productKey) {
@@ -9392,9 +9387,6 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     stockStates.forEach(state => {
         transaction.update(state.ref,{reserved:Math.max(0,state.reserved),updatedAt:now});
     });
-    transaction.set(reservationDocRef(orderId),{
-        ...inventoryReservationPayload(orderId,order,0,'released'),shortageQty:0,updatedAt:now
-    },{merge:true});
     transaction.update(db.collection('orders').doc(orderId),{
         items:nextItems,updatedAt:now
     });
@@ -9577,8 +9569,9 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)) : null;
     if (!invRef || !whRef) throw new Error('此訂單尚未指定有效倉庫，無法進行庫存出貨。');
 
-    const deliveryItemId=order.itemId||'';
-    const deliveryReservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
+    const deliveryItemId=String(order.itemId||'').trim();
+    if(!deliveryItemId) throw new Error('出貨品項缺少 itemId，無法安全對應庫存占用紀錄。');
+    const deliveryReservationRef=db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`);
     const invSnap = await transaction.get(invRef);
     const whSnap = await transaction.get(whRef);
     const reservationSnap = await transaction.get(deliveryReservationRef);
@@ -9637,8 +9630,9 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const invRef = inventoryRefFor(order);
     const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)) : null;
     if (!invRef || !whRef) throw new Error('此訂單沒有可追蹤的出貨倉庫。');
-    const deliveryItemId=order.itemId||'';
-    const reservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
+    const deliveryItemId=String(order.itemId||'').trim();
+    if(!deliveryItemId) throw new Error('退貨品項缺少 itemId，無法安全對應庫存占用紀錄。');
+    const reservationRef=db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`);
     const invSnap = await transaction.get(invRef);
     const whSnap = await transaction.get(whRef);
     const reservationSnap = await transaction.get(reservationRef);
