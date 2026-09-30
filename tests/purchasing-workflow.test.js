@@ -854,6 +854,29 @@ test('full returns stay in fulfillment instead of closing the order', () => {
     assert.match(app,/全數退貨・待補送/);
 });
 
+test('cancelled orders keep actual delivered sales but no pending sales', () => {
+    const start=app.indexOf('function calculateOrderStatsContribution');
+    const end=app.indexOf('\nfunction addSalesStatsContribution',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    const context=vm.createContext({
+        normalizedOrderStatus:()=> 'cancelled',
+        orderQuantity:()=>10,
+        orderUnitSalesAmount:()=>100,
+        savedDeliveryRecords:()=>[{date:'2026-09-01',qty:4}],
+        savedReturnRecords:()=>[],
+        localDateString:()=> '2026-09-30',
+        dateInStatsRange:(date,start,end)=>!!date&&(!start||date>=start)&&(!end||date<=end)
+    });
+    vm.runInContext(source,context);
+    const result=context.calculateOrderStatsContribution({costPrice:50,orderDate:'2026-09-01'},'2026-09-01','2026-09-30');
+    assert.equal(result.actualQty,4);
+    assert.equal(result.actualSales,400);
+    assert.equal(result.pendingQty,0);
+    assert.equal(result.pendingSales,0);
+    assert.equal(result.actualCost,200);
+});
+
 test('completion date includes a later return date when the order is still net complete', () => {
     const start=app.indexOf('function orderCompletionDate');
     const end=app.indexOf('\nfunction orderPeriodRange',start);
