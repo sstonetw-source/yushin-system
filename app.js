@@ -4233,36 +4233,36 @@ function renderQuotePdfDocument(quoteData = {}) {
                 <div><label>單號：</label><span class="quote-pdf-value quote-pdf-no">${escapeHtml(quoteData.quoteNo || '')}</span></div>
             </div>
         </div>
-        <div class="table-wrap">
-            <table class="quote-pdf-table">
-                <thead><tr><th>項次</th><th>品名 / 規格 / 型號說明</th><th>數量</th><th>含稅單價</th><th>未稅單價</th><th>含稅小計</th></tr></thead>
-                <tbody class="quote-pdf-items">
-                    ${items.map((item, index) => {
-                        const extras = quotePdfExtraRows(item);
-                        return `<tr>
-                            <td>${index + 1}</td>
-                            <td>
-                                <div class="quote-pdf-item-detail">
-                                    ${item.nameEn ? `<div><b>英文品名：</b>${escapeHtml(item.nameEn)}</div>` : ''}
-                                    ${item.nameCn ? `<div><b>中文品名：</b>${escapeHtml(item.nameCn)}</div>` : ''}
-                                    ${item.model ? `<div><b>貨號：</b>${escapeHtml(item.model)}</div>` : ''}
-                                    ${item.brand ? `<div><b>廠牌：</b>${escapeHtml(item.brand)}</div>` : ''}
-                                    ${item.spec ? `<div><b>規格：</b><span class="quote-pdf-prewrap">${escapeHtml(item.spec)}</span></div>` : ''}
-                                    ${extras.map(([label, value]) => `<div class="quote-pdf-extra"><b>${escapeHtml(label)}：</b>${escapeHtml(value)}</div>`).join('')}
-                                </div>
-                            </td>
-                            <td>${escapeHtml(String(item.qty ?? ''))}</td>
-                            <td>${Number(item.price || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td>
-                            <td>${Number(item.exPrice || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td>
-                            <td>${Number(item.subtotal || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</td>
-                        </tr>`;
-                    }).join('')}
-                </tbody>
-            </table>
+        <div class="quote-pdf-grid">
+            <div class="quote-pdf-grid-row quote-pdf-grid-head">
+                <div>項次</div><div>品名 / 規格 / 型號說明</div><div>數量</div><div>含稅單價</div><div>未稅單價</div><div>含稅小計</div>
+            </div>
+            <div class="quote-pdf-items">
+                ${items.map((item, index) => {
+                    const extras = quotePdfExtraRows(item);
+                    return `<div class="quote-pdf-grid-row quote-pdf-item-row">
+                        <div class="quote-pdf-cell quote-pdf-index">${index + 1}</div>
+                        <div class="quote-pdf-cell">
+                            <div class="quote-pdf-item-detail">
+                                ${item.nameEn ? `<div><b>英文品名：</b>${escapeHtml(item.nameEn)}</div>` : ''}
+                                ${item.nameCn ? `<div><b>中文品名：</b>${escapeHtml(item.nameCn)}</div>` : ''}
+                                ${item.model ? `<div><b>貨號：</b>${escapeHtml(item.model)}</div>` : ''}
+                                ${item.brand ? `<div><b>廠牌：</b>${escapeHtml(item.brand)}</div>` : ''}
+                                ${item.spec ? `<div><b>規格：</b><span class="quote-pdf-prewrap">${escapeHtml(item.spec)}</span></div>` : ''}
+                                ${extras.map(([label, value]) => `<div class="quote-pdf-extra"><b>${escapeHtml(label)}：</b>${escapeHtml(value)}</div>`).join('')}
+                            </div>
+                        </div>
+                        <div class="quote-pdf-cell">${escapeHtml(String(item.qty ?? ''))}</div>
+                        <div class="quote-pdf-cell">${Number(item.price || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</div>
+                        <div class="quote-pdf-cell">${Number(item.exPrice || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</div>
+                        <div class="quote-pdf-cell">${Number(item.subtotal || 0).toLocaleString('zh-TW', { maximumFractionDigits: 2 })}</div>
+                    </div>`;
+                }).join('')}
+            </div>
         </div>
         <div class="quote-summary-block">
             ${validDays ? `<div class="footer-note">* 本估價單有效期限 ${escapeHtml(validDays)} 天。</div>` : ''}
-            <div class="bottom-layout">
+            <div class="quote-pdf-bottom">
                 <div class="stamp-section">${stamp ? `<img src="${escapeAttr(stamp)}" alt="${escapeAttr(info?.title || '')} 估價單章">` : ''}</div>
                 <div class="total-section">
                     <p>銷售額合計：NT$ <span>${subtotal.toLocaleString()}</span></p>
@@ -4289,7 +4289,7 @@ function createQuotePdfStage(quoteData) {
 function quotePdfSafePageEnd(clone, canvas, startY, desiredEndY) {
     const rootRect = clone.getBoundingClientRect();
     const scale = canvas.width / Math.max(1, clone.getBoundingClientRect().width);
-    const ranges = [...clone.querySelectorAll('.quote-pdf-items tr, .quote-summary-block')].map(el => {
+    const ranges = [...clone.querySelectorAll('.quote-pdf-item-row, .quote-summary-block')].map(el => {
         const rect = el.getBoundingClientRect();
         return {
             top: Math.max(0, (rect.top - rootRect.top) * scale),
