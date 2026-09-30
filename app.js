@@ -9593,6 +9593,8 @@ window.resetDeliveryForm = function() {
     document.getElementById('deliveryNotes').value = '';
     document.getElementById('deliveryFormTitle').innerText = '新增送貨紀錄';
     document.getElementById('deliveryCancelEditBtn').style.display = 'none';
+    const itemSelect=document.getElementById('deliveryItemId');
+    if(itemSelect)itemSelect.disabled=false;
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     const progress = deliveryProgressInfo(order || {});
     document.getElementById('deliveryFormHint').innerText = `目前最多還可登錄 ${progress.remaining} 個。`;
@@ -9974,8 +9976,15 @@ function renderDeliveryModal() {
         <button type="button" class="workflow-step ${order.isBilled?'done':''}" ${editableSteps?`onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"`:'disabled'}><span>4</span>${order.isBilled?'已報帳':'未報帳'}</button>`;
     const deliveryItems=normalizedOrderItems(order);
     const itemSummary=deliveryItems.map(item=>{
-        const delivered=savedDeliveryRecords(order).filter(r=>!r.itemId||r.itemId===item.itemId).reduce((s,r)=>s+Number(r.qty||0),0);
-        return `<div><strong>${escapeHtml(item.itemName||'未命名品項')}</strong>（${escapeHtml(item.itemCode||'無貨號')}） ${delivered}/${Number(item.qty||0)}</div>`;
+        const grossDelivered=savedDeliveryRecords(order)
+            .filter(r=>(r.itemId||((deliveryItems.length===1&&deliveryItems[0]?.itemId)||''))===item.itemId)
+            .reduce((sum,r)=>sum+Number(r.qty||0),0);
+        const returned=savedReturnRecords(order)
+            .filter(r=>(r.itemId||((deliveryItems.length===1&&deliveryItems[0]?.itemId)||''))===item.itemId)
+            .reduce((sum,r)=>sum+Number(r.qty||0),0);
+        const delivered=Math.max(0,grossDelivered-returned);
+        const returnLabel=returned>0?`（已退 ${returned}）`:'';
+        return `<div><strong>${escapeHtml(item.itemName||'未命名品項')}</strong>（${escapeHtml(item.itemCode||'無貨號')}） ${delivered}/${Number(item.qty||0)}${returnLabel}</div>`;
     }).join('');
     document.getElementById('deliveryOrderSummary').innerHTML = itemSummary + `
         <div style="margin-top:6px;">整張訂單：${progress.delivered}/${progress.total}</div>
@@ -10021,15 +10030,31 @@ window.editDeliveryRecord = function(recordId) {
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     const record = savedDeliveryRecords(order).find(item => item.id === recordId);
     if (!record) return;
+    const orderItems=normalizedOrderItems(order);
+    const targetItem=orderItems.find(item=>item.itemId===record.itemId) || (orderItems.length===1?orderItems[0]:null);
+    if(!targetItem){alert('找不到這筆送貨紀錄對應的品項，無法安全編輯。');return;}
     document.getElementById('deliveryEditId').value = record.id;
+    const itemSelect=document.getElementById('deliveryItemId');
+    if(itemSelect){
+        itemSelect.value=targetItem.itemId;
+        itemSelect.disabled=true;
+        itemSelect.style.display=orderItems.length>1?'':'none';
+    }
     document.getElementById('deliveryDate').value = record.date || localDateString();
     document.getElementById('deliveryQty').value = record.qty;
     document.getElementById('deliveryNotes').value = record.notes || '';
     document.getElementById('deliveryFormTitle').innerText = '編輯送貨紀錄';
     document.getElementById('deliveryCancelEditBtn').style.display = '';
     document.getElementById('deliveryFormPanel').style.display = '';
-    const otherQty = savedDeliveryRecords(order).filter(item => item.id !== recordId).reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-    document.getElementById('deliveryFormHint').innerText = `此筆最多可改為 ${Math.max(0, orderQuantity(order) - otherQty)} 個。`;
+    const otherDelivered=savedDeliveryRecords(order)
+        .filter(row=>row.id!==recordId&&((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId))
+        .reduce((sum,row)=>sum+Number(row.qty||0),0);
+    const returned=savedReturnRecords(order)
+        .filter(row=>((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId))
+        .reduce((sum,row)=>sum+Number(row.qty||0),0);
+    const otherNetDelivered=Math.max(0,otherDelivered-returned);
+    const maxQty=Math.max(0,Number(targetItem.qty||targetItem.orderedQty||0)-otherNetDelivered);
+    document.getElementById('deliveryFormHint').innerText = `此筆最多可改為 ${maxQty} 個。`;
 };
 
 window.saveDeliveryRecord = async function() {
@@ -10063,7 +10088,7 @@ window.saveDeliveryRecord = async function() {
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
             const orderItems=normalizedOrderItems(order);
-            const requestedItemId=document.getElementById('deliveryItemId')?.value||orderItems[0]?.itemId||'item-1';
+            const requestedItemId=previous?.itemId||document.getElementById('deliveryItemId')?.value||orderItems[0]?.itemId||'item-1';
             const targetItem=orderItems.find(item=>item.itemId===requestedItemId)||orderItems[0];
             if(!targetItem)throw new Error('找不到送貨品項。');
             const itemOtherDelivered=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
