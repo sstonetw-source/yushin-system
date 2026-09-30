@@ -33,7 +33,6 @@
       inventoryShortageQty: shortageQty,
       purchaseRequiredQty: shortageQty,
       supplyOrderedQty,
-      purchaseOrderedQty: supplyOrderedQty,
       receivedQty,
       dispatchPreparedQty,
       deliveredQty,
