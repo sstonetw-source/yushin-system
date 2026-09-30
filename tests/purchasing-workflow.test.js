@@ -87,6 +87,7 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
         inventoryNumbers: data => ({onHand:Number(data.onHand||0),reserved:Number(data.reserved||0),incoming:Number(data.incoming||0)}),
         invalidateWarehouseStockCache: () => {},
         resolveBrandName: name => name,
+        buildInventorySearchTokens: row => [String(row.itemCode||'').toLowerCase()],
         currentUserName:'採購',currentUser:null,
         DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
         firebase:{firestore:{FieldValue:{arrayUnion:(...values) => values}}}
@@ -99,7 +100,9 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
     await register('PO1',po);
     await register('PO1',po);
     assert.equal(docs.get('inventory/P1').incoming,3);
+    assert.deepEqual(docs.get('inventory/P1').searchTokens,['a']);
     assert.equal(docs.get('inventory/P2').incoming,2);
+    assert.deepEqual(docs.get('inventory/P2').searchTokens,['b']);
     assert.equal(docs.get('warehouseStocks/W1__P1').incoming,3);
     assert.equal(docs.get('pendingInventoryItems/W1__P1').incomingQty,3);
     assert.equal(docs.get('purchaseOrders/PO1').incomingRegistrationStatus,'completed');
