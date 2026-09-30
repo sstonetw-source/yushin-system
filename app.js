@@ -9822,7 +9822,9 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             const total = orderQuantity(order);
             const records = savedDeliveryRecords(order).slice();
             const alreadyDelivered = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-            const remaining = Math.max(0, total - alreadyDelivered);
+            const alreadyReturned = returnedQuantity(order);
+            const effectiveDelivered = Math.max(0, alreadyDelivered - alreadyReturned);
+            const remaining = Math.max(0, total - effectiveDelivered);
             if (!total || remaining <= 0) throw new Error('這筆訂單已無尚未送貨數量。');
             const actor = deliveryActor();
             const now = new Date().toISOString();
@@ -9835,8 +9837,10 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             record.cogs=Number(inventoryResult?.cogs||0);
             records[records.length-1]=record;
             const nextItems=transactionItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
+            const grossAfterDelivery = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+            const effectiveAfterDelivery = Math.max(0, grossAfterDelivery - returnedQuantity(order));
             const updates = {
-                items:nextItems, deliveryRecords: records, deliveredQty: total, isDelivered: true,
+                items:nextItems, deliveryRecords: records, deliveredQty: grossAfterDelivery, isDelivered: effectiveAfterDelivery >= total,
                 deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history)
             };
             if (statusEntries.length) updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...statusEntries);
@@ -10068,7 +10072,7 @@ window.saveDeliveryRecord = async function() {
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
             const action = previous ? 'edit' : 'create';
             const history = { action, recordId: record.id, before: previous, after: record, by: actor, at: now };
-            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: totalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: effectiveTotalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             const deliveryDelta = qty - Number(previous?.qty || 0);
             if(deliveryDelta){
                 const itemRecords=records.filter(r=>r.itemId===targetItem.itemId);
@@ -10140,7 +10144,8 @@ window.deleteDeliveryRecord = async function(recordId) {
             const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
             const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
             const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
-            const updates = { items:syncedItems, deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: totalDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const effectiveDelivered=Math.max(0,totalDelivered-returnedQuantity(order));
+            const updates = { items:syncedItems, deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: effectiveDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
@@ -10360,7 +10365,8 @@ window.saveReturnRecord = async function() {
                 if(existingIndex>=0)records[existingIndex]=record;else records[records.length-1]=record;
             }
             const syncedItems=syncedReservedQty===null?orderItems:orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:syncedReservedQty}:item);
-            const updates = { items:syncedItems, returnRecords: records, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const effectiveDelivered=Math.max(0,delivered-totalReturned);
+            const updates = { items:syncedItems, returnRecords: records, returnedQty: totalReturned, isDelivered:effectiveDelivered>=orderQuantity(order)&&orderQuantity(order)>0, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
@@ -10407,7 +10413,8 @@ window.deleteReturnRecord = async function(recordId) {
             const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),deliveryRecords:itemDeliveries,returnRecords:itemReturns};
             const inventoryResult=await applyInventoryReturnDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, removed);
             const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
-            const updates = { items:syncedItems, returnRecords: next, returnedQty: totalReturned, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
+            const effectiveDelivered=Math.max(0,deliveredQuantity(order)-totalReturned);
+            const updates = { items:syncedItems, returnRecords: next, returnedQty: totalReturned, isDelivered:effectiveDelivered>=orderQuantity(order)&&orderQuantity(order)>0, returnHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, returnHistory: [...(order.returnHistory || []), history] };
