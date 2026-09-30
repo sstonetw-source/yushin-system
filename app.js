@@ -8100,12 +8100,12 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
             const whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
             const [orderSnap,resSnap,invSnap,whSnap]=await Promise.all([tx.get(orderRef),tx.get(reservationRef),tx.get(invRef),tx.get(whRef)]);
-            if(!orderSnap.exists||!resSnap.exists||!invSnap.exists||!whSnap.exists){skipCandidate=true;return;}
+            if(!orderSnap.exists||!resSnap.exists||!whSnap.exists){skipCandidate=true;return;}
             const reservation=resSnap.data();
             const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
             const order={id:orderSnap.id,...orderSnap.data()};
             if(normalizedOrderStatus(order)!=='normal'||liveShortage<=0){skipCandidate=true;return;}
-            const inv=inventoryNumbers(invSnap.data()),wh=inventoryNumbers(whSnap.data());
+            const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}),wh=inventoryNumbers(whSnap.data());
             const take=Math.min(remaining,liveShortage,Math.max(0,wh.available));
             if(take<=0){skipCandidate=true;return;}
             const items=normalizedOrderItems(order);
@@ -8120,7 +8120,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const nextOrder={...order,items,updatedAt:now};
             tx.update(orderRef,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
             tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
-            tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
+            if(invSnap.exists)tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
             tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
             tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,candidate.orderId,productKey,actor,{warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE'}));
             took=take;
