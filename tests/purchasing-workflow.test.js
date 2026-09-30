@@ -854,6 +854,25 @@ test('full returns stay in fulfillment instead of closing the order', () => {
     assert.match(app,/全數退貨・待補送/);
 });
 
+test('completion date includes a later return date when the order is still net complete', () => {
+    const start=app.indexOf('function orderCompletionDate');
+    const end=app.indexOf('\nfunction orderPeriodRange',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    const context=vm.createContext({
+        deliveryProgressInfo:()=>({state:'complete'}),
+        orderInvoiceDate:()=> '2026-09-02',
+        savedDeliveryRecords:()=>[
+            {date:'2026-09-01',qty:10},
+            {date:'2026-09-05',qty:2}
+        ],
+        savedReturnRecords:()=>[{date:'2026-09-10',qty:2}],
+        dateOnlyFromTimestamp:value=>String(value||'').slice(0,10)
+    });
+    vm.runInContext(source,context);
+    assert.equal(context.orderCompletionDate({isBilled:true}),'2026-09-10');
+});
+
 test('delivery progress uses net delivered quantity after returns', () => {
     const start=app.indexOf('function deliveryProgressInfo');
     const end=app.indexOf('\nfunction savedReturnRecords',start);
