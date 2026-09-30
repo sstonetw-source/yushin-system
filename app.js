@@ -7809,7 +7809,7 @@ window.reprintPurchaseOrder = function(poId) {
     poItems = purchaseItemsFromSavedPo(po);
     poAllItems = poItems;
     poEditingId = po.id;
-    poIncomingSyncPending = po.incomingRegistrationVersion === 1 && po.incomingRegistrationStatus !== 'completed';
+    poIncomingSyncPending = false;
     switchPoCompany(po.company || 'yushin', null, true);
 
     document.getElementById('poVendorName').value = po.vendorName || '';
@@ -7878,90 +7878,60 @@ function updatePoSaveButton() {
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
-async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
-    const previousItems = (previousPo ? purchaseItemsFromSavedPo(previousPo) : [])
-        .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
-    const nextItems = purchaseItemsFromSavedPo(poRecord)
-        .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
-
-    const compositeKey = item => {
-        const productKey = poIncomingKey(item);
-        const warehouseId = item.warehouseId || defaultWarehouse()?.id || '';
-        return productKey ? `${productKey}||${warehouseId}` : '';
-    };
-    const keys = new Set([...previousItems, ...nextItems].map(compositeKey).filter(Boolean));
-
-    for (const composite of keys) {
-        const [key, warehouseId] = composite.split('||');
-        const oldQty = previousItems.filter(item => compositeKey(item) === composite).reduce((sum,item)=>sum+Number(item.qty||0),0);
-        const newQty = nextItems.filter(item => compositeKey(item) === composite).reduce((sum,item)=>sum+Number(item.qty||0),0);
-        if (newQty === oldQty) continue;
-        const sample = nextItems.find(item => compositeKey(item) === composite)
-            || previousItems.find(item => compositeKey(item) === composite) || {};
-
+async function registerPurchaseIncoming(poId, poRecord) {
+    const supplyIds = Array.isArray(poRecord?.supplyOrderIds) ? poRecord.supplyOrderIds : [];
+    for (const supplyId of supplyIds) {
         await db.runTransaction(async tx => {
-            const invRef = db.collection('inventory').doc(encodeURIComponent(key));
-            const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)) : null;
-            const pendingId = warehouseId ? warehouseStockDocId(warehouseId,key) : encodeURIComponent(key);
-            const pendingRef = db.collection('pendingInventoryItems').doc(pendingId);
+            const supplyRef = db.collection('supplyOrders').doc(supplyId);
+            const supplySnap = await tx.get(supplyRef);
+            if (!supplySnap.exists) throw new Error(`找不到供應紀錄 ${supplyId}`);
+            const supply = supplySnap.data();
+            if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
 
-            const invSnap = await tx.get(invRef);
-            const whSnap = whRef ? await tx.get(whRef) : null;
-            const pendingSnap = await tx.get(pendingRef);
-            // The PO itself is committed before this step. Keep the applied quantity on
-            // the stock summary so a retry after a partial failure cannot add it twice.
-            const registered = pendingSnap.exists ? (pendingSnap.data().incomingByPurchaseOrder || {}) : {};
-            const delta = newQty - Number(registered[poId] || 0);
+            const key = String(supply.productKey || supply.productId || '').trim();
+            const warehouseId = String(supply.warehouseId || defaultWarehouse()?.id || '').trim();
+            if (!key || !warehouseId) throw new Error(`供應紀錄 ${supplyId} 缺少產品或倉庫資料`);
+
+            const targetQty = Math.max(0, Number(supply.qty || 0));
+            const registeredQty = Math.max(0, Number(supply.incomingRegisteredQty || 0));
+            const delta = targetQty - registeredQty;
             if (!delta) return;
+
+            const invRef = db.collection('inventory').doc(encodeURIComponent(key));
+            const whRef = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key));
+            const invSnap = await tx.get(invRef);
+            const whSnap = await tx.get(whRef);
             const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {});
-            const wh = inventoryNumbers(whSnap?.exists ? whSnap.data() : {});
-            const oldPending = Number(pendingSnap.exists ? pendingSnap.data().incomingQty : 0) || 0;
-            const nextIncoming = Math.max(0, oldPending + delta);
+            const wh = inventoryNumbers(whSnap.exists ? whSnap.data() : {});
             const now = new Date().toISOString();
 
             if (invSnap.exists) {
-                tx.set(invRef, { incoming:Math.max(0,inv.incoming+delta), updatedAt:now }, { merge:true });
+                tx.set(invRef,{incoming:Math.max(0,inv.incoming+delta),updatedAt:now},{merge:true});
             } else {
                 const nextInventory={
-                    productKey:key, productId:sample.productId||'', itemCode:sample.itemCode||'', itemName:sample.itemName||'',
-                    brand:resolveBrandName(sample.brand||''), onHand:0, reserved:0, incoming:Math.max(0,delta), lots:[], updatedAt:now
+                    productKey:key,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',
+                    brand:resolveBrandName(supply.brand||''),onHand:0,reserved:0,incoming:Math.max(0,delta),lots:[],updatedAt:now
                 };
                 nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
                 tx.set(invRef,nextInventory,{merge:true});
             }
-
-            if (whRef) {
-                tx.set(whRef, {
-                    warehouseId, productKey:key, productId:sample.productId||'', itemCode:sample.itemCode||'',
-                    itemName:sample.itemName||'', brand:resolveBrandName(sample.brand||''),
-                    onHand:wh.onHand, reserved:wh.reserved, incoming:Math.max(0,wh.incoming+delta), updatedAt:now
-                }, { merge:true });
-            }
-
-            const sourceOrderIds = nextItems.filter(item => compositeKey(item) === composite && item.orderId).map(item=>item.orderId);
-            const pendingPayload = {
-                productKey:key, productId:sample.productId||'', itemCode:sample.itemCode||'', itemName:sample.itemName||'',
-                brand:resolveBrandName(sample.brand||''), supplier:poRecord.vendorName||'', warehouseId,
-                incomingQty:nextIncoming, status:nextIncoming>0?'pending-arrival':'cancelled',
-                incomingByPurchaseOrder:{ ...registered, [poId]:newQty },
-                sourcePurchaseOrders:firebase.firestore.FieldValue.arrayUnion(poId),
-                updatedAt:now, createdAt:pendingSnap.exists?(pendingSnap.data().createdAt||now):now
-            };
-            if (sourceOrderIds.length) pendingPayload.sourceOrderIds=firebase.firestore.FieldValue.arrayUnion(...sourceOrderIds);
-            tx.set(pendingRef,pendingPayload,{merge:true});
-
-            tx.set(db.collection('inventoryMovements').doc(), {
-                type:'purchase_incoming', qty:delta, productKey:key, warehouseId,
-                fulfillmentType:'WAREHOUSE', sourceType:DOCUMENT_TYPES.PURCHASE_ORDER, sourceId:poId,
-                createdAt:now, createdBy:currentUserName||currentUser?.email||''
+            tx.set(whRef,{
+                warehouseId,productKey:key,productId:supply.productId||'',itemCode:supply.itemCode||'',
+                itemName:supply.itemName||'',brand:resolveBrandName(supply.brand||''),
+                onHand:wh.onHand,reserved:wh.reserved,incoming:Math.max(0,wh.incoming+delta),updatedAt:now
+            },{merge:true});
+            tx.update(supplyRef,{incomingRegisteredQty:targetQty,incomingRegisteredAt:now,updatedAt:now});
+            tx.set(db.collection('inventoryMovements').doc(),{
+                type:'purchase_incoming',qty:delta,productKey:key,warehouseId,
+                fulfillmentType:'WAREHOUSE',sourceType:'SUPPLY_ORDER',sourceId:supplyId,
+                purchaseDocumentId:poId,createdAt:now,createdBy:currentUserName||currentUser?.email||''
             });
         });
-        if(warehouseId) invalidateWarehouseStockCache(key,warehouseId);
+        const supply = poRecord.items?.[Number(String(supplyId).split('-').pop())];
+        const key = poIncomingKey(supply || {});
+        const warehouseId = supply?.warehouseId || defaultWarehouse()?.id || '';
+        if (key && warehouseId) invalidateWarehouseStockCache(key,warehouseId);
     }
-    await db.collection('purchaseOrders').doc(poId).set({
-        incomingRegistrationStatus:'completed', incomingRegistrationAt:new Date().toISOString()
-    }, { merge:true });
-    poRecord.incomingRegistrationStatus = 'completed';
 }
 
 let poReceiptTargetId = '';
@@ -8116,13 +8086,10 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         receivedProductKey=productKey;receivedWarehouseId=warehouseId;sourceOrderId=supply.orderId||'';
         const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
         const whRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
-        const pendingRef=db.collection('pendingInventoryItems').doc(warehouseId?warehouseStockDocId(warehouseId,productKey):encodeURIComponent(productKey));
         const invSnap=await tx.get(invRef);
         const whSnap=whRef?await tx.get(whRef):null;
-        const pendingSnap=await tx.get(pendingRef);
         const inv=inventoryNumbers(invSnap.exists?invSnap.data():{});
         const wh=inventoryNumbers(whSnap?.exists?whSnap.data():{});
-        const pendingIncoming=Math.max(0,Number(pendingSnap.exists?pendingSnap.data().incomingQty:0)||0);
         let order=null,items=[],itemIndex=-1,reserveQty=0;
         if(supply.orderId){
             const orderRef=db.collection('orders').doc(supply.orderId);
@@ -8159,8 +8126,6 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
           tx.set(invRef,nextInventory,{merge:true});
         }
         if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:Math.max(0,wh.incoming-qty),updatedAt:now},{merge:true});
-        const nextPendingIncoming=Math.max(0,pendingIncoming-qty);
-        if(pendingSnap.exists)tx.set(pendingRef,{incomingQty:nextPendingIncoming,status:nextPendingIncoming>0?'pending-arrival':'completed',completedAt:nextPendingIncoming>0?null:now,completedBy:nextPendingIncoming>0?'':actor,updatedAt:now},{merge:true});
         const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
@@ -8776,8 +8741,6 @@ window.printPurchaseOrder = async function() {
         poDate: document.getElementById('poDate').value,
         status: BUSINESS_STATUS.ACTIVE,
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
-        incomingRegistrationVersion:1,
-        incomingRegistrationStatus:'pending',
         items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
         ...netAmountMetadata(poNetTotal),
         createdAt: new Date().toISOString(),
@@ -8794,7 +8757,6 @@ window.printPurchaseOrder = async function() {
     let poCommitted = false;
     try {
         const poDocumentId = poNo;
-        let previousPoForIncoming = null;
         let committedSourceOrders = [];
         const commitPromise = db.runTransaction(async transaction => {
             committedSourceOrders = [];
@@ -8802,7 +8764,6 @@ window.printPurchaseOrder = async function() {
             const orderRefs = orderIds.map(orderId => db.collection('orders').doc(orderId));
             const poSnapshot = await transaction.get(poRef);
             const orderSnapshots = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
-            previousPoForIncoming = poSnapshot.exists ? { id: poDocumentId, ...poSnapshot.data() } : null;
             if (poSnapshot.exists) throw new Error(`訂購單號 ${poNo} 已存在，請關閉視窗後重新產生單號。`);
             orderSnapshots.forEach((snapshot, index) => {
                 if (!snapshot.exists) throw new Error('來源訂單已不存在。');
@@ -8831,6 +8792,7 @@ window.printPurchaseOrder = async function() {
                     brand:resolveBrandName(item.brand||''),
                     qty:Number(item.qty||0),
                     receivedQty:0,
+                    incomingRegisteredQty:0,
                     supplier:vendorName,
                     unitCost:Number(item.unitPrice||0),
                     orderDate:poRecord.poDate,
@@ -8900,10 +8862,9 @@ window.printPurchaseOrder = async function() {
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立訂購單。
-        registerPurchaseIncoming(poDocumentId, poRecord, previousPoForIncoming)
+        registerPurchaseIncoming(poDocumentId, poRecord)
             .then(() => {
                 poIncomingSyncPending = false;
-                savedPo.incomingRegistrationStatus = 'completed';
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
                 updatePoSaveStatus(`訂購單 ${poNo} 已建立；在途庫存同步完成。`);
                 updatePoSaveButton();
