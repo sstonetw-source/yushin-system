@@ -539,8 +539,8 @@
                 </div>
             </div>
             <div class="meta-section">
-                <div class="meta-row"><label>抬頭：</label><input type="text" id="clientName" list="clientList" onchange="applyCustomerQuotePreferences(this.value)"></div>
-                <div class="meta-row no-print"><label>客戶名稱：</label><input type="text" id="ordererName" placeholder="訂購人姓名（僅供內部管理，不會印在估價單上）"></div>
+                <div class="meta-row"><label>抬頭：</label><input type="text" id="clientName" list="clientList" onchange="applyCurrentQuoteCustomerPreferences()"></div>
+                <div class="meta-row no-print"><label>客戶名稱：</label><input type="text" id="ordererName" placeholder="訂購人姓名（僅供內部管理，不會印在估價單上）" onchange="applyCurrentQuoteCustomerPreferences()"></div>
                 <div class="meta-row-three">
                     <div><label>負責業務：</label><select id="salesName" onchange="onSalesChange()"><option value="">請選擇負責業務</option></select><span id="salesPhone" style="margin-left:6px;font-size:11px;color:#333;"></span></div>
                     <div><label>估價日期：</label><input type="text" id="quoteDate"></div>
@@ -1420,6 +1420,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20260930-56"></script>
+    <script src="app.js?v=20260930-57"></script>
 </body>
 </html>

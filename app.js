@@ -3481,6 +3481,18 @@ function rememberQuoteCustomerPreferences(customerName, items = []) {
     }, { merge: true }).catch(err => console.warn('客戶估價欄位偏好儲存失敗：', err));
 }
 
+function quotePreferenceCustomerName() {
+    return String(
+        document.getElementById('ordererName')?.value
+        || document.getElementById('clientName')?.value
+        || ''
+    ).trim();
+}
+
+window.applyCurrentQuoteCustomerPreferences = function() {
+    return applyCustomerQuotePreferences(quotePreferenceCustomerName());
+};
+
 window.applyCustomerQuotePreferences = async function(customerName) {
     const name = String(customerName || '').trim();
     activeQuoteOptionalFields = new Set();
@@ -3990,7 +4002,7 @@ window.printThreeQuotes = async function() {
     const percent2 = Math.max(0, parseFloat(document.getElementById('comparisonPercent2').value) || 0);
     const percent3 = Math.max(0, parseFloat(document.getElementById('comparisonPercent3').value) || 0);
     const quoteData = collectCurrentQuoteRecord();
-    rememberQuoteCustomerPreferences(quoteData.clientName, quoteData.items);
+    rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
     const printButton = document.getElementById('threeQuotePrintBtn');
     printButton.disabled = true;
     printButton.innerText = '準備 Logo 與印章中…';
@@ -4097,7 +4109,7 @@ window.handleSaveAndPrint = function() {
             subtotal: row.querySelector('.subtotal-inc').value
         });
     });
-    rememberQuoteCustomerPreferences(clientName, quoteData.items);
+    rememberQuoteCustomerPreferences(ordererName || clientName, quoteData.items);
 
     prepareQuoteForPrint();
 

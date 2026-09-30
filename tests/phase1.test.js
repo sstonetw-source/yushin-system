@@ -1219,6 +1219,15 @@ test('Forecast basic edits preserve Stage and status for the progress workflow',
 });
 
 
+test('quote optional-field preferences belong to the customer name before the invoice title', () => {
+    assert.match(appSource, /function quotePreferenceCustomerName\(\)/);
+    assert.match(appSource, /document\.getElementById\('ordererName'\)\?\.value[\s\S]*document\.getElementById\('clientName'\)\?\.value/);
+    assert.match(indexSource, /id="clientName"[^>]+onchange="applyCurrentQuoteCustomerPreferences\(\)"/);
+    assert.match(indexSource, /id="ordererName"[^>]+onchange="applyCurrentQuoteCustomerPreferences\(\)"/);
+    assert.match(appSource, /rememberQuoteCustomerPreferences\(ordererName \|\| clientName, quoteData\.items\)/);
+    assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
+});
+
 test('quote item-code auto-fill waits for Product Master and reacts while typing', () => {
     assert.match(appSource, /function findPriceItemByCodeValue/);
     assert.match(appSource, /function applyQuoteProductMatch/);
