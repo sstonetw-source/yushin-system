@@ -7892,7 +7892,7 @@ async function registerPurchaseIncoming(poId, poRecord) {
             const warehouseId = String(supply.warehouseId || defaultWarehouse()?.id || '').trim();
             if (!key || !warehouseId) throw new Error(`供應紀錄 ${supplyId} 缺少產品或倉庫資料`);
 
-            const targetQty = Math.max(0, Number(supply.qty || 0));
+            const targetQty = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
             const registeredQty = Math.max(0, Number(supply.incomingRegisteredQty || 0));
             const delta = targetQty - registeredQty;
             if (!delta) return;
@@ -8116,16 +8116,18 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
                 }
             }
         }
+        const registeredIncoming=Math.max(0,Number(supply.incomingRegisteredQty||0));
+        const incomingRelease=Math.min(qty,registeredIncoming);
         const embeddedLots=[...(invSnap.exists?(invSnap.data().lots||[]):[])];
         const embeddedIndex=embeddedLots.findIndex(l=>(l.lotNo||'')===lotNo&&(l.expiryDate||'')===expiryDate);
         if(embeddedIndex>=0)embeddedLots[embeddedIndex]={...embeddedLots[embeddedIndex],qty:Number(embeddedLots[embeddedIndex].qty||0)+qty};
         else embeddedLots.push({lotNo,expiryDate,qty,receivedAt:now,sourceSupplyId:supplyId});
         {
-          const nextInventory={...(invSnap.exists?invSnap.data():{}),productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:Math.max(0,inv.incoming-qty),lots:embeddedLots,updatedAt:now};
+          const nextInventory={...(invSnap.exists?invSnap.data():{}),productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:Math.max(0,inv.incoming-incomingRelease),lots:embeddedLots,updatedAt:now};
           nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
           tx.set(invRef,nextInventory,{merge:true});
         }
-        if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:Math.max(0,wh.incoming-qty),updatedAt:now},{merge:true});
+        if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:Math.max(0,wh.incoming-incomingRelease),updatedAt:now},{merge:true});
         const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
@@ -8133,7 +8135,12 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         tx.set(receiptRef,{supplyOrderId:supplyId,orderId:supply.orderId||'',itemId:supply.itemId||'',productKey,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor});
         tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:receiptRef.id,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
         const receivedQty=Number(supply.receivedQty||0)+qty;
-        tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
+        tx.update(supplyRef,{
+            receivedQty,
+            incomingRegisteredQty:Math.max(0,registeredIncoming-incomingRelease),
+            status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',
+            updatedAt:now
+        });
     });
     if (receivedProductKey && receivedWarehouseId) invalidateWarehouseStockCache(receivedProductKey, receivedWarehouseId);
     // Replenishment / excess receipt stock automatically serves oldest outstanding shortages.
