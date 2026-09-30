@@ -11,6 +11,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
         <link rel="stylesheet" href="styles.css?v=20260930-8">
 </head>
 <body>
@@ -573,7 +575,8 @@
         </div>
 
         <div class="no-print quote-primary-actions" style="text-align: center; margin-top: 25px;">
-            <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">🖨️ 列印 / 存為 PDF（自動同步雲端）</button>
+            <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">📄 匯出 PDF（自動同步雲端）</button>
+            <button type="button" id="legacyQuotePrintBtn" class="btn-secondary" style="font-size:16px;padding:10px 24px;" onclick="handleSaveAndPrint()">🖨️ 列印</button>
             <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
         </div>
