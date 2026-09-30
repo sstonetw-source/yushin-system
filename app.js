@@ -9774,15 +9774,18 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
             transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)-row.qty,updatedAt:now});
         }
     }
-    // inventoryReservations 是正式占用紀錄；退貨恢復占用，刪除／縮減退貨則反向釋放。
+    // 正常訂單退貨後要把商品重新保留給原訂單，供補送使用。
+    // 已取消／作廢訂單只把退貨放回自由庫存，不能重新占住庫存；若遇到殘留占用也一併釋放。
     const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
-    const nextReservation=Math.max(0,currentReservation+deltaQty);
+    const returnKeepsReservation=normalizedOrderStatus(order)==='normal';
+    const nextReservation=returnKeepsReservation?Math.max(0,currentReservation+deltaQty):0;
     const reservationDelta=nextReservation-currentReservation;
     const nextReserved=Math.max(0,inv.reserved+reservationDelta);
     const nextWarehouseReserved=Math.max(0,wh.reserved+reservationDelta);
     if (invSnap.exists) transaction.set(invRef,{onHand:Math.max(0,inv.onHand+deltaQty),reserved:nextReserved,incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:nextWarehouseReserved,incoming:wh.incoming,updatedAt:now},{merge:true});
-    transaction.set(reservationRef,{...inventoryReservationPayload(sourceId,order,nextReservation,nextReservation>0?'active':'fulfilled'),itemId:deliveryItemId,warehouseId},{merge:true});
+    const reservationStatus=returnKeepsReservation?(nextReservation>0?'active':'fulfilled'):'released';
+    transaction.set(reservationRef,{...inventoryReservationPayload(sourceId,order,nextReservation,reservationStatus),itemId:deliveryItemId,warehouseId},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
