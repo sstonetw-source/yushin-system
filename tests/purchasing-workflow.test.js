@@ -761,6 +761,29 @@ test('delivery writes keep isDelivered based on net delivered quantity', () => {
     assert.match(returns,/isDelivered:effectiveDelivered>=orderQuantity\(order\)&&orderQuantity\(order\)>0/);
 });
 
+test('full returns stay in fulfillment instead of closing the order', () => {
+    const workflow=require('../modules/workflow-core.js');
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal',
+        returnedQty:10,
+        effectiveDeliveredQty:0,
+        orderedQty:10,
+        deliveredQty:0,
+        fulfillmentType:'WAREHOUSE',
+        shortageQty:0,
+        supplyOrderedQty:10,
+        receivedQty:10,
+        isBilled:true
+    }), 'delivery');
+
+    const categoryStart=app.indexOf('function orderWorkCategories');
+    const categoryEnd=app.indexOf('\nfunction orderWorkStatusInfo',categoryStart);
+    const categorySource=app.slice(categoryStart,categoryEnd);
+    assert.ok(categoryStart>=0&&categoryEnd>categoryStart);
+    assert.doesNotMatch(categorySource,/lifecycle\.returned>0&&lifecycle\.effectiveDelivered<=0/);
+    assert.match(app,/全數退貨・待補送/);
+});
+
 test('delivery progress uses net delivered quantity after returns', () => {
     const start=app.indexOf('function deliveryProgressInfo');
     const end=app.indexOf('\nfunction savedReturnRecords',start);
