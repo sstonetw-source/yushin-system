@@ -3506,7 +3506,7 @@ window.applyCustomerQuotePreferences = async function(customerName) {
         // 估價單目前只保留仍可編輯的「更多資訊」欄位；舊偏好不再讓已移除欄位自動展開。
         const supportedFields = new Set(['origin','leadTime','hospitalItemCode','remarks']);
         activeQuoteOptionalFields = new Set(fields.filter(field => supportedFields.has(field)));
-        if (!fields.length) return;
+        if (!activeQuoteOptionalFields.size) return;
         document.querySelectorAll('#quoteItems tr').forEach(row => {
             const details = row.querySelector('.quote-extra-fields');
             if (details) details.open = true;
