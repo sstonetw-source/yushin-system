@@ -136,8 +136,6 @@ input[type="number"] {
     -moz-appearance: textfield;
 }
 .item-input-group { display: flex; flex-direction: column; gap: 1px; text-align: left; padding: 0; font-size: 10.5px; color: #333; }
-.print-text-mirror { display: none; }
-.sales-name-print-mirror { display: none; }
 .field-row { display: flex; align-items: center; gap: 4px; margin-bottom: 0; }
 .field-row:has(.item-spec) { align-items: flex-start; }
 .field-row:has(.item-spec) > label { padding-top: 2px; }
@@ -149,7 +147,6 @@ input[type="number"] {
 .quote-custom-fields { display:flex; flex-direction:column; gap:5px; margin-top:7px; }
 .quote-custom-field-row { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) auto; gap:6px; align-items:center; }
 .quote-add-custom-field { margin-top:6px; }
-.quote-extra-print { display:none; }
 .field-row label { font-weight: bold; white-space: nowrap; min-width: 60px; flex-shrink: 0; }
 .field-row input, .field-row textarea { flex: 1; width: auto; min-width: 0; }
 
@@ -172,7 +169,6 @@ input[type="number"] {
 .stamp-section img { width: 180px; height: auto; }
 .total-section { text-align: right; font-size: 13px; font-weight: bold; }
 .discount-input { width: 50px; padding: 2px 4px; font-size: 12px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
-#comparisonQuotePrintPages { display:none; }
 
 
 
@@ -197,6 +193,18 @@ input[type="number"] {
     box-shadow: none !important;
     color: #000 !important;
 }
+.quote-pdf-stage .quote-pdf-page {
+    width:190mm !important;
+    max-width:190mm !important;
+    min-width:190mm !important;
+    margin:0 0 8mm !important;
+    padding:0 !important;
+    background:#fff !important;
+    box-shadow:none !important;
+    box-sizing:border-box;
+}
+.quote-pdf-stage .quote-pdf-page .quote-pdf-grid { margin-bottom:4px; }
+
 .quote-pdf-stage .quote-pdf-logo {
     display:block !important;
     width:125px;
@@ -281,23 +289,6 @@ input[type="number"] {
 .quote-pdf-stage .quote-pdf-document.theme-morningstar .quote-pdf-cell,
 .quote-pdf-stage .quote-pdf-document.theme-morningstar .quote-pdf-grid-head > div { border-color:#cfe3d8; }
 
-.quote-pdf-stage .print-text-mirror,
-.quote-pdf-stage .sales-name-print-mirror {
-    display: block !important;
-    color: #000 !important;
-    -webkit-text-fill-color: #000 !important;
-}
-.quote-pdf-stage .sales-name-print-mirror { display: inline !important; font-size: 12px; }
-.quote-pdf-stage .quote-extra-print {
-    display: block !important;
-    margin-top: 2px;
-    text-align: left;
-    font-size: 10px;
-    line-height: 1.2;
-}
-.quote-pdf-stage .quote-extra-print-row { display:flex; align-items:flex-start; gap:3px; margin-top:1px; }
-.quote-pdf-stage .quote-extra-print-row strong { flex:0 0 auto; white-space:nowrap; }
-.quote-pdf-stage .quote-extra-print-row span { min-width:0; overflow-wrap:anywhere; }
 .quote-pdf-stage .quote-pdf-value {
     color:#000;
     -webkit-text-fill-color:#000;
@@ -679,25 +670,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     .no-print, button, .sub-nav, .nav-tabs { display: none !important; }
     .print-empty-field { display: none !important; }
 
-    /* 估價單快速列印模式：只讓列印引擎處理估價單本體。
-       iPhone Safari 即使其他模組畫面上未顯示，仍可能為大型 DOM 做 print layout；
-       明確排除可大幅降低產生 PDF 預覽前的等待。 */
-    body.printing-quote .content-section { display: none !important; }
-    body.printing-quote #quote-system { display: block !important; }
-    body.printing-quote #quote-system > .sub-nav,
-    body.printing-quote #quote-system > #myQuotesPanel { display: none !important; }
-    body.printing-quote #quoteCreatePanel > .sub-nav,
-    body.printing-quote #quoteCreatePanel > .quote-primary-actions { display: none !important; }
-    body.printing-quote #quoteCreatePanel > *:not(#printableQuote):not(#comparisonQuotePrintPages) { display: none !important; }
 
-    /* 列印估價單時完全排除其他大型系統區塊，減少 Chrome 排版與列印預覽的處理量。 */
-    body:not(.printing-po) #order-system,
-    body:not(.printing-po) #equipment-system,
-    body:not(.printing-po) #admin-system,
-    body:not(.printing-po) #myQuotesPanel,
-    body:not(.printing-po) #poModalOverlay {
-        display: none !important;
-    }
     input, textarea { border: none !important; background: transparent !important; }
     textarea { resize: none !important; overflow: hidden !important; }
 
@@ -718,90 +691,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         font-size: 12px;
     }
 
-    .field-row:has(input[value=""]),
-    .field-row:has(textarea:placeholder-shown),
-    /* 貨號空白時才隱藏該欄；廠牌欄還含有隱藏的產品線 input，不能用泛用 input 判斷，
-       否則即使自行輸入了廠牌，整個廠牌欄也會在列印時被誤隱藏。 */
-    .item-row-pair > div:has(.item-model[value=""]) {
-        display: none !important;
-    }
-    #discountRow:has(input[value="0"]),
-    #discountRow:has(input[value=""]) { display: none !important; }
 
-    /* 英文品名/中文品名/貨號/廠牌：列印時隱藏單行輸入框，改顯示可換行的完整內容鏡像文字 */
-    .item-en, .item-cn, .item-model, .item-brand, .item-brand-other { display: none !important; }
-    .print-text-mirror {
-        display: block !important;
-        flex: 1;
-        min-width: 0;
-        white-space: normal;
-        word-break: break-word;
-        text-align: left;
-        font-size: 10.5px;
-        line-height: 1.15;
-    }
-    .quote-extra-print {
-        display:block !important;
-        margin-top:2px;
-        text-align:left;
-        font-size:10px;
-        line-height:1.2;
-    }
-    .quote-extra-print.print-empty-field { display:none !important; }
-    .quote-extra-print-row { display:flex; align-items:flex-start; gap:3px; margin-top:1px; }
-    .quote-extra-print-row strong { flex:0 0 auto; white-space:nowrap; }
-    .quote-extra-print-row span { min-width:0; overflow-wrap:anywhere; }
-
-    /* 避免品項表格的每一列被分頁攔腰切斷：放不下就整列移到下一頁 */
-    table tr {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-    thead { display: table-header-group; }
-
-    /* Phase 1D：JS 依每個品項實際列印高度標出換頁點；每個品項保持完整，
-       瀏覽器換頁後 thead 會自動重複，不讓第二、三頁失去欄位名稱。 */
-    #quoteItems tr.quote-print-page-break {
-        break-before: page !important;
-        page-break-before: always !important;
-    }
-    /* iOS Safari 對大型巢狀區塊的 break-inside:avoid 會明顯拖慢 PDF 預覽。
-       只保護真正需要黏在一起的印章＋合計；有效期限可自然留在前一頁。 */
-    #printableQuote .bottom-layout,
-    #printableQuote .total-section {
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-    }
-    #printableQuote.quote-multipage-print #itemTable {
-        margin-bottom: 3mm;
-    }
 
     @page { size: A4; margin: 10mm; }
     body { margin: 0; }
 
-    /* 手機瀏覽器（尤其 iOS Safari）「儲存為 PDF」時，常常不會乖乖依照上面 @page 的 A4 尺寸重新排版，
-       而是直接拿「手機螢幕目前顯示的寬度」去產生內容，導致在手機上輸出的估價單被壓得非常窄：
-       負責業務的姓名/電話被迫換行、估價單號太長被邊框截斷看不全。
-       這裡強制估價單內容用固定寬度排版（190mm，等於 A4 扣掉左右各 10mm 邊界），
-       不管是在桌機還是手機上輸出，畫面排版都會維持跟桌機列印一樣寬，不會因為手機螢幕窄而被壓縮 */
-    #quote-system.content-section {
-        max-width: none !important;
-        width: 190mm !important;
-        margin: 0 auto !important;
-        padding: 0 !important;
-        box-shadow: none !important;
-    }
-    #printableQuote {
-        width: 190mm !important;
-    }
-    body:not(.printing-three-quotes) #comparisonQuotePrintPages { display:none !important; }
-    body.printing-three-quotes #comparisonQuotePrintPages { display:block !important; width:190mm !important; }
-    body.printing-three-quotes #printableQuote { break-after:page; page-break-after:always; }
-    body.printing-three-quotes .comparison-quote-page { display:block !important; min-height:0 !important; break-before:auto; page-break-before:auto; break-after:page; page-break-after:always; }
-    body.printing-three-quotes .comparison-quote-page:last-child { break-after:auto; page-break-after:auto; }
-    .company-logo { width: 135px; max-height: 105px; }
-    #printableQuote.theme-yushin .company-logo-yushin { width: 115px; max-height: 84px; }
-    #printableQuote.theme-MULTI-LIFE .company-logo-dingxin { width: 115px; max-height: 84px; }
 
     /* 產生訂購單：列印時只顯示這張訂購單，其他分頁／導覽列／原本開著的視窗全部隱藏，
        訂購單本身也比照估價單，強制用 190mm 固定寬度排版，不會被手機窄螢幕壓縮 */
