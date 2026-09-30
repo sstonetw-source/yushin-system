@@ -5924,9 +5924,7 @@ function selfOrderActionHtml(order) {
     return normalizedOrderItems(order)
         .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
         .map(item => {
-            const required=Math.max(0,Number(item.shortageQty||0));
-            const ordered=Math.max(0,Number(item.supplyOrderedQty||0));
-            const remaining=Math.max(0,required-ordered);
+            const remaining=remainingProcurementQty(order,item);
             return {item,remaining};
         })
         .filter(row=>row.remaining>0)
@@ -5938,9 +5936,7 @@ window.openSelfOrderModal = function(orderId,itemId) {
     const order=ordersCache.find(row=>row.id===orderId);
     const item=normalizedOrderItems(order||{}).find(row=>row.itemId===itemId);
     if(!order||!item||!canBusinessSelfOrder(order))return;
-    const required=Math.max(0,Number(item.shortageQty||0));
-    const ordered=Math.max(0,Number(item.supplyOrderedQty||0));
-    const remaining=Math.max(0,required-ordered);
+    const remaining=remainingProcurementQty(order,item);
     if(remaining<=0){alert('此品項目前沒有尚未訂貨的缺貨數量。');return;}
     document.getElementById('selfOrderOrderId').value=orderId;
     document.getElementById('selfOrderItemId').value=itemId;
@@ -5987,9 +5983,8 @@ window.saveSelfOrder = async function() {
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
             if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，業務不可自行訂貨。');
-            const required=Math.max(0,Number(item.shortageQty||0));
             const already=Math.max(0,Number(item.supplyOrderedQty||0));
-            const remaining=Math.max(0,required-already);
+            const remaining=remainingProcurementQty(order,item);
             if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
             const supplyRef=db.collection('supplyOrders').doc();
             internalNo=`SO-${orderDate.replace(/-/g,'')}-${supplyRef.id.slice(0,6).toUpperCase()}`;
@@ -6061,8 +6056,8 @@ function orderItemWorkCategory(order, item) {
     const dispatch=itemDispatchState(order,item);
     const input={
         lifecycleStatus:lifecycle.status,
-        returnedQty:lifecycle.returned,
-        effectiveDeliveredQty:lifecycle.effectiveDelivered,
+        returnedQty:dispatch.returned,
+        effectiveDeliveredQty:dispatch.delivered,
         orderedQty:item.orderedQty??item.qty,
         deliveredQty:dispatch.delivered,
         isBilled:!!order.isBilled,
@@ -6845,7 +6840,8 @@ function remainingProcurementQty(order, item) {
     const qty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
     const ordered = Math.max(0, Number(item.supplyOrderedQty || 0));
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
-        return Math.max(0, qty - ordered);
+        const returned=itemDispatchState(order,item).returned;
+        return Math.max(0, qty + returned - ordered);
     }
     const shortage = Math.max(0, Number(item.shortageQty || 0));
     const received = Math.max(0, Number(item.receivedQty || 0));
@@ -8787,7 +8783,7 @@ function assertPurchaseLinesAvailable(order, lines) {
     for (const [index, qty] of requestedByIndex) {
         const source = sourceItems[index];
         const required = (source.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
-            ? Number(source.qty || 0)
+            ? Math.max(0, Number(source.qty || 0)) + itemDispatchState(order,source).returned
             : Math.max(0, Number(source.shortageQty || 0));
         const remaining = Math.max(0, required - Math.max(0, Number(source.supplyOrderedQty || 0)));
         if (!(qty > 0) || qty > remaining + 1e-9) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
