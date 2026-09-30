@@ -730,6 +730,25 @@ test('supply receipt retries are idempotent by operation id', () => {
     assert.match(save,/clearReceiptOperationId\(supplyId\)/);
 });
 
+test('delivery writes keep isDelivered based on net delivered quantity', () => {
+    const quickStart=app.indexOf('window.quickCompleteDelivery = async function');
+    const quickEnd=app.indexOf('window.quickCancelAllDelivery',quickStart);
+    const quick=app.slice(quickStart,quickEnd);
+    assert.match(quick,/const alreadyReturned = returnedQuantity\(order\)/);
+    assert.match(quick,/const effectiveDelivered = Math\.max\(0, alreadyDelivered - alreadyReturned\)/);
+    assert.match(quick,/isDelivered: effectiveAfterDelivery >= total/);
+
+    const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
+    const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
+    const save=app.slice(saveStart,saveEnd);
+    assert.match(save,/isDelivered: effectiveTotalDelivered >= total/);
+
+    const returnStart=app.indexOf('window.saveReturnRecord = async function');
+    const returnEnd=app.indexOf('window.deleteReturnRecord',returnStart);
+    const returns=app.slice(returnStart,returnEnd);
+    assert.match(returns,/isDelivered:effectiveDelivered>=orderQuantity\(order\)&&orderQuantity\(order\)>0/);
+});
+
 test('delivery progress uses net delivered quantity after returns', () => {
     const start=app.indexOf('function deliveryProgressInfo');
     const end=app.indexOf('\nfunction savedReturnRecords',start);
