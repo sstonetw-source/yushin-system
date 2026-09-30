@@ -204,16 +204,53 @@ input[type="number"] {
     margin-top:3px !important;
     text-decoration:underline;
 }
-.quote-pdf-stage .quote-pdf-table th:nth-child(1),
-.quote-pdf-stage .quote-pdf-table td:nth-child(1) { width:4%; }
-.quote-pdf-stage .quote-pdf-table th:nth-child(3),
-.quote-pdf-stage .quote-pdf-table td:nth-child(3),
-.quote-pdf-stage .quote-pdf-table th:nth-child(4),
-.quote-pdf-stage .quote-pdf-table td:nth-child(4),
-.quote-pdf-stage .quote-pdf-table th:nth-child(5),
-.quote-pdf-stage .quote-pdf-table td:nth-child(5),
-.quote-pdf-stage .quote-pdf-table th:nth-child(6),
-.quote-pdf-stage .quote-pdf-table td:nth-child(6) { width:9%; }
+.quote-pdf-stage .quote-pdf-grid {
+    width:100%;
+    border:1px solid #333;
+    box-sizing:border-box;
+    margin-bottom:5px;
+}
+.quote-pdf-stage .quote-pdf-grid-row {
+    display:grid !important;
+    grid-template-columns:4% minmax(0, 1fr) 9% 9% 9% 9% !important;
+    width:100% !important;
+    box-sizing:border-box;
+}
+.quote-pdf-stage .quote-pdf-grid-head {
+    background:#f0f0f0;
+    font-size:11px;
+    font-weight:700;
+    text-align:center;
+}
+.quote-pdf-stage .quote-pdf-grid-head > div,
+.quote-pdf-stage .quote-pdf-cell {
+    min-width:0;
+    padding:3px 5px;
+    box-sizing:border-box;
+    border-right:1px solid #333;
+    border-bottom:1px solid #333;
+    font-size:11px;
+    line-height:1.15;
+    text-align:center;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.quote-pdf-stage .quote-pdf-grid-head > div:last-child,
+.quote-pdf-stage .quote-pdf-cell:last-child { border-right:0; }
+.quote-pdf-stage .quote-pdf-items .quote-pdf-item-row:last-child .quote-pdf-cell { border-bottom:0; }
+.quote-pdf-stage .quote-pdf-cell:nth-child(2) {
+    align-items:flex-start;
+    justify-content:flex-start;
+}
+.quote-pdf-stage .quote-pdf-bottom {
+    display:flex !important;
+    flex-direction:row !important;
+    justify-content:space-between !important;
+    align-items:flex-start !important;
+    gap:12px;
+    margin-bottom:4px;
+}
 .quote-pdf-stage .quote-pdf-item-detail {
     display:flex;
     flex-direction:column;
@@ -232,18 +269,15 @@ input[type="number"] {
 .quote-pdf-stage .quote-pdf-grand-total { font-size:14px; color:#003366; }
 .quote-pdf-stage .quote-summary-block { margin-top:2px; }
 .quote-pdf-stage .quote-pdf-document.theme-yushin { font-family:"Microsoft JhengHei", Arial, sans-serif; }
-.quote-pdf-stage .quote-pdf-document.theme-yushin table th { background-color:#dbe9ff; }
+.quote-pdf-stage .quote-pdf-document.theme-yushin .quote-pdf-grid-head { background-color:#dbe9ff; }
 .quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE { font-family:"SimSun", "PMingLiU", "細明體", serif; }
-.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE table { border:3px double #000; background-color:#fff; }
-.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE th,
-.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE td { border:1px solid #000; background-color:#fff; }
-.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE table th { background-color:#000; color:#fff; }
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .quote-pdf-grid { border:3px double #000; background-color:#fff; }
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .quote-pdf-grid-head { background:#000; color:#fff; }
 .quote-pdf-stage .quote-pdf-document.theme-morningstar { font-family:"Yuanti SC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
-.quote-pdf-stage .quote-pdf-document.theme-morningstar .table-wrap { border-radius:10px; overflow:hidden; border:1px solid #1b4d3e; }
-.quote-pdf-stage .quote-pdf-document.theme-morningstar table { border-collapse:separate; border-spacing:0; border:none; }
-.quote-pdf-stage .quote-pdf-document.theme-morningstar th,
-.quote-pdf-stage .quote-pdf-document.theme-morningstar td { border:none; border-bottom:1px solid #cfe3d8; border-right:1px solid #cfe3d8; }
-.quote-pdf-stage .quote-pdf-document.theme-morningstar table th { background-color:#1b4d3e; color:#fff; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar .quote-pdf-grid { border:1px solid #1b4d3e; border-radius:10px; overflow:hidden; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar .quote-pdf-grid-head { background:#1b4d3e; color:#fff; }
+.quote-pdf-stage .quote-pdf-document.theme-morningstar .quote-pdf-cell,
+.quote-pdf-stage .quote-pdf-document.theme-morningstar .quote-pdf-grid-head > div { border-color:#cfe3d8; }
 
 .quote-pdf-stage .print-text-mirror,
 .quote-pdf-stage .sales-name-print-mirror {
@@ -269,9 +303,9 @@ input[type="number"] {
     overflow-wrap:anywhere;
 }
 .quote-pdf-stage .field-row .quote-pdf-value { flex:1; min-width:0; }
-.quote-pdf-stage #itemTable tr { break-inside:avoid; page-break-inside:avoid; }
+.quote-pdf-stage .quote-pdf-item-row { break-inside:avoid; page-break-inside:avoid; }
 .quote-pdf-stage .quote-summary-block,
-.quote-pdf-stage .bottom-layout { break-inside:avoid; page-break-inside:avoid; }
+.quote-pdf-stage .quote-pdf-bottom { break-inside:avoid; page-break-inside:avoid; }
 
 .three-quote-dialog { max-width:760px; }
 .three-quote-options { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
