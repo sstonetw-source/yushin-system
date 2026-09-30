@@ -1600,7 +1600,7 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
-    assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?訂購單 \$\{poNo\} 已建立並儲存/);
+    assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?訂購單 \$\{poNo\} 已同步雲端/);
     // PO 會同時更新來源訂單與採購資料；核心 transaction 必須先成功，才可開啟可對外使用的列印文件。
     assert.match(save, /await commitPromise;[\s\S]*?printSavedPoDocument\(poNo, vendorName\);/);
     assert.doesNotMatch(save, /printSavedPoDocument\(poNo, vendorName\);[\s\S]*?await commitPromise/);
