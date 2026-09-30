@@ -4302,19 +4302,17 @@ function paginateQuotePdfDocument(stage, source) {
             const donor = current;
             const finalPage = createQuotePdfPage(stage, source, false);
             pages.push(finalPage);
+            finalPage.page.appendChild(summaryClone);
 
-            // 讓最後一頁同時帶至少一個品項與合計。若空間仍不足，就逐步把前一頁末端品項移過來。
+            // 最後一頁優先放「合計整塊」，再嘗試把前一頁最後面的品項搬過來。
+            // 每次搬一筆就量一次高度；放不下就立即放回原頁，避免越搬越擠。
             while (donor.items.lastElementChild) {
-                finalPage.items.prepend(donor.items.lastElementChild);
-                finalPage.page.appendChild(summaryClone);
-                if (finalPage.page.scrollHeight <= maxHeight) break;
-                summaryClone.remove();
-            }
-
-            if (!summaryClone.parentNode) {
-                // 極端情況：單一品項 + 合計本身已高於一頁。品項保持完整，合計獨立成最後一頁。
-                while (finalPage.items.firstElementChild) donor.items.appendChild(finalPage.items.firstElementChild);
-                finalPage.page.appendChild(summaryClone);
+                const candidate = donor.items.lastElementChild;
+                finalPage.items.prepend(candidate);
+                if (finalPage.page.scrollHeight > maxHeight) {
+                    donor.items.appendChild(candidate);
+                    break;
+                }
             }
         }
     }
