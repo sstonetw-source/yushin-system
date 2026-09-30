@@ -8781,8 +8781,13 @@ function assertPurchaseLinesAvailable(order, lines) {
     for (const line of lines) {
         const index = Number(line.orderItemIndex);
         const source = sourceItems[index];
-        if (!Number.isInteger(index) || !source || source.itemCode !== line.itemCode
-            || (line.itemId && source.itemId && line.itemId !== source.itemId)) throw new Error('來源訂單品項已變更，請重新建立訂購單。');
+        const sourceItemCode = String(source?.itemCode || '').trim();
+        const lineItemCode = String(line?.itemCode || '').trim();
+        const stableItemMismatch = !!(line?.itemId && source?.itemId && line.itemId !== source.itemId);
+        if (!Number.isInteger(index) || !source || stableItemMismatch
+            || (sourceItemCode && lineItemCode && sourceItemCode !== lineItemCode)) {
+            throw new Error('來源訂單品項已變更，請重新建立訂購單。');
+        }
         requestedByIndex.set(index, (requestedByIndex.get(index) || 0) + Number(line.qty || 0));
     }
     for (const [index, qty] of requestedByIndex) {
@@ -8995,8 +9000,16 @@ window.printPurchaseOrder = async function() {
                         const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
                         const currentSupplyOrdered=Math.max(0,Number(item.supplyOrderedQty||0));
                         const cumulative=currentSupplyOrdered+orderedQty;
+                        const identityLine=matches.find(line=>line.itemId&&item.itemId&&line.itemId===item.itemId)||matches[0];
                         return orderedQty>0?{
                             ...item,
+                            // 採購單可補齊來源訂單原本缺少的產品識別資料；已有值不覆蓋，
+                            // 避免「來源貨號空白 → 採購頁可填 → 儲存又被擋住」的死路流程。
+                            productId:item.productId||identityLine?.productId||'',
+                            itemCode:item.itemCode||identityLine?.itemCode||'',
+                            itemName:item.itemName||identityLine?.itemName||'',
+                            brand:item.brand||resolveBrandName(identityLine?.brand||''),
+                            productLine:item.productLine||identityLine?.productLine||'',
                             supplyOrderedQty:cumulative,
                             purchaseDocumentNos:[...new Set([...(item.purchaseDocumentNos||[]),poNo])],
                             orderedAt:item.orderedAt && item.orderedAt < poRecord.poDate ? item.orderedAt : poRecord.poDate

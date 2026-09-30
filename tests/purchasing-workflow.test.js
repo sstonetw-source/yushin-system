@@ -50,6 +50,22 @@ test('a PO cannot exceed the remaining need even when lines split the same item'
     assert.throws(() => validate(order, [{orderItemIndex:0,itemCode:'B',qty:1}]), /品項已變更/);
 });
 
+test('PO may fill missing source identity when the stable item id still matches', () => {
+    const order = { items:[{ itemId:'I1', itemCode:'', qty:3, shortageQty:3, supplyOrderedQty:0 }] };
+    assert.doesNotThrow(() => validate(order, [{orderItemIndex:0,itemId:'I1',itemCode:'A-1',qty:1}]));
+    assert.throws(() => validate(order, [{orderItemIndex:0,itemId:'OTHER',itemCode:'A-1',qty:1}]), /品項已變更/);
+});
+
+test('formal PO backfills only missing source product identity fields', () => {
+    const start = app.indexOf('const nextItems=normalizedOrderItems(orderData).map');
+    const end = app.indexOf('const nextOrderData=', start);
+    const source = app.slice(start, end);
+    assert.match(source, /productId:item\.productId\|\|identityLine\?\.productId\|\|''/);
+    assert.match(source, /itemCode:item\.itemCode\|\|identityLine\?\.itemCode\|\|''/);
+    assert.match(source, /itemName:item\.itemName\|\|identityLine\?\.itemName\|\|''/);
+    assert.match(source, /brand:item\.brand\|\|resolveBrandName\(identityLine\?\.brand\|\|''\)/);
+});
+
 test('a self order reduces the quantity available to the formal PO', () => {
     const order = { items:[{ itemCode:'A', qty:8, shortageQty:5, supplyOrderedQty:4 }] };
     validate(order, [{orderItemIndex:0,itemCode:'A',qty:1}]);
