@@ -730,6 +730,51 @@ test('supply receipt retries are idempotent by operation id', () => {
     assert.match(save,/clearReceiptOperationId\(supplyId\)/);
 });
 
+test('dispatch readiness uses live reservation and supports later receipt batches', () => {
+    const start=app.indexOf('function itemDispatchState');
+    const end=app.indexOf('\nfunction orderContextActionState',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    const context=vm.createContext({
+        normalizedOrderItems:order=>order.items||[],
+        savedDeliveryRecords:order=>order.deliveryRecords||[],
+        savedReturnRecords:order=>order.returnRecords||[]
+    });
+    vm.runInContext(source,context);
+    const item={itemId:'I1',reservedQty:5,dispatchPreparedQty:5};
+    const afterFirstShipment=context.itemDispatchState({items:[item],deliveryRecords:[{itemId:'I1',qty:5}]},item);
+    assert.equal(afterFirstShipment.pending,5);
+    assert.equal(afterFirstShipment.shippable,0);
+
+    const syncedAfterShipment={...item,reservedQty:0};
+    const shippedState=context.itemDispatchState({items:[syncedAfterShipment],deliveryRecords:[{itemId:'I1',qty:5}]},syncedAfterShipment);
+    assert.equal(shippedState.pending,0);
+
+    const secondReceipt={...syncedAfterShipment,reservedQty:5,receivedQty:10};
+    const secondBatch=context.itemDispatchState({items:[secondReceipt],deliveryRecords:[{itemId:'I1',qty:5}]},secondReceipt);
+    assert.equal(secondBatch.pending,5);
+    assert.equal(secondBatch.shippable,0);
+
+    const secondPrepared={...secondReceipt,dispatchPreparedQty:10};
+    const ready=context.itemDispatchState({items:[secondPrepared],deliveryRecords:[{itemId:'I1',qty:5}]},secondPrepared);
+    assert.equal(ready.pending,0);
+    assert.equal(ready.shippable,5);
+});
+
+test('delivery and return writes synchronize live reservedQty back to order items', () => {
+    const deliveryStart=app.indexOf('window.saveDeliveryRecord = async function()');
+    const deliveryEnd=app.indexOf('window.deleteDeliveryRecord',deliveryStart);
+    const delivery=app.slice(deliveryStart,deliveryEnd);
+    assert.match(delivery,/newReservedQty/);
+    assert.match(delivery,/updates\.items=syncedItems/);
+
+    const returnStart=app.indexOf('window.saveReturnRecord = async function()');
+    const returnEnd=app.indexOf('window.deleteReturnRecord',returnStart);
+    const returns=app.slice(returnStart,returnEnd);
+    assert.match(returns,/syncedReservedQty/);
+    assert.match(returns,/items:syncedItems/);
+});
+
 test('receipt modal close function exists and does not discard retry key', () => {
     const start=app.indexOf('window.closePoReceiptBatch = function()');
     const end=app.indexOf('\n\nwindow.receiveSupplyOrder',start);
