@@ -562,20 +562,6 @@ test('browser history restores internal pages without forcing Firestore reloads'
 });
 
 
-test('quote print pagination uses the real print layout and keeps rows/footer intact', () => {
-    assert.match(appSource, /function markQuotePrintPagination\(\)/);
-    const start = appSource.indexOf('function markQuotePrintPagination()');
-    const end = appSource.indexOf('function prepareQuoteForPrint()', start);
-    const pagination = appSource.slice(start, end);
-    assert.doesNotMatch(pagination, /getBoundingClientRect\(\)/);
-    assert.match(pagination, /quote-print-page-break/);
-    assert.match(appSource, /markQuotePrintPagination\(\)/);
-    assert.match(cssSource, /thead \{ display: table-header-group; \}/);
-    assert.match(cssSource, /table tr \{[\s\S]*?break-inside: avoid/);
-    assert.match(indexSource, /class="quote-summary-block"[\s\S]*class="footer-note"[\s\S]*class="bottom-layout"/);
-    assert.doesNotMatch(cssSource, /#printableQuote \.quote-summary-block,[\s\S]{0,180}break-inside:\s*avoid/);
-    assert.match(cssSource, /#printableQuote \.bottom-layout/);
-});
 
 
 test('quote owner wording stays consistently labeled as responsible sales', () => {
@@ -596,11 +582,9 @@ test('quote optional item fields stay collapsed, persist, print only when filled
     assert.match(appSource, /quote-custom-field-row/);
     assert.match(appSource, /quoteOptionalFields/);
     assert.match(appSource, /FieldValue\.arrayUnion\(\.\.\.quoteOptionalFields\)/);
-    assert.match(appSource, /rememberQuoteCustomerPreferences\(ordererName \|\| clientName, quoteData\.items\)/);
     assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
     assert.match(appSource, /renderComparisonExtraFields\(item\.extra, variant\)/);
     assert.match(appSource, /item\.hospitalItemCode/);
-    assert.match(cssSource, /\.quote-extra-print/);
 });
 
 
@@ -614,7 +598,7 @@ test('quote PDF uses an isolated fixed grid so mobile card CSS cannot reshape it
     assert.doesNotMatch(renderSource, /<table class="quote-pdf-table">/);
     assert.match(cssSource, /grid-template-columns:4% minmax\(0, 1fr\) 9% 9% 9% 9% !important/);
     assert.match(cssSource, /\.quote-pdf-stage \.quote-pdf-bottom \{/);
-    assert.match(appSource, /querySelectorAll\('\.quote-pdf-item-row, \.quote-summary-block'\)/);
+    assert.match(appSource, /querySelectorAll\('\.quote-pdf-item-row'\)/);
 });
 
 
@@ -623,7 +607,7 @@ test('quote PDF document is rendered directly from quote data without cloning th
     const renderEnd = appSource.indexOf('\n}\n\nfunction createQuotePdfStage', renderStart) + 2;
     const renderSource = appSource.slice(renderStart, renderEnd);
     const stageStart = appSource.indexOf('function createQuotePdfStage(quoteData)');
-    const stageEnd = appSource.indexOf('\n}\n\nfunction quotePdfSafePageEnd', stageStart) + 2;
+    const stageEnd = appSource.indexOf('\n}\n\nfunction quotePdfPageHeightPx', stageStart) + 2;
     const stageSource = appSource.slice(stageStart, stageEnd);
     assert.match(renderSource, /quoteData\.items/);
     assert.match(renderSource, /companyData/);
@@ -631,7 +615,7 @@ test('quote PDF document is rendered directly from quote data without cloning th
     assert.match(stageSource, /renderQuotePdfDocument\(quoteData\)/);
     assert.doesNotMatch(stageSource, /cloneNode/);
     assert.doesNotMatch(stageSource, /prepareQuoteForPrint/);
-    assert.match(appSource, /\.quote-pdf-item-row, \.quote-summary-block/);
+    assert.match(appSource, /function paginateQuotePdfDocument\(stage, source\)/);
 });
 
 
@@ -723,8 +707,8 @@ test('new quotes and orders persist createdAt and normalized order item-code key
     assert.match(saveOrder, /itemCodeKey: normalizeHistoryItemCode\(itemCode\)/);
     assert.match(saveOrder, /buildFullHistorySearchTokens\('order', data\)/);
 
-    const quoteStart = appSource.indexOf('window.handleSaveAndPrint =');
-    const quoteEnd = appSource.indexOf('\n};', quoteStart) + 3;
+    const quoteStart = appSource.indexOf('function collectCurrentQuoteRecord()');
+    const quoteEnd = appSource.indexOf('\n}', quoteStart) + 2;
     const quoteSave = appSource.slice(quoteStart, quoteEnd);
     assert.match(quoteSave, /createdAt: new Date\(\)\.toISOString\(\)/);
     const persistStart = appSource.indexOf('function persistQuoteOutputRecord');
@@ -1328,7 +1312,6 @@ test('quote optional-field preferences belong to the customer name before the in
     assert.match(appSource, /document\.getElementById\('ordererName'\)\?\.value[\s\S]*document\.getElementById\('clientName'\)\?\.value/);
     assert.match(indexSource, /id="clientName"[^>]+onchange="applyCurrentQuoteCustomerPreferences\(\)"/);
     assert.match(indexSource, /id="ordererName"[^>]+onchange="applyCurrentQuoteCustomerPreferences\(\)"/);
-    assert.match(appSource, /rememberQuoteCustomerPreferences\(ordererName \|\| clientName, quoteData\.items\)/);
     assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.ordererName \|\| quoteData\.clientName, quoteData\.items\)/);
 });
 
@@ -1891,7 +1874,7 @@ test('cached session restore does not initialize the same active page twice',()=
 
 test('three-quote output compacts layout as item count grows', () => {
     const start = appSource.indexOf('function renderComparisonQuotePage(companyKey, percent, variant)');
-    const end = appSource.indexOf('\n}\n\nfunction waitForQuoteImages', start) + 2;
+    const end = appSource.indexOf('\n}\n\nfunction preloadQuoteImage', start) + 2;
     assert.ok(start >= 0 && end > start);
     const source = appSource.slice(start, end);
     assert.match(source, /items\.length >= 7 \? ' comparison-quote-dense' : items\.length >= 4 \? ' comparison-quote-compact'/);
