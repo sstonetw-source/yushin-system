@@ -905,6 +905,20 @@ test('dispatch readiness uses live reservation and supports later receipt batche
     assert.equal(ready.shippable,5);
 });
 
+test('multi-item delivery edits cannot make an item delivered quantity lower than its returns', () => {
+    const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
+    const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
+    const saveSource=app.slice(saveStart,saveEnd);
+    assert.match(saveSource,/const itemGrossAfter=itemOtherDelivered\+qty/);
+    assert.match(saveSource,/itemGrossAfter\+1e-9<itemReturned/);
+
+    const deleteStart=app.indexOf('window.deleteDeliveryRecord = async function');
+    const deleteEnd=app.indexOf('window.clearLegacyDelivery',deleteStart);
+    const deleteSource=app.slice(deleteStart,deleteEnd);
+    assert.match(deleteSource,/const itemGrossAfter=itemRecords\.filter\(r=>r\.id!==recordId\)/);
+    assert.match(deleteSource,/itemGrossAfter\+1e-9<itemReturned/);
+});
+
 test('editing a multi-item delivery stays bound to its original item', () => {
     const editStart=app.indexOf('window.editDeliveryRecord = function');
     const editEnd=app.indexOf('\nwindow.saveDeliveryRecord = async function',editStart);
