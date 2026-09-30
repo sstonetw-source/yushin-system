@@ -9397,9 +9397,13 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const itemId = String(item.itemId || `item-${index + 1}`);
         const productKey = inventoryProductKey(item);
         const directShip = (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
-        const delivered = deliveries
+        const grossDelivered = deliveries
             .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
             .reduce((sum, row) => sum + Number(row.qty || 0), 0);
+        const returned = savedReturnRecords(order)
+            .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
+            .reduce((sum, row) => sum + Number(row.qty || 0), 0);
+        const delivered = Math.max(0, grossDelivered - returned);
         const ordered = Math.max(0, Number(item.qty || item.orderedQty || 0));
         const warehouseId = directShip ? '' : (item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '');
         const invRef = !directShip && productKey ? inventoryRefFor(item) : null;
