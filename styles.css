@@ -668,29 +668,15 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 @media print {
     html, body { color-scheme: light; }
     .no-print, button, .sub-nav, .nav-tabs { display: none !important; }
-    .print-empty-field { display: none !important; }
-
 
     input, textarea { border: none !important; background: transparent !important; }
     textarea { resize: none !important; overflow: hidden !important; }
 
-    /* 手機瀏覽器（尤其 iOS Safari）在深色模式下，輸入框/選單文字列印出來常會是灰色甚至看不清楚，
-       這裡強制列印輸出一律使用黑色文字，避免輸出的估價單看起來字很淡 */
-    input, select, textarea, .print-text-mirror, #salesPhone {
+    /* 訂購單列印仍使用瀏覽器原生列印，輸入欄位固定黑色避免深色模式干擾。 */
+    input, select, textarea {
         color: #000 !important;
         -webkit-text-fill-color: #000 !important;
     }
-
-    select#salesName {
-        display: none !important;
-    }
-    .sales-name-print-mirror {
-        display: inline !important;
-        color: #000 !important;
-        -webkit-text-fill-color: #000 !important;
-        font-size: 12px;
-    }
-
 
 
     @page { size: A4; margin: 10mm; }
