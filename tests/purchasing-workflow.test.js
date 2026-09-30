@@ -947,6 +947,16 @@ test('dispatch readiness uses live reservation and supports later receipt batche
     assert.equal(ready.shippable,5);
 });
 
+test('cancelled-order returns go back to free stock instead of restoring reservation', () => {
+    const start=app.indexOf('async function applyInventoryReturnDeltaInTransaction');
+    const end=app.indexOf('\nwindow.quickCompleteDelivery',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const returnKeepsReservation=normalizedOrderStatus\(order\)==='normal'/);
+    assert.match(source,/const nextReservation=returnKeepsReservation\?Math\.max\(0,currentReservation\+deltaQty\):0/);
+    assert.match(source,/const reservationStatus=returnKeepsReservation\?\(nextReservation>0\?'active':'fulfilled'\):'released'/);
+});
+
 test('multi-item delivery edits cannot make an item delivered quantity lower than its returns', () => {
     const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
     const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
