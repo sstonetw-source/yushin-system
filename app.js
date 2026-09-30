@@ -4027,7 +4027,7 @@ function waitForQuoteImages() {
             };
             img.onload = () => done(true);
             img.onerror = () => done(false);
-            timer = setTimeout(() => done(img.complete && img.naturalWidth > 0), 1200);
+            timer = setTimeout(() => done(img.complete && img.naturalWidth > 0), 300);
         });
     }));
 }
@@ -4059,7 +4059,7 @@ window.printThreeQuotes = async function() {
         return;
     }
     closeThreeQuoteDialog();
-    document.body.classList.add('printing-three-quotes');
+    document.body.classList.add('printing-quote', 'printing-three-quotes');
     const originalTitle = document.title;
     document.title = `${quoteData.quoteNo}-${quoteData.ordererName || quoteData.clientName || ''}-三家估價`;
     window._quoteOriginalTitle = originalTitle;
@@ -4152,6 +4152,8 @@ window.handleSaveAndPrint = function() {
     });
     rememberQuoteCustomerPreferences(ordererName || clientName, quoteData.items);
 
+    // 列印時只讓瀏覽器排版估價單本身，不讓 iPhone Safari 同時計算整個管理系統。
+    document.body.classList.add('printing-quote');
     prepareQuoteForPrint();
 
     // 列印用的內容本來就是畫面上現有的資料，不需要等雲端存檔完成才印出來——
@@ -9164,6 +9166,10 @@ window.addEventListener('afterprint', () => {
 // 瀏覽器沒辦法告訴網頁「使用者是真的按了列印，還是按了取消」，這兩種情況都會觸發同一個事件，
 // 如果自動清空，不小心點到取消也會被清空，很不方便。改成用下面「製作下一張估價單」按鈕，
 // 由使用者自己決定什麼時候真的要開始寫下一張
+window.addEventListener('afterprint', () => {
+    document.body.classList.remove('printing-quote');
+});
+
 window.addEventListener('afterprint', () => {
     document.body.classList.remove('printing-three-quotes');
     const comparisonPages = document.getElementById('comparisonQuotePrintPages');
