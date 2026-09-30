@@ -1536,8 +1536,8 @@ test('stock replenishment always uses a valid warehouse PO path', () => {
     const start = appSource.indexOf('window.printPurchaseOrder');
     const end = appSource.indexOf('window.closePurchaseOrderModal', start);
     const source = appSource.slice(start, end);
-    assert.match(source, /原廠備貨是公司庫存採購，不能設定為原廠直送/);
-    assert.match(source, /原廠備貨必須指定入庫倉庫/);
+    assert.match(source, /新增庫存採購單是公司庫存採購，不能設定為原廠直送/);
+    assert.match(source, /新增庫存採購單必須指定入庫倉庫/);
     assert.match(source, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
     assert.match(source, /db\.collection\('supplyOrders'\)/);
 });
