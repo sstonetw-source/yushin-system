@@ -905,6 +905,28 @@ test('dispatch readiness uses live reservation and supports later receipt batche
     assert.equal(ready.shippable,5);
 });
 
+test('editing a multi-item delivery stays bound to its original item', () => {
+    const editStart=app.indexOf('window.editDeliveryRecord = function');
+    const editEnd=app.indexOf('\nwindow.saveDeliveryRecord = async function',editStart);
+    const editSource=app.slice(editStart,editEnd);
+    assert.ok(editStart>=0&&editEnd>editStart);
+    assert.match(editSource,/targetItem=orderItems\.find\(item=>item\.itemId===record\.itemId\)/);
+    assert.match(editSource,/itemSelect\.disabled=true/);
+    assert.match(editSource,/otherDelivered=savedDeliveryRecords\(order\)/);
+    assert.match(editSource,/otherNetDelivered=Math\.max\(0,otherDelivered-returned\)/);
+
+    const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
+    const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
+    const saveSource=app.slice(saveStart,saveEnd);
+    assert.match(saveSource,/const requestedItemId=previous\?\.itemId\|\|document\.getElementById\('deliveryItemId'\)\?\.value/);
+
+    const renderStart=app.indexOf('function renderDeliveryModal');
+    const renderEnd=app.indexOf('window.editDeliveryRecord = function',renderStart);
+    const renderSource=app.slice(renderStart,renderEnd);
+    assert.match(renderSource,/const returned=savedReturnRecords\(order\)/);
+    assert.match(renderSource,/const delivered=Math\.max\(0,grossDelivered-returned\)/);
+});
+
 test('delivery and return writes synchronize live reservedQty back to order items', () => {
     const deliveryStart=app.indexOf('window.saveDeliveryRecord = async function()');
     const deliveryEnd=app.indexOf('window.deleteDeliveryRecord',deliveryStart);
