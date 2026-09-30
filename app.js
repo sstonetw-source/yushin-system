@@ -7242,11 +7242,6 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         await db.runTransaction(async tx => {
             const orderRef = db.collection('orders').doc(orderId);
             const [orderSnapshot, supplySnapshot] = await Promise.all([tx.get(orderRef), tx.get(supplyRef)]);
-            if (supplySnapshot.exists) {
-                savedSupply = { id:supplyRef.id, ...supplySnapshot.data() };
-                savedOrder = orderSnapshot.exists ? { id:orderId, ...orderSnapshot.data() } : null;
-                return;
-            }
             if (!orderSnapshot.exists) throw new Error('來源訂單已不存在。');
             const order = { id:orderId, ...orderSnapshot.data() };
             if (normalizedOrderStatus(order) !== 'normal') throw new Error('來源訂單已取消或作廢。');
@@ -7255,27 +7250,53 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             if (itemIndex < 0) throw new Error('找不到來源訂單品項。');
             const item = items[itemIndex];
             const qty = remainingProcurementQty(order, item);
-            if (!(qty > 0)) throw new Error('此品項已無待採購數量，請重新整理。');
+
+            // 同一個品項第一次按「已訂購」與網路不確定後重試共用固定 supply id。
+            // 若訂單之後真的增加數量而再次產生新缺口，不能因為舊 supply 已存在就永遠卡住；
+            // 這時在同一筆 supply 上累加新的訂購量，並留下 orderEvents 供追蹤。
+            const existingSupply = supplySnapshot.exists ? { id:supplyRef.id, ...supplySnapshot.data() } : null;
+            if (!(qty > 0)) {
+                if (existingSupply) {
+                    savedSupply = existingSupply;
+                    savedOrder = order;
+                    return;
+                }
+                throw new Error('此品項已無待採購數量，請重新整理。');
+            }
+
             const productKey = poIncomingKey(item);
             const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
             const warehouseId = directShip ? '' : (item.warehouseId || defaultWarehouse()?.id || '');
             if (!directShip && (!productKey || !warehouseId)) throw new Error('訂單快照缺少貨號或入庫倉庫，請先修正來源訂單。');
             const orderDate = localDateString();
-            const internalNo = `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(-8).toUpperCase()}`;
+            const internalNo = existingSupply?.internalNo || `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(-8).toUpperCase()}`;
             const alreadyOrdered = Math.max(Number(item.purchaseOrderedQty || 0), Number(item.supplyOrderedQty || 0));
             const nextOrdered = alreadyOrdered + qty;
             const now = new Date().toISOString();
+            const previousSupplyQty = Math.max(0, Number(existingSupply?.qty || 0));
+            const receivedQty = Math.max(0, Number(existingSupply?.receivedQty || 0));
+            const nextSupplyQty = previousSupplyQty + qty;
+            const nextSupplyStatus = receivedQty >= nextSupplyQty && nextSupplyQty > 0
+                ? 'RECEIVED' : receivedQty > 0 ? 'PARTIAL_RECEIPT' : 'ORDERED';
+            const orderEvents = Array.isArray(existingSupply?.orderEvents) ? existingSupply.orderEvents.slice() : [];
+            orderEvents.push({ qty, orderDate, createdAt:now, createdByUid:currentUser?.uid||'', createdBy:currentUserName||currentUser?.email||'' });
+
             savedSupply = {
-                id:supplyRef.id, type:'PURCHASING_MANUAL', internalNo, status:'ORDERED',
+                ...(existingSupply || {}),
+                id:supplyRef.id, type:'PURCHASING_MANUAL', internalNo, status:nextSupplyStatus,
                 orderId, itemId, orderItemIndex:itemIndex,
                 ownerUid:order.ownerUid||'', salesCode:order.salesCode||'', salesName:order.salesName||'',
                 customerName:order.customerName||'', company:order.company||'yushin',
                 productId:item.productId||'', productKey, itemCode:item.itemCode||'', itemName:item.itemName||'',
                 brand:item.brand||'', productLine:item.productLine||'',
-                qty, receivedQty:0, supplier:item.supplier||order.supplier||'',
-                unitCost:Number(item.costPrice??item.unitCost??item.purchasePrice??order.costPrice??0), orderDate,
+                qty:nextSupplyQty, receivedQty, supplier:item.supplier||order.supplier||existingSupply?.supplier||'',
+                unitCost:Number(item.costPrice??item.unitCost??item.purchasePrice??order.costPrice??existingSupply?.unitCost??0),
+                orderDate:existingSupply?.orderDate||orderDate, lastOrderedAt:orderDate, orderEvents,
                 fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE', warehouseId,
-                createdAt:now, createdByUid:currentUser?.uid||'', createdBy:currentUserName||currentUser?.email||'', createdByRole:currentUserRole
+                createdAt:existingSupply?.createdAt||now, updatedAt:now,
+                createdByUid:existingSupply?.createdByUid||currentUser?.uid||'',
+                createdBy:existingSupply?.createdBy||currentUserName||currentUser?.email||'',
+                createdByRole:existingSupply?.createdByRole||currentUserRole
             };
             items[itemIndex] = {
                 ...item, purchaseOrderedQty:nextOrdered, supplyOrderedQty:nextOrdered,
@@ -7290,7 +7311,11 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         const index = ordersCache.findIndex(order => order.id === orderId);
         if (index >= 0 && savedOrder) ordersCache[index] = savedOrder;
         if (savedOrder) syncOrderIntoPurchasingCaches(savedOrder, { render:false });
-        if (savedSupply && !supplyReceivingCache.some(row => row.id === savedSupply.id)) supplyReceivingCache.unshift(savedSupply);
+        if (savedSupply) {
+            const supplyIndex=supplyReceivingCache.findIndex(row=>row.id===savedSupply.id);
+            if(supplyIndex>=0)supplyReceivingCache[supplyIndex]=savedSupply;
+            else supplyReceivingCache.unshift(savedSupply);
+        }
         writeAppDataCache('orders', ordersCache);
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
