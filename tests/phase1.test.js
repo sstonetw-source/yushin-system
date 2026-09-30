@@ -562,13 +562,16 @@ test('browser history restores internal pages without forcing Firestore reloads'
 });
 
 
-test('quote print pagination measures rendered rows and keeps rows/footer intact', () => {
+test('quote print pagination uses the real print layout and keeps rows/footer intact', () => {
     assert.match(appSource, /function markQuotePrintPagination\(\)/);
-    assert.match(appSource, /getBoundingClientRect\(\)\.height/);
-    assert.match(appSource, /quote-print-page-break/);
+    const start = appSource.indexOf('function markQuotePrintPagination()');
+    const end = appSource.indexOf('function prepareQuoteForPrint()', start);
+    const pagination = appSource.slice(start, end);
+    assert.doesNotMatch(pagination, /getBoundingClientRect\(\)/);
+    assert.match(pagination, /quote-print-page-break/);
     assert.match(appSource, /markQuotePrintPagination\(\)/);
-    assert.match(cssSource, /#quoteItems tr\.quote-print-page-break/);
     assert.match(cssSource, /thead \{ display: table-header-group; \}/);
+    assert.match(cssSource, /table tr \{[\s\S]*?break-inside: avoid/);
     assert.match(cssSource, /#printableQuote \.bottom-layout/);
 });
 
