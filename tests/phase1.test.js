@@ -1303,6 +1303,14 @@ test('manual inventory changes support batch rows instead of browser prompts', (
     const end = appSource.indexOf('function inventoryProductKey', start);
     const s = appSource.slice(start, end);
     assert.doesNotMatch(s, /prompt\('貨號'/);
+    const saveStart = appSource.indexOf('window.saveInventoryAdjustmentBatch =');
+    const saveEnd = appSource.indexOf('function inventoryProductKey', saveStart);
+    const save = appSource.slice(saveStart, saveEnd);
+    assert.match(save, /const results=\[\]/);
+    assert.match(save, /results\.push\(\{row,ok:true\}\)/);
+    assert.match(save, /results\.push\(\{row,ok:false,error:/);
+    assert.match(save, /inventoryAdjustmentRows=failed\.map\(result=>result\.row\)/);
+    assert.match(save, /成功的品項已從表單移除/);
 });
 
 

@@ -5492,8 +5492,9 @@ window.saveInventoryAdjustmentBatch = async function() {
     const actor=currentUserName||currentUser?.email||'';
     const button=document.getElementById('saveInventoryAdjustmentBatchBtn');
     if(button){button.disabled=true;button.textContent='儲存中…';}
-    try{
-      for(const row of rows){
+    const results=[];
+    for(const row of rows){
+      try{
         const match=findPriceItemByCodeValue(row.itemCode);
         if(!match) throw new Error(`Product Master 找不到貨號 ${row.itemCode}`);
         let delta=Number(row.qty||0);
@@ -5550,12 +5551,27 @@ window.saveInventoryAdjustmentBatch = async function() {
           tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',lotId:authoritativeLotId,sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
         });
         if(row.warehouseId) invalidateWarehouseStockCache(key,row.warehouseId);
+        results.push({row,ok:true});
+      }catch(e){
+        results.push({row,ok:false,error:e?.message||String(e)});
       }
-      closeInventoryAdjustment();
-      alert(`已完成 ${rows.length} 筆庫存異動。`);
+    }
+    const succeeded=results.filter(result=>result.ok);
+    const failed=results.filter(result=>!result.ok);
+    if(succeeded.length){
       loadInventory(true).catch(refreshErr => console.error('庫存異動後背景刷新失敗', refreshErr));
-    }catch(e){alert('庫存異動失敗：'+e.message);}
-    finally{if(button){button.disabled=false;button.textContent='確認儲存';}}
+    }
+    if(!failed.length){
+      closeInventoryAdjustment();
+      alert(`已完成 ${succeeded.length} 筆庫存異動。`);
+    }else{
+      // 已成功的列直接從表單移除，避免使用者看到「部分失敗」後整批重按造成重複入庫／重複扣庫存。
+      inventoryAdjustmentRows=failed.map(result=>result.row);
+      renderInventoryAdjustmentRows();
+      const details=failed.slice(0,8).map(result=>`${result.row.itemCode||'未命名品項'}：${result.error}`).join('\n');
+      alert(`庫存異動部分完成：成功 ${succeeded.length} 筆，失敗 ${failed.length} 筆。\n成功的品項已從表單移除，請只修正並重試畫面中保留的失敗品項。${details?'\n\n'+details:''}`);
+    }
+    if(button){button.disabled=false;button.textContent='確認儲存';}
 };
 function inventoryProductKey(record) {
     return String(record?.productId || (record?.itemCode ? `code:${normalizeHistoryItemCode(record.itemCode)}` : '')).trim();
