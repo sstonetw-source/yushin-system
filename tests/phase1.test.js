@@ -986,11 +986,13 @@ test('sales handoff changes the sales-code holder instead of rewriting historica
     assert.doesNotMatch(s, /\{\s*salesName:\s*toName\s*\}/);
 });
 
-test('inventory reservation is traceable to occupying orders', () => {
+test('inventory reservation is traceable to occupying orders without order-level quantity mirrors', () => {
     assert.match(appSource, /inventoryReservations/);
     assert.match(appSource, /openInventoryReservationDetails/);
-    assert.match(appSource, /inventoryReservedQty/);
-    assert.match(appSource, /inventoryShortageQty/);
+    assert.match(appSource, /reservedQty/);
+    assert.match(appSource, /shortageQty/);
+    assert.doesNotMatch(appSource, /inventoryReservedQty/);
+    assert.doesNotMatch(appSource, /inventoryShortageQty/);
 });
 
 test('unknown order items do not create inventory before purchase receipt', () => {
@@ -1628,7 +1630,9 @@ test('cancel and restore reservations are item-aware', () => {
   assert.match(source,/order_restored/);
   assert.match(source,/stockStates = new Map/);
   assert.match(source,/transaction\.set\(reservationDocRef\(orderId\)/);
-  assert.match(source,/items:nextItems,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage/);
+  assert.match(source,/items:nextItems,updatedAt:now/);
+  assert.doesNotMatch(source,/inventoryReservedQty/);
+  assert.doesNotMatch(source,/inventoryShortageQty/);
 });
 
 test('delivery and return deletes reject duplicate submissions and cancelled orders can return delivered goods', () => {
