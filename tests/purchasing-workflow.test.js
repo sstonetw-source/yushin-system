@@ -19,6 +19,9 @@ test('purchasing user-facing copy avoids legacy stock-order and source-order wor
     assert.doesNotMatch(html, /來源訂單日期/);
     assert.doesNotMatch(app, /原廠備貨是公司庫存採購/);
     assert.match(html, /全部採購單則依正式訂購日期查詢/);
+    assert.match(html, /🖨️ 列印 \/ 存為 PDF（自動同步雲端）/);
+    assert.doesNotMatch(app, /確認品項、廠商與單價後再儲存|完成後即可儲存|檢查並儲存中/);
+    assert.match(app, /正在同步訂購單到雲端/);
 });
 
 test('purchasing has three item-level work queues and no legacy number function', () => {

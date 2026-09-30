@@ -7909,8 +7909,8 @@ window.reprintPurchaseOrder = async function(poId) {
     try {
         poIncomingSyncPending = await purchaseIncomingSyncPending(po);
         updatePoSaveStatus(poIncomingSyncPending
-            ? `訂購單 ${po.poNo || po.id} 已儲存，但供應紀錄仍需同步在途庫存。`
-            : `已儲存訂購單 ${po.poNo || po.id}。按下方按鈕列印或輸出 PDF。`);
+            ? `訂購單 ${po.poNo || po.id} 已同步雲端，但供應紀錄仍需同步在途庫存。`
+            : `訂購單 ${po.poNo || po.id} 已同步雲端。按下方按鈕即可再次列印或輸出 PDF。`);
     } catch (err) {
         poIncomingSyncPending = true;
         updatePoSaveStatus(`無法確認供應紀錄的在途同步狀態：${err.message}`, true);
@@ -8511,7 +8511,7 @@ window.openDirectStockPurchase = async function() {
     generatePoNo();
     addDirectPoItem();
     updatePoModeUI();
-    updatePoSaveStatus('這張備貨訂購單尚未建立。確認品項、廠商與單價後再儲存。');
+    updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，按「列印 / 存為 PDF」；系統會自動同步雲端。');
     document.getElementById('poModalOverlay').classList.add('active');
 
     // 備貨單的空白表單不依賴雲端主檔，先立即顯示；供應商與預設倉庫在背景補齊。
@@ -8832,7 +8832,7 @@ window.printPurchaseOrder = async function() {
     if (poSaveInProgress) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     if (!poEditingId && !poNoReady) {
-        updatePoSaveStatus(poNoLoading ? '訂購單號仍在產生中，完成後即可儲存。' : '訂購單號尚未就緒，請切換公司或重新開啟後再試。', !poNoLoading);
+        updatePoSaveStatus(poNoLoading ? '訂購單號仍在產生中，完成後即可列印 / 存為 PDF。' : '訂購單號尚未就緒，請切換公司或重新開啟後再試。', !poNoLoading);
         return;
     }
     if (poEditingId) {
@@ -8853,9 +8853,9 @@ window.printPurchaseOrder = async function() {
         try {
             await registerPurchaseIncoming(savedPo.id, savedPo);
             poIncomingSyncPending = false;
-            updatePoSaveStatus(`訂購單 ${savedPo.poNo} 已儲存，在途庫存同步完成。請再按「列印／輸出 PDF」。`);
+            updatePoSaveStatus(`訂購單 ${savedPo.poNo} 已同步雲端，在途庫存同步完成。請再按「列印 / 存為 PDF」。`);
         } catch (err) {
-            updatePoSaveStatus(`訂購單已儲存，在途庫存同步仍未完成：${err.message}`, true);
+            updatePoSaveStatus(`訂購單已同步雲端，但在途庫存同步仍未完成：${err.message}`, true);
         } finally {
             poSaveInProgress = false;
             if (button) button.disabled = false;
@@ -8928,9 +8928,9 @@ window.printPurchaseOrder = async function() {
     poSaveInProgress = true;
     if (button) {
         button.disabled = true;
-        button.innerText = '檢查並儲存中…';
+        button.innerText = '同步雲端中…';
     }
-    updatePoSaveStatus('正在建立訂購單…');
+    updatePoSaveStatus('正在同步訂購單到雲端…');
     let poCommitted = false;
     try {
         const poDocumentId = poNo;
@@ -9032,7 +9032,7 @@ window.printPurchaseOrder = async function() {
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
-        updatePoSaveStatus(`訂購單 ${poNo} 已建立並儲存；正在開啟列印，在途庫存於背景同步…`);
+        updatePoSaveStatus(`訂購單 ${poNo} 已同步雲端；正在開啟列印，在途庫存於背景同步…`);
 
         // 核心 transaction 一完成就直接進列印；不要在列印前重畫採購卡與整張 PO 清單。
         // syncCommittedPurchaseOrderSources 已更新同一份 ordersCache；其餘畫面可在列印後／背景同步完成時再刷新。
@@ -9050,16 +9050,16 @@ window.printPurchaseOrder = async function() {
             .catch(err => {
                 console.error('訂購單在途庫存背景同步失敗：', err);
                 poIncomingSyncPending = true;
-                updatePoSaveStatus(`訂購單已儲存，但在途庫存同步未完成：${err.message}。請由這張訂購單重試同步，不要另建一張。`, true);
+                updatePoSaveStatus(`訂購單已同步雲端，但在途庫存同步未完成：${err.message}。請由這張訂購單重試同步，不要另建一張。`, true);
                 updatePoSaveButton();
             });
     } catch (err) {
         console.error('儲存訂購單紀錄失敗：', err);
         updatePoSaveStatus(poCommitted
-            ? `訂購單已儲存，但在途庫存同步未完成：${err.message}`
+            ? `訂購單已同步雲端，但在途庫存同步未完成：${err.message}`
             : `訂購單未建立：${err.message}`, true);
         alert(poCommitted
-            ? '訂購單已儲存，但在途庫存同步未完成。請在這張訂購單按「重試同步在途庫存」，不要另建一張：' + err.message
+            ? '訂購單已同步雲端，但在途庫存同步未完成。請在這張訂購單按「重試同步在途庫存」，不要另建一張：' + err.message
             : '無法產生訂購單：' + err.message);
     } finally {
         poSaveInProgress = false;
