@@ -5616,19 +5616,19 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     const requested=Math.max(0,Number(item.qty||0));
     const productKey=inventoryProductKey(item);
     const itemId=String(item.itemId||`item-${itemIndex+1}`);
-    if(!requested)return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:0,inventoryShortageQty:0,purchaseRequiredQty:0,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey};
+    if(!requested)return {...item,itemId,orderedQty:requested,reservedQty:0,shortageQty:0,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey};
     // 沒有 Product Master 對應時不能做庫存占用，但仍要保留完整缺貨/採購需求；
     // 否則估價單轉訂單後會出現「有訂單、採購頁卻沒有需求」的斷鏈。
-    if(!productKey)return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:requested,inventoryShortageQty:requested,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:'',reservationError:'missing_product_master'};
+    if(!productKey)return {...item,itemId,orderedQty:requested,reservedQty:0,shortageQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:'',reservationError:'missing_product_master'};
     if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
-        return {...item,itemId,orderedQty:requested,reservedQty:0,inventoryReservedQty:0,shortageQty:0,inventoryShortageQty:0,purchaseRequiredQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,directShipQty:requested,warehouseId:'',reservationStatus:'not_required'};
+        return {...item,itemId,orderedQty:requested,reservedQty:0,shortageQty:0,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,directShipQty:requested,warehouseId:'',reservationStatus:'not_required'};
     }
     const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
     const aggregateRef=inventoryRefFor(item);
     const warehouseRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
     const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
     const actor=currentUserName||currentUser?.email||'';
-    let result={...item,itemId,inventoryReservedQty:0,inventoryShortageQty:requested,inventoryProductKey:productKey,warehouseId};
+    let result={...item,itemId,reservedQty:0,shortageQty:requested,inventoryProductKey:productKey,warehouseId};
     await db.runTransaction(async tx=>{
         const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
         const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
@@ -5663,7 +5663,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
             orderDate:order.orderDate||'',quantity:reservable,shortageQty:shortage,
             status:reservable>0?'active':'shortage',warehouseId,updatedAt:now
         },{merge:true});
-        result={...item,itemId,orderedQty:requested,reservedQty:reservable,inventoryReservedQty:reservable,shortageQty:shortage,inventoryShortageQty:shortage,purchaseRequiredQty:shortage,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,warehouseId};
+        result={...item,itemId,orderedQty:requested,reservedQty:reservable,shortageQty:shortage,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,warehouseId};
     });
     if(warehouseId) invalidateWarehouseStockCache(productKey,warehouseId);
     return result;
@@ -5675,8 +5675,8 @@ async function reserveInventoryForNewOrder(orderId, order) {
         const item=await reserveSingleOrderItem(orderId,order,items[0]||legacyOrderItemFromOrder(order),0);
         const updates={
             items:[item],itemCount:1,orderSchemaVersion:2,
-            inventoryReservedQty:Number(item.inventoryReservedQty||0),
-            inventoryShortageQty:Number(item.inventoryShortageQty||0),
+            inventoryReservedQty:Number(item.reservedQty??item.inventoryReservedQty??0),
+            inventoryShortageQty:Number(item.shortageQty??item.inventoryShortageQty??0),
             inventoryProductKey:item.inventoryProductKey||'',
             fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:item.warehouseId||''
         };
@@ -5687,8 +5687,8 @@ async function reserveInventoryForNewOrder(orderId, order) {
     }
     const reservedItems=[];
     for(let i=0;i<items.length;i++) reservedItems.push(await reserveSingleOrderItem(orderId,order,items[i],i));
-    const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.inventoryReservedQty||0),0);
-    const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.inventoryShortageQty||0),0);
+    const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.reservedQty??item.inventoryReservedQty??0),0);
+    const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.shortageQty??item.inventoryShortageQty??0),0);
     const updates={items:reservedItems,itemCount:reservedItems.length,orderSchemaVersion:2,inventoryReservedQty:reservedQty,inventoryShortageQty:shortageQty};
     Object.assign(order,updates);
     Object.assign(updates,orderWorkIndexFields(order));
@@ -5816,8 +5816,8 @@ function purchaseProgressInfo(order) {
     const direct=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP');
     const warehouse=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
     if(items.length&&direct.length===items.length)return {state:'direct',label:'原廠直送'};
-    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0)),0);
-    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??0)),Number(item.supplyOrderedQty??item.purchaseOrderedQty??0)),0);
+    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0)),0);
+    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0)),Number(item.supplyOrderedQty??item.purchaseOrderedQty??0)),0);
     if(required<=0)return {state:'not_required',label:'無需採購'};
     if(ordered>=required)return {state:'ordered',label:`已訂貨 ${ordered}/${required}`};
     if(ordered>0)return {state:'partial',label:`部分訂貨 ${ordered}/${required}`};
@@ -5951,7 +5951,7 @@ function selfOrderActionHtml(order) {
     return normalizedOrderItems(order)
         .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
         .map(item => {
-            const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
+            const required=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0));
             const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
             const remaining=Math.max(0,required-ordered);
             return {item,remaining};
@@ -5965,7 +5965,7 @@ window.openSelfOrderModal = function(orderId,itemId) {
     const order=ordersCache.find(row=>row.id===orderId);
     const item=normalizedOrderItems(order||{}).find(row=>row.itemId===itemId);
     if(!order||!item||!canBusinessSelfOrder(order))return;
-    const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
+    const required=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0));
     const ordered=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
     const remaining=Math.max(0,required-ordered);
     if(remaining<=0){alert('此品項目前沒有尚未訂貨的缺貨數量。');return;}
@@ -6014,7 +6014,7 @@ window.saveSelfOrder = async function() {
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
             if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，業務不可自行訂貨。');
-            const required=Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.shortageQty??0));
+            const required=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??0));
             const already=Math.max(0,Number(item.supplyOrderedQty??item.purchaseOrderedQty??0));
             const remaining=Math.max(0,required-already);
             if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
@@ -6870,7 +6870,7 @@ function remainingProcurementQty(order, item) {
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
         return Math.max(0, qty - ordered);
     }
-    const shortage = Math.max(0, Number(item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
+    const shortage = Math.max(0, Number(item.shortageQty ?? item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
     const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
     const outstandingSupply = Math.max(0, ordered - received);
     return Math.max(0, shortage - outstandingSupply);
@@ -7683,7 +7683,7 @@ function receivingEvidenceForWorkItem(order, item, itemIndex) {
 function receivingWorkProgress(order, item) {
     const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
     const orderedQty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
-    const shortage = Math.max(0, Number(item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
+    const shortage = Math.max(0, Number(item.shortageQty ?? item.inventoryShortageQty ?? item.purchaseRequiredQty ?? 0));
     const supplyOrdered = Math.max(0, Number(item.supplyOrderedQty ?? item.purchaseOrderedQty ?? 0));
     const received = Math.max(0, Number(item.receivedQty ?? item.purchaseReceivedQty ?? item.supplyReceivedQty ?? 0));
     const target = directShip ? orderedQty : Math.max(shortage, supplyOrdered);
@@ -8123,7 +8123,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             if(index<0){skipCandidate=true;return;}
             const item=items[index],oldReserved=Number(item.reservedQty??item.inventoryReservedQty??0);
             const oldShortage=Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??liveShortage));
-            items[index]={...item,reservedQty:oldReserved+take,inventoryReservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take),inventoryShortageQty:Math.max(0,oldShortage-take)};
+            items[index]={...item,reservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take)};
             const totalReserved=items.reduce((s,row)=>s+Number(row.reservedQty??row.inventoryReservedQty??0),0);
             const totalShortage=items.reduce((s,row)=>s+Number(row.shortageQty??row.inventoryShortageQty??0),0);
             const now=new Date().toISOString();
@@ -8220,7 +8220,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
                     const shortage=Math.max(0,Number(item.inventoryShortageQty??item.shortageQty??0));
                     reserveQty=Math.min(qty,shortage);reservedForSource=reserveQty;
                     const next=window.YushinFulfillment.applyReceipt(item,qty);
-                    items[itemIndex]={...next,reservedQty:next.reservedQty,inventoryReservedQty:next.reservedQty};
+                    items[itemIndex]={...next,reservedQty:next.reservedQty};
                     const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
                     tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
                     tx.set(db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`),{
@@ -8716,7 +8716,7 @@ function purchaseItemsFromOrder(order) {
         const procurementType=item.procurementType||order.procurementType||'PURCHASING_PO';
         if(procurementType==='SALES_SELF_ORDER') return null;
         const procurementRequired=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
-            ? fullQty : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??fullQty));
+            ? fullQty : Math.max(0,Number(item.shortageQty??item.inventoryShortageQty??item.purchaseRequiredQty??fullQty));
         const remainingPurchase=Math.max(0,procurementRequired-Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0)));
         return {
             orderId: order.id,
@@ -9041,7 +9041,7 @@ function assertPurchaseLinesAvailable(order, lines) {
         const source = sourceItems[index];
         const required = (source.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
             ? Number(source.qty || 0)
-            : Math.max(0, Number(source.purchaseRequiredQty ?? source.inventoryShortageQty ?? source.qty ?? 0));
+            : Math.max(0, Number(source.shortageQty ?? source.inventoryShortageQty ?? source.purchaseRequiredQty ?? source.qty ?? 0));
         const remaining = Math.max(0, required - Math.max(0, Number(source.supplyOrderedQty ?? source.purchaseOrderedQty ?? 0)));
         if (!(qty > 0) || qty > remaining + 1e-9) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
     }
@@ -9725,7 +9725,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
                 status:nextStatus==='cancelled'?'released':(directShip?'direct_ship':'shortage'),warehouseId:'',updatedAt:now
             }, { merge:true });
             const nextReserved = nextStatus==='cancelled' ? 0 : 0;
-            nextItems.push({...item,itemId,inventoryReservedQty:nextReserved,inventoryShortageQty:nextStatus==='cancelled'?0:shortage,reservedQty:nextReserved,shortageQty:nextStatus==='cancelled'?0:shortage});
+            nextItems.push({...item,itemId,reservedQty:nextReserved,shortageQty:nextStatus==='cancelled'?0:shortage});
             totalReserved += nextReserved;
             totalShortage += nextStatus==='cancelled'?0:shortage;
             continue;
@@ -9748,7 +9748,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
                 salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',
                 orderDate:order.orderDate||'',quantity:0,shortageQty:0,status:'released',warehouseId,updatedAt:now
             },{merge:true});
-            nextItems.push({...item,itemId,inventoryReservedQty:0,inventoryShortageQty:0,reservedQty:0,shortageQty:0});
+            nextItems.push({...item,itemId,reservedQty:0,shortageQty:0});
             continue;
         }
 
@@ -9773,7 +9773,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
             orderDate:order.orderDate||'',quantity:reserve,shortageQty:shortage,
             status:reserve>0?'active':(shortage>0?'shortage':'fulfilled'),warehouseId,updatedAt:now
         },{merge:true});
-        nextItems.push({...item,itemId,inventoryReservedQty:reserve,inventoryShortageQty:shortage,reservedQty:reserve,shortageQty:shortage});
+        nextItems.push({...item,itemId,reservedQty:reserve,shortageQty:shortage});
         totalReserved += reserve;
         totalShortage += shortage;
     }
