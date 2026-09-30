@@ -292,8 +292,8 @@ let inventoryAnalysisReceipts = [];
 let inventoryAnalysisStocks = [];
 let inventoryAnalysisLots = [];
 let inventoryAnalysisLotCosts = new Map();
-let inventoryAnalysisPurchaseOrders = [];
-let inventoryAnalysisDirectShipPurchaseOrders = [];
+let inventoryAnalysisSupplyOrders = [];
+let inventoryAnalysisDirectShipSupplyOrders = [];
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
 const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman', 'Thermo'];
@@ -7505,13 +7505,6 @@ window.loadMorePurchaseOrders = function() {
     return loadPurchaseOrderPage(false);
 };
 
-function poReceiptLabel(po) {
-    const progress = poReceiptProgress(po);
-    if (progress.complete) return progress.directShipOnly ? '原廠直送已到貨' : '已全部到貨';
-    if (progress.received > 0) return (progress.directShipOnly ? '原廠直送部分到貨 ' : '部分到貨 ') + progress.received + '/' + progress.ordered;
-    return (progress.directShipOnly ? '原廠直送待到貨 0/' : '待到貨 0/') + progress.ordered;
-}
-
 function waitingDaysFromDate(date) {
     const raw = String(date || '').trim();
     const match = raw.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
@@ -7526,17 +7519,7 @@ function waitingDaysFromDate(date) {
 }
 
 function poWaitingDays(po) {
-    return poReceiptProgress(po).complete ? '' : waitingDaysFromDate(po.poDate);
-}
-
-function poActionHtml(po) {
-    const reprint = `<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`;
-    const progress=poReceiptProgress(po);
-    if (progress.complete) return reprint;
-    // 原廠直送仍需要確認實際到貨，才能讓來源訂單由「待到貨」推進到「待送貨」；
-    // 只是確認時不寫入倉庫庫存。
-    const receiptLabel=progress.directShipOnly?'📦 確認直送到貨':'📥 到貨入庫';
-    return reprint + ` <button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrder('${escapeAttr(po.id)}')">${receiptLabel}</button>`;
+    return waitingDaysFromDate(po.poDate);
 }
 
 function purchaseOrderSearchTokens(po={}) {
@@ -7759,7 +7742,7 @@ window.renderPoList = function() {
         return;
     }
     const head = document.getElementById('poListHeadRow');
-    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>建立天數</th><th>品項</th><th>總計金額</th><th>文件狀態</th><th class="no-print">操作</th>';
     const tbody = document.getElementById('poListBody');
     const searchInput = document.getElementById('poListSearch');
     if (!tbody || !searchInput) return;
@@ -7784,15 +7767,8 @@ window.renderPoList = function() {
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
         items.forEach((item,itemIndex)=>{
-            const receipt=poItemReceiptProgress(po,item,itemIndex);
-            const {received,ordered,complete,directShip}=receipt;
-            if (purchasingView === 'receiving') {
-                if (complete || receipt.remaining<=0) return;
-                const context=receivingQueueContext(po,item);
-                if(!context){stockPending++;return;}
-                if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
-                receivingItemKeys.add(context.workKey);
-            } else if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
+            const ordered=Math.max(0,Number(item.qty||0));
+            if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
             const tr = document.createElement('tr');
@@ -7802,15 +7778,11 @@ window.renderPoList = function() {
                 <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
                 <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
                 <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
-                <td data-th="等待天數">${escapeHtml(complete?'—':(poWaitingDays(po)||'—'))}</td>
+                <td data-th="建立天數">${escapeHtml(poWaitingDays(po)||'—')}</td>
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
-                <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
-                <td data-th="操作" class="no-print">${complete
-                    ? '<span>已完成</span>'
-                    : canEditPage('orders.po')
-                        ? `<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">${directShip?'確認直送到貨':'📥 到貨入庫'}</button>`
-                        : '<span class="order-progress-badge">唯讀</span>'} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
+                <td data-th="文件狀態">已建立</td>
+                <td data-th="操作" class="no-print">${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:'—'}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -7945,25 +7917,6 @@ function updatePoSaveButton() {
             : '🖨️ 列印 / 存為 PDF（自動同步雲端）';
 }
 
-function receivedQuantityForPoItem(po, itemIndex) {
-    return (Array.isArray(po?.receiptRecords) ? po.receiptRecords : [])
-        .filter(r => Number(r.itemIndex) === Number(itemIndex))
-        .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
-}
-function poItemReceiptProgress(po,item,itemIndex) {
-    const ordered=Math.max(0,Number(item?.qty||0));
-    const directShip=(item?.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
-    const received=Math.min(ordered,Math.max(0,receivedQuantityForPoItem(po,itemIndex)));
-    const remaining=Math.max(0,ordered-received);
-    return {ordered,received,remaining,complete:ordered>0&&received>=ordered,directShip};
-}
-function poReceiptProgress(po) {
-    const allItems = purchaseItemsFromSavedPo(po);
-    const rows=allItems.map((item,index)=>poItemReceiptProgress(po,item,index));
-    const ordered=rows.reduce((s,row)=>s+row.ordered,0);
-    const received=rows.reduce((s,row)=>s+row.received,0);
-    return { ordered, received, remaining:Math.max(0,ordered-received), complete:ordered>0&&received>=ordered, directShipOnly:allItems.length>0&&rows.every(row=>row.directShip) };
-}
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
@@ -8297,320 +8250,6 @@ window.openSupplyReceipt = function(supplyId) {
     document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
 };
 
-window.receivePurchaseOrderItem = function(poId,itemIndex) {
-    if (!canEditPage('orders.po')) return;
-    const po=poListCache.find(p=>p.id===poId);
-    if(!po)return;
-    const items=purchaseItemsFromSavedPo(po),item=items[itemIndex];
-    if(!item)return;
-    const received=receivedQuantityForPoItem(po,itemIndex);
-    const remaining=Math.max(0,Number(item.qty||0)-received);
-    if(remaining<=0){alert('此品項已全部到貨。');return;}
-    const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
-    poReceiptTargetId=poId;
-    const body=document.getElementById('poReceiptBatchBody');
-    const title=document.getElementById('poReceiptBatchTitle');
-    if(title)title.textContent=directShip ? `原廠直送到貨｜${po.poNo||po.id}｜${item.itemCode||item.itemName||''}` : `到貨入庫｜${po.poNo||po.id}｜${item.itemCode||item.itemName||''}`;
-    body.innerHTML=`
-        <tr data-index="${itemIndex}">
-            <td><input type="checkbox" class="po-receive-select" checked></td>
-            <td>${escapeHtml(item.itemCode||'')}</td>
-            <td>${escapeHtml(item.itemName||'')}</td>
-            <td>${Number(item.qty||0)}</td><td>${received}</td><td>${remaining}</td>
-            <td><input type="number" class="po-receive-qty" min="0" max="${remaining}" step="any" value="${remaining}" style="width:85px;"></td>
-            <td><input type="text" class="po-receive-lot" placeholder="批號"></td>
-            <td><input type="date" class="po-receive-expiry"></td>
-        </tr>`;
-    document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
-};
-
-window.receivePurchaseOrder = function(poId) {
-    if (!canEditPage('orders.po')) return;
-    const po = poListCache.find(p => p.id === poId);
-    if (!po) return;
-    const items = purchaseItemsFromSavedPo(po);
-    const rows = items.map((item, index) => ({
-        item,
-        index,
-        received: receivedQuantityForPoItem(po, index),
-        remaining: Math.max(0, Number(item.qty || 0) - receivedQuantityForPoItem(po, index))
-    })).filter(row => row.remaining > 0);
-    if (!rows.length) {
-        alert('這張訂購單已全部到貨。');
-        return;
-    }
-
-    poReceiptTargetId = poId;
-    const body = document.getElementById('poReceiptBatchBody');
-    const title = document.getElementById('poReceiptBatchTitle');
-    if (title) title.textContent = `到貨入庫｜${po.poNo || po.id}`;
-    body.innerHTML = rows.map(row => `
-        <tr data-index="${row.index}">
-            <td><input type="checkbox" class="po-receive-select" checked></td>
-            <td>${escapeHtml(row.item.itemCode||'')}</td>
-            <td>${escapeHtml(row.item.itemName||'')}<div style="font-size:11px;color:#666;">${escapeHtml(warehouseMasterCache.find(w=>w.id===row.item.warehouseId)?.warehouseName || row.item.warehouseId || '')}</div></td>
-            <td>${row.item.qty}</td>
-            <td>${row.received}</td>
-            <td>${row.remaining}</td>
-            <td><input type="number" class="po-receive-qty" min="0" max="${row.remaining}" step="any" value="${row.remaining}" style="width:85px;"></td>
-            <td><input type="text" class="po-receive-lot" placeholder="批號"></td>
-            <td><input type="date" class="po-receive-expiry"></td>
-        </tr>
-    `).join('');
-    document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
-};
-
-window.closePoReceiptBatch = function() {
-    poReceiptTargetId = '';
-    document.getElementById('poReceiptBatchOverlay')?.classList.remove('active');
-};
-
-async function receiveSinglePoLine(poId, itemIndex, qty, lotNo = '', expiryDate = '', operationId = '') {
-    const now = new Date().toISOString();
-    const actor = currentUserName || currentUser?.email || '';
-    const receiptId = operationId || `rcv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${itemIndex}`;
-    let committedPo = null;
-    let alreadyProcessed = false;
-    let cancelledWarehouseSource = false;
-    const affectedOrderIds = new Set();
-
-    await db.runTransaction(async tx => {
-        cancelledWarehouseSource = false;
-        const receiptRef = db.collection('receipts').doc(receiptId);
-        const receiptSnap = await tx.get(receiptRef);
-        if (receiptSnap.exists) { alreadyProcessed = true; return; }
-        const poRef = db.collection('purchaseOrders').doc(poId);
-        const poSnap = await tx.get(poRef);
-        if (!poSnap.exists) throw new Error('找不到訂購單');
-        const live = poSnap.data();
-        const liveItems = purchaseItemsFromSavedPo(live);
-        const item = liveItems[itemIndex];
-        if (!item) throw new Error('找不到品項');
-        if (item.orderId) affectedOrderIds.add(item.orderId);
-        const directShip=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
-        const formalSupplyRef=db.collection('supplyOrders').doc(formalSupplyOrderId(poId,itemIndex));
-        const formalSupplySnap=await tx.get(formalSupplyRef);
-
-        const already = receivedQuantityForPoItem(live, itemIndex);
-        const remaining = Math.max(0, Number(item.qty || 0) - already);
-        if (!qty || qty <= 0 || qty > remaining) throw new Error(`${item.itemCode || item.itemName} 到貨數量不正確`);
-
-        if(directShip){
-            let sourceOrder=null;
-            if(item.orderId){
-                const orderSnap=await tx.get(db.collection('orders').doc(item.orderId));
-                if(orderSnap.exists)sourceOrder={id:orderSnap.id,...orderSnap.data()};
-            }
-            if(!sourceOrder)throw new Error('原廠直送品項缺少來源訂單。');
-            if(normalizedOrderStatus(sourceOrder)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
-            const sourceItems=normalizedOrderItems(sourceOrder);
-            const sourceIndex=Number(item.orderItemIndex||0);
-            const sourceItem=sourceItems[sourceIndex];
-            if(!sourceItem)throw new Error('找不到來源訂單品項。');
-            const nextDelivered=Math.min(Number((sourceItem.orderedQty ?? sourceItem.qty) || 0),Number(sourceItem.deliveredQty||0)+qty);
-            sourceItems[sourceIndex]={...sourceItem,receivedQty:Number(sourceItem.receivedQty||0)+qty,purchaseReceivedQty:Number(sourceItem.purchaseReceivedQty||0)+qty,deliveredQty:nextDelivered,directShipDeliveredQty:Number(sourceItem.directShipDeliveredQty||0)+qty};
-            const nextOrder={...sourceOrder,items:sourceItems,itemCount:sourceItems.length,orderSchemaVersion:2,updatedAt:now};
-            tx.update(db.collection('orders').doc(item.orderId),{items:sourceItems,itemCount:sourceItems.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
-            const record={id:receiptId,itemIndex,orderId:item.orderId,orderItemIndex:sourceIndex,itemCode:item.itemCode||'',itemName:item.itemName||'',qty,fulfillmentType:'DIRECT_SHIP',date:localDateString(),createdAt:now,createdBy:actor};
-            const records=[...(live.receiptRecords||[]),record];
-            const allProgress=liveItems.map((row,index)=>{
-                const orderedQty=Number(row.qty||0);
-                const got=records.filter(record=>Number(record.itemIndex)===index).reduce((sum,record)=>sum+Number(record.qty||0),0);
-                return orderedQty>0&&got>=orderedQty;
-            });
-            const receiptComplete=allProgress.length>0&&allProgress.every(Boolean);
-            const poUpdates={receiptRecords:records,updatedAt:now,status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,receiptStatus:receiptComplete?'received':'partial'};
-            tx.update(poRef,poUpdates);
-            committedPo={id:poId,...live,...poUpdates};
-            if(formalSupplySnap.exists){
-                const formalSupply=formalSupplySnap.data();
-                const formalReceived=Number(formalSupply.receivedQty||0)+qty;
-                tx.update(formalSupplyRef,{receivedQty:formalReceived,status:formalReceived>=Number(formalSupply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
-            }
-            tx.set(db.collection('receipts').doc(receiptId),{receiptId,purchaseOrderId:poId,orderId:item.orderId,itemId:sourceItem.itemId||'',qty,fulfillmentType:'DIRECT_SHIP',sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,createdAt:now,createdBy:actor});
-            return;
-        }
-
-        const key = poIncomingKey(item);
-        if (!key) throw new Error(`${item.itemName || '品項'} 缺少貨號／Product ID`);
-        const warehouseId = item.warehouseId || defaultWarehouse()?.id || '';
-        if (!warehouseId) throw new Error(`${item.itemCode || item.itemName || '品項'} 尚未指定入庫倉庫，請先建立／指定倉庫。`);
-
-        const invRef = db.collection('inventory').doc(encodeURIComponent(key));
-        const whRef = warehouseId ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)) : null;
-        const pendingRef = db.collection('pendingInventoryItems').doc(warehouseId ? warehouseStockDocId(warehouseId,key) : encodeURIComponent(key));
-
-        const invSnap = await tx.get(invRef);
-        const whSnap = whRef ? await tx.get(whRef) : null;
-        const pendingSnap = await tx.get(pendingRef);
-        const pendingIncoming = Number(pendingSnap.exists ? pendingSnap.data().incomingQty : 0) || 0;
-        const stock = inventoryNumbers(invSnap.exists ? invSnap.data() : { incoming: pendingIncoming });
-        const whStock = inventoryNumbers(whSnap?.exists ? whSnap.data() : { incoming: pendingIncoming });
-
-        let sourceOrder = null;
-        if (item.orderId) {
-            const orderSnap = await tx.get(db.collection('orders').doc(item.orderId));
-            if (orderSnap.exists) sourceOrder = { id: orderSnap.id, ...orderSnap.data() };
-        }
-        cancelledWarehouseSource=!!sourceOrder&&normalizedOrderStatus(sourceOrder)!=='normal';
-
-        let reserveFromReceipt=0;
-        let sourceOrderItems=sourceOrder?normalizedOrderItems(sourceOrder):[];
-        const sourceItemIndex=Number(item.orderItemIndex||0);
-        const sourceItem=sourceOrderItems[sourceItemIndex]||null;
-        if(!cancelledWarehouseSource&&sourceItem&&(sourceItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
-            const shortage=Math.max(0,Number(sourceItem.inventoryShortageQty||0));
-            reserveFromReceipt=Math.min(qty,shortage);
-        }
-
-        const record = {
-            id:receiptId, itemIndex, orderId:item.orderId||'', orderItemIndex:Number(item.orderItemIndex||0), productKey:key, productId:item.productId||'',
-            itemCode:item.itemCode||'', itemName:item.itemName||'', brand:resolveBrandName(item.brand||''),
-            qty, reservedQty:reserveFromReceipt, lotNo, expiryDate, warehouseId, fulfillmentType:'WAREHOUSE',
-            date:localDateString(), createdAt:now, createdBy:actor
-        };
-        const records = [...(live.receiptRecords || []), record];
-
-        const lots = [...(invSnap.exists ? (invSnap.data().lots || []) : [])];
-        if (lotNo || expiryDate) {
-            const lotIndex = lots.findIndex(l => (l.lotNo||'') === lotNo && (l.expiryDate||'') === expiryDate);
-            if (lotIndex >= 0) lots[lotIndex] = { ...lots[lotIndex], qty:Number(lots[lotIndex].qty||0)+qty };
-            else lots.push({ lotNo, expiryDate, qty });
-        }
-
-        {
-            const nextInventory={...(invSnap.exists?invSnap.data():{}),
-                productKey:key, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
-                brand:resolveBrandName(item.brand||''), currency:live.currency||DEFAULT_CURRENCY,
-                onHand:stock.onHand+qty, reserved:stock.reserved+reserveFromReceipt,
-                incoming:Math.max(0,stock.incoming-qty), lots, updatedAt:now
-            };
-            nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
-            tx.set(invRef,nextInventory,{merge:true});
-        }
-
-        if (whRef) {
-            tx.set(whRef, {
-                warehouseId, productKey:key, productId:item.productId||'', itemCode:item.itemCode||'',
-                itemName:item.itemName||'', brand:resolveBrandName(item.brand||''),
-                onHand:whStock.onHand+qty, reserved:whStock.reserved+reserveFromReceipt,
-                incoming:Math.max(0,whStock.incoming-qty), updatedAt:now
-            }, { merge:true });
-        }
-
-        if(sourceOrder&&!cancelledWarehouseSource&&sourceItem){
-            const itemShortage=Math.max(0,Number(sourceItem.inventoryShortageQty||0));
-            const sourceReceivedQty=Math.min(Number(sourceItem.qty||sourceItem.orderedQty||0),Number(sourceItem.receivedQty||0)+qty);
-            const nextSourceItems=sourceOrderItems.map((row,index)=>index===sourceItemIndex?{
-                ...row,receivedQty:sourceReceivedQty,
-                purchaseReceivedQty:Math.min(Number(row.qty||row.orderedQty||0),Number(row.purchaseReceivedQty||0)+qty),
-                inventoryReservedQty:Number(row.inventoryReservedQty||0)+reserveFromReceipt,
-                inventoryShortageQty:Math.max(0,itemShortage-reserveFromReceipt),inventoryProductKey:key,warehouseId
-            }:row);
-            const totalReserved=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryReservedQty||0),0);
-            const totalShortage=nextSourceItems.reduce((s,row)=>s+Number(row.inventoryShortageQty||0),0);
-            const nextSourceOrder={...sourceOrder,items:nextSourceItems,itemCount:nextSourceItems.length,orderSchemaVersion:2,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now};
-            tx.update(db.collection('orders').doc(item.orderId),{
-                items:nextSourceItems,itemCount:nextSourceItems.length,orderSchemaVersion:2,
-                inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,
-                ...orderWorkIndexFields(nextSourceOrder),updatedAt:now
-            });
-            if(reserveFromReceipt>0){
-                const sourceItemId=String(sourceItem.itemId||`item-${sourceItemIndex+1}`);
-                tx.set(db.collection('inventoryReservations').doc(`${item.orderId}__${sourceItemId}`),{
-                    orderId:item.orderId,itemId:sourceItemId,orderNo:sourceOrder.orderNo||sourceOrder.quoteNo||item.orderId,
-                    productKey:key,itemCode:sourceItem.itemCode||'',itemName:sourceItem.itemName||'',
-                    customerName:sourceOrder.customerName||'',salesCode:sourceOrder.salesCode||'',
-                    salesName:sourceOrder.salesName||'',orderDate:sourceOrder.orderDate||'',
-                    quantity:Number(sourceItem.inventoryReservedQty||0)+reserveFromReceipt,
-                    shortageQty:Math.max(0,itemShortage-reserveFromReceipt),status:'active',warehouseId,updatedAt:now
-                },{merge:true});
-            }
-        }
-
-        // V2 authoritative receipt cost lives in Inventory Lot, not Product Master / moving average.
-        const lotRef=db.collection('inventoryLots').doc();
-        tx.set(lotRef,{
-            productKey:key,productId:item.productId||'',warehouseId,lotNo,expiryDate,
-            receivedQty:qty,remainingQty:qty,
-            supplier:live.vendorName||'',sourceType:'PURCHASE_ORDER',sourceId:poId,
-            orderId:item.orderId||'',itemId:sourceItem?.itemId||'',receivedAt:now
-        });
-        tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{
-            lotId:lotRef.id,productKey:key,productId:item.productId||'',warehouseId,
-            unitCost:Number(item.unitPrice||0),currency:live.currency||DEFAULT_CURRENCY,
-            sourceType:'PURCHASE_ORDER',sourceId:poId,createdAt:now,createdBy:actor
-        });
-        tx.set(receiptRef,{
-            purchaseOrderId:poId,orderId:item.orderId||'',itemId:sourceItem?.itemId||'',
-            productKey:key,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,
-            createdAt:now,createdBy:actor
-        });
-        tx.set(db.collection('inventoryMovements').doc(), {
-            type:'receipt', qty, productKey:key, itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), lotNo, expiryDate, warehouseId, lotId:lotRef.id,
-            fulfillmentType:'WAREHOUSE', sourceType:DOCUMENT_TYPES.PURCHASE_ORDER,
-            sourceId:poId, receiptId, createdAt:now, createdBy:actor,
-            ownerUid:sourceOrder?.ownerUid||'',salesCode:sourceOrder?.salesCode||''
-        });
-        if(formalSupplySnap.exists){
-            const formalSupply=formalSupplySnap.data();
-            const formalReceived=Number(formalSupply.receivedQty||0)+qty;
-            tx.update(formalSupplyRef,{receivedQty:formalReceived,status:formalReceived>=Number(formalSupply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
-        }
-
-        const pendingRemaining=Math.max(0,pendingIncoming-qty);
-        tx.set(pendingRef, {
-            productKey:key, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), warehouseId, incomingQty:pendingRemaining,
-            status:pendingRemaining>0?'pending-arrival':'completed',
-            completedAt:pendingRemaining>0?null:now, completedBy:pendingRemaining>0?'':actor, updatedAt:now
-        }, { merge:true });
-
-        // 混合 PO（入庫＋原廠直送）必須等每一個品項各自到齊才完成。
-        // 不能只加總倉庫品項，否則其中一條先到齊就可能把整張 PO 提前結案。
-        const allProgress=liveItems.map((row,index)=>{
-            const orderedQty=Math.max(0,Number(row.qty||0));
-            const receivedQty=records
-                .filter(record=>Number(record.itemIndex)===index)
-                .reduce((sum,record)=>sum+Number(record.qty||0),0);
-            return {orderedQty,receivedQty,complete:orderedQty>0&&receivedQty>=orderedQty};
-        });
-        const receiptComplete=allProgress.length>0&&allProgress.every(row=>row.complete);
-        const anyReceived=allProgress.some(row=>row.receivedQty>0);
-        const poUpdates={
-            receiptRecords:records, updatedAt:now,
-            status:receiptComplete?BUSINESS_STATUS.COMPLETED:BUSINESS_STATUS.ACTIVE,
-            receiptStatus:receiptComplete?'received':anyReceived?'partial':'pending'
-        };
-        tx.update(poRef, poUpdates);
-        committedPo={id:poId,...live,...poUpdates};
-    });
-    if (alreadyProcessed) return [...affectedOrderIds];
-    // 原廠直送不進倉庫，因此不應執行入庫後的 FIFO 庫存分配。
-    const completedPo=committedPo||{};
-    const completedItem=purchaseItemsFromSavedPo(completedPo)[itemIndex]||{};
-    if((completedItem.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP') return [...affectedOrderIds];
-
-    // Formal PO replenishment / surplus stock follows the same FIFO shortage allocation as self-order receipts.
-    // Reuse the PO state committed by the transaction instead of reading the same PO again.
-    const postPo=completedPo;
-    const postItems=purchaseItemsFromSavedPo(postPo);
-    const postItem=postItems[itemIndex]||{};
-    const postKey=poIncomingKey(postItem);
-    const postWarehouse=postItem.warehouseId||defaultWarehouse()?.id||'';
-    const receiptRow=[...(postPo.receiptRecords||[])].reverse().find(row=>row.id===receiptId);
-    // receiveSinglePoLine already reserved reserveFromReceipt inside its transaction.
-    // Persist it on the receipt row in future writes; for this call use the exact transaction result captured above.
-    const freeQty=Math.max(0,Number(qty||0)-Number(receiptRow?.reservedQty??0));
-    if(postKey&&postWarehouse) invalidateWarehouseStockCache(postKey,postWarehouse);
-    if(freeQty>0&&postKey&&postWarehouse&&!cancelledWarehouseSource){
-        const allocation=await allocateFreeReceiptStockToShortages(postKey,postWarehouse,freeQty,actor,postItem.orderId||'');
-        allocation.affectedOrderIds.forEach(id=>affectedOrderIds.add(id));
-    }
-    return [...affectedOrderIds];
-}
-
 window.savePoReceiptBatch = async function() {
     if (!canEditPage('orders.po') || poReceiptSaveInProgress) return;
     const poId = poReceiptTargetId;
@@ -8629,12 +8268,12 @@ window.savePoReceiptBatch = async function() {
     let completed = 0;
     const affectedOrderIds = new Set();
     try {
-        if(poId.startsWith('supply:')){
-            const supplyId=poId.slice(7);
-            for(const entry of entries){ const ids=await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate); ids.forEach(id=>affectedOrderIds.add(id)); completed++; }
-        }else{
-            const batchOperationId=`po-receipt-${poId}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-            for (const entry of entries){ const ids=await receiveSinglePoLine(poId, entry.itemIndex, entry.qty, entry.lotNo, entry.expiryDate, `${batchOperationId}-${entry.itemIndex}`); ids.forEach(id=>affectedOrderIds.add(id)); completed++; }
+        if(!poId.startsWith('supply:')) throw new Error('到貨必須從供應紀錄進入，請重新整理待到貨頁面。');
+        const supplyId=poId.slice(7);
+        for(const entry of entries){
+            const ids=await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate);
+            ids.forEach(id=>affectedOrderIds.add(id));
+            completed++;
         }
         // 核心入庫 transaction 已完成後就結束使用者等待；跨模組列表改成背景同步。
         // 這些 reload 只是 UI refresh，不應延長「確認入庫」按鈕的完成時間。
@@ -9175,7 +8814,6 @@ window.printPurchaseOrder = async function() {
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
         status: BUSINESS_STATUS.ACTIVE,
-        receiptStatus: 'pending',
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
         incomingRegistrationVersion:1,
         incomingRegistrationStatus:'pending',
@@ -12468,18 +12106,18 @@ async function loadInventoryAnalysisSupport(start, end) {
         .where('createdAt','<=',end+'T23:59:59')
         .where('type','==','receipt')
         .orderBy('createdAt','desc');
-    const purchaseOrderQuery = db.collection('purchaseOrders')
-        .where('poDate','>=',start)
-        .where('poDate','<=',end)
-        .orderBy('poDate','desc');
+    const supplyOrderQuery = db.collection('supplyOrders')
+        .where('orderDate','>=',start)
+        .where('orderDate','<=',end)
+        .orderBy('orderDate','desc');
     // 目前庫存價值只需要仍有餘量的 lot；已耗盡歷史 lot 不應隨資料量成長而反覆下載。
     const activeLotsQuery = db.collection('inventoryLots')
         .where('remainingQty','>',0)
         .orderBy('remainingQty');
-    const [movements, lots, purchaseOrders] = await Promise.all([
+    const [movements, lots, supplyOrders] = await Promise.all([
         readQueryInBatches(receiptQuery),
         readQueryInBatches(activeLotsQuery),
-        readQueryInBatches(purchaseOrderQuery)
+        readQueryInBatches(supplyOrderQuery)
     ]);
 
     // COGS、期間入庫與目前庫存各自可能引用不同 lot。只抓實際被這次分析引用的受保護成本文件。
@@ -12500,9 +12138,9 @@ async function loadInventoryAnalysisSupport(start, end) {
     inventoryAnalysisStocks = [];
     inventoryAnalysisLots = lots;
     inventoryAnalysisLotCosts = new Map(lotCosts.map(row=>[row.id,row]));
-    inventoryAnalysisPurchaseOrders = purchaseOrders;
-    inventoryAnalysisDirectShipPurchaseOrders = inventoryAnalysisPurchaseOrders
-        .filter(po=>purchaseItemsFromSavedPo(po).some(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'));
+    inventoryAnalysisSupplyOrders = supplyOrders;
+    inventoryAnalysisDirectShipSupplyOrders = inventoryAnalysisSupplyOrders
+        .filter(row=>(row.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP');
 }
 
 function protectedAllocationCost(records) {
@@ -12529,11 +12167,9 @@ function inventoryAnalysisTotals(start,end) {
         const lotCost = inventoryAnalysisLotCosts.get(receipt.lotId);
         purchase += Number(receipt.qty || 0) * Number(lotCost?.unitCost || 0);
     });
-    // 原廠直送不產生 receipt，採購成本由 PO 直送品項直接計入。
-    inventoryAnalysisDirectShipPurchaseOrders.forEach(po => {
-        purchaseItemsFromSavedPo(po)
-            .filter(item => (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP')
-            .forEach(item => { purchase += Number(item.qty || 0) * Number(item.unitPrice || 0); });
+    // 原廠直送不進倉庫，因此採購成本直接由 supplyOrders 的直送紀錄計入。
+    inventoryAnalysisDirectShipSupplyOrders.forEach(supply => {
+        purchase += Number(supply.qty || 0) * Number(supply.unitCost || 0);
     });
     const sales = salesStatisticsOrders.flatMap(salesStatisticOrderLines).reduce((sum, order) => {
         const contribution = calculateOrderStatsContribution(order, start, end);
@@ -12543,15 +12179,13 @@ function inventoryAnalysisTotals(start,end) {
         const lotCost = inventoryAnalysisLotCosts.get(lot.id);
         return sum + Number(lot.remainingQty || 0) * Number(lotCost?.unitCost || 0);
     }, 0);
-    // 尚未到貨的正式採購仍可直接用受權限保護的 PO 單價估值，不把成本複製到公開 inventory。
-    const incoming = inventoryAnalysisPurchaseOrders.reduce((sum, po) => {
-        return sum + purchaseItemsFromSavedPo(po)
-            .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
-            .reduce((itemSum, item, index) => {
-                const remaining = Math.max(0, Number(item.qty || 0) - receivedQuantityForPoItem(po, index));
-                return itemSum + remaining * Number(item.unitPrice || 0);
-            }, 0);
-    }, 0);
+    // 在途價值直接由 supplyOrders 的未到貨數量計算；PO 文件不再維護到貨狀態。
+    const incoming = inventoryAnalysisSupplyOrders
+        .filter(supply => (supply.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
+        .reduce((sum, supply) => {
+            const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
+            return sum + remaining * Number(supply.unitCost || 0);
+        }, 0);
     const cogs = protectedHistoricalCogs(start, end);
     return { purchase, sales, difference: sales - purchase, stockValue, incoming, cogs, grossProfit:sales-cogs };
 }
