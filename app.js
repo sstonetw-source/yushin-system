@@ -4973,8 +4973,12 @@ function orderCompletionDate(order) {
             return date && date > latest ? date : latest;
         }, '')
         : (order?.isDelivered ? order.orderDate || '' : '');
-    // 核銷與送貨可任意先後；兩條流程都完成的較晚日期才是真正完成日。
-    return [invoiceDate, deliveryDate].filter(Boolean).sort().pop() || '';
+    const returnDate = savedReturnRecords(order).reduce((latest, record) => {
+        const date = record.date || dateOnlyFromTimestamp(record.createdAt);
+        return date && date > latest ? date : latest;
+    }, '');
+    // 核銷、送貨與退貨可跨日補登；訂單重新達成完整履約時，以三條流程最後一個發生日作為完成日。
+    return [invoiceDate, deliveryDate, returnDate].filter(Boolean).sort().pop() || '';
 }
 
 function orderPeriodRange() {
