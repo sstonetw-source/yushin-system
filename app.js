@@ -2355,7 +2355,7 @@ async function createForecastOrdersDirectly(forecast, items) {
             salesName:forecast.salesName||currentUserName||'',
             salesCode:forecast.salesCode||currentUserCode||'',
             ownerUid:forecast.ownerUid||currentUser?.uid||'',
-            isOrdered:false,isArrived:false,isDelivered:false,isBilled:false,invoiceDate:''
+            isDelivered:false,isBilled:false,invoiceDate:''
         };
         orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
         batch.set(orderRef,orderData);
@@ -6028,7 +6028,7 @@ function orderProgressInfo(order) {
 
 function isDeletableOrderDraft(order) {
     if (!order || order.quoteNo || order.purchaseOrderNo) return false;
-    if (order.isOrdered || order.isArrived || order.isDelivered || order.isBilled) return false;
+    if (order.isDelivered || order.isBilled) return false;
     if (savedDeliveryRecords(order).length || savedReturnRecords(order).length) return false;
     if ((order.statusHistory || []).length || (order.deliveryHistory || []).length || (order.returnHistory || []).length || (order.orderLifecycleHistory || []).length) return false;
     return normalizedOrderStatus(order) === 'normal';
@@ -8993,47 +8993,30 @@ function resetQuoteFormForNextOne() {
 // 先在畫面上立即反應（樂觀更新），不用等雲端回應才變色，感覺上會快很多；
 // 如果雲端寫入失敗，才把狀態復原並提示錯誤
 window.toggleOrderStatus = function(orderId, field, newValue) {
-    if (field !== 'isBilled') {
-        alert('訂貨、到貨與送貨狀態已由 V2 採購／入庫／打單流程自動管理。');
-        return;
-    }
+    if (field !== 'isBilled') return;
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
-    const pendingKey = `${orderId}:${field}`;
+    const pendingKey = `${orderId}:isBilled`;
     if (pendingOrderStatusKeys.has(pendingKey)) return;
     if (normalizedOrderStatus(o) !== 'normal') { alert('已取消的訂單不能更改進度。'); return; }
-    const delivery = deliveryProgressInfo(o);
-    if (field === 'isOrdered' && !newValue && (o.isArrived || delivery.delivered > 0)) { alert('已有到貨或送貨紀錄，不能直接取消訂貨。'); return; }
-    if (field === 'isArrived' && !newValue && delivery.delivered > 0) { alert('已有送貨紀錄，不能直接取消到貨。'); return; }
-    let invoiceDate = o.invoiceDate || '';
-    if (field === 'isBilled' && newValue) {
-        // 某些手機內建瀏覽器不顯示 window.prompt，會讓按鈕看起來完全沒反應。
-        // 點擊時直接以今天完成報帳；若實際開票日不同，可立刻在列內日期欄修改。
-        invoiceDate = orderInvoiceDate(o) || localDateString();
-    }
-    if (field === 'isBilled' && !newValue) invoiceDate = '';
+
+    const invoiceDate = newValue ? (orderInvoiceDate(o) || localDateString()) : '';
     const previousWorkFilter = activeOrderWorkFilter;
     const previous = {
-        isOrdered: o.isOrdered, isArrived: o.isArrived, isBilled: o.isBilled,
-        invoiceDate: o.invoiceDate || '', orderedBy: o.orderedBy, statusHistory: [...(o.statusHistory || [])]
+        isBilled: o.isBilled,
+        invoiceDate: o.invoiceDate || '',
+        status: o.status,
+        statusHistory: [...(o.statusHistory || [])]
     };
-    const statusLabel = { isOrdered: '已訂貨', isArrived: '已到貨', isDelivered: '已送貨', isBilled: '已報帳' }[field] || field;
     const actor = currentUserName || currentUser?.email || '未知使用者';
     const timestamp = new Date().toISOString();
-    const logEntry = { field, value: newValue, label: `${newValue ? statusLabel : `取消${statusLabel}`}`, by: actor, at: timestamp };
-    const optimisticEntries = [];
-    if (field === 'isArrived' && newValue && !o.isOrdered) {
-        o.isOrdered = true;
-        o.orderedBy = actor;
-        optimisticEntries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: timestamp });
-    }
-    o[field] = newValue;
-    if (field === 'isBilled') o.invoiceDate = invoiceDate;
-    if (field === 'isBilled' && !newValue && activeOrderWorkFilter === 'complete') activeOrderWorkFilter = 'billing';
-    if (field === 'isBilled' && newValue && activeOrderWorkFilter === 'billing' && deliveryProgressInfo(o).state === 'complete') activeOrderWorkFilter = 'complete';
-    if (field === 'isOrdered') o.orderedBy = newValue ? actor : '';
-    optimisticEntries.push(logEntry);
-    o.statusHistory = [...previous.statusHistory, ...optimisticEntries];
+    const logEntry = { field:'isBilled', value:newValue, label:newValue ? '已報帳' : '取消已報帳', by:actor, at:timestamp };
+
+    o.isBilled = newValue;
+    o.invoiceDate = invoiceDate;
+    if (!newValue && activeOrderWorkFilter === 'complete') activeOrderWorkFilter = 'billing';
+    if (newValue && activeOrderWorkFilter === 'billing' && deliveryProgressInfo(o).state === 'complete') activeOrderWorkFilter = 'complete';
+    o.statusHistory = [...previous.statusHistory, logEntry];
     pendingOrderStatusKeys.add(pendingKey);
     writeAppDataCache('orders', ordersCache);
     renderOrdersList();
@@ -9045,36 +9028,20 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         if (!snapshot.exists) throw new Error('找不到這筆訂單。');
         const order = snapshot.data();
         if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
-        const serverDelivery = deliveryProgressInfo(order);
-        if (field === 'isOrdered' && !newValue && (order.isArrived || serverDelivery.delivered > 0)) throw new Error('已有到貨或送貨進度，不能取消訂貨。');
-        if (field === 'isArrived' && !newValue && serverDelivery.delivered > 0) throw new Error('已有送貨進度，不能直接取消到貨。');
-        const entries = [];
-        const updates = { [field]: newValue, updatedAt: timestamp };
-        if (field === 'isArrived' && newValue && !order.isOrdered) {
-            updates.isOrdered = true;
-            updates.orderedBy = order.orderedBy || actor;
-            entries.push({ field: 'isOrdered', value: true, label: '已訂貨', by: actor, at: timestamp });
-        }
-        if (field === 'isBilled') {
-            updates.invoiceDate = invoiceDate;
-            // 訂單完成狀態由 isBilled / workCategories 推導。
-            // status 保留給訂單生命週期（正常／取消），避免核銷後因 status=COMPLETED
-            // 被 ACTIVE 訂單 Query 排除而從訂單主列表消失。
-            updates.status = BUSINESS_STATUS.ACTIVE;
-        }
-        if (field === 'isOrdered') updates.orderedBy = newValue ? actor : '';
-        entries.push(logEntry);
-        updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...entries);
+        const updates = {
+            isBilled:newValue,
+            invoiceDate,
+            status:BUSINESS_STATUS.ACTIVE,
+            updatedAt:timestamp,
+            statusHistory:firebase.firestore.FieldValue.arrayUnion(logEntry)
+        };
         Object.assign(updates,orderWorkIndexFields({...order,...updates}));
         transaction.update(ref, updates);
         committed = {
-            isOrdered: updates.isOrdered !== undefined ? updates.isOrdered : order.isOrdered,
-            isArrived: updates.isArrived !== undefined ? updates.isArrived : order.isArrived,
-            isBilled: updates.isBilled !== undefined ? updates.isBilled : order.isBilled,
-            status: updates.status !== undefined ? updates.status : order.status,
-            invoiceDate: updates.invoiceDate !== undefined ? updates.invoiceDate : order.invoiceDate,
-            orderedBy: updates.orderedBy !== undefined ? updates.orderedBy : order.orderedBy,
-            statusHistory: [...(order.statusHistory || []), ...entries]
+            isBilled:newValue,
+            invoiceDate,
+            status:BUSINESS_STATUS.ACTIVE,
+            statusHistory:[...(order.statusHistory || []),logEntry]
         };
     }).then(() => {
         Object.assign(o, committed);
@@ -9549,8 +9516,7 @@ function renderOrderStatusHistory(order) {
         entries.push({ at: item.at, action: statusLabels[after.status] || '訂單狀態變更', by: item.by, detail: `${after.date || ''}${after.reason ? `／${after.reason}` : ''}` });
     });
     (order.fieldEditHistory || []).forEach(item => entries.push({ at: item.at, action: item.label || '修改資料', by: item.by, detail: `${item.before ?? '－'} → ${item.after ?? '－'}` }));
-    // V2 採購／到貨狀態由 PO、receipt、reservation 與 dispatch qty 推導。
-    // isOrdered / isArrived 僅保留舊資料相容，不再顯示成目前流程真相。
+    // 採購／到貨狀態由 supplyOrders、receipts、reservation 與 dispatch qty 推導。
     if (order.isBilled && !(order.statusHistory || []).some(item => item.field === 'isBilled')) {
         entries.push({ at: orderInvoiceDate(order) || order.orderDate || '', action: '報帳（歷史推估）', by: '舊資料未記錄', detail: '依目前報帳狀態推估' });
     }
@@ -10851,8 +10817,6 @@ window.saveNewOrder = function() {
         salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || currentUserName || '',
         salesCode: assistedOwner?.code || window._orderModalQuoteContext?.salesCode || currentUserCode || '',
         ownerUid: assistedOwner?.uid || window._orderModalQuoteContext?.ownerUid || currentUser?.uid || '',
-        isOrdered: false,
-        isArrived: false,
         isDelivered: false,
         isBilled: false,
         invoiceDate: ''
