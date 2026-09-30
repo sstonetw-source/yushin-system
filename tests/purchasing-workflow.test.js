@@ -304,7 +304,7 @@ test('receiving waits for both order work state and purchase evidence before dec
     assert.match(app, /function loadPurchasingReceivingQueue\(reset = true\)/);
     assert.match(app, /Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset\)[\s\S]*?refreshPurchasingOrderCache\(reset\)/);
     assert.match(app, /function purchasingArrivalWorkKeys\(filters = purchaseFilterContext\(\)\)/);
-    assert.match(app, /採購紀錄載入中/);
+    assert.match(app, /採購資料載入中/);
     assert.match(app, /尚未找到對應採購紀錄/);
 });
 

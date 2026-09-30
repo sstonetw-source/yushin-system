@@ -7673,10 +7673,7 @@ function receivingEvidenceForWorkItem(order, item, itemIndex) {
             if (!sameOrder || !sameItem) return;
             const progress = poItemReceiptProgress(po, poItem, poItemIndex);
             if (progress.complete || progress.remaining <= 0) return;
-            evidence.push({
-                type:'po', id:po.id, itemIndex:poItemIndex,
-                label:po.poNo || po.id, progress
-            });
+            evidence.push({ type:'po', id:po.id, itemIndex:poItemIndex, label:po.poNo || po.id, progress });
         });
     });
     supplyReceivingCache.forEach(supply => {
@@ -7689,8 +7686,7 @@ function receivingEvidenceForWorkItem(order, item, itemIndex) {
         const remaining = Math.max(0, ordered - received);
         if (remaining <= 0) return;
         evidence.push({
-            type:'supply', id:supply.id,
-            label:supply.internalNo || supply.id,
+            type:'supply', id:supply.id, label:supply.internalNo || supply.id,
             progress:{ordered,received,remaining,directShip:(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'}
         });
     });
@@ -7726,7 +7722,6 @@ function renderPurchasingReceivingWorkList() {
         normalizedOrderItems(order).forEach((item, itemIndex) => {
             if (!orderItemDisplayCategories(order, item).includes('arrival')) return;
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
-
             workCount++;
             const progress = receivingWorkProgress(order, item);
             const evidence = receivingEvidenceForWorkItem(order, item, itemIndex);
@@ -7772,7 +7767,114 @@ function renderPurchasingReceivingWorkList() {
 }
 
 window.renderPoList = function() {
-    if (emptyHint) {
+    if (purchasingView === 'receiving') {
+        renderPurchasingReceivingWorkList();
+        updatePoLoadMoreButton();
+        return;
+    }
+    const head = document.getElementById('poListHeadRow');
+    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th>';
+    const tbody = document.getElementById('poListBody');
+    const searchInput = document.getElementById('poListSearch');
+    if (!tbody || !searchInput) return;
+    const keyword = (searchInput.value || '').toLowerCase();
+    const filters = purchaseFilterContext();
+    tbody.innerHTML = '';
+    let shown = 0;
+    let stockPending = 0;
+    const receivingItemKeys = new Set();
+    const arrivalWorkKeys = purchasingView === 'receiving' ? purchasingArrivalWorkKeys(filters) : new Set();
+
+    const poRows = poHistorySearchActive ? poHistorySearchResults : poListCache;
+    poRows.forEach(po => {
+        // 全歷史搜尋已在資料層比對單號、廠商、採購人員與品項；歷史搜尋模式不可再用較窄欄位二次過濾。
+        if (!poHistorySearchActive) {
+            const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
+            if (keyword && !searchable.includes(keyword)) return;
+        }
+
+        const items = purchaseItemsFromSavedPo(po);
+        const companyInfo = companyData[po.company];
+        const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
+
+        items.forEach((item,itemIndex)=>{
+            const receipt=poItemReceiptProgress(po,item,itemIndex);
+            const {received,ordered,complete,directShip}=receipt;
+            if (purchasingView === 'receiving') {
+                if (complete || receipt.remaining<=0) return;
+                const context=receivingQueueContext(po,item);
+                if(!context){stockPending++;return;}
+                if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
+                receivingItemKeys.add(context.workKey);
+            } else if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
+            shown++;
+            const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td data-th="單號">${escapeHtml(po.poNo || '')}</td>
+                <td data-th="公司">${escapeHtml(companyLabel)}</td>
+                <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
+                <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
+                <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
+                <td data-th="等待天數">${escapeHtml(complete?'—':(poWaitingDays(po)||'—'))}</td>
+                <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
+                <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
+                <td data-th="到貨進度">${complete?'已到貨':received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td>
+                <td data-th="操作" class="no-print">${complete
+                    ? '<span>已完成</span>'
+                    : canEditPage('orders.po')
+                        ? `<button type="button" class="btn-small btn-secondary" onclick="receivePurchaseOrderItem('${escapeAttr(po.id)}',${itemIndex})">${directShip?'確認直送到貨':'📥 到貨入庫'}</button>`
+                        : '<span class="order-progress-badge">唯讀</span>'} ${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:''}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    });
+
+    if (purchasingView === 'receiving') supplyReceivingCache.forEach(supply=>{
+        const ordered=Math.max(0,Number(supply.qty||0));
+        const received=Math.max(0,Number(supply.receivedQty||0));
+        const remaining=Math.max(0,ordered-received);
+        if(!remaining)return;
+        const context=receivingQueueContext(supply,supply);
+        if(!context){stockPending++;return;}
+        if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
+        receivingItemKeys.add(context.workKey);
+        shown++;
+        const receiveAction = canEditPage('orders.po')
+            ? `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">${(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'確認直送到貨':'📥 到貨入庫'}</button>`
+            : '<span class="order-progress-badge">唯讀</span>';
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print">${receiveAction}</td>`;
+        tbody.appendChild(tr);
+    });
+
+    const emptyHint = document.getElementById('poListEmptyHint');
+    const status = document.getElementById('poHistorySearchStatus');
+    if (purchasingView === 'receiving') {
+        const missingWorkCount = [...arrivalWorkKeys].filter(key => !receivingItemKeys.has(key)).length;
+        if (emptyHint) {
+            emptyHint.style.display = shown === 0 ? 'block' : 'none';
+            emptyHint.textContent = !purchasingReceivingReady
+                ? '正在載入待到貨採購紀錄…'
+                : arrivalWorkKeys.size
+                    ? '待到貨工作存在，但尚未找到可操作的採購紀錄。'
+                    : '目前沒有待到貨品項。';
+        }
+        if (status) {
+            const parts = [];
+            if (!purchasingReceivingReady) {
+                parts.push(`待到貨工作 ${arrivalWorkKeys.size} 個；採購紀錄載入中…`);
+            } else if (shown > 0) {
+                parts.push(`待到貨 ${receivingItemKeys.size} 個訂單品項；${shown} 筆採購紀錄`);
+                if (shown > receivingItemKeys.size) parts.push('同一品項有分批／多張採購紀錄');
+            }
+            if (purchasingReceivingReady && missingWorkCount > 0) {
+                parts.push(`有 ${missingWorkCount} 個待到貨品項尚未找到對應採購紀錄，請重新整理或檢查資料`);
+            }
+            if (stockPending > 0) parts.push(`另有 ${stockPending} 筆不屬於目前訂單「待到貨」狀態，不計入上方工作卡`);
+            status.textContent = parts.join('。');
+        }
+    } else if (emptyHint) {
         emptyHint.style.display = shown === 0 ? 'block' : 'none';
         emptyHint.textContent = '目前還沒有產生過任何訂購單。';
     }
