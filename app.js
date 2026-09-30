@@ -6034,7 +6034,7 @@ window.saveSelfOrder = async function() {
             const validation=window.YushinSupply?.validate(record);
             if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
             tx.set(supplyRef,record);
-            items[index]={...item,supplyOrderedQty:already+qty,purchaseOrderedQty:already+qty,selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate};
+            items[index]={...item,supplyOrderedQty:already+qty,selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate};
             savedOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(savedOrder),updatedAt:now});
         });
@@ -7297,7 +7297,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 createdByRole:existingSupply?.createdByRole||currentUserRole
             };
             items[itemIndex] = {
-                ...item, purchaseOrderedQty:nextOrdered, supplyOrderedQty:nextOrdered,
+                ...item, supplyOrderedQty:nextOrdered,
                 manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])],
                 orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate
             };
@@ -7420,9 +7420,9 @@ async function loadPurchaseOrderPage(reset) {
     const requestedView = purchasingView;
     updatePoLoadMoreButton();
     try {
-        let query = poListHasMore ? (purchasingView === 'receiving'
-            ? db.collection('purchaseOrders').where('receiptStatus','in',['pending','partial']).orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT)
-            : db.collection('purchaseOrders').orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT)) : null;
+        let query = poListHasMore && purchasingView !== 'receiving'
+            ? db.collection('purchaseOrders').orderBy('poNo','desc').limit(DEFAULT_LIST_LIMIT)
+            : null;
         if (query && poListCursor) query = query.startAfter(poListCursor);
         let supplyQuery = purchasingView === 'receiving' && supplyReceivingHasMore
             // Keep this on the single-field status index; page through mixed PO and
@@ -7435,14 +7435,11 @@ async function loadPurchaseOrderPage(reset) {
             supplyQuery ? supplyQuery.get() : Promise.resolve({docs:[],size:0,empty:true})
         ]);
         if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
-        const freshSupply=supplySnapshot.docs
-            .map(doc=>({id:doc.id,...doc.data()}))
-            .filter(row=>row.type==='SALES_SELF_ORDER'||row.type==='PURCHASING_MANUAL');
+        const freshSupply=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
         const supplyRecords=new Map((reset?[]:supplyReceivingCache).map(row=>[row.id,row]));
         freshSupply.forEach(row=>supplyRecords.set(row.id,row));
         // 倉庫型 PO 即使來源訂單取消仍待到貨；原廠直送與自行訂購維持原有篩選。
         const sourceOrderIds=purchasingView==='receiving'?[...new Set([
-            ...snapshot.docs.flatMap(doc=>purchaseItemsFromSavedPo(doc.data()).map(item=>item.orderId).filter(Boolean)),
             ...freshSupply.map(row=>row.orderId).filter(Boolean)
         ])]:[];
         // Load More keeps earlier PO rows, so their source-order statuses must stay
@@ -7665,31 +7662,18 @@ function receivingQueueContext(record, item) {
 
 function receivingEvidenceForWorkItem(order, item, itemIndex) {
     const evidence = [];
-    poListCache.forEach(po => {
-        purchaseItemsFromSavedPo(po).forEach((poItem, poItemIndex) => {
-            const sameOrder = poItem.orderId && poItem.orderId === order.id;
-            const sameItem = (poItem.itemId && item.itemId && poItem.itemId === item.itemId)
-                || Number(poItem.orderItemIndex) === Number(itemIndex);
-            if (!sameOrder || !sameItem) return;
-            const progress = poItemReceiptProgress(po, poItem, poItemIndex);
-            if (progress.complete || progress.remaining <= 0) return;
-            evidence.push({ type:'po', id:po.id, itemIndex:poItemIndex, label:po.poNo || po.id, progress });
-        });
-    });
     supplyReceivingCache.forEach(supply => {
         if (!supply?.orderId || supply.orderId !== order.id) return;
         const sameItem = (supply.itemId && item.itemId && supply.itemId === item.itemId)
             || Number(supply.orderItemIndex) === Number(itemIndex);
         if (!sameItem) return;
-        const formalPoId = supply.type === 'PURCHASING_PO' ? String(supply.purchaseOrderId || '') : '';
-        const formalPoAlreadyShown = formalPoId && evidence.some(entry => entry.type === 'po' && String(entry.id) === formalPoId);
-        if (formalPoAlreadyShown) return;
         const ordered = Math.max(0, Number(supply.qty || 0));
         const received = Math.max(0, Number(supply.receivedQty || 0));
         const remaining = Math.max(0, ordered - received);
         if (remaining <= 0) return;
         evidence.push({
-            type:'supply', id:supply.id, label:supply.internalNo || supply.id,
+            type:'supply', id:supply.id,
+            label:supply.purchaseDocumentNo || supply.internalNo || supply.id,
             progress:{ordered,received,remaining,directShip:(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'}
         });
     });
@@ -7984,30 +7968,6 @@ function poReceiptProgress(po) {
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
-async function syncFormalPurchaseSupplyOrders(poId, poRecord) {
-    const items = purchaseItemsFromSavedPo(poRecord);
-    if (!items.length) return;
-    const batch = db.batch();
-    const now = new Date().toISOString();
-    items.forEach((item, itemIndex) => {
-        const supplyRef = db.collection('supplyOrders').doc(formalSupplyOrderId(poId, itemIndex));
-        const receivedQty = Number(poRecord?.receiptRecords?.filter(row => Number(row.itemIndex) === itemIndex)
-            .reduce((sum, row) => sum + Number(row.qty || 0), 0) || 0);
-        batch.set(supplyRef, {
-            type:'PURCHASING_PO', purchaseOrderId:poId, purchaseOrderNo:poRecord.poNo || poId, itemIndex,
-            orderId:item.orderId||'', itemId:item.itemId||'', orderItemIndex:Number(item.orderItemIndex||0),
-            productKey:poIncomingKey(item), productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
-            brand:resolveBrandName(item.brand||''), supplier:poRecord.vendorName||'', qty:Number(item.qty||0),
-            receivedQty, unitCost:Number(item.unitPrice||0), fulfillmentType:item.fulfillmentType||'WAREHOUSE',
-            warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
-            status:receivedQty>=Number(item.qty||0)?'RECEIVED':receivedQty>0?'PARTIAL_RECEIPT':'ORDERED',
-            ownerUid:item.ownerUid||'', salesCode:item.salesCode||'',
-            createdAt:poRecord.createdAt||now, updatedAt:now
-        }, {merge:true});
-    });
-    await batch.commit();
-}
-
 async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
     const previousItems = (previousPo ? purchaseItemsFromSavedPo(previousPo) : [])
         .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
@@ -8086,9 +8046,6 @@ async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
         });
         if(warehouseId) invalidateWarehouseStockCache(key,warehouseId);
     }
-    // 正式 PO 本身已是權威資料；supplyOrders 只是跨模組查詢用的鏡像。
-    // 放到列印後的背景同步，避免每個品項的鏡像寫入拖慢第一次開啟列印視窗。
-    await syncFormalPurchaseSupplyOrders(poId, poRecord);
     await db.collection('purchaseOrders').doc(poId).set({
         incomingRegistrationStatus:'completed', incomingRegistrationAt:new Date().toISOString()
     }, { merge:true });
@@ -8231,7 +8188,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             if(itemIndex<0)throw new Error('找不到來源訂單品項。');
             const item=items[itemIndex];
             const delivered=Math.min(Number((item.orderedQty ?? item.qty) || 0),Number(item.deliveredQty||0)+qty);
-            items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,supplyReceivedQty:Number(item.supplyReceivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
+            items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
             const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
             const receivedQty=Number(supply.receivedQty||0)+qty;
@@ -9248,6 +9205,42 @@ window.printPurchaseOrder = async function() {
                 if (!snapshot.exists) throw new Error('來源訂單已不存在。');
                 assertPurchaseLinesAvailable(snapshot.data(), poRecord.items.filter(item => item.orderId === orderIds[index]));
             });
+            const supplyOrderIds = [];
+            poRecord.items.forEach((item,itemIndex)=>{
+                const supplyId=formalSupplyOrderId(poDocumentId,itemIndex);
+                const supplyRef=db.collection('supplyOrders').doc(supplyId);
+                supplyOrderIds.push(supplyId);
+                transaction.set(supplyRef,{
+                    type:'PURCHASING_PO',
+                    internalNo:poNo,
+                    purchaseDocumentId:poDocumentId,
+                    purchaseDocumentNo:poNo,
+                    status:'ORDERED',
+                    orderId:item.orderId||'',
+                    itemId:item.itemId||'',
+                    orderItemIndex:Number(item.orderItemIndex||0),
+                    ownerUid:item.ownerUid||'',
+                    salesCode:item.salesCode||'',
+                    productId:item.productId||'',
+                    productKey:poIncomingKey(item),
+                    itemCode:item.itemCode||'',
+                    itemName:item.itemName||'',
+                    brand:resolveBrandName(item.brand||''),
+                    qty:Number(item.qty||0),
+                    receivedQty:0,
+                    supplier:vendorName,
+                    unitCost:Number(item.unitPrice||0),
+                    orderDate:poRecord.poDate,
+                    fulfillmentType:item.fulfillmentType||'WAREHOUSE',
+                    warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
+                    createdAt:poRecord.createdAt,
+                    updatedAt:poRecord.createdAt,
+                    createdByUid:currentUser?.uid||'',
+                    createdBy:currentUserName||currentUser?.email||'',
+                    createdByRole:currentUserRole
+                });
+            });
+            poRecord.supplyOrderIds=supplyOrderIds;
             transaction.set(poRef, poRecord);
             orderSnapshots.forEach((snapshot, index) => {
                 if (snapshot.exists) {
@@ -9256,22 +9249,20 @@ window.printPurchaseOrder = async function() {
                     const nextItems=normalizedOrderItems(orderData).map((item,itemIndex)=>{
                         const matches=orderedLines.filter(line=>Number(line.orderItemIndex)===itemIndex);
                         const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
-                        const cumulative=Number(item.purchaseOrderedQty||0)+orderedQty;
-                        return orderedQty>0?{...item,purchaseOrderNo:poNo,purchaseOrderNos:[...new Set([...(item.purchaseOrderNos||[]),poNo])],purchaseOrderedQty:cumulative,orderedAt:item.orderedAt && item.orderedAt < poRecord.poDate ? item.orderedAt : poRecord.poDate}:item;
+                        const currentSupplyOrdered=Math.max(Number(item.supplyOrderedQty||0),Number(item.purchaseOrderedQty||0));
+                        const cumulative=currentSupplyOrdered+orderedQty;
+                        return orderedQty>0?{
+                            ...item,
+                            supplyOrderedQty:cumulative,
+                            purchaseDocumentNos:[...new Set([...(item.purchaseDocumentNos||[]),poNo])],
+                            orderedAt:item.orderedAt && item.orderedAt < poRecord.poDate ? item.orderedAt : poRecord.poDate
+                        }:item;
                     });
-                    const requiredQty=item=>(item.fulfillmentType||orderData.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
-                        ? Number(item.qty||0) : Math.max(0,Number(item.purchaseRequiredQty??item.inventoryShortageQty??item.qty??0));
-                    const totalNeeded=nextItems.reduce((sum,item)=>sum+requiredQty(item),0);
-                    const totalOrdered=nextItems.reduce((sum,item)=>sum+Math.min(requiredQty(item),Math.max(Number(item.purchaseOrderedQty||0),Number(item.supplyOrderedQty||0))),0);
-                    const nextOrderData={...orderData,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,purchaseOrderedQty:totalOrdered};
+                    const nextOrderData={...orderData,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2};
                     const orderUpdates = {
                         items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,
                         ...orderWorkIndexFields(nextOrderData),
-                        purchaseOrderNo: poNo,
-                        purchaseOrderNos:[...new Set([...(orderData.purchaseOrderNos||[]),poNo])],
-                        purchaseOrderedQty:totalOrdered,
-                        purchaseStatus:totalOrdered<=0?'pending':totalOrdered<totalNeeded?'partial':'ordered',
-                        linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'created')])
+                        linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'document')])
                     };
                     transaction.update(orderRefs[index], orderUpdates);
                     committedSourceOrders.push({id:snapshot.id,...orderData,...orderUpdates});
