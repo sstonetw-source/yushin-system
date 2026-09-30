@@ -795,15 +795,16 @@ test('inventory full search uses indexed pagination without legacy collection sc
     assert.doesNotMatch(s,/orderBy\('updatedAt','desc'\)/);
 });
 
-test('phase 6 purchase orders create incoming or pending items without increasing on-hand', () => {
+test('phase 6 supply orders register incoming cache without increasing on-hand', () => {
     const start=appSource.indexOf('async function registerPurchaseIncoming');
-    const end=appSource.indexOf('window.receivePurchaseOrder',start);
+    const end=appSource.indexOf('let poReceiptTargetId',start);
     const s=appSource.slice(start,end);
     assert.match(s,/incoming:Math\.max\(0,inv\.incoming\+delta\)/);
     assert.match(s,/warehouseStocks/);
     assert.doesNotMatch(s,/onHand:inv\.onHand\+delta/);
-    assert.match(s,/pendingInventoryItems/);
-    assert.match(s,/purchase_incoming/);
+    assert.doesNotMatch(s,/pendingInventoryItems/);
+    assert.match(s,/incomingRegisteredQty:targetQty/);
+    assert.match(s,/sourceType:'SUPPLY_ORDER'/);
     assert.match(s,/nextInventory\.searchTokens=buildInventorySearchTokens\(nextInventory\)/);
 });
 
@@ -816,7 +817,7 @@ test('phase 6 supply receipt decreases incoming and increases warehouse stock wi
     assert.match(s,/onHand:wh\.onHand\+qty/);
     assert.match(s,/incoming:Math\.max\(0,wh\.incoming-qty\)/);
     assert.match(s,/collection\('receipts'\)/);
-    assert.match(s,/pendingInventoryItems/);
+    assert.doesNotMatch(s,/pendingInventoryItems/);
     assert.match(s,/supplyRef,\{receivedQty,status:/);
     assert.doesNotMatch(s,/receiptRecords/);
     assert.doesNotMatch(s,/receiptStatus/);
@@ -1380,7 +1381,7 @@ test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receivi
     const incomingStart = appSource.indexOf('async function registerPurchaseIncoming');
     const incomingEnd = appSource.indexOf('window.receivePurchaseOrder', incomingStart);
     const incoming = appSource.slice(incomingStart, incomingEnd);
-    assert.match(incoming, /filter\(item => \(item\.fulfillmentType \|\| 'WAREHOUSE'\) !== 'DIRECT_SHIP'\)/);
+    assert.match(incoming, /if \(\(supply\.fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'\) return/);
 });
 
 test('Phase 2-6 security rules cover supplier and warehouse master collections', () => {
@@ -1593,7 +1594,7 @@ test('ordered action belongs to purchasing while the order list only shows progr
     assert.match(save, /await commitPromise;[\s\S]*?printSavedPoDocument\(poNo, vendorName\);/);
     assert.doesNotMatch(save, /printSavedPoDocument\(poNo, vendorName\);[\s\S]*?await commitPromise/);
     // 在途庫存仍維持背景同步，不阻塞列印。
-    assert.doesNotMatch(save, /await registerPurchaseIncoming\(poDocumentId, poRecord, previousPoForIncoming\);[\s\S]*?printSavedPoDocument\(poNo, vendorName\)/);
+    assert.doesNotMatch(save, /await registerPurchaseIncoming\(poDocumentId, poRecord\);[\s\S]*?printSavedPoDocument\(poNo, vendorName\)/);
     assert.match(indexSource, /id="poSaveStatus" role="status"/);
 });
 
