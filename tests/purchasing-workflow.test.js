@@ -87,6 +87,7 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
         inventoryNumbers: data => ({onHand:Number(data.onHand||0),reserved:Number(data.reserved||0),incoming:Number(data.incoming||0)}),
         invalidateWarehouseStockCache: () => {},
         resolveBrandName: name => name,
+        syncFormalPurchaseSupplyOrders: async () => {},
         currentUserName:'採購',currentUser:null,
         DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
         firebase:{firestore:{FieldValue:{arrayUnion:(...values) => values}}}
@@ -327,6 +328,31 @@ test('purchase-order history search does not scan legacy unindexed history', () 
     assert.match(source, /where\('searchTokens','array-contains',token\)/);
     assert.doesNotMatch(source, /舊訂購單相容搜尋/);
     assert.doesNotMatch(source, /while\(!done\)/);
+});
+
+test('formal PO supply mirrors sync after the authoritative PO commit path', () => {
+    const helperStart = app.indexOf('async function syncFormalPurchaseSupplyOrders');
+    const helperEnd = app.indexOf('async function registerPurchaseIncoming', helperStart);
+    const helper = app.slice(helperStart, helperEnd);
+    assert.ok(helperStart >= 0 && helperEnd > helperStart);
+    assert.match(helper, /db\.batch\(\)/);
+    assert.match(helper, /supplyOrders/);
+    assert.match(helper, /type:'PURCHASING_PO'/);
+
+    const registerStart = app.indexOf('async function registerPurchaseIncoming');
+    const registerEnd = app.indexOf('let poReceiptTargetId', registerStart);
+    const registerSource = app.slice(registerStart, registerEnd);
+    assert.match(registerSource, /await syncFormalPurchaseSupplyOrders\(poId, poRecord\)/);
+
+    const printStart = app.indexOf('window.printPurchaseOrder = async function()');
+    const printEnd = app.indexOf("window.addEventListener('afterprint'", printStart);
+    const printSource = app.slice(printStart, printEnd);
+    const transactionStart = printSource.indexOf('const commitPromise = db.runTransaction');
+    const transactionEnd = printSource.indexOf('await commitPromise');
+    const coreTransaction = printSource.slice(transactionStart, transactionEnd);
+    assert.doesNotMatch(coreTransaction, /supplyOrders/);
+    assert.ok(printSource.indexOf('await commitPromise') < printSource.indexOf('printSavedPoDocument(poNo, vendorName)'));
+    assert.ok(printSource.indexOf('printSavedPoDocument(poNo, vendorName)') < printSource.indexOf('registerPurchaseIncoming(poDocumentId, poRecord'));
 });
 
 test('purchase receiving queue calculates progress per PO item',()=>{
