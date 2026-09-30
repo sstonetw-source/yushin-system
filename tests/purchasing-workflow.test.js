@@ -87,7 +87,6 @@ test('repeating an incoming-stock update does not count the same PO twice', asyn
         inventoryNumbers: data => ({onHand:Number(data.onHand||0),reserved:Number(data.reserved||0),incoming:Number(data.incoming||0)}),
         invalidateWarehouseStockCache: () => {},
         resolveBrandName: name => name,
-        syncFormalPurchaseSupplyOrders: async () => {},
         currentUserName:'採購',currentUser:null,
         DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
         firebase:{firestore:{FieldValue:{arrayUnion:(...values) => values}}}
@@ -301,24 +300,21 @@ test('receiving work list renders one row per order item and keeps PO records in
     assert.match(renderSource, /const poRows = poHistorySearchActive \? poHistorySearchResults : poListCache/);
 });
 
-test('receiving evidence does not show a formal PO and its supply mirror twice', () => {
+test('receiving evidence uses supplyOrders as the only procurement source', () => {
     const source = app.match(/function receivingEvidenceForWorkItem\(order, item, itemIndex\) \{[\s\S]*?\n\}/)?.[0];
     assert.ok(source);
     const context = vm.createContext({
-        poListCache:[{id:'PO1',poNo:'PO1',items:[{orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1}]}],
         supplyReceivingCache:[
-            {id:'po-PO1-0',type:'PURCHASING_PO',purchaseOrderId:'PO1',orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1,receivedQty:0},
+            {id:'po-PO1-0',type:'PURCHASING_PO',purchaseDocumentNo:'PO1',orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1,receivedQty:0},
             {id:'SELF1',type:'SALES_SELF_ORDER',orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1,receivedQty:0}
-        ],
-        purchaseItemsFromSavedPo:po=>po.items,
-        poItemReceiptProgress:()=>({ordered:1,received:0,remaining:1,complete:false})
+        ]
     });
     const fn=vm.runInContext(`${source}\nreceivingEvidenceForWorkItem`,context);
     const evidence=fn({id:'O1'},{itemId:'I1'},0);
     assert.equal(evidence.length,2);
-    assert.equal(evidence.filter(entry=>entry.type==='po').length,1);
-    assert.equal(evidence.filter(entry=>entry.type==='supply').length,1);
-    assert.equal(evidence.find(entry=>entry.type==='supply').id,'SELF1');
+    assert.equal(evidence.filter(entry=>entry.type==='po').length,0);
+    assert.equal(evidence.every(entry=>entry.type==='supply'),true);
+    assert.equal(evidence[0].label,'PO1');
 });
 
 test('receiving waits for both order work state and purchase evidence before declaring empty', () => {
@@ -350,29 +346,20 @@ test('purchase-order history search does not scan legacy unindexed history', () 
     assert.doesNotMatch(source, /while\(!done\)/);
 });
 
-test('formal PO supply mirrors sync after the authoritative PO commit path', () => {
-    const helperStart = app.indexOf('async function syncFormalPurchaseSupplyOrders');
-    const helperEnd = app.indexOf('async function registerPurchaseIncoming', helperStart);
-    const helper = app.slice(helperStart, helperEnd);
-    assert.ok(helperStart >= 0 && helperEnd > helperStart);
-    assert.match(helper, /db\.batch\(\)/);
-    assert.match(helper, /supplyOrders/);
-    assert.match(helper, /type:'PURCHASING_PO'/);
-
-    const registerStart = app.indexOf('async function registerPurchaseIncoming');
-    const registerEnd = app.indexOf('let poReceiptTargetId', registerStart);
-    const registerSource = app.slice(registerStart, registerEnd);
-    assert.match(registerSource, /await syncFormalPurchaseSupplyOrders\(poId, poRecord\)/);
-
+test('formal PO creates authoritative supplyOrders before saving the document snapshot', () => {
     const printStart = app.indexOf('window.printPurchaseOrder = async function()');
     const printEnd = app.indexOf("window.addEventListener('afterprint'", printStart);
     const printSource = app.slice(printStart, printEnd);
     const transactionStart = printSource.indexOf('const commitPromise = db.runTransaction');
     const transactionEnd = printSource.indexOf('await commitPromise');
     const coreTransaction = printSource.slice(transactionStart, transactionEnd);
-    assert.doesNotMatch(coreTransaction, /supplyOrders/);
+    assert.match(coreTransaction, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
+    assert.match(coreTransaction, /type:'PURCHASING_PO'/);
+    assert.match(coreTransaction, /purchaseDocumentId:poDocumentId/);
+    assert.match(coreTransaction, /poRecord\.supplyOrderIds=supplyOrderIds/);
+    assert.match(coreTransaction, /supplyOrderedQty:cumulative/);
+    assert.doesNotMatch(coreTransaction, /purchaseOrderedQty:cumulative/);
     assert.ok(printSource.indexOf('await commitPromise') < printSource.indexOf('printSavedPoDocument(poNo, vendorName)'));
-    assert.ok(printSource.indexOf('printSavedPoDocument(poNo, vendorName)') < printSource.indexOf('registerPurchaseIncoming(poDocumentId, poRecord'));
 });
 
 test('purchase receiving queue calculates progress per PO item',()=>{
@@ -434,7 +421,7 @@ test('purchasing work cards reuse the shared recent order cache',()=>{
     assert.match(app,/orderItemDisplayCategories\(order,item\)\.includes\('dispatch'\)/);
     assert.doesNotMatch(app,/where\('workCategories',\s*'array-contains',\s*'ordering'\)/);
     assert.doesNotMatch(app,/where\('workCategories','array-contains','dispatch'\)/);
-    assert.match(app,/where\('receiptStatus','in',\['pending','partial'\]\)/);
+    assert.doesNotMatch(app,/purchaseOrders'\)\.where\('receiptStatus','in',\['pending','partial'\]\)/);
     assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
 });
 
@@ -448,9 +435,9 @@ test('quote cancellation and legacy delivery cleanup refresh work category index
     assert.match(app,/clearLegacyDelivery[\s\S]*?Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\)/);
 });
 
-test('receiving queue includes self orders but follows the source order arrival state',()=>{
-    assert.match(app,/receiptStatus: 'pending'/);
-    assert.match(app,/const freshSupply=supplySnapshot\.docs\s*\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)\s*\.filter\(row=>row\.type==='SALES_SELF_ORDER'\|\|row\.type==='PURCHASING_MANUAL'\)/);
+test('receiving queue reads every open supply type and follows the source order arrival state',()=>{
+    assert.match(app,/const freshSupply=supplySnapshot\.docs\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)/);
+    assert.doesNotMatch(app,/freshSupply=supplySnapshot\.docs[\s\S]{0,180}filter\(row=>row\.type/);
     assert.match(app,/業務自行訂購/);
     assert.match(app,/function receivingQueueContext\(record, item\)/);
     assert.match(app,/orderItemDisplayCategories\(sourceOrder,sourceItem\)\.includes\('arrival'\)/);
@@ -481,7 +468,7 @@ test('manual ordered action records supply and source item only once after an un
             }},
         canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
         currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
-        remainingProcurementQty:(record,item)=>Math.max(0,2-Number(item.purchaseOrderedQty||0)),
+        remainingProcurementQty:(record,item)=>Math.max(0,2-Number(item.supplyOrderedQty||0)),
         poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-09-29',
         normalizedOrderStatus:()=> 'normal',
         normalizedOrderItems:record=>record.items,orderWorkIndexFields:()=>({workCategories:['arrival']}),
@@ -492,7 +479,7 @@ test('manual ordered action records supply and source item only once after an un
     vm.runInContext(source,context);
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1);
-    assert.equal(order.items[0].purchaseOrderedQty,2);
+    assert.equal(order.items[0].purchaseOrderedQty,0);
     assert.equal(order.items[0].supplyOrderedQty,2);
     assert.equal(supply.type,'PURCHASING_MANUAL');
     assert.equal(supply.status,'ORDERED');
@@ -549,7 +536,8 @@ test('manual ordered action can add a later genuine shortage without duplicating
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(supply.qty,5,'new uncovered shortage is added to the existing manual supply');
     assert.equal(supply.orderEvents.length,2);
-    assert.equal(order.items[0].purchaseOrderedQty,5);
+    assert.equal(order.items[0].purchaseOrderedQty,0);
+    assert.equal(order.items[0].supplyOrderedQty,5);
     assert.equal(updates,2);
 });
 
@@ -565,34 +553,29 @@ test('ordered action is a direct snapshot-based state change without a data-entr
     assert.doesNotMatch(app, /printSupplyOrderDocument/);
 });
 
-test('loading another receiving page retains source status for earlier PO rows', async () => {
+test('loading another receiving page retains source status for earlier supply rows', async () => {
     const source = app.match(/async function loadPurchaseOrderPage\(reset\) \{[\s\S]*?\n\}\n(?=\nwindow\.loadMyPurchaseOrders)/)?.[0];
     assert.ok(source);
-    const purchaseDocs = ['PO1','PO2'].map((id,index) => ({
-        id, data:() => ({poNo:id,items:[{orderId:`ORDER${index+1}`}]})
-    }));
     const supplyDocs = [
-        {id:'FORMAL',data:()=>({type:'PURCHASING_PO',status:'ORDERED'})},
+        {id:'FORMAL',data:()=>({type:'PURCHASING_PO',status:'ORDERED',orderId:'ORDER1',orderDate:'2026-09-28'})},
         {id:'SELF',data:()=>({type:'SALES_SELF_ORDER',status:'ORDERED',orderId:'ORDER2',orderDate:'2026-09-27'})},
         {id:'SELF-OLDER',data:()=>({type:'SALES_SELF_ORDER',status:'ORDERED',orderId:'ORDER1',orderDate:'2026-09-26'})}
     ];
-    let page = 0;
+    let purchaseReads = 0;
     let supplyPage = 0;
-    const purchaseQuery = {
-        where(){return this;}, orderBy(){return this;}, limit(){return this;}, startAfter(){return this;},
-        async get(){const docs=[purchaseDocs[page++]];return {docs,size:docs.length,empty:false};}
-    };
     const context = vm.createContext({
-        window:{}, db:{collection:name => name==='purchaseOrders' ? purchaseQuery : name==='supplyOrders'
+        window:{}, db:{collection:name => name==='purchaseOrders'
+            ? {orderBy(){return this;},limit(){return this;},startAfter(){return this;},async get(){purchaseReads++;return {docs:[],size:0,empty:true};}}
+            : name==='supplyOrders'
             ? {where(){return this;},limit(){return this;},startAfter(){return this;},async get(){const doc=supplyDocs[supplyPage++];const docs=doc?[doc]:[];return {docs,size:docs.length,empty:!docs.length};}}
-            : {where(){return this;},async get(){return {docs:purchaseDocs.map((doc,index)=>({id:`ORDER${index+1}`,data:()=>({status:'active'})}))};}}},
+            : {where(){return this;},async get(){return {docs:['ORDER1','ORDER2'].map(id=>({id,data:()=>({status:'active'})}))};}}},
         firebase:{firestore:{FieldPath:{documentId:()=>({})}}},
         canAccessPage:()=>true, currentUserRole:'purchaser', purchasingView:'receiving',
         poListPageLoading:false, poListCursor:null, poListHasMore:true, poListCache:[],
         supplyReceivingCache:[], supplyReceivingCursor:null, supplyReceivingHasMore:true,
         receivingSourceOrderStatusCache:new Map(), receivingSourceOrderCache:new Map(), ordersCache:[], DEFAULT_LIST_LIMIT:1,
-        BUSINESS_STATUS:{ACTIVE:'active'}, normalizedOrderStatus:()=> 'normal',
-        purchaseItemsFromSavedPo:po=>po.items, readAppDataCache:()=>null,
+        normalizedOrderStatus:()=> 'normal',
+        readAppDataCache:()=>null,
         compareBusinessRecordsNewestFirst:(a,b,dateField,numberField)=>{
             const dateCompare=String(b?.[dateField]||'').localeCompare(String(a?.[dateField]||''));
             return dateCompare || String(b?.[numberField]||'').localeCompare(String(a?.[numberField]||''));
@@ -602,18 +585,15 @@ test('loading another receiving page retains source status for earlier PO rows',
     });
     vm.runInContext(source,context);
     await context.loadPurchaseOrderPage(true);
-    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
-    assert.equal(context.supplyReceivingCache.length,0);
-    await context.loadPurchaseOrderPage(false);
-    assert.equal(context.poListCache.length,2);
+    assert.equal(purchaseReads,0,'receiving must not query purchaseOrders');
     assert.equal(context.supplyReceivingCache.length,1);
-    assert.equal(context.supplyReceivingCache[0].id,'SELF');
+    assert.equal(context.supplyReceivingCache[0].id,'FORMAL');
     assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
-    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER2'),'normal');
-    context.poListHasMore=false;
     await context.loadPurchaseOrderPage(false);
-    assert.equal(page,2,'PO query should stop after its last page');
-    assert.equal(context.supplyReceivingCache.length,2,'older self-orders remain reachable');
+    assert.equal(context.supplyReceivingCache.length,2);
+    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER2'),'normal');
+    await context.loadPurchaseOrderPage(false);
+    assert.equal(context.supplyReceivingCache.length,3);
     assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
 });
 
@@ -763,13 +743,13 @@ test('committed PO refreshes item quantities in order and purchasing views', () 
     assert.ok(start>=0&&end>start);
     assert.match(app,/committedSourceOrders\.push\(\{id:snapshot\.id,\.\.\.orderData,\.\.\.orderUpdates\}\)/);
     assert.match(app,/syncCommittedPurchaseOrderSources\(committedSourceOrders\)/);
-    const oldOrder={id:'O1',items:[{qty:5,purchaseOrderedQty:0}]};
+    const oldOrder={id:'O1',items:[{qty:5,supplyOrderedQty:0}]};
     const writes=[];
     let listRenders=0;
     const context=vm.createContext({
         ordersCache:[oldOrder],pendingPurchaseCache:[oldOrder],purchasingDispatchCache:[],
         purchasingView:'ordering',
-        pendingProcurementDisplayLines:order=>order.items[0].purchaseOrderedQty<5?[{}]:[],
+        pendingProcurementDisplayLines:order=>order.items[0].supplyOrderedQty<5?[{}]:[],
         normalizedOrderItems:order=>order.items,
         orderItemDisplayCategories:()=>[],
         normalizedOrderStatus:()=> 'normal',
@@ -782,10 +762,10 @@ test('committed PO refreshes item quantities in order and purchasing views', () 
         renderOrdersList:()=>{listRenders++;}
     });
     vm.runInContext(app.slice(start,end),context);
-    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,purchaseOrderedQty:3}]}])",context);
-    assert.equal(context.ordersCache[0].items[0].purchaseOrderedQty,3);
-    assert.equal(context.pendingPurchaseCache[0].items[0].purchaseOrderedQty,3);
-    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,purchaseOrderedQty:5}]}])",context);
+    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,supplyOrderedQty:3}]}])",context);
+    assert.equal(context.ordersCache[0].items[0].supplyOrderedQty,3);
+    assert.equal(context.pendingPurchaseCache[0].items[0].supplyOrderedQty,3);
+    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,supplyOrderedQty:5}]}])",context);
     assert.equal(context.pendingPurchaseCache.length,0);
     assert.equal(listRenders,2);
     assert.deepEqual(writes.at(-2),['purchase-dispatch',[]]);
