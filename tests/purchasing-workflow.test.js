@@ -287,6 +287,19 @@ test('purchasing completed excludes unresolved procurement and includes direct s
     assert.match(source, /return rows;/);
 });
 
+test('receiving work list renders one row per order item and keeps PO records in history only', () => {
+    assert.match(html, /id="poListHeadRow"/);
+    assert.match(app, /function renderPurchasingReceivingWorkList\(\)/);
+    assert.match(app, /ordersCache\.forEach\(order =>/);
+    assert.match(app, /orderItemDisplayCategories\(order, item\)\.includes\('arrival'\)/);
+    assert.match(app, /const evidence = receivingEvidenceForWorkItem\(order, item, itemIndex\)/);
+    assert.match(app, /已合併在同一品項顯示/);
+    const renderStart = app.indexOf('window.renderPoList = function()');
+    const renderSource = app.slice(renderStart, app.indexOf('// 把「採購訂單」', renderStart));
+    assert.match(renderSource, /if \(purchasingView === 'receiving'\) \{[\s\S]*?renderPurchasingReceivingWorkList\(\);[\s\S]*?return;/);
+    assert.match(renderSource, /const poRows = poHistorySearchActive \? poHistorySearchResults : poListCache/);
+});
+
 test('receiving waits for both order work state and purchase evidence before declaring empty', () => {
     assert.match(app, /function loadPurchasingReceivingQueue\(reset = true\)/);
     assert.match(app, /Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset\)[\s\S]*?refreshPurchasingOrderCache\(reset\)/);
