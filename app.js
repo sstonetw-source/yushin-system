@@ -13470,7 +13470,7 @@ window.downloadDatabaseBackup = async function() {
         'brands', 'productLines', 'products', 'productCosts', 'priceHistory', 'customers', 'salesCodes',
         'suppliers', 'brandSupplierMappings', 'warehouses', 'warehouseStocks',
         'inventory', 'inventoryLots', 'inventoryLotCosts', 'inventoryReservations',
-        'pendingInventoryItems', 'inventoryMovements', 'receipts', 'supplyOrders', 'dispatchRecords', 'deliveries', 'auditLogs'
+        'inventoryMovements', 'receipts', 'supplyOrders', 'dispatchRecords', 'deliveries', 'auditLogs'
     ];
     button.disabled = true;
     button.innerText = '正在整理備份…';
@@ -13543,7 +13543,7 @@ const RESTORABLE_BACKUP_COLLECTIONS = new Set([
     'quotes','forecasts','orders','purchaseOrders','equipment','brands','productLines',
     'products','productCosts','priceHistory','customers','salesCodes','suppliers',
     'brandSupplierMappings','warehouses','warehouseStocks','inventory','inventoryLots',
-    'inventoryLotCosts','inventoryReservations','pendingInventoryItems','inventoryMovements',
+    'inventoryLotCosts','inventoryReservations','inventoryMovements',
     'receipts','supplyOrders','dispatchRecords','deliveries','auditLogs','forecastProgress'
 ]);
 function restoreBackupValue(value) {
@@ -13825,7 +13825,7 @@ function systemAuditProductKey(record = {}) {
 
 const TEST_DATA_RESET_DELETE_COLLECTIONS = [
     'orders','purchaseOrders','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
-    'receipts','dispatchRecords','deliveries','pendingInventoryItems','inventoryMovements','auditLogs'
+    'receipts','dispatchRecords','deliveries','inventoryMovements','auditLogs'
 ];
 let testDataResetPreviewState = null;
 
