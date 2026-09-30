@@ -34,8 +34,8 @@
     const delivered=n(input.deliveredQty);
     if(qty>0&&delivered>=qty)return input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
-    const ordered=Math.max(n(input.purchaseOrderedQty),n(input.supplyOrderedQty));
-    const received=Math.max(n(input.receivedQty),n(input.purchaseReceivedQty),n(input.supplyReceivedQty));
+    const ordered=n(input.supplyOrderedQty??input.purchaseOrderedQty);
+    const received=n(input.receivedQty??input.purchaseReceivedQty??input.supplyReceivedQty);
     if(fulfillmentType==='DIRECT_SHIP'){
       if(qty>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
       if(received<qty)return ITEM_WORK_CATEGORIES.ARRIVAL;
