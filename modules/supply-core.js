@@ -3,7 +3,7 @@
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinSupply=api;
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
-  const TYPES=Object.freeze({PURCHASING_PO:'PURCHASING_PO',SALES_SELF_ORDER:'SALES_SELF_ORDER',STOCK_REPLENISHMENT:'STOCK_REPLENISHMENT'});
+  const TYPES=Object.freeze({PURCHASING_PO:'PURCHASING_PO',PURCHASING_MANUAL:'PURCHASING_MANUAL',SALES_SELF_ORDER:'SALES_SELF_ORDER',STOCK_REPLENISHMENT:'STOCK_REPLENISHMENT'});
   function n(v){const x=Number(v);return Number.isFinite(x)?Math.max(0,x):0;}
   function normalize(record={}){
     const type=Object.values(TYPES).includes(record.type)?record.type:TYPES.PURCHASING_PO;
@@ -30,7 +30,7 @@
   }
   function canCreate(role,type){
     if(role==='admin')return true;
-    if(type===TYPES.PURCHASING_PO||type===TYPES.STOCK_REPLENISHMENT)return role==='purchaser';
+    if(type===TYPES.PURCHASING_PO||type===TYPES.PURCHASING_MANUAL||type===TYPES.STOCK_REPLENISHMENT)return role==='purchaser';
     if(type===TYPES.SALES_SELF_ORDER)return role==='sales'||role==='engineer';
     return false;
   }

@@ -1,5 +1,6 @@
 const test=require('node:test');const assert=require('node:assert/strict');const s=require('../modules/supply-core.js');
-test('purchaser creates formal PO and replenishment',()=>{assert.equal(s.canCreate('purchaser',s.TYPES.PURCHASING_PO),true);assert.equal(s.canCreate('purchaser',s.TYPES.STOCK_REPLENISHMENT),true);});
+test('purchaser creates formal PO manual order and replenishment',()=>{assert.equal(s.canCreate('purchaser',s.TYPES.PURCHASING_PO),true);assert.equal(s.canCreate('purchaser',s.TYPES.PURCHASING_MANUAL),true);assert.equal(s.canCreate('purchaser',s.TYPES.STOCK_REPLENISHMENT),true);});
+test('manual purchasing type survives normalization',()=>{const x=s.normalize({type:s.TYPES.PURCHASING_MANUAL,qty:2,receivedQty:0});assert.equal(x.type,s.TYPES.PURCHASING_MANUAL);assert.equal(x.status,'ORDERED');});
 test('sales and engineer can self-order but cannot create formal PO',()=>{for(const r of ['sales','engineer']){assert.equal(s.canCreate(r,s.TYPES.SALES_SELF_ORDER),true);assert.equal(s.canCreate(r,s.TYPES.PURCHASING_PO),false);}});
 test('self-order requires supplier cost qty and customer item link',()=>{const v=s.validate({type:s.TYPES.SALES_SELF_ORDER,qty:2,supplier:'X',unitCost:100,orderId:'o1',itemId:'i1'});assert.equal(v.valid,true);});
 test('stock replenishment does not require customer order and never creates dispatch',()=>{const r={type:s.TYPES.STOCK_REPLENISHMENT,qty:10,supplier:'X'};assert.equal(s.validate(r).valid,true);assert.equal(s.createsCustomerDispatch(r),false);});

@@ -363,7 +363,7 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
-    // Unified source/order evidence: PURCHASING_PO, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
+    // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner()
