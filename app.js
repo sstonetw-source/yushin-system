@@ -5667,6 +5667,14 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     if(warehouseId) invalidateWarehouseStockCache(productKey,warehouseId);
     return result;
 }
+function orderReservationSummary(order) {
+    const items=normalizedOrderItems(order);
+    return {
+        reservedQty:items.reduce((sum,item)=>sum+Math.max(0,Number(item.reservedQty||0)),0),
+        shortageQty:items.reduce((sum,item)=>sum+Math.max(0,Number(item.shortageQty||0)),0)
+    };
+}
+
 async function reserveInventoryForNewOrder(orderId, order) {
     if(!warehouseMasterCache.length)await loadWarehouseMaster();
     const items=normalizedOrderItems(order);
@@ -5674,21 +5682,19 @@ async function reserveInventoryForNewOrder(orderId, order) {
         const item=await reserveSingleOrderItem(orderId,order,items[0]||legacyOrderItemFromOrder(order),0);
         const updates={
             items:[item],itemCount:1,orderSchemaVersion:2,
-            inventoryReservedQty:Number(item.reservedQty||0),
-            inventoryShortageQty:Number(item.shortageQty||0),
             inventoryProductKey:item.inventoryProductKey||'',
             fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:item.warehouseId||''
         };
         Object.assign(order,updates);
         Object.assign(updates,orderWorkIndexFields(order));
         await db.collection('orders').doc(orderId).set(updates,{merge:true});
-        return {reservedQty:updates.inventoryReservedQty,shortageQty:updates.inventoryShortageQty,items:[item]};
+        return {reservedQty:Number(item.reservedQty||0),shortageQty:Number(item.shortageQty||0),items:[item]};
     }
     const reservedItems=[];
     for(let i=0;i<items.length;i++) reservedItems.push(await reserveSingleOrderItem(orderId,order,items[i],i));
     const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.reservedQty||0),0);
     const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.shortageQty||0),0);
-    const updates={items:reservedItems,itemCount:reservedItems.length,orderSchemaVersion:2,inventoryReservedQty:reservedQty,inventoryShortageQty:shortageQty};
+    const updates={items:reservedItems,itemCount:reservedItems.length,orderSchemaVersion:2};
     Object.assign(order,updates);
     Object.assign(updates,orderWorkIndexFields(order));
     await db.collection('orders').doc(orderId).set(updates,{merge:true});
@@ -6719,7 +6725,7 @@ window.retryOrderInventoryReservation = async function(orderId) {
         order.inventoryReservationStatus='pending';order.inventoryReservationError='';order.inventoryReservationUpdatedAt=now;renderOrdersList();
         const reservation=await reserveInventoryForNewOrder(orderId,order);
         const completedAt=new Date().toISOString();
-        const updates={inventoryReservationStatus:'completed',inventoryReservationError:'',inventoryReservationUpdatedAt:completedAt,inventoryReservedQty:reservation.reservedQty,inventoryShortageQty:reservation.shortageQty};
+        const updates={inventoryReservationStatus:'completed',inventoryReservationError:'',inventoryReservationUpdatedAt:completedAt};
         await db.collection('orders').doc(orderId).set(updates,{merge:true});
         Object.assign(order,updates);
         renderOrdersList();
@@ -8073,8 +8079,8 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const totalReserved=items.reduce((s,row)=>s+Number(row.reservedQty||0),0);
             const totalShortage=items.reduce((s,row)=>s+Number(row.shortageQty||0),0);
             const now=new Date().toISOString();
-            const nextOrder={...order,items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now};
-            tx.update(orderRef,{items,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,...orderWorkIndexFields(nextOrder),updatedAt:now});
+            const nextOrder={...order,items,updatedAt:now};
+            tx.update(orderRef,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
             tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
             tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
             tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
@@ -9422,7 +9428,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         ...inventoryReservationPayload(orderId,order,0,'released'),shortageQty:0,updatedAt:now
     },{merge:true});
     transaction.update(db.collection('orders').doc(orderId),{
-        items:nextItems,inventoryReservedQty:totalReserved,inventoryShortageQty:totalShortage,updatedAt:now
+        items:nextItems,updatedAt:now
     });
 }
 
@@ -9608,7 +9614,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     if (!invSnap.exists || !whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
 
     const inv = inventoryNumbers(invSnap.data()), wh = inventoryNumbers(whSnap.data());
-    const initialReserved = Number(order.reservedQty ?? order.inventoryReservedQty ?? 0);
+    const initialReserved = Number(order.reservedQty || 0);
     const oldDelivered = savedDeliveryRecords(order).reduce((sum,row)=>sum+Number(row.qty||0),0);
     const newDelivered = Math.max(0, oldDelivered + deltaQty);
     const oldReservedRemaining = Math.max(0, initialReserved - oldDelivered);
@@ -9704,7 +9710,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const deliveryItemId=order.itemId||'';
     const reservationRef=deliveryItemId?db.collection('inventoryReservations').doc(`${sourceId}__${deliveryItemId}`):reservationDocRef(sourceId);
     const currentItemState=itemDispatchState(order,order);
-    const currentReservation=Math.max(0,Number(order.reservedQty??order.inventoryReservedQty??0)-currentItemState.grossDelivered+currentItemState.returned);
+    const currentReservation=Math.max(0,Number(order.reservedQty||0)-currentItemState.grossDelivered+currentItemState.returned);
     const nextReservation=Math.max(0,currentReservation+deltaQty);
     transaction.set(reservationRef,{...inventoryReservationPayload(sourceId,order,nextReservation,nextReservation>0?'active':'fulfilled'),itemId:deliveryItemId,warehouseId},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
@@ -10942,7 +10948,7 @@ window.saveNewOrder = function() {
         let reservation;
         try {
             if(data.inventoryReservationStatus==='completed'){
-                reservation={reservedQty:Number(data.inventoryReservedQty||0),shortageQty:Number(data.inventoryShortageQty||0)};
+                reservation=orderReservationSummary(data);
             }else{
                 if (saveButton) saveButton.innerText = '同步庫存中…';
                 reservation = await reserveInventoryForNewOrder(docRef.id, data);
@@ -10965,8 +10971,6 @@ window.saveNewOrder = function() {
             },{merge:true}).catch(markErr=>console.error('標記訂單庫存占用失敗：',markErr));
             throw new Error(`訂單已建立，但庫存占用未完成：${reservationErr?.message||reservationErr}。可按儲存重試同一張訂單。`);
         }
-        data.inventoryReservedQty = reservation.reservedQty;
-        data.inventoryShortageQty = reservation.shortageQty;
         data.inventoryProductKey = inventoryProductKey(data);
         rememberRecentCustomerName(data.customerName);
         const quoteContext=window._orderModalQuoteContext;
