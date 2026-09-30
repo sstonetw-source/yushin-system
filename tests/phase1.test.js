@@ -1662,6 +1662,20 @@ test('delivery and return deletes reject duplicate submissions and cancelled ord
 });
 
 
+test('system data audit follows supplyOrders as procurement truth', () => {
+  const start=appSource.indexOf('window.runSystemDataAudit = async function()');
+  const end=appSource.indexOf('window.previewInventoryCostMigration',start);
+  const source=appSource.slice(start,end);
+  assert.ok(start>=0&&end>start);
+  assert.match(source,/readCollectionInBatches\('supplyOrders'\)/);
+  assert.match(source,/const supplyIds = new Set\(supplyOrders\.map/);
+  assert.match(source,/供應紀錄來源訂單不存在/);
+  assert.match(source,/供應紀錄倉庫異常/);
+  assert.match(source,/供應紀錄數量異常/);
+  assert.match(source,/訂購單文件找不到供應紀錄/);
+  assert.doesNotMatch(source,/po\.orderId \|\| po\.sourceOrderId/);
+});
+
 test('legacy cost migration also sanitizes aggregate and warehouse stock cost fields', () => {
   assert.match(appSource,/legacyWarehouseStocks/);
   assert.match(appSource,/warehouseStocks/);
