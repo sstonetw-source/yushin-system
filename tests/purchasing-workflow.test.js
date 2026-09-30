@@ -666,6 +666,35 @@ test('cancelled source is excluded from the order-aligned receiving queue', () =
     assert.match(app.slice(start,end),/來源訂單已取消，不能繼續確認到貨/);
 });
 
+test('cancelled warehouse source still receives into free stock while direct ship stays blocked', () => {
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('window.openSupplyReceipt',start);
+    const source=app.slice(start,end);
+    const directStart=source.indexOf('if(directShip){');
+    const warehouseStart=source.indexOf("const productKey=supply.productKey", directStart);
+    const registeredStart=source.indexOf('const registeredIncoming=', warehouseStart);
+    assert.ok(directStart>=0&&warehouseStart>directStart&&registeredStart>warehouseStart);
+    assert.match(source.slice(directStart,warehouseStart),/來源訂單已取消，不能繼續確認到貨/);
+    const warehouseSource=source.slice(warehouseStart,registeredStart);
+    assert.match(warehouseSource,/sourceOrderStatus=normalizedOrderStatus\(order\)/);
+    assert.match(warehouseSource,/if\(sourceOrderStatus==='normal'\)\{/);
+    assert.doesNotMatch(warehouseSource,/來源訂單已取消，不能繼續確認到貨/);
+    assert.match(source,/sourceOrderStatus,productKey,warehouseId,qty/);
+});
+
+test('receiving queue keeps standalone stock and cancelled-order warehouse supplies visible', () => {
+    const start=app.indexOf('function renderPurchasingReceivingWorkList()');
+    const end=app.indexOf('\nwindow.renderPoList = function()',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const representedSupplyIds = new Set\(\)/);
+    assert.match(source,/supplyReceivingCache\.forEach\(supply =>/);
+    assert.match(source,/來源訂單已取消，貨到後轉為可用庫存/);
+    assert.match(source,/庫存補貨／非正常訂單供應/);
+    assert.match(source,/來源訂單已取消，直送不可確認/);
+    assert.match(source,/openSupplyReceipt\('/);
+});
+
 test('warehouse receiving no longer mutates purchase-order receipt state', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
