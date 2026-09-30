@@ -8127,25 +8127,30 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         let order=null,items=[],itemIndex=-1,reserveQty=0;
         if(supply.orderId){
             const orderRef=db.collection('orders').doc(supply.orderId);
+            const reservationRef=db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`);
             const orderSnap=await tx.get(orderRef);
+            const reservationSnap=await tx.get(reservationRef);
             if(orderSnap.exists){
                 order=orderSnap.data();
                 if(normalizedOrderStatus(order)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
                 items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
                 if(itemIndex>=0){
+                    if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存占用紀錄，無法安全入庫。');
                     const item=items[itemIndex];
-                    const shortage=Math.max(0,Number(item.shortageQty||0));
-                    reserveQty=Math.min(qty,shortage);reservedForSource=reserveQty;
-                    const next=window.YushinFulfillment.applyReceipt(item,qty);
+                    const reservation=reservationSnap.data();
+                    const currentReserved=Math.max(0,Number(reservation.quantity||0));
+                    const next=window.YushinFulfillment.applyReceipt({...item,reservedQty:currentReserved},qty);
+                    reserveQty=Math.max(0,Number(next.reservedQty||0)-currentReserved);
+                    reservedForSource=reserveQty;
                     items[itemIndex]={...next,reservedQty:next.reservedQty};
                     const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
                     tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
-                    tx.set(db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`),{
+                    tx.set(reservationRef,{
                         orderId:supply.orderId,itemId:supply.itemId,orderNo:order.orderNo||order.quoteNo||supply.orderId,
                         productKey,itemCode:supply.itemCode||'',itemName:supply.itemName||'',customerName:order.customerName||'',
                         ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',salesName:order.salesName||'',orderDate:order.orderDate||'',
-                        quantity:Number(items[itemIndex].reservedQty||0),shortageQty:Number(items[itemIndex].shortageQty||0),
-                        status:Number(items[itemIndex].reservedQty||0)>0?'active':'shortage',warehouseId,updatedAt:now
+                        quantity:Number(next.reservedQty||0),shortageQty:Number(next.shortageQty||0),
+                        status:Number(next.reservedQty||0)>0?'active':'shortage',warehouseId,updatedAt:now
                     },{merge:true});
                 }
             }
