@@ -8876,7 +8876,6 @@ window.printPurchaseOrder = async function() {
         vendorName,
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
-        status: BUSINESS_STATUS.ACTIVE,
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
         items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
         ...netAmountMetadata(poNetTotal),
