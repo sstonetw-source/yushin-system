@@ -620,6 +620,20 @@ test('primary quote export generates PDF directly without browser print', () => 
 });
 
 
+test('three-quote export uses the same direct PDF engine', () => {
+    assert.match(indexSource, /id="threeQuotePrintBtn"[^>]*>匯出三頁 PDF<\/button>/);
+    const start = appSource.indexOf('window.printThreeQuotes = async function()');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const source = appSource.slice(start, end);
+    assert.match(source, /new window\.jspdf\.jsPDF/);
+    assert.match(source, /window\.html2canvas\(first\.clone/);
+    assert.match(source, /comparisonStage\.querySelectorAll\('\.comparison-quote-page'\)/);
+    assert.match(source, /pdf\.addPage\('a4', 'p'\)/);
+    assert.match(source, /-三家估價\.pdf/);
+    assert.doesNotMatch(source, /window\.print\(\)/);
+});
+
+
 test('quote printing avoids long blocking image waits on mobile', () => {
     const openStart = appSource.indexOf('window.openThreeQuoteDialog = function()');
     const openEnd = appSource.indexOf('window.closeThreeQuoteDialog', openStart);
