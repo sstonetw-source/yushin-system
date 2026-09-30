@@ -5777,8 +5777,8 @@ function orderLifecycleInfo(order) {
     const effectiveDelivered = Math.max(0, delivered - returned);
     const status = normalizedOrderStatus(order);
     if (status === 'cancelled') return { status, label: '已取消', css: 'invalid', delivered, returned, effectiveDelivered };
-    if (returned > 0 && effectiveDelivered <= 0) return { status, label: '全數退貨', css: 'invalid', delivered, returned, effectiveDelivered };
-    if (returned > 0) return { status, label: '部分退貨', css: 'returned', delivered, returned, effectiveDelivered };
+    if (returned > 0 && effectiveDelivered <= 0) return { status, label: '全數退貨・待補送', css: 'returned', delivered, returned, effectiveDelivered };
+    if (returned > 0) return { status, label: '部分退貨・待補送', css: 'returned', delivered, returned, effectiveDelivered };
     return { status, label: '正常', css: 'normal', delivered, returned, effectiveDelivered };
 }
 
@@ -6093,7 +6093,7 @@ function orderItemDisplayCategories(order, item) {
 
 function orderWorkCategories(order) {
     const lifecycle=orderLifecycleInfo(order);
-    if(lifecycle.status!=='normal'||(lifecycle.returned>0&&lifecycle.effectiveDelivered<=0))return ['closed'];
+    if(lifecycle.status!=='normal')return ['closed'];
     const items=normalizedOrderItems(order);
     const categories=[...new Set(items.flatMap(item=>{
         const category=orderItemWorkCategory(order,item);
@@ -6633,7 +6633,7 @@ window.renderOrdersList = function() {
 
         const tr = document.createElement('tr');
         const lifecycle = orderLifecycleInfo(o);
-        if (lifecycle.status !== 'normal' || (lifecycle.returned > 0 && lifecycle.effectiveDelivered <= 0)) {
+        if (lifecycle.status !== 'normal') {
             tr.classList.add('order-row-closed');
         }
         bindListRowSelection(tr);
