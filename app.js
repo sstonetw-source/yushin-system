@@ -7981,6 +7981,30 @@ function poReceiptProgress(po) {
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
+async function syncFormalPurchaseSupplyOrders(poId, poRecord) {
+    const items = purchaseItemsFromSavedPo(poRecord);
+    if (!items.length) return;
+    const batch = db.batch();
+    const now = new Date().toISOString();
+    items.forEach((item, itemIndex) => {
+        const supplyRef = db.collection('supplyOrders').doc(formalSupplyOrderId(poId, itemIndex));
+        const receivedQty = Number(poRecord?.receiptRecords?.filter(row => Number(row.itemIndex) === itemIndex)
+            .reduce((sum, row) => sum + Number(row.qty || 0), 0) || 0);
+        batch.set(supplyRef, {
+            type:'PURCHASING_PO', purchaseOrderId:poId, purchaseOrderNo:poRecord.poNo || poId, itemIndex,
+            orderId:item.orderId||'', itemId:item.itemId||'', orderItemIndex:Number(item.orderItemIndex||0),
+            productKey:poIncomingKey(item), productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
+            brand:resolveBrandName(item.brand||''), supplier:poRecord.vendorName||'', qty:Number(item.qty||0),
+            receivedQty, unitCost:Number(item.unitPrice||0), fulfillmentType:item.fulfillmentType||'WAREHOUSE',
+            warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
+            status:receivedQty>=Number(item.qty||0)?'RECEIVED':receivedQty>0?'PARTIAL_RECEIPT':'ORDERED',
+            ownerUid:item.ownerUid||'', salesCode:item.salesCode||'',
+            createdAt:poRecord.createdAt||now, updatedAt:now
+        }, {merge:true});
+    });
+    await batch.commit();
+}
+
 async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
     const previousItems = (previousPo ? purchaseItemsFromSavedPo(previousPo) : [])
         .filter(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP');
@@ -8059,6 +8083,9 @@ async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
         });
         if(warehouseId) invalidateWarehouseStockCache(key,warehouseId);
     }
+    // 正式 PO 本身已是權威資料；supplyOrders 只是跨模組查詢用的鏡像。
+    // 放到列印後的背景同步，避免每個品項的鏡像寫入拖慢第一次開啟列印視窗。
+    await syncFormalPurchaseSupplyOrders(poId, poRecord);
     await db.collection('purchaseOrders').doc(poId).set({
         incomingRegistrationStatus:'completed', incomingRegistrationAt:new Date().toISOString()
     }, { merge:true });
@@ -9219,18 +9246,6 @@ window.printPurchaseOrder = async function() {
                 assertPurchaseLinesAvailable(snapshot.data(), poRecord.items.filter(item => item.orderId === orderIds[index]));
             });
             transaction.set(poRef, poRecord);
-            poRecord.items.forEach((item,itemIndex)=>{
-                const supplyRef=db.collection('supplyOrders').doc(formalSupplyOrderId(poDocumentId,itemIndex));
-                const previousReceived=Number(previousPoForIncoming?.receiptRecords?.filter(row=>Number(row.itemIndex)===itemIndex).reduce((sum,row)=>sum+Number(row.qty||0),0)||0);
-                transaction.set(supplyRef,{
-                    type:'PURCHASING_PO',purchaseOrderId:poDocumentId,purchaseOrderNo:poNo,itemIndex,
-                    orderId:item.orderId||'',itemId:item.itemId||'',orderItemIndex:Number(item.orderItemIndex||0),
-                    productKey:poIncomingKey(item),productId:item.productId||'',itemCode:item.itemCode||'',itemName:item.itemName||'',brand:resolveBrandName(item.brand||''),
-                    supplier:vendorName,qty:Number(item.qty||0),receivedQty:previousReceived,unitCost:Number(item.unitPrice||0),fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
-                    status:previousReceived>=Number(item.qty||0)?'RECEIVED':previousReceived>0?'PARTIAL_RECEIPT':'ORDERED',
-                    ownerUid:item.ownerUid||'',salesCode:item.salesCode||'',createdAt:previousPoForIncoming?.createdAt||poRecord.createdAt,updatedAt:new Date().toISOString()
-                },{merge:true});
-            });
             orderSnapshots.forEach((snapshot, index) => {
                 if (snapshot.exists) {
                     const orderData = snapshot.data();
