@@ -14,8 +14,8 @@
 
   function normalizeItem(item = {}, index = 0) {
     const orderedQty = n(item.orderedQty ?? item.qty);
-    const reservedQty = clamp(item.reservedQty ?? item.inventoryReservedQty, 0, orderedQty);
-    const supplyOrderedQty = clamp(item.supplyOrderedQty ?? item.purchaseOrderedQty, 0, orderedQty);
+    const reservedQty = clamp(item.reservedQty, 0, orderedQty);
+    const supplyOrderedQty = clamp(item.supplyOrderedQty, 0, orderedQty);
     const receivedQty = clamp(item.receivedQty, 0, orderedQty);
     const dispatchPreparedQty = clamp(item.dispatchPreparedQty, 0, orderedQty);
     const deliveredQty = clamp(item.deliveredQty, 0, orderedQty);
