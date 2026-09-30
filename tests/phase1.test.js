@@ -784,6 +784,17 @@ test('phase 5 cancelling and restoring orders adjusts reservations without delet
 });
 
 
+test('inventory full search uses indexed pagination without legacy collection scans', () => {
+    const start=appSource.indexOf('async function runInventorySearch');
+    const end=appSource.indexOf('function populateInventoryBrandFilter',start);
+    const s=appSource.slice(start,end);
+    assert.match(s,/where\('searchTokens','array-contains',token\)/);
+    assert.match(s,/if\(cursor\)query=query\.startAfter\(cursor\)/);
+    assert.match(s,/if\(snapshot\.size<DEFAULT_LIST_LIMIT\)break/);
+    assert.doesNotMatch(s,/舊庫存相容搜尋/);
+    assert.doesNotMatch(s,/orderBy\('updatedAt','desc'\)/);
+});
+
 test('phase 6 purchase orders create incoming or pending items without increasing on-hand', () => {
     const start=appSource.indexOf('async function registerPurchaseIncoming');
     const end=appSource.indexOf('window.receivePurchaseOrder',start);
@@ -793,6 +804,7 @@ test('phase 6 purchase orders create incoming or pending items without increasin
     assert.doesNotMatch(s,/onHand:inv\.onHand\+delta/);
     assert.match(s,/pendingInventoryItems/);
     assert.match(s,/purchase_incoming/);
+    assert.match(s,/nextInventory\.searchTokens=buildInventorySearchTokens\(nextInventory\)/);
 });
 
 test('phase 6 supply receipt decreases incoming and increases warehouse stock with partial receipts', () => {
