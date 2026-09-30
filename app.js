@@ -8077,7 +8077,7 @@ async function refreshAffectedOrderCaches(orderIds = []) {
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
     const now=new Date().toISOString(),actor=deliveryActor();
-    let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',reservedForSource=0;
+    let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',sourceOrderStatus='',reservedForSource=0;
     const affectedOrderIds = new Set();
     await db.runTransaction(async tx=>{
         const supplyRef=db.collection('supplyOrders').doc(supplyId);
@@ -8128,26 +8128,30 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
             const reservationSnap=await tx.get(reservationRef);
             if(orderSnap.exists){
                 order=orderSnap.data();
-                if(normalizedOrderStatus(order)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
-                items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
-                if(itemIndex>=0){
-                    if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存占用紀錄，無法安全入庫。');
-                    const item=items[itemIndex];
-                    const reservation=reservationSnap.data();
-                    const currentReserved=Math.max(0,Number(reservation.quantity||0));
-                    const next=window.YushinFulfillment.applyReceipt({...item,reservedQty:currentReserved},qty);
-                    reserveQty=Math.max(0,Number(next.reservedQty||0)-currentReserved);
-                    reservedForSource=reserveQty;
-                    items[itemIndex]={...next,reservedQty:next.reservedQty};
-                    const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
-                    tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
-                    tx.set(reservationRef,{
-                        orderId:supply.orderId,itemId:supply.itemId,orderNo:order.orderNo||order.quoteNo||supply.orderId,
-                        productKey,itemCode:supply.itemCode||'',itemName:supply.itemName||'',customerName:order.customerName||'',
-                        ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',salesName:order.salesName||'',orderDate:order.orderDate||'',
-                        quantity:Number(next.reservedQty||0),shortageQty:Number(next.shortageQty||0),
-                        status:Number(next.reservedQty||0)>0?'active':'shortage',warehouseId,updatedAt:now
-                    },{merge:true});
+                sourceOrderStatus=normalizedOrderStatus(order);
+                // 倉庫型採購即使來源訂單已取消，供應商仍可能照常出貨。
+                // 此時貨照常入庫，但不可再占回已取消訂單；整批視為自由庫存。
+                if(sourceOrderStatus==='normal'){
+                    items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
+                    if(itemIndex>=0){
+                        if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存占用紀錄，無法安全入庫。');
+                        const item=items[itemIndex];
+                        const reservation=reservationSnap.data();
+                        const currentReserved=Math.max(0,Number(reservation.quantity||0));
+                        const next=window.YushinFulfillment.applyReceipt({...item,reservedQty:currentReserved},qty);
+                        reserveQty=Math.max(0,Number(next.reservedQty||0)-currentReserved);
+                        reservedForSource=reserveQty;
+                        items[itemIndex]={...next,reservedQty:next.reservedQty};
+                        const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+                        tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
+                        tx.set(reservationRef,{
+                            orderId:supply.orderId,itemId:supply.itemId,orderNo:order.orderNo||order.quoteNo||supply.orderId,
+                            productKey,itemCode:supply.itemCode||'',itemName:supply.itemName||'',customerName:order.customerName||'',
+                            ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',salesName:order.salesName||'',orderDate:order.orderDate||'',
+                            quantity:Number(next.reservedQty||0),shortageQty:Number(next.shortageQty||0),
+                            status:Number(next.reservedQty||0)>0?'active':'shortage',warehouseId,updatedAt:now
+                        },{merge:true});
+                    }
                 }
             }
         }
@@ -8167,7 +8171,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='') {
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
         const receiptRef=db.collection('receipts').doc();
-        tx.set(receiptRef,{supplyOrderId:supplyId,orderId:supply.orderId||'',itemId:supply.itemId||'',productKey,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor});
+        tx.set(receiptRef,{supplyOrderId:supplyId,orderId:supply.orderId||'',itemId:supply.itemId||'',sourceOrderStatus,productKey,warehouseId,qty,lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor});
         tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:receiptRef.id,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
         const receivedQty=Number(supply.receivedQty||0)+qty;
         tx.update(supplyRef,{
