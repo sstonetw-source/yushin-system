@@ -4321,8 +4321,13 @@ function paginateQuotePdfDocument(stage, source) {
     return pages.map(entry => entry.page);
 }
 
-async function addQuotePagesToPdf(pdf, pages, scale) {
+async function addQuotePagesToPdf(pdf, pages, scale, onProgress = null) {
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const jpegQuality = isMobile ? 0.88 : 0.92;
+
     for (let index = 0; index < pages.length; index += 1) {
+        if (typeof onProgress === 'function') onProgress(index + 1, pages.length);
+
         const page = pages[index];
         const canvas = await window.html2canvas(page, {
             backgroundColor:'#ffffff',
@@ -4343,7 +4348,17 @@ async function addQuotePagesToPdf(pdf, pages, scale) {
             ? maxWidthMm
             : canvas.width * renderHeightMm / canvas.height;
         const x = (210 - renderWidthMm) / 2;
-        pdf.addImage(canvas.toDataURL('image/jpeg', 0.96), 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
+
+        // iPhone Safari 在多頁估價單時容易因大型 Canvas + Base64 JPEG 疊加造成記憶體壓力。
+        // 每頁加入 PDF 後立即釋放 Canvas，並把執行權交回瀏覽器，避免畫面看似卡死。
+        const imageData = canvas.toDataURL('image/jpeg', jpegQuality);
+        pdf.addImage(imageData, 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
+        canvas.width = 1;
+        canvas.height = 1;
+
+        if (index < pages.length - 1) {
+            await new Promise(resolve => window.setTimeout(resolve, 0));
+        }
     }
 }
 
@@ -4378,12 +4393,15 @@ window.exportCurrentQuotePdf = async function() {
 
         // 手機降低 Canvas 倍率以減少記憶體與等待時間；桌機維持較高解析度。
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        const scale = isMobile ? 1.35 : 1.75;
+        const scale = isMobile ? 1.15 : 1.65;
         const pages = paginateQuotePdfDocument(stage, exportDom.documentNode);
         await waitForPdfImages(stage);
 
         const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
-        await addQuotePagesToPdf(pdf, pages, scale);
+        await addQuotePagesToPdf(pdf, pages, scale, (pageNo, pageCount) => {
+            if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
+        });
+        if (button) button.innerText = '正在下載 PDF…';
         pdf.save(quotePdfFileName(quoteData));
     } catch (err) {
         console.error('匯出估價單 PDF 失敗：', err);
