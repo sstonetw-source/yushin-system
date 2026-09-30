@@ -36,8 +36,11 @@
     const ordered=n(input.supplyOrderedQty);
     const received=n(input.receivedQty);
     if(fulfillmentType==='DIRECT_SHIP'){
-      if(qty>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
-      if(received<qty)return ITEM_WORK_CATEGORIES.ARRIVAL;
+      // 直送退貨後需要由供應商補送；供應需求因此是原訂購量 + 已退貨量。
+      // supplyOrderedQty / receivedQty 保留累計量，補送批次可自然超過原始訂購量。
+      const requiredSupply=qty+n(input.returnedQty);
+      if(requiredSupply>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
+      if(received<requiredSupply)return ITEM_WORK_CATEGORIES.ARRIVAL;
       return ITEM_WORK_CATEGORIES.DELIVERY;
     }
     const shortage=n(input.shortageQty);
