@@ -1,6 +1,8 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const w=require('../modules/workflow-core.js');
+const fulfillment=require('../modules/fulfillment-core.js');
+const supply=require('../modules/supply-core.js');
 
 test('one item can mix stock standard purchase and peer transfer quantities',()=>{
   const result=w.validateSupplyAllocations({orderedQty:10,fulfillmentType:'WAREHOUSE',customerName:'Hospital',supplyAllocations:[
@@ -124,4 +126,45 @@ test('restored warehouse item with received supply and no uncovered shortage is 
 test('direct ship ignores warehouse shortage semantics and follows order then receipt progress',()=>{
   assert.equal(w.itemWorkCategory({orderedQty:4,fulfillmentType:'DIRECT_SHIP',shortageQty:4,supplyOrderedQty:4,receivedQty:2}),'arrival');
   assert.equal(w.itemWorkCategory({orderedQty:4,fulfillmentType:'DIRECT_SHIP',shortageQty:4,supplyOrderedQty:4,receivedQty:4}),'delivery');
+});
+
+
+test('cross-module shortage purchase and partial receipts stay numerically aligned',()=>{
+  let item=fulfillment.reserveFromAvailable({orderedQty:10},4);
+  assert.deepEqual(
+    {reservedQty:item.reservedQty,shortageQty:item.shortageQty},
+    {reservedQty:4,shortageQty:6}
+  );
+  assert.equal(w.itemWorkCategory({...item,supplyOrderedQty:0}),'ordering');
+
+  let supplyRecord=supply.normalize({
+    type:supply.TYPES.PURCHASING_PO,
+    qty:6,
+    receivedQty:0,
+    supplier:'Supplier',
+    orderId:'O1',
+    itemId:'I1'
+  });
+  item={...item,supplyOrderedQty:supplyRecord.qty};
+  assert.equal(w.itemWorkCategory(item),'arrival');
+
+  let receipt=supply.applyReceipt(supplyRecord,2);
+  supplyRecord=receipt.record;
+  item=fulfillment.applyReceipt(item,receipt.appliedQty);
+  assert.deepEqual(
+    {supplyReceived:supplyRecord.receivedQty,itemReceived:item.receivedQty,reservedQty:item.reservedQty,shortageQty:item.shortageQty},
+    {supplyReceived:2,itemReceived:2,reservedQty:6,shortageQty:4}
+  );
+  assert.equal(w.itemWorkCategory(item),'arrival');
+
+  receipt=supply.applyReceipt(supplyRecord,4);
+  supplyRecord=receipt.record;
+  item=fulfillment.applyReceipt(item,receipt.appliedQty);
+  assert.deepEqual(
+    {supplyReceived:supplyRecord.receivedQty,itemReceived:item.receivedQty,reservedQty:item.reservedQty,shortageQty:item.shortageQty},
+    {supplyReceived:6,itemReceived:6,reservedQty:10,shortageQty:0}
+  );
+  assert.equal(supplyRecord.status,'RECEIVED');
+  assert.equal(w.itemWorkCategory(item),'delivery');
+  assert.equal(fulfillment.pendingDispatchQty(item),10);
 });
