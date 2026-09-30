@@ -8993,7 +8993,10 @@ function resetQuoteFormForNextOne() {
 // 先在畫面上立即反應（樂觀更新），不用等雲端回應才變色，感覺上會快很多；
 // 如果雲端寫入失敗，才把狀態復原並提示錯誤
 window.toggleOrderStatus = function(orderId, field, newValue) {
-    if (field !== 'isBilled') return;
+    if (field !== 'isBilled') {
+        alert('訂貨、到貨與送貨狀態已由 V2 採購／入庫／打單流程自動管理。');
+        return;
+    }
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
     const pendingKey = `${orderId}:isBilled`;
@@ -9032,7 +9035,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
             isBilled:newValue,
             invoiceDate,
             status:BUSINESS_STATUS.ACTIVE,
-            updatedAt:timestamp,
+            updatedAt: timestamp,
             statusHistory:firebase.firestore.FieldValue.arrayUnion(logEntry)
         };
         Object.assign(updates,orderWorkIndexFields({...order,...updates}));
