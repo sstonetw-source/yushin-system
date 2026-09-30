@@ -813,9 +813,11 @@ test('phase 6 supply receipt decreases incoming and increases warehouse stock wi
     const end=appSource.indexOf('window.openSupplyReceipt',start);
     const s=appSource.slice(start,end);
     assert.match(s,/onHand:inv\.onHand\+qty/);
-    assert.match(s,/incoming:Math\.max\(0,inv\.incoming-qty\)/);
+    assert.match(s,/const incomingRelease=Math\.min\(qty,registeredIncoming\)/);
+    assert.match(s,/incoming:Math\.max\(0,inv\.incoming-incomingRelease\)/);
     assert.match(s,/onHand:wh\.onHand\+qty/);
-    assert.match(s,/incoming:Math\.max\(0,wh\.incoming-qty\)/);
+    assert.match(s,/incoming:Math\.max\(0,wh\.incoming-incomingRelease\)/);
+    assert.match(s,/incomingRegisteredQty:Math\.max\(0,registeredIncoming-incomingRelease\)/);
     assert.match(s,/collection\('receipts'\)/);
     assert.doesNotMatch(s,/pendingInventoryItems/);
     assert.match(s,/supplyRef,\{receivedQty,status:/);
