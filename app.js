@@ -6028,6 +6028,14 @@ function orderProgressInfo(order) {
 
 function isDeletableOrderDraft(order) {
     if (!order || order.quoteNo || order.purchaseOrderNo) return false;
+    const items = normalizedOrderItems(order);
+    const hasProcurementEvidence = items.some(item =>
+        Math.max(0, Number(item.supplyOrderedQty || 0)) > 0
+        || (Array.isArray(item.purchaseDocumentNos) && item.purchaseDocumentNos.some(Boolean))
+    ) || (Array.isArray(order.linkedDocuments) && order.linkedDocuments.some(link =>
+        link?.type === DOCUMENT_TYPES.PURCHASE_ORDER && link?.id
+    ));
+    if (hasProcurementEvidence) return false;
     if (order.isDelivered || order.isBilled) return false;
     if (savedDeliveryRecords(order).length || savedReturnRecords(order).length) return false;
     if ((order.statusHistory || []).length || (order.deliveryHistory || []).length || (order.returnHistory || []).length || (order.orderLifecycleHistory || []).length) return false;
