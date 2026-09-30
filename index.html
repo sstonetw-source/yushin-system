@@ -13,7 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20260930-8">
+        <link rel="stylesheet" href="styles.css?v=20260930-9">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -630,7 +630,7 @@
             <div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張只供比價，不會儲存到雲端。</div>
             <div class="eq-modal-close-row">
                 <button type="button" class="btn-secondary" onclick="closeThreeQuoteDialog()">取消</button>
-                <button type="button" id="threeQuotePrintBtn" onclick="printThreeQuotes()">列印三頁／存為 PDF</button>
+                <button type="button" id="threeQuotePrintBtn" onclick="printThreeQuotes()">匯出三頁 PDF</button>
             </div>
         </div>
     </div>
@@ -1425,6 +1425,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20260930-62"></script>
+    <script src="app.js?v=20260930-63"></script>
 </body>
 </html>
