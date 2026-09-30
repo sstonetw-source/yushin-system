@@ -604,6 +604,22 @@ test('quote optional item fields stay collapsed, persist, print only when filled
 });
 
 
+test('primary quote export generates PDF directly without browser print', () => {
+    assert.match(indexSource, /html2canvas@1\.4\.1/);
+    assert.match(indexSource, /jspdf@2\.5\.2/);
+    assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
+    assert.match(indexSource, /id="legacyQuotePrintBtn"[^>]*onclick="handleSaveAndPrint\(\)"/);
+    assert.match(appSource, /printBtn\.addEventListener\('click', exportCurrentQuotePdf\)/);
+    assert.match(appSource, /window\.exportCurrentQuotePdf = async function/);
+    assert.match(appSource, /window\.html2canvas\(clone/);
+    assert.match(appSource, /new window\.jspdf\.jsPDF/);
+    assert.match(appSource, /pdf\.save\(quotePdfFileName\(quoteData\)\)/);
+    assert.match(appSource, /persistQuoteOutputRecord\(quoteData, 'PDF'\)/);
+    assert.match(cssSource, /\.quote-pdf-stage/);
+    assert.match(cssSource, /width: 190mm/);
+});
+
+
 test('quote printing avoids long blocking image waits on mobile', () => {
     const openStart = appSource.indexOf('window.openThreeQuoteDialog = function()');
     const openEnd = appSource.indexOf('window.closeThreeQuoteDialog', openStart);
