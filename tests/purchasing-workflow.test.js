@@ -677,6 +677,18 @@ test('cancelled source is excluded from the order-aligned receiving queue', () =
     assert.match(app.slice(start,end),/來源訂單已取消，不能繼續確認到貨/);
 });
 
+test('direct-ship receipt writes the same authoritative delivery records used by order progress', () => {
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('const productKey=supply.productKey',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/id:`direct-\$\{operationKey\}`/);
+    assert.match(source,/deliveryRecords=\[\.\.\.savedDeliveryRecords\(order\),deliveryRecord\]/);
+    assert.match(source,/deliveredQty:grossDelivered/);
+    assert.match(source,/isDelivered:Math\.max\(0,grossDelivered-returned\)>=total&&total>0/);
+    assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
+});
+
 test('cancelled warehouse source still receives into free stock while direct ship stays blocked', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
