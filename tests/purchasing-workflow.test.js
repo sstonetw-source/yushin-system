@@ -260,6 +260,14 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
 });
 
 
+test('purchasing completed card is not capped by the visible 50-row page', () => {
+    const start = app.indexOf('function renderPurchasingWorkCards()');
+    const end = app.indexOf('function purchasingCompletedRows()', start);
+    const source = app.slice(start, end);
+    assert.match(source, /const completed = purchasingCompletedRows\(\)/);
+    assert.doesNotMatch(source, /visiblePurchasingCompletedRows\(\)/);
+});
+
 test('purchasing completed starts at 50 rows and supports loading more', () => {
     assert.match(html, /id="purchaseCompletedMoreBtn"/);
     assert.match(app, /let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT/);

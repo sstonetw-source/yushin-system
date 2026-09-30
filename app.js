@@ -6924,7 +6924,9 @@ function renderPurchasingWorkCards() {
         if (count) count.textContent = `${metrics[category].count} 筆`;
         if (amount) amount.textContent = formatStatsMoney(metrics[category].amount);
     });
-    const completed = visiblePurchasingCompletedRows();
+    // 圖卡統計已載入資料中的全部已完成品項；50 筆限制只套在下方明細顯示，
+    // 避免使用者按「載入更多」時圖卡數字跟著人為跳動。
+    const completed = purchasingCompletedRows();
     const completedCount = document.getElementById('purchaseCountCompleted');
     const completedAmount = document.getElementById('purchaseAmountCompleted');
     if (completedCount) completedCount.textContent = `${completed.length} 筆`;
