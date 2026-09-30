@@ -7681,6 +7681,9 @@ function receivingEvidenceForWorkItem(order, item, itemIndex) {
         const sameItem = (supply.itemId && item.itemId && supply.itemId === item.itemId)
             || Number(supply.orderItemIndex) === Number(itemIndex);
         if (!sameItem) return;
+        const formalPoId = supply.type === 'PURCHASING_PO' ? String(supply.purchaseOrderId || '') : '';
+        const formalPoAlreadyShown = formalPoId && evidence.some(entry => entry.type === 'po' && String(entry.id) === formalPoId);
+        if (formalPoAlreadyShown) return;
         const ordered = Math.max(0, Number(supply.qty || 0));
         const received = Math.max(0, Number(supply.receivedQty || 0));
         const remaining = Math.max(0, ordered - received);
