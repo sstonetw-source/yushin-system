@@ -1379,7 +1379,8 @@ test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership c
 
 test('V2 formal purchase orders normalize supply lines and receipts update them', () => {
     assert.match(appSource, /function formalSupplyOrderId/);
-    assert.match(appSource, /type:'PURCHASING_PO',purchaseOrderId/);
+    assert.match(appSource, /async function syncFormalPurchaseSupplyOrders/);
+    assert.match(appSource, /type:'PURCHASING_PO'[\s\S]*?purchaseOrderId/);
     assert.match(appSource, /formalSupplyReceived|formalReceived/);
     assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(formalSupplyOrderId/);
 });
@@ -1539,7 +1540,9 @@ test('stock replenishment always uses a valid warehouse PO path', () => {
     assert.match(source, /新增庫存採購單是公司庫存採購，不能設定為原廠直送/);
     assert.match(source, /新增庫存採購單必須指定入庫倉庫/);
     assert.match(source, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
-    assert.match(source, /db\.collection\('supplyOrders'\)/);
+    const helperStart = appSource.indexOf('async function syncFormalPurchaseSupplyOrders');
+    const helperEnd = appSource.indexOf('async function registerPurchaseIncoming', helperStart);
+    assert.match(appSource.slice(helperStart, helperEnd), /db\.collection\('supplyOrders'\)/);
 });
 
 test('ordered action belongs to purchasing while the order list only shows progress', () => {
