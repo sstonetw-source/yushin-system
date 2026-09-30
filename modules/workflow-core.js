@@ -42,8 +42,12 @@
       return ITEM_WORK_CATEGORIES.DELIVERY;
     }
     const shortage=n(input.inventoryShortageQty??input.purchaseRequiredQty);
-    if(shortage>0)return ITEM_WORK_CATEGORIES.ORDERING;
-    if(ordered>received)return ITEM_WORK_CATEGORIES.ARRIVAL;
+    // shortage 仍包含「已發單但尚未到貨」的缺口，因此先扣掉尚在途的供應。
+    // 只有在途數量覆蓋不了的部分才仍屬於待採購；已被 PO 覆蓋但未收貨則是待到貨。
+    const outstandingSupply=Math.max(0,ordered-received);
+    const uncoveredShortage=Math.max(0,shortage-outstandingSupply);
+    if(uncoveredShortage>0)return ITEM_WORK_CATEGORIES.ORDERING;
+    if(shortage>0||ordered>received)return ITEM_WORK_CATEGORIES.ARRIVAL;
     return ITEM_WORK_CATEGORIES.DELIVERY;
   }
   function normalizeSupplyAllocations(item={}){

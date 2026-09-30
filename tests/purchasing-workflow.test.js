@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const workflow = require('../modules/workflow-core.js');
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -196,8 +197,7 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /\['dispatch', '待打單'\]/);
     assert.match(app, /\['shipping', '待出貨'\]/);
     assert.match(app, /allOrderItems\.filter\(item=>orderItemDisplayCategories\(o,item\)\.includes\(activeOrderWorkFilter\)\)/);
-    assert.match(app, /if\(uncoveredShortage>0\)return 'ordering';/);
-    assert.match(app, /if\(shortage>0\|\|ordered>received\)return 'arrival';/);
+    assert.match(app, /return YushinWorkflow\.itemWorkCategory\(input\);/);
 });
 
 test('stock order shows dispatch, shipping, billing and complete as work advances', () => {
@@ -208,7 +208,8 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:order=>order.deliveryRecords||[],
         savedReturnRecords:()=>[],
-        orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0})
+        orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
+        YushinWorkflow:workflow
     });
     vm.runInContext(`${dispatchSource}\n${categorySource}`,ctx);
     const order={items:[{itemId:'I1',qty:3,orderedQty:3,inventoryShortageQty:0,
@@ -235,7 +236,8 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
     const context = vm.createContext({
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:()=>[],savedReturnRecords:()=>[],
-        orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0})
+        orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
+        YushinWorkflow:workflow
     });
     vm.runInContext(`${dispatchSource}\n${categorySource}`,context);
     const order={items:[{itemId:'I1',qty:10,orderedQty:10,inventoryShortageQty:5,

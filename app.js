@@ -6094,27 +6094,8 @@ function orderItemWorkCategory(order, item) {
         purchaseReceivedQty:item.purchaseReceivedQty,
         supplyReceivedQty:item.supplyReceivedQty
     };
-    // 唯一品項工作狀態來源。所有訂單列表、圖卡與 workCategories 都使用這裡。
-    const qty=Math.max(0,Number(input.orderedQty)||0);
-    if(input.lifecycleStatus!=='normal'||(Number(input.returnedQty||0)>0&&Number(input.effectiveDeliveredQty||0)<=0))return 'closed';
-    if(qty>0&&Number(input.deliveredQty||0)>=qty)return input.isBilled?'complete':'billing';
-    const ordered=Math.max(Number(input.purchaseOrderedQty||0),Number(input.supplyOrderedQty||0));
-    const received=Math.max(Number(input.receivedQty||0),Number(input.purchaseReceivedQty||0),Number(input.supplyReceivedQty||0));
-    if(input.fulfillmentType==='DIRECT_SHIP'){
-        if(qty>ordered)return 'ordering';
-        if(received<qty)return 'arrival';
-        return 'delivery';
-    }
-    // WAREHOUSE 的 inventoryShortageQty 是「目前仍未被庫存／既有供應覆蓋的缺口」，
-    // 不是累計採購需求。只要仍有 shortage 就必須待採購；既有 PO 尚未收齊才是待到貨。
-    const shortage=Math.max(0,Number(input.inventoryShortageQty??input.purchaseRequiredQty??0));
-    // shortage 是「目前尚未被實體庫存占用的數量」；已發單但尚未到貨的數量仍會留在 shortage。
-    // 因此要先扣掉尚在途的採購量，只有超出在途供應的缺口才屬於「待採購」。
-    const outstandingSupply=Math.max(0,ordered-received);
-    const uncoveredShortage=Math.max(0,shortage-outstandingSupply);
-    if(uncoveredShortage>0)return 'ordering';
-    if(shortage>0||ordered>received)return 'arrival';
-    return 'delivery';
+    // 單一權威來源：畫面、圖卡、採購與 workCategories 全部交給 workflow-core 判斷。
+    return YushinWorkflow.itemWorkCategory(input);
 }
 
 // 倉庫品項的採購／到貨／送貨仍共用原本的資料狀態；訂單頁依已打單量

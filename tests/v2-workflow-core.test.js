@@ -105,8 +105,12 @@ test('mixed fulfillment keeps each item in its own workflow state',()=>{
 });
 
 
-test('restored warehouse item keeps uncovered demand in ordering even with an existing PO',()=>{
-  assert.equal(w.itemWorkCategory({orderedQty:10,inventoryShortageQty:2,purchaseOrderedQty:6,receivedQty:0}),'ordering');
+test('restored warehouse item moves to arrival when existing supply fully covers the shortage',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,inventoryShortageQty:2,purchaseOrderedQty:6,receivedQty:0}),'arrival');
+});
+
+test('restored warehouse item stays in ordering when issued supply does not cover the shortage',()=>{
+  assert.equal(w.itemWorkCategory({orderedQty:10,inventoryShortageQty:8,purchaseOrderedQty:6,receivedQty:0}),'ordering');
 });
 
 test('restored warehouse item with no uncovered shortage stays in arrival while supply is still incoming',()=>{
