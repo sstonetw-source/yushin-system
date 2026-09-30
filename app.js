@@ -5173,38 +5173,30 @@ async function runInventorySearch(){
  if(inventorySearchLoading)return;
  inventorySearchLoading=true;inventorySearchActive=true;inventorySearchResults=[];
  const results=new Map();
- if(status)status.textContent='快速搜尋庫存索引中…';
+ if(status)status.textContent='正在搜尋全部庫存…';
  renderInventoryList();
  try{
    const token=fullHistoryServerToken(keyword);
+   let checked=0,cursor=null;
    if(token){
-     const indexedSnap=await firestoreReadWithTimeout(
-       db.collection('inventory').where('searchTokens','array-contains',token).limit(DEFAULT_LIST_LIMIT).get(),
-       '庫存索引搜尋'
-     );
-     indexedSnap.docs.forEach(doc=>{const row={id:doc.id,...doc.data()};if(inventoryRecordMatches(row,keyword))results.set(row.id,row);});
-     inventorySearchResults=[...results.values()].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
-     renderInventoryList();
-     if(status)status.textContent=`索引找到 ${results.size} 筆；正在相容搜尋舊庫存…`;
-   }
-   let cursor=null,done=false,scanned=0;
-   while(!done){
-     let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);
-     if(cursor)q=q.startAfter(cursor);
-     const snap=await firestoreReadWithTimeout(q.get(),'舊庫存相容搜尋');
-     scanned+=snap.size;
-     snap.docs.forEach(doc=>{
-       const data=doc.data();
-       if(Array.isArray(data.searchTokens)&&data.searchTokens.length)return;
-       const row={id:doc.id,...data};
-       if(inventoryRecordMatches(row,keyword))results.set(row.id,row);
-     });
-     cursor=snap.empty?null:snap.docs[snap.docs.length-1];
-     done=snap.size<DEFAULT_LIST_LIMIT;
-     inventorySearchResults=[...results.values()].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
-     renderInventoryList();
-     if(status)status.textContent=`已相容檢查舊庫存 ${scanned} 筆，找到 ${results.size} 筆${done?'':'…'}`;
-     await Promise.resolve();
+     while(true){
+       let query=db.collection('inventory')
+         .where('searchTokens','array-contains',token)
+         .limit(DEFAULT_LIST_LIMIT);
+       if(cursor)query=query.startAfter(cursor);
+       const snapshot=await firestoreReadWithTimeout(query.get(),'庫存索引搜尋');
+       checked+=snapshot.size;
+       snapshot.docs.forEach(doc=>{
+         const row={id:doc.id,...doc.data()};
+         if(inventoryRecordMatches(row,keyword))results.set(row.id,row);
+       });
+       inventorySearchResults=[...results.values()].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
+       renderInventoryList();
+       if(status)status.textContent=`全庫搜尋中：已檢查 ${checked} 筆候選資料，找到 ${results.size} 筆…`;
+       if(snapshot.size<DEFAULT_LIST_LIMIT)break;
+       cursor=snapshot.docs[snapshot.docs.length-1];
+       await Promise.resolve();
+     }
    }
    if(status)status.textContent=`全庫搜尋完成：找到 ${results.size} 筆`;
  }catch(err){
@@ -7964,10 +7956,12 @@ async function registerPurchaseIncoming(poId, poRecord, previousPo = null) {
             if (invSnap.exists) {
                 tx.set(invRef, { incoming:Math.max(0,inv.incoming+delta), updatedAt:now }, { merge:true });
             } else {
-                tx.set(invRef, {
+                const nextInventory={
                     productKey:key, productId:sample.productId||'', itemCode:sample.itemCode||'', itemName:sample.itemName||'',
                     brand:resolveBrandName(sample.brand||''), onHand:0, reserved:0, incoming:Math.max(0,delta), lots:[], updatedAt:now
-                }, { merge:true });
+                };
+                nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
+                tx.set(invRef,nextInventory,{merge:true});
             }
 
             if (whRef) {
