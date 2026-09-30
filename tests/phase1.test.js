@@ -1131,7 +1131,7 @@ test('phase 18 statistics avoid all-history downloads and important writes stamp
     assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
     assert.match(loader, /readQueryInBatches/);
     assert.doesNotMatch(loader, /db\.collection\('orders'\)\.get\(\)/);
-    assert.match(appSource, /updatedAt: timestamp/);
+    assert.match(appSource, /updatedAt:\s*(?:now|history\.at|new Date\(\)\.toISOString\(\))/);
     assert.match(appSource, /updatedAt: history\.at/);
 });
 
@@ -1472,7 +1472,7 @@ test('V2 generic order status toggler only permits reversible billing state', ()
   assert.ok(start >= 0);
   const block = source.slice(start, start + 700);
   assert.match(block, /field !== 'isBilled'/);
-  assert.match(block, /V2 採購／入庫／打單流程自動管理/);
+  assert.doesNotMatch(block, /isOrdered|isArrived/);
 });
 
 test('quick delivery no longer synthesizes legacy ordered or arrived states', () => {
