@@ -3477,7 +3477,8 @@ function rememberQuoteCustomerPreferences(customerName, items = []) {
         customerId,
         name,
         active: true,
-        quoteOptionalFields,
+        // 只增加這個客戶曾經用過的欄位，不因某一張估價單少填就把既有偏好洗掉。
+        quoteOptionalFields: firebase.firestore.FieldValue.arrayUnion(...quoteOptionalFields),
         updatedAt: new Date().toISOString()
     }, { merge: true }).catch(err => console.warn('客戶估價欄位偏好儲存失敗：', err));
 }
@@ -3894,6 +3895,7 @@ function comparisonItemsForTotal(targetTotal) {
         return {
             name: row.querySelector('.item-cn').value.trim() || row.querySelector('.item-en').value.trim(),
             model: row.querySelector('.item-model').value.trim(), qty,
+            extra: quoteExtraDataFromRow(row),
             weight: Math.max(0, qty * price * (1 - discountRate / 100))
         };
     }).filter(item => item.name || item.model);
@@ -3908,6 +3910,23 @@ function comparisonItemsForTotal(targetTotal) {
 
 function formatComparisonMoney(value) {
     return Number(value || 0).toLocaleString('zh-TW', { maximumFractionDigits: 4 });
+}
+
+function renderComparisonExtraFields(extra = {}, variant = 'b') {
+    const labels = variant === 'a'
+        ? { origin:'ORIGIN', leadTime:'LEAD TIME', hospitalItemCode:'HOSPITAL ITEM', manufacturer:'MANUFACTURER' }
+        : { origin:'產地', leadTime:'交貨期', hospitalItemCode:'院內料號', manufacturer:'製造商' };
+    const rows = [
+        [labels.origin, extra.origin],
+        [labels.leadTime, extra.leadTime],
+        [labels.hospitalItemCode, extra.hospitalItemCode],
+        [labels.manufacturer, extra.manufacturer],
+        ...(Array.isArray(extra.customFields) ? extra.customFields.map(field => [field.label, field.value]) : [])
+    ].filter(([label, value]) => String(label || '').trim() && String(value || '').trim());
+    if (!rows.length) return '';
+    return `<div class="comparison-product-extra">${rows.map(([label, value]) =>
+        `<span><b>${escapeHtml(label)}：</b>${escapeHtml(value)}</span>`
+    ).join('')}</div>`;
 }
 
 function renderComparisonQuotePage(companyKey, percent, variant) {
@@ -3926,7 +3945,7 @@ function renderComparisonQuotePage(companyKey, percent, variant) {
     return `<section class="comparison-quote-page comparison-style-${variant}">
         <header class="comparison-quote-header"><div class="comparison-company-block">${headerIdentity}${company.addr ? `<p>${escapeHtml(company.addr)}</p>` : ''}${company.contact ? `<p>${company.contact}</p>` : ''}</div>${variant === 'a' ? '<div class="comparison-document-title">QUOTATION</div>' : ''}</header>
         <div class="comparison-quote-meta">${document.getElementById('clientName').value.trim() ? `<div><span>${variant === 'a' ? 'CUSTOMER' : '抬頭'}</span><strong>${escapeHtml(document.getElementById('clientName').value)}</strong></div>` : ''}<div><span>${variant === 'a' ? 'DATE' : '報價日期'}</span><strong>${escapeHtml(document.getElementById('quoteDate').value || '')}</strong></div></div>
-        <div class="comparison-product-list">${items.map(item => `<article class="comparison-product-item">${variant === 'a' ? `<div class="comparison-product-main"><strong class="comparison-product-name">${escapeHtml(item.name || '－')}</strong><span class="comparison-product-model">MODEL：${escapeHtml(item.model || '－')}</span></div>` : `<span class="comparison-product-model">型號：${escapeHtml(item.model || '－')}</span><strong class="comparison-product-name">${escapeHtml(item.name || '－')}</strong>`}<span class="comparison-unit-price">${variant === 'a' ? 'UNIT' : '單價'} NT$ ${formatComparisonMoney(item.unitPrice)}</span><span class="comparison-product-qty">${variant === 'a' ? 'QTY' : '數量'} ${escapeHtml(String(item.qty || 0))}</span><strong class="comparison-product-subtotal">${variant === 'a' ? 'SUBTOTAL' : '小計'} NT$ ${formatComparisonMoney(item.amount)}</strong></article>`).join('')}</div>
+        <div class="comparison-product-list">${items.map(item => `<article class="comparison-product-item"><div class="comparison-product-main"><strong class="comparison-product-name">${escapeHtml(item.name || '－')}</strong><span class="comparison-product-model">${variant === 'a' ? 'MODEL' : '型號'}：${escapeHtml(item.model || '－')}</span>${renderComparisonExtraFields(item.extra, variant)}</div><span class="comparison-unit-price">${variant === 'a' ? 'UNIT' : '單價'} NT$ ${formatComparisonMoney(item.unitPrice)}</span><span class="comparison-product-qty">${variant === 'a' ? 'QTY' : '數量'} ${escapeHtml(String(item.qty || 0))}</span><strong class="comparison-product-subtotal">${variant === 'a' ? 'SUBTOTAL' : '小計'} NT$ ${formatComparisonMoney(item.amount)}</strong></article>`).join('')}</div>
         <div class="comparison-quote-total-row"><span>${variant === 'a' ? 'TOTAL (TAX INCLUDED)' : '含稅總金額'}</span><strong>NT$ ${total.toLocaleString()}</strong></div>
         <div class="comparison-quote-chinese-total">合計新台幣 ${numberToChineseWords(total)}元整</div>
         <div class="comparison-quote-stamp">${stamp}</div>
@@ -3972,6 +3991,7 @@ window.printThreeQuotes = async function() {
     const percent2 = Math.max(0, parseFloat(document.getElementById('comparisonPercent2').value) || 0);
     const percent3 = Math.max(0, parseFloat(document.getElementById('comparisonPercent3').value) || 0);
     const quoteData = collectCurrentQuoteRecord();
+    rememberQuoteCustomerPreferences(quoteData.clientName, quoteData.items);
     const printButton = document.getElementById('threeQuotePrintBtn');
     printButton.disabled = true;
     printButton.innerText = '準備 Logo 與印章中…';

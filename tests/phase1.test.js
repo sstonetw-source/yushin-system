@@ -585,7 +585,10 @@ test('quote optional item fields stay collapsed, persist, print only when filled
     assert.match(appSource, /item-manufacturer/);
     assert.match(appSource, /quote-custom-field-row/);
     assert.match(appSource, /quoteOptionalFields/);
+    assert.match(appSource, /FieldValue\.arrayUnion\(\.\.\.quoteOptionalFields\)/);
     assert.match(appSource, /rememberQuoteCustomerPreferences\(clientName, quoteData\.items\)/);
+    assert.match(appSource, /rememberQuoteCustomerPreferences\(quoteData\.clientName, quoteData\.items\)/);
+    assert.match(appSource, /renderComparisonExtraFields\(item\.extra, variant\)/);
     assert.match(appSource, /item\.hospitalItemCode/);
     assert.match(cssSource, /\.quote-extra-print/);
 });

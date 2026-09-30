@@ -198,7 +198,7 @@ input[type="number"] {
 .comparison-quote-meta span { display:block; margin-bottom:2mm; color:#666; font-size:10px; }
 .comparison-quote-meta strong { display:block; font-size:13px; font-weight:normal; }
 .comparison-product-list { margin-top:2mm; }
-.comparison-product-item { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto auto; align-items:center; gap:3mm; min-height:12mm; padding:2.5mm 1mm; font-size:13px; }
+.comparison-product-item { display:grid; grid-template-columns:minmax(0,1fr) auto auto auto; align-items:center; gap:3mm; min-height:12mm; padding:2.5mm 1mm; font-size:13px; }
 .comparison-product-model,
 .comparison-unit-price,
 .comparison-product-qty,
@@ -230,6 +230,10 @@ input[type="number"] {
 .comparison-style-a .comparison-product-list { margin-top:4mm; }
 .comparison-style-a .comparison-product-item { grid-template-columns:minmax(0,1fr) auto auto auto; min-height:12mm; padding:2.5mm 0; border-bottom:1px dotted #777; font-family:"PMingLiU","Songti TC",serif; }
 .comparison-style-a .comparison-product-main { display:flex; flex-direction:column; gap:.7mm; min-width:0; line-height:1.15; }
+.comparison-product-main { min-width:0; }
+.comparison-product-extra { display:flex; flex-wrap:wrap; gap:.5mm 3mm; margin-top:1mm; color:#555; font-size:9.5px; line-height:1.25; }
+.comparison-product-extra span { white-space:normal; }
+.comparison-product-extra b { font-weight:600; }
 .comparison-style-a .comparison-product-main .comparison-product-name,
 .comparison-style-a .comparison-product-main .comparison-product-model { font-size:13px; letter-spacing:0; }
 .comparison-style-a .comparison-product-name,
