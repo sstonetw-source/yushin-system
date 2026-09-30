@@ -5502,7 +5502,8 @@ window.saveInventoryAdjustmentBatch = async function() {
              const unallocated=Math.max(0,n.onHand-assignedOther-wh.onHand);
              if(delta>unallocated) throw new Error(`${row.itemCode} 未分倉庫存只有 ${unallocated}，不可分配 ${delta}。`);
           }else{
-             if(n.onHand+delta<0) throw new Error(`${row.itemCode} 異動後總庫存不可小於 0`);
+             // warehouseStocks 是實際庫存唯一真相；inventory 只維持總覽快取，
+             // 不得因 aggregate cache 漂移而阻擋合法的分倉庫存異動。
              if(wh.onHand+delta<0) throw new Error(`${row.itemCode} 異動後分倉庫存不可小於 0`);
           }
 
