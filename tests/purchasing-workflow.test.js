@@ -742,6 +742,19 @@ test('supply receipt retries are idempotent by operation id', () => {
     assert.match(save,/clearReceiptOperationId\(supplyId\)/);
 });
 
+test('multi-item returns require and use an explicit return item selector', () => {
+    assert.match(indexSource,/id="returnItemId"/);
+    assert.match(indexSource,/onchange="updateReturnFormHint\(\)"/);
+    const resetStart=app.indexOf('function returnItemDeliveredQty');
+    const saveStart=app.indexOf('window.saveReturnRecord = async function');
+    const saveEnd=app.indexOf('window.deleteReturnRecord',saveStart);
+    const source=app.slice(resetStart,saveEnd);
+    assert.match(source,/populateReturnItemOptions/);
+    assert.match(source,/updateReturnFormHint/);
+    assert.match(source,/document\.getElementById\('returnItemId'\)\?\.value/);
+    assert.match(source,/returnItemReturnedQty/);
+});
+
 test('delivery writes keep isDelivered based on net delivered quantity', () => {
     const quickStart=app.indexOf('window.quickCompleteDelivery = async function');
     const quickEnd=app.indexOf('window.quickCancelAllDelivery',quickStart);
