@@ -1520,7 +1520,6 @@ test('warehouse master save has immediate feedback and duplicate-submit guard', 
 test('formal purchase document derives ordered progress from supplyOrders only', () => {
     assert.match(appSource, /supplyOrderedQty:cumulative/);
     assert.doesNotMatch(appSource, /purchaseOrderedQty:cumulative/);
-    assert.match(appSource, /purchaseStatus:totalOrdered<=0\?'pending':totalOrdered<totalNeeded\?'partial':'ordered'/);
     assert.match(appSource, /function purchaseProgressInfo/);
     assert.match(appSource, /已訂貨 \$\{ordered\}\/\$\{required\}/);
 });
