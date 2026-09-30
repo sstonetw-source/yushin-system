@@ -761,6 +761,52 @@ test('delivery writes keep isDelivered based on net delivered quantity', () => {
     assert.match(returns,/isDelivered:effectiveDelivered>=orderQuantity\(order\)&&orderQuantity\(order\)>0/);
 });
 
+test('direct-ship returns create replacement supply demand', () => {
+    const workflow=require('../modules/workflow-core.js');
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal',
+        returnedQty:2,
+        effectiveDeliveredQty:8,
+        orderedQty:10,
+        deliveredQty:8,
+        fulfillmentType:'DIRECT_SHIP',
+        supplyOrderedQty:10,
+        receivedQty:10,
+        isBilled:false
+    }), 'ordering');
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal',
+        returnedQty:2,
+        effectiveDeliveredQty:8,
+        orderedQty:10,
+        deliveredQty:8,
+        fulfillmentType:'DIRECT_SHIP',
+        supplyOrderedQty:12,
+        receivedQty:10,
+        isBilled:false
+    }), 'arrival');
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal',
+        returnedQty:2,
+        effectiveDeliveredQty:10,
+        orderedQty:10,
+        deliveredQty:10,
+        fulfillmentType:'DIRECT_SHIP',
+        supplyOrderedQty:12,
+        receivedQty:12,
+        isBilled:false
+    }), 'billing');
+
+    const remainingStart=app.indexOf('function remainingProcurementQty');
+    const remainingEnd=app.indexOf('\nfunction pendingProcurementDisplayLines',remainingStart);
+    const remainingSource=app.slice(remainingStart,remainingEnd);
+    assert.match(remainingSource,/qty \+ returned - ordered/);
+
+    const selfStart=app.indexOf('function selfOrderActionHtml');
+    const selfEnd=app.indexOf('\nwindow.openSelfOrderModal',selfStart);
+    assert.match(app.slice(selfStart,selfEnd),/remainingProcurementQty\(order,item\)/);
+});
+
 test('full returns stay in fulfillment instead of closing the order', () => {
     const workflow=require('../modules/workflow-core.js');
     assert.equal(workflow.itemWorkCategory({
