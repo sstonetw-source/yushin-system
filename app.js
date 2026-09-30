@@ -7650,6 +7650,8 @@ function renderPurchasingReceivingWorkList() {
     let workCount = 0;
     let missingEvidence = 0;
     let evidenceCount = 0;
+    let standaloneSupplyCount = 0;
+    const representedSupplyIds = new Set();
 
     ordersCache.forEach(order => {
         if (normalizedOrderStatus(order) !== 'normal') return;
@@ -7659,6 +7661,7 @@ function renderPurchasingReceivingWorkList() {
             workCount++;
             const progress = receivingWorkProgress(order, item);
             const evidence = receivingEvidenceForWorkItem(order, item, itemIndex);
+            evidence.forEach(entry => representedSupplyIds.add(entry.id));
             evidenceCount += evidence.length;
             if (!evidence.length) missingEvidence++;
 
@@ -7683,14 +7686,62 @@ function renderPurchasingReceivingWorkList() {
         });
     });
 
+    // 沒有對應到「正常訂單待到貨工作」的供應紀錄仍可能是真實在途：
+    // 例如庫存補貨，或客戶訂單取消後供應商仍照常出貨。這些不可從採購頁消失。
+    supplyReceivingCache.forEach(supply => {
+        if (representedSupplyIds.has(supply.id)) return;
+        const ordered = Math.max(0, Number(supply.qty || 0));
+        const received = Math.max(0, Number(supply.receivedQty || 0));
+        const remaining = Math.max(0, ordered - received);
+        if (remaining <= 0) return;
+
+        const sourceOrder = receivingSourceOrderForItem(supply);
+        const sourceStatus = sourceOrder ? normalizedOrderStatus(sourceOrder) : '';
+        const directShip = (supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
+        const date = sourceOrder?.orderDate || supply.orderDate || '';
+        const salesName = sourceOrder?.salesName || supply.salesName || supply.createdBy || '';
+        const brand = supply.brand || '';
+        if (!purchaseLineMatchesFilters(date, salesName, brand, filters)) return;
+
+        // 已取消訂單的原廠直送沒有倉庫可承接，因此只能顯示警示、不可確認到貨。
+        const blockedDirectShip = directShip && sourceOrder && sourceStatus !== 'normal';
+        const actionHtml = !canEditPage('orders.po')
+            ? '<span class="order-progress-badge">唯讀</span>'
+            : blockedDirectShip
+                ? '<span class="order-progress-badge order-progress-warning">來源訂單已取消，直送不可確認</span>'
+                : `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">${directShip ? '確認直送到貨' : '📥 到貨入庫'}</button>`;
+
+        const customerLabel = sourceOrder?.customerName || sourceOrder?.customer || supply.customerName
+            || (supply.orderId ? '來源訂單' : '庫存補貨');
+        const sourceLabel = sourceOrder && sourceStatus !== 'normal'
+            ? '來源訂單已取消，貨到後轉為可用庫存'
+            : !supply.orderId
+                ? '庫存補貨'
+                : sourceOrder
+                    ? '待到貨'
+                    : '供應紀錄';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td data-th="訂單日期">${escapeHtml(date)}</td>
+            <td data-th="客戶">${escapeHtml(customerLabel)}</td>
+            <td data-th="負責業務">${escapeHtml(salesName)}</td>
+            <td data-th="待到貨品項">${escapeHtml(supply.itemCode || supply.itemName || supply.id)} × ${ordered}</td>
+            <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${received > 0 ? `部分到貨 ${received}/${ordered}` : `待到貨 0/${ordered}`}</td>
+            <td data-th="操作" class="no-print">${actionHtml}</td>`;
+        tbody.appendChild(tr);
+        standaloneSupplyCount++;
+    });
+
+    const totalRows = workCount + standaloneSupplyCount;
     if (emptyHint) {
-        emptyHint.style.display = workCount === 0 ? 'block' : 'none';
+        emptyHint.style.display = totalRows === 0 ? 'block' : 'none';
         emptyHint.textContent = !purchasingReceivingReady ? '正在載入待到貨工作…' : '目前沒有待到貨品項。';
     }
     if (status) {
         if (!purchasingReceivingReady) status.textContent = `待到貨工作 ${workCount} 個；採購資料載入中…`;
         else {
             const parts = [`待到貨 ${workCount} 個訂單品項`];
+            if (standaloneSupplyCount) parts.push(`另有 ${standaloneSupplyCount} 筆庫存補貨／非正常訂單供應`);
             if (evidenceCount > workCount) parts.push(`其中 ${evidenceCount - workCount} 筆為分批／多張採購來源，已合併在同一品項顯示`);
             if (missingEvidence) parts.push(`${missingEvidence} 個品項尚未找到可操作的採購紀錄`);
             status.textContent = parts.join('。');
