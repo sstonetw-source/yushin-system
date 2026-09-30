@@ -254,6 +254,17 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
 });
 
 
+test('purchasing completed excludes unresolved procurement and includes direct ship after arrival', () => {
+    const start = app.indexOf('function purchasingCompletedRows()');
+    const end = app.indexOf('function renderPurchasingCompletedOrders()', start);
+    const source = app.slice(start, end);
+    assert.match(source, /const category = orderItemWorkCategory\(order, item\)/);
+    assert.match(source, /\['ordering', 'arrival', 'closed'\]\.includes\(category\)/);
+    assert.match(source, /const directShip = \(item\.fulfillmentType \|\| order\.fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'/);
+    assert.match(source, /if \(!directShip &&/);
+    assert.match(source, /return rows\.slice\(0, DEFAULT_LIST_LIMIT\)/);
+});
+
 test('receiving waits for both order work state and purchase evidence before declaring empty', () => {
     assert.match(app, /function loadPurchasingReceivingQueue\(reset = true\)/);
     assert.match(app, /Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset\)[\s\S]*?refreshPurchasingOrderCache\(reset\)/);

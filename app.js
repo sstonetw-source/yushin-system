@@ -6935,13 +6935,17 @@ function purchasingCompletedRows() {
     const filters = purchaseFilterContext();
     ordersCache.forEach(order => normalizedOrderItems(order).forEach(item => {
         if (normalizedOrderStatus(order) !== 'normal') return;
-        if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
+        const category = orderItemWorkCategory(order, item);
+        // 採購端只有在「待採購／待到貨」都結束後才算完成。
+        // 倉庫品項還要確認出貨單已打完；原廠直送沒有打單步驟，到貨確認後採購工作即完成。
+        if (['ordering', 'arrival', 'closed'].includes(category)) return;
+        const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
         const state = itemDispatchState(order, item);
-        if (Number(item.dispatchPreparedQty || 0) <= 0 || Number(state.pending || 0) > 0) return;
+        if (!directShip && (Number(item.dispatchPreparedQty || 0) <= 0 || Number(state.pending || 0) > 0)) return;
         if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
         rows.push({ order, item, state });
     }));
-    return rows;
+    return rows.slice(0, DEFAULT_LIST_LIMIT);
 }
 
 function renderPurchasingCompletedOrders() {
