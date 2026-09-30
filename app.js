@@ -8225,11 +8225,11 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 sourceOrderStatus=normalizedOrderStatus(order);
                 // 倉庫型採購即使來源訂單已取消，供應商仍可能照常出貨。
                 // 此時貨照常入庫，但不可再占回已取消訂單；整批視為自由庫存。
-                if(sourceOrderStatus==='normal'){
-                    items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
-                    if(itemIndex>=0){
+                items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
+                if(itemIndex>=0){
+                    const item=items[itemIndex];
+                    if(sourceOrderStatus==='normal'){
                         if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存占用紀錄，無法安全入庫。');
-                        const item=items[itemIndex];
                         const reservation=reservationSnap.data();
                         const currentReserved=Math.max(0,Number(reservation.quantity||0));
                         const next=window.YushinFulfillment.applyReceipt({...item,reservedQty:currentReserved},qty);
@@ -8245,6 +8245,17 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                             quantity:Number(next.reservedQty||0),shortageQty:Number(next.shortageQty||0),
                             status:Number(next.reservedQty||0)>0?'active':'shortage',warehouseId,updatedAt:now
                         },{merge:true});
+                    }else{
+                        // 取消中的來源訂單不重新占庫存，但仍同步實際到貨摘要。
+                        // 這樣日後恢復訂單時，不會把已經到倉的數量再次誤判成在途採購。
+                        const orderedQty=Math.max(0,Number(item.orderedQty??item.qty??0));
+                        const currentReceived=Math.max(0,Number(item.receivedQty||0));
+                        const receivedForOrder=Math.min(qty,Math.max(0,orderedQty-currentReceived));
+                        if(receivedForOrder>0){
+                            items[itemIndex]={...item,receivedQty:currentReceived+receivedForOrder};
+                            const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+                            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
+                        }
                     }
                 }
             }
