@@ -3465,3 +3465,13 @@ test('receiving details reuse purchasing dispatch snapshots', () => {
     const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
     assert.match(appSource.slice(switchStart,switchEnd),/view === 'receiving'[\s\S]*?renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
 });
+
+
+test('purchasing support data refreshes filters without rescanning order rows', () => {
+    const start=appSource.indexOf("if (mainKey === 'orders.po') {");
+    const end=appSource.indexOf("if (mainKey === 'inventory')",start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/Promise\.allSettled\(\[ensureSalesListLoaded\(\), ensureBrandSettingsLoaded\(\)\]\)/);
+    assert.match(source,/populatePurchasingFilters\(\)/);
+    assert.doesNotMatch(source,/if \(canAccessPage\('orders\.po'\)\) renderPurchasingView\(\)/);
+});
