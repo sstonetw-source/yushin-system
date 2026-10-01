@@ -2095,3 +2095,20 @@ test('admin view-role switch clears purchasing session state', () => {
     assert.match(source,/purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT/);
     assert.match(source,/purchasingViewLoaded\.clear\(\)/);
 });
+
+
+test('receiving queue no longer contaminates purchase history cache', () => {
+    assert.doesNotMatch(appSource, /purchase-receiving/);
+    const hydrateStart=appSource.indexOf("if (mainKey === 'orders.po') {");
+    const hydrateEnd=appSource.indexOf('\n    }\n}',hydrateStart)+7;
+    const hydrateSource=appSource.slice(hydrateStart,hydrateEnd);
+    assert.match(hydrateSource,/readAppDataCache\('purchase-pending'\)/);
+    assert.match(hydrateSource,/readAppDataCache\('purchase-dispatch'\)/);
+    assert.doesNotMatch(hydrateSource,/poListCache/);
+
+    const receivingStart=appSource.indexOf("} else if (view === 'receiving') {");
+    const receivingEnd=appSource.indexOf("} else if (view === 'history') {",receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.doesNotMatch(receivingSource,/readAppDataCache/);
+    assert.match(receivingSource,/loadPurchasingReceivingQueue\(true\)/);
+});
