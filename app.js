@@ -7127,7 +7127,7 @@ const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
     // 這裡只需要知道「是否為單品項訂單」來承接舊紀錄沒有 itemId 的情況；
-    // 不需要為每個品項重新 normalizedOrderItems(order)，避免工作卡／列表反覆整理整張訂單。
+    // 不需要為每個品項重新整理整張訂單，避免工作卡／列表反覆做相同工作。
     const singleItem = Array.isArray(order?.items) && order.items.length === 1;
     const grossDelivered=savedDeliveryRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
         .reduce((sum,r)=>sum+Number(r.qty||0),0);
