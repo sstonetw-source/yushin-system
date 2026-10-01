@@ -3106,3 +3106,36 @@ test('delivery history reuses normalized item lookup', () => {
     assert.match(source,/deliveryItemNameById\.get\(record\.itemId\)/);
     assert.equal((source.match(/normalizedOrderItems\(order\)/g)||[]).length,1);
 });
+
+
+test('order row summaries reuse normalized items', () => {
+    const quantityStart=appSource.indexOf('function orderQuantity(order, normalizedItems = null)');
+    const lifecycleEnd=appSource.indexOf('\nfunction purchaseProgressInfo',quantityStart);
+    const progressSource=appSource.slice(quantityStart,lifecycleEnd);
+    assert.match(progressSource,/normalizedItems \|\| normalizedOrderItems\(order\)/);
+    assert.match(progressSource,/orderQuantity\(order, normalizedItems\)/);
+    assert.match(progressSource,/deliveredQuantity\(order, normalizedItems\)/);
+
+    const fulfillmentStart=appSource.indexOf('function fulfillmentProgressInfo(order, normalizedItems = null)');
+    const fulfillmentEnd=appSource.indexOf('\nconst pendingDispatchOrderIds',fulfillmentStart);
+    assert.match(appSource.slice(fulfillmentStart,fulfillmentEnd),/normalizedItems \|\| normalizedOrderItems\(order\)/);
+
+    const contextStart=appSource.indexOf('function orderContextActionState(order, normalizedItems = null)');
+    const contextEnd=appSource.indexOf('\nwindow.markOrderItemDispatchPrepared',contextStart);
+    const contextSource=appSource.slice(contextStart,contextEnd);
+    assert.match(contextSource,/normalizedItems \|\| normalizedOrderItems\(order\)/);
+    assert.match(contextSource,/function dispatchActionHtml\(order, normalizedItems = null\)/);
+
+    const selfStart=appSource.indexOf('function selfOrderActionHtml(order, normalizedItems = null)');
+    const selfEnd=appSource.indexOf('\nwindow.openSelfOrderModal',selfStart);
+    assert.match(appSource.slice(selfStart,selfEnd),/normalizedItems \|\| normalizedOrderItems\(order\)/);
+
+    const renderStart=appSource.indexOf('window.renderOrdersList = function()');
+    const renderEnd=appSource.indexOf('\n};',renderStart)+3;
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/deliveryProgressInfo\(o, allOrderItems\)/);
+    assert.match(renderSource,/fulfillmentProgressInfo\(o, allOrderItems\)/);
+    assert.match(renderSource,/orderContextActionState\(o, allOrderItems\)/);
+    assert.match(renderSource,/dispatchActionHtml\(o, allOrderItems\)/);
+    assert.match(renderSource,/selfOrderActionHtml\(o, allOrderItems\)/);
+});
