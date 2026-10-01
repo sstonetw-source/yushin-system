@@ -2050,3 +2050,34 @@ test('purchase draft fallback read is bounded', () => {
     assert.match(source,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('orders'\)\.doc\(orderId\)\.get\(\)[\s\S]*?'訂購單來源訂單'/);
     assert.match(source,/button\.textContent = '開啟中…'/);
 });
+
+
+test('purchase history reuses cache without resetting on every tab switch', () => {
+    const loadStart=appSource.indexOf('async function loadPurchaseOrderPage');
+    const loadEnd=appSource.indexOf('window.loadMyPurchaseOrders',loadStart);
+    const loadSource=appSource.slice(loadStart,loadEnd);
+    assert.match(loadSource,/purchasingView === 'receiving'[\s\S]*?supplyReceivingCursor = null[\s\S]*?else \{[\s\S]*?poListCursor = null/);
+    assert.match(loadSource,/readAppDataCache\('purchase-history'\)/);
+    assert.match(loadSource,/if \(query\) \{[\s\S]*?writeAppDataCache\('purchase-history', poListCache\)/);
+    assert.doesNotMatch(loadSource,/writeAppDataCache\('purchase-receiving', poListCache\)/);
+
+    const switchStart=appSource.indexOf("} else if (view === 'history') {");
+    const switchEnd=appSource.indexOf("} else if (view === 'dispatch') {",switchStart);
+    const switchSource=appSource.slice(switchStart,switchEnd);
+    assert.match(switchSource,/readAppDataCache\('purchase-history'\)/);
+    assert.match(switchSource,/purchasingViewLoaded\.has\('history'\)/);
+    assert.doesNotMatch(switchSource,/poListCache = \[\]/);
+
+    const buttonStart=appSource.indexOf('function updatePoLoadMoreButton');
+    const buttonEnd=appSource.indexOf('\n}',buttonStart)+2;
+    const buttonSource=appSource.slice(buttonStart,buttonEnd);
+    assert.match(buttonSource,/purchasingView === 'receiving' \? supplyReceivingHasMore : poListHasMore/);
+});
+
+test('completed purchasing queue uses mobile card layout like other work queues', () => {
+    assert.match(stylesSource, /#purchasePendingStatus, #purchaseDispatchStatus, #purchaseCompletedStatus/);
+    assert.match(stylesSource, /#purchaseCompletedPanel \.table-wrap/);
+    assert.match(stylesSource, /#purchaseCompletedPanel table, #purchaseCompletedPanel tbody, #purchaseCompletedPanel tr, #purchaseCompletedPanel td/);
+    assert.match(stylesSource, /#purchaseCompletedPanel td\[data-th\]::before/);
+    assert.match(stylesSource, /#purchaseCompletedPanel td\[data-th="操作"\]/);
+});
