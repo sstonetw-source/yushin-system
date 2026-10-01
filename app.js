@@ -7332,13 +7332,13 @@ window.saveSelfOrder = async function() {
             const snap=await tx.get(orderRef);
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
-            if(!canBusinessSelfOrder(order))throw new Error('只有負責業務可自行訂貨。');
+            if(!canBusinessSelfOrder(order))throw new Error('只有此訂單負責人可自行訂貨。');
             if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
             const items=normalizedOrderItems(order);
             const index=items.findIndex(row=>row.itemId===itemId);
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
-            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，業務不可自行訂貨。');
+            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，不能自行訂貨。');
             const already=Math.max(0,Number(item.supplyOrderedQty||0));
             const remaining=remainingProcurementQty(order,item);
             if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
@@ -8749,11 +8749,11 @@ function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContex
             const selfOrder = item.procurementType === 'SALES_SELF_ORDER';
             const actionHtml = selfOrder
                 ? (canBusinessSelfOrder(order)
-                    ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記業務自行訂貨</button>`
-                    : '<span class="order-progress-badge">業務自行訂貨・由負責業務處理</span>')
+                    ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記自行訂貨</button>`
+                    : '<span class="order-progress-badge">自行訂貨・由訂單負責人處理</span>')
                 : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}',this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
             const row = document.createElement('tr');
-            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '業務自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
+            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
             fragment.appendChild(row);
             shown++;
         }
