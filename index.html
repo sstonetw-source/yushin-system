@@ -105,8 +105,8 @@
         <div class="inventory-summary-note">搜尋直接查詢 Product Master，不受目前畫面載入筆數限制。一般操作不會掃描歷史資料；管理員／採購可按「待補 Product Master」手動查看近期待補品項。</div>
         <div class="table-wrap">
             <table class="product-management-table">
-                <thead id="productManagementHead"><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>供應商</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
-                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
+                <thead id="productManagementHead"><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
+                <tbody id="productManagementBody"><tr><td colspan="9" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
             </table>
         </div>
     </div>
@@ -1153,10 +1153,13 @@
         <!-- Product Master：正式資料只存 products / productCosts。 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
-                <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ 下載 Product Master Excel 範本</button>
-                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
+                <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ Product Master 範本</button>
+                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">（標準格式：Excel 檔名＝廠牌，例如 Beckman Coulter.xlsx；工作表名稱＝產品線，例如 Centrifuge、Flow Cytometry。每筆必須有貨號；產品與售價寫入 products，成本只寫入 productCosts。）</span>
+                <button type="button" class="btn-secondary" onclick="downloadProductPriceUpdateTemplate()">⬇️ 售價更新範本</button>
+                <button type="button" class="btn-secondary" onclick="document.getElementById('productPriceExcelInput').click()">📤 只更新建議售價</button>
+                <input type="file" id="productPriceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductPriceExcelUpload(this)">
+                <span style="font-size:12px;color:#666;">Product Master：檔名＝廠牌、分頁＝產品線。建議售價只有一個，存在 products.listPrice；成本獨立存在 productCosts。若只調價，使用「只更新建議售價」，不會改其他產品資料。</span>
             </div>
             <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
                 <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -1434,6 +1437,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-17"></script>
+    <script src="app.js?v=20261001-15"></script>
 </body>
 </html>
