@@ -688,6 +688,8 @@ test('quote and purchase-order browser-print code is removed in favor of the sha
     assert.doesNotMatch(appSource, /prepareQuoteForPrint/);
     assert.doesNotMatch(appSource, /markQuotePrintPagination/);
     assert.doesNotMatch(appSource, /printing-po/);
+    assert.doesNotMatch(cssSource, /printing-po/);
+    assert.doesNotMatch(cssSource, /po-print-field-mirror/);
     assert.match(appSource, /window\.printPurchaseOrder = async function/);
     assert.match(appSource, /async function addDocumentPagesToPdf/);
     assert.match(appSource, /async function printSavedPoDocument/);
