@@ -3584,6 +3584,11 @@ test('self-order capability is aligned between frontend and Firestore rules', ()
     const capabilitySource=appSource.slice(capabilityStart,capabilityEnd);
     assert.match(capabilitySource,/return hasBusinessCapability\(role\)/);
 
+    const actionStart=appSource.indexOf('function canBusinessSelfOrder');
+    const actionEnd=appSource.indexOf('\nfunction selfOrderActionHtml',actionStart);
+    const actionSource=appSource.slice(actionStart,actionEnd);
+    assert.match(actionSource,/canSelfOrderCapability\(currentUserRole\)/);
+    assert.doesNotMatch(actionSource,/currentUserRole !== 'sales'/);
     const ruleStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /inventory/{id}',ruleStart);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
