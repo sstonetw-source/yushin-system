@@ -2330,3 +2330,21 @@ test('forecast warehouse and business product reads are bounded', () => {
     assert.match(searchSource,/產品名稱搜尋/);
     assert.match(searchSource,/產品庫存搜尋/);
 });
+
+
+test('own-scope forecast does not preload full staff directory', () => {
+    const loadStart=appSource.indexOf('window.loadForecasts = async function');
+    const loadEnd=appSource.indexOf('let forecastHistorySearchActive',loadStart);
+    const loadSource=appSource.slice(loadStart,loadEnd);
+    assert.match(loadSource,/if \(canViewAllData\('forecast'\)\) await ensureSalesListLoaded\(\)/);
+    assert.match(loadSource,/else populateForecastSalesFilter\(\)/);
+
+    const initStart=appSource.indexOf('function initializePageData(mainKey');
+    const initEnd=appSource.indexOf('\nfunction ensureSalesListLoaded',initStart);
+    const initSource=appSource.slice(initStart,initEnd);
+    const blockStart=initSource.indexOf("if (mainKey === 'forecast')");
+    const blockEnd=initSource.indexOf("if (mainKey === 'quote')",blockStart);
+    const block=initSource.slice(blockStart,blockEnd);
+    assert.match(block,/if \(canViewAllData\('forecast'\)\)/);
+    assert.match(block,/else \{\s*populateForecastSalesFilter\(\)/);
+});
