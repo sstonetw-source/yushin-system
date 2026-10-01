@@ -8286,6 +8286,15 @@ function remainingProcurementQty(order, item, dispatchOverride = null) {
     return Math.max(0, shortage - Math.max(0, ordered - received));
 }
 
+function purchasingLifecycleSnapshot(normalizedItemsByOrder, sourceOrders = ordersCache) {
+    const itemMap = normalizedItemsByOrder || new Map(
+        sourceOrders.map(order => [order.id, normalizedOrderItems(order)])
+    );
+    return new Map(
+        sourceOrders.map(order => [order.id, orderLifecycleInfo(order, itemMap.get(order.id) || [])])
+    );
+}
+
 function purchasingDispatchStateSnapshot(normalizedItemsByOrder, sourceOrders = ordersCache) {
     const itemMap = normalizedItemsByOrder || new Map(
         sourceOrders.map(order => [order.id, normalizedOrderItems(order)])
@@ -8329,7 +8338,7 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
     }).filter(Boolean);
 }
 
-function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows = null, filterContext = null, dispatchStatesByOrder = null) {
+function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const definitions = [
         ['ordering', 'purchaseCountOrdering', 'purchaseAmountOrdering'],
         ['arrival', 'purchaseCountReceiving', 'purchaseAmountReceiving'],
@@ -8341,6 +8350,7 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         ordersCache.map(order => [order.id, normalizedOrderItems(order)])
     );
     const stateMap = dispatchStatesByOrder || purchasingDispatchStateSnapshot(itemMap);
+    const lifecycleMap = lifecyclesByOrder || purchasingLifecycleSnapshot(itemMap);
     // 訂單頁與採購頁共用完全相同的品項狀態與金額統計核心；
     // 採購頁只額外套自己的日期／業務／廠牌篩選，避免兩頁各算各的再次出現數字不一致。
     const metrics = buildOrderItemWorkMetrics(
@@ -8348,7 +8358,8 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         definitions.map(([category]) => category),
         (order, item) => purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters),
         itemMap,
-        stateMap
+        stateMap,
+        lifecycleMap
     );
 
     definitions.forEach(([category, countId, amountId]) => {
@@ -8359,7 +8370,7 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
     });
     // 圖卡統計已載入資料中的全部已完成品項；50 筆限制只套在下方明細顯示，
     // 避免使用者按「載入更多」時圖卡數字跟著人為跳動。
-    const completed = completedRows || purchasingCompletedRows(filters, itemMap, stateMap);
+    const completed = completedRows || purchasingCompletedRows(filters, itemMap, stateMap, lifecycleMap);
     const completedCount = document.getElementById('purchaseCountCompleted');
     const completedAmount = document.getElementById('purchaseAmountCompleted');
     if (completedCount) completedCount.textContent = `${completed.length} 筆`;
@@ -8367,12 +8378,12 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         sum + Number(row.item.unitPrice || row.item.salesPrice || 0) * Number(row.item.qty || row.item.orderedQty || 0), 0));
 }
 
-function purchasingCompletedRows(filters = purchaseFilterContext(), normalizedItemsByOrder = null, dispatchStatesByOrder = null) {
+function purchasingCompletedRows(filters = purchaseFilterContext(), normalizedItemsByOrder = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const rows = [];
     ordersCache.forEach(order => {
         const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
-        if (normalizedOrderStatus(order) !== 'normal') return;
-        const lifecycle = orderLifecycleInfo(order, items);
+        const lifecycle = lifecyclesByOrder?.get(order.id) || orderLifecycleInfo(order, items);
+        if (lifecycle.status !== 'normal') return;
         const orderDispatchStates = dispatchStatesByOrder?.get(order.id) || null;
         items.forEach(item => {
             const state = orderDispatchStates?.get(item) || itemDispatchState(order, item);
@@ -8434,10 +8445,11 @@ window.renderPurchasingView = function() {
         ordersCache.map(order => [order.id, normalizedOrderItems(order)])
     );
     const dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
+    const lifecyclesByOrder = purchasingLifecycleSnapshot(normalizedItemsByOrder);
     const completedRows = purchasingView === 'completed'
-        ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder)
+        ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder)
         : null;
-    renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder);
+    renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder);
     if (purchasingView === 'ordering') renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
     else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
     else if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
