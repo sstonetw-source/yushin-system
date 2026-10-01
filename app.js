@@ -868,7 +868,10 @@ function initializePageData(mainKey, options = {}) {
         ensureSalesListLoaded().then(populateForecastSalesFilter).catch(err => console.warn('業務名單載入失敗：', err));
     }
     if (mainKey === 'quote') ensureQuoteFormInitialized();
-    if (mainKey === 'products') clearProductManagementSearch({ preserveInput: true });
+    if (mainKey === 'products') {
+        clearProductManagementSearch({ preserveInput: true });
+        updatePendingProductMasterButton();
+    }
     if (mainKey === 'orders.list') {
         // 訂單列表本身不需要完整 Product Master。先載 50 筆訂單，避免 iPhone 每次進頁
         // 都等待 Product Master 與大量 datalist DOM 建立完成才顯示資料。
@@ -1302,6 +1305,117 @@ let productManagementResults = [];
 let productManagementSearchInProgress = false;
 let productManagementSearchTimer = null;
 
+let pendingProductMasterLoading = false;
+let pendingProductMasterRows = [];
+
+function canManagePendingProductMaster() {
+    return currentUserRole === 'admin' || currentUserRole === 'purchaser';
+}
+
+function updatePendingProductMasterButton() {
+    const button = document.getElementById('pendingProductMasterBtn');
+    if (button) button.style.display = canManagePendingProductMaster() ? '' : 'none';
+}
+
+function pendingProductKey(item = {}) {
+    const brand = normalizeBrandLookupKey(item.brand || '');
+    const code = normalizeItemCodeLoose(item.itemCode || item.model || '');
+    const name = String(item.itemName || item.nameCn || item.nameEn || '').normalize('NFKC').trim().toLocaleLowerCase();
+    return code ? `${brand}::${code}` : `${brand}::name:${name}`;
+}
+
+function collectPendingProductRowsFromDocument(doc, sourceType) {
+    const items = Array.isArray(doc.items) ? doc.items : [];
+    const date = doc.orderDate || doc.quoteDate || doc.createdAt || '';
+    const reference = sourceType === 'order' ? (doc.id || '') : (doc.quoteNo || doc.id || '');
+    return items
+        .filter(item => item.productMasterMatched !== true)
+        .map(item => ({
+            key: pendingProductKey(item),
+            sourceType,
+            reference,
+            date,
+            itemCode: item.itemCode || item.model || '',
+            itemName: item.itemName || item.nameCn || item.nameEn || '',
+            brand: item.brand || ''
+        }))
+        .filter(row => row.itemCode || row.itemName);
+}
+
+function renderPendingProductMasterRows() {
+    const body = document.getElementById('productManagementBody');
+    if (!body) return;
+    if (!pendingProductMasterRows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="empty-hint">目前沒有待補 Product Master 的近期品項。</td></tr>';
+        return;
+    }
+    body.innerHTML = pendingProductMasterRows.map(row => `<tr>
+        <td data-th="貨號">${escapeHtml(row.itemCode || '－')}</td>
+        <td data-th="品名">${escapeHtml(row.itemName || '－')}</td>
+        <td data-th="廠牌">${escapeHtml(row.brand || '－')}</td>
+        <td data-th="來源">${escapeHtml(row.sources.join('、'))}</td>
+        <td data-th="最近使用">${escapeHtml(row.latestDate || '－')}</td>
+        <td data-th="次數">${row.count}</td>
+    </tr>`).join('');
+}
+
+window.loadPendingProductMaster = async function() {
+    if (!canManagePendingProductMaster() || pendingProductMasterLoading) return;
+    const button = document.getElementById('pendingProductMasterBtn');
+    const status = document.getElementById('productManagementSearchStatus');
+    pendingProductMasterLoading = true;
+    if (button) { button.disabled = true; button.textContent = '讀取中…'; }
+    if (status) status.textContent = '正在讀取近期待補品項…';
+    try {
+        // 只有主動按下才查；兩個集合各最多 50 張，不掃描全部歷史資料。
+        const [quoteSnap, orderSnap] = await Promise.all([
+            firestoreReadWithTimeout(
+                db.collection('quotes').where('productMasterMatched', '==', false).limit(50).get(),
+                '待補 Product Master－估價單'
+            ),
+            firestoreReadWithTimeout(
+                db.collection('orders').where('productMasterMatched', '==', false).limit(50).get(),
+                '待補 Product Master－訂單'
+            )
+        ]);
+        const rows = [
+            ...(quoteSnap.docs || []).flatMap(doc => collectPendingProductRowsFromDocument({ id:doc.id, ...doc.data() }, 'quote')),
+            ...(orderSnap.docs || []).flatMap(doc => collectPendingProductRowsFromDocument({ id:doc.id, ...doc.data() }, 'order'))
+        ];
+        const grouped = new Map();
+        rows.forEach(row => {
+            const key = row.key || `${row.sourceType}::${row.reference}::${row.itemCode}::${row.itemName}`;
+            const current = grouped.get(key) || {
+                itemCode:row.itemCode, itemName:row.itemName, brand:row.brand,
+                latestDate:'', count:0, sources:[]
+            };
+            current.count += 1;
+            if (String(row.date || '') > String(current.latestDate || '')) current.latestDate = row.date || '';
+            const sourceLabel = row.sourceType === 'order' ? '訂單' : '估價單';
+            if (!current.sources.includes(sourceLabel)) current.sources.push(sourceLabel);
+            if (!current.itemCode && row.itemCode) current.itemCode = row.itemCode;
+            if (!current.itemName && row.itemName) current.itemName = row.itemName;
+            if (!current.brand && row.brand) current.brand = row.brand;
+            grouped.set(key, current);
+        });
+        pendingProductMasterRows = [...grouped.values()]
+            .sort((a,b) => String(b.latestDate || '').localeCompare(String(a.latestDate || '')))
+            .slice(0, 100);
+        renderPendingProductMasterRows();
+        const input = document.getElementById('productManagementSearch');
+        if (input) input.value = '';
+        if (status) status.textContent = pendingProductMasterRows.length
+            ? `待補 Product Master：${pendingProductMasterRows.length} 個近期品項。`
+            : '目前沒有近期待補品項。';
+    } catch (err) {
+        console.error('讀取待補 Product Master 失敗：', err);
+        if (status) status.textContent = '待補清單讀取失敗，請稍後再試。';
+    } finally {
+        pendingProductMasterLoading = false;
+        if (button) { button.disabled = false; button.textContent = '待補 Product Master'; }
+    }
+};
+
 function productManagementRow(product) {
     const productId = product.productId || product.id || '';
     const price = Number(product.listPrice ?? product.price ?? 0);
@@ -1351,6 +1465,7 @@ window.queueProductManagementSearch = function() {
 
 window.searchProductManagement = async function() {
     if (productManagementSearchInProgress || !canAccessPage('products')) return;
+    pendingProductMasterRows = [];
     const input = document.getElementById('productManagementSearch');
     const button = document.getElementById('productManagementSearchBtn');
     const status = document.getElementById('productManagementSearchStatus');
@@ -3407,6 +3522,7 @@ window.onOrderItemCodeChange = async function(input) {
         input.dataset.autofillStatus = 'not-found';
         input.dataset.productLine = '';
         input.dataset.productType = '';
+        input.dataset.productMasterMatched = '0';
         const hiddenProductLine = document.getElementById('orderProductLine');
         if (hiddenProductLine) hiddenProductLine.value = '';
         window._orderModalProductId = '';
@@ -3436,6 +3552,7 @@ window.onOrderItemCodeChange = async function(input) {
     }
 
     input.dataset.productLine = match.productLine || '';
+    input.dataset.productMasterMatched = '1';
     const hiddenProductLine = document.getElementById('orderProductLine');
     if (hiddenProductLine) hiddenProductLine.value = match.productLine || '';
     input.dataset.productType = match.productType || '';
@@ -3926,15 +4043,19 @@ function collectCurrentQuoteRecord() {
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
     };
-    document.querySelectorAll('#quoteItems tr').forEach(row => record.items.push({
-        nameEn: row.querySelector('.item-en').value, nameCn: row.querySelector('.item-cn').value,
-        model: row.querySelector('.item-model').value, brand: quoteRowBrandValue(row),
-        productLine: row.querySelector('.item-product-line').value, productType: row.querySelector('.item-product-type').value,
-        productId: row.querySelector('.item-product-id')?.value || '', spec: row.querySelector('.item-spec').value,
-        ...quoteExtraDataFromRow(row), qty: row.querySelector('.qty').value,
-        price: row.querySelector('.inc-price').value, exPrice: row.querySelector('.ex-price').value,
-        subtotal: row.querySelector('.subtotal-inc').value
-    }));
+    document.querySelectorAll('#quoteItems tr').forEach(row => {
+        const productId = row.querySelector('.item-product-id')?.value || '';
+        record.items.push({
+            nameEn: row.querySelector('.item-en').value, nameCn: row.querySelector('.item-cn').value,
+            model: row.querySelector('.item-model').value, brand: quoteRowBrandValue(row),
+            productLine: row.querySelector('.item-product-line').value, productType: row.querySelector('.item-product-type').value,
+            productId, productMasterMatched: !!productId, spec: row.querySelector('.item-spec').value,
+            ...quoteExtraDataFromRow(row), qty: row.querySelector('.qty').value,
+            price: row.querySelector('.inc-price').value, exPrice: row.querySelector('.ex-price').value,
+            subtotal: row.querySelector('.subtotal-inc').value
+        });
+    });
+    record.productMasterMatched = record.items.length > 0 && record.items.every(item => item.productMasterMatched === true);
     return record;
 }
 
@@ -11388,6 +11509,7 @@ function setOrderModalItem(item={}) {
     const codeInput=document.getElementById('orderItemCode');
     codeInput.dataset.productLine=normalized.productLine||'';
     codeInput.dataset.productType=normalized.productType||'';
+    codeInput.dataset.productMasterMatched=normalized.productMasterMatched===true?'1':'0';
     if(normalized.brand)selectBrandInDropdown(document.getElementById('orderBrand'),normalized.brand);
     else document.getElementById('orderBrand').value='';
     onOrderBrandSelectChange();
@@ -11433,6 +11555,7 @@ function normalizeNewOrderItem(item = {}) {
         itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
         brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
         productId:match?.productId||item.productId||stableProductId(match||item),productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
+        productMasterMatched:!!match || item.productMasterMatched === true,
         authorizationType:match?authorizationTypeForProduct(match):(item.authorizationType||''),supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
         warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' ? String(item.warehouseId||'') : ''
@@ -11441,7 +11564,7 @@ function normalizeNewOrderItem(item = {}) {
 
 function currentOrderModalItem() {
     const codeInput=document.getElementById('orderItemCode');
-    const item={itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const item={itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     const cost=document.getElementById('orderCostPrice').value;if(item.procurementType==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
@@ -11467,7 +11590,7 @@ window.addCurrentOrderItemToDraft=function(){
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;
+    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;
     document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
 };
 
@@ -11744,6 +11867,7 @@ window.saveNewOrder = function() {
         productType: '',
         fulfillmentType:firstItem.fulfillmentType,warehouseId:firstItem.warehouseId||'',qty:firstItem.qty,unitPrice:firstItem.unitPrice,
         totalPrice:items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0),items,itemCount:items.length,orderSchemaVersion:2,
+        productMasterMatched:items.length > 0 && items.every(item => item.productMasterMatched === true),
         status: BUSINESS_STATUS.ACTIVE,
         ...grossAmountMetadata(items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0)),
         transactionType: document.getElementById('orderTransactionType').value,
