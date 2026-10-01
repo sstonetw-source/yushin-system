@@ -3439,3 +3439,29 @@ test('order work cards and rows share lifecycle snapshots', () => {
     assert.match(listSource,/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder\)/);
     assert.match(listSource,/const lifecycle = lifecyclesByOrder\.get\(o\.id\) \|\| orderLifecycleInfo\(o, allOrderItems\)/);
 });
+
+
+test('receiving details reuse purchasing dispatch snapshots', () => {
+    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
+    const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource,/dispatchStatesByOrder = null/);
+    assert.match(receivingSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
+    assert.match(receivingSource,/const orderDispatchStates = dispatchStatesByOrder\?\.get\(order\.id\) \|\| null/);
+    assert.match(receivingSource,/const dispatch = orderDispatchStates\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
+    assert.match(receivingSource,/orderItemDisplayCategories\(order, item, lifecycle, dispatch\)/);
+
+    const poStart=appSource.indexOf('window.renderPoList = function');
+    const poEnd=appSource.indexOf('\n// 把「採購訂單」',poStart);
+    const poSource=appSource.slice(poStart,poEnd);
+    assert.match(poSource,/dispatchStatesByOrder = null/);
+    assert.match(poSource,/renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext, dispatchStatesByOrder\)/);
+
+    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
+    assert.match(appSource.slice(viewStart,viewEnd),/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
+
+    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
+    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
+    assert.match(appSource.slice(switchStart,switchEnd),/view === 'receiving'[\s\S]*?renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
+});
