@@ -8315,13 +8315,13 @@ function purchasingDispatchStateSnapshot(normalizedItemsByOrder, sourceOrders = 
     );
 }
 
-function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchStateByItem = null) {
+function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchStateByItem = null, lifecycleOverride = null) {
     if (normalizedOrderStatus(order) !== 'normal') return [];
     // 工作卡與明細只讀訂單本身；不要在 render 階段解析成本／Product Master。
     // 同一輪採購頁 render 可直接沿用已 normalize 的品項快照。
     // 真正按「已訂購／產生訂購單」時，pendingPurchaseLines() 才補齊正式採購資料。
     const items = normalizedItems || normalizedOrderItems(order);
-    const lifecycle = orderLifecycleInfo(order, items);
+    const lifecycle = lifecycleOverride || orderLifecycleInfo(order, items);
     return items.map((item, index) => {
         const dispatch = dispatchStateByItem?.get(item) || itemDispatchState(order, item);
         if (orderItemWorkCategory(order, item, lifecycle, dispatch) !== 'ordering') return null;
@@ -8458,10 +8458,10 @@ window.renderPurchasingView = function() {
         ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder)
         : null;
     renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder);
-    if (purchasingView === 'ordering') renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
-    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+    if (purchasingView === 'ordering') renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
+    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
     else if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
-    else renderPoList(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+    else renderPoList(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
 };
 
 window.changePurchasePeriod = function(value) {
@@ -8491,10 +8491,13 @@ window.switchPurchasingView = function(view, tab) {
     const dispatchStatesByOrder = view === 'history'
         ? null
         : purchasingDispatchStateSnapshot(normalizedItemsByOrder);
+    const lifecyclesByOrder = view === 'history'
+        ? null
+        : purchasingLifecycleSnapshot(normalizedItemsByOrder);
     const completedRows = view === 'completed'
-        ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder)
+        ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder)
         : null;
-    if (view !== 'history') renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder);
+    if (view !== 'history') renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder);
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
@@ -8511,7 +8514,7 @@ window.switchPurchasingView = function(view, tab) {
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
     if (view === 'ordering') {
-        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
             loadPendingPurchaseOrders(true, { reuseOrders:true }).catch(err => {
@@ -8520,7 +8523,7 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'receiving') {
-        renderPoList(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+        renderPoList(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
         if (!purchasingViewLoaded.has('receiving')) {
             purchasingViewLoaded.add('receiving');
             loadPurchasingReceivingQueue(true, { reuseOrders:true }).catch(err => {
@@ -8544,7 +8547,7 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'dispatch') {
-        renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+        renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
         if (!purchasingViewLoaded.has('dispatch')) {
             purchasingViewLoaded.add('dispatch');
             Promise.resolve(loadPurchasingDispatchOrders(true, { reuseOrders:true })).catch(err => {
@@ -8561,6 +8564,7 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
     purchasingDispatchLoading = true;
     let normalizedItemsByOrder = null;
     let dispatchStatesByOrder = null;
+    let lifecyclesByOrder = null;
     let filters = null;
     let completedRows = null;
     const refreshButton = document.getElementById(purchasingView === 'completed'
@@ -8583,10 +8587,11 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
             ordersCache.map(order => [order.id, normalizedOrderItems(order)])
         );
         dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
+        lifecyclesByOrder = purchasingLifecycleSnapshot(normalizedItemsByOrder);
         filters = purchaseFilterContext();
         purchasingDispatchCache = ordersCache.filter(order => {
             const items = normalizedItemsByOrder.get(order.id) || [];
-            const lifecycle = orderLifecycleInfo(order, items);
+            const lifecycle = lifecyclesByOrder.get(order.id) || orderLifecycleInfo(order, items);
             const states = dispatchStatesByOrder.get(order.id);
             return items.some(item =>
                 orderItemDisplayCategories(order, item, lifecycle, states?.get(item)).includes('dispatch')
@@ -8594,22 +8599,22 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
         });
         purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         completedRows = purchasingView === 'completed'
-            ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder)
+            ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder)
             : null;
-        renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder);
+        renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder);
     } catch (err) {
         purchasingDispatchError = `待打單清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         purchasingDispatchLoading = false;
         if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
         if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
-        else renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+        else renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
     }
 }
 
 window.loadPurchasingDispatchOrders=loadPurchasingDispatchOrders;
 
-function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
+function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const body=document.getElementById('purchaseDispatchBody');
     const status=document.getElementById('purchaseDispatchStatus');
     const more=document.getElementById('purchaseDispatchMoreBtn');
@@ -8621,7 +8626,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
     const filters=filterContext || purchaseFilterContext();
     sourceOrders.forEach(order=>{
         const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
-        const lifecycle = orderLifecycleInfo(order, items);
+        const lifecycle = lifecyclesByOrder?.get(order.id) || orderLifecycleInfo(order, items);
         const states = dispatchStatesByOrder?.get(order.id) || null;
         const pending=items.map(item=>{
             const state = states?.get(item) || itemDispatchState(order,item);
@@ -8697,7 +8702,7 @@ function syncCommittedPurchaseOrderSources(orders) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 }
 
-function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
+function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
     body.innerHTML = '';
@@ -8709,7 +8714,8 @@ function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContex
         const items = pendingProcurementDisplayLines(
             order,
             normalizedItemsByOrder?.get(order.id),
-            dispatchStatesByOrder?.get(order.id)
+            dispatchStatesByOrder?.get(order.id),
+            lifecyclesByOrder?.get(order.id)
         );
         for (const item of items) {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) continue;
@@ -8738,6 +8744,7 @@ window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
     pendingPurchaseLoading = true;
     let normalizedItemsByOrder = null;
     let dispatchStatesByOrder = null;
+    let lifecyclesByOrder = null;
     let filters = null;
     const refreshButton = document.getElementById('purchasePendingRefreshBtn');
     if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
@@ -8754,22 +8761,24 @@ window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
             ordersCache.map(order => [order.id, normalizedOrderItems(order)])
         );
         dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
+        lifecyclesByOrder = purchasingLifecycleSnapshot(normalizedItemsByOrder);
         filters = purchaseFilterContext();
         pendingPurchaseCache = ordersCache.filter(order =>
             pendingProcurementDisplayLines(
                 order,
                 normalizedItemsByOrder.get(order.id),
-                dispatchStatesByOrder.get(order.id)
+                dispatchStatesByOrder.get(order.id),
+                lifecyclesByOrder.get(order.id)
             ).length > 0
         );
         pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        renderPurchasingWorkCards(normalizedItemsByOrder, null, filters, dispatchStatesByOrder);
+        renderPurchasingWorkCards(normalizedItemsByOrder, null, filters, dispatchStatesByOrder, lifecyclesByOrder);
     } catch (err) {
         pendingPurchaseError = `待採購清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         pendingPurchaseLoading = false;
         if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
-        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
     }
 };
 
@@ -9257,7 +9266,7 @@ function receivingWorkProgress(order, item) {
     return { target, received:Math.min(target, received), remaining:Math.max(0, target - received), directShip };
 }
 
-function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
+function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const tbody = document.getElementById('poListBody');
     const head = document.getElementById('poListHeadRow');
     const emptyHint = document.getElementById('poListEmptyHint');
@@ -9278,7 +9287,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
 
     ordersCache.forEach(order => {
         const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
-        const lifecycle = orderLifecycleInfo(order, items);
+        const lifecycle = lifecyclesByOrder?.get(order.id) || orderLifecycleInfo(order, items);
         if (lifecycle.status !== 'normal') return;
         const orderDispatchStates = dispatchStatesByOrder?.get(order.id) || null;
         items.forEach((item, itemIndex) => {
@@ -9378,9 +9387,9 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     }
 }
 
-window.renderPoList = function(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
+window.renderPoList = function(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     if (purchasingView === 'receiving') {
-        renderPurchasingReceivingWorkList(normalizedItemsByOrder, filterContext, dispatchStatesByOrder);
+        renderPurchasingReceivingWorkList(normalizedItemsByOrder, filterContext, dispatchStatesByOrder, lifecyclesByOrder);
         updatePoLoadMoreButton();
         return;
     }
