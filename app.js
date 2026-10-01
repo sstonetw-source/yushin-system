@@ -8858,7 +8858,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     const originalLabel = button?.textContent || '已訂購';
     if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
-        let savedOrder, savedSupply;
+        let savedOrder, savedSupply, incomingProductKey='', incomingWarehouseId='';
         const supplyRef = db.collection('supplyOrders').doc(quickPurchaseSupplyId(orderId, itemId));
         await db.runTransaction(async tx => {
             const orderRef = db.collection('orders').doc(orderId);
@@ -8871,84 +8871,109 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             if (itemIndex < 0) throw new Error('找不到來源訂單品項。');
             const item = items[itemIndex];
             const qty = remainingProcurementQty(order, item);
-
-            // 同一個品項第一次按「已訂購」與網路不確定後重試共用固定 supply id。
-            // 若訂單之後真的增加數量而再次產生新缺口，不能因為舊 supply 已存在就永遠卡住；
-            // 這時在同一筆 supply 上累加新的訂購量，並留下 orderEvents 供追蹤。
             const existingSupply = supplySnapshot.exists ? { id:supplyRef.id, ...supplySnapshot.data() } : null;
-            if (!(qty > 0)) {
-                if (existingSupply) {
-                    savedSupply = existingSupply;
-                    savedOrder = order;
-                    return;
-                }
-                throw new Error('此品項已無待採購數量，請重新整理。');
-            }
+            if (!(qty > 0) && !existingSupply) throw new Error('此品項已無待採購數量，請重新整理。');
 
             const productKey = poIncomingKey(item);
             const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
             const warehouseId = directShip ? '' : (item.warehouseId || defaultWarehouse()?.id || '');
             if (!directShip && (!productKey || !warehouseId)) throw new Error('訂單快照缺少貨號或入庫倉庫，請先修正來源訂單。');
+
             const orderDate = localDateString();
             const internalNo = existingSupply?.internalNo || `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(-8).toUpperCase()}`;
             const alreadyOrdered = Math.max(0, Number(item.supplyOrderedQty || 0));
-            const nextOrdered = alreadyOrdered + qty;
             const now = new Date().toISOString();
             const previousSupplyQty = Math.max(0, Number(existingSupply?.qty || 0));
             const receivedQty = Math.max(0, Number(existingSupply?.receivedQty || 0));
-            const nextSupplyQty = previousSupplyQty + qty;
+            const nextSupplyQty = previousSupplyQty + Math.max(0, Number(qty || 0));
+            const nextOrdered = alreadyOrdered + Math.max(0, Number(qty || 0));
             const nextSupplyStatus = receivedQty >= nextSupplyQty && nextSupplyQty > 0
                 ? 'RECEIVED' : receivedQty > 0 ? 'PARTIAL_RECEIPT' : 'ORDERED';
+            const registeredIncomingQty = Math.max(0, Number(existingSupply?.incomingRegisteredQty || 0));
+            const targetIncomingQty = directShip ? 0 : Math.max(0, nextSupplyQty - receivedQty);
+            const incomingDelta = targetIncomingQty - registeredIncomingQty;
+
+            let invRef=null, whRef=null, invSnap=null, whSnap=null;
+            if (!directShip && incomingDelta !== 0) {
+                invRef = db.collection('inventory').doc(encodeURIComponent(productKey));
+                whRef = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey));
+                [invSnap, whSnap] = await Promise.all([tx.get(invRef), tx.get(whRef)]);
+            }
+
+            // 單純重試時不增加訂購量或事件，但仍會修復曾中斷的 incoming 同步。
             const orderEvents = Array.isArray(existingSupply?.orderEvents) ? existingSupply.orderEvents.slice() : [];
-            orderEvents.push({ qty, orderDate, createdAt:now, createdByUid:currentUser?.uid||'', createdBy:currentUserName||currentUser?.email||'' });
+            if (qty > 0) {
+                orderEvents.push({ qty, orderDate, createdAt:now, createdByUid:currentUser?.uid||'', createdBy:currentUserName||currentUser?.email||'' });
+            }
 
             savedSupply = {
                 ...(existingSupply || {}),
-                id:supplyRef.id,
-                // 供應紀錄建立後保留第一次下單的來源快照；再次追加數量只更新採購執行欄位，
-                // 避免後續訂單編輯把既有供應紀錄的來源、貨號、負責人或建立者改寫。
-                type:existingSupply?.type||'PURCHASING_MANUAL',
-                internalNo,
-                status:nextSupplyStatus,
-                orderId:existingSupply?.orderId||orderId,
-                itemId:existingSupply?.itemId||itemId,
-                orderItemIndex:existingSupply?.orderItemIndex??itemIndex,
-                ownerUid:existingSupply?.ownerUid||order.ownerUid||'',
-                salesCode:existingSupply?.salesCode||order.salesCode||'',
-                salesName:existingSupply?.salesName||order.salesName||'',
-                customerName:existingSupply?.customerName||order.customerName||'',
-                company:existingSupply?.company||order.company||'yushin',
-                productId:existingSupply?.productId||item.productId||'',
-                productKey:existingSupply?.productKey||productKey,
-                itemCode:existingSupply?.itemCode||item.itemCode||'',
-                itemName:existingSupply?.itemName||item.itemName||'',
-                brand:existingSupply?.brand||item.brand||'',
-                productLine:existingSupply?.productLine||item.productLine||'',
-                qty:nextSupplyQty,
-                receivedQty,
+                id:supplyRef.id, type:'PURCHASING_MANUAL', internalNo, status:nextSupplyStatus,
+                orderId, itemId, orderItemIndex:itemIndex,
+                ownerUid:order.ownerUid||'', salesCode:order.salesCode||'', salesName:order.salesName||'',
+                customerName:order.customerName||'', company:order.company||'yushin',
+                productId:item.productId||'', productKey, itemCode:item.itemCode||'', itemName:item.itemName||'',
+                brand:item.brand||'', productLine:item.productLine||'',
+                qty:nextSupplyQty, receivedQty,
+                incomingRegisteredQty:targetIncomingQty,
+                incomingRegisteredAt:incomingDelta !== 0 ? now : (existingSupply?.incomingRegisteredAt||''),
                 supplier:item.supplier||order.supplier||existingSupply?.supplier||'',
                 unitCost:Number(item.costPrice??item.unitCost??item.purchasePrice??order.costPrice??existingSupply?.unitCost??0),
                 orderDate:existingSupply?.orderDate||orderDate,
-                lastOrderedAt:orderDate,
+                lastOrderedAt:qty > 0 ? orderDate : (existingSupply?.lastOrderedAt||existingSupply?.orderDate||orderDate),
                 orderEvents,
-                fulfillmentType:existingSupply?.fulfillmentType||item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
-                warehouseId:existingSupply?.warehouseId??warehouseId,
-                createdAt:existingSupply?.createdAt||now,
-                updatedAt:now,
+                fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE', warehouseId,
+                createdAt:existingSupply?.createdAt||now, updatedAt:now,
                 createdByUid:existingSupply?.createdByUid||currentUser?.uid||'',
                 createdBy:existingSupply?.createdBy||currentUserName||currentUser?.email||'',
                 createdByRole:existingSupply?.createdByRole||currentUserRole
             };
-            items[itemIndex] = {
-                ...item, supplyOrderedQty:nextOrdered,
-                manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])],
-                orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate
-            };
-            savedOrder = { ...order, items, itemCount:items.length, orderSchemaVersion:2, updatedAt:now };
+
+            if (invRef && whRef) {
+                const inv = inventoryNumbers(invSnap?.exists ? invSnap.data() : {});
+                const wh = inventoryNumbers(whSnap?.exists ? whSnap.data() : {});
+                if (invSnap?.exists) {
+                    tx.set(invRef, {incoming:Math.max(0,inv.incoming+incomingDelta),updatedAt:now}, {merge:true});
+                } else {
+                    const nextInventory = {
+                        productKey, productId:item.productId||'', itemCode:item.itemCode||'', itemName:item.itemName||'',
+                        brand:resolveBrandName(item.brand||''), onHand:0, reserved:0,
+                        incoming:Math.max(0,incomingDelta), lots:[], updatedAt:now
+                    };
+                    nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
+                    tx.set(invRef,nextInventory,{merge:true});
+                }
+                tx.set(whRef,{
+                    warehouseId,productKey,productId:item.productId||'',itemCode:item.itemCode||'',
+                    itemName:item.itemName||'',brand:resolveBrandName(item.brand||''),
+                    onHand:wh.onHand,reserved:wh.reserved,incoming:Math.max(0,wh.incoming+incomingDelta),updatedAt:now
+                },{merge:true});
+                tx.set(db.collection('inventoryMovements').doc(),{
+                    type:'purchase_incoming',qty:incomingDelta,productKey,warehouseId,
+                    fulfillmentType:'WAREHOUSE',sourceType:'SUPPLY_ORDER',sourceId:supplyRef.id,
+                    purchaseDocumentId:internalNo,createdAt:now,
+                    createdBy:currentUserName||currentUser?.email||'',
+                    ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
+                });
+                incomingProductKey=productKey;
+                incomingWarehouseId=warehouseId;
+            }
+
             tx.set(supplyRef, (({id, ...record}) => record)(savedSupply));
-            tx.update(orderRef, {items, itemCount:items.length, orderSchemaVersion:2,
-                ...orderWorkIndexFields(savedOrder), updatedAt:now});
+            if (qty > 0) {
+                items[itemIndex] = {
+                    ...item, supplyOrderedQty:nextOrdered,
+                    manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])],
+                    orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate
+                };
+                savedOrder = { ...order, items, itemCount:items.length, orderSchemaVersion:2, updatedAt:now };
+                tx.update(orderRef, {items, itemCount:items.length, orderSchemaVersion:2,
+                    ...orderWorkIndexFields(savedOrder), updatedAt:now});
+            } else {
+                savedOrder = order;
+            }
         });
+        if (incomingProductKey && incomingWarehouseId) invalidateWarehouseStockCache(incomingProductKey,incomingWarehouseId);
         const index = ordersCache.findIndex(order => order.id === orderId);
         if (index >= 0 && savedOrder) ordersCache[index] = savedOrder;
         if (savedOrder) syncOrderIntoPurchasingCaches(savedOrder, { render:false });
@@ -8970,7 +8995,6 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         if (button?.isConnected) { button.disabled = false; button.textContent = originalLabel; }
     }
 };
-
 window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const button = [...document.querySelectorAll('#purchasePendingBody button')].find(el => {
