@@ -8205,6 +8205,9 @@ function loadPurchasingReceivingQueue(reset = true, options = {}) {
     ]).then(results => {
         purchasingReceivingReady = true;
         const failed = results.filter(result => result.status === 'rejected');
+        // 兩條查詢平行完成後，以待到貨來源訂單再合併一次，
+        // 避免較晚完成的近期訂單刷新覆蓋較舊但仍在途的來源訂單。
+        mergeReceivingSourceOrdersIntoOrderCache();
         renderPurchasingView();
         if (failed.length) throw failed[0].reason;
     }).finally(() => {
@@ -8956,6 +8959,15 @@ function updatePoLoadMoreButton() {
     }
 }
 
+function mergeReceivingSourceOrdersIntoOrderCache() {
+    if (!receivingSourceOrderCache.size) return;
+    const mergedOrders = new Map(ordersCache.map(order => [order.id, order]));
+    receivingSourceOrderCache.forEach((order, id) => mergedOrders.set(id, order));
+    ordersCache = [...mergedOrders.values()]
+        .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
+    writeAppDataCache('orders', ordersCache);
+}
+
 async function loadPurchaseOrderPage(reset, options = {}) {
     if (!canAccessPage('orders.po')) return;
     const deferRender = options.deferRender === true;
@@ -9031,10 +9043,7 @@ async function loadPurchaseOrderPage(reset, options = {}) {
         receivingSourceOrderStatusCache=nextSourceStatuses;
         receivingSourceOrderCache=nextSourceOrders;
         if (purchasingView === 'receiving' && nextSourceOrders.size) {
-            const mergedOrders = new Map(ordersCache.map(order => [order.id, order]));
-            nextSourceOrders.forEach((order, id) => mergedOrders.set(id, order));
-            ordersCache = [...mergedOrders.values()].sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
-            writeAppDataCache('orders', ordersCache);
+            mergeReceivingSourceOrdersIntoOrderCache();
             if (!deferRender) renderPurchasingWorkCards();
         }
         supplyReceivingCache=[...supplyRecords.values()]
