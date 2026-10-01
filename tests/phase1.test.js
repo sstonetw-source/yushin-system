@@ -2096,6 +2096,13 @@ test('admin view-role switch clears purchasing session state', () => {
     const start=appSource.indexOf('window.switchViewRole = function(role)');
     const end=appSource.indexOf('\nfunction actuallySwitchMainTab',start);
     const source=appSource.slice(start,end);
+    assert.match(source,/loadedMainPages\.clear\(\)/);
+    assert.match(source,/lastShowAppInitKey = ''/);
+    assert.match(source,/myQuotesCache = \[\]/);
+    assert.match(source,/ordersCache = \[\]/);
+    assert.match(source,/forecastCache = \[\]/);
+    assert.match(source,/inventoryCache = \[\]/);
+    assert.match(source,/equipmentList = \[\]/);
     assert.match(source,/pendingPurchaseCache = \[\]/);
     assert.match(source,/poHistorySearchResults = \[\]/);
     assert.match(source,/supplyReceivingCache = \[\]/);
