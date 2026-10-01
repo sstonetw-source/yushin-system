@@ -2637,3 +2637,19 @@ test('legacy quote lookup keeps the loaded quote number and editing context', ()
     assert.doesNotMatch(source,/switchCompany\(/);
     assert.match(source,/setQuoteEditingContext\(data\.quoteNo \|\| qNo\)/);
 });
+
+
+test('receiving refresh coalesces final purchasing render', () => {
+    const queueStart=appSource.indexOf('function loadPurchasingReceivingQueue');
+    const queueEnd=appSource.indexOf('\nlet purchasingFilterOptionsSignature',queueStart);
+    const queueSource=appSource.slice(queueStart,queueEnd);
+    assert.match(queueSource,/loadPurchaseOrderPage\(reset, \{ deferRender:true \}\)/);
+    assert.match(queueSource,/renderPurchasingView\(\)/);
+
+    const pageStart=appSource.indexOf('async function loadPurchaseOrderPage');
+    const pageEnd=appSource.indexOf('\nwindow.loadMyPurchaseOrders',pageStart);
+    const pageSource=appSource.slice(pageStart,pageEnd);
+    assert.match(pageSource,/const deferRender = options\.deferRender === true/);
+    assert.match(pageSource,/if \(!deferRender\) renderPurchasingWorkCards\(\)/);
+    assert.match(pageSource,/if \(!deferRender\) renderPoList\(\)/);
+});
