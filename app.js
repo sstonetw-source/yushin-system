@@ -841,7 +841,8 @@ function hydratePageFromLocalCache(mainKey) {
             const orderCache = readAppDataCache('orders');
             if (orderCache?.records?.length) ordersCache = orderCache.records;
         }
-        renderPurchasingWorkCards();
+        // 第一次初始化下一步會立即 switchPurchasingView() 並重畫；
+        // 回到已載入頁面時 DOM 仍保留，不在 hydrate 階段重複掃 ordersCache。
     }
 }
 
@@ -852,7 +853,6 @@ function initializePageData(mainKey, options = {}) {
     loadedMainPages.add(mainKey);
     if (['quote', 'forecast', 'orders.list', 'inventory', 'equipment', 'admin'].includes(mainKey)) {
         ensureBrandSettingsLoaded().then(() => {
-            if (mainKey === 'quote') populateQuoteBrandDropdowns();
             if (mainKey === 'forecast' && canAccessPage('forecast')) renderForecastList();
             if (mainKey === 'orders.list' && canAccessPage('orders.list')) renderOrdersList();
             if (mainKey === 'inventory' && canAccessPage('inventory')) renderInventoryList();
@@ -3044,12 +3044,15 @@ window.generateQuoteNo = async function() {
     const prefix = `${info.prefix}-${dateStr}-${salesCode}-`;
 
     try {
-        const snapshot = await db.collection('quotes')
-            .where('quoteNo', '>=', prefix)
-            .where('quoteNo', '<=', prefix + '\uf8ff')
-            .orderBy('quoteNo', 'desc')
-            .limit(1)
-            .get();
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('quotes')
+                .where('quoteNo', '>=', prefix)
+                .where('quoteNo', '<=', prefix + '\uf8ff')
+                .orderBy('quoteNo', 'desc')
+                .limit(1)
+                .get(),
+            '估價單號'
+        );
 
         // 用「目前已存在的最大流水號 + 1」而非「筆數 + 1」：
         // 因為 Firestore 是拿 quoteNo 當文件 ID，如果中間有一張估價單被刪除，
