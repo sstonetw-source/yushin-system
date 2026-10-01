@@ -2886,3 +2886,20 @@ test('purchase history skips hidden work-card calculations', () => {
     assert.match(switchSource,/const normalizedItemsByOrder = view === 'history'[\s\S]*?\? null/);
     assert.match(switchSource,/if \(view !== 'history'\) renderPurchasingWorkCards/);
 });
+
+
+test('history search throttles intermediate list renders', () => {
+    const orderStart=appSource.indexOf('function runOrderHistorySearch()');
+    const orderEnd=appSource.indexOf('\nwindow.scheduleOrderHistorySearch',orderStart);
+    const orderSource=appSource.slice(orderStart,orderEnd);
+    assert.match(orderSource,/let lastIntermediateRenderAt = 0/);
+    assert.match(orderSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(orderSource,/orderHistorySearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderOrdersList\(\)[\s\S]*?全歷史搜尋完成/);
+
+    const quoteStart=appSource.indexOf('function runQuoteHistorySearch()');
+    const quoteEnd=appSource.indexOf('\nwindow.scheduleQuoteHistorySearch',quoteStart);
+    const quoteSource=appSource.slice(quoteStart,quoteEnd);
+    assert.match(quoteSource,/let lastIntermediateRenderAt = 0/);
+    assert.match(quoteSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(quoteSource,/quoteHistorySearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderMyQuotesList\(\)[\s\S]*?全歷史搜尋完成/);
+});
