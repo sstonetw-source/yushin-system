@@ -120,7 +120,6 @@ let appInitialized = false;  // 避免每次登入狀態變化都重複初始化
 let pendingTab = null;
 let salesListLoadPromise = null;
 let quickProductTarget = null;
-let clientHistoryLoadPromise = null;
 let quoteFormInitialized = false;
 const APP_CACHE_VERSION = 1;
 const APP_DATA_CACHE_PREFIX = 'yushin-data-cache:';
@@ -192,12 +191,6 @@ function scheduleListSearch(timer, callback, delay = DEFAULT_SEARCH_DEBOUNCE_MS)
     clearTimeout(timer);
     return setTimeout(callback, delay);
 }
-function mergeUniqueSearchResults(existing = [], incoming = [], key = 'id') {
-    const rows = new Map(existing.map(row => [String(row?.[key] ?? ''), row]));
-    incoming.forEach(row => rows.set(String(row?.[key] ?? ''), row));
-    return [...rows.values()];
-}
-
 const DEFAULT_CURRENCY = 'TWD';
 const DEFAULT_TAX_RATE = 0.05;
 const BUSINESS_STATUS = Object.freeze({
@@ -933,16 +926,6 @@ function ensureSalesListLoaded() {
         });
     }
     return salesListLoadPromise;
-}
-
-function ensureClientHistoryLoaded() {
-    if (!clientHistoryLoadPromise) {
-        clientHistoryLoadPromise = loadClientHistory().catch(err => {
-            clientHistoryLoadPromise = null;
-            throw err;
-        });
-    }
-    return clientHistoryLoadPromise;
 }
 
 function ensureQuoteFormInitialized() {
@@ -6223,10 +6206,6 @@ function legacyDocumentLinks(record, type) {
     return normalizeDocumentLinks(links);
 }
 
-function documentLinksFor(record, type) {
-    return legacyDocumentLinks(record || {}, type);
-}
-
 function compareBusinessRecordsNewestFirst(a, b, dateField, numberField) {
     const dateCompare = String(b?.[dateField] || '').localeCompare(String(a?.[dateField] || ''));
     if (dateCompare) return dateCompare;
@@ -6933,11 +6912,6 @@ window.openInventoryReservationDetails = async function(productKey) {
 window.closeInventoryReservationDetails = function() {
     document.getElementById('inventoryReservationOverlay')?.classList.remove('active');
 };
-function orderReservedQuantity(order) {
-    if (normalizedOrderStatus(order) !== 'normal') return 0;
-    return Math.max(0, orderQuantity(order) - deliveredQuantity(order));
-}
-
 async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     const requested=Math.max(0,Number(item.qty||0));
     const productKey=inventoryProductKey(item);
@@ -7418,13 +7392,6 @@ window.saveSelfOrder = async function() {
     }catch(err){alert('自行訂貨失敗：'+err.message);}
     finally{button.disabled=false;button.innerText='確認自行訂貨';}
 };
-
-function orderProgressInfo(order) {
-    // 訂單主狀態只由單一品項工作狀態引擎決定。
-    // purchaseProgressInfo / fulfillmentProgressInfo 僅保留數量與操作可用性資訊，
-    // 不再建立另一套「待採購／待到貨／待送貨／待核銷」判斷。
-    return orderWorkStatusInfo(order);
-}
 
 function isDeletableOrderDraft(order) {
     if (!order || order.quoteNo || order.purchaseOrderNo) return false;
@@ -11371,23 +11338,6 @@ function formatOrderStatusTime(value) {
     return date.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function renderOrderStatusLog(order) {
-    const latest = {};
-    (order.statusHistory || []).forEach(entry => { latest[entry.field] = entry; });
-    const fields = [
-        // V2 sourcing / receipt / dispatch / delivery are derived from transactional records.
-        // Keep legacy statusHistory readable, but do not present old manual 訂貨／到貨 toggles as current truth.
-        ['isDelivered', '舊版送貨紀錄'],
-        ['isBilled', '報帳']
-    ];
-    const lines = fields.map(([field, label]) => {
-        const entry = latest[field];
-        if (!entry || !entry.value) return `${label}：－`;
-        return `${label}：${escapeHtml(entry.by || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(entry.at))}</span>`;
-    });
-    return `<div style="line-height:1.45;min-width:116px;">${lines.join('<hr style="border:0;border-top:1px solid #ddd;margin:3px 0;">')}</div>`;
-}
-
 window.showCustomerOrderHistory = async function(customerName) {
     const customerKey = normalizeFullHistorySearchValue(customerName);
     if (!customerKey) return;
@@ -14590,10 +14540,6 @@ function salesAmount(order) {
 }
 
 // 訂單的 costPrice 是「每單位含稅進貨成本」，故需乘上數量才是該筆訂單的總成本。
-function costAmount(order) {
-    return (parseFloat(order.costPrice) || 0) * (parseFloat(order.qty) || 0);
-}
-
 function normalizeItemCode(value) {
     return String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
 }
