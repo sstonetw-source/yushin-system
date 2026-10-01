@@ -163,6 +163,8 @@ service cloud.firestore {
       return businessOwner()
         && data.get('productId', '') == id
         && data.get('status', '') == 'TEMPORARY'
+        && data.get('active', false) == true
+        && data.get('source', '') == 'QUICK_CREATE'
         && data.get('createdBy', '') == request.auth.uid
         && data.get('updatedBy', '') == request.auth.uid
         && data.get('authorizationType', '') in ['AUTHORIZED', 'NON_AUTHORIZED']
