@@ -406,58 +406,30 @@ window.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('change', blockReadonlyEdit, true);
     document.addEventListener('input', blockReadonlyEdit, true);
 
-    // 訂單「更多操作」選單：一次只開一個，點擊外部、完成選擇或按 Esc 都會收起。
+    // 訂單／估價單／訂購單的「更多」選單共用同一組事件代理：
+    // 全站同一時間只開一個；點擊外部、完成選擇或按 Esc 都會收起。
+    const moreMenuSelector = '.order-more-menu, .quote-more-menu, .po-more-menu';
+    const openMoreMenuSelector = '.order-more-menu[open], .quote-more-menu[open], .po-more-menu[open]';
     document.addEventListener('toggle', event => {
-        const openedMenu = event.target.closest?.('.order-more-menu');
+        const openedMenu = event.target.closest?.(moreMenuSelector);
         if (!openedMenu?.open) return;
-        document.querySelectorAll('.order-more-menu[open]').forEach(menu => {
+        document.querySelectorAll(openMoreMenuSelector).forEach(menu => {
             if (menu !== openedMenu) menu.open = false;
         });
     }, true);
     document.addEventListener('click', event => {
-        const menu = event.target.closest?.('.order-more-menu');
+        const menu = event.target.closest?.(moreMenuSelector);
         if (!menu) {
-            document.querySelectorAll('.order-more-menu[open]').forEach(openMenu => { openMenu.open = false; });
+            document.querySelectorAll(openMoreMenuSelector).forEach(openMenu => { openMenu.open = false; });
             return;
         }
-        if (event.target.closest('.order-more-menu-popover button')) menu.open = false;
+        if (event.target.closest('.order-more-menu-popover button, .quote-more-menu-popover button, .po-more-menu-popover button')) {
+            menu.open = false;
+        }
     });
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
-        document.querySelectorAll('.order-more-menu[open], .quote-more-menu[open], .po-more-menu[open]').forEach(menu => { menu.open = false; });
-    });
-
-    // 全部估價單「更多」：一次只開一個；點擊外部或完成動作就收起。
-    document.addEventListener('toggle', event => {
-        const openedMenu = event.target.closest?.('.quote-more-menu');
-        if (!openedMenu?.open) return;
-        document.querySelectorAll('.quote-more-menu[open]').forEach(menu => {
-            if (menu !== openedMenu) menu.open = false;
-        });
-    }, true);
-    document.addEventListener('click', event => {
-        const menu = event.target.closest?.('.quote-more-menu');
-        if (!menu) {
-            document.querySelectorAll('.quote-more-menu[open]').forEach(openMenu => { openMenu.open = false; });
-            return;
-        }
-        if (event.target.closest('.quote-more-menu-popover button')) menu.open = false;
-    });
-
-    document.addEventListener('toggle', event => {
-        const openedMenu = event.target.closest?.('.po-more-menu');
-        if (!openedMenu?.open) return;
-        document.querySelectorAll('.po-more-menu[open]').forEach(menu => {
-            if (menu !== openedMenu) menu.open = false;
-        });
-    }, true);
-    document.addEventListener('click', event => {
-        const menu = event.target.closest?.('.po-more-menu');
-        if (!menu) {
-            document.querySelectorAll('.po-more-menu[open]').forEach(openMenu => { openMenu.open = false; });
-            return;
-        }
-        if (event.target.closest('.po-more-menu-popover button')) menu.open = false;
+        document.querySelectorAll(openMoreMenuSelector).forEach(menu => { menu.open = false; });
     });
 
     // 估價單表單的草稿自動儲存：只要在「建立估價單」區塊裡打字/選擇/切換任何東西，
