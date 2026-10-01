@@ -2804,3 +2804,20 @@ test('purchasing refresh loaders reuse normalized item snapshots', () => {
     assert.match(dispatchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters\)/);
     assert.match(dispatchSource,/renderPurchasingCompletedOrders\(completedRows\)/);
 });
+
+
+test('Product Master search renders results in 100-row UI pages', () => {
+    assert.match(indexSource,/id="productManagementMoreRow"/);
+    assert.match(indexSource,/id="productManagementMoreBtn"[^>]*onclick="loadMoreProductManagementResults\(\)"/);
+    const stateStart=appSource.indexOf('let productManagementResults = []');
+    const stateEnd=appSource.indexOf('let pendingProductMasterLoading',stateStart);
+    const stateSource=appSource.slice(stateStart,stateEnd);
+    assert.match(stateSource,/const PRODUCT_MANAGEMENT_RENDER_STEP = 100/);
+    assert.match(stateSource,/let productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP/);
+    const renderStart=appSource.indexOf('function updateProductManagementMoreButton');
+    const renderEnd=appSource.indexOf('window.clearProductManagementSearch',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/productManagementResults\.slice\(0, productManagementVisibleLimit\)/);
+    assert.match(renderSource,/productManagementVisibleLimit \+= PRODUCT_MANAGEMENT_RENDER_STEP/);
+    assert.match(stylesSource,/\.product-load-more-row/);
+});
