@@ -430,7 +430,24 @@ window.addEventListener('DOMContentLoaded', () => {
     });
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
-        document.querySelectorAll('.order-more-menu[open]').forEach(menu => { menu.open = false; });
+        document.querySelectorAll('.order-more-menu[open], .quote-more-menu[open]').forEach(menu => { menu.open = false; });
+    });
+
+    // 全部估價單「更多」：一次只開一個；點擊外部或完成動作就收起。
+    document.addEventListener('toggle', event => {
+        const openedMenu = event.target.closest?.('.quote-more-menu');
+        if (!openedMenu?.open) return;
+        document.querySelectorAll('.quote-more-menu[open]').forEach(menu => {
+            if (menu !== openedMenu) menu.open = false;
+        });
+    }, true);
+    document.addEventListener('click', event => {
+        const menu = event.target.closest?.('.quote-more-menu');
+        if (!menu) {
+            document.querySelectorAll('.quote-more-menu[open]').forEach(openMenu => { openMenu.open = false; });
+            return;
+        }
+        if (event.target.closest('.quote-more-menu-popover button')) menu.open = false;
     });
 
     // 估價單表單的草稿自動儲存：只要在「建立估價單」區塊裡打字/選擇/切換任何東西，
@@ -4997,6 +5014,7 @@ window.renderMyQuotesList = function() {
         const statusBadges = [];
         if (q.dealClosed) {
             statusBadges.push('<span class="quote-status-badge is-deal">已成交</span>');
+            if (q.threeQuoteRecord) statusBadges.push('<span class="quote-status-badge is-three">三估單</span>');
         } else {
             statusBadges.push('<span class="quote-status-badge is-quoted">已報價</span>');
             if (q.threeQuoteRecord) statusBadges.push('<span class="quote-status-badge is-three">三估單</span>');
