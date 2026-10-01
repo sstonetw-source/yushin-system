@@ -3622,3 +3622,17 @@ test('self-order capability is aligned between frontend and Firestore rules', ()
     assert.match(ruleSource,/request\.resource\.data\.salesCode == salesCode\(\)/);
     assert.doesNotMatch(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?\|\| \(sales\(\)/);
 });
+
+
+test('purchasing cache sync performs one unified active render', () => {
+    const start=appSource.indexOf('function syncOrderIntoPurchasingCaches');
+    const end=appSource.indexOf('\nfunction syncCommittedPurchaseOrderSources',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/options\.render === false/);
+    assert.match(source,/purchasing-system/);
+    assert.match(source,/renderPurchasingView\(\)/);
+    assert.doesNotMatch(source,/renderPurchasingWorkCards\(\)/);
+    assert.doesNotMatch(source,/renderPendingPurchaseOrders\(\)/);
+    assert.doesNotMatch(source,/renderPurchasingDispatchOrders\(\)/);
+    assert.doesNotMatch(source,/renderPoList\(\)/);
+});
