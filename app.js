@@ -111,7 +111,7 @@ const roleDataScopes = Object.freeze({
     sales: Object.freeze({ quotes:'own', forecasts:'own', orders:'own', equipment:'own' }),
     purchaser: Object.freeze({ quotes:'all', forecasts:'none', orders:'all', equipment:'none' }),
     warehouse: Object.freeze({ quotes:'none', forecasts:'none', orders:'all', equipment:'none' }),
-    engineer: Object.freeze({ quotes:'own', forecasts:'none', orders:'own', equipment:'own' })
+    engineer: Object.freeze({ quotes:'own', forecasts:'none', orders:'own', equipment:'all' })
 });
 let currentUserName = '';    // 目前登入者自己的業務姓名（來自 users 集合）
 let currentUserPhone = '';   // 目前登入者自己的電話
