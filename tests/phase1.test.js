@@ -4073,6 +4073,8 @@ test('supply order rules preserve identity and valid operational quantities', ()
     assert.match(stateSource,/request\.resource\.data\.get\('qty', 0\) >= resource\.data\.get\('qty', 0\)/);
     assert.match(stateSource,/receivedQty', 0\) <= request\.resource\.data\.get\('qty', 0\)/);
     assert.match(stateSource,/incomingRegisteredQty', 0\) >= 0/);
+    assert.match(stateSource,/incomingRegisteredQty', 0\) <= \([\s\S]*?qty', 0\) - request\.resource\.data\.get\('receivedQty', 0\)/);
+    assert.match(stateSource,/fulfillmentType', 'WAREHOUSE'\) != 'DIRECT_SHIP'[\s\S]*?incomingRegisteredQty', 0\) == 0/);
     assert.match(stateSource,/'ORDERED', 'PARTIAL_RECEIPT', 'RECEIVED', 'CANCELLED'/);
 
     const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
