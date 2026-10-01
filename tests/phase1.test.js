@@ -4404,3 +4404,15 @@ test('admin exposes the loaded application asset version', () => {
     assert.match(appSource,/renderSystemVersionLabel\(\);/);
     assert.match(appSource,/系統版本 \$\{APP_ASSET_VERSION\}/);
 });
+
+
+test('product management can batch-select products into one quote or one order', () => {
+    assert.match(indexSource, /id="productManagementSelectionBar"/);
+    assert.match(indexSource, /addProductManagementSelectionToQuote\(\)/);
+    assert.match(indexSource, /addProductManagementSelectionToOrder\(\)/);
+    assert.match(appSource, /const productManagementSelection = new Map\(\)/);
+    assert.match(appSource, /function toggleVisibleProductManagementSelection/);
+    assert.match(appSource, /products\.forEach\(product => addQuoteRow\(productManagementSource\(product\)\)\)/);
+    assert.match(appSource, /newOrderDraftItems = sources\.slice\(1\)\.map\(normalizeNewOrderItem\)/);
+    assert.match(appSource, /saveOrderDraft\(\);\s*clearProductManagementSelection\(\);/);
+});

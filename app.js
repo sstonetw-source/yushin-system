@@ -1314,6 +1314,7 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
    - 不讀 productCosts，避免一般業務畫面暴露成本
    ========================================================= */
 let productManagementResults = [];
+const productManagementSelection = new Map();
 let productManagementSearchInProgress = false;
 let productManagementSearchTimer = null;
 let productManagementSearchGeneration = 0;
@@ -1375,11 +1376,13 @@ function collectPendingProductRowsFromDocument(doc, sourceType) {
 function setProductManagementTableMode(mode = 'products') {
     const head = document.getElementById('productManagementHead');
     if (!head) return;
+    head.dataset.mode = mode;
     head.innerHTML = mode === 'pending'
         ? '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>來源</th><th>最近使用</th><th>次數</th><th class="no-print">操作</th></tr>'
-        : '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr>';
+        : '<tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)"></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr>';
     const moreRow = document.getElementById('productManagementMoreRow');
     if (moreRow && mode === 'pending') moreRow.style.display = 'none';
+    updateProductManagementSelectionBar();
 }
 
 function renderPendingProductMasterRows() {
@@ -1485,7 +1488,9 @@ function productManagementRow(product) {
     const productId = product.productId || product.id || '';
     const price = Number(product.listPrice ?? product.price ?? 0);
     const status = product.status || (product.active === false ? 'INACTIVE' : 'ACTIVE');
-    return `<tr>
+    const selected = !!productId && productManagementSelection.has(productId);
+    return `<tr class="${selected ? 'is-selected' : ''}">
+      <td data-th="選取" class="no-print product-management-select-cell"><input type="checkbox" ${selected ? 'checked' : ''} ${productId ? '' : 'disabled'} aria-label="選取 ${escapeAttr(product.productName || product.nameCn || product.nameEn || product.manufacturerPartNo || product.sku || '產品')}" onchange="toggleProductManagementSelection('${escapeAttr(productId)}', this.checked)"></td>
       <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
       <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
       <td data-th="廠牌">${escapeHtml(product.brandName || product.brand || '')}</td>
@@ -1500,6 +1505,62 @@ function productManagementRow(product) {
         ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="openProductMasterEditor('${escapeAttr(productId)}')">編輯主檔</button>` : ''}
       </td>
     </tr>`;
+}
+
+function updateProductManagementSelectionBar() {
+    const bar = document.getElementById('productManagementSelectionBar');
+    const countEl = document.getElementById('productManagementSelectionCount');
+    const quoteBtn = document.getElementById('productManagementBatchQuoteBtn');
+    const orderBtn = document.getElementById('productManagementBatchOrderBtn');
+    const head = document.getElementById('productManagementHead');
+    const productMode = !head || head.dataset.mode !== 'pending';
+    const count = productManagementSelection.size;
+    if (countEl) countEl.textContent = `已選 ${count} 項`;
+    if (bar) bar.hidden = !productMode || count === 0;
+    if (quoteBtn) quoteBtn.hidden = !canEditPage('quote.create');
+    if (orderBtn) orderBtn.hidden = !canEditPage('orders.list');
+
+    const visible = productManagementResults.slice(0, productManagementVisibleLimit)
+        .filter(product => product.productId || product.id);
+    const selectedVisible = visible.filter(product => productManagementSelection.has(product.productId || product.id)).length;
+    const selectVisible = document.getElementById('productManagementSelectVisible');
+    if (selectVisible) {
+        selectVisible.checked = visible.length > 0 && selectedVisible === visible.length;
+        selectVisible.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
+        selectVisible.disabled = visible.length === 0;
+    }
+}
+
+function toggleProductManagementSelection(productId, checked) {
+    const id = String(productId || '');
+    const product = productManagementResults.find(item => (item.productId || item.id) === id);
+    if (checked && product) productManagementSelection.set(id, { ...product });
+    else productManagementSelection.delete(id);
+    const input = [...document.querySelectorAll('.product-management-select-cell input[type="checkbox"]')]
+        .find(node => node.getAttribute('onchange')?.includes(`'${id}'`));
+    input?.closest('tr')?.classList.toggle('is-selected', productManagementSelection.has(id));
+    updateProductManagementSelectionBar();
+}
+
+function toggleVisibleProductManagementSelection(checked) {
+    productManagementResults.slice(0, productManagementVisibleLimit).forEach(product => {
+        const id = product.productId || product.id || '';
+        if (!id) return;
+        if (checked) productManagementSelection.set(id, { ...product });
+        else productManagementSelection.delete(id);
+    });
+    renderProductManagementResults();
+}
+
+function clearProductManagementSelection() {
+    productManagementSelection.clear();
+    document.querySelectorAll('.product-management-select-cell input[type="checkbox"]').forEach(input => { input.checked = false; });
+    document.querySelectorAll('.product-management-table tr.is-selected').forEach(row => row.classList.remove('is-selected'));
+    updateProductManagementSelectionBar();
+}
+
+function selectedProductManagementProducts() {
+    return [...productManagementSelection.values()];
 }
 
 function updateProductManagementMoreButton() {
@@ -1522,8 +1583,9 @@ function renderProductManagementResults() {
     const visibleResults = productManagementResults.slice(0, productManagementVisibleLimit);
     body.innerHTML = visibleResults.length
         ? visibleResults.map(productManagementRow).join('')
-        : '<tr><td colspan="9" class="empty-hint">查無符合產品。</td></tr>';
+        : '<tr><td colspan="10" class="empty-hint">查無符合產品。</td></tr>';
     updateProductManagementMoreButton();
+    updateProductManagementSelectionBar();
 }
 
 window.loadMoreProductManagementResults = function() {
@@ -1552,7 +1614,7 @@ window.clearProductManagementSearch = function(options = {}) {
     const button = document.getElementById('productManagementSearchBtn');
     if (input && !options.preserveInput) input.value = '';
     if (status) status.textContent = '';
-    if (body) body.innerHTML = '<tr><td colspan="9" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
     if (button) { button.disabled = false; button.textContent = '搜尋產品'; }
 };
 
@@ -1889,21 +1951,67 @@ function productManagementSource(product) {
     };
 }
 
-window.addProductManagementToQuote = function(productId) {
-    const product = productManagementResults.find(item => (item.productId || item.id) === productId);
-    if (!product || !canAccessPage('quote.create')) return;
+function quoteProductManagementRowIsEmpty(row) {
+    if (!row) return false;
+    const textSelectors = ['.item-model', '.item-cn', '.item-en', '.item-spec', '.item-product-id'];
+    const hasText = textSelectors.some(selector => String(row.querySelector(selector)?.value || '').trim());
+    const qty = Number(row.querySelector('.qty')?.value || 0);
+    const price = Number(row.querySelector('.inc-price')?.value || 0);
+    return !hasText && qty <= 1 && price === 0;
+}
+
+function openProductManagementProductsInQuote(products) {
+    if (!Array.isArray(products) || !products.length || !canEditPage('quote.create')) return;
     actuallySwitchMainTab('quote-system', document.querySelector('[data-main-nav="quote"]'));
     switchQuoteView('create', document.getElementById('qsub-create'), { skipHistory: true });
     ensureQuoteFormInitialized();
-    addQuoteRow(productManagementSource(product));
+    [...document.querySelectorAll('#quoteItems tr')].filter(quoteProductManagementRowIsEmpty).forEach(row => row.remove());
+    products.forEach(product => addQuoteRow(productManagementSource(product)));
+    calculateTotals();
+    saveQuoteDraft();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+window.addProductManagementToQuote = function addProductManagementToQuote(productId) {
+    const product = productManagementResults.find(item => (item.productId || item.id) === productId);
+    if (!product || !canEditPage('quote.create')) return;
+    openProductManagementProductsInQuote([product]);
 };
 
-window.addProductManagementToOrder = function(productId) {
+window.addProductManagementToOrder = function addProductManagementToOrder(productId) {
     const product = productManagementResults.find(item => (item.productId || item.id) === productId);
-    if (!product || !canAccessPage('orders.list')) return;
+    if (!product || !canEditPage('orders.list')) return;
     openOrderWorkspace(document.querySelector('[data-main-nav="orders"]'));
     openOrderModal(productManagementSource(product));
+};
+
+window.addProductManagementSelectionToQuote = function addProductManagementSelectionToQuote() {
+    const products = selectedProductManagementProducts();
+    if (!products.length) return;
+    if (!canEditPage('quote.create')) {
+        alert('您沒有建立估價單的權限。');
+        return;
+    }
+    openProductManagementProductsInQuote(products);
+    clearProductManagementSelection();
+};
+
+window.addProductManagementSelectionToOrder = function addProductManagementSelectionToOrder() {
+    const products = selectedProductManagementProducts();
+    if (!products.length) return;
+    if (!canEditPage('orders.list')) {
+        alert('您沒有建立訂單的權限。');
+        return;
+    }
+    const sources = products.map(productManagementSource);
+    openOrderWorkspace(document.querySelector('[data-main-nav="orders"]'));
+    openOrderModal(sources[0]);
+    newOrderDraftItems = sources.slice(1).map(normalizeNewOrderItem);
+    renderNewOrderDraftItems();
+    const title = document.getElementById('orderModalTitle');
+    if (title) title.innerText = `新增訂單（${sources.length} 個品項）`;
+    saveOrderDraft();
+    clearProductManagementSelection();
 };
 
 window.openOrderWorkspace = function(el) {

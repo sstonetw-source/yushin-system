@@ -13,7 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261001-18">
+        <link rel="stylesheet" href="styles.css?v=20261002-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -106,11 +106,22 @@
         </div>
         <div class="product-search-note">搜尋會查完整 Product Master，不受目前畫面載入筆數限制。</div>
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
+        <div id="productManagementSelectionBar" class="product-selection-bar no-print" hidden>
+            <div class="product-selection-summary">
+                <strong id="productManagementSelectionCount">已選 0 項</strong>
+                <span>可跨搜尋繼續選品；完成後一次帶入同一張單據。</span>
+            </div>
+            <div class="product-selection-actions">
+                <button type="button" id="productManagementBatchQuoteBtn" onclick="addProductManagementSelectionToQuote()">加入同一估價單</button>
+                <button type="button" id="productManagementBatchOrderBtn" class="btn-secondary" onclick="addProductManagementSelectionToOrder()">建立同一訂單</button>
+                <button type="button" class="btn-secondary" onclick="clearProductManagementSelection()">清除已選</button>
+            </div>
+        </div>
 
         <div class="table-wrap product-results-wrap">
             <table class="product-management-table">
-                <thead id="productManagementHead"><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
-                <tbody id="productManagementBody"><tr><td colspan="9" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
+                <thead id="productManagementHead" data-mode="products"><tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)" disabled></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
+                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
             </table>
         </div>
         <div id="productManagementMoreRow" class="product-load-more-row no-print" style="display:none;">
@@ -1396,6 +1407,6 @@
     <script src="modules/supply-core.js?v=20261001-6"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-141"></script>
+    <script src="app.js?v=20261002-1"></script>
 </body>
 </html>
