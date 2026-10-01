@@ -13447,6 +13447,9 @@ function productMasterDocToPriceItem(doc) {
         spec: data.specification || data.spec || '',
         price: data.listPrice ?? data.price ?? 0,
         supplier: data.supplier || '',
+        inventoryTracked: data.inventoryTracked === true,
+        lotTracked: data.lotTracked === true,
+        expiryTracked: data.expiryTracked === true,
         source: data.source || '',
         status: data.status || (data.active === false ? 'INACTIVE' : 'ACTIVE'),
         active: data.active !== false && data.status !== 'INACTIVE'
@@ -14869,6 +14872,9 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
         specification: normalized.spec || '',
         listPrice: Number(normalized.price || 0),
         supplier: normalized.supplier || '',
+        inventoryTracked: !!normalized.inventoryTracked,
+        lotTracked: !!normalized.lotTracked,
+        expiryTracked: !!normalized.expiryTracked,
         authorizationType: authorizationTypeForProduct(normalized),
         status,
         active: status === 'ACTIVE',
@@ -15398,7 +15404,7 @@ window.handlePriceExcelUpload = async function(input) {
     const reader = new FileReader();
     reader.onprogress = function(event) {
         if (!event.lengthComputable) return;
-        // 檔案讀取階段使用 0～50%，保留後半段顯示資料整理與雲端儲存（多廠牌需逐一儲存，會分段顯示進度）。
+        // 檔案讀取階段使用 0～50%，保留後半段顯示資料整理與同一廠牌多產品線的雲端儲存進度。
         setPriceUploadProgress((event.loaded / event.total) * 50, '讀取 Excel 檔案中…');
     };
     reader.onload = async function(e) {
