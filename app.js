@@ -2044,7 +2044,7 @@ function populateForecastSalesFilter() {
     const ownName = forecastOwnSalesName();
 
     if (!canSeeAll) {
-        const label = ownName ? `我的案件（${ownName}）` : '我的案件';
+        const label = ownName || '我的案件';
         const signature = JSON.stringify(['own', ownName, label]);
         if (signature !== forecastSalesFilterSignature) {
             select.innerHTML = `<option value="${escapeAttr(ownName)}">${escapeHtml(label)}</option>`;
@@ -2052,7 +2052,6 @@ function populateForecastSalesFilter() {
         }
         select.value = ownName;
         select.disabled = true;
-        updateForecastFilterUi();
         return;
     }
 
@@ -2071,132 +2070,32 @@ function populateForecastSalesFilter() {
         const name = stripPhoneSuffix(item.salesName || '');
         if (name) names.add(name);
     });
-    if (ownName) names.add(ownName);
 
     select.disabled = false;
     const sortedNames = [...names].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    const signature = JSON.stringify(['all', ownName, sortedNames]);
-    const defaultKey = `${currentUser?.uid || ''}|${currentUserRole || ''}|${ownName}`;
-    const applyDefault = select.dataset.forecastDefaultKey !== defaultKey;
+    const signature = JSON.stringify(['all', sortedNames]);
 
     if (signature !== forecastSalesFilterSignature) {
-        const ownOption = ownName
-            ? `<option value="${escapeAttr(ownName)}">我的案件（${escapeHtml(ownName)}）</option>`
-            : '';
-        const otherOptions = sortedNames
-            .filter(name => name !== ownName)
-            .map(name => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`)
-            .join('');
-        select.innerHTML = '<option value="">全部業務</option>' + ownOption + otherOptions;
+        select.innerHTML = '<option value="">全部業務</option>' + sortedNames.map(name =>
+            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`
+        ).join('');
         forecastSalesFilterSignature = signature;
     }
 
-    if (applyDefault) {
-        select.dataset.forecastDefaultKey = defaultKey;
-        select.value = ownName || '';
-    } else if ([...select.options].some(option => option.value === current)) {
-        select.value = current;
-    } else {
-        select.value = '';
-    }
-
-    updateForecastFilterUi();
+    if ([...select.options].some(option => option.value === current)) select.value = current;
+    else select.value = '';
 }
-
-function updateForecastFilterUi() {
-    const mineButton = document.getElementById('forecastMineQuickBtn');
-    const activeButton = document.getElementById('forecastActiveQuickBtn');
-    const filterButton = document.getElementById('forecastFilterToggleBtn');
-    const salesFilter = document.getElementById('forecastSalesFilter');
-    const statusFilter = document.getElementById('forecastStatusFilter');
-    const ownName = forecastOwnSalesName();
-
-    const mineActive = !canViewAllData('forecast') || (!!ownName && salesFilter?.value === ownName);
-    const activeActive = (statusFilter?.value || 'active') === 'active';
-
-    mineButton?.classList.toggle('is-active', mineActive);
-    activeButton?.classList.toggle('is-active', activeActive);
-
-    let advancedCount = 0;
-    if ((document.getElementById('forecastBrandFilter')?.value || '')) advancedCount++;
-    if ((document.getElementById('forecastStageFilter')?.value || '')) advancedCount++;
-    if ((document.getElementById('forecastPeriodFilter')?.value || 'this-year') !== 'this-year') advancedCount++;
-    if ((statusFilter?.value || 'active') !== 'active') advancedCount++;
-    if (canViewAllData('forecast') && (salesFilter?.value || '') !== (ownName || '')) advancedCount++;
-
-    if (filterButton) {
-        filterButton.textContent = advancedCount ? `篩選（${advancedCount}）` : '篩選';
-    }
-}
-
-window.toggleForecastFilterPanel = function() {
-    const panel = document.getElementById('forecastFilterPanel');
-    const button = document.getElementById('forecastFilterToggleBtn');
-    if (!panel) return;
-    panel.hidden = !panel.hidden;
-    if (button) button.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
-};
-
-window.applyForecastLocalFilters = function() {
-    updateForecastFilterUi();
-    renderForecastList();
-};
 
 window.handleForecastStatusFilterChange = function() {
-    updateForecastFilterUi();
     loadForecasts(true);
 };
 
 window.handleForecastSalesFilterChange = function() {
-    updateForecastFilterUi();
     loadForecasts(true);
 };
 
-window.toggleForecastMineFilter = function() {
-    const select = document.getElementById('forecastSalesFilter');
-    if (!select) return;
-    const ownName = forecastOwnSalesName();
-
-    if (!canViewAllData('forecast')) {
-        select.value = ownName;
-        updateForecastFilterUi();
-        renderForecastList();
-        return;
-    }
-
-    select.value = ownName && select.value !== ownName ? ownName : '';
-    updateForecastFilterUi();
-    loadForecasts(true);
-};
-
-window.setForecastActiveFilter = function() {
-    const select = document.getElementById('forecastStatusFilter');
-    if (!select) return;
-    if (select.value === 'active') {
-        updateForecastFilterUi();
-        return;
-    }
-    select.value = 'active';
-    updateForecastFilterUi();
-    loadForecasts(true);
-};
-
-window.clearForecastFilters = function() {
-    const ownName = forecastOwnSalesName();
-    const brand = document.getElementById('forecastBrandFilter');
-    const sales = document.getElementById('forecastSalesFilter');
-    const status = document.getElementById('forecastStatusFilter');
-    const stage = document.getElementById('forecastStageFilter');
-    const period = document.getElementById('forecastPeriodFilter');
-
-    if (brand) brand.value = '';
-    if (sales) sales.value = canViewAllData('forecast') ? (ownName || '') : ownName;
-    if (status) status.value = 'active';
-    if (stage) stage.value = '';
-    if (period) period.value = 'this-year';
-
-    updateForecastFilterUi();
-    loadForecasts(true);
+window.handleForecastBrandFilterChange = function() {
+    renderForecastList();
 };
 
 function populateForecastBrandDropdown(selectedBrand = '') {
@@ -2232,17 +2131,11 @@ window.loadForecasts = async function(reset = true) {
 
     forecastLoading = true;
     const button = document.getElementById('forecastLoadMoreBtn');
-    const refreshButton = document.getElementById('forecastRefreshBtn');
 
     if (button) {
         button.disabled = true;
         button.innerText = '載入中…';
     }
-    if (refreshButton && reset) {
-        refreshButton.disabled = true;
-        refreshButton.innerText = '載入中…';
-    }
-
     try {
         if (canViewAllData('forecast')) await ensureSalesListLoaded();
         else populateForecastSalesFilter();
@@ -2304,10 +2197,6 @@ window.loadForecasts = async function(reset = true) {
             button.disabled = false;
             button.innerText = '載入更多（每次 50 筆）';
             button.style.display = forecastHasMore ? '' : 'none';
-        }
-        if (refreshButton) {
-            refreshButton.disabled = false;
-            refreshButton.innerText = '↻ 更新';
         }
     }
 };
@@ -2424,8 +2313,6 @@ window.renderForecastList = function() {
     const brandFilter = document.getElementById('forecastBrandFilter')?.value || '';
     const salesFilter = document.getElementById('forecastSalesFilter')?.value || '';
     const statusFilter = document.getElementById('forecastStatusFilter')?.value || 'active';
-    const stageFilter = document.getElementById('forecastStageFilter')?.value || '';
-    const periodFilter = document.getElementById('forecastPeriodFilter')?.value || 'this-year';
 
     body.innerHTML = '';
     const fragment = document.createDocumentFragment();
@@ -2450,10 +2337,7 @@ window.renderForecastList = function() {
         if (!forecastHistorySearchActive && keyword && !searchable.includes(keyword)) return;
         if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
         if (salesFilter && salesName !== salesFilter) return;
-        if (statusFilter !== 'all' && item.status !== statusFilter) return;
-        if (stageFilter && item.stage !== stageFilter) return;
-        // 進行中 Forecast 是目前 pipeline，跨年度持續顯示；Win/Lost 才依結案/更新時間套用統計期間。
-        if (item.status !== 'active' && !dateInUnifiedPeriod(item.closedAt || item.latestProgressAt || item.updatedAt || item.createdAt, periodFilter)) return;
+        if (item.status !== statusFilter) return;
 
         shown++;
 
@@ -2519,7 +2403,6 @@ window.renderForecastList = function() {
 
     const hint = document.getElementById('forecastEmptyHint');
     if (hint) hint.style.display = shown ? 'none' : 'block';
-    updateForecastFilterUi();
 };
 
 window.openForecastModal = function(id = '') {
