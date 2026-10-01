@@ -2293,3 +2293,22 @@ test('product save buttons show feedback during duplicate checks', () => {
     assert.match(quickSource,/button\.textContent = '儲存中…'/);
     assert.match(quickSource,/endActionButton\(button, state\)/);
 });
+
+
+test('customer helper and inventory detail reads are bounded', () => {
+    assert.match(appSource,/最近客戶紀錄/);
+    assert.match(appSource,/客戶估價偏好/);
+    assert.match(appSource,/庫存占用明細/);
+
+    const clientStart=appSource.indexOf('function loadClientHistory()');
+    const clientEnd=appSource.indexOf('\nwindow.saveToStorage',clientStart);
+    assert.match(appSource.slice(clientStart,clientEnd),/firestoreReadWithTimeout/);
+
+    const preferenceStart=appSource.indexOf('window.applyCustomerQuotePreferences = async function');
+    const preferenceEnd=appSource.indexOf('\nwindow.addQuoteCustomField',preferenceStart);
+    assert.match(appSource.slice(preferenceStart,preferenceEnd),/firestoreReadWithTimeout/);
+
+    const reservationStart=appSource.indexOf('window.openInventoryReservationDetails = async function');
+    const reservationEnd=appSource.indexOf('\nwindow.closeInventoryReservationDetails',reservationStart);
+    assert.match(appSource.slice(reservationStart,reservationEnd),/firestoreReadWithTimeout/);
+});
