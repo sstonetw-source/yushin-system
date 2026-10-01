@@ -1346,7 +1346,7 @@ function setProductManagementTableMode(mode = 'products') {
     const head = document.getElementById('productManagementHead');
     if (!head) return;
     head.innerHTML = mode === 'pending'
-        ? '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>來源</th><th>最近使用</th><th>次數</th></tr>'
+        ? '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>來源</th><th>最近使用</th><th>次數</th><th class="no-print">操作</th></tr>'
         : '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>供應商</th><th>狀態</th><th class="no-print">快速操作</th></tr>';
 }
 
@@ -1355,16 +1355,17 @@ function renderPendingProductMasterRows() {
     const body = document.getElementById('productManagementBody');
     if (!body) return;
     if (!pendingProductMasterRows.length) {
-        body.innerHTML = '<tr><td colspan="6" class="empty-hint">目前沒有待補 Product Master 的近期品項。</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="empty-hint">目前沒有待補 Product Master 的近期品項。</td></tr>';
         return;
     }
-    body.innerHTML = pendingProductMasterRows.map(row => `<tr>
+    body.innerHTML = pendingProductMasterRows.map((row,index) => `<tr>
         <td data-th="貨號">${escapeHtml(row.itemCode || '－')}</td>
         <td data-th="品名">${escapeHtml(row.itemName || '－')}</td>
         <td data-th="廠牌">${escapeHtml(row.brand || '－')}</td>
         <td data-th="來源">${escapeHtml(row.sources.join('、'))}</td>
         <td data-th="最近使用">${escapeHtml(row.latestDate || '－')}</td>
         <td data-th="次數">${row.count}</td>
+        <td data-th="操作" class="no-print">${canManagePendingProductMaster() ? `<button type="button" class="btn-small" onclick="openPendingProductMasterEditor(${index})">補主檔</button>` : ''}</td>
     </tr>`).join('');
 }
 
@@ -1442,6 +1443,7 @@ function productManagementRow(product) {
       <td data-th="快速操作" class="no-print product-management-actions">
         ${canAccessPage('quote.create') ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
         ${canAccessPage('orders.list') ? `<button type="button" class="btn-small btn-secondary" onclick="addProductManagementToOrder('${escapeAttr(productId)}')">建立訂單</button>` : ''}
+        ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="openProductMasterEditor('${escapeAttr(productId)}')">編輯主檔</button>` : ''}
       </td>
     </tr>`;
 }
@@ -1525,6 +1527,194 @@ window.searchProductManagement = async function() {
         productManagementSearchInProgress = false;
         if (button) { button.disabled = false; button.textContent = '搜尋產品'; }
         if (input) { input.disabled = false; input.focus(); }
+    }
+};
+
+
+function ensureProductMasterEditor() {
+    let overlay = document.getElementById('productMasterEditorOverlay');
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'productMasterEditorOverlay';
+    overlay.className = 'eq-modal-overlay no-print';
+    overlay.innerHTML = `
+      <div class="eq-modal-box" style="max-width:760px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <h3 id="productMasterEditorTitle" style="margin:0;">Product Master</h3>
+          <button type="button" class="btn-secondary" onclick="closeProductMasterEditor()">✕ 關閉</button>
+        </div>
+        <input type="hidden" id="pmEditProductId">
+        <input type="hidden" id="pmEditCreatedAt">
+        <input type="hidden" id="pmEditSource">
+        <div class="form-grid" style="margin-top:14px;">
+          <div><label>廠牌 *</label><input id="pmEditBrand" type="text" list="quickProductBrandList" autocomplete="off"></div>
+          <div><label>原廠貨號 *</label><input id="pmEditCode" type="text" autocomplete="off"></div>
+          <div><label>中文品名 *</label><input id="pmEditNameCn" type="text" autocomplete="off"></div>
+          <div><label>英文品名</label><input id="pmEditNameEn" type="text" autocomplete="off"></div>
+          <div style="grid-column:1/-1;"><label>規格／包裝</label><input id="pmEditSpec" type="text" autocomplete="off"></div>
+          <div><label>產品線 *</label><input id="pmEditProductLine" type="text" placeholder="例如：Flow Cytometry"></div>
+          <div><label>產品類型</label><input id="pmEditProductType" type="text" list="pmProductTypeList" placeholder="例如：Reagent"></div>
+          <datalist id="pmProductTypeList">
+            <option value="Instrument"></option><option value="Reagent"></option><option value="Consumable"></option>
+            <option value="Accessory"></option><option value="Service"></option>
+          </datalist>
+          <div><label>主要供應商</label><input id="pmEditSupplier" type="text" autocomplete="off"></div>
+          <div><label>建議售價（含稅）</label><input id="pmEditListPrice" type="number" min="0" step="0.01"></div>
+          <div><label>代理屬性</label>
+            <select id="pmEditAuthorization">
+              <option value="AUTHORIZED">代理產品</option>
+              <option value="NON_AUTHORIZED">非代理產品</option>
+            </select>
+          </div>
+          <div><label>狀態</label>
+            <select id="pmEditStatus"><option value="ACTIVE">啟用</option><option value="INACTIVE">停用</option></select>
+          </div>
+          <div style="grid-column:1/-1;display:flex;gap:16px;flex-wrap:wrap;">
+            <label><input id="pmEditInventoryTracked" type="checkbox"> 庫存管理</label>
+            <label><input id="pmEditLotTracked" type="checkbox"> 批號管理</label>
+            <label><input id="pmEditExpiryTracked" type="checkbox"> 效期管理</label>
+          </div>
+        </div>
+        <div id="pmEditMeta" style="margin-top:10px;font-size:12px;color:#666;"></div>
+        <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" id="saveProductMasterEditorBtn" onclick="saveProductMasterEditor()">儲存主檔</button>
+          <button type="button" class="btn-secondary" onclick="closeProductMasterEditor()">取消</button>
+        </div>
+      </div>`;
+    overlay.addEventListener('click', event => { if (event.target === overlay) closeProductMasterEditor(); });
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+function populateProductMasterEditor(product = {}, options = {}) {
+    const overlay = ensureProductMasterEditor();
+    const source = product.source || options.source || 'MANUAL';
+    document.getElementById('pmEditProductId').value = product.productId || product.id || '';
+    document.getElementById('pmEditCreatedAt').value = product.createdAt || '';
+    document.getElementById('pmEditSource').value = source;
+    document.getElementById('pmEditBrand').value = product.brandName || product.brand || options.brand || '';
+    document.getElementById('pmEditCode').value = product.manufacturerPartNo || product.sku || options.itemCode || '';
+    document.getElementById('pmEditNameCn').value = product.productName || product.nameCn || options.itemName || '';
+    document.getElementById('pmEditNameEn').value = product.nameEn || '';
+    document.getElementById('pmEditSpec').value = product.specification || product.spec || '';
+    document.getElementById('pmEditProductLine').value = product.productLine || '';
+    document.getElementById('pmEditProductType').value = product.productType || product.category || '';
+    document.getElementById('pmEditSupplier').value = product.supplier || '';
+    document.getElementById('pmEditListPrice').value = product.listPrice ?? product.price ?? '';
+    const inferredAuthorization = product.authorizationType
+        || (isBrandAuthorizedForCurrentCompany(product.brandName || product.brand || options.brand || '') ? 'AUTHORIZED' : 'NON_AUTHORIZED');
+    document.getElementById('pmEditAuthorization').value = inferredAuthorization;
+    document.getElementById('pmEditStatus').value = product.status === 'INACTIVE' || product.active === false ? 'INACTIVE' : 'ACTIVE';
+    document.getElementById('pmEditInventoryTracked').checked = product.inventoryTracked === true;
+    document.getElementById('pmEditLotTracked').checked = product.lotTracked === true;
+    document.getElementById('pmEditExpiryTracked').checked = product.expiryTracked === true;
+    document.getElementById('productMasterEditorTitle').textContent = product.productId || product.id ? '編輯 Product Master' : '建立 Product Master';
+    document.getElementById('pmEditMeta').textContent =
+        `來源：${source || 'MANUAL'}${product.updatedAt ? '　最後更新：' + product.updatedAt : ''}`;
+    overlay.classList.add('active');
+}
+
+window.openProductMasterEditor = async function(productId) {
+    if (!canManagePendingProductMaster()) return;
+    let product = productManagementResults.find(item => (item.productId || item.id) === productId);
+    if (!product && productId) {
+        const snap = await firestoreReadWithTimeout(db.collection('products').doc(productId).get(), '讀取 Product Master');
+        if (snap.exists) product = { id:snap.id, ...snap.data() };
+    }
+    if (!product) { alert('找不到這筆 Product Master。'); return; }
+    populateProductMasterEditor(product);
+};
+
+window.openPendingProductMasterEditor = function(index) {
+    if (!canManagePendingProductMaster()) return;
+    const row = pendingProductMasterRows[index];
+    if (!row) return;
+    populateProductMasterEditor({}, {
+        source:'MANUAL',
+        brand:row.brand || '',
+        itemCode:row.itemCode || '',
+        itemName:row.itemName || ''
+    });
+};
+
+window.closeProductMasterEditor = function() {
+    document.getElementById('productMasterEditorOverlay')?.classList.remove('active');
+};
+
+window.saveProductMasterEditor = async function() {
+    if (!canManagePendingProductMaster()) return;
+    const button = document.getElementById('saveProductMasterEditorBtn');
+    const brand = resolveBrandName(document.getElementById('pmEditBrand').value || '');
+    const code = String(document.getElementById('pmEditCode').value || '').trim();
+    const productName = String(document.getElementById('pmEditNameCn').value || '').trim();
+    const productLine = String(document.getElementById('pmEditProductLine').value || '').trim();
+    if (!brand || !code || !productName || !productLine) {
+        alert('請至少完成廠牌、原廠貨號、中文品名與產品線。');
+        return;
+    }
+
+    const originalId = String(document.getElementById('pmEditProductId').value || '').trim();
+    const normalizedPartNo = normalizeItemCodeLoose(code);
+    const duplicateSnap = await db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get();
+    const duplicate = duplicateSnap.docs.find(doc => {
+        if (doc.id === originalId) return false;
+        const data = doc.data() || {};
+        return normalizeBrandLookupKey(data.brandName || data.brand || '') === normalizeBrandLookupKey(brand);
+    });
+    if (duplicate) {
+        alert('這個廠牌與貨號已經存在於 Product Master，請直接編輯既有產品。');
+        return;
+    }
+
+    const productId = originalId || stableProductId({ brand, model:code });
+    const now = new Date().toISOString();
+    const status = document.getElementById('pmEditStatus').value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const brandEntry = brandMasterEntryForName(brand);
+    const record = {
+        productId,
+        brandId: brandEntry?.id || '',
+        brandName: brand,
+        manufacturerPartNo: code,
+        normalizedPartNo,
+        productName,
+        nameEn: String(document.getElementById('pmEditNameEn').value || '').trim(),
+        specification: String(document.getElementById('pmEditSpec').value || '').trim(),
+        productLine,
+        productLineId: productLine,
+        productType: String(document.getElementById('pmEditProductType').value || '').trim(),
+        category: String(document.getElementById('pmEditProductType').value || '').trim(),
+        supplier: String(document.getElementById('pmEditSupplier').value || '').trim(),
+        listPrice: Number(document.getElementById('pmEditListPrice').value || 0),
+        authorizationType: document.getElementById('pmEditAuthorization').value || 'NON_AUTHORIZED',
+        inventoryTracked: document.getElementById('pmEditInventoryTracked').checked,
+        lotTracked: document.getElementById('pmEditLotTracked').checked,
+        expiryTracked: document.getElementById('pmEditExpiryTracked').checked,
+        status,
+        active: status === 'ACTIVE',
+        source: String(document.getElementById('pmEditSource').value || 'MANUAL').toUpperCase(),
+        createdAt: document.getElementById('pmEditCreatedAt').value || now,
+        updatedAt: now,
+        updatedBy: currentUser?.uid || ''
+    };
+
+    const state = beginActionButton(button, '儲存中…');
+    if (!state) return;
+    try {
+        await db.collection('products').doc(productId).set(record, { merge:true });
+        const cached = productMasterDocToPriceItem({ id:productId, data:() => record });
+        cacheProductLookupItem(cached);
+        const resultIndex = productManagementResults.findIndex(item => (item.productId || item.id) === productId);
+        if (resultIndex >= 0) productManagementResults[resultIndex] = { id:productId, ...record };
+        else productManagementResults.unshift({ id:productId, ...record });
+        renderProductManagementResults();
+        closeProductMasterEditor();
+        const statusEl = document.getElementById('productManagementSearchStatus');
+        if (statusEl) statusEl.textContent = `已儲存 Product Master：${brand} / ${code}`;
+    } catch (err) {
+        console.error('儲存 Product Master 失敗：', err);
+        alert('儲存 Product Master 失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, state);
     }
 };
 
@@ -14878,7 +15068,8 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
         authorizationType: authorizationTypeForProduct(normalized),
         status,
         active: status === 'ACTIVE',
-        source: String(source || normalized.source || 'PRODUCT_MASTER').toUpperCase(),
+        source: String(normalized.source || source || 'PRODUCT_MASTER').toUpperCase(),
+        ...(normalized.createdAt ? { createdAt: normalized.createdAt } : {}),
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser?.uid || ''
     };
@@ -15379,7 +15570,7 @@ window.downloadProductMasterTemplate = async function() {
         alert(err.message);
         return;
     }
-    const headers = ['貨號','中文品名','英文品名','規格','類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
+    const headers = ['貨號','中文品名','英文品名','規格','產品類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
     const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','耗材','','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
     ws['!cols'] = [18,28,32,24,14,24,14,14,10,12,12,12].map(wch => ({ wch }));
