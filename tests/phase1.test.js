@@ -3705,3 +3705,19 @@ test('business reservation rules preserve reservation identity and narrow stock 
     const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
     assert.match(reservationRule,/allow update: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
+
+
+test('equipment data scope agrees with engineer all-company access', () => {
+    assert.match(appSource,/sales:\s*Object\.freeze\(\{[^\n]*equipment:'own'/);
+    assert.match(appSource,/engineer:\s*Object\.freeze\(\{[^\n]*equipment:'all'/);
+    const start=appSource.indexOf('function canViewAllEquipment()');
+    const end=appSource.indexOf('\nwindow.loadEquipmentFromCloud',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'engineer'/);
+    const ruleStart=rulesSource.indexOf('match /equipment/{id}');
+    const ruleEnd=rulesSource.indexOf('\n    match /',ruleStart+10);
+    const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
+    assert.match(ruleSource,/allow read: if admin\(\) \|\| engineer\(\)/);
+    assert.match(ruleSource,/allow create: if admin\(\) \|\| engineer\(\)/);
+    assert.match(ruleSource,/allow update: if admin\(\) \|\| engineer\(\)/);
+});
