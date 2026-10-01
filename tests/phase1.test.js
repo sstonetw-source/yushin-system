@@ -2778,3 +2778,12 @@ test('quote list filters avoid rebuilding unchanged options', () => {
     assert.match(appSource,/let myQuoteSalesFilterSignature = ''/);
     assert.match(salesSource,/signature !== myQuoteSalesFilterSignature/);
 });
+
+
+test('quote list builds item search text only when searching', () => {
+    const start=appSource.indexOf('window.renderMyQuotesList = function()');
+    const end=appSource.indexOf('\nwindow.createForecastFromQuote',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/if \(!quoteHistorySearchActive && keyword\) \{[\s\S]*?const itemSearchText/);
+    assert.match(source,/if \(!searchable\.includes\(keyword\)\) return/);
+});
