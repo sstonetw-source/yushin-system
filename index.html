@@ -98,6 +98,7 @@
             <input id="productManagementSearch" type="search" placeholder="輸入貨號或品名（至少 2 個字）" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
+            <button type="button" id="createProductMasterBtn" class="btn-secondary" style="display:none;" onclick="openNewProductMasterEditor()">＋ 新增 Product Master</button>
             <button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補 Product Master</button>
             <span id="productManagementSearchStatus" class="inline-status"></span>
         </div>
@@ -1433,6 +1434,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-15"></script>
+    <script src="app.js?v=20261001-16"></script>
 </body>
 </html>
