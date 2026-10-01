@@ -5636,6 +5636,9 @@ function quoteBrandsForRecord(quote = {}) {
         .filter(Boolean));
 }
 
+let myQuoteBrandFilterSignature = '';
+let myQuoteSalesFilterSignature = '';
+
 function populateMyQuoteBrandFilter(source = []) {
     const select = document.getElementById('myQuoteBrandFilter');
     if (!select) return;
@@ -5647,10 +5650,15 @@ function populateMyQuoteBrandFilter(source = []) {
             if (key && !brands.has(key)) brands.set(key, brand);
         });
     });
-    select.innerHTML = '<option value="">全部廠牌</option>' + [...brands.values()]
-        .sort((a,b)=>a.localeCompare(b,'zh-Hant'))
-        .map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
-    if ([...select.options].some(option => option.value === selected)) select.value = selected;
+    const brandNames = [...brands.values()].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+    const signature = JSON.stringify(brandNames);
+    if (signature !== myQuoteBrandFilterSignature) {
+        select.innerHTML = '<option value="">全部廠牌</option>' + brandNames
+            .map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
+        myQuoteBrandFilterSignature = signature;
+    }
+    if (brandNames.includes(selected)) select.value = selected;
+    else if (selected) select.value = '';
 }
 
 function populateMyQuoteSalesFilter() {
@@ -5665,9 +5673,14 @@ function populateMyQuoteSalesFilter() {
         ...myQuotesCache.map(quote => stripPhoneSuffix(quote.salesName || '')),
         ...quoteHistorySearchResults.map(quote => stripPhoneSuffix(quote.salesName || ''))
     ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    select.innerHTML = '<option value="">全部業務</option>' + names.map(name =>
-        `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+    const signature = JSON.stringify(names);
+    if (signature !== myQuoteSalesFilterSignature) {
+        select.innerHTML = '<option value="">全部業務</option>' + names.map(name =>
+            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+        myQuoteSalesFilterSignature = signature;
+    }
     if (names.includes(selected)) select.value = selected;
+    else if (selected) select.value = '';
 }
 
 window.renderMyQuotesList = function() {
