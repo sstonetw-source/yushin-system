@@ -9,7 +9,10 @@
     const type=Object.values(TYPES).includes(record.type)?record.type:TYPES.PURCHASING_PO;
     const qty=n(record.qty);
     const receivedQty=Math.min(qty,n(record.receivedQty));
-    return {...record,type,qty,receivedQty,remainingQty:Math.max(0,qty-receivedQty),status:receivedQty>=qty&&qty>0?'RECEIVED':receivedQty>0?'PARTIAL_RECEIPT':record.status||'ORDERED'};
+    const cancelled=String(record.status||'').toUpperCase()==='CANCELLED';
+    const remainingQty=cancelled?0:Math.max(0,qty-receivedQty);
+    const status=cancelled?'CANCELLED':receivedQty>=qty&&qty>0?'RECEIVED':receivedQty>0?'PARTIAL_RECEIPT':record.status||'ORDERED';
+    return {...record,type,qty,receivedQty,remainingQty,status};
   }
   function validate(record={}){
     const x=normalize(record),errors=[];
