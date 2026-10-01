@@ -462,7 +462,14 @@ service cloud.firestore {
       allow create: if canReceiveInventory()
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data);
-      allow update: if false;
+      // Receipt facts remain immutable. Receiving roles may only advance the
+      // post-receipt shortage-allocation checkpoint used for resumable/idempotent retries.
+      allow update: if canReceiveInventory()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'autoAllocatedQty', 'allocationCompleted', 'allocationUpdatedAt'
+        ])
+        && request.resource.data.get('autoAllocatedQty', 0) >= resource.data.get('autoAllocatedQty', 0)
+        && request.resource.data.get('autoAllocatedQty', 0) <= resource.data.get('autoAllocationQty', 0);
       allow delete: if admin();
     }
 
