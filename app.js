@@ -7495,12 +7495,12 @@ function orderWorkAmount(order, category) {
         .reduce((sum,item)=>sum+orderItemWorkAmount(order,item,category),0);
 }
 
-function buildOrderItemWorkMetrics(orders, categories, include = null, normalizedItemsByOrder = null, dispatchStatesByOrder = null) {
+function buildOrderItemWorkMetrics(orders, categories, include = null, normalizedItemsByOrder = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const metrics = Object.fromEntries(categories.map(category => [category, { count:0, amount:0 }]));
     (orders || []).forEach(order => {
         const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
         const totalQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.qty || 0)), 0);
-        const lifecycle = orderLifecycleInfo(order, items);
+        const lifecycle = lifecyclesByOrder?.get(order.id) || orderLifecycleInfo(order, items);
         const orderDispatchStates = dispatchStatesByOrder?.get(order.id) || null;
         items.forEach(item => {
             // 工作圖卡同一品項只掃一次送貨／退貨紀錄；分類與金額共用同一份 dispatch state。
@@ -7521,7 +7521,7 @@ window.setOrderWorkFilter = function(filter) {
     renderOrdersList();
 };
 
-function renderOrderWorkCards(orders, normalizedItemsByOrder = null, dispatchStatesByOrder = null) {
+function renderOrderWorkCards(orders, normalizedItemsByOrder = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const container = document.getElementById('orderWorkCards');
     if (!container) return;
     const definitions = [
@@ -7537,7 +7537,8 @@ function renderOrderWorkCards(orders, normalizedItemsByOrder = null, dispatchSta
         definitions.map(([key]) => key),
         (order, item, category) => orderMatchesWorkPeriod(order, category),
         normalizedItemsByOrder,
-        dispatchStatesByOrder
+        dispatchStatesByOrder,
+        lifecyclesByOrder
     );
     container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
 }
@@ -8016,11 +8017,15 @@ window.renderOrdersList = function() {
         const items = normalizedItemsByOrder.get(order.id) || [];
         return [order.id, new Map(items.map(item => [item, itemDispatchState(order, item)]))];
     }));
-    renderOrderWorkCards(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder);
+    const lifecyclesByOrder = new Map(baseOrders.map(order => [
+        order.id,
+        orderLifecycleInfo(order, normalizedItemsByOrder.get(order.id) || [])
+    ]));
+    renderOrderWorkCards(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder);
 
     baseOrders.forEach(o => {
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
-        const lifecycle = orderLifecycleInfo(o, allOrderItems);
+        const lifecycle = lifecyclesByOrder.get(o.id) || orderLifecycleInfo(o, allOrderItems);
         const dispatchStateByItem = dispatchStatesByOrder.get(o.id) || new Map();
         const displayCategoriesByItem = new Map(
             allOrderItems.map(item => [item, orderItemDisplayCategories(o, item, lifecycle, dispatchStateByItem.get(item))])
