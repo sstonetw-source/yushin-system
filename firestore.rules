@@ -166,6 +166,8 @@ service cloud.firestore {
         && data.get('createdBy', '') == request.auth.uid
         && data.get('updatedBy', '') == request.auth.uid
         && data.get('authorizationType', '') in ['AUTHORIZED', 'NON_AUTHORIZED']
+        && data.get('source', '') == 'QUICK_CREATE'
+        && data.get('active', false) == true
         && data.get('listPrice', -1) is number
         && data.listPrice >= 0
         && data.keys().hasOnly([
