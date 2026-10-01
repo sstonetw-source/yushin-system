@@ -745,7 +745,7 @@ test('phase 2 product master keeps formal product identity and legacy migration 
     const productSource = appSource.slice(productStart, productEnd);
     assert.doesNotMatch(productSource, /\bunit\s*:/);
     assert.match(appSource, /spec:/);
-    assert.match(appSource, /normalizeProductMasterList\(imported/);
+    assert.match(appSource, /normalizeProductMasterList\(/);
     assert.match(appSource, /collection\('products'\)/);
     assert.doesNotMatch(appSource, /settings\/prices/);
 });
@@ -1467,10 +1467,12 @@ test('database backup includes formal Product Master and cost collections', () =
     assert.match(appSource, /'brands'/);
 });
 
-test('Product Master admin UI uses direct Excel upload without the legacy migration panel', () => {
+test('Product Master admin UI uses one standard Excel import without the legacy migration panel', () => {
     assert.doesNotMatch(indexSource, /Product Master v2 遷移/);
     assert.doesNotMatch(indexSource, /id="productMasterMigrationPreviewBtn"/);
-    assert.match(indexSource, /上傳 Excel 更新 Product Master/);
+    assert.match(indexSource, /匯入 Product Master/);
+    assert.match(indexSource, /只維護一種 Excel/);
+    assert.doesNotMatch(indexSource, /只更新建議售價/);
 });
 
 
@@ -1650,7 +1652,7 @@ test('V2 backup and storage audit include fulfillment and protected cost collect
 test('V2 admin UI no longer exposes the legacy migration deployment panel', () => {
     assert.doesNotMatch(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
     assert.doesNotMatch(indexSource, /庫存成本隔離，直到顯示 0/);
-    assert.match(indexSource, /上傳 Excel 更新 Product Master/);
+    assert.match(indexSource, /匯入 Product Master/);
 });
 
 
