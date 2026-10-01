@@ -78,7 +78,6 @@ let salesList = [
     { name: "預設業務", code: "01", phone: "0912345678" }
 ];
 let priceList = [];
-let priceCatalogMeta = [];
 let priceItemLookup = new Map();
 let currentUser = null;      // 目前登入的 Firebase Auth 使用者物件
 let currentUserRole = null;  // 'admin' / 'sales' / 'purchaser' / 'warehouse' / 'engineer' —— 目前實際套用在畫面上的「有效身份」
@@ -1338,9 +1337,11 @@ function canManagePendingProductMaster() {
 
 function updatePendingProductMasterButton() {
     const allowed = canManagePendingProductMaster();
+    const tools = document.getElementById('productManagementTools');
     const pendingButton = document.getElementById('pendingProductMasterBtn');
     const createButton = document.getElementById('createProductMasterBtn');
     const batchMaintenance = document.getElementById('productBatchMaintenance');
+    if (tools) tools.style.display = allowed ? '' : 'none';
     if (pendingButton) pendingButton.style.display = allowed ? '' : 'none';
     if (createButton) createButton.style.display = allowed ? '' : 'none';
     if (batchMaintenance) batchMaintenance.style.display = allowed ? '' : 'none';
@@ -14350,7 +14351,7 @@ window.exportEquipmentExcel = async function() {
 };
 
 /* =========================================================
-   管理員雲端後台：人員、Product Master、廠牌、進銷存、倉庫與資料庫管理
+   管理員雲端後台：人員、廠牌、進銷存、倉庫與資料庫管理
    ========================================================= */
 window.switchAdminTab = function(tab, el) {
     document.querySelectorAll('#admin-system .sub-tab').forEach(t => t.classList.remove('active'));
@@ -14359,7 +14360,6 @@ window.switchAdminTab = function(tab, el) {
     document.getElementById(`admin-${tab}`).style.display = 'block';
 
     if (tab === 'sales') reloadSalesFromUsers();
-    if (tab === 'prices') loadPriceCatalogSummary();
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
     if (tab === 'agencies') Promise.all([ensureBrandSettingsLoaded(), loadSupplierWarehouseMasters()]).then(() => {
         renderKeyStatisticBrands();
@@ -16789,43 +16789,7 @@ window.runInventoryCostMigration = async function() {
     catch(err){console.error('庫存成本隔離失敗：',err);if(status)status.innerText='隔離中斷：'+(err.message||err)+'。流程可重複執行。';if(runButton)runButton.disabled=false;}
     finally{if(previewButton)previewButton.disabled=false;}
 };
-/* ---------- 價格表管理 ---------- */
-function formatPriceCatalogTime(value) {
-    if (!value) return '舊資料未記錄';
-    const raw = typeof value.toDate === 'function' ? value.toDate() : new Date(value);
-    if (Number.isNaN(raw.getTime())) return '舊資料未記錄';
-    return raw.toLocaleString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
-}
-
-function renderPriceCatalogSummary() {
-    const tbody = document.getElementById('adminPriceCatalogBody');
-    if (!tbody) return;
-    tbody.innerHTML = priceCatalogMeta.length ? priceCatalogMeta.map(item => `
-        <tr>
-            <td>${escapeHtml(item.name)}</td>
-            <td>${escapeHtml(formatPriceCatalogTime(item.updatedAt))}</td>
-            <td class="no-print"><span style="font-size:12px;color:#666;">重新上傳同廠牌即可更新</span></td>
-        </tr>
-    `).join('') : '<tr><td colspan="3" style="color:#888;">目前雲端沒有價格表。</td></tr>';
-}
-
-// 價格表管理頁只讀取輕量索引；不再為了顯示清單下載所有價格明細。
-window.loadPriceCatalogSummary = async function() {
-    const tbody = document.getElementById('adminPriceCatalogBody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="3" style="color:#888;">載入中…</td></tr>';
-    try {
-        await loadBrandMaster();
-        priceCatalogMeta = brandMasterCache
-            .filter(item => item.active !== false)
-            .map(item => ({ name: item.name, updatedAt: item.updatedAt || null }))
-            .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-        renderPriceCatalogSummary();
-    } catch (err) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="3" style="color:#c00;">載入失敗：${escapeHtml(err.message)}</td></tr>`;
-    }
-};
-
-// Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。
+// Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。// Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。
 function setPriceUploadProgress(percent, status, keepVisible = true) {
     const wrap = document.getElementById('priceUploadProgress');
     const statusEl = document.getElementById('priceUploadStatus');
@@ -17397,7 +17361,7 @@ window.handlePriceExcelUpload = async function(input) {
 
             if (!brandGroups.length) {
                 setPriceUploadProgress(0, '找不到可上傳的價格資料。');
-                alert('無法從 Excel 辨識出有效資料。請確認每筆產品都有廠牌、產品線與貨號。');
+                alert('無法從 Excel 辨識出有效資料。請確認每筆產品至少有廠牌與貨號。');
                 input.value = '';
                 return;
             }
@@ -17446,7 +17410,6 @@ window.handlePriceExcelUpload = async function(input) {
                 purchaseCostCache.clear();
             }
             refreshPriceDatalists();
-            loadPriceCatalogSummary();
             renderCompanyAgencyBrandSettings();
             setPriceUploadProgress(100, `完成：檢查 ${imported.length} 筆；產品寫入 ${totalProductWrites}、標準成本寫入 ${totalCostWrites}、完全無變動 ${totalUnchangedRows} 筆。`);
             alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n只寫入實際有變動的資料；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。`);

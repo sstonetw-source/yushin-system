@@ -13,7 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261001-16">
+        <link rel="stylesheet" href="styles.css?v=20261001-17">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -95,28 +95,19 @@
         <div class="section-header no-print">
             <div>
                 <h2>產品管理</h2>
-                <div class="section-subtitle">搜尋 Product Master；產品分類集中由主檔管理，成本獨立存放且一般業務不顯示。</div>
+                <div class="section-subtitle">搜尋完整產品主檔；一般業務不顯示受保護的標準成本。</div>
             </div>
         </div>
+
         <div class="toolbar no-print product-search-toolbar">
-            <input id="productManagementSearch" type="search" placeholder="輸入貨號或品名開頭（至少 2 個字）" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
-            <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋產品</button>
+            <input id="productManagementSearch" type="search" placeholder="搜尋貨號、中文品名或英文品名" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
+            <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
-            <button type="button" id="createProductMasterBtn" class="btn-secondary" style="display:none;" onclick="openNewProductMasterEditor()">＋ 新增 Product Master</button>
-            <button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補 Product Master</button>
-                        <div id="productBatchMaintenance" class="order-export-menu" style="display:none;">
-                <div class="order-export-panel" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                    <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準 Product Import 範本</button>
-                    <button type="button" onclick="document.getElementById('productImportExcelInput').click()">匯入標準產品檔</button>
-                    <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                    <span style="font-size:12px;color:#666;">只維護一種 Excel：產品主檔、建議售價與標準成本同列維護；系統匯入後自動分流保存，實際採購價不會被覆蓋。</span>
-                    <span id="productBatchMaintenanceStatus" class="inline-status" role="status" aria-live="polite"></span>
-                </div>
-            </div>
-            <span id="productManagementSearchStatus" class="inline-status"></span>
         </div>
-        <div class="inventory-summary-note">搜尋直接查詢完整 Product Master，不受目前畫面載入筆數限制；貨號與中英文品名採開頭比對，不掃描整個資料庫。管理員／採購可按「待補 Product Master」手動查看近期待補品項。</div>
-        <div class="table-wrap">
+        <div class="product-search-note">搜尋會查完整 Product Master，不受目前畫面載入筆數限制。</div>
+        <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
+
+        <div class="table-wrap product-results-wrap">
             <table class="product-management-table">
                 <thead id="productManagementHead"><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
                 <tbody id="productManagementBody"><tr><td colspan="9" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
@@ -125,9 +116,42 @@
         <div id="productManagementMoreRow" class="product-load-more-row no-print" style="display:none;">
             <button type="button" id="productManagementMoreBtn" class="btn-secondary" onclick="loadMoreProductManagementResults()">載入更多結果</button>
         </div>
-    </div>
 
-    <!-- ============ Forecast 系統 ============ -->
+        <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
+            <div class="product-management-tools-title">管理工具</div>
+            <div class="product-management-tools-actions">
+                <button type="button" id="createProductMasterBtn" class="btn-secondary" style="display:none;" onclick="openNewProductMasterEditor()">＋ 新增產品</button>
+                <button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補產品</button>
+            </div>
+
+            <details id="productBatchMaintenance" class="product-import-details" style="display:none;">
+                <summary>批次匯入</summary>
+                <div class="product-import-card">
+                    <div class="product-import-actions">
+                        <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
+                        <button type="button" onclick="document.getElementById('productImportExcelInput').click()">匯入標準產品檔</button>
+                        <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
+                    </div>
+                    <p class="product-import-summary">一份 Excel 維護產品、建議售價與標準成本。只處理本次檔案中的品項，不影響其他產品與歷史採購資料。</p>
+                    <details class="product-import-rules">
+                        <summary>查看欄位規則</summary>
+                        <div class="product-import-rules-grid">
+                            <div><strong>必要識別</strong><span>廠牌、貨號</span></div>
+                            <div><strong>可選填</strong><span>產品線、規格、產品類型、單位、標準成本</span></div>
+                            <div><strong>預設值</strong><span>啟用＝是；庫存／批號／效期管理＝否</span></div>
+                            <div><strong>成本</strong><span>標準成本留白不覆蓋原值；實際採購價另外保存</span></div>
+                        </div>
+                    </details>
+                    <div id="priceUploadProgress" class="product-import-progress" style="display:none;">
+                        <div class="product-import-progress-head"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
+                        <div class="product-import-progress-track"><div id="priceUploadProgressBar" class="product-import-progress-bar" style="width:0;"></div></div>
+                    </div>
+                    <span id="productBatchMaintenanceStatus" class="inline-status" role="status" aria-live="polite"></span>
+                </div>
+            </details>
+        </section>
+    </div>
+    <!-- ============ Forecast 系統 ============ -->    <!-- ============ Forecast 系統 ============ -->
 <div id="forecast-system" class="content-section">
     <div class="section-header no-print forecast-section-header">
         <h2>
@@ -1087,7 +1111,6 @@
     <div id="admin-system" class="content-section">
         <div class="sub-nav no-print">
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
-            <div class="sub-tab" id="admin-sub-prices" onclick="switchAdminTab('prices', this)">產品主檔</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
             <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-warehouses" onclick="switchAdminTab('warehouses', this)">🏬 倉庫管理</div>
@@ -1108,26 +1131,7 @@
             </table>
         </div>
 
-        <!-- Product Import：人工只維護一種 Excel；系統將產品／售價寫入 products，標準成本分流到 productCosts。 -->
-        <div id="admin-prices" class="admin-panel" style="display:none;">
-            <div class="toolbar no-print">
-                <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ 下載標準匯入範本</button>
-                <button onclick="document.getElementById('priceExcelInput').click()">📤 匯入 Product Master</button>
-                <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">只維護一種 Excel：又鑫標準 Product Import。每列可同時包含產品資料、建議售價與標準成本；可只上傳要新增／修改的品項。系統只寫入有變動的欄位，未出現在檔案中的產品不會被刪除或停用；標準成本獨立存 productCosts，實際採購價與歷史成本不會被覆蓋。</span>
-            </div>
-            <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
-                <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
-                <div style="height:8px;background:#d9e5ef;border-radius:999px;overflow:hidden;margin-top:6px;"><div id="priceUploadProgressBar" style="height:100%;width:0;background:#1a73a8;transition:width .2s ease;"></div></div>
-            </div>
-
-            <table class="price-catalog-table">
-                <thead><tr><th>Product Master／廠牌</th><th>最後更新時間</th><th class="no-print">操作</th></tr></thead>
-                <tbody id="adminPriceCatalogBody"><tr><td colspan="3" style="color:#888;">載入中…</td></tr></tbody>
-            </table>
-        </div>
-
-        <div id="admin-agencies" class="admin-panel" style="display:none;">
+        <div id="admin-agencies" class="admin-panel" style="display:none;">        <div id="admin-agencies" class="admin-panel" style="display:none;">
             <div class="panel">
                 <strong>主要代理廠牌</strong>
                 <p style="font-size:12px;color:#666;margin:6px 0;">只有這裡儲存的主要代理廠牌會出現在一般廠牌選單並獨立統計；不需要先上傳價目表。未列入與未填的廠牌歸入「其他廠牌」，維修獨立統計。產品線由 Product Master 統一管理，建立訂單時由系統依貨號自動帶入，業務不需手動填寫。</p>
@@ -1392,6 +1396,6 @@
     <script src="modules/supply-core.js?v=20261001-6"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-140"></script>
+    <script src="app.js?v=20261001-141"></script>
 </body>
 </html>

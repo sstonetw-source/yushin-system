@@ -1522,12 +1522,17 @@ test('database backup includes formal Product Master and cost collections', () =
     assert.match(appSource, /'brands'/);
 });
 
-test('Product Master admin UI uses one standard Excel import without the legacy migration panel', () => {
+test('Product Management is the single daily Product Import entry', () => {
     assert.doesNotMatch(indexSource, /Product Master v2 遷移/);
     assert.doesNotMatch(indexSource, /id="productMasterMigrationPreviewBtn"/);
-    assert.match(indexSource, /匯入 Product Master/);
-    assert.match(indexSource, /只維護一種 Excel/);
-    assert.doesNotMatch(indexSource, /只更新建議售價/);
+    assert.doesNotMatch(indexSource, /id="admin-sub-prices"/);
+    assert.doesNotMatch(indexSource, /id="admin-prices"/);
+    assert.match(indexSource, /id="productManagementTools"/);
+    assert.match(indexSource, /id="productBatchMaintenance"/);
+    assert.match(indexSource, />批次匯入</);
+    assert.match(indexSource, /下載標準範本/);
+    assert.match(indexSource, /查看欄位規則/);
+    assert.match(indexSource, /只處理本次檔案中的品項/);
 });
 
 
@@ -3994,6 +3999,22 @@ test('mobile order list stays card based', () => {
 });
 
 
+test('Product Management mobile layout prevents horizontal overflow and keeps tools secondary', () => {
+    const productStart=indexSource.indexOf('id="product-system"');
+    const forecastStart=indexSource.indexOf('<!-- ============ Forecast 系統 ============ -->',productStart);
+    const productSource=indexSource.slice(productStart,forecastStart);
+    assert.ok(productStart>=0&&forecastStart>productStart);
+    assert.ok(productSource.indexOf('id="productManagementSearch"') < productSource.indexOf('id="productManagementTools"'));
+    assert.match(productSource,/\+ 新增產品/);
+    assert.match(productSource,/待補產品/);
+    assert.match(productSource,/id="priceUploadProgress"/);
+
+    assert.match(cssSource,/#product-system\s*\{[\s\S]*?overflow-x:hidden/);
+    assert.match(cssSource,/@media screen and \(max-width: 640px\)[\s\S]*?#product-system[\s\S]*?max-width:100%[\s\S]*?overflow-x:hidden/);
+    assert.match(cssSource,/\.product-import-card[\s\S]*?min-width:0/);
+    assert.match(cssSource,/\.product-management-tools-actions[\s\S]*?grid-template-columns:1fr 1fr/);
+});
+
 test('obsolete helper wrappers stay removed', () => {
     [
       'mergeUniqueSearchResults',
@@ -4043,7 +4064,7 @@ test('legacy standalone price and cost helpers stay isolated while UI uses unifi
 
     assert.match(indexSource,/id="productBatchMaintenance"/);
     assert.match(indexSource,/handlePriceExcelUpload\(this\)/);
-    assert.match(indexSource,/下載標準 Product Import 範本/);
+    assert.match(indexSource,/下載標準範本/);
     assert.match(indexSource,/只維護一種 Excel/);
     assert.doesNotMatch(indexSource,/handleProductPriceExcelUpload\(this\)/);
     assert.doesNotMatch(indexSource,/handleProductCostExcelUpload\(this\)/);
