@@ -1153,13 +1153,10 @@
         <!-- Product Master：正式資料只存 products / productCosts。 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
-                <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ Product Master 範本</button>
-                <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Product Master</button>
+                <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ 下載標準匯入範本</button>
+                <button onclick="document.getElementById('priceExcelInput').click()">📤 匯入 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <button type="button" class="btn-secondary" onclick="downloadProductPriceUpdateTemplate()">⬇️ 售價更新範本</button>
-                <button type="button" class="btn-secondary" onclick="document.getElementById('productPriceExcelInput').click()">📤 只更新建議售價</button>
-                <input type="file" id="productPriceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductPriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">Product Master：檔名＝廠牌、分頁＝產品線。建議售價只有一個，存在 products.listPrice；成本獨立存在 productCosts。若只調價，使用「只更新建議售價」，不會改其他產品資料。</span>
+                <span style="font-size:12px;color:#666;">只維護一種 Excel：每列包含廠牌、產品線、貨號、產品資料、建議售價與標準成本。可只上傳要新增／修改的品項；未出現在檔案中的產品不會被刪除或停用。建議售價存 products，標準成本獨立存 productCosts。</span>
             </div>
             <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
                 <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -1437,6 +1434,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-15"></script>
+    <script src="app.js?v=20261001-18"></script>
 </body>
 </html>
