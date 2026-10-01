@@ -160,68 +160,19 @@
             <span id="forecastHistorySearchStatus" class="inline-status" role="status"></span>
         </div>
 
-        <div class="forecast-quick-filters" aria-label="Forecast 快速篩選">
-            <button
-                type="button"
-                id="forecastMineQuickBtn"
-                class="forecast-filter-chip"
-                onclick="toggleForecastMineFilter()"
-            >我的案件</button>
-            <button
-                type="button"
-                id="forecastActiveQuickBtn"
-                class="forecast-filter-chip"
-                onclick="setForecastActiveFilter()"
-            >進行中</button>
-            <button
-                type="button"
-                id="forecastFilterToggleBtn"
-                class="forecast-filter-chip"
-                onclick="toggleForecastFilterPanel()"
-                aria-expanded="false"
-                aria-controls="forecastFilterPanel"
-            >篩選</button>
-        </div>
+        <select id="forecastSalesFilter" aria-label="Forecast 業務" onchange="handleForecastSalesFilterChange()">
+            <option value="">全部業務</option>
+        </select>
 
-        <div id="forecastFilterPanel" class="forecast-filter-panel" hidden>
-            <div class="forecast-filter-grid">
-                <select id="forecastBrandFilter" aria-label="Forecast 廠牌" onchange="applyForecastLocalFilters()">
-                    <option value="">全部廠牌</option>
-                </select>
+        <select id="forecastBrandFilter" aria-label="Forecast 廠牌" onchange="handleForecastBrandFilterChange()">
+            <option value="">全部廠牌</option>
+        </select>
 
-                <select id="forecastSalesFilter" aria-label="Forecast 業務" onchange="handleForecastSalesFilterChange()">
-                    <option value="">全部業務</option>
-                </select>
-
-                <select id="forecastStatusFilter" aria-label="Forecast 狀態" onchange="handleForecastStatusFilterChange()">
-                    <option value="active" selected>進行中</option>
-                    <option value="won">Win</option>
-                    <option value="lost">Lost</option>
-                    <option value="all">全部狀態</option>
-                </select>
-
-                <select id="forecastStageFilter" aria-label="Forecast Stage" onchange="applyForecastLocalFilters()">
-                    <option value="">全部 Stage</option>
-                    <option value="stage1">Stage 1</option>
-                    <option value="stage2">Stage 2</option>
-                    <option value="stage3">Stage 3</option>
-                    <option value="stage4">Stage 4</option>
-                    <option value="stage5">Stage 5</option>
-                </select>
-
-                <select id="forecastPeriodFilter" aria-label="Forecast 期間" onchange="applyForecastLocalFilters()">
-                    <option value="this-month">本月</option>
-                    <option value="last-month">上月</option>
-                    <option value="this-quarter">本季</option>
-                    <option value="this-year" selected>今年</option>
-                    <option value="last-year">去年</option>
-                    <option value="all">全部期間</option>
-                </select>
-            </div>
-            <div class="forecast-filter-actions">
-                <button type="button" class="btn-secondary" onclick="clearForecastFilters()">清除篩選</button>
-            </div>
-        </div>
+        <select id="forecastStatusFilter" aria-label="Forecast 狀態" onchange="handleForecastStatusFilterChange()">
+            <option value="active" selected>進行中</option>
+            <option value="won">Win</option>
+            <option value="lost">Lost</option>
+        </select>
     </div>
 
     <div class="table-wrap forecast-table-wrap">
