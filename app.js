@@ -15992,13 +15992,16 @@ let pendingPriceImportPreview = null;
 async function summarizeProductMasterImport(groups) {
     const rows = groups.flatMap(group => group.imported.map(raw => normalizeProductMasterItem({ ...raw, brand: group.brand })));
     const existingIds = new Set();
-    for (let i = 0; i < rows.length; i += 10) {
-        const chunk = rows.slice(i, i + 10);
-        const docs = await Promise.all(chunk.map(item => firestoreReadWithTimeout(
-            db.collection('products').doc(item.productId).get(),
+    const uniqueProductIds = [...new Set(rows.map(item => String(item.productId || '').trim()).filter(Boolean))];
+    for (let i = 0; i < uniqueProductIds.length; i += 10) {
+        const ids = uniqueProductIds.slice(i, i + 10);
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('products')
+                .where(firebase.firestore.FieldPath.documentId(), 'in', ids)
+                .get(),
             'Product Master 匯入比對'
-        )));
-        docs.forEach(doc => { if (doc.exists) existingIds.add(doc.id); });
+        );
+        snapshot.docs.forEach(doc => existingIds.add(doc.id));
     }
     let added = 0, updated = 0, inactive = 0;
     const brands = groups.map(group => {
