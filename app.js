@@ -8021,7 +8021,7 @@ function loadPurchasingReceivingQueue(reset = true, options = {}) {
     purchasingReceivingReady = false;
     renderPoList();
     purchasingReceivingLoadPromise = Promise.allSettled([
-        loadPurchaseOrderPage(reset),
+        loadPurchaseOrderPage(reset, { deferRender:true }),
         refreshPurchasingOrderCache(reset, options)
     ]).then(results => {
         purchasingReceivingReady = true;
@@ -8667,8 +8667,9 @@ function updatePoLoadMoreButton() {
     }
 }
 
-async function loadPurchaseOrderPage(reset) {
+async function loadPurchaseOrderPage(reset, options = {}) {
     if (!canAccessPage('orders.po')) return;
+    const deferRender = options.deferRender === true;
     if (poListPageLoading) return;
     if (reset) {
         if (purchasingView === 'receiving') {
@@ -8745,7 +8746,7 @@ async function loadPurchaseOrderPage(reset) {
             nextSourceOrders.forEach((order, id) => mergedOrders.set(id, order));
             ordersCache = [...mergedOrders.values()].sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
             writeAppDataCache('orders', ordersCache);
-            renderPurchasingWorkCards();
+            if (!deferRender) renderPurchasingWorkCards();
         }
         supplyReceivingCache=[...supplyRecords.values()]
             .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
@@ -8761,7 +8762,7 @@ async function loadPurchaseOrderPage(reset) {
             poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
             writeAppDataCache('purchase-history', poListCache);
         }
-        renderPoList();
+        if (!deferRender) renderPoList();
     } catch (err) {
         console.error('讀取訂購單／待到貨資料失敗：', err);
         const message = err?.message || String(err || '未知錯誤');
