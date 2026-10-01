@@ -13,7 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261001-11">
+        <link rel="stylesheet" href="styles.css?v=20261001-12">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -112,6 +112,9 @@
                 <thead id="productManagementHead"><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
                 <tbody id="productManagementBody"><tr><td colspan="9" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
             </table>
+        </div>
+        <div id="productManagementMoreRow" class="product-load-more-row no-print" style="display:none;">
+            <button type="button" id="productManagementMoreBtn" class="btn-secondary" onclick="loadMoreProductManagementResults()">載入更多結果</button>
         </div>
     </div>
 
@@ -1447,6 +1450,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-71"></script>
+    <script src="app.js?v=20261001-72"></script>
 </body>
 </html>
