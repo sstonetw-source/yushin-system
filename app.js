@@ -8325,6 +8325,12 @@ window.loadMorePurchasingCompleted = async function() {
 
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
+    if (purchasingView === 'history') {
+        // 全部訂購單不顯示工作卡；直接畫正式訂購單歷史，
+        // 不需要為了被隱藏的卡片掃描整批 ordersCache。
+        renderPoList();
+        return;
+    }
     const filters = purchaseFilterContext();
     const normalizedItemsByOrder = new Map(
         ordersCache.map(order => [order.id, normalizedOrderItems(order)])
@@ -8359,14 +8365,14 @@ window.switchPurchasingView = function(view, tab) {
     purchasingView = view;
     if (view === 'completed' && previousPurchasingView !== 'completed') purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
     populatePurchasingFilters();
-    const filters = purchaseFilterContext();
-    const normalizedItemsByOrder = new Map(
-        ordersCache.map(order => [order.id, normalizedOrderItems(order)])
-    );
+    const filters = view === 'history' ? null : purchaseFilterContext();
+    const normalizedItemsByOrder = view === 'history'
+        ? null
+        : new Map(ordersCache.map(order => [order.id, normalizedOrderItems(order)]));
     const completedRows = view === 'completed'
         ? purchasingCompletedRows(filters, normalizedItemsByOrder)
         : null;
-    renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
+    if (view !== 'history') renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
