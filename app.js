@@ -3405,6 +3405,11 @@ window.onOrderItemCodeChange = async function(input) {
     const match = await findProductByCode(value);
     if (!match) {
         input.dataset.autofillStatus = 'not-found';
+        input.dataset.productLine = '';
+        input.dataset.productType = '';
+        const hiddenProductLine = document.getElementById('orderProductLine');
+        if (hiddenProductLine) hiddenProductLine.value = '';
+        window._orderModalProductId = '';
         setOrderCostFieldForProduct(null);
         showQuickProductButton(input, 'order');
         return;
@@ -3431,7 +3436,8 @@ window.onOrderItemCodeChange = async function(input) {
     }
 
     input.dataset.productLine = match.productLine || '';
-    document.getElementById('orderProductLine').value = match.productLine || '';
+    const hiddenProductLine = document.getElementById('orderProductLine');
+    if (hiddenProductLine) hiddenProductLine.value = match.productLine || '';
     input.dataset.productType = match.productType || '';
 
     // 成本與庫存彼此獨立；平行查詢，避免成本讀取阻塞庫存提示。
@@ -11377,7 +11383,10 @@ function setOrderModalItem(item={}) {
     document.getElementById('orderItemName').value=normalized.itemName||'';
     const nameEn=document.getElementById('orderItemNameEn');if(nameEn)nameEn.value=normalized.itemNameEn||'';
     const spec=document.getElementById('orderSpec');if(spec)spec.value=normalized.spec||'';
-    document.getElementById('orderProductLine').value=normalized.productLine||'';
+    const productLineField=document.getElementById('orderProductLine');if(productLineField)productLineField.value=normalized.productLine||'';
+    const codeInput=document.getElementById('orderItemCode');
+    codeInput.dataset.productLine=normalized.productLine||'';
+    codeInput.dataset.productType=normalized.productType||'';
     if(normalized.brand)selectBrandInDropdown(document.getElementById('orderBrand'),normalized.brand);
     else document.getElementById('orderBrand').value='';
     onOrderBrandSelectChange();
@@ -11422,7 +11431,7 @@ function normalizeNewOrderItem(item = {}) {
         ...item,itemId:item.itemId||`item-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
         brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
-        productId:item.productId||match?.productId||stableProductId(match||item),productLine:item.productLine||match?.productLine||'',productType:match?.productType||item.productType||'',
+        productId:match?.productId||item.productId||stableProductId(match||item),productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
         authorizationType:match?authorizationTypeForProduct(match):(item.authorizationType||''),supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
         warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' ? String(item.warehouseId||'') : ''
@@ -11430,7 +11439,8 @@ function normalizeNewOrderItem(item = {}) {
 }
 
 function currentOrderModalItem() {
-    const item={itemCode:document.getElementById('orderItemCode').value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:document.getElementById('orderProductLine').value.trim(),spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const codeInput=document.getElementById('orderItemCode');
+    const item={itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     const cost=document.getElementById('orderCostPrice').value;if(item.procurementType==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
@@ -11455,7 +11465,9 @@ window.addCurrentOrderItemToDraft=function(){
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>(existing.productId&&item.productId&&existing.productId===item.productId)||(!existing.productId&&!item.productId&&normalizeHistoryItemCode(existing.itemCode)===normalizeHistoryItemCode(item.itemCode)));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
-    ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
+    ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;
+    document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
 };
 
 window.openOrderModal = function(source = null) {
@@ -13565,19 +13577,21 @@ function findPriceItemForOrder(order) {
 
 function productLineForOrder(order) {
     if ((order.brand || '').trim() === '維修') return '維修';
-    const savedLine = (order.productLine || '').trim();
-    if (savedLine && savedLine !== '未分類') return savedLine;
-    // 舊訂單未存產品線，或曾被存成「未分類」時，依廠牌＋貨號回查最新價目表。
+    // 銷售分析以 Product Master 為分類真實來源；業務不需要在訂單上判斷或維護產品線。
     const match = findPriceItemForOrder(order);
-    return (match && match.productLine) ? match.productLine.trim() : '未分類';
+    const masterLine = (match?.productLine || '').trim();
+    if (masterLine) return masterLine;
+    // 只有 Product Master 暫時查不到時，才沿用訂單內既有的背景快照。
+    const savedLine = (order.productLine || '').trim();
+    return savedLine && savedLine !== '未分類' ? savedLine : '未分類';
 }
 
 function productTypeForOrder(order) {
-    const savedType = (order.productType || '').trim();
-    if (savedType && savedType !== '未分類') return savedType;
-    // 舊訂單沒有類型時，同樣可依貨號回查目前價目表；仍找不到才歸到未分類。
     const match = findPriceItemForOrder(order);
-    return (match && match.productType) ? match.productType.trim() : '未分類';
+    const masterType = (match?.productType || '').trim();
+    if (masterType) return masterType;
+    const savedType = (order.productType || '').trim();
+    return savedType && savedType !== '未分類' ? savedType : '未分類';
 }
 
 function statisticBrandForOrder(order) {
