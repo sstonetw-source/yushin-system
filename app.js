@@ -4003,6 +4003,85 @@ function preloadComparisonQuoteImages() {
     sources.forEach(src => preloadQuoteImage(src));
 }
 
+window.openSavedThreeQuoteRecord = async function(quoteNo) {
+    const button = actionButtonFromEventOrSelector();
+    const buttonState = beginActionButton(button, '載入三估單…');
+    if (button && !buttonState) return;
+
+    try {
+        let source = myQuotesCache.find(q => q.quoteNo === quoteNo)
+            || quoteHistorySearchResults.find(q => q.quoteNo === quoteNo);
+
+        if (!source) {
+            const snapshot = await firestoreReadWithTimeout(
+                db.collection('quotes').doc(quoteNo).get(),
+                '載入三估單紀錄'
+            );
+            if (!snapshot.exists) throw new Error('找不到這張估價單。');
+            source = { id: snapshot.id, ...snapshot.data() };
+        }
+
+        const saved = source.threeQuoteRecord;
+        if (!saved || !saved.baseQuote) throw new Error('這張估價單沒有已儲存的三估單紀錄。');
+
+        await ensureSalesListLoaded();
+
+        const baseQuote = saved.baseQuote;
+        restoringQuoteDraft = true;
+        actuallySwitchMainTab('quote-system');
+        switchQuoteView('create', document.getElementById('qsub-create'));
+        applyCompanyTheme(baseQuote.company || source.company || 'yushin');
+        populateSalesDropdown();
+
+        document.getElementById('clientName').value = baseQuote.clientName || '';
+        document.getElementById('ordererName').value = baseQuote.ordererName || '';
+        document.getElementById('salesName').value = baseQuote.salesName || '';
+        document.getElementById('quoteDate').value = baseQuote.quoteDate || '';
+        document.getElementById('quoteNo').value = baseQuote.quoteNo || quoteNo;
+        document.getElementById('validDays').value = baseQuote.validDays ?? 90;
+        document.getElementById('discountRateInput').value = baseQuote.discountRate || 0;
+        updateSalesPhoneDisplay();
+
+        const itemsBody = document.getElementById('quoteItems');
+        itemsBody.innerHTML = '';
+        if (Array.isArray(baseQuote.items) && baseQuote.items.length) {
+            baseQuote.items.forEach(item => addQuoteRow(item));
+        } else {
+            addQuoteRow();
+        }
+        calculateTotals();
+
+        restoringQuoteDraft = false;
+        saveQuoteDraft();
+
+        preloadComparisonQuoteImages();
+        const company2 = saved.company2 || '';
+        const company3 = saved.company3 || '';
+        setComparisonCompanyOptions(document.getElementById('comparisonCompany2'), company2, company3);
+        setComparisonCompanyOptions(document.getElementById('comparisonCompany3'), company3, company2);
+        document.getElementById('comparisonPercent2').value = saved.percent2 ?? 10;
+        document.getElementById('comparisonPercent3').value = saved.percent3 ?? 15;
+        updateThreeQuoteDialog();
+
+        const summary = document.getElementById('threeQuoteBaseSummary');
+        if (summary && saved.generatedAt) {
+            const generatedAt = new Date(saved.generatedAt);
+            const timeLabel = Number.isNaN(generatedAt.getTime())
+                ? ''
+                : generatedAt.toLocaleString('zh-TW', { hour12: false });
+            summary.insertAdjacentHTML('beforeend', timeLabel ? `<br><span class="three-quote-record-time">紀錄時間：${escapeHtml(timeLabel)}</span>` : '');
+        }
+
+        document.getElementById('threeQuoteOverlay').classList.add('active');
+    } catch (err) {
+        console.error('載入三估單紀錄失敗：', err);
+        alert('載入三估單紀錄失敗：' + (err?.message || err));
+    } finally {
+        restoringQuoteDraft = false;
+        endActionButton(button, buttonState);
+    }
+};
+
 window.printThreeQuotes = async function() {
     const validationMessage = currentQuoteOutputValidation();
     if (validationMessage) { alert(validationMessage); return; }
@@ -4033,7 +4112,27 @@ window.printThreeQuotes = async function() {
 
         quoteData = quoteDataForPdfExport();
         rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
-        persistQuoteOutputRecord(quoteData, '三家估價 PDF');
+
+        const baseQuoteSnapshot = JSON.parse(JSON.stringify(quoteData));
+        quoteData.threeQuoteRecord = {
+            version: 1,
+            generatedAt: new Date().toISOString(),
+            company2,
+            company3,
+            percent2,
+            percent3,
+            baseTotal: comparisonBaseTotal(),
+            total2: roundedComparisonTotal(percent2),
+            total3: roundedComparisonTotal(percent3),
+            baseQuote: baseQuoteSnapshot
+        };
+        await persistQuoteOutputRecord(quoteData, '三家估價 PDF');
+
+        const cachedIndex = myQuotesCache.findIndex(q => q.quoteNo === quoteData.quoteNo);
+        if (cachedIndex >= 0) myQuotesCache[cachedIndex] = { ...myQuotesCache[cachedIndex], ...quoteData };
+        const historyIndex = quoteHistorySearchResults.findIndex(q => q.quoteNo === quoteData.quoteNo);
+        if (historyIndex >= 0) quoteHistorySearchResults[historyIndex] = { ...quoteHistorySearchResults[historyIndex], ...quoteData };
+        writeAppDataCache('quotes', myQuotesCache);
 
         const first = createQuotePdfStage(quoteData);
         firstStage = first.stage;
@@ -4097,7 +4196,7 @@ function quotePdfFileName(quoteData = {}) {
 
 function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
     quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
-    db.collection('quotes').doc(quoteData.quoteNo).set(quoteData).then(() => {
+    return db.collection('quotes').doc(quoteData.quoteNo).set(quoteData).then(() => {
         if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
             return db.collection('forecasts').doc(quoteData.sourceId).set({
                 linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.QUOTE, quoteData.quoteNo, 'created')),
@@ -4107,6 +4206,7 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
     }).catch(err => {
         console.error('儲存估價單到雲端失敗：', err);
         alert('提醒：估價單存到雲端失敗（' + err.message + '）。' + outputLabel + '內容不受影響，請稍後確認網路後再重新同步。');
+        throw err;
     });
 }
 
@@ -4846,6 +4946,7 @@ window.renderMyQuotesList = function() {
             <td class="no-print quote-list-actions">
                 <div class="quote-list-action-row">
                     <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${escapeAttr(q.quoteNo)}')">載入</button>
+                    ${q.threeQuoteRecord ? `<button type="button" class="btn-small btn-secondary" onclick="openSavedThreeQuoteRecord('${escapeAttr(q.quoteNo)}')">三估單紀錄</button>` : ''}
                     <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
                     ${canEditPage('forecast') ? `<button type="button" class="btn-small btn-secondary" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">Forecast</button>` : ''}
                     ${actionBtn}
