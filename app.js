@@ -1750,7 +1750,10 @@ window.saveProductMasterEditor = async function() {
 
     const originalId = String(document.getElementById('pmEditProductId').value || '').trim();
     const normalizedPartNo = normalizeItemCodeLoose(code);
-    const duplicateSnap = await db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get();
+    const duplicateSnap = await firestoreReadWithTimeout(
+        db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get(),
+        'Product Master 重複貨號檢查'
+    );
     const duplicate = duplicateSnap.docs.find(doc => {
         if (doc.id === originalId) return false;
         const data = doc.data() || {};
@@ -2667,10 +2670,13 @@ window.openForecastHistoryModal = async function(id) {
     overlay.classList.add('active');
 
     try {
-        const snapshot = await db.collection('forecasts').doc(id).collection('progress')
-            .orderBy('createdAt', 'desc')
-            .limit(100)
-            .get();
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('forecasts').doc(id).collection('progress')
+                .orderBy('createdAt', 'desc')
+                .limit(100)
+                .get(),
+            'Forecast 歷史紀錄'
+        );
 
         const rows = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         body.innerHTML = rows.length ? rows.map(row => `<tr>
@@ -2695,7 +2701,10 @@ async function forecastProductMatchAsync(item) {
         const cached = priceList.find(product => String(product.productId || '') === productId);
         if (cached) return cached;
         try {
-            const snap = await db.collection('products').doc(productId).get();
+            const snap = await firestoreReadWithTimeout(
+                db.collection('products').doc(productId).get(),
+                'Forecast Product Master'
+            );
             if (snap.exists) {
                 const product = productMasterDocToPriceItem(snap);
                 if (product.status !== 'INACTIVE' && product.active !== false) return cacheProductLookupItem(product);
@@ -2767,7 +2776,10 @@ async function forecastOrderItems(forecast) {
 
     // 舊 Forecast 由估價單建立時沒有保存 items；從來源估價單補抓，讓既有資料也能正確拆單。
     if (forecast.sourceType === DOCUMENT_TYPES.QUOTE && forecast.sourceId) {
-        const quoteSnap = await db.collection('quotes').doc(forecast.sourceId).get();
+        const quoteSnap = await firestoreReadWithTimeout(
+            db.collection('quotes').doc(forecast.sourceId).get(),
+            'Forecast 來源估價單'
+        );
         const quote = quoteSnap.exists ? quoteSnap.data() : null;
         if (Array.isArray(quote?.items) && quote.items.length) {
             const items = quote.items.map(item => ({
@@ -5230,7 +5242,10 @@ window.copyQuoteAsNew = async function(quoteNo) {
     let source = myQuotesCache.find(quote => quote.quoteNo === quoteNo);
     try {
         if (!source) {
-            const snapshot = await db.collection('quotes').doc(quoteNo).get();
+            const snapshot = await firestoreReadWithTimeout(
+                db.collection('quotes').doc(quoteNo).get(),
+                '複製估價單'
+            );
             if (!snapshot.exists) throw new Error('找不到這張估價單。');
             source = { id: snapshot.id, ...snapshot.data() };
         }
@@ -5631,7 +5646,11 @@ window.createForecastFromQuote = async function(quoteNo) {
 
     try {
         const cached = myQuotesCache.find(q => q.quoteNo === quoteNo);
-        const q = cached || (await db.collection('quotes').doc(quoteNo).get()).data();
+        const quoteSnapshot = cached ? null : await firestoreReadWithTimeout(
+            db.collection('quotes').doc(quoteNo).get(),
+            '建立 Forecast 的估價單'
+        );
+        const q = cached || quoteSnapshot?.data();
 
         if (!q) {
             throw new Error('找不到估價單');
@@ -5742,7 +5761,11 @@ window.markQuoteAsDeal = async function(quoteNo) {
     if(button && !buttonState)return;
     try {
         const cached=myQuotesCache.find(q=>q.quoteNo===quoteNo) || quoteHistorySearchResults.find(q=>q.quoteNo===quoteNo);
-        const q=cached || (await db.collection('quotes').doc(quoteNo).get()).data();
+        const quoteSnapshot=cached ? null : await firestoreReadWithTimeout(
+            db.collection('quotes').doc(quoteNo).get(),
+            '成交轉訂單估價單'
+        );
+        const q=cached || quoteSnapshot?.data();
         if(!q)throw new Error('找不到這張估價單');
         if(q.dealClosed){alert('這張估價單已經標記過成交了。');return;}
         const sourceItems=(q.items||[]).filter(item=>item.nameCn||item.nameEn||item.model);
@@ -14256,7 +14279,10 @@ window.saveQuickProduct = async function() {
 
     const normalizedPartNo = normalizeItemCodeLoose(code);
     const brandEntry = brandMasterEntryForName(brand);
-    const duplicateSnap = await db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get();
+    const duplicateSnap = await firestoreReadWithTimeout(
+        db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get(),
+        'Product Master 重複貨號檢查'
+    );
     const duplicate = duplicateSnap.docs.find(doc => {
         const data = doc.data() || {};
         return normalizeBrandLookupKey(data.brandName || data.brand || '') === normalizeBrandLookupKey(brand);
