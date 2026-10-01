@@ -3095,3 +3095,14 @@ test('item dispatch state avoids renormalizing the whole order', () => {
     assert.doesNotMatch(source,/normalizedOrderItems\(order\)/);
     assert.match(source,/!r\.itemId&&singleItem/);
 });
+
+
+test('delivery history reuses normalized item lookup', () => {
+    const start=appSource.indexOf('function renderDeliveryModal()');
+    const end=appSource.indexOf('\nwindow.editDeliveryRecord',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const deliveryItems=normalizedOrderItems\(order\)/);
+    assert.match(source,/const deliveryItemNameById=new Map\(deliveryItems\.map/);
+    assert.match(source,/deliveryItemNameById\.get\(record\.itemId\)/);
+    assert.equal((source.match(/normalizedOrderItems\(order\)/g)||[]).length,1);
+});
