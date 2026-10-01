@@ -2372,5 +2372,9 @@ test('admin maintenance reads are bounded', () => {
 
     const importStart=appSource.indexOf('async function summarizeProductMasterImport');
     const importEnd=appSource.indexOf('async function confirmProductMasterImport',importStart);
-    assert.match(appSource.slice(importStart,importEnd),/firestoreReadWithTimeout\([\s\S]*?'Product Master 匯入比對'/);
+    const importSource=appSource.slice(importStart,importEnd);
+    assert.match(importSource,/firestoreReadWithTimeout\([\s\S]*?'Product Master 匯入比對'/);
+    assert.match(importSource,/FieldPath\.documentId\(\), 'in', ids/);
+    assert.match(importSource,/uniqueProductIds/);
+    assert.doesNotMatch(importSource,/Promise\.all\(chunk\.map/);
 });
