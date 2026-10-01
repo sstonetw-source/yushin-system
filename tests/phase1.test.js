@@ -2378,3 +2378,13 @@ test('admin maintenance reads are bounded', () => {
     assert.match(importSource,/uniqueProductIds/);
     assert.doesNotMatch(importSource,/Promise\.all\(chunk\.map/);
 });
+
+
+test('test data reset reads are bounded', () => {
+    const start=appSource.indexOf('async function countCollectionDocuments');
+    const end=appSource.indexOf('\nwindow.previewTestDataReset',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/firestoreReadWithTimeout\(query\.get\(\), `\$\{name\} 文件數量`\)/);
+    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?limit\(300\)\.get\(\)[\s\S]*?`\$\{name\} 清除批次`/);
+    assert.match(source,/firestoreReadWithTimeout\(query\.get\(\), `\$\{name\} 庫存歸零批次`\)/);
+});
