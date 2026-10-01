@@ -2112,3 +2112,16 @@ test('receiving queue no longer contaminates purchase history cache', () => {
     assert.doesNotMatch(receivingSource,/readAppDataCache/);
     assert.match(receivingSource,/loadPurchasingReceivingQueue\(true\)/);
 });
+
+
+test('session restore and foreground account checks use bounded Firestore reads', () => {
+    const authStart=appSource.indexOf('firebase.auth().onAuthStateChanged(function(user)');
+    const authEnd=appSource.indexOf('\n});\n\nfunction getPagePermission',authStart);
+    const authSource=appSource.slice(authStart,authEnd);
+    assert.match(authSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('users'\)\.doc\(user\.uid\)\.get\(\)[\s\S]*?'登入狀態驗證'/);
+
+    const resumeStart=appSource.indexOf('function revalidateCurrentUserAccess()');
+    const resumeEnd=appSource.indexOf('\nfunction recoverVisibleAppAfterResume',resumeStart);
+    const resumeSource=appSource.slice(resumeStart,resumeEnd);
+    assert.match(resumeSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('users'\)\.doc\(user\.uid\)\.get\(\)[\s\S]*?'帳號狀態驗證'/);
+});
