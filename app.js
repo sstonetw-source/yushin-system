@@ -4053,30 +4053,6 @@ window.onOrderItemCodeInput = function(input) {
 };
 
 // 客戶名稱自動完成：僅抓「最近 10 筆」估價單取樣，避免隨估價單累積而讀取量無上限增長
-function loadClientHistory() {
-    return firestoreReadWithTimeout(
-        db.collection('quotes').orderBy('quoteNo', 'desc').limit(10).get(),
-        '最近客戶紀錄'
-    ).then(snapshot => {
-        const clientListDatalist = document.getElementById('clientList');
-        if (!clientListDatalist) return;
-
-        const clients = new Set();
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            if (data.clientName) clients.add(data.clientName);
-        });
-
-        clientListDatalist.innerHTML = '';
-        clients.forEach(c => {
-            const opt = document.createElement('option');
-            opt.value = c;
-            clientListDatalist.appendChild(opt);
-        });
-        populateOrderCustomerSuggestions();
-    }).catch(() => {});
-}
-
 window.saveToStorage = function() {
     const validDays = document.getElementById('validDays').value;
     localStorage.setItem('quote_valid_days', validDays);
@@ -6167,20 +6143,6 @@ function linkedDocumentFields(sourceType = '', sourceId = '', links = []) {
     };
 }
 
-
-function legacyDocumentLinks(record, type) {
-    const links = [...(record?.linkedDocuments || [])];
-    if (type === DOCUMENT_TYPES.ORDER) {
-        if (record?.quoteNo) links.push(documentLink(DOCUMENT_TYPES.QUOTE, record.quoteNo, 'source'));
-        if (record?.purchaseOrderNo) links.push(documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, record.purchaseOrderNo, 'created'));
-    }
-    if (type === DOCUMENT_TYPES.PURCHASE_ORDER) {
-        purchaseItemsFromSavedPo(record).forEach(item => {
-            if (item.orderId) links.push(documentLink(DOCUMENT_TYPES.ORDER, item.orderId, 'source'));
-        });
-    }
-    return normalizeDocumentLinks(links);
-}
 
 function compareBusinessRecordsNewestFirst(a, b, dateField, numberField) {
     const dateCompare = String(b?.[dateField] || '').localeCompare(String(a?.[dateField] || ''));
