@@ -15,8 +15,11 @@
   function normalizeItem(item = {}, index = 0) {
     const orderedQty = n(item.orderedQty ?? item.qty);
     const reservedQty = clamp(item.reservedQty, 0, orderedQty);
-    const supplyOrderedQty = clamp(item.supplyOrderedQty, 0, orderedQty);
-    const receivedQty = clamp(item.receivedQty, 0, orderedQty);
+    // 採購與到貨是累計供應量，不是「目前尚未履約量」。
+    // 原廠直送若送貨後退貨並補送，累計訂購／到貨量會合理地超過原始 orderedQty；
+    // 這裡只保證非負，不可把補送數量截回原訂購量。
+    const supplyOrderedQty = n(item.supplyOrderedQty);
+    const receivedQty = n(item.receivedQty);
     const dispatchPreparedQty = clamp(item.dispatchPreparedQty, 0, orderedQty);
     const deliveredQty = clamp(item.deliveredQty, 0, orderedQty);
     const returnedQty = clamp(item.returnedQty, 0, deliveredQty);

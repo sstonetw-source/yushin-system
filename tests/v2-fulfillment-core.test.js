@@ -17,3 +17,24 @@ test('FEFO allocates earliest expiry first and computes actual COGS',()=>{const 
 test('FIFO ignores expiry when product is not expiry-managed',()=>{const r=f.allocateLots([{id:'new',remainingQty:10,receivedAt:'2026-02-01',unitCost:120},{id:'old',remainingQty:10,receivedAt:'2026-01-01',unitCost:100}],12,false);assert.deepEqual(r.allocations.map(x=>[x.lotId,x.qty]),[['old',10],['new',2]]);});
 
 test('completed prepared delivery exposes next reserved quantity for dispatch',()=>{const x={orderedQty:20,reservedQty:3,dispatchPreparedQty:5,deliveredQty:5};assert.equal(f.shippableQty(x),0);assert.equal(f.pendingDispatchQty(x),3);});
+
+
+test('direct-ship replacement supply counters can exceed original ordered quantity after return',()=>{
+  const x=f.normalizeItem({
+    orderedQty:10,
+    fulfillmentType:'DIRECT_SHIP',
+    supplyOrderedQty:12,
+    receivedQty:12,
+    deliveredQty:10
+  });
+  assert.equal(x.supplyOrderedQty,12);
+  assert.equal(x.receivedQty,12);
+});
+
+test('warehouse cumulative supply counters are preserved instead of silently truncated',()=>{
+  const x=f.normalizeItem({orderedQty:5,supplyOrderedQty:7,receivedQty:6});
+  assert.equal(x.supplyOrderedQty,7);
+  assert.equal(x.receivedQty,6);
+  assert.equal(x.reservedQty,0);
+  assert.equal(x.shortageQty,5);
+});
