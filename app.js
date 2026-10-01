@@ -5702,9 +5702,13 @@ window.renderMyQuotesList = function() {
     if (salesHeader) salesHeader.style.display = isAdminViewingAll ? '' : 'none';
 
     visibleQuoteSource.forEach(q => {
-        const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
-        const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
-        if (!quoteHistorySearchActive && keyword && !searchable.includes(keyword)) return;
+        if (!quoteHistorySearchActive && keyword) {
+            const itemSearchText = (q.items || []).map(item =>
+                `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`
+            ).join(' ');
+            const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
+            if (!searchable.includes(keyword)) return;
+        }
         if (salesFilter && stripPhoneSuffix(q.salesName || '') !== salesFilter) return;
         if (brandFilter && !quoteBrandsForRecord(q).includes(brandFilter)) return;
         if (statusFilter === 'open' && q.dealClosed) return;
