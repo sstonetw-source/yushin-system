@@ -7030,7 +7030,15 @@ function normalizedOrderItems(order) {
             deliveredQty: grossDeliveredQty,
             returnedQty
         };
-        return window.YushinFulfillment ? window.YushinFulfillment.normalizeItem(base, index) : base;
+        const normalized = window.YushinFulfillment ? window.YushinFulfillment.normalizeItem(base, index) : base;
+        // 僅在記憶體標記這個物件的送貨／退貨量已由 deliveryRecords / returnRecords 索引完成。
+        // non-enumerable 不會被 spread / JSON / Firestore 寫回，避免快照欄位變成持久資料。
+        try {
+            Object.defineProperty(normalized, '__fulfillmentSnapshot', {
+                value:true, enumerable:false, configurable:true
+            });
+        } catch (_) {}
+        return normalized;
     });
 }
 
@@ -7148,13 +7156,18 @@ function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByI
 const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
-    // 這裡只需要知道「是否為單品項訂單」來承接舊紀錄沒有 itemId 的情況；
-    // 不需要為每個品項重新整理整張訂單，避免工作卡／列表反覆做相同工作。
+    // normalizedOrderItems() 已將 deliveryRecords / returnRecords 依 itemId 索引完成時，
+    // 直接使用該記憶體快照；只有原始 item 才回退掃描事件紀錄。
+    const hasSnapshot = item?.__fulfillmentSnapshot === true;
     const singleItem = Array.isArray(order?.items) && order.items.length === 1;
-    const grossDelivered=savedDeliveryRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
-        .reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const returned=savedReturnRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
-        .reduce((sum,r)=>sum+Number(r.qty||0),0);
+    const grossDelivered=hasSnapshot
+        ? Math.max(0,Number(item.deliveredQty||0))
+        : savedDeliveryRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
+            .reduce((sum,r)=>sum+Number(r.qty||0),0);
+    const returned=hasSnapshot
+        ? Math.max(0,Number(item.returnedQty||0))
+        : savedReturnRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
+            .reduce((sum,r)=>sum+Number(r.qty||0),0);
     // 品項工作狀態使用有效送貨量。已送貨後若發生退貨，必須退出「已完成／待核銷」，
     // 回到仍需補送的物流狀態；grossDelivered 保留給庫存與歷史追蹤。
     const delivered=Math.max(0,grossDelivered-returned);
