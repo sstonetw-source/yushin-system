@@ -161,6 +161,13 @@ service cloud.firestore {
         && request.resource.data.get('receivedQty', 0) >= resource.data.get('receivedQty', 0)
         && request.resource.data.get('receivedQty', 0) <= request.resource.data.get('qty', 0)
         && request.resource.data.get('incomingRegisteredQty', 0) >= 0
+        && request.resource.data.get('incomingRegisteredQty', 0) <= (
+          request.resource.data.get('qty', 0) - request.resource.data.get('receivedQty', 0)
+        )
+        && (
+          request.resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+          || request.resource.data.get('incomingRegisteredQty', 0) == 0
+        )
         && request.resource.data.get('cancelledQty', 0) >= 0
         && request.resource.data.get('cancelledQty', 0) <= (
           request.resource.data.get('qty', 0) - request.resource.data.get('receivedQty', 0)
