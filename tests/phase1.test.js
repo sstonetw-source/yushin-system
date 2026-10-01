@@ -753,7 +753,8 @@ test('phase 2 product master keeps formal product identity and legacy migration 
 
 test('phase 2 documents link to productId while retaining historical snapshots', () => {
     assert.match(appSource, /class="item-product-id"/);
-    assert.match(appSource, /productId: row\.querySelector\('\.item-product-id'\)/);
+    assert.match(appSource, /const productId = row\.querySelector\('\.item-product-id'\)\?\.value \|\| ''/);
+    assert.match(appSource, /productId, productMasterMatched: !!productId/);
     assert.match(appSource, /data\.productId = priceMatch\.productId/);
     assert.match(appSource, /productId:sourceItem\.productId\|\|priceMatch\?\.productId/);
     assert.match(appSource, /data\.supplier = priceMatch\.supplier/);
@@ -1419,7 +1420,7 @@ test('Product Master v2 uses targeted server lookup instead of a 500-row overlay
 test('Product Master v2 keeps authorization separate from the legacy productType category', () => {
     assert.match(appSource, /authorizationTypeForProduct/);
     assert.match(appSource, /authorizationType/);
-    assert.match(appSource, /productType: data\.category \|\| data\.productType/);
+    assert.match(appSource, /productType: data\.productType \|\| data\.category \|\| ''/);
 });
 
 test('quick product creation is temporary, duplicate-safe and can be used from quote or order', () => {
