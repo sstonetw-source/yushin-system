@@ -2348,3 +2348,29 @@ test('own-scope forecast does not preload full staff directory', () => {
     assert.match(block,/if \(canViewAllData\('forecast'\)\)/);
     assert.match(block,/else \{\s*populateForecastSalesFilter\(\)/);
 });
+
+
+test('admin maintenance reads are bounded', () => {
+    const transferStart=appSource.indexOf('async function legacySalesDocsInPages');
+    const transferEnd=appSource.indexOf('async function countLegacyRecordsForSalesCode',transferStart);
+    const transferSource=appSource.slice(transferStart,transferEnd);
+    assert.match(transferSource,/firestoreReadWithTimeout\([\s\S]*?collectionName \+ ' 舊業務資料'/);
+
+    const executeStart=appSource.indexOf('window.executeSalesTransfer = async function');
+    const executeEnd=appSource.indexOf('// 依 Firestore batch 500 筆上限',executeStart);
+    const executeSource=appSource.slice(executeStart,executeEnd);
+    assert.match(executeSource,/firestoreReadWithTimeout\([\s\S]*?'業務代號交接紀錄'/);
+
+    const indexStart=appSource.indexOf('window.migrateOrderSearchIndexes = async function');
+    const indexEnd=appSource.indexOf('/* ---------- Product Master',indexStart);
+    const indexSource=appSource.slice(indexStart,indexEnd);
+    assert.match(indexSource,/firestoreReadWithTimeout\([\s\S]*?搜尋索引補建/);
+
+    const migrationStart=appSource.indexOf('async function readCollectionForMigration');
+    const migrationEnd=appSource.indexOf('function recordContainsEmbeddedCost',migrationStart);
+    assert.match(appSource.slice(migrationStart,migrationEnd),/firestoreReadWithTimeout\([\s\S]*?遷移資料/);
+
+    const importStart=appSource.indexOf('async function summarizeProductMasterImport');
+    const importEnd=appSource.indexOf('async function confirmProductMasterImport',importStart);
+    assert.match(appSource.slice(importStart,importEnd),/firestoreReadWithTimeout\([\s\S]*?'Product Master 匯入比對'/);
+});
