@@ -4238,3 +4238,17 @@ test('supply status must match operational quantities', () => {
     assert.match(source,/cancelReason', ''\) != ''/);
     assert.match(source,/cancelledByUid', ''\) == request\.auth\.uid/);
 });
+
+
+test('receipt retry stays idempotent after outstanding supply is cancelled', () => {
+    const start=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const end=appSource.indexOf('\nwindow.openSupplyReceipt',start);
+    const source=appSource.slice(start,end);
+    const receiptGuard=source.indexOf('if(receiptSnap.exists)');
+    const cancelledGuard=source.indexOf("String(supply.status || '').toUpperCase() === 'CANCELLED'");
+    assert.ok(receiptGuard>=0);
+    assert.ok(cancelledGuard>receiptGuard);
+    assert.match(source,/alreadyProcessed=true/);
+    assert.match(source,/processedReceipt=receipt/);
+    assert.match(source,/此供應紀錄已取消，不能再確認到貨/);
+});
