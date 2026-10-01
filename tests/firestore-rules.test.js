@@ -205,6 +205,8 @@ test('sales may create a temporary product and own non-agency cost, but cannot a
   await assertSucceeds(setDoc(doc(db('sales1'), 'products/p3'), product));
   await assertFails(updateDoc(doc(db('sales1'), 'products/p3'), { listPrice:1 }));
   await assertFails(setDoc(doc(db('sales2'), 'products/p4'), { ...product, productId:'p4' }));
+  await assertFails(setDoc(doc(db('sales1'), 'products/p5'), { ...product, productId:'p5', source:'PRICE_LIST' }));
+  await assertFails(setDoc(doc(db('sales1'), 'products/p6'), { ...product, productId:'p6', active:false }));
   const cost = { productId:'p3', productLineId:'Roche', standardCost:100, salesVisible:true, source:'quick_create', updatedAt:'2026-09-23', updatedBy:'sales1' };
   await assertSucceeds(setDoc(doc(db('sales1'), 'productCosts/p3'), cost));
   await assertFails(setDoc(doc(db('sales2'), 'productCosts/p3'), { ...cost, updatedBy:'sales2' }));
