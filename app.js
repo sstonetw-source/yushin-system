@@ -8092,19 +8092,24 @@ function pendingProcurementDisplayLines(order) {
     }).filter(Boolean);
 }
 
-function renderPurchasingWorkCards() {
+function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows = null, filterContext = null) {
     const definitions = [
         ['ordering', 'purchaseCountOrdering', 'purchaseAmountOrdering'],
         ['arrival', 'purchaseCountReceiving', 'purchaseAmountReceiving'],
         ['dispatch', 'purchaseCountDispatch', 'purchaseAmountDispatch']
     ];
-    const filters = purchaseFilterContext();
+    const filters = filterContext || purchaseFilterContext();
+    // 同一次採購頁 render 只 normalize 每張訂單一次，工作卡與「已完成」統計共用。
+    const itemMap = normalizedItemsByOrder || new Map(
+        ordersCache.map(order => [order.id, normalizedOrderItems(order)])
+    );
     // 訂單頁與採購頁共用完全相同的品項狀態與金額統計核心；
     // 採購頁只額外套自己的日期／業務／廠牌篩選，避免兩頁各算各的再次出現數字不一致。
     const metrics = buildOrderItemWorkMetrics(
         ordersCache,
         definitions.map(([category]) => category),
-        (order, item) => purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)
+        (order, item) => purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters),
+        itemMap
     );
 
     definitions.forEach(([category, countId, amountId]) => {
@@ -8115,7 +8120,7 @@ function renderPurchasingWorkCards() {
     });
     // 圖卡統計已載入資料中的全部已完成品項；50 筆限制只套在下方明細顯示，
     // 避免使用者按「載入更多」時圖卡數字跟著人為跳動。
-    const completed = purchasingCompletedRows();
+    const completed = completedRows || purchasingCompletedRows(filters, itemMap);
     const completedCount = document.getElementById('purchaseCountCompleted');
     const completedAmount = document.getElementById('purchaseAmountCompleted');
     if (completedCount) completedCount.textContent = `${completed.length} 筆`;
@@ -8123,10 +8128,9 @@ function renderPurchasingWorkCards() {
         sum + Number(row.item.unitPrice || row.item.salesPrice || 0) * Number(row.item.qty || row.item.orderedQty || 0), 0));
 }
 
-function purchasingCompletedRows() {
+function purchasingCompletedRows(filters = purchaseFilterContext(), normalizedItemsByOrder = null) {
     const rows = [];
-    const filters = purchaseFilterContext();
-    ordersCache.forEach(order => normalizedOrderItems(order).forEach(item => {
+    ordersCache.forEach(order => (normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order)).forEach(item => {
         if (normalizedOrderStatus(order) !== 'normal') return;
         const category = orderItemWorkCategory(order, item);
         // 採購端只有在「待採購／待到貨」都結束後才算完成。
@@ -8141,11 +8145,11 @@ function purchasingCompletedRows() {
     return rows;
 }
 
-function renderPurchasingCompletedOrders() {
+function renderPurchasingCompletedOrders(completedRows = null) {
     const body = document.getElementById('purchaseCompletedBody');
     const status = document.getElementById('purchaseCompletedStatus');
     if (!body) return;
-    const allRows = purchasingCompletedRows();
+    const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.slice(0, purchasingCompletedVisibleLimit);
     body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項">${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openDeliveryModal('${escapeAttr(order.id)}')">查看訂單進度</button></td></tr>`).join('');
     if (status) status.textContent = rows.length
@@ -8172,10 +8176,17 @@ window.loadMorePurchasingCompleted = async function() {
 
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
-    renderPurchasingWorkCards();
+    const filters = purchaseFilterContext();
+    const normalizedItemsByOrder = new Map(
+        ordersCache.map(order => [order.id, normalizedOrderItems(order)])
+    );
+    const completedRows = purchasingView === 'completed'
+        ? purchasingCompletedRows(filters, normalizedItemsByOrder)
+        : null;
+    renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
     if (purchasingView === 'ordering') renderPendingPurchaseOrders();
     else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
-    else if (purchasingView === 'completed') renderPurchasingCompletedOrders();
+    else if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
     else renderPoList();
 };
 
@@ -8199,7 +8210,14 @@ window.switchPurchasingView = function(view, tab) {
     purchasingView = view;
     if (view === 'completed' && previousPurchasingView !== 'completed') purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
     populatePurchasingFilters();
-    renderPurchasingWorkCards();
+    const filters = purchaseFilterContext();
+    const normalizedItemsByOrder = new Map(
+        ordersCache.map(order => [order.id, normalizedOrderItems(order)])
+    );
+    const completedRows = view === 'completed'
+        ? purchasingCompletedRows(filters, normalizedItemsByOrder)
+        : null;
+    renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
@@ -8257,7 +8275,7 @@ window.switchPurchasingView = function(view, tab) {
                 console.error('待打單首次載入失敗：', err);
             });
         }
-    } else renderPurchasingCompletedOrders();
+    } else renderPurchasingCompletedOrders(completedRows);
 };
 
 async function loadPurchasingDispatchOrders(reset=true, options={}) {
