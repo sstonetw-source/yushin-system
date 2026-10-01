@@ -318,6 +318,39 @@ test('operational receipt and movement reject embedded cost fields', async () =>
   }));
 });
 
+
+test('receiving roles may advance only receipt allocation progress within its target', async () => {
+  await seed('receipts/r-progress', {
+    receiptId:'r-progress', supplyOrderId:'s1',
+    productKey:'p1', warehouseId:'w1', qty:5,
+    autoAllocationQty:3, autoAllocatedQty:0, allocationCompleted:false
+  });
+
+  await assertSucceeds(updateDoc(doc(db('wh1'), 'receipts/r-progress'), {
+    autoAllocatedQty:2,
+    allocationCompleted:false,
+    allocationUpdatedAt:'2026-10-01T08:00:00Z'
+  }));
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'receipts/r-progress'), {
+    autoAllocatedQty:3,
+    allocationCompleted:true,
+    allocationUpdatedAt:'2026-10-01T08:01:00Z'
+  }));
+
+  await assertFails(updateDoc(doc(db('wh1'), 'receipts/r-progress'), {
+    autoAllocatedQty:2
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'receipts/r-progress'), {
+    autoAllocatedQty:4
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'receipts/r-progress'), {
+    qty:99
+  }));
+  await assertFails(updateDoc(doc(db('sales1'), 'receipts/r-progress'), {
+    autoAllocatedQty:3
+  }));
+});
+
 test('business owner can read own self-order but not formal supply order cost record', async () => {
   await seed('supplyOrders/self1', { type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', unitCost:100 });
   await seed('supplyOrders/formal1', { type:'PURCHASING_PO', ownerUid:'sales1', salesCode:'S01', unitCost:80 });
