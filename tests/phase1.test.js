@@ -833,10 +833,9 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
     assert.match(po, /linkedDocuments: normalizeDocumentLinks/);
 });
 
-test('phase 3 preserves legacy links and cancels generated orders instead of hard deleting them', () => {
-    assert.match(appSource, /function legacyDocumentLinks\(record, type\)/);
+test('phase 3 cancels generated orders instead of hard deleting them', () => {
     const start = appSource.indexOf('window.unmarkQuoteAsDeal =');
-   const end = appSource.indexOf('/* =========================================================\n   訂單管理系統', start);
+    const end = appSource.indexOf('/* =========================================================\n   訂單管理系統', start);
     const source = appSource.slice(start, end);
     assert.match(source, /status: 'cancelled'/);
     assert.match(source, /cancelReason: '來源估價單取消成交'/);
@@ -1411,7 +1410,7 @@ test('quote product lookup tolerates harmless item-code punctuation only when un
 
 test('order item-code autofill waits for Product Master and fills sale/cost fields', () => {
     const start = appSource.indexOf('window.onOrderItemCodeChange');
-    const end = appSource.indexOf('function loadClientHistory', start);
+    const end = appSource.indexOf('window.saveToStorage', start);
     const s = appSource.slice(start, end);
     assert.match(s, /await findProductByCode/);
     assert.doesNotMatch(s, /await ensurePriceListLoaded/);
@@ -2312,14 +2311,9 @@ test('product save buttons show feedback during duplicate checks', () => {
 });
 
 
-test('customer helper and inventory detail reads are bounded', () => {
-    assert.match(appSource,/最近客戶紀錄/);
+test('customer preference and inventory detail reads are bounded', () => {
     assert.match(appSource,/客戶估價偏好/);
     assert.match(appSource,/庫存占用明細/);
-
-    const clientStart=appSource.indexOf('function loadClientHistory()');
-    const clientEnd=appSource.indexOf('\nwindow.saveToStorage',clientStart);
-    assert.match(appSource.slice(clientStart,clientEnd),/firestoreReadWithTimeout/);
 
     const preferenceStart=appSource.indexOf('window.applyCustomerQuotePreferences = async function');
     const preferenceEnd=appSource.indexOf('\nwindow.addQuoteCustomField',preferenceStart);
