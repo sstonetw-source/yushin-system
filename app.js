@@ -949,10 +949,17 @@ function ensureQuoteFormInitialized() {
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
         switchCompany('yushin');
     }
-    ensureSalesListLoaded().then(() => {
+    if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
+        ensureSalesListLoaded().then(() => {
+            populateSalesDropdown();
+            if (draft) restoreQuoteDraft(draft);
+        }).catch(err => console.warn('業務名單載入失敗：', err));
+    } else {
+        // 業務／工程師只能選自己；登入 profile 已含姓名、代號與電話，
+        // 不為了單一選項再掃完整 users collection。
         populateSalesDropdown();
         if (draft) restoreQuoteDraft(draft);
-    }).catch(err => console.warn('業務名單載入失敗：', err));
+    }
 }
 
 
@@ -3117,8 +3124,10 @@ function updateSalesPhoneDisplay() {
     const phoneSpan = document.getElementById('salesPhone');
     if (!input || !phoneSpan) return;
 
-    const match = salesList.find(s => s.name === input.value.trim());
-    phoneSpan.innerText = match ? (match.phone || '') : '';
+    const selectedName = input.value.trim();
+    const match = salesList.find(s => s.name === selectedName);
+    phoneSpan.innerText = match ? (match.phone || '')
+        : (selectedName === currentUserName ? (currentUserPhone || '') : '');
 }
 
 function populateEquipmentSalesDropdown() {
