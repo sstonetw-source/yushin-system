@@ -14846,6 +14846,7 @@ function normalizeProductMasterItem(item) {
         sku: item.sku || item.model || '',
         supplier: String(item.supplier || '').trim(),
         spec: item.spec || '',
+        unit: String(item.unit || item.uom || '').trim(),
         productLine: String(item.productLine || '').trim(),
         productType: normalizeProductTypeValue(item.productType || item.category || ''),
         authorizationType: String(item.authorizationType || '').trim().toUpperCase(),
@@ -14944,6 +14945,7 @@ function productMasterDocToPriceItem(doc) {
         productType: data.productType || data.category || '',
         authorizationType: data.authorizationType || '',
         spec: data.specification || data.spec || '',
+        unit: data.unit || data.uom || '',
         price: data.listPrice ?? data.price ?? 0,
         supplier: data.supplier || '',
         inventoryTracked: data.inventoryTracked === true,
@@ -16386,6 +16388,7 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
         category: normalized.productType || '',
         productType: normalized.productType || '',
         specification: normalized.spec || '',
+        unit: normalized.unit || '',
         listPrice: Number(normalized.price || 0),
         inventoryTracked: !!normalized.inventoryTracked,
         lotTracked: !!normalized.lotTracked,
@@ -16842,28 +16845,117 @@ function setPriceUploadProgress(percent, status, keepVisible = true) {
     }
 }
 
+const PRODUCT_MASTER_IMPORT_FIELDS = [
+    'productId','brandId','brandName','manufacturerPartNo','normalizedPartNo','productName','nameEn',
+    'productLine','productLineId','category','productType','specification','unit','listPrice',
+    'inventoryTracked','lotTracked','expiryTracked','authorizationType','status','active','source'
+];
+
+function productImportValueEqual(field, currentValue, nextValue) {
+    if (field === 'listPrice') return Number(currentValue || 0) === Number(nextValue || 0);
+    if (['inventoryTracked','lotTracked','expiryTracked','active'].includes(field)) return !!currentValue === !!nextValue;
+    return String(currentValue ?? '') === String(nextValue ?? '');
+}
+
 async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
     const canWriteFormalMaster = currentUserRole === 'admin' || currentUserRole === 'purchaser';
-    if (!canWriteFormalMaster) return;
-    const now = new Date().toISOString();
-    const operations = [];
+    if (!canWriteFormalMaster) return { productWrites:0, costWrites:0, unchangedRows:0 };
 
-    (imported || []).forEach(raw => {
-        const item = normalizeProductMasterItem({ ...raw, brand: storedBrand });
-        const product = productMasterRecordFromItem(item, 'PRICE_LIST');
+    const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand: storedBrand })));
+    const productIds = [...new Set(normalizedItems.map(item => item.productId).filter(Boolean))];
+    const costProductIds = [...new Set(normalizedItems.filter(item => item.standardCostProvided === true).map(item => item.productId).filter(Boolean))];
+    const existingProducts = new Map();
+    const existingCosts = new Map();
+
+    for (let i = 0; i < productIds.length; i += 10) {
+        const ids = productIds.slice(i, i + 10);
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('products').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
+            'Product Import 產品比對'
+        );
+        snapshot.docs.forEach(doc => existingProducts.set(doc.id, doc.data() || {}));
+    }
+    for (let i = 0; i < costProductIds.length; i += 10) {
+        const ids = costProductIds.slice(i, i + 10);
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('productCosts').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
+            'Product Import 成本比對'
+        );
+        snapshot.docs.forEach(doc => existingCosts.set(doc.id, doc.data() || {}));
+    }
+
+    const now = new Date().toISOString();
+    const updatedBy = currentUser?.uid || '';
+    const operations = [];
+    let productWrites = 0;
+    let costWrites = 0;
+    let unchangedRows = 0;
+
+    normalizedItems.forEach(item => {
+        const product = productMasterRecordFromItem(item, 'PRODUCT_IMPORT');
         product.status = item.active === false ? 'INACTIVE' : 'ACTIVE';
         product.active = product.status === 'ACTIVE';
-        product.updatedAt = now;
-        operations.push(batch => batch.set(db.collection('products').doc(product.productId), product, { merge: true }));
+
+        const existingProduct = existingProducts.get(product.productId);
+        let productPatch = null;
+        if (!existingProduct) {
+            productPatch = product;
+        } else {
+            const changed = {};
+            PRODUCT_MASTER_IMPORT_FIELDS.forEach(field => {
+                if (!productImportValueEqual(field, existingProduct[field], product[field])) changed[field] = product[field];
+            });
+            if (Object.keys(changed).length) productPatch = { ...changed, updatedAt:now, updatedBy };
+        }
+
+        let costPatch = null;
+        if (item.standardCostProvided === true) {
+            const standardCost = Number(item.standardCost);
+            const existingCost = existingCosts.get(product.productId);
+            const nextCost = {
+                productId: product.productId,
+                productLineId: product.productLineId || product.productLine || '',
+                standardCost,
+                salesVisible: product.authorizationType === 'NON_AUTHORIZED'
+            };
+            const changedCost = {};
+            Object.keys(nextCost).forEach(field => {
+                const current = existingCost?.[field];
+                const next = nextCost[field];
+                const equal = field === 'standardCost' ? Number(current ?? NaN) === Number(next) : String(current ?? '') === String(next ?? '');
+                if (!equal) changedCost[field] = next;
+            });
+            if (!existingCost || Object.keys(changedCost).length) {
+                costPatch = {
+                    ...(existingCost ? changedCost : nextCost),
+                    source:'PRODUCT_IMPORT',
+                    updatedAt:now,
+                    updatedBy
+                };
+            }
+        }
+
+        if (!productPatch && !costPatch) {
+            unchangedRows += 1;
+            return;
+        }
+        if (productPatch) productWrites += 1;
+        if (costPatch) costWrites += 1;
+        operations.push(batch => {
+            if (productPatch) batch.set(db.collection('products').doc(product.productId), productPatch, { merge:true });
+            if (costPatch) batch.set(db.collection('productCosts').doc(product.productId), costPatch, { merge:true });
+        });
     });
-    await commitMigrationBatch(operations);
+
+    await commitMigrationBatch(operations, 200);
+    return { productWrites, costWrites, unchangedRows };
 }
 
 async function saveProductMasterBrand(imported, brand) {
     const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand })));
-    await syncImportedBrandToFormalProductMaster(normalizedItems, brand);
-    normalizedItems.forEach(item => cacheProductLookupItem(item));
-    return brand;
+    const syncResult = await syncImportedBrandToFormalProductMaster(normalizedItems, brand);
+    normalizedItems.map(productItemWithoutCost).forEach(item => cacheProductLookupItem(item));
+    return { brand, ...syncResult };
 }
 
 
@@ -16883,25 +16975,25 @@ async function summarizeProductMasterImport(groups) {
         );
         snapshot.docs.forEach(doc => existingIds.add(doc.id));
     }
-    let added = 0, updated = 0, inactive = 0;
+    let added = 0, existing = 0, inactive = 0;
     const brands = groups.map(group => {
-        let brandAdded = 0, brandUpdated = 0;
+        let brandAdded = 0, brandExisting = 0;
         group.imported.forEach(raw => {
             const item = normalizeProductMasterItem({ ...raw, brand: group.brand });
-            if (existingIds.has(item.productId)) { updated++; brandUpdated++; } else { added++; brandAdded++; }
+            if (existingIds.has(item.productId)) { existing++; brandExisting++; } else { added++; brandAdded++; }
             if (!item.active) inactive++;
         });
-        return { brand: group.brand, productLine: group.productLine || '', count: group.imported.length, added: brandAdded, updated: brandUpdated };
+        return { brand: group.brand, productLine: group.productLine || '', count: group.imported.length, added: brandAdded, existing: brandExisting };
     });
-    return { added, updated, inactive, total: added + updated, brands };
+    const costRows = rows.filter(item => item.standardCostProvided === true).length;
+    return { added, existing, inactive, costRows, total: added + existing, brands };
 }
 
 async function confirmProductMasterImport(groups) {
     const summary = await summarizeProductMasterImport(groups);
-    const lines = summary.brands.map(item => `${item.brand} / ${item.productLine || '未分類'}：${item.count} 筆（新增 ${item.added}／更新 ${item.updated}）`);
-    return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n資料只會寫入 Product Master（products）；成本資料 productCosts 不會由這份 Excel 修改。歷史估價單與訂單快照也不會被改寫。確定寫入雲端嗎？`);
+    const lines = summary.brands.map(item => `${item.brand} / ${item.productLine || '未分類'}：${item.count} 筆（新增 ${item.added}／既有 ${item.existing}）`);
+    return confirm(`又鑫標準 Product Import 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、既有 ${summary.existing}、停用標記 ${summary.inactive}；其中 ${summary.costRows} 筆含標準成本。\n\n同一份 Excel 會自動分流：產品資料與建議售價寫入 products，標準成本寫入受保護的 productCosts。實際採購價、歷史訂單與庫存批次成本不會被覆蓋；成本欄留白時也不會清除既有標準成本。系統只寫入實際有變動的欄位，未出現在檔案中的產品不處理。確定寫入雲端嗎？`);
 }
-
 
 window.downloadProductMasterTemplate = async function() {
     try {
@@ -16910,15 +17002,14 @@ window.downloadProductMasterTemplate = async function() {
         alert(err.message);
         return;
     }
-    const headers = ['廠牌','產品線','貨號','中文品名','英文品名','規格','產品類型','建議售價（含稅）','啟用','庫存管理','批號管理','效期管理'];
-    const example = ['Beckman Coulter','Centrifuge','EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','1000','是','是','否','否'];
+    const headers = ['廠牌','產品線','貨號','中文品名','英文品名','規格','產品類型','單位','建議售價（含稅）','標準成本（含稅）','啟用','庫存管理','批號管理','效期管理'];
+    const example = ['Beckman Coulter','Centrifuge','EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','EA','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [22,20,18,28,32,24,14,16,10,12,12,12].map(wch => ({ wch }));
+    ws['!cols'] = [22,20,18,28,32,24,14,10,16,16,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '產品資料');
-    XLSX.writeFile(wb, 'Product Master.xlsx');
+    XLSX.writeFile(wb, '又鑫_Product_Import.xlsx');
 };
-
 window.downloadProductPriceUpdateTemplate = async function() {
     try {
         await ensureXlsxLoaded();
@@ -17213,8 +17304,14 @@ window.handlePriceExcelUpload = async function(input) {
         input.value = '';
         return;
     }
+    if (productMasterMigrationRunning) {
+        input.value = '';
+        return;
+    }
+    productMasterMigrationRunning = true;
+    setProductBatchMaintenanceBusy(true);
 
-    setPriceUploadProgress(0, '準備讀取價格表…');
+    setPriceUploadProgress(0, '準備讀取 Product Import…');
     const reader = new FileReader();
     reader.onprogress = function(event) {
         if (!event.lengthComputable) return;
@@ -17223,7 +17320,7 @@ window.handlePriceExcelUpload = async function(input) {
     };
     reader.onload = async function(e) {
         try {
-            setPriceUploadProgress(55, '正在整理價格資料…');
+            setPriceUploadProgress(55, '正在整理產品、售價與標準成本…');
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
 
@@ -17247,8 +17344,9 @@ window.handlePriceExcelUpload = async function(input) {
 
             // 標準格式以欄位為主：廠牌、產品線都存在每一列。
             // 為了讓既有整理好的檔案仍可使用，若欄位空白才退回用「檔名＝廠牌、分頁＝產品線」。
-            const fallbackBrand = toHalfWidth(String(file.name || '').replace(/\.(xlsx|xls)$/i, '').replace(/^Product Master$/i, ''));
+            const fallbackBrand = toHalfWidth(String(file.name || '').replace(/\.(xlsx|xls)$/i, '').replace(/^(Product Master|Product Import|又鑫_Product_Import)$/i, ''));
             const brandGroupsMap = new Map();
+            const seenProductIds = new Set();
             workbook.SheetNames.forEach(sheetName => {
                 const fallbackProductLine = toHalfWidth(sheetName === '產品資料' ? '' : sheetName);
                 const sheet = workbook.Sheets[sheetName];
@@ -17267,6 +17365,7 @@ window.handlePriceExcelUpload = async function(input) {
 
                     const productType = normalizeProductTypeValue(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type']));
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
+                    const unit = String(getField(row, ['單位', 'Unit', 'UOM'])).trim();
                     const activeRaw = String(getField(row, ['啟用', '启用', 'Active', 'Status'])).trim().toLocaleLowerCase();
                     const yes = value => ['1', 'true', 'yes', 'y', '是', '啟用', '启用'].includes(String(value || '').trim().toLocaleLowerCase());
                     const inventoryTracked = yes(getField(row, ['庫存管理', '库存管理', 'Inventory Tracked', 'Inventory']));
@@ -17277,12 +17376,20 @@ window.handlePriceExcelUpload = async function(input) {
                     const price = priceRaw === '' ? 0 : Number(String(priceRaw).replace(/,/g, '').trim());
                     if (!Number.isFinite(price) || price < 0) throw new Error(`貨號「${model}」的建議售價格式不正確。`);
 
+                    const standardCostRaw = getField(row, ['標準成本（含稅）', '標準成本', '含稅成本', '成本', '進貨成本']);
+                    const standardCostProvided = String(standardCostRaw ?? '').trim() !== '';
+                    const standardCost = standardCostProvided ? Number(String(standardCostRaw).replace(/,/g, '').trim()) : null;
+                    if (standardCostProvided && (!Number.isFinite(standardCost) || standardCost < 0)) throw new Error(`貨號「${model}」的標準成本格式不正確。`);
+
                     const importedItem = {
-                        nameCn, nameEn, model, brand, productType, productLine, spec,
+                        nameCn, nameEn, model, brand, productType, productLine, spec, unit,
                         inventoryTracked, lotTracked, expiryTracked,
                         active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true,
-                        price, source:'PRODUCT_MASTER'
+                        price, standardCost, standardCostProvided, source:'PRODUCT_IMPORT'
                     };
+                    const importProductId = stableProductId(importedItem);
+                    if (seenProductIds.has(importProductId)) throw new Error(`貨號「${model}」在檔案中重複出現。每個廠牌／貨號請只保留一列。`);
+                    seenProductIds.add(importProductId);
                     const groupKey = `${normalizeBrandLookupKey(brand)}::${productLine.toLocaleLowerCase()}`;
                     if (!brandGroupsMap.has(groupKey)) brandGroupsMap.set(groupKey, { brand, productLine, imported:[] });
                     brandGroupsMap.get(groupKey).imported.push(importedItem);
@@ -17313,13 +17420,18 @@ window.handlePriceExcelUpload = async function(input) {
             });
 
             let savedCount = 0;
+            let totalProductWrites = 0;
+            let totalCostWrites = 0;
+            let totalUnchangedRows = 0;
             for (const { brand, items } of itemsByBrand.values()) {
-                setPriceUploadProgress(70 + (savedCount / Math.max(1, itemsByBrand.size)) * 20, `正在儲存「${brand}」的 ${items.length} 筆 Product Master…`);
-                const storedBrand = await saveProductMasterBrand(items, brand);
+                setPriceUploadProgress(70 + (savedCount / Math.max(1, itemsByBrand.size)) * 20, `正在儲存「${brand}」的 ${items.length} 筆產品／售價／成本…`);
+                const saveResult = await saveProductMasterBrand(items, brand);
+                const storedBrand = saveResult.brand;
+                totalProductWrites += saveResult.productWrites;
+                totalCostWrites += saveResult.costWrites;
+                totalUnchangedRows += saveResult.unchangedRows;
                 const normalizedImported = normalizeProductMasterList(items.map(item => ({ ...item, brand: storedBrand })));
-                const visibleImported = (currentUserRole === 'admin' || currentUserRole === 'purchaser')
-                    ? normalizedImported
-                    : normalizedImported.map(productItemWithoutCost);
+                const visibleImported = normalizedImported.map(productItemWithoutCost);
 
                 // 以 productId 增量合併本機快取。只上傳幾筆時，不可把同廠牌其他產品從目前畫面暫時移除。
                 const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
@@ -17327,23 +17439,31 @@ window.handlePriceExcelUpload = async function(input) {
                 priceList = [...merged.values()];
 
                 const lineCount = new Set(items.map(item => item.productLine || '')).size;
-                savedBrands.push(`${storedBrand}（${items.length} 筆／${lineCount} 個產品線）`);
+                savedBrands.push(`${storedBrand}（${items.length} 筆／${lineCount} 個產品線；產品寫入 ${saveResult.productWrites}、成本寫入 ${saveResult.costWrites}）`);
                 savedCount += 1;
             }
 
+            if (totalCostWrites) {
+                visibleProductCostCache.clear();
+                purchaseCostCache.clear();
+            }
             refreshPriceDatalists();
             loadPriceCatalogSummary();
             renderCompanyAgencyBrandSettings();
-            setPriceUploadProgress(100, `完成：已匯入 ${imported.length} 筆 Product Master，未出現在檔案中的產品不受影響。`);
-            alert(`Product Master 匯入完成：\n${savedBrands.join('\n')}\n\n本次只新增／更新檔案中的品項，其他產品不會被刪除或停用。`);
+            setPriceUploadProgress(100, `完成：檢查 ${imported.length} 筆；產品寫入 ${totalProductWrites}、標準成本寫入 ${totalCostWrites}、完全無變動 ${totalUnchangedRows} 筆。`);
+            alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n只寫入實際有變動的資料；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。`);
         } catch (err) {
             setPriceUploadProgress(0, '儲存雲端失敗，請稍後再試。');
             alert('上傳失敗：' + err.message);
         } finally {
+            productMasterMigrationRunning = false;
+            setProductBatchMaintenanceBusy(false);
             input.value = '';
         }
     };
     reader.onerror = function() {
+        productMasterMigrationRunning = false;
+        setProductBatchMaintenanceBusy(false);
         setPriceUploadProgress(0, '讀取 Excel 檔案失敗。');
         alert('讀取 Excel 檔案失敗，請重新選擇檔案。');
         input.value = '';

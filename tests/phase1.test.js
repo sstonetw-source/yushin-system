@@ -3814,34 +3814,43 @@ test('order lifecycle follows procurement dispatch delivery billing and return s
 });
 
 
-test('Product Master Excel import is incremental, selling-price only, and never removes omitted products', () => {
+test('Product Import is incremental, splits standard cost securely, and never removes omitted products', () => {
     const syncStart=appSource.indexOf('async function syncImportedBrandToFormalProductMaster');
     const syncEnd=appSource.indexOf('\nasync function saveProductMasterBrand',syncStart);
     const syncSource=appSource.slice(syncStart,syncEnd);
-    assert.match(syncSource,/batch\.set\(db\.collection\('products'\)\.doc\(product\.productId\), product, \{ merge: true \}\)/);
-    assert.doesNotMatch(syncSource,/productCosts/);
-    assert.doesNotMatch(syncSource,/productCostRecordFromItem/);
+    assert.match(syncSource,/db\.collection\('products'\)/);
+    assert.match(syncSource,/db\.collection\('productCosts'\)/);
+    assert.match(syncSource,/PRODUCT_MASTER_IMPORT_FIELDS/);
+    assert.match(syncSource,/commitMigrationBatch\(operations, 200\)/);
     assert.doesNotMatch(syncSource,/\.delete\(/);
 
     const templateStart=appSource.indexOf('window.downloadProductMasterTemplate = async function');
     const templateEnd=appSource.indexOf('\nwindow.downloadProductPriceUpdateTemplate',templateStart);
     const templateSource=appSource.slice(templateStart,templateEnd);
     assert.match(templateSource,/建議售價（含稅）/);
-    assert.doesNotMatch(templateSource,/標準成本/);
+    assert.match(templateSource,/標準成本（含稅）/);
+    assert.match(templateSource,/單位/);
+    assert.match(templateSource,/又鑫_Product_Import\.xlsx/);
 
     const uploadStart=appSource.indexOf('window.handlePriceExcelUpload = async function');
-    const uploadSource=appSource.slice(uploadStart, uploadStart + 12000);
+    const uploadSource=appSource.slice(uploadStart, uploadStart + 16000);
+    assert.match(uploadSource,/standardCostRaw/);
+    assert.match(uploadSource,/標準成本格式不正確/);
     assert.match(uploadSource,/以 productId 增量合併本機快取/);
     assert.match(uploadSource,/未出現在檔案中的產品不受影響/);
     assert.match(uploadSource,/其他產品不會被刪除或停用/);
-    assert.doesNotMatch(uploadSource,/costRaw/);
-    assert.doesNotMatch(uploadSource,/標準成本格式不正確/);
+    assert.match(uploadSource,/標準成本與實際採購價分開保存/);
 
     const confirmStart=appSource.indexOf('async function confirmProductMasterImport');
     const confirmEnd=appSource.indexOf('\n\nwindow.downloadProductMasterTemplate',confirmStart);
     const confirmSource=appSource.slice(confirmStart,confirmEnd);
-    assert.match(confirmSource,/成本資料 productCosts 不會由這份 Excel 修改/);
+    assert.match(confirmSource,/產品資料與建議售價寫入 products/);
+    assert.match(confirmSource,/標準成本寫入受保護的 productCosts/);
+    assert.match(confirmSource,/實際採購價、歷史訂單與庫存批次成本不會被覆蓋/);
 });
+
+
+test('order lifecycle actions are hidden from purchaser and guarded by business capability'
 
 
 test('order lifecycle actions are hidden from purchaser and guarded by business capability', () => {
