@@ -900,10 +900,17 @@ function initializePageData(mainKey, options = {}) {
         loadBrandMaster().then(renderInventoryList).catch(err => console.warn('廠牌名單載入失敗：', err));
     }
     if (mainKey === 'equipment') {
-        // 儀器列表先載入，避免 users collection 阻塞主要內容。
+        // 儀器列表先載入；只有能看全公司儀器的身份才需要完整 users 名單。
+        // 一般業務／工程師直接使用登入者姓名與業務代號，避免每次進頁都掃 users。
         loadEquipmentFromCloud();
-        ensureSalesListLoaded().then(() => { populateEquipmentSalesDropdown(); renderEquipmentList(); }).catch(err => console.warn('業務名單載入失敗：', err));
-        loadBrandMaster().then(renderEquipmentList).catch(err => console.warn('廠牌名單載入失敗：', err));
+        if (canViewAllEquipment()) {
+            ensureSalesListLoaded()
+                .then(() => { populateEquipmentSalesDropdown(); renderEquipmentList(); })
+                .catch(err => console.warn('業務名單載入失敗：', err));
+        } else {
+            populateEquipmentSalesDropdown();
+        }
+        // Brand Master 已由上方 ensureBrandSettingsLoaded() 共用載入與重畫。
     }
     if (mainKey === 'admin') reloadSalesFromUsers();
 }
@@ -3116,7 +3123,9 @@ function populateEquipmentSalesDropdown() {
     const select = document.getElementById('eqSales');
     if (!select) return;
     select.innerHTML = '<option value="">未指定業務</option>';
-    const visibleList = salesList; // 顯示全部業務
+    const visibleList = canViewAllEquipment()
+        ? salesList
+        : (currentUserName ? [{ name:currentUserName, code:currentUserCode, phone:currentUserPhone }] : []);
     visibleList.forEach(s => {
         if (s.name) {
             const option = document.createElement('option');
@@ -12942,7 +12951,9 @@ function escapeHtml(str) {
 // 用代號當前綴後，就算彼此看不到對方的資料，編號也不會重複。
 function getNextAssetId(salesName) {
     const match = salesList.find(s => s.name === salesName);
-    const code = (match && match.code) ? match.code : 'NA';
+    const code = (salesName === currentUserName && currentUserCode)
+        ? currentUserCode
+        : ((match && match.code) ? match.code : 'NA');
     const prefix = `EQ-${code}-`;
 
     let maxSeq = 0;
