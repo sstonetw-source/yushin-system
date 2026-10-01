@@ -16250,22 +16250,6 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
     };
 }
 
-function productCostRecordFromItem(item, productRecord) {
-    const raw = item?.cost;
-    if (raw === undefined || raw === null || String(raw).trim() === '') return null;
-    const cost = Number(raw);
-    if (!Number.isFinite(cost)) return null;
-    return {
-        productId: productRecord.productId,
-        productLineId: productRecord.productLineId || productRecord.productLine || '',
-        standardCost: cost,
-        salesVisible: productRecord.authorizationType === 'NON_AUTHORIZED',
-        source: 'product_master',
-        updatedAt: new Date().toISOString(),
-        updatedBy: currentUser?.uid || ''
-    };
-}
-
 async function readCollectionForMigration(name, pageSize = 300) {
     const rows = [];
     let cursor = null;
@@ -16695,13 +16679,6 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
         product.active = product.status === 'ACTIVE';
         product.updatedAt = now;
         operations.push(batch => batch.set(db.collection('products').doc(product.productId), product, { merge: true }));
-
-        const cost = productCostRecordFromItem(item, product);
-        if (cost) {
-            cost.source = 'PRICE_LIST';
-            cost.updatedAt = now;
-            operations.push(batch => batch.set(db.collection('productCosts').doc(product.productId), cost, { merge: true }));
-        }
     });
     await commitMigrationBatch(operations);
 }
@@ -16746,7 +16723,7 @@ async function summarizeProductMasterImport(groups) {
 async function confirmProductMasterImport(groups) {
     const summary = await summarizeProductMasterImport(groups);
     const lines = summary.brands.map(item => `${item.brand} / ${item.productLine || '未分類'}：${item.count} 筆（新增 ${item.added}／更新 ${item.updated}）`);
-    return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n資料將直接寫入 products / productCosts；歷史估價單與訂單快照不會被改寫。確定寫入雲端嗎？`);
+    return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n資料只會寫入 Product Master（products）；成本資料 productCosts 不會由這份 Excel 修改。歷史估價單與訂單快照也不會被改寫。確定寫入雲端嗎？`);
 }
 
 
@@ -16757,10 +16734,10 @@ window.downloadProductMasterTemplate = async function() {
         alert(err.message);
         return;
     }
-    const headers = ['廠牌','產品線','貨號','中文品名','英文品名','規格','產品類型','建議售價（含稅）','標準成本（含稅）','啟用','庫存管理','批號管理','效期管理'];
-    const example = ['Beckman Coulter','Centrifuge','EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','1000','600','是','是','否','否'];
+    const headers = ['廠牌','產品線','貨號','中文品名','英文品名','規格','產品類型','建議售價（含稅）','啟用','庫存管理','批號管理','效期管理'];
+    const example = ['Beckman Coulter','Centrifuge','EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','1000','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [22,20,18,28,32,24,14,16,16,10,12,12,12].map(wch => ({ wch }));
+    ws['!cols'] = [22,20,18,28,32,24,14,16,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '產品資料');
     XLSX.writeFile(wb, 'Product Master.xlsx');
@@ -16969,17 +16946,14 @@ window.handlePriceExcelUpload = async function(input) {
                     const expiryTracked = yes(getField(row, ['效期管理', 'Expiry Tracked', 'Expiry']));
 
                     const priceRaw = getField(row, ['建議售價（含稅）', '建議售價', '含稅單價', '單價', '價格']);
-                    const costRaw = getField(row, ['標準成本（含稅）', '含稅成本', '標準成本', '成本', '進貨成本']);
                     const price = priceRaw === '' ? 0 : Number(String(priceRaw).replace(/,/g, '').trim());
-                    const cost = costRaw === '' ? null : Number(String(costRaw).replace(/,/g, '').trim());
                     if (!Number.isFinite(price) || price < 0) throw new Error(`貨號「${model}」的建議售價格式不正確。`);
-                    if (cost !== null && (!Number.isFinite(cost) || cost < 0)) throw new Error(`貨號「${model}」的標準成本格式不正確。`);
 
                     const importedItem = {
                         nameCn, nameEn, model, brand, productType, productLine, spec,
                         inventoryTracked, lotTracked, expiryTracked,
                         active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true,
-                        price, cost, source:'PRODUCT_MASTER'
+                        price, source:'PRODUCT_MASTER'
                     };
                     const groupKey = `${normalizeBrandLookupKey(brand)}::${productLine.toLocaleLowerCase()}`;
                     if (!brandGroupsMap.has(groupKey)) brandGroupsMap.set(groupKey, { brand, productLine, imported:[] });
