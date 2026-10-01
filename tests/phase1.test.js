@@ -2125,3 +2125,26 @@ test('session restore and foreground account checks use bounded Firestore reads'
     const resumeSource=appSource.slice(resumeStart,resumeEnd);
     assert.match(resumeSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('users'\)\.doc\(user\.uid\)\.get\(\)[\s\S]*?'帳號狀態驗證'/);
 });
+
+
+test('order and purchasing initialization avoid duplicate brand-driven renders', () => {
+    const start=appSource.indexOf('function initializePageData(mainKey');
+    const end=appSource.indexOf('\nfunction ensureSalesListLoaded',start);
+    const source=appSource.slice(start,end);
+
+    assert.match(source,/\['quote', 'forecast', 'orders\.list', 'inventory', 'equipment', 'admin'\]\.includes\(mainKey\)/);
+    assert.doesNotMatch(source,/\['quote', 'forecast', 'orders\.list', 'orders\.po'/);
+
+    const orderStart=source.indexOf("if (mainKey === 'orders.list')");
+    const orderEnd=source.indexOf("if (mainKey === 'orders.po')",orderStart);
+    const orderSource=source.slice(orderStart,orderEnd);
+    assert.match(orderSource,/loadOrdersFromCloud\(\)/);
+    assert.doesNotMatch(orderSource,/loadBrandMaster\(\)\.then/);
+
+    const purchaseStart=source.indexOf("if (mainKey === 'orders.po')");
+    const purchaseEnd=source.indexOf("if (mainKey === 'inventory')",purchaseStart);
+    const purchaseSource=source.slice(purchaseStart,purchaseEnd);
+    assert.match(purchaseSource,/Promise\.allSettled\(\[ensureSalesListLoaded\(\), ensureBrandSettingsLoaded\(\)\]\)/);
+    assert.equal((purchaseSource.match(/renderPurchasingView\(\)/g) || []).length, 1);
+    assert.doesNotMatch(purchaseSource,/loadBrandMaster\(\)\.then/);
+});
