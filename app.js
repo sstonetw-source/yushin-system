@@ -15010,7 +15010,10 @@ async function legacySalesDocsInPages(collectionName, salesName, onPage, pageSiz
             .orderBy(firebase.firestore.FieldPath.documentId())
             .limit(pageSize);
         if (cursor) query = query.startAfter(cursor);
-        const snap = await query.get();
+        const snap = await firestoreReadWithTimeout(
+            query.get(),
+            collectionName + ' 舊業務資料'
+        );
         if (snap.empty) break;
         await onPage(snap.docs);
         cursor = snap.docs[snap.docs.length - 1];
@@ -15098,7 +15101,10 @@ window.executeSalesTransfer = async function() {
         const migrated = await backfillSalesCodeForLegacyRecords(currentHolder, salesCode);
         const now = new Date().toISOString();
         const codeRef = db.collection('salesCodes').doc(String(salesCode));
-        const codeSnap = await codeRef.get();
+        const codeSnap = await firestoreReadWithTimeout(
+            codeRef.get(),
+            '業務代號交接紀錄'
+        );
         const history = Array.isArray(codeSnap.data()?.handoffHistory) ? codeSnap.data().handoffHistory : [];
         const entry = {
             fromUid: currentHolder?.uid || '',
@@ -15433,7 +15439,10 @@ window.backfillOrderSearchIndex = async function() {
             while (true) {
                 let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
                 if (cursor) query = query.startAfter(cursor);
-                const snapshot = await query.get();
+                const snapshot = await firestoreReadWithTimeout(
+                    query.get(),
+                    collectionName + ' 搜尋索引補建'
+                );
                 if (snapshot.empty) break;
                 const batch = db.batch();
                 let writes = 0;
@@ -15539,7 +15548,10 @@ async function readCollectionForMigration(name, pageSize = 300) {
     while (true) {
         let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(pageSize);
         if (cursor) query = query.startAfter(cursor);
-        const snap = await query.get();
+        const snap = await firestoreReadWithTimeout(
+            query.get(),
+            name + ' 遷移資料'
+        );
         if (snap.empty) break;
         snap.docs.forEach(doc => rows.push({ ref:doc.ref, id:doc.id, data:doc.data() || {} }));
         cursor = snap.docs[snap.docs.length - 1];
@@ -15982,7 +15994,10 @@ async function summarizeProductMasterImport(groups) {
     const existingIds = new Set();
     for (let i = 0; i < rows.length; i += 10) {
         const chunk = rows.slice(i, i + 10);
-        const docs = await Promise.all(chunk.map(item => db.collection('products').doc(item.productId).get()));
+        const docs = await Promise.all(chunk.map(item => firestoreReadWithTimeout(
+            db.collection('products').doc(item.productId).get(),
+            'Product Master 匯入比對'
+        )));
         docs.forEach(doc => { if (doc.exists) existingIds.add(doc.id); });
     }
     let added = 0, updated = 0, inactive = 0;
