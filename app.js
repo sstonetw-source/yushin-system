@@ -13173,6 +13173,8 @@ window.scheduleEquipmentSearch = function() {
     equipmentSearchTimer = scheduleListSearch(equipmentSearchTimer, () => runEquipmentSearch());
 };
 
+let equipmentFilterOptionsSignature = '';
+
 function populateEquipmentListFilters() {
     const salesSelect = document.getElementById('eqSalesFilter');
     const brandSelect = document.getElementById('eqBrandFilter');
@@ -13186,20 +13188,26 @@ function populateEquipmentListFilters() {
         ...equipmentList.map(item => stripPhoneSuffix(item.salesName || '')),
         ...equipmentSearchResults.map(item => stripPhoneSuffix(item.salesName || ''))
     ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    if (canSeeAll) {
-        salesSelect.innerHTML = '<option value="">全部業務</option>' + names.map(name =>
-            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
-        if (names.includes(selectedSales)) salesSelect.value = selectedSales;
-    }
     const selectedBrand = brandSelect.value;
     const brands = dedupeBrandsCaseInsensitive([
         ...getPriceListBrands(true), ...equipmentList.map(item => resolveBrandName(item.brand || '')),
         ...equipmentSearchResults.map(item => resolveBrandName(item.brand || ''))
     ]).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
-        `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
-        + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+    const signature = JSON.stringify([canSeeAll, names, brands]);
+    if (signature !== equipmentFilterOptionsSignature) {
+        if (canSeeAll) {
+            salesSelect.innerHTML = '<option value="">全部業務</option>' + names.map(name =>
+                `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+        }
+        brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
+            `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+            + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+        equipmentFilterOptionsSignature = signature;
+    }
+    if (canSeeAll && names.includes(selectedSales)) salesSelect.value = selectedSales;
+    else if (canSeeAll && salesSelect.value && !names.includes(salesSelect.value)) salesSelect.value = '';
     if (brands.includes(selectedBrand) || selectedBrand === OTHER_BRAND_OPTION_KEY) brandSelect.value = selectedBrand;
+    else if (brandSelect.value && !brands.includes(brandSelect.value)) brandSelect.value = '';
     return brands;
 }
 
@@ -13212,6 +13220,7 @@ window.renderEquipmentList = function() {
     const brandFilter = document.getElementById('eqBrandFilter')?.value || '';
 
     tbody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     let shown = 0;
 
     const source = equipmentSearchActive ? equipmentSearchResults : equipmentList;
@@ -13244,8 +13253,9 @@ window.renderEquipmentList = function() {
                 <button type="button" class="btn-danger" onclick="event.stopPropagation(); deleteEquipment('${eq.id}')">刪除</button>
             </td>
         `;
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
     });
+    tbody.appendChild(fragment);
 
     document.getElementById('eqEmptyHint').style.display = shown === 0 ? 'block' : 'none';
 };
