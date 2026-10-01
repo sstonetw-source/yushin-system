@@ -3021,3 +3021,22 @@ test('receipt allocation retry resumes after committed receipt without duplicate
     assert.match(saveSource,/err\?\.code==='receipt-allocation-pending'/);
     assert.match(saveSource,/保留同一個 operationId/);
 });
+
+
+test('purchase receiving and history lists batch row insertion', () => {
+    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList()');
+    const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource,/const fragment = document\.createDocumentFragment\(\)/);
+    assert.match(receivingSource,/fragment\.appendChild\(tr\)/);
+    assert.match(receivingSource,/tbody\.appendChild\(fragment\)/);
+    assert.doesNotMatch(receivingSource,/tbody\.appendChild\(tr\)/);
+
+    const historyStart=appSource.indexOf('window.renderPoList = function()');
+    const historyEnd=appSource.indexOf('\n};',historyStart)+3;
+    const historySource=appSource.slice(historyStart,historyEnd);
+    assert.match(historySource,/const fragment = document\.createDocumentFragment\(\)/);
+    assert.match(historySource,/fragment\.appendChild\(tr\)/);
+    assert.match(historySource,/tbody\.appendChild\(fragment\)/);
+    assert.doesNotMatch(historySource,/tbody\.appendChild\(tr\)/);
+});
