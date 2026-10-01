@@ -4158,3 +4158,23 @@ test('direct ship receipt transaction writes the supply delta required by securi
     assert.match(directSource,/tx\.update\(supplyRef,\{receivedQty,status:/);
     assert.match(directSource,/tx\.update\(orderRef,\{[\s\S]*?deliveryRecords,deliveredQty:grossDelivered,isDelivered:/);
 });
+
+
+test('cancelled supply is terminal and cannot be received again', () => {
+    const receiveStart=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const receiveEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiveStart);
+    const receiveSource=appSource.slice(receiveStart,receiveEnd);
+    assert.match(receiveSource,/supply\.status[\s\S]*?'CANCELLED'[\s\S]*?不能再確認到貨/);
+
+    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
+    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
+    const stateSource=rulesSource.slice(stateStart,stateEnd);
+    assert.match(stateSource,/resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
+    assert.match(stateSource,/receivedQty', 0\) >= resource\.data\.get\('receivedQty', 0\)/);
+    assert.match(stateSource,/cancelledQty', 0\) <= \([\s\S]*?qty'[\s\S]*?- request\.resource\.data\.get\('receivedQty'/);
+
+    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
+    const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
+    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
+    assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
+});
