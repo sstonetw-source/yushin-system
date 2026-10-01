@@ -3837,8 +3837,7 @@ test('Product Import is incremental, splits standard cost securely, and never re
     assert.match(uploadSource,/standardCostRaw/);
     assert.match(uploadSource,/標準成本格式不正確/);
     assert.match(uploadSource,/以 productId 增量合併本機快取/);
-    assert.match(uploadSource,/未出現在檔案中的產品不受影響/);
-    assert.match(uploadSource,/其他產品不會被刪除或停用/);
+    assert.match(uploadSource,/未出現在檔案中的產品不會被刪除或停用/);
     assert.match(uploadSource,/標準成本與實際採購價分開保存/);
 
     const confirmStart=appSource.indexOf('async function confirmProductMasterImport');
