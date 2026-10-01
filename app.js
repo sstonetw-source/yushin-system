@@ -8387,6 +8387,9 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
     purchasingDispatchError = '';
     purchasingDispatchLoading = true;
+    let normalizedItemsByOrder = null;
+    let filters = null;
+    let completedRows = null;
     const refreshButton = document.getElementById(purchasingView === 'completed'
         ? 'purchaseCompletedRefreshBtn'
         : 'purchaseDispatchRefreshBtn');
@@ -8395,18 +8398,27 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
     else renderPurchasingDispatchOrders();
     try {
         await refreshPurchasingOrderCache(reset, options);
+        normalizedItemsByOrder = new Map(
+            ordersCache.map(order => [order.id, normalizedOrderItems(order)])
+        );
+        filters = purchaseFilterContext();
         purchasingDispatchCache = ordersCache.filter(order =>
-            normalizedOrderItems(order).some(item => orderItemDisplayCategories(order,item).includes('dispatch'))
+            (normalizedItemsByOrder.get(order.id) || []).some(item =>
+                orderItemDisplayCategories(order,item).includes('dispatch')
+            )
         );
         purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        renderPurchasingWorkCards();
+        completedRows = purchasingView === 'completed'
+            ? purchasingCompletedRows(filters, normalizedItemsByOrder)
+            : null;
+        renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
     } catch (err) {
         purchasingDispatchError = `待打單清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         purchasingDispatchLoading = false;
         if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
-        if (purchasingView === 'completed') renderPurchasingCompletedOrders();
-        else renderPurchasingDispatchOrders();
+        if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
+        else renderPurchasingDispatchOrders(normalizedItemsByOrder, filters);
     }
 }
 
@@ -8521,21 +8533,29 @@ window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po') || pendingPurchaseLoading) return;
     pendingPurchaseError = '';
     pendingPurchaseLoading = true;
+    let normalizedItemsByOrder = null;
+    let filters = null;
     const refreshButton = document.getElementById('purchasePendingRefreshBtn');
     if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
     renderPendingPurchaseOrders();
     try {
         // 直接沿用訂單頁同一個分頁載入器與 ordersCache；同一時間不重複發 orders Query。
         await refreshPurchasingOrderCache(reset, options);
-        pendingPurchaseCache = ordersCache.filter(order => pendingProcurementDisplayLines(order).length > 0);
+        normalizedItemsByOrder = new Map(
+            ordersCache.map(order => [order.id, normalizedOrderItems(order)])
+        );
+        filters = purchaseFilterContext();
+        pendingPurchaseCache = ordersCache.filter(order =>
+            pendingProcurementDisplayLines(order, normalizedItemsByOrder.get(order.id)).length > 0
+        );
         pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        renderPurchasingWorkCards();
+        renderPurchasingWorkCards(normalizedItemsByOrder, null, filters);
     } catch (err) {
         pendingPurchaseError = `待採購清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         pendingPurchaseLoading = false;
         if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
-        renderPendingPurchaseOrders();
+        renderPendingPurchaseOrders(normalizedItemsByOrder, filters);
     }
 };
 
