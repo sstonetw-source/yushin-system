@@ -3573,3 +3573,16 @@ test('purchasing detail queues reuse lifecycle snapshots', () => {
     assert.match(switchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
     assert.match(switchSource,/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
+
+
+test('completed purchasing load-more reuses one render snapshot', () => {
+    const start=appSource.indexOf('window.loadMorePurchasingCompleted = async function()');
+    const end=appSource.indexOf('\n};',start)+3;
+    const source=appSource.slice(start,end);
+    assert.match(source,/const normalizedItemsByOrder = new Map/);
+    assert.match(source,/const dispatchStatesByOrder = purchasingDispatchStateSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(source,/const lifecyclesByOrder = purchasingLifecycleSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(source,/purchasingCompletedRows\([\s\S]*?normalizedItemsByOrder,[\s\S]*?dispatchStatesByOrder,[\s\S]*?lifecyclesByOrder/);
+    assert.match(source,/renderPurchasingWorkCards\([\s\S]*?loadedRows,[\s\S]*?dispatchStatesByOrder,[\s\S]*?lifecyclesByOrder/);
+    assert.doesNotMatch(source,/renderPurchasingWorkCards\(\)/);
+});
