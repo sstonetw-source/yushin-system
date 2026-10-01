@@ -153,16 +153,17 @@ test('preview host selects isolated Firebase project and exposes a visible envir
     assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
 });
 
-test('quote owner selector defaults to self and lets purchaser choose sales or engineer', () => {
+test('quote owner selector lets engineer assist sales while keeping sales self-only', () => {
     assert.match(appSource, /function populateSalesDropdown\(\)/);
     const start = appSource.indexOf('function populateSalesDropdown()');
     const end = appSource.indexOf('\n}\n', start) + 2;
     const selector = appSource.slice(start, end);
-    assert.match(selector, /currentUserRole === 'sales' \|\| currentUserRole === 'engineer'/);
-    assert.match(selector, /s\.uid === currentUser\?\.uid/);
-    assert.match(selector, /role === 'sales' \|\| role === 'engineer'/);
+    assert.match(selector, /if \(currentUserRole === 'sales'\) return s\.uid === currentUser\?\.uid/);
+    assert.match(selector, /if \(currentUserRole === 'engineer'\) return s\.uid === currentUser\?\.uid \|\| role === 'sales'/);
+    assert.match(selector, /return role === 'sales' \|\| role === 'engineer'/);
     assert.match(selector, /\? currentUserName : ''/);
-    assert.match(rulesSource, /match \/quotes\/\{id\}[\s\S]*?purchaser\(\) && validQuoteOwner\(request\.resource\.data\)/);
+    assert.match(rulesSource, /function engineerAssistedSalesQuote/);
+    assert.match(rulesSource, /match \/quotes\/\{id\}[\s\S]*?engineerAssistedSalesQuote\(request\.resource\.data\)/);
 });
 
 test('main brand list ignores Product Master and non-key Brand Master entries', () => {
