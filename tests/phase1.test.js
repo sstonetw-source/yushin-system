@@ -4112,3 +4112,49 @@ test('supply rule tightening still covers current quick-order receipt and cancel
     assert.match(receiptSource,/PARTIAL_RECEIPT/);
     assert.match(receiptSource,/RECEIVED/);
 });
+
+
+test('direct ship delivery rule is bound to the matching atomic receipt', () => {
+    const directStart=rulesSource.indexOf('function directShipReceiptOrderUpdate(orderId)');
+    const directEnd=rulesSource.indexOf('\n\n    function purchaserOrderWorkflowUpdate()',directStart);
+    const source=rulesSource.slice(directStart,directEnd);
+    assert.ok(directStart>=0&&directEnd>directStart);
+    assert.match(source,/afterRecords\.size\(\) == beforeRecords\.size\(\) \+ 1/);
+    assert.match(source,/afterRecords\[0:beforeRecords\.size\(\)\] == beforeRecords/);
+    assert.match(source,/newRecord\.get\('sourceType', ''\) == 'DIRECT_SHIP_RECEIPT'/);
+    assert.match(source,/supplyBefore = get\(supplyPath\)\.data/);
+    assert.match(source,/supplyAfter = getAfter\(supplyPath\)\.data/);
+    assert.match(source,/supplyBefore\.get\('orderId', ''\) == orderId/);
+    assert.match(source,/supplyAfter\.get\('receivedQty', 0\) == supplyBefore\.get\('receivedQty', 0\) \+ newRecord\.get\('qty', 0\)/);
+    assert.match(source,/supplyAfter\.get\('receivedQty', 0\) <= supplyAfter\.get\('qty', 0\)/);
+    assert.match(source,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'deliveryRecords'[\s\S]*?'deliveredQty'[\s\S]*?'isDelivered'/);
+
+    const purchaserStart=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
+    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseOrderWorkflowUpdate()',purchaserStart);
+    const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
+    assert.doesNotMatch(purchaserSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);
+
+    const warehouseStart=rulesSource.indexOf('function warehouseOrderWorkflowUpdate()');
+    const warehouseEnd=rulesSource.indexOf('\n\n    function productPath',warehouseStart);
+    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
+    assert.doesNotMatch(warehouseSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);
+
+    const orderStart=rulesSource.indexOf('match /orders/{id}');
+    const orderEnd=rulesSource.indexOf('\n\n    // Formal supplier PO',orderStart);
+    const orderSource=rulesSource.slice(orderStart,orderEnd);
+    assert.match(orderSource,/directShipReceiptOrderUpdate\(id\)/);
+});
+
+test('direct ship receipt transaction writes the supply delta required by security rules', () => {
+    const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptSource=appSource.slice(receiptStart,receiptEnd);
+    const directStart=receiptSource.indexOf('if(directShip){');
+    const warehouseStart=receiptSource.indexOf('const productKey=',directStart);
+    const directSource=receiptSource.slice(directStart,warehouseStart);
+    assert.match(directSource,/deliveryRecord=\{[\s\S]*?sourceType:'DIRECT_SHIP_RECEIPT'[\s\S]*?sourceId:supplyId/);
+    assert.match(directSource,/deliveryRecords=\[\.\.\.savedDeliveryRecords\(order\),deliveryRecord\]/);
+    assert.match(directSource,/const receivedQty=Number\(supply\.receivedQty\|\|0\)\+qty/);
+    assert.match(directSource,/tx\.update\(supplyRef,\{receivedQty,status:/);
+    assert.match(directSource,/tx\.update\(orderRef,\{[\s\S]*?deliveryRecords,deliveredQty:grossDelivered,isDelivered:/);
+});
