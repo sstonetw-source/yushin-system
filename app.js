@@ -2228,6 +2228,7 @@ async function runForecastHistorySearch(reset = true) {
     const records = new Map();
     let cursor = null;
     let checked = 0;
+    let lastIntermediateRenderAt = 0;
     updateForecastHistorySearchStatus('正在搜尋全部 Forecast…');
     renderForecastList();
 
@@ -2243,10 +2244,14 @@ async function runForecastHistorySearch(reset = true) {
                 const data = { id: doc.id, ...doc.data() };
                 if (fullHistoryRecordMatches('forecast', data, rawKeyword)) records.set(doc.id, data);
             });
-            forecastHistorySearchResults = [...records.values()].sort(
-                (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))
-            );
-            renderForecastList();
+            const now = Date.now();
+            if (now - lastIntermediateRenderAt >= 100 || snapshot.size < DEFAULT_LIST_LIMIT) {
+                lastIntermediateRenderAt = now;
+                forecastHistorySearchResults = [...records.values()].sort(
+                    (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))
+                );
+                renderForecastList();
+            }
             updateForecastHistorySearchStatus(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
 
             if (snapshot.size < DEFAULT_LIST_LIMIT) break;
@@ -2256,6 +2261,10 @@ async function runForecastHistorySearch(reset = true) {
         }
         if (generation !== forecastHistorySearchGeneration) return;
         forecastHistorySearchCursor = null;
+        forecastHistorySearchResults = [...records.values()].sort(
+            (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))
+        );
+        renderForecastList();
         updateForecastHistorySearchStatus(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
         if (generation !== forecastHistorySearchGeneration) return;
@@ -13100,6 +13109,7 @@ async function runEquipmentSearch() {
     const records = new Map();
     let cursor = null;
     let checked = 0;
+    let lastIntermediateRenderAt = 0;
     if (status) status.textContent = '正在搜尋全部儀器…';
     if (moreButton) moreButton.style.display = 'none';
     renderEquipmentList();
@@ -13122,9 +13132,13 @@ async function runEquipmentSearch() {
                 const data = { id:doc.id, ...doc.data() };
                 if (data.active !== false && fullHistoryRecordMatches('equipment', data, rawKeyword)) records.set(doc.id, data);
             });
-            equipmentSearchResults = [...records.values()]
-                .sort((a,b)=>String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant'));
-            renderEquipmentList();
+            const now = Date.now();
+            if (now - lastIntermediateRenderAt >= 100 || snapshot.size < DEFAULT_LIST_LIMIT) {
+                lastIntermediateRenderAt = now;
+                equipmentSearchResults = [...records.values()]
+                    .sort((a,b)=>String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant'));
+                renderEquipmentList();
+            }
             if (status) status.textContent = `全資料搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`;
 
             if (snapshot.size < DEFAULT_LIST_LIMIT) break;
@@ -13133,6 +13147,9 @@ async function runEquipmentSearch() {
         }
 
         if (generation !== equipmentSearchGeneration) return;
+        equipmentSearchResults = [...records.values()]
+            .sort((a,b)=>String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant'));
+        renderEquipmentList();
         if (status) status.textContent = `全資料搜尋完成：找到 ${records.size} 筆`;
     } catch (err) {
         if (generation !== equipmentSearchGeneration) return;
