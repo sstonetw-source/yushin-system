@@ -565,8 +565,8 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .purchase-view-tabs { display:flex; gap:8px; margin-bottom:12px; border-bottom:1px solid #d5dde5; }
 .purchase-view-tabs button { border-radius:7px 7px 0 0; background:#edf1f5; color:#334; }
 .purchase-view-tabs button.active { background:#003366; color:#fff; }
-#purchasePendingStatus, #purchaseDispatchStatus { overflow-wrap:anywhere; }
-#purchasePendingPanel .table-wrap, #purchaseDispatchPanel .table-wrap { max-width:100%; overflow-x:auto; }
+#purchasePendingStatus, #purchaseDispatchStatus, #purchaseCompletedStatus { overflow-wrap:anywhere; }
+#purchasePendingPanel .table-wrap, #purchaseDispatchPanel .table-wrap, #purchaseCompletedPanel .table-wrap { max-width:100%; overflow-x:auto; }
 .order-work-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin:0 0 14px; }
 .order-work-card { border:1px solid #d5dde5; background:#f7f9fb; color:#334; border-radius:8px; padding:10px 8px; text-align:left; min-width:0; }
 .order-work-card:hover { background:#edf3f8; }
@@ -595,12 +595,23 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     .order-period-toolbar, .order-custom-period { align-items:stretch; flex-direction:column; }
     .order-period-toolbar select, .order-period-toolbar input { width:100%; min-height:44px; }
     .order-period-note { flex-basis:auto; }
-    #purchasePendingPanel .toolbar > *, #purchaseDispatchPanel .toolbar > * { max-width:100%; box-sizing:border-box; }
-    #purchasePendingPanel .table-wrap, #purchaseDispatchPanel .table-wrap { overflow-x:visible; }
+    #purchasePendingPanel .toolbar > *,
+    #purchaseDispatchPanel .toolbar > *,
+    #purchaseCompletedPanel .toolbar > * { max-width:100%; box-sizing:border-box; }
+    #purchasePendingPanel .table-wrap,
+    #purchaseDispatchPanel .table-wrap,
+    #purchaseCompletedPanel .table-wrap { overflow-x:visible; }
     #purchasePendingPanel table, #purchasePendingPanel tbody, #purchasePendingPanel tr, #purchasePendingPanel td,
-    #purchaseDispatchPanel table, #purchaseDispatchPanel tbody, #purchaseDispatchPanel tr, #purchaseDispatchPanel td { display:block; width:100%; min-width:0; box-sizing:border-box; }
-    #purchasePendingPanel thead, #purchaseDispatchPanel thead { display:none; }
-    #purchasePendingPanel tbody tr, #purchaseDispatchPanel tbody tr {
+    #purchaseDispatchPanel table, #purchaseDispatchPanel tbody, #purchaseDispatchPanel tr, #purchaseDispatchPanel td,
+    #purchaseCompletedPanel table, #purchaseCompletedPanel tbody, #purchaseCompletedPanel tr, #purchaseCompletedPanel td {
+        display:block; width:100%; min-width:0; box-sizing:border-box;
+    }
+    #purchasePendingPanel thead,
+    #purchaseDispatchPanel thead,
+    #purchaseCompletedPanel thead { display:none; }
+    #purchasePendingPanel tbody tr,
+    #purchaseDispatchPanel tbody tr,
+    #purchaseCompletedPanel tbody tr {
         margin-bottom:16px;
         padding:16px;
         border:0;
@@ -608,14 +619,28 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
         background:#fff;
         box-shadow:0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
     }
-    #purchasePendingPanel td, #purchaseDispatchPanel td { border:0; border-bottom:1px solid #eef1f4; padding:7px 0; text-align:left; overflow-wrap:anywhere; }
-    #purchasePendingPanel td:last-child, #purchaseDispatchPanel td:last-child { border-bottom:0; }
-    #purchasePendingPanel td[data-th]::before, #purchaseDispatchPanel td[data-th]::before { content:attr(data-th) "："; display:block; margin-bottom:3px; color:#999; font-size:10.5px; font-weight:700; letter-spacing:.02em; }
-    #purchasePendingPanel td button, #purchaseDispatchPanel td button { min-height:44px; }
+    #purchasePendingPanel td,
+    #purchaseDispatchPanel td,
+    #purchaseCompletedPanel td {
+        border:0; border-bottom:1px solid #eef1f4; padding:7px 0; text-align:left; overflow-wrap:anywhere;
+    }
+    #purchasePendingPanel td:last-child,
+    #purchaseDispatchPanel td:last-child,
+    #purchaseCompletedPanel td:last-child { border-bottom:0; }
+    #purchasePendingPanel td[data-th]::before,
+    #purchaseDispatchPanel td[data-th]::before,
+    #purchaseCompletedPanel td[data-th]::before {
+        content:attr(data-th) "："; display:block; margin-bottom:3px; color:#999; font-size:10.5px; font-weight:700; letter-spacing:.02em;
+    }
+    #purchasePendingPanel td button,
+    #purchaseDispatchPanel td button,
+    #purchaseCompletedPanel td button { min-height:44px; }
     #purchasePendingPanel td[data-th="操作"],
-    #purchaseDispatchPanel td[data-th="操作"] { display:flex; flex-wrap:wrap; gap:6px; }
+    #purchaseDispatchPanel td[data-th="操作"],
+    #purchaseCompletedPanel td[data-th="操作"] { display:flex; flex-wrap:wrap; gap:6px; }
     #purchasePendingPanel td[data-th="操作"] button,
-    #purchaseDispatchPanel td[data-th="操作"] button { flex:1 1 120px; }
+    #purchaseDispatchPanel td[data-th="操作"] button,
+    #purchaseCompletedPanel td[data-th="操作"] button { flex:1 1 120px; }
 }
 .sales-stat-cards { display:grid; grid-template-columns:repeat(3,minmax(180px,1fr)); gap:12px; margin:14px 0; }
 .sales-stat-card { background:#f7f9fc; border:1px solid #d7e0ea; border-radius:9px; padding:16px; display:flex; flex-direction:column; gap:7px; }
