@@ -281,6 +281,30 @@ input[type="number"] {
 .quote-pdf-stage .quote-pdf-document.theme-yushin { font-family:"Microsoft JhengHei", Arial, sans-serif; }
 .quote-pdf-stage .quote-pdf-document.theme-yushin .quote-pdf-grid-head { background-color:#dbe9ff; }
 .quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE { font-family:"SimSun", "PMingLiU", "細明體", serif; }
+/* 鼎新版頁首：Logo 與公司資料分欄，避免絕對定位的 Logo 壓到電話／公司名稱。
+   左右保留等寬欄位，中央公司資料仍維持整頁視覺置中。 */
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .header-container {
+    display:grid;
+    grid-template-columns:104px minmax(0, 1fr) 104px;
+    align-items:center;
+}
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .quote-pdf-logo {
+    position:static !important;
+    left:auto !important;
+    top:auto !important;
+    transform:none !important;
+    grid-column:1;
+    justify-self:center;
+    width:92px !important;
+    max-height:78px !important;
+}
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .header-info {
+    grid-column:2;
+    min-width:0;
+}
+.quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .header-info p {
+    white-space:normal;
+}
 .quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .quote-pdf-grid { border:3px double #000; background-color:#fff; }
 .quote-pdf-stage .quote-pdf-document.theme-MULTI-LIFE .quote-pdf-grid-head { background:#000; color:#fff; }
 .quote-pdf-stage .quote-pdf-document.theme-morningstar { font-family:"Yuanti SC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
