@@ -3648,3 +3648,33 @@ test('deferred receiving load merges source orders only after parallel reads fin
     assert.match(queueSource,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
     assert.match(queueSource,/renderPurchasingView\(\)/);
 });
+
+
+test('warehouse receiving capability is separate from purchase editing', () => {
+    assert.match(appSource,/warehouse:\s*Object\.freeze\([^\n]*'orders\.po':'view'/);
+    assert.match(appSource,/function canReceiveInventoryCapability\(role = currentUserRole\) \{[\s\S]*?role === 'warehouse'/);
+
+    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
+    const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.equal((receivingSource.match(/!canReceiveInventoryCapability\(\)/g)||[]).length,2);
+    assert.doesNotMatch(receivingSource,/!canEditPage\('orders\.po'\)/);
+
+    const openStart=appSource.indexOf('window.openSupplyReceipt = function');
+    const openEnd=appSource.indexOf('\nwindow.savePoReceiptBatch',openStart);
+    assert.match(appSource.slice(openStart,openEnd),/if \(!canReceiveInventoryCapability\(\)\) return/);
+
+    const saveStart=appSource.indexOf('window.savePoReceiptBatch = async function');
+    const saveEnd=appSource.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
+    assert.match(appSource.slice(saveStart,saveEnd),/if \(!canReceiveInventoryCapability\(\) \|\| poReceiptSaveInProgress\) return/);
+
+    const stockStart=appSource.indexOf('window.openDirectStockPurchase = async function');
+    const stockEnd=appSource.indexOf('\nwindow.closePurchaseOrder',stockStart);
+    assert.match(appSource.slice(stockStart,stockEnd),/if \(!canEditPage\('orders\.po'\)\) return/);
+});
+
+test('warehouse receiving UI matches Firestore receive capability', () => {
+    assert.match(rulesSource,/function canReceiveInventory\(\) \{[\s\S]*?admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
+    assert.match(appSource,/倉管模式：可以確認到貨與入庫/);
+    assert.match(appSource,/window\.receiveSupplyOrder = function\(supplyId\) \{[\s\S]*?canReceiveInventoryCapability\(\)/);
+});
