@@ -526,7 +526,7 @@ test('manual ordered action records supply and source item only once after an un
     const source = app.match(/const pendingPurchaseOrderKeys = new Set\(\);[\s\S]*?\n(?=window\.openOrderPurchaseDraft)/)?.[0];
     assert.ok(source);
     const order = {items:[{itemId:'I1',itemCode:'P1',itemName:'Product',qty:2,
-        productId:'P1',supplier:'Vendor',costPrice:100,warehouseId:'W1',
+        productId:'P1',supplier:'Vendor',costPrice:100,warehouseId:'W1',fulfillmentType:'DIRECT_SHIP',
         procurementType:'PURCHASING_PO',supplyOrderedQty:0,shortageQty:2}],orderNo:'O1'};
     let supply, updates = 0;
     const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
@@ -571,7 +571,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
     const source = app.match(/const pendingPurchaseOrderKeys = new Set\(\);[\s\S]*?\n(?=window\.openOrderPurchaseDraft)/)?.[0];
     assert.ok(source);
     const order = {items:[{itemId:'I1',itemCode:'P1',itemName:'Product',qty:2,
-        productId:'P1',supplier:'Vendor',costPrice:100,warehouseId:'W1',
+        productId:'P1',supplier:'Vendor',costPrice:100,warehouseId:'W1',fulfillmentType:'DIRECT_SHIP',
         procurementType:'PURCHASING_PO',supplyOrderedQty:0,receivedQty:0,shortageQty:2}],orderNo:'O1'};
     let supply, updates = 0;
     const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
@@ -1490,4 +1490,105 @@ test('cancelled outstanding quantity becomes purchasable again', () => {
     const validateSource=app.slice(validateStart,validateEnd);
     assert.match(validateSource,/const remaining = remainingProcurementQty\(order, source\)/);
     assert.doesNotMatch(validateSource,/purchaseDocumentNos/);
+});
+
+
+test('warehouse quick ordered action registers incoming atomically and idempotently', async () => {
+    const source = app.match(/const pendingPurchaseOrderKeys = new Set\(\);[\s\S]*?\n(?=window\.openOrderPurchaseDraft)/)?.[0];
+    assert.ok(source);
+
+    const docs=new Map();
+    const order={
+        items:[{itemId:'I1',itemCode:'P1',itemName:'Product',qty:2,productId:'P1',
+            supplier:'Vendor',costPrice:100,warehouseId:'W1',fulfillmentType:'WAREHOUSE',
+            procurementType:'PURCHASING_PO',supplyOrderedQty:0,receivedQty:0,shortageQty:2}],
+        orderNo:'O1',ownerUid:'sales-1',salesCode:'S01'
+    };
+    docs.set('orders/O1',order);
+    docs.set('inventory/P1',{productKey:'P1',onHand:0,reserved:0,incoming:0});
+    docs.set('warehouseStocks/W1__P1',{warehouseId:'W1',productKey:'P1',onHand:0,reserved:0,incoming:0});
+    let sequence=0;
+    const movements=[];
+    const db={
+        collection:name=>({doc:id=>{
+            const finalId=id||('auto-'+(++sequence));
+            return {key:name+'/'+finalId,id:finalId};
+        }}),
+        async runTransaction(callback){
+            const writes=[];
+            const tx={
+                async get(ref){return {exists:docs.has(ref.key),id:ref.id,data:()=>docs.get(ref.key)};},
+                set(ref,data,options){writes.push(['set',ref,data,options]);},
+                update(ref,data){writes.push(['update',ref,data,{merge:true}]);}
+            };
+            await callback(tx);
+            writes.forEach(([kind,ref,data,options])=>{
+                if(ref.key.startsWith('inventoryMovements/')) movements.push(data);
+                const previous=docs.get(ref.key)||{};
+                docs.set(ref.key,(kind==='update'||options?.merge)?{...previous,...data}:data);
+            });
+        }
+    };
+    const context=vm.createContext({
+        window:{},document:{getElementById:()=>null},db,
+        canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
+        currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
+        remainingProcurementQty:(record,item)=>{
+            const ordered=Number(item.supplyOrderedQty||0);
+            const received=Number(item.receivedQty||0);
+            return Math.max(0,Number(item.shortageQty||0)-Math.max(0,ordered-received));
+        },
+        poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-10-01',
+        normalizedOrderStatus:()=> 'normal',normalizedOrderItems:record=>record.items,
+        orderWorkIndexFields:()=>({workCategories:['arrival']}),
+        inventoryNumbers:data=>({
+            onHand:Number(data?.onHand||0),reserved:Number(data?.reserved||0),incoming:Number(data?.incoming||0)
+        }),
+        warehouseStockDocId:(warehouse,key)=>warehouse+'__'+key,
+        resolveBrandName:value=>value||'',
+        buildInventorySearchTokens:()=>['p1'],
+        invalidateWarehouseStockCache:()=>{},
+        ordersCache:[],supplyReceivingCache:[],
+        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},renderOrdersList:()=>{},
+        switchPurchasingView:()=>{},alert:()=>{}
+    });
+    vm.runInContext(source,context);
+
+    const button={disabled:false,textContent:'已訂購',isConnected:false};
+    await context.window.markPurchaseItemOrdered('O1','I1',button);
+    assert.equal(docs.get('orders/O1').items[0].supplyOrderedQty,2);
+    assert.equal(docs.get('supplyOrders/manual-O1-I1').incomingRegisteredQty,2);
+    assert.equal(docs.get('inventory/P1').incoming,2);
+    assert.equal(docs.get('warehouseStocks/W1__P1').incoming,2);
+    assert.equal(movements.length,1);
+    assert.equal(movements[0].qty,2);
+
+    await context.window.markPurchaseItemOrdered('O1','I1',button);
+    assert.equal(docs.get('inventory/P1').incoming,2,'plain retry must not duplicate incoming');
+    assert.equal(docs.get('warehouseStocks/W1__P1').incoming,2);
+    assert.equal(docs.get('supplyOrders/manual-O1-I1').orderEvents.length,1);
+    assert.equal(movements.length,1);
+
+    docs.get('orders/O1').items[0].shortageQty=5;
+    await context.window.markPurchaseItemOrdered('O1','I1',button);
+    assert.equal(docs.get('orders/O1').items[0].supplyOrderedQty,5);
+    assert.equal(docs.get('supplyOrders/manual-O1-I1').qty,5);
+    assert.equal(docs.get('supplyOrders/manual-O1-I1').incomingRegisteredQty,5);
+    assert.equal(docs.get('inventory/P1').incoming,5);
+    assert.equal(docs.get('warehouseStocks/W1__P1').incoming,5);
+    assert.equal(movements.length,2);
+    assert.equal(movements[1].qty,3);
+});
+
+test('quick ordered action writes incoming inside the same transaction', () => {
+    const start=app.indexOf('window.markPurchaseItemOrdered = async function');
+    const end=app.indexOf('\nwindow.openOrderPurchaseDraft',start);
+    const source=app.slice(start,end);
+    assert.match(source,/const targetIncomingQty = directShip \? 0 : Math\.max\(0, nextSupplyQty - receivedQty\)/);
+    assert.match(source,/const incomingDelta = targetIncomingQty - registeredIncomingQty/);
+    assert.match(source,/collection\('inventory'\)/);
+    assert.match(source,/collection\('warehouseStocks'\)/);
+    assert.match(source,/type:'purchase_incoming'/);
+    assert.match(source,/incomingRegisteredQty:targetIncomingQty/);
+    assert.match(source,/單純重試時不增加訂購量或事件，但仍會修復曾中斷的 incoming 同步/);
 });
