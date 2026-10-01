@@ -165,9 +165,35 @@ service cloud.firestore {
         && request.resource.data.get('cancelledQty', 0) <= (
           request.resource.data.get('qty', 0) - request.resource.data.get('receivedQty', 0)
         )
-        && request.resource.data.get('status', 'ORDERED') in [
-          'ORDERED', 'PARTIAL_RECEIPT', 'RECEIVED', 'CANCELLED'
-        ];
+        && (
+          (
+            request.resource.data.get('status', 'ORDERED') == 'ORDERED'
+            && request.resource.data.get('receivedQty', 0) == 0
+            && request.resource.data.get('cancelledQty', 0) == 0
+          )
+          || (
+            request.resource.data.get('status', 'ORDERED') == 'PARTIAL_RECEIPT'
+            && request.resource.data.get('receivedQty', 0) > 0
+            && request.resource.data.get('receivedQty', 0) < request.resource.data.get('qty', 0)
+            && request.resource.data.get('cancelledQty', 0) == 0
+          )
+          || (
+            request.resource.data.get('status', 'ORDERED') == 'RECEIVED'
+            && request.resource.data.get('qty', 0) > 0
+            && request.resource.data.get('receivedQty', 0) == request.resource.data.get('qty', 0)
+            && request.resource.data.get('cancelledQty', 0) == 0
+          )
+          || (
+            request.resource.data.get('status', 'ORDERED') == 'CANCELLED'
+            && request.resource.data.get('qty', 0) > request.resource.data.get('receivedQty', 0)
+            && request.resource.data.get('cancelledQty', 0)
+              == request.resource.data.get('qty', 0) - request.resource.data.get('receivedQty', 0)
+            && request.resource.data.get('incomingRegisteredQty', 0) == 0
+            && request.resource.data.get('cancelReason', '') != ''
+            && request.resource.data.get('cancelledAt', '') != ''
+            && request.resource.data.get('cancelledByUid', '') == request.auth.uid
+          )
+        );
     }
 
     function purchaserSupplyOperationalUpdate() {
