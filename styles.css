@@ -1584,3 +1584,80 @@ html[data-app-environment="preview"] body { border-top: 0; }
         font-size: 15px;
     }
 }
+
+
+/* ===== 2026-10-01：手機主導覽改為工作優先的收合選單 =====
+   桌機維持既有主導覽；手機預設只佔一列，使用者需要切換模組時再展開原本八個入口。
+   只改導覽呈現，不改任何權限、資料查詢或交易流程。 */
+.mobile-nav-toggle { display: none; }
+
+@media screen and (max-width: 640px) {
+    .nav-tabs {
+        position: sticky;
+        top: 0;
+        z-index: 1200;
+        display: flex;
+        padding: 8px 12px;
+        gap: 0;
+        background-image: none;
+        box-sizing: border-box;
+    }
+
+    .mobile-nav-toggle {
+        display: flex;
+        width: 100%;
+        min-height: 46px;
+        margin: 0;
+        padding: 9px 12px;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 10px;
+        border: 1px solid rgba(255,255,255,.28);
+        border-radius: 9px;
+        background: rgba(0,34,68,.92);
+        color: #fff;
+        font: inherit;
+        font-size: 16px;
+        font-weight: 700;
+        cursor: pointer;
+        box-sizing: border-box;
+    }
+    .mobile-nav-toggle-icon {
+        font-size: 21px;
+        line-height: 1;
+    }
+
+    .nav-tabs:not(.mobile-open) .nav-tab,
+    .nav-tabs:not(.mobile-open) .nav-spacer,
+    .nav-tabs:not(.mobile-open) .auth-status {
+        display: none !important;
+    }
+
+    .nav-tabs.mobile-open {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 8px;
+        padding: 12px;
+        max-height: calc(100vh - env(safe-area-inset-top, 0px));
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .nav-tabs.mobile-open .mobile-nav-toggle {
+        grid-column: 1 / -1;
+    }
+    .nav-tabs.mobile-open .nav-tab {
+        display: flex;
+    }
+    .nav-tabs.mobile-open .nav-spacer {
+        display: none;
+    }
+    .nav-tabs.mobile-open .auth-status {
+        display: grid;
+    }
+
+    /* 導覽收合後，功能內容直接接在頂部，第一屏優先留給實際工作。 */
+    .content-section {
+        padding-top: 16px;
+    }
+}
