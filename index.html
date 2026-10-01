@@ -914,7 +914,7 @@
                     <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
                     <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
                 </div>
-                <div><label>產品線（選填）</label><input type="text" id="orderProductLine" placeholder="例如：儀器、試劑、耗材"></div>
+                <input type="hidden" id="orderProductLine" value="">
                 <div><label>規格</label><input type="text" id="orderSpec"></div>
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
                 <div><label>單價</label><input type="number" id="orderUnitPrice" value="0" oninput="calcOrderTotal()"></div>
@@ -1432,6 +1432,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-10"></script>
+    <script src="app.js?v=20261001-11"></script>
 </body>
 </html>
