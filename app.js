@@ -2338,7 +2338,7 @@ window.renderForecastList = function() {
 };
 
 window.openForecastModal = function(id = '') {
-    if (!canEditPage('forecast')) return;
+    if (!canCreateForecastCapability() || !canEditPage('forecast')) return;
 
     const item = id ? forecastCache.find(entry => entry.id === id) : null;
 
@@ -2377,7 +2377,7 @@ window.closeForecastModal = function() {
 };
 
 window.saveForecast = async function() {
-    if (forecastSaveInProgress || !canEditPage('forecast')) return;
+    if (forecastSaveInProgress || !canCreateForecastCapability() || !canEditPage('forecast')) return;
 
     const id = document.getElementById('forecastId').value;
     const existing = id ? forecastCache.find(item => item.id === id) : null;
@@ -5807,7 +5807,7 @@ window.renderMyQuotesList = function() {
 
 // 成交：標記估價單為已成交，並把裡面每一個品項匯入訂單管理系統（一次性動作，避免重複匯入）
 window.createForecastFromQuote = async function(quoteNo) {
-    if (!canEditPage('forecast')) {
+    if (!canCreateForecastCapability() || !canEditPage('forecast')) {
         alert('您沒有 Forecast 編輯權限。');
         return;
     }
@@ -13450,7 +13450,7 @@ window.exportOrdersByDate = async function() {
    ========================================================= */
 // 儀器管理系統的查看權限：業務只看自己；管理員／工程師可依 Firestore Rules 查看全部。
 function canViewAllEquipment() {
-    return currentUserRole === 'admin' || currentUserRole === 'engineer';
+    return canManageEquipmentCapability();
 }
 
 window.loadEquipmentFromCloud = function(reset = true) {
