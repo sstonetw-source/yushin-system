@@ -2733,3 +2733,23 @@ test('receiving work list indexes supply evidence once per render', () => {
     assert.match(renderSource,/const evidenceIndex = buildReceivingEvidenceIndex\(\)/);
     assert.match(renderSource,/receivingEvidenceForWorkItem\(order, item, itemIndex, evidenceIndex\)/);
 });
+
+
+test('quote numbering fails closed and preserves editing identity', () => {
+    const start=appSource.indexOf('window.generateQuoteNo = async function()');
+    const end=appSource.indexOf('\n// 估價單可歸屬業務或工程師',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/if \(editingQuoteNo && !restoringQuoteDraft\)/);
+    assert.match(source,/quoteNoInput\.value = editingQuoteNo/);
+    assert.doesNotMatch(source,/prefix\}01/);
+    assert.match(source,/quoteNoInput\.value = ''/);
+    assert.match(source,/無法取得安全的估價單號/);
+
+    const salesStart=appSource.indexOf('window.onSalesChange = function()');
+    const salesEnd=appSource.indexOf('\n};',salesStart)+3;
+    assert.match(appSource.slice(salesStart,salesEnd),/if \(!editingQuoteNo\) generateQuoteNo\(\)/);
+
+    const dropdownStart=appSource.indexOf('function populateSalesDropdown()');
+    const dropdownEnd=appSource.indexOf('\n// 依目前輸入的業務姓名',dropdownStart);
+    assert.match(appSource.slice(dropdownStart,dropdownEnd),/if \(!restoringQuoteDraft && !editingQuoteNo\) generateQuoteNo\(\)/);
+});
