@@ -2504,3 +2504,26 @@ test('order list calculates row progress summaries once', () => {
     assert.match(source,/const billingPending = pendingOrderStatusKeys\.has\(o\.id \+ ':isBilled'\)/);
     assert.match(source,/const lifecyclePending = pendingLifecycleOrderIds\.has\(o\.id\)/);
 });
+
+
+test('order work cards reuse normalized order items', () => {
+    const amountStart=appSource.indexOf('function orderItemWorkAmount');
+    const amountEnd=appSource.indexOf('\nfunction orderWorkAmount',amountStart);
+    const amountSource=appSource.slice(amountStart,amountEnd);
+    assert.match(amountSource,/totalQtyOverride = null/);
+    assert.match(amountSource,/totalQtyOverride === null \? orderQuantity\(order\) : totalQtyOverride/);
+
+    const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
+    const metricsEnd=appSource.indexOf('\nwindow.setOrderWorkFilter',metricsStart);
+    const metricsSource=appSource.slice(metricsStart,metricsEnd);
+    assert.match(metricsSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
+    assert.match(metricsSource,/orderItemWorkAmount\(order,item,category,totalQty\)/);
+
+    const cardsStart=appSource.indexOf('function renderOrderWorkCards');
+    const cardsEnd=appSource.indexOf('\nfunction createOrderPaginationState',cardsStart);
+    assert.match(appSource.slice(cardsStart,cardsEnd),/normalizedItemsByOrder/);
+
+    const listStart=appSource.indexOf('window.renderOrdersList = function()');
+    const listEnd=appSource.indexOf('window.retryOrderInventoryReservation',listStart);
+    assert.match(appSource.slice(listStart,listEnd),/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder\)/);
+});
