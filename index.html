@@ -864,7 +864,7 @@
         </div>
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
-                <button type="button" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">↻ 更新</button>
+                <button type="button" id="purchasePendingRefreshBtn" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">↻ 更新</button>
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
             <div class="table-wrap"><table>
@@ -878,7 +878,7 @@
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋全部採購單：單號 / 廠商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
                 <span id="poHistorySearchStatus" role="status"></span>
-                <button class="btn-secondary" onclick="loadMyPurchaseOrders()">↻ 更新</button>
+                <button type="button" id="purchasePoRefreshBtn" class="btn-secondary" onclick="loadMyPurchaseOrders()">↻ 更新</button>
             </div>
             <table>
                 <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
@@ -889,7 +889,7 @@
         </div>
         <div id="purchaseDispatchPanel" style="display:none">
             <div class="toolbar no-print">
-                <button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">↻ 更新</button>
+                <button type="button" id="purchaseDispatchRefreshBtn" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">↻ 更新</button>
                 <span id="purchaseDispatchStatus" role="status"></span>
             </div>
             <div class="inventory-summary-note">顯示已到貨、尚有待打單數量的訂單。完成出貨單後按「已打單」，訂單即進入可出貨狀態。</div>
@@ -900,7 +900,7 @@
             <div class="po-load-more-row no-print"><button type="button" id="purchaseDispatchMoreBtn" class="btn-secondary" style="display:none" onclick="loadPurchasingDispatchOrders(false)">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseCompletedPanel" style="display:none">
-            <div class="toolbar no-print"><button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">↻ 更新</button><span id="purchaseCompletedStatus" role="status"></span></div>
+            <div class="toolbar no-print"><button type="button" id="purchaseCompletedRefreshBtn" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">↻ 更新</button><span id="purchaseCompletedStatus" role="status"></span></div>
             <div class="inventory-summary-note">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div>
             <div class="table-wrap"><table><thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>已完成採購品項</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
@@ -1447,6 +1447,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-28"></script>
+    <script src="app.js?v=20261001-29"></script>
 </body>
 </html>
