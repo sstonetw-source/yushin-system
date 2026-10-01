@@ -4223,12 +4223,12 @@ window.printThreeQuotes = async function() {
         await waitForPdfImages(first.documentNode);
 
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        const scale = isMobile ? 1.35 : 1.75;
+        const scale = isMobile ? 1.15 : 1.65;
         const firstPages = paginateQuotePdfDocument(first.stage, first.documentNode);
         await waitForPdfImages(first.stage);
 
         const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
-        await addQuotePagesToPdf(pdf, firstPages, scale);
+        await addDocumentPagesToPdf(pdf, firstPages, { scale });
         firstStage.remove();
         firstStage = null;
 
@@ -4241,22 +4241,13 @@ window.printThreeQuotes = async function() {
         await waitForPdfImages(comparisonStage);
 
         const comparisonPages = [...comparisonStage.querySelectorAll('.comparison-quote-page')];
-        for (const page of comparisonPages) {
-            const canvas = await window.html2canvas(page, {
-                backgroundColor:'#ffffff', scale, logging:false, useCORS:true, allowTaint:false,
-                width:Math.ceil(page.scrollWidth), height:Math.ceil(page.scrollHeight), windowWidth:794
-            });
-            pdf.addPage('a4', 'p');
-            const maxWidthMm = 190;
-            const maxHeightMm = 277;
-            const naturalHeightMm = canvas.height * maxWidthMm / canvas.width;
-            const renderHeightMm = Math.min(maxHeightMm, naturalHeightMm);
-            const renderWidthMm = renderHeightMm === naturalHeightMm
-                ? maxWidthMm
-                : canvas.width * renderHeightMm / canvas.height;
-            const x = (210 - renderWidthMm) / 2;
-            pdf.addImage(canvas.toDataURL('image/jpeg', 0.96), 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
-        }
+        await addDocumentPagesToPdf(pdf, comparisonPages, {
+            scale,
+            addPageBeforeFirst: true,
+            onProgress: (pageNo, pageCount) => {
+                if (button) button.innerText = `正在產生三家估價單… ${pageNo}/${pageCount}`;
+            }
+        });
 
         const threeQuoteName = quotePdfFileName(quoteData).replace(/\.pdf$/i, '-三家估價.pdf');
         pdf.save(threeQuoteName);
@@ -4506,7 +4497,12 @@ function paginateQuotePdfDocument(stage, source) {
     return pages.map(entry => entry.page);
 }
 
-async function addQuotePagesToPdf(pdf, pages, scale, onProgress = null) {
+async function addDocumentPagesToPdf(pdf, pages, options = {}) {
+    const {
+        scale = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 1.15 : 1.65,
+        onProgress = null,
+        addPageBeforeFirst = false
+    } = options;
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const jpegQuality = isMobile ? 0.88 : 0.92;
 
@@ -4524,7 +4520,9 @@ async function addQuotePagesToPdf(pdf, pages, scale, onProgress = null) {
             height:Math.ceil(page.scrollHeight),
             windowWidth:794
         });
-        if (index > 0) pdf.addPage('a4', 'p');
+
+        if (index > 0 || addPageBeforeFirst) pdf.addPage('a4', 'p');
+
         const maxWidthMm = 190;
         const maxHeightMm = 277;
         const naturalHeightMm = canvas.height * maxWidthMm / canvas.width;
@@ -4534,10 +4532,11 @@ async function addQuotePagesToPdf(pdf, pages, scale, onProgress = null) {
             : canvas.width * renderHeightMm / canvas.height;
         const x = (210 - renderWidthMm) / 2;
 
-        // iPhone Safari 在多頁估價單時容易因大型 Canvas + Base64 JPEG 疊加造成記憶體壓力。
-        // 每頁加入 PDF 後立即釋放 Canvas，並把執行權交回瀏覽器，避免畫面看似卡死。
-        const imageData = canvas.toDataURL('image/jpeg', jpegQuality);
+        // 共用 PDF 核心：估價單、三家估價單、訂購單皆逐頁加入後立即釋放 Canvas。
+        // 這可避免 iPhone Safari 在多頁文件上累積大型 Canvas / Base64 造成記憶體壓力。
+        let imageData = canvas.toDataURL('image/jpeg', jpegQuality);
         pdf.addImage(imageData, 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
+        imageData = null;
         canvas.width = 1;
         canvas.height = 1;
 
@@ -4593,8 +4592,11 @@ window.exportCurrentQuotePdf = async function() {
         await waitForPdfImages(stage);
 
         const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
-        await addQuotePagesToPdf(pdf, pages, scale, (pageNo, pageCount) => {
-            if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
+        await addDocumentPagesToPdf(pdf, pages, {
+            scale,
+            onProgress: (pageNo, pageCount) => {
+                if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
+            }
         });
         if (button) button.innerText = '正在下載 PDF…';
         pdf.save(quotePdfFileName(quoteData));
@@ -9446,9 +9448,21 @@ function paginatePoPdfDocument(stage, source) {
         current.page.appendChild(summaryClone);
         if (current.page.scrollHeight > maxHeight) {
             summaryClone.remove();
-            current = createPoPdfPage(stage, source, false);
-            pages.push(current);
-            current.page.appendChild(summaryClone);
+            const donor = current;
+            const finalPage = createPoPdfPage(stage, source, false);
+            pages.push(finalPage);
+            finalPage.page.appendChild(summaryClone);
+
+            // 與估價單相同：最後一頁優先保留合計區，再把前頁最後的品項往後搬，
+            // 只要超出 A4 可用高度就立即放回，避免產生大片空白或切到合計內容。
+            while (donor.tbody.lastElementChild) {
+                const candidate = donor.tbody.lastElementChild;
+                finalPage.tbody.prepend(candidate);
+                if (finalPage.page.scrollHeight > maxHeight) {
+                    donor.tbody.appendChild(candidate);
+                    break;
+                }
+            }
         }
     }
 
@@ -9481,9 +9495,12 @@ async function printSavedPoDocument(poNo, vendorName) {
         const scale = isMobile ? 1.15 : 1.65;
         const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
 
-        await addQuotePagesToPdf(pdf, pages, scale, (pageNo, pageCount) => {
-            if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
-            updatePoSaveStatus(`正在產生訂購單 PDF… ${pageNo}/${pageCount}`);
+        await addDocumentPagesToPdf(pdf, pages, {
+            scale,
+            onProgress: (pageNo, pageCount) => {
+                if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
+                updatePoSaveStatus(`正在產生訂購單 PDF… ${pageNo}/${pageCount}`);
+            }
         });
 
         if (button) button.innerText = '正在下載 PDF…';
