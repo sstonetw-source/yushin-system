@@ -697,7 +697,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     input, textarea { border: none !important; background: transparent !important; }
     textarea { resize: none !important; overflow: hidden !important; }
 
-    /* 訂購單列印仍使用瀏覽器原生列印，輸入欄位固定黑色避免深色模式干擾。 */
+    /* 使用者若手動呼叫瀏覽器列印，輸入欄位維持黑色，避免深色模式干擾。 */
     input, select, textarea {
         color: #000 !important;
         -webkit-text-fill-color: #000 !important;
@@ -708,99 +708,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     body { margin: 0; }
 
 
-    /* 產生訂購單：列印時只顯示這張訂購單，其他分頁／導覽列／原本開著的視窗全部隱藏，
-       訂購單本身也比照估價單，強制用 190mm 固定寬度排版，不會被手機窄螢幕壓縮 */
-    body.printing-po .content-section,
-    body.printing-po .nav-tabs,
-    body.printing-po .sub-nav {
-        display: none !important;
-    }
-    body:not(.printing-po) #poModalOverlay {
-        display: none !important;
-    }
-    body.printing-po #poModalOverlay {
-        display: block !important;
-        position: static !important;
-        background: none !important;
-        padding: 0 !important;
-        inset: auto !important;
-    }
-    body.printing-po #poModalOverlay .eq-modal-box {
-        box-shadow: none !important;
-        max-width: none !important;
-        width: 190mm !important;
-        margin: 0 auto !important;
-        padding: 0 !important;
-        border-radius: 0 !important;
-        overflow: visible !important;
-    }
-    /* 訂購單比照估價單：真正列印的文件本體固定為 A4 可列印寬度。
-       modal 只負責編輯，列印時不再讓手機版 modal / table-wrap 的 overflow 參與排版。 */
-    body.printing-po #printablePO {
-        display: block !important;
-        width: 190mm !important;
-        min-width: 190mm !important;
-        max-width: 190mm !important;
-        margin: 0 auto !important;
-        overflow: visible !important;
-        box-sizing: border-box !important;
-    }
-    body.printing-po #poItemsTable {
-        display: table !important;
-        width: 100% !important;
-        min-width: 0 !important;
-        max-width: 100% !important;
-        table-layout: fixed !important;
-        overflow: visible !important;
-    }
-    body.printing-po #poItemsTable th,
-    body.printing-po #poItemsTable td {
-        box-sizing: border-box !important;
-        white-space: normal !important;
-        overflow: visible !important;
-        overflow-wrap: anywhere !important;
-        word-break: break-word !important;
-    }
-    body.printing-po #poItemsTable th:nth-child(1) { width: 28% !important; }
-    body.printing-po #poItemsTable th:nth-child(2) { width: 15% !important; }
-    body.printing-po #poItemsTable th:nth-child(3) { width: 13% !important; }
-    body.printing-po #poItemsTable th:nth-child(4) { width: 10% !important; }
-    body.printing-po #poItemsTable th:nth-child(5) { width: 16% !important; }
-    body.printing-po #poItemsTable th:nth-child(6) { width: 18% !important; }
-    /* no-print 的第 7 欄在 iOS 列印引擎中仍可能參與 table-layout 計算；
-       直接從訂購單列印表格移除，避免右側小計／總計被裁掉。 */
-    body.printing-po #poItemsTable th.no-print,
-    body.printing-po #poItemsTable td.no-print { display: none !important; width: 0 !important; padding: 0 !important; border: 0 !important; }
-    body.printing-po #poItemsTable input {
-        width: 100% !important;
-        min-width: 0 !important;
-        padding: 0 !important;
-        box-sizing: border-box !important;
-        color: #000 !important;
-        -webkit-text-fill-color: #000 !important;
-    }
-    body.printing-po #printablePO input { display:none !important; }
-    body.printing-po #printablePO .po-print-field-mirror {
-        display:block !important;
-        min-width:0 !important;
-        color:#000 !important;
-        -webkit-text-fill-color:#000 !important;
-        white-space:normal !important;
-        overflow-wrap:anywhere !important;
-        word-break:break-word !important;
-        line-height:1.25 !important;
-    }
-    body.printing-po #poItemsTable tr,
-    body.printing-po .po-total-section {
-        break-inside:avoid !important;
-        page-break-inside:avoid !important;
-    }
-    body.printing-po #poItemsTable thead { display:table-header-group !important; }
 }
 
 /* ============ 手機版：建立估價單改成由上到下垂直輸入 ============
-   只在螢幕（screen）套用，列印/存 PDF 一律用上面 @media print 或原本桌面版的表格排版，
-   所以「輸出」出來的估價單格式完全不受這裡影響 */
+   只在螢幕（screen）套用；PDF 由獨立固定寬度 stage 產生，
+   所以輸出格式不受手機卡片版 CSS 影響。 */
 @media screen and (max-width: 640px) {
     /* 主系統入口固定為兩欄等寬按鍵；新增模組後仍維持手機可快速點選。 */
     .nav-tabs {
