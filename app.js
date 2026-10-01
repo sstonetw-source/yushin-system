@@ -6011,7 +6011,9 @@ async function loadWarehouseStocksForInventoryPage() {
 
 window.loadInventory=async function(reset=true){
  if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCursor=null;inventoryHasMore=true;warehouseStockCache=new Map();if(!inventoryCache.length){const cached=readAppDataCache('inventory');if(cached?.records?.length){inventoryCache=cached.records;renderInventoryList();}}} inventoryLoading=true;
- try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await q.get();if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];
+ const refreshButton=document.getElementById('inventoryRefreshBtn');
+ if(refreshButton&&reset){refreshButton.disabled=true;refreshButton.textContent='載入中…';}
+ try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await firestoreReadWithTimeout(q.get(),'庫存清單');if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];
  const freshRows=snap.docs.map(d=>({id:d.id,...d.data()}));
  if(reset){
    // stale-while-revalidate：舊快取只負責先畫畫面；雲端第一頁成功後必須整頁取代，
@@ -6023,14 +6025,14 @@ window.loadInventory=async function(reset=true){
  inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
  if(reset){
  const [m,supplies]=await Promise.all([
- db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),
- db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(100).get().catch(()=>({docs:[]}))
+ firestoreReadWithTimeout(db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),'庫存異動'),
+ firestoreReadWithTimeout(db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(100).get(),'在途供應').catch(()=>({docs:[]}))
  ]);inventoryLedgerCache=m.docs.map(d=>({id:d.id,...d.data()}));pendingSupplyCache=supplies.docs.map(d=>({id:d.id,...d.data()})).filter(row=>(row.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP').sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
  }
  await loadWarehouseStocksForInventoryPage();
  writeAppDataCache('inventory', inventoryCache);
  renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
- }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
+ }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';if(refreshButton){refreshButton.disabled=false;refreshButton.textContent='↻ 更新';}}
 };
 let businessProductSearchTimer = null;
 window.queueBusinessProductSearch=function(){

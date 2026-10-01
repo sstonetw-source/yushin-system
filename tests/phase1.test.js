@@ -953,6 +953,17 @@ test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustme
  assert.match(appSource,/orderBy\('createdAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
 });
 
+test('inventory refresh gives immediate feedback and bounded Firestore reads',()=>{
+ assert.match(indexSource,/id="inventoryRefreshBtn"[\s\S]*?>↻ 更新<\/button>/);
+ const start=appSource.indexOf('window.loadInventory=async function');
+ const end=appSource.indexOf('\n};',start)+3;
+ const source=appSource.slice(start,end);
+ assert.match(source,/inventoryRefreshBtn/);
+ assert.match(source,/載入中…/);
+ assert.match(source,/firestoreReadWithTimeout\(q\.get\(\),'庫存清單'\)/);
+ assert.match(source,/firestoreReadWithTimeout\(db\.collection\('inventoryMovements'\)[\s\S]*?'庫存異動'\)/);
+});
+
 
 test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(appSource,/warehouse: '倉管'/);assert.match(appSource,/key: 'inventory'/);});
 
