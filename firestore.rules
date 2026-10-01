@@ -136,6 +136,7 @@ service cloud.firestore {
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
           'linkedDocuments',
+          'costPrice', 'transactionType', 'invoiceTitle', 'remarks', 'invoiceDate', 'fieldEditHistory',
           'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt',
           'deliveryRecords', 'deliveredQty', 'isDelivered',
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
