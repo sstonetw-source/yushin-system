@@ -3475,3 +3475,31 @@ test('purchasing support data refreshes filters without rescanning order rows', 
     assert.match(source,/populatePurchasingFilters\(\)/);
     assert.doesNotMatch(source,/if \(canAccessPage\('orders\.po'\)\) renderPurchasingView\(\)/);
 });
+
+
+test('purchasing cards and completed rows share lifecycle snapshots', () => {
+    const helperStart=appSource.indexOf('function purchasingLifecycleSnapshot');
+    const helperEnd=appSource.indexOf('\nfunction purchasingDispatchStateSnapshot',helperStart);
+    const helperSource=appSource.slice(helperStart,helperEnd);
+    assert.match(helperSource,/orderLifecycleInfo\(order, itemMap\.get\(order\.id\) \|\| \[\]\)/);
+
+    const cardsStart=appSource.indexOf('function renderPurchasingWorkCards');
+    const cardsEnd=appSource.indexOf('\nfunction purchasingCompletedRows',cardsStart);
+    const cardsSource=appSource.slice(cardsStart,cardsEnd);
+    assert.match(cardsSource,/lifecyclesByOrder = null/);
+    assert.match(cardsSource,/const lifecycleMap = lifecyclesByOrder \|\| purchasingLifecycleSnapshot\(itemMap\)/);
+    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?stateMap,[\s\S]*?lifecycleMap/);
+    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
+
+    const completedStart=appSource.indexOf('function purchasingCompletedRows');
+    const completedEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',completedStart);
+    const completedSource=appSource.slice(completedStart,completedEnd);
+    assert.match(completedSource,/lifecyclesByOrder = null/);
+    assert.match(completedSource,/lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo/);
+
+    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
+    const viewSource=appSource.slice(viewStart,viewEnd);
+    assert.match(viewSource,/const lifecyclesByOrder = purchasingLifecycleSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
+});
