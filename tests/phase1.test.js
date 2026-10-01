@@ -2439,3 +2439,17 @@ test('purchasing order refresh updates cache without duplicate render', () => {
     const refreshSource=appSource.slice(refreshStart,refreshEnd);
     assert.match(refreshSource,/loadOrderPage\(reset, \{ silent: true, skipRender: true \}\)/);
 });
+
+
+test('purchaser order edit fields match visible order UI', () => {
+    const start=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
+    const end=rulesSource.indexOf('function warehouseOrderWorkflowUpdate()',start);
+    const source=rulesSource.slice(start,end);
+    for (const field of ['costPrice','transactionType','invoiceTitle','remarks','invoiceDate','fieldEditHistory']) {
+        assert.match(source,new RegExp("'" + field + "'"));
+    }
+    assert.match(source,/sameCommercialOwner\(\)/);
+    assert.doesNotMatch(source,/'ownerUid'/);
+    assert.doesNotMatch(source,/'salesCode'/);
+    assert.doesNotMatch(source,/'unitPrice'/);
+});
