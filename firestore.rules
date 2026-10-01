@@ -135,7 +135,10 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
-          'linkedDocuments', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+          'linkedDocuments',
+          'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt',
+          'deliveryRecords', 'deliveredQty', 'isDelivered',
+          'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
     }
@@ -145,7 +148,9 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'inventoryReservedQty', 'inventoryShortageQty',
-          'receivedQty', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+          'receivedQty',
+          'deliveryRecords', 'deliveredQty', 'isDelivered',
+          'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
     }
