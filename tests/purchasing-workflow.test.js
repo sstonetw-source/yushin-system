@@ -254,10 +254,12 @@ test('order work cards and filters use item-level work states', () => {
 });
 
 test('stock order shows dispatch, shipping, billing and complete as work advances', () => {
-    const start = app.indexOf('function itemDispatchState(order, item)');
-    const end = app.indexOf('\nfunction orderWorkIndexFields', start);
-    const source = app.slice(start, end);
-    assert.ok(start >= 0 && end > start);
+    const dispatchStart = app.indexOf('function itemDispatchState(order, item)');
+    const dispatchEnd = app.indexOf('\nfunction orderContextActionState', dispatchStart);
+    const categoryStart = app.indexOf('function orderItemWorkCategory(');
+    const categoryEnd = app.indexOf('\nfunction orderWorkIndexFields', categoryStart);
+    assert.ok(dispatchStart >= 0 && dispatchEnd > dispatchStart && categoryStart >= 0 && categoryEnd > categoryStart);
+    const source = app.slice(dispatchStart, dispatchEnd) + '\n' + app.slice(categoryStart, categoryEnd);
     const ctx = vm.createContext({
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:order=>order.deliveryRecords||[],
@@ -284,10 +286,12 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
 });
 
 test('a partly stocked order keeps its shortage and exposes reserved stock to dispatch', () => {
-    const start = app.indexOf('function itemDispatchState(order, item)');
-    const end = app.indexOf('\nfunction orderWorkIndexFields', start);
-    const source = app.slice(start, end);
-    assert.ok(start >= 0 && end > start);
+    const dispatchStart = app.indexOf('function itemDispatchState(order, item)');
+    const dispatchEnd = app.indexOf('\nfunction orderContextActionState', dispatchStart);
+    const categoryStart = app.indexOf('function orderItemWorkCategory(');
+    const categoryEnd = app.indexOf('\nfunction orderWorkIndexFields', categoryStart);
+    assert.ok(dispatchStart >= 0 && dispatchEnd > dispatchStart && categoryStart >= 0 && categoryEnd > categoryStart);
+    const source = app.slice(dispatchStart, dispatchEnd) + '\n' + app.slice(categoryStart, categoryEnd);
     const context = vm.createContext({
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:()=>[],savedReturnRecords:()=>[],
