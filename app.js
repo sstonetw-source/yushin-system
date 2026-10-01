@@ -1313,8 +1313,11 @@ function canManagePendingProductMaster() {
 }
 
 function updatePendingProductMasterButton() {
-    const button = document.getElementById('pendingProductMasterBtn');
-    if (button) button.style.display = canManagePendingProductMaster() ? '' : 'none';
+    const allowed = canManagePendingProductMaster();
+    const pendingButton = document.getElementById('pendingProductMasterBtn');
+    const createButton = document.getElementById('createProductMasterBtn');
+    if (pendingButton) pendingButton.style.display = allowed ? '' : 'none';
+    if (createButton) createButton.style.display = allowed ? '' : 'none';
 }
 
 function pendingProductKey(item = {}) {
@@ -1645,6 +1648,11 @@ function populateProductMasterEditor(product = {}, options = {}) {
     overlay.classList.add('active');
 }
 
+window.openNewProductMasterEditor = function() {
+    if (!canManagePendingProductMaster()) return;
+    populateProductMasterEditor({}, { source:'MANUAL' });
+};
+
 window.openProductMasterEditor = async function(productId) {
     if (!canManagePendingProductMaster()) return;
     let product = productManagementResults.find(item => (item.productId || item.id) === productId);
@@ -1745,7 +1753,9 @@ window.saveProductMasterEditor = async function() {
         renderProductManagementResults();
         closeProductMasterEditor();
         const statusEl = document.getElementById('productManagementSearchStatus');
-        if (statusEl) statusEl.textContent = `已儲存 Product Master：${brand} / ${code}`;
+        if (statusEl) statusEl.textContent = status === 'INACTIVE'
+            ? `已停用 Product Master：${brand} / ${code}；估價與訂單不再自動帶入。`
+            : `已儲存 Product Master：${brand} / ${code}`;
     } catch (err) {
         console.error('儲存 Product Master 失敗：', err);
         alert('儲存 Product Master 失敗：' + (err?.message || err));
@@ -13455,15 +13465,19 @@ function findPriceItemByCodeValue(value) {
     if (!normalized) return null;
 
     const direct = priceItemLookup.get(`code:${normalized}`);
-    if (direct) return direct;
+    if (direct && direct.status !== 'INACTIVE' && direct.active !== false) return direct;
 
-    const exact = priceList.find(item => normalizeItemCode(item.model) === normalized);
+    const exact = priceList.find(item => normalizeItemCode(item.model) === normalized && item.status !== 'INACTIVE' && item.active !== false);
     if (exact) return exact;
 
-    // 有些舊價目表貨號帶有空格、-、/ 或 .；只有在寬鬆比對結果唯一時才自動帶入，避免誤抓錯品項。
+    // 有些價目表貨號帶有空格、-、/ 或 .；只有在寬鬆比對結果唯一時才自動帶入，避免誤抓錯品項。
     const loose = normalizeItemCodeLoose(value);
     if (!loose) return null;
-    const candidates = priceList.filter(item => normalizeItemCodeLoose(item.model) === loose);
+    const candidates = priceList.filter(item =>
+        normalizeItemCodeLoose(item.model) === loose
+        && item.status !== 'INACTIVE'
+        && item.active !== false
+    );
     return candidates.length === 1 ? candidates[0] : null;
 }
 
@@ -13471,7 +13485,8 @@ function cacheProductLookupItem(item) {
     if (!item) return null;
     const productId = item.productId || stableProductId(item);
     const next = normalizeProductMasterItem({ ...item, productId });
-    priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(next);
+    priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId);
+    if (next.status !== 'INACTIVE' && next.active !== false) priceList.push(next);
     rebuildPriceItemLookup();
     return next;
 }
