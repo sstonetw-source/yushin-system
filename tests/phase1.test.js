@@ -2541,3 +2541,43 @@ test('read-only order roles see non-editable row controls', () => {
     assert.match(source,/openOrderStatusHistory/);
     assert.match(source,/button\.remove\(\)/);
 });
+
+
+test('shared brand and warehouse master reads are bounded', () => {
+    const warehouseStart=appSource.indexOf('async function loadWarehouseMaster');
+    const warehouseEnd=appSource.indexOf('\nasync function loadSupplierWarehouseMasters',warehouseStart);
+    const warehouseSource=appSource.slice(warehouseStart,warehouseEnd);
+    assert.match(warehouseSource,/firestoreReadWithTimeout\([\s\S]*?warehouses[\s\S]*?'倉庫主檔'/);
+
+    const companyStart=appSource.indexOf('function loadCompanyAgencyBrandSettings');
+    const companyEnd=appSource.indexOf('\nfunction loadSalesStatisticsSettings',companyStart);
+    const companySource=appSource.slice(companyStart,companyEnd);
+    assert.match(companySource,/firestoreReadWithTimeout\([\s\S]*?companyAgencyBrands[\s\S]*?'公司代理廠牌設定'/);
+
+    const statsStart=appSource.indexOf('function loadSalesStatisticsSettings');
+    const statsEnd=appSource.indexOf('\nlet brandSettingsLoadPromise',statsStart);
+    const statsSource=appSource.slice(statsStart,statsEnd);
+    assert.match(statsSource,/firestoreReadWithTimeout\([\s\S]*?salesStatistics[\s\S]*?'重點廠牌設定'/);
+});
+
+
+test('purchasing render reuses normalized order items', () => {
+    const cardsStart=appSource.indexOf('function renderPurchasingWorkCards');
+    const cardsEnd=appSource.indexOf('\nfunction purchasingCompletedRows',cardsStart);
+    const cardsSource=appSource.slice(cardsStart,cardsEnd);
+    assert.match(cardsSource,/const itemMap = normalizedItemsByOrder \|\| new Map/);
+    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap/);
+    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap\)/);
+
+    const rowsStart=appSource.indexOf('function purchasingCompletedRows');
+    const rowsEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',rowsStart);
+    const rowsSource=appSource.slice(rowsStart,rowsEnd);
+    assert.match(rowsSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
+
+    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
+    const viewSource=appSource.slice(viewStart,viewEnd);
+    assert.match(viewSource,/const normalizedItemsByOrder = new Map/);
+    assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters\)/);
+    assert.match(viewSource,/renderPurchasingCompletedOrders\(completedRows\)/);
+});
