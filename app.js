@@ -1617,14 +1617,13 @@ window.searchProductManagement = async function() {
             const data = { id:doc.id, ...doc.data() };
             if (canSeeInactive || (data.status !== 'INACTIVE' && data.active !== false)) map.set(doc.id, data);
         });
-        productManagementResults = [...map.values()]
-            .sort((a,b) => String(a.manufacturerPartNo || '').localeCompare(String(b.manufacturerPartNo || ''), 'zh-Hant'));
-
-        // 三條 prefix query 會平行分頁；大量資料時不要每 50 筆就重建一次整張表。
+        // 三條 prefix query 會平行分頁；大量資料時不要每 50 筆就重排＋重建整張表。
         // 搜尋途中最多約每 100ms 更新一次，完成時再做最後完整 render。
         const now = Date.now();
         if (now - lastIntermediateRenderAt >= 100) {
             lastIntermediateRenderAt = now;
+            productManagementResults = [...map.values()]
+                .sort((a,b) => String(a.manufacturerPartNo || '').localeCompare(String(b.manufacturerPartNo || ''), 'zh-Hant'));
             renderProductManagementResults();
             if (status) status.textContent = `搜尋中：已檢查 ${checked} 筆候選資料，找到 ${productManagementResults.length} 筆…`;
         }
@@ -1658,6 +1657,8 @@ window.searchProductManagement = async function() {
             scanPrefix('nameEn', raw, '產品英文品名搜尋')
         ]);
         if (generation !== productManagementSearchGeneration) return;
+        productManagementResults = [...map.values()]
+            .sort((a,b) => String(a.manufacturerPartNo || '').localeCompare(String(b.manufacturerPartNo || ''), 'zh-Hant'));
         renderProductManagementResults();
         if (status) {
             const visible = Math.min(productManagementVisibleLimit, productManagementResults.length);
