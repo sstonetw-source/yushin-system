@@ -110,14 +110,21 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(indexSource, /app\.js\?v=\d{8}-\d+/);
 });
 
-test('product management uses server search without exposing protected cost data', () => {
+test('product management uses complete paginated server search without exposing protected cost data', () => {
     assert.match(indexSource, /id="product-system"/);
     assert.match(indexSource, /data-main-nav="products"/);
     const searchStart = appSource.indexOf('window.searchProductManagement =');
     const searchEnd = appSource.indexOf('\n};', searchStart) + 3;
     const productSearch = appSource.slice(searchStart, searchEnd);
     assert.match(productSearch, /db\.collection\('products'\)/);
-    assert.match(productSearch, /limit\(50\)/);
+    assert.match(productSearch, /while \(true\)/);
+    assert.match(productSearch, /orderBy\(field\)/);
+    assert.match(productSearch, /startAt\(value\)/);
+    assert.match(productSearch, /endAt\(value \+ '\\uf8ff'\)/);
+    assert.match(productSearch, /limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(productSearch, /firestoreReadWithTimeout\(query\.get\(\), label\)/);
+    assert.match(productSearch, /generation !== productManagementSearchGeneration/);
+    assert.doesNotMatch(productSearch, /slice\(0, 50\)/);
     assert.doesNotMatch(productSearch, /productCosts|loadVisibleProductCost/);
     assert.match(appSource, /window\.addProductManagementToQuote/);
     assert.match(appSource, /window\.addProductManagementToOrder/);
@@ -132,7 +139,10 @@ test('inventory product lookup debounces server search', () => {
 test('product management debounces full Product Master search', () => {
     assert.match(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(appSource, /productManagementSearchTimer = scheduleListSearch\(productManagementSearchTimer, \(\) => searchProductManagement\(\)\)/);
-    assert.match(appSource, /db\.collection\('products'\).*limit\(50\)/s);
+    assert.match(appSource, /scanPrefix\('normalizedPartNo', normalized/);
+    assert.match(appSource, /scanPrefix\('productName', raw/);
+    assert.match(appSource, /scanPrefix\('nameEn', raw/);
+    assert.match(indexSource, /貨號與中英文品名採開頭比對/);
 });
 
 test('preview host selects isolated Firebase project and exposes a visible environment banner', () => {
