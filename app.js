@@ -954,13 +954,13 @@ function ensureQuoteFormInitialized() {
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
         switchCompany('yushin');
     }
-    if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
+    if (currentUserRole === 'admin' || currentUserRole === 'purchaser' || currentUserRole === 'engineer') {
         ensureSalesListLoaded().then(() => {
             populateSalesDropdown();
             if (draft) restoreQuoteDraft(draft);
         }).catch(err => console.warn('業務名單載入失敗：', err));
     } else {
-        // 業務／工程師只能選自己；登入 profile 已含姓名、代號與電話，
+        // 業務只能選自己；登入 profile 已含姓名、代號與電話，
         // 不為了單一選項再掃完整 users collection。
         populateSalesDropdown();
         if (draft) restoreQuoteDraft(draft);
