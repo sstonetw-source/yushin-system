@@ -14,17 +14,16 @@
 
   function normalizeItem(item = {}, index = 0) {
     const orderedQty = n(item.orderedQty ?? item.qty);
-    const reservedQty = clamp(item.reservedQty, 0, orderedQty);
-    // 採購與到貨是累計供應量，不是「目前尚未履約量」。
-    // 原廠直送若送貨後退貨並補送，累計訂購／到貨量會合理地超過原始 orderedQty；
-    // 這裡只保證非負，不可把補送數量截回原訂購量。
+    // 採購、到貨、打單、送貨與退貨都是累計事件量。
+    // 發生退貨後補送時，累計量可以合理超過原始 orderedQty，不能截回原訂購量。
     const supplyOrderedQty = n(item.supplyOrderedQty);
     const receivedQty = n(item.receivedQty);
-    const dispatchPreparedQty = clamp(item.dispatchPreparedQty, 0, orderedQty);
-    const deliveredQty = clamp(item.deliveredQty, 0, orderedQty);
-    const returnedQty = clamp(item.returnedQty, 0, deliveredQty);
-    const fulfilledQty = Math.max(0, deliveredQty - returnedQty);
+    const dispatchPreparedQty = n(item.dispatchPreparedQty);
+    const deliveredQty = n(item.deliveredQty);
+    const returnedQty = Math.min(n(item.returnedQty), deliveredQty);
+    const fulfilledQty = clamp(deliveredQty - returnedQty, 0, orderedQty);
     const outstandingQty = Math.max(0, orderedQty - fulfilledQty);
+    const reservedQty = clamp(item.reservedQty, 0, outstandingQty);
     const shortageQty = Math.max(0, outstandingQty - reservedQty);
     return {
       ...item,
@@ -37,8 +36,7 @@
       receivedQty,
       dispatchPreparedQty,
       deliveredQty,
-      returnedQty,
-      shortageQty
+      returnedQty
     };
   }
 

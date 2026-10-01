@@ -38,3 +38,27 @@ test('warehouse cumulative supply counters are preserved instead of silently tru
   assert.equal(x.reservedQty,0);
   assert.equal(x.shortageQty,5);
 });
+
+
+test('return replacement dispatch remains cumulative beyond original order quantity',()=>{
+  let x=f.normalizeItem({
+    orderedQty:10,
+    reservedQty:2,
+    dispatchPreparedQty:12,
+    deliveredQty:10,
+    returnedQty:2
+  });
+  assert.equal(x.dispatchPreparedQty,12);
+  assert.equal(x.deliveredQty,10);
+  assert.equal(x.returnedQty,2);
+  assert.equal(x.reservedQty,2);
+  assert.equal(x.shortageQty,0);
+  assert.equal(f.shippableQty(x),2);
+
+  x=f.deliver(x,2);
+  assert.equal(x.deliveredQty,12);
+  assert.equal(x.returnedQty,2);
+  assert.equal(x.reservedQty,0);
+  assert.equal(x.shortageQty,0);
+  assert.equal(f.fulfillmentStatus(x),'全部送貨');
+});
