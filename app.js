@@ -4827,7 +4827,17 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
             conflict.code = 'quote-number-conflict';
             throw conflict;
         }
-        transaction.set(quoteRef, quoteData);
+
+        if (snapshot.exists && updatingExisting) {
+            const existing = snapshot.data() || {};
+            // 編輯既有估價單時，表單只代表可編輯內容；成交、三估單、文件連結等背景欄位
+            // 必須由 merge 保留。建立者與建立時間也屬稽核欄位，不可因重新輸出而改寫。
+            quoteData.createdAt = existing.createdAt || quoteData.createdAt;
+            quoteData.createdByUid = existing.createdByUid || quoteData.createdByUid || '';
+            quoteData.createdByName = existing.createdByName || quoteData.createdByName || '';
+            quoteData.createdByRole = existing.createdByRole || quoteData.createdByRole || '';
+        }
+        transaction.set(quoteRef, quoteData, { merge: true });
     }).then(() => {
         if (!editingQuoteNo) {
             setQuoteEditingContext(quoteData.quoteNo);
