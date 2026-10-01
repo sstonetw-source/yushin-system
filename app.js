@@ -7414,16 +7414,20 @@ async function loadOrderPage(reset, options = {}) {
         if (generation !== orderLoadGeneration) return;
         ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         writeAppDataCache('orders', ordersCache);
-        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-        else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+        if (!options.skipRender) {
+            if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+            else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+        }
     } catch (err) {
         if (generation !== orderLoadGeneration) return;
         console.error("讀取訂單失敗：", err);
         if (records.size) {
             ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         }
-        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-        else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+        if (!options.skipRender) {
+            if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+            else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+        }
         if (err?.code === 'firestore-read-timeout') {
             orderLoadErrorMessage = '連線逾時，點此重試';
         } else {
@@ -7908,7 +7912,9 @@ const purchasingViewLoaded = new Set();
 
 function refreshPurchasingOrderCache(reset = true) {
     if (purchasingOrderRefreshPromise) return purchasingOrderRefreshPromise;
-    purchasingOrderRefreshPromise = Promise.resolve(loadOrderPage(reset, { silent: true }))
+    // 採購頁自己的 caller 會在資料更新後統一 render；
+    // 背景共用 orders 查詢只更新 cache，不先重畫一次工作卡。
+    purchasingOrderRefreshPromise = Promise.resolve(loadOrderPage(reset, { silent: true, skipRender: true }))
         .finally(() => { purchasingOrderRefreshPromise = null; });
     return purchasingOrderRefreshPromise;
 }
