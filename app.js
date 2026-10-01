@@ -2005,6 +2005,9 @@ function normalizeForecastBrand(value) {
     return resolveBrandName(value);
 }
 
+let forecastBrandFilterSignature = '';
+let forecastSalesFilterSignature = '';
+
 function populateForecastBrandFilter() {
     const select = document.getElementById('forecastBrandFilter');
     if (!select) return;
@@ -2024,19 +2027,17 @@ function populateForecastBrandFilter() {
         if (key && !brands.has(key)) brands.set(key, brand);
     });
 
-    select.innerHTML = '<option value="">全部廠牌</option>';
-    [...brands.values()]
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
-        .forEach(brand => {
-            const option = document.createElement('option');
-            option.value = brand;
-            option.textContent = brand;
-            select.appendChild(option);
-        });
-
-    if ([...select.options].some(option => option.value === current)) {
-        select.value = current;
+    const sortedBrands = [...brands.values()].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const signature = JSON.stringify(sortedBrands);
+    if (signature !== forecastBrandFilterSignature) {
+        select.innerHTML = '<option value="">全部廠牌</option>' + sortedBrands.map(brand =>
+            `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`
+        ).join('');
+        forecastBrandFilterSignature = signature;
     }
+
+    if (sortedBrands.includes(current)) select.value = current;
+    else if (select.value && !sortedBrands.includes(select.value)) select.value = '';
 }
 
 function populateForecastSalesFilter() {
@@ -2046,7 +2047,11 @@ function populateForecastSalesFilter() {
     const canSeeAll = canViewAllData('forecast');
     if (!canSeeAll) {
         const label = currentUserName || '我的 Forecast';
-        select.innerHTML = `<option value="${escapeAttr(currentUserName || '')}">${escapeHtml(label)}</option>`;
+        const signature = JSON.stringify(['own', currentUserName || '', label]);
+        if (signature !== forecastSalesFilterSignature) {
+            select.innerHTML = `<option value="${escapeAttr(currentUserName || '')}">${escapeHtml(label)}</option>`;
+            forecastSalesFilterSignature = signature;
+        }
         select.value = currentUserName || '';
         select.disabled = true;
         return;
@@ -2063,20 +2068,17 @@ function populateForecastSalesFilter() {
         });
 
     select.disabled = false;
-    select.innerHTML = '<option value="">全部業務</option>';
-
-    [...names]
-        .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
-        .forEach(name => {
-            const option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
-            select.appendChild(option);
-        });
-
-    if ([...select.options].some(option => option.value === current)) {
-        select.value = current;
+    const sortedNames = [...names].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const signature = JSON.stringify(['all', sortedNames]);
+    if (signature !== forecastSalesFilterSignature) {
+        select.innerHTML = '<option value="">全部業務</option>' + sortedNames.map(name =>
+            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`
+        ).join('');
+        forecastSalesFilterSignature = signature;
     }
+
+    if (sortedNames.includes(current)) select.value = current;
+    else if (select.value && !sortedNames.includes(select.value)) select.value = '';
 }
 
 function populateForecastBrandDropdown(selectedBrand = '') {
@@ -2299,6 +2301,7 @@ window.renderForecastList = function() {
     const periodFilter = document.getElementById('forecastPeriodFilter')?.value || 'this-year';
 
     body.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     let shown = 0;
 
     // 搜尋模式必須使用後端全歷史結果，不能只迭代目前載入的 50 筆 forecastCache。
@@ -2360,8 +2363,9 @@ window.renderForecastList = function() {
             <td data-th="操作" class="no-print forecast-actions">${actions}</td>
         `;
 
-        body.appendChild(row);
+        fragment.appendChild(row);
     });
+    body.appendChild(fragment);
 
     const hint = document.getElementById('forecastEmptyHint');
     if (hint) hint.style.display = shown ? 'none' : 'block';
