@@ -4456,6 +4456,74 @@ function fetchAndFillQuote(qNo) {
     });
 }
 
+window.openQuoteFromAdmin = async function(quoteNo) {
+    if (!canAccessPage('quote.create')) {
+        alert('您沒有權限開啟估價單。');
+        return;
+    }
+
+    const button = actionButtonFromEventOrSelector();
+    const buttonState = beginActionButton(button, '載入中…');
+    if (button && !buttonState) return;
+
+    try {
+        // 優先使用目前列表已載入的資料，只有快取沒有時才讀 Firestore。
+        // 這樣手機按「載入」時通常不需要再等一次網路。
+        let source = myQuotesCache.find(q => q.quoteNo === quoteNo)
+            || quoteHistorySearchResults.find(q => q.quoteNo === quoteNo);
+
+        if (!source) {
+            const snapshot = await firestoreReadWithTimeout(
+                db.collection('quotes').doc(quoteNo).get(),
+                '載入估價單'
+            );
+            if (!snapshot.exists) throw new Error('找不到這張估價單。');
+            source = { id: snapshot.id, ...snapshot.data() };
+        }
+
+        if (!canViewAllData('quotes') && !belongsToCurrentUser(source.salesName, source.ownerUid)) {
+            throw new Error('您只能載入自己名下的估價單。');
+        }
+
+        await ensureSalesListLoaded();
+
+        // 載入既有估價單時禁止 populateSalesDropdown / 公司切換重新產生新單號。
+        restoringQuoteDraft = true;
+        actuallySwitchMainTab('quote-system');
+        switchQuoteView('create', document.getElementById('qsub-create'));
+        applyCompanyTheme(source.company || 'yushin');
+        populateSalesDropdown();
+
+        document.getElementById('clientName').value = source.clientName || '';
+        document.getElementById('ordererName').value = source.ordererName || '';
+        document.getElementById('salesName').value = source.salesName || '';
+        document.getElementById('quoteDate').value = source.quoteDate || '';
+        document.getElementById('quoteNo').value = source.quoteNo || quoteNo;
+        document.getElementById('validDays').value = source.validDays ?? 90;
+        document.getElementById('discountRateInput').value = source.discountRate || 0;
+        updateSalesPhoneDisplay();
+
+        const itemsBody = document.getElementById('quoteItems');
+        itemsBody.innerHTML = '';
+        if (Array.isArray(source.items) && source.items.length) {
+            source.items.forEach(item => addQuoteRow(item));
+        } else {
+            addQuoteRow();
+        }
+        calculateTotals();
+
+        restoringQuoteDraft = false;
+        saveQuoteDraft();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+        console.error('載入估價單失敗：', err);
+        alert('載入估價單失敗：' + (err?.message || err));
+    } finally {
+        restoringQuoteDraft = false;
+        endActionButton(button, buttonState);
+    }
+};
+
 window.copyQuoteAsNew = async function(quoteNo) {
     if (!canEditPage('quote.create')) {
         alert('您目前沒有建立估價單的權限。');
@@ -4777,7 +4845,7 @@ window.renderMyQuotesList = function() {
             <td>${statusCell}</td>
             <td class="no-print quote-list-actions">
                 <div class="quote-list-action-row">
-                    <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${q.quoteNo}')">載入</button>
+                    <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${escapeAttr(q.quoteNo)}')">載入</button>
                     <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
                     ${canEditPage('forecast') ? `<button type="button" class="btn-small btn-secondary" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">Forecast</button>` : ''}
                     ${actionBtn}
