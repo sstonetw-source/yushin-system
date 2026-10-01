@@ -2464,6 +2464,8 @@ function applyCompanyTheme(compKey, el) {
 
 // 手動切換公司分頁時，套用主題之外還要重新產生一個新單號（原本的行為）
 window.switchCompany = function(compKey, el) {
+    setQuoteEditingContext('');
+    setQuoteOutputStatus('');
     applyCompanyTheme(compKey, el);
     generateQuoteNo();
 };
@@ -3721,6 +3723,49 @@ window.calculateTotals = function() {
 };
 
 const QUOTE_DRAFT_STORAGE_KEY = 'quote_draft_v1';
+let editingQuoteNo = '';
+
+function updateQuoteEditingBanner() {
+    const banner = document.getElementById('quoteEditingBanner');
+    const number = document.getElementById('quoteEditingNumber');
+    if (!banner || !number) return;
+    if (editingQuoteNo) {
+        number.innerText = editingQuoteNo;
+        banner.style.display = 'flex';
+    } else {
+        number.innerText = '';
+        banner.style.display = 'none';
+    }
+}
+
+function setQuoteEditingContext(quoteNo = '') {
+    editingQuoteNo = String(quoteNo || '').trim();
+    updateQuoteEditingBanner();
+}
+
+function setQuoteOutputStatus(message = '', isError = false) {
+    const el = document.getElementById('quoteOutputStatus');
+    if (!el) return;
+    el.innerText = message;
+    el.classList.toggle('is-error', !!isError);
+    el.style.display = message ? 'block' : 'none';
+}
+
+window.saveLoadedQuoteAsNew = async function() {
+    const originalQuoteNo = editingQuoteNo || document.getElementById('quoteNo')?.value || '';
+    setQuoteEditingContext('');
+    initDate();
+    setQuoteOutputStatus('正在建立新的估價單號…');
+    await generateQuoteNo();
+    saveQuoteDraft();
+    setQuoteOutputStatus(`已另存為新估價單：${document.getElementById('quoteNo')?.value || ''}`);
+    if (originalQuoteNo) {
+        window.setTimeout(() => {
+            const current = document.getElementById('quoteOutputStatus')?.innerText || '';
+            if (current.startsWith('已另存為新估價單')) setQuoteOutputStatus('');
+        }, 2500);
+    }
+};
 
 // 把目前畫面上的估價單內容（表頭資訊＋所有品項）整份存到本機瀏覽器（localStorage），
 // 這樣就算關掉分頁、關掉瀏覽器、甚至重開電腦，只要是同一台裝置、同一個瀏覽器，
@@ -3752,6 +3797,7 @@ function saveQuoteDraft() {
             quoteNo: document.getElementById('quoteNo')?.value || '',
             discountRate: document.getElementById('discountRateInput')?.value || '0',
             validDays: document.getElementById('validDays')?.value || '90',
+            editingQuoteNo,
             items
         };
         localStorage.setItem(QUOTE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
@@ -3792,6 +3838,7 @@ function restoreQuoteDraft(draft) {
     // 單號沿用草稿裡存的那組，不重新產生；業務欄位要等 populateSalesDropdown 把選單填好之後才還原得了，
     // 這裡先记住待會兒要設定的值
     document.getElementById('quoteNo').value = draft.quoteNo || '';
+    setQuoteEditingContext(draft.editingQuoteNo || '');
     window._pendingDraftSalesName = draft.salesName || '';
 
     calculateTotals();
@@ -4038,6 +4085,8 @@ window.openSavedThreeQuoteRecord = async function(quoteNo) {
         document.getElementById('salesName').value = baseQuote.salesName || '';
         document.getElementById('quoteDate').value = baseQuote.quoteDate || '';
         document.getElementById('quoteNo').value = baseQuote.quoteNo || quoteNo;
+        setQuoteEditingContext(baseQuote.quoteNo || quoteNo);
+        setQuoteOutputStatus('');
         document.getElementById('validDays').value = baseQuote.validDays ?? 90;
         document.getElementById('discountRateInput').value = baseQuote.discountRate || 0;
         updateSalesPhoneDisplay();
@@ -4111,6 +4160,8 @@ window.printThreeQuotes = async function() {
         }
 
         quoteData = quoteDataForPdfExport();
+        quoteData.lastOutputAt = new Date().toISOString();
+        quoteData.lastOutputType = 'THREE_QUOTE_PDF';
         rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
 
         const baseQuoteSnapshot = JSON.parse(JSON.stringify(quoteData));
@@ -4176,6 +4227,7 @@ window.printThreeQuotes = async function() {
 
         const threeQuoteName = quotePdfFileName(quoteData).replace(/\.pdf$/i, '-三家估價.pdf');
         pdf.save(threeQuoteName);
+        setQuoteOutputStatus('✓ 三家估價單已產生並同步');
         closeThreeQuoteDialog();
     } catch (err) {
         console.error('匯出三家估價 PDF 失敗：', err);
@@ -4483,9 +4535,19 @@ window.exportCurrentQuotePdf = async function() {
         }
 
         const quoteData = quoteDataForPdfExport();
+        quoteData.lastOutputAt = new Date().toISOString();
+        quoteData.lastOutputType = 'PDF';
         rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
         // 雲端同步與 PDF 產生平行執行，不讓 Firestore 網路速度阻塞使用者。
-        persistQuoteOutputRecord(quoteData, 'PDF');
+        const syncPromise = persistQuoteOutputRecord(quoteData, 'PDF')
+            .then(() => {
+                setQuoteOutputStatus('✓ PDF 已產生，估價單已同步');
+                return true;
+            })
+            .catch(() => {
+                setQuoteOutputStatus('PDF 已產生，但雲端同步失敗，請稍後再試', true);
+                return false;
+            });
 
         const exportDom = createQuotePdfStage(quoteData);
         stage = exportDom.stage;
@@ -4503,6 +4565,8 @@ window.exportCurrentQuotePdf = async function() {
         });
         if (button) button.innerText = '正在下載 PDF…';
         pdf.save(quotePdfFileName(quoteData));
+        setQuoteOutputStatus('PDF 已產生；估價單同步中…');
+        syncPromise.then(() => {});
     } catch (err) {
         console.error('匯出估價單 PDF 失敗：', err);
         alert('產生估價單 PDF 失敗：' + (err?.message || err) + '。請確認網路後再試一次。');
@@ -4599,6 +4663,8 @@ window.openQuoteFromAdmin = async function(quoteNo) {
         document.getElementById('salesName').value = source.salesName || '';
         document.getElementById('quoteDate').value = source.quoteDate || '';
         document.getElementById('quoteNo').value = source.quoteNo || quoteNo;
+        setQuoteEditingContext(source.quoteNo || quoteNo);
+        setQuoteOutputStatus('');
         document.getElementById('validDays').value = source.validDays ?? 90;
         document.getElementById('discountRateInput').value = source.discountRate || 0;
         updateSalesPhoneDisplay();
@@ -4661,6 +4727,8 @@ window.copyQuoteAsNew = async function(quoteNo) {
         if (Array.isArray(source.items) && source.items.length) source.items.forEach(item => addQuoteRow(item));
         else addQuoteRow();
         calculateTotals();
+        setQuoteEditingContext('');
+        setQuoteOutputStatus('');
         await generateQuoteNo();
         saveQuoteDraft();
     } catch (err) {
@@ -4926,13 +4994,18 @@ window.renderMyQuotesList = function() {
         bindListRowSelection(tr);
 
         // --- 修改這裡：根據狀態顯示不同按鈕 ---
-        const statusCell = q.dealClosed
-            ? '<span style="color:#2e7d32;font-weight:bold;">✓ 已成交</span>'
-            : '<span style="color:#888;">未成交</span>';
+        const statusBadges = [];
+        if (q.dealClosed) {
+            statusBadges.push('<span class="quote-status-badge is-deal">已成交</span>');
+        } else {
+            statusBadges.push('<span class="quote-status-badge is-quoted">已報價</span>');
+            if (q.threeQuoteRecord) statusBadges.push('<span class="quote-status-badge is-three">三估單</span>');
+        }
+        const statusCell = `<div class="quote-status-badges">${statusBadges.join('')}</div>`;
 
-        const actionBtn = q.dealClosed
-            ? `<button type="button" class="btn-small btn-secondary" style="background-color: #666;" onclick="unmarkQuoteAsDeal('${q.quoteNo}')">❌ 取消成交</button>`
-            : `<button type="button" class="btn-small" onclick="markQuoteAsDeal('${q.quoteNo}')">✅ 成交</button>`;
+        const dealButton = q.dealClosed
+            ? ''
+            : `<button type="button" class="btn-small quote-primary-deal" onclick="markQuoteAsDeal('${escapeAttr(q.quoteNo)}')">✓ 成交</button>`;
         // ------------------------------------
 
         tr.innerHTML = `
@@ -4946,11 +5019,17 @@ window.renderMyQuotesList = function() {
             <td class="no-print quote-list-actions">
                 <div class="quote-list-action-row">
                     <button type="button" class="btn-small" onclick="openQuoteFromAdmin('${escapeAttr(q.quoteNo)}')">載入</button>
-                    ${q.threeQuoteRecord ? `<button type="button" class="btn-small btn-secondary" onclick="openSavedThreeQuoteRecord('${escapeAttr(q.quoteNo)}')">三估單紀錄</button>` : ''}
-                    <button type="button" class="btn-small btn-secondary" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製</button>
-                    ${canEditPage('forecast') ? `<button type="button" class="btn-small btn-secondary" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">Forecast</button>` : ''}
-                    ${actionBtn}
-                    ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="btn-small danger-menu-item" onclick="permanentlyDeleteQuote('${escapeAttr(q.quoteNo)}')">永久刪除</button>` : ''}
+                    ${q.threeQuoteRecord ? `<button type="button" class="btn-small btn-secondary" onclick="openSavedThreeQuoteRecord('${escapeAttr(q.quoteNo)}')">三估單</button>` : ''}
+                    ${dealButton}
+                    <details class="quote-more-menu">
+                        <summary class="btn-small btn-secondary">更多</summary>
+                        <div class="quote-more-menu-popover">
+                            <button type="button" onclick="copyQuoteAsNew('${escapeAttr(q.quoteNo)}')">複製成新估價單</button>
+                            ${canEditPage('forecast') ? `<button type="button" onclick="createForecastFromQuote('${escapeAttr(q.quoteNo)}')">建立 Forecast</button>` : ''}
+                            ${q.dealClosed ? `<button type="button" onclick="unmarkQuoteAsDeal('${escapeAttr(q.quoteNo)}')">取消成交</button>` : ''}
+                            ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteQuote('${escapeAttr(q.quoteNo)}')">永久刪除</button>` : ''}
+                        </div>
+                    </details>
                 </div>
             </td>
         `;
@@ -9472,6 +9551,8 @@ window.addEventListener('afterprint', () => {
 // 重開時看到的會是這張全新的空白單，而不是被清掉的上一張。
 window.startNextQuote = function() {
     if (!confirm('確定要開始製作下一張估價單嗎？目前畫面上的內容將會被清空（如果還沒匯出 PDF，請先確認已經處理好）。')) return;
+    setQuoteEditingContext('');
+    setQuoteOutputStatus('');
     resetQuoteFormForNextOne();
     saveQuoteDraft();
 };
