@@ -4336,3 +4336,14 @@ test('cancelled warehouse supply is excluded from incoming inventory value', () 
     assert.equal(totals.incoming,300);
     assert.match(source,/status \|\| ''\)\.toUpperCase\(\) !== 'CANCELLED'/);
 });
+
+
+test('self-order wording stays role-neutral for business owners', () => {
+    const start=appSource.indexOf('function canBusinessSelfOrder');
+    const end=appSource.indexOf('\nfunction orderProgressInfo',start);
+    const source=appSource.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.doesNotMatch(source,/只有負責業務可自行訂貨/);
+    assert.doesNotMatch(appSource,/業務自行訂貨・由負責業務處理/);
+    assert.match(appSource,/自行訂貨・由訂單負責人處理/);
+});
