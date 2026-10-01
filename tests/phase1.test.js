@@ -2833,3 +2833,15 @@ test('product master search sorts only when rendering', () => {
     assert.match(throttleSource,/productManagementResults = \[\.\.\.map\.values\(\)\]/);
     assert.match(source,/if \(generation !== productManagementSearchGeneration\) return;\s*productManagementResults = \[\.\.\.map\.values\(\)\]/);
 });
+
+
+test('order list skips search-string work when no keyword and batches DOM insertion', () => {
+    const start=appSource.indexOf('window.renderOrdersList = function()');
+    const end=appSource.indexOf('window.retryOrderInventoryReservation',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const fragment = document\.createDocumentFragment\(\)/);
+    assert.match(source,/if \(!orderHistorySearchActive && keyword\) \{[\s\S]*?const itemSearchable[\s\S]*?const searchable/);
+    assert.match(source,/fragment\.appendChild\(tr\)/);
+    assert.match(source,/tbody\.appendChild\(fragment\)/);
+    assert.doesNotMatch(source,/tbody\.appendChild\(tr\)/);
+});
