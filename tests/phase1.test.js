@@ -2753,3 +2753,13 @@ test('quote numbering fails closed and preserves editing identity', () => {
     const dropdownEnd=appSource.indexOf('\n// 依目前輸入的業務姓名',dropdownStart);
     assert.match(appSource.slice(dropdownStart,dropdownEnd),/if \(!restoringQuoteDraft && !editingQuoteNo\) generateQuoteNo\(\)/);
 });
+
+
+test('product master search throttles intermediate table renders', () => {
+    const start=appSource.indexOf('window.searchProductManagement = async function()');
+    const end=appSource.indexOf('\nfunction ensureProductMasterEditor',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/let lastIntermediateRenderAt = 0/);
+    assert.match(source,/now - lastIntermediateRenderAt >= 100/);
+    assert.match(source,/renderProductManagementResults\(\);\s*if \(status\) status\.textContent = `完成/);
+});
