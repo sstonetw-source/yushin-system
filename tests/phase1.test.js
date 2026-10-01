@@ -2666,3 +2666,27 @@ test('existing quote output preserves audit and background metadata', () => {
     assert.match(source,/quoteData\.createdByRole = existing\.createdByRole/);
     assert.match(source,/transaction\.set\(quoteRef, quoteData, \{ merge: true \}\)/);
 });
+
+
+test('purchasing detail render reuses normalized item snapshots', () => {
+    const pendingLinesStart=appSource.indexOf('function pendingProcurementDisplayLines');
+    const pendingLinesEnd=appSource.indexOf('\nfunction renderPurchasingWorkCards',pendingLinesStart);
+    const pendingLinesSource=appSource.slice(pendingLinesStart,pendingLinesEnd);
+    assert.match(pendingLinesSource,/normalizedItems \|\| normalizedOrderItems\(order\)/);
+
+    const pendingStart=appSource.indexOf('function renderPendingPurchaseOrders');
+    const pendingEnd=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',pendingStart);
+    const pendingSource=appSource.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/normalizedItemsByOrder\?\.get\(order\.id\)/);
+
+    const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders');
+    const dispatchEnd=appSource.indexOf('\nfunction pendingPurchaseLines',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
+
+    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
+    const viewSource=appSource.slice(viewStart,viewEnd);
+    assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters\)/);
+    assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters\)/);
+});
