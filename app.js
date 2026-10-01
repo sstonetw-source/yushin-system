@@ -2422,6 +2422,7 @@ window.renderForecastList = function() {
     const keyword = (document.getElementById('forecastSearch')?.value || '').trim().toLocaleLowerCase();
     const brandFilter = document.getElementById('forecastBrandFilter')?.value || '';
     const salesFilter = document.getElementById('forecastSalesFilter')?.value || '';
+    const statusFilter = document.getElementById('forecastStatusFilter')?.value || 'active';
     const stageFilter = document.getElementById('forecastStageFilter')?.value || '';
     const periodFilter = document.getElementById('forecastPeriodFilter')?.value || 'this-year';
 
@@ -2448,6 +2449,7 @@ window.renderForecastList = function() {
         if (!forecastHistorySearchActive && keyword && !searchable.includes(keyword)) return;
         if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
         if (salesFilter && salesName !== salesFilter) return;
+        if (statusFilter !== 'all' && item.status !== statusFilter) return;
         if (stageFilter && item.stage !== stageFilter) return;
         // 進行中 Forecast 是目前 pipeline，跨年度持續顯示；Win/Lost 才依結案/更新時間套用統計期間。
         if (item.status !== 'active' && !dateInUnifiedPeriod(item.closedAt || item.latestProgressAt || item.updatedAt || item.createdAt, periodFilter)) return;
