@@ -6984,16 +6984,38 @@ function normalizedOrderItems(order) {
     const deliveryRecords = Array.isArray(order?.deliveryRecords) ? order.deliveryRecords : null;
     const returnRecords = Array.isArray(order?.returnRecords) ? order.returnRecords : null;
     const singleItem = source.length === 1;
+    const singleItemId = singleItem ? String(source[0]?.itemId || 'item-1') : '';
+    const deliveryQtyByItemId = new Map();
+    const returnQtyByItemId = new Map();
+
+    // 一張訂單先各掃一次送貨／退貨紀錄，再由 itemId O(1) 取值。
+    // 避免多品項＋多次分批送貨時，每個品項都重新 filter 整份紀錄。
+    if (deliveryRecords) {
+        deliveryRecords.forEach(row => {
+            const itemId = String(row?.itemId || singleItemId || '');
+            if (!itemId) return;
+            deliveryQtyByItemId.set(itemId,
+                (deliveryQtyByItemId.get(itemId) || 0) + Math.max(0, Number(row?.qty || 0)));
+        });
+    }
+    if (returnRecords) {
+        returnRecords.forEach(row => {
+            const itemId = String(row?.itemId || singleItemId || '');
+            if (!itemId) return;
+            returnQtyByItemId.set(itemId,
+                (returnQtyByItemId.get(itemId) || 0) + Math.max(0, Number(row?.qty || 0)));
+        });
+    }
+
     return source.map((item, index) => {
         const itemId = String(item.itemId || `item-${index + 1}`);
-        const matchesItem = row => String(row?.itemId || '') === itemId || (!row?.itemId && singleItem);
         // 送貨／退貨紀錄是實際履約的權威來源。若只使用 items 內舊的累計欄位，
         // 「已全數送貨 → 退貨 → 補送」時會把已送過的數量重新誤判成缺貨。
         const grossDeliveredQty = deliveryRecords
-            ? deliveryRecords.filter(matchesItem).reduce((sum,row)=>sum+Math.max(0,Number(row?.qty||0)),0)
+            ? (deliveryQtyByItemId.get(itemId) || 0)
             : Math.max(0,Number(item.deliveredQty||0));
         const returnedQty = returnRecords
-            ? returnRecords.filter(matchesItem).reduce((sum,row)=>sum+Math.max(0,Number(row?.qty||0)),0)
+            ? (returnQtyByItemId.get(itemId) || 0)
             : Math.max(0,Number(item.returnedQty||0));
         const base = {
             ...item,
