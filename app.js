@@ -508,7 +508,10 @@ window.addEventListener('DOMContentLoaded', () => {
             // Firestore is still authoritative; permissions are refreshed before any new session data is trusted.
             const cachedProfile=readCachedUserProfile(user.uid);
             if(cachedProfile){applyUserProfile(cachedProfile);showApp();}
-            db.collection('users').doc(user.uid).get().then(doc => {
+            firestoreReadWithTimeout(
+                db.collection('users').doc(user.uid).get(),
+                '登入狀態驗證'
+            ).then(doc => {
                 if (firebase.auth().currentUser?.uid !== user.uid) return;
                 if (!doc.exists) throw new Error('找不到此 UID 對應的 users 文件');
                 const d = doc.data() || {};
@@ -1155,7 +1158,10 @@ let appResumeTimer = null;
 function revalidateCurrentUserAccess() {
     const user = firebase.auth().currentUser;
     if (!user) return Promise.resolve();
-    return db.collection('users').doc(user.uid).get().then(doc => {
+    return firestoreReadWithTimeout(
+        db.collection('users').doc(user.uid).get(),
+        '帳號狀態驗證'
+    ).then(doc => {
         if (firebase.auth().currentUser?.uid !== user.uid) return;
         const d = doc.exists ? (doc.data() || {}) : null;
         if (!d || d.disabled === true || d.active === false) {
