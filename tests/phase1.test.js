@@ -2204,3 +2204,19 @@ test('shared batch master reads are bounded', () => {
     const warehouseEnd=appSource.indexOf('async function loadSupplierWarehouseMasters',warehouseStart);
     assert.match(appSource.slice(warehouseStart,warehouseEnd),/firestoreReadWithTimeout\([\s\S]*?'倉庫主檔'/);
 });
+
+
+test('opening linked purchase orders and supply sync checks are bounded', () => {
+    const idsStart=appSource.indexOf('async function readDocumentsByIds');
+    const idsEnd=appSource.indexOf('async function loadInventoryAnalysisSupport',idsStart);
+    const idsSource=appSource.slice(idsStart,idsEnd);
+    assert.match(idsSource,/firestoreReadWithTimeout\([\s\S]*?collectionName \+ ' 指定文件'/);
+
+    const openStart=appSource.indexOf('window.openPurchaseOrderFromOrder = async function');
+    const openEnd=appSource.indexOf('/* =========================================================\n   產生訂購單',openStart);
+    const openSource=appSource.slice(openStart,openEnd);
+    assert.match(openSource,/beginActionButton\(button, '開啟中…'\)/);
+    assert.match(openSource,/firestoreReadWithTimeout\([\s\S]*?'訂購單紀錄'/);
+    assert.match(openSource,/await reprintPurchaseOrder\(po\.id\)/);
+    assert.match(openSource,/endActionButton\(button, buttonState\)/);
+});
