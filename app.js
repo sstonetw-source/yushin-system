@@ -1267,6 +1267,7 @@ window.switchViewRole = function(role) {
     receivingSourceOrderStatusCache = new Map();
     receivingSourceOrderCache = new Map();
     purchasingReceivingReady = false;
+    purchasingOrdersReady = false;
     purchasingDispatchCache = [];
     purchasingDispatchCursor = null;
     purchasingDispatchHasMore = true;
@@ -7893,6 +7894,7 @@ let supplyReceivingHasMore = true;
 let receivingSourceOrderStatusCache = new Map();
 let receivingSourceOrderCache = new Map();
 let purchasingOrderRefreshPromise = null;
+let purchasingOrdersReady = false;
 let purchasingReceivingLoadPromise = null;
 let purchasingReceivingReady = false;
 let purchasingView = 'ordering';
@@ -7910,11 +7912,16 @@ let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
 
 const purchasingViewLoaded = new Set();
 
-function refreshPurchasingOrderCache(reset = true) {
+function refreshPurchasingOrderCache(reset = true, options = {}) {
+    if (options.reuseOrders && purchasingOrdersReady) return Promise.resolve(ordersCache);
     if (purchasingOrderRefreshPromise) return purchasingOrderRefreshPromise;
     // 採購頁自己的 caller 會在資料更新後統一 render；
     // 背景共用 orders 查詢只更新 cache，不先重畫一次工作卡。
     purchasingOrderRefreshPromise = Promise.resolve(loadOrderPage(reset, { silent: true, skipRender: true }))
+        .then(() => {
+            purchasingOrdersReady = true;
+            return ordersCache;
+        })
         .finally(() => { purchasingOrderRefreshPromise = null; });
     return purchasingOrderRefreshPromise;
 }
@@ -7932,13 +7939,13 @@ function purchasingArrivalWorkKeys(filters = purchaseFilterContext()) {
     return keys;
 }
 
-function loadPurchasingReceivingQueue(reset = true) {
+function loadPurchasingReceivingQueue(reset = true, options = {}) {
     if (purchasingReceivingLoadPromise) return purchasingReceivingLoadPromise;
     purchasingReceivingReady = false;
     renderPoList();
     purchasingReceivingLoadPromise = Promise.allSettled([
         loadPurchaseOrderPage(reset),
-        refreshPurchasingOrderCache(reset)
+        refreshPurchasingOrderCache(reset, options)
     ]).then(results => {
         purchasingReceivingReady = true;
         const failed = results.filter(result => result.status === 'rejected');
@@ -8182,7 +8189,7 @@ window.switchPurchasingView = function(view, tab) {
         renderPendingPurchaseOrders();
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
-            loadPendingPurchaseOrders(true).catch(err => {
+            loadPendingPurchaseOrders(true, { reuseOrders:true }).catch(err => {
                 purchasingViewLoaded.delete('ordering');
                 console.error('待採購首次載入失敗：', err);
             });
@@ -8191,7 +8198,7 @@ window.switchPurchasingView = function(view, tab) {
         renderPoList();
         if (!purchasingViewLoaded.has('receiving')) {
             purchasingViewLoaded.add('receiving');
-            loadPurchasingReceivingQueue(true).catch(err => {
+            loadPurchasingReceivingQueue(true, { reuseOrders:true }).catch(err => {
                 purchasingViewLoaded.delete('receiving');
                 console.error('待到貨首次載入失敗：', err);
             });
@@ -8215,7 +8222,7 @@ window.switchPurchasingView = function(view, tab) {
         renderPurchasingDispatchOrders();
         if (!purchasingViewLoaded.has('dispatch')) {
             purchasingViewLoaded.add('dispatch');
-            Promise.resolve(loadPurchasingDispatchOrders(true)).catch(err => {
+            Promise.resolve(loadPurchasingDispatchOrders(true, { reuseOrders:true })).catch(err => {
                 purchasingViewLoaded.delete('dispatch');
                 console.error('待打單首次載入失敗：', err);
             });
@@ -8223,7 +8230,7 @@ window.switchPurchasingView = function(view, tab) {
     } else renderPurchasingCompletedOrders();
 };
 
-async function loadPurchasingDispatchOrders(reset=true) {
+async function loadPurchasingDispatchOrders(reset=true, options={}) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
     purchasingDispatchError = '';
     purchasingDispatchLoading = true;
@@ -8234,7 +8241,7 @@ async function loadPurchasingDispatchOrders(reset=true) {
     if (purchasingView === 'completed') renderPurchasingCompletedOrders();
     else renderPurchasingDispatchOrders();
     try {
-        await refreshPurchasingOrderCache(reset);
+        await refreshPurchasingOrderCache(reset, options);
         purchasingDispatchCache = ordersCache.filter(order =>
             normalizedOrderItems(order).some(item => orderItemDisplayCategories(order,item).includes('dispatch'))
         );
@@ -8357,7 +8364,7 @@ function renderPendingPurchaseOrders() {
     if (more) { more.style.display = pendingPurchaseHasMore ? '' : 'none'; more.disabled = pendingPurchaseLoading; }
 }
 
-window.loadPendingPurchaseOrders = async function(reset = true) {
+window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po') || pendingPurchaseLoading) return;
     pendingPurchaseError = '';
     pendingPurchaseLoading = true;
@@ -8366,7 +8373,7 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     renderPendingPurchaseOrders();
     try {
         // 直接沿用訂單頁同一個分頁載入器與 ordersCache；同一時間不重複發 orders Query。
-        await refreshPurchasingOrderCache(reset);
+        await refreshPurchasingOrderCache(reset, options);
         pendingPurchaseCache = ordersCache.filter(order => pendingProcurementDisplayLines(order).length > 0);
         pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         renderPurchasingWorkCards();
