@@ -15615,7 +15615,7 @@ async function countCollectionDocuments(name) {
     while (true) {
         let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(500);
         if (cursor) query = query.startAfter(cursor);
-        const snap = await query.get();
+        const snap = await firestoreReadWithTimeout(query.get(), `${name} 文件數量`);
         count += snap.size;
         if (snap.size < 500) break;
         cursor = snap.docs[snap.docs.length - 1];
@@ -15626,7 +15626,10 @@ async function countCollectionDocuments(name) {
 async function deleteCollectionInBatches(name, onProgress) {
     let deleted = 0;
     while (true) {
-        const snap = await db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(300).get();
+        const snap = await firestoreReadWithTimeout(
+            db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(300).get(),
+            `${name} 清除批次`
+        );
         if (snap.empty) break;
         const batch = db.batch();
         snap.docs.forEach(doc => batch.delete(doc.ref));
@@ -15643,7 +15646,7 @@ async function resetStockCollection(name, status) {
     while (true) {
         let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(300);
         if (cursor) query = query.startAfter(cursor);
-        const snap = await query.get();
+        const snap = await firestoreReadWithTimeout(query.get(), `${name} 庫存歸零批次`);
         if (snap.empty) break;
         const batch = db.batch();
         snap.docs.forEach(doc => batch.set(doc.ref, {
