@@ -3658,3 +3658,13 @@ test('purchasing queues reuse already loaded order cache without duplicate rende
     assert.match(dispatchSource,/purchasingDispatchHasMore = !!orderPaginationState/);
     assert.match(dispatchSource,/return ordersCache/);
 });
+
+
+test('receiving page load performs one unified render', () => {
+    const start=appSource.indexOf('async function loadPurchaseOrderPage');
+    const end=appSource.indexOf('\nwindow.loadMyPurchaseOrders',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
+    assert.doesNotMatch(source,/mergeReceivingSourceOrdersIntoOrderCache\(\);[\s\S]{0,120}renderPurchasingWorkCards\(\)/);
+    assert.match(source,/if \(!deferRender\) \{[\s\S]*?purchasingView === 'receiving'\) renderPurchasingView\(\);[\s\S]*?else renderPoList\(\)/);
+});
