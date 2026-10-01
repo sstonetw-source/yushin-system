@@ -597,6 +597,9 @@ function canCreateForecastCapability(role = currentUserRole) {
 function canSelfOrderCapability(role = currentUserRole) {
     return hasBusinessCapability(role);
 }
+function canManageOrderLifecycleCapability(role = currentUserRole) {
+    return hasBusinessCapability(role);
+}
 function canCreatePurchaseOrderCapability(role = currentUserRole) {
     return role === 'admin' || role === 'purchaser';
 }
@@ -8032,7 +8035,8 @@ window.renderOrdersList = function() {
 
     const canManageOrderOps = currentUserRole === 'purchaser' || currentUserRole === 'admin';
     const canEditOrders = canEditPage('orders.list');
-    const canConfirmOrderDelivery = hasBusinessCapability();
+    const canManageOrderLifecycle = canManageOrderLifecycleCapability();
+    const canConfirmOrderDelivery = canManageOrderLifecycle;
     const costHeader = document.getElementById('orderCostHeader');
     if (costHeader) costHeader.style.display = canManageOrderOps ? '' : 'none';
 
@@ -8130,12 +8134,14 @@ window.renderOrdersList = function() {
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
                             ${lifecyclePending
-                                ? '<button type="button" disabled>處理中…</button>'
-                                : lifecycle.status === 'normal'
-                                    ? `${contextActions.showPartialDelivery ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>` : ''}
+                                ? (canManageOrderLifecycle ? '<button type="button" disabled>處理中…</button>' : '')
+                                : canManageOrderLifecycle
+                                    ? (lifecycle.status === 'normal'
+                                        ? `${contextActions.showPartialDelivery ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>` : ''}
                             <button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>
                             ${contextActions.showReturn ? `<button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}`
-                                    : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
+                                        : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`)
+                                    : ''}
                             ${dispatchActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
@@ -11640,7 +11646,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
 }
 
 window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
-    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     if (!['normal', 'cancelled'].includes(nextStatus)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder) return;
@@ -11721,7 +11727,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
 
 window.toggleOrderProgressStatus = function(field, newValue) {
     const orderId = currentDeliveryOrderId;
-    if (!orderId || !canEditPage('orders.list')) return;
+    if (!orderId || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     toggleOrderStatus(orderId, field, newValue);
     renderDeliveryModal();
 };
@@ -11743,7 +11749,7 @@ window.resetDeliveryForm = function() {
 
 window.openPartialDeliveryForm = function() {
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
-    if (!order || !canEditPage('orders.list')) return;
+    if (!order || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if (normalizedOrderStatus(order) !== 'normal') { alert('已取消的訂單不能新增送貨紀錄。'); return; }
     const progress = deliveryProgressInfo(order);
     if (progress.remaining <= 0) { alert('這筆訂單已全數送貨。'); return; }
@@ -11754,11 +11760,13 @@ window.openPartialDeliveryForm = function() {
 };
 
 window.openPartialDeliveryForOrder = function(orderId) {
+    if (!canManageOrderLifecycleCapability()) return;
     openDeliveryModal(orderId);
     openPartialDeliveryForm();
 };
 
 window.openReturnManagement = function(orderId) {
+    if (!canManageOrderLifecycleCapability()) return;
     openDeliveryModal(orderId);
     const form = document.getElementById('returnFormPanel');
     form.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -11935,7 +11943,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
 window.quickCompleteDelivery = async function(orderIdOverride) {
     const orderId = orderIdOverride || currentDeliveryOrderId;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
-    if (!cachedOrder || !canEditPage('orders.list')) return;
+    if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     const cachedProgress = deliveryProgressInfo(cachedOrder);
     if (normalizedOrderStatus(cachedOrder) !== 'normal') { alert('已取消的訂單不能送貨。'); return; }
     if (cachedProgress.state === 'complete') return quickCancelAllDelivery(orderId);
@@ -12039,7 +12047,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
 window.quickCancelAllDelivery = async function(orderIdOverride) {
     const orderId = orderIdOverride || currentDeliveryOrderId;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
-    if (!cachedOrder || !canEditPage('orders.list')) return;
+    if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if (returnedQuantity(cachedOrder) > 0) { alert('這筆訂單已有退貨紀錄，請先從 ⋯ 中更正或刪除退貨紀錄。'); return; }
     if (normalizedOrderItems(cachedOrder).length > 1) {
         alert('舊版多品項訂單不能使用一鍵取消全部送貨，請逐品項更正送貨紀錄，避免庫存還原到錯誤品項。');
@@ -12103,7 +12111,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
 function renderDeliveryModal() {
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     if (!order) return;
-    const editable = canEditPage('orders.list');
+    const editable = canManageOrderLifecycleCapability() && canEditPage('orders.list');
     const isEditing = !!document.getElementById('deliveryEditId').value;
     document.getElementById('deliveryFormPanel').style.display = editable && (normalizedOrderStatus(order) === 'normal' || isEditing) && (deliveryPartialFormOpen || isEditing) ? '' : 'none';
     const progress = deliveryProgressInfo(order);
@@ -12203,7 +12211,7 @@ window.editDeliveryRecord = function(recordId) {
 };
 
 window.saveDeliveryRecord = async function() {
-    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     const orderId = currentDeliveryOrderId;
     const date = document.getElementById('deliveryDate').value;
     const qty = parseFloat(document.getElementById('deliveryQty').value);
@@ -12303,7 +12311,7 @@ window.saveDeliveryRecord = async function() {
 };
 
 window.deleteDeliveryRecord = async function(recordId) {
-    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     if (!confirm('確定要刪除這筆送貨紀錄嗎？異動軌跡仍會保留。')) return;
     const orderId = currentDeliveryOrderId;
     if (!orderId || pendingDeliveryOrderIds.has(orderId)) return;
@@ -12359,7 +12367,7 @@ window.deleteDeliveryRecord = async function(recordId) {
 };
 
 window.clearLegacyDelivery = async function() {
-    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     if (!confirm('確定取消這筆舊資料的「已送貨」推估嗎？取消後請重新登錄正確送貨日期與數量。')) return;
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     if (!order) return;
@@ -12454,7 +12462,7 @@ window.resetReturnForm = function() {
 function renderOrderLifecycleModal() {
     const order = ordersCache.find(item => item.id === currentLifecycleOrderId);
     if (!order) return;
-    const editable = canEditPage('orders.list');
+    const editable = canManageOrderLifecycleCapability() && canEditPage('orders.list');
     const info = orderLifecycleInfo(order);
     document.getElementById('orderStatusEditPanel').style.display = editable ? '' : 'none';
     const isEditingReturn = !!document.getElementById('returnEditId').value;
@@ -12477,7 +12485,7 @@ function renderOrderLifecycleModal() {
 }
 
 window.saveOrderLifecycleStatus = async function() {
-    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     const order = ordersCache.find(item => item.id === currentLifecycleOrderId);
     if (!order) return;
     const nextStatus = document.getElementById('orderLifecycleStatus').value;
@@ -12544,7 +12552,7 @@ window.editReturnRecord = function(recordId) {
 };
 
 window.saveReturnRecord = async function() {
-    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     const orderId = currentLifecycleOrderId;
     const date = document.getElementById('returnDate').value;
     const qty = parseFloat(document.getElementById('returnQty').value);
@@ -12624,7 +12632,7 @@ window.saveReturnRecord = async function() {
 };
 
 window.deleteReturnRecord = async function(recordId) {
-    if (!canEditPage('orders.list')) { alert('您目前只有查看權限。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     if (!confirm('確定要刪除這筆退貨紀錄嗎？異動軌跡仍會保留。')) return;
     const orderId = currentLifecycleOrderId;
     if (!orderId || pendingReturnOrderIds.has(orderId)) return;
