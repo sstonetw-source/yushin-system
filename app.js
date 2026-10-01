@@ -7020,8 +7020,8 @@ function ensureOrderItemCompatibility(order) {
     return order;
 }
 
-function orderQuantity(order) {
-    return normalizedOrderItems(order)
+function orderQuantity(order, normalizedItems = null) {
+    return (normalizedItems || normalizedOrderItems(order))
         .reduce((sum,item)=>sum+Math.max(0,Number(item.qty||0)),0);
 }
 
@@ -7029,16 +7029,16 @@ function savedDeliveryRecords(order) {
     return Array.isArray(order?.deliveryRecords) ? order.deliveryRecords : [];
 }
 
-function deliveredQuantity(order) {
+function deliveredQuantity(order, normalizedItems = null) {
     const records = savedDeliveryRecords(order);
     if (records.length) return records.reduce((sum, record) => sum + (parseFloat(record.qty) || 0), 0);
     // 舊資料只有「已送貨」布林值：視為全數送貨，但不在未確認前改寫雲端資料。
-    return order?.isDelivered ? orderQuantity(order) : 0;
+    return order?.isDelivered ? orderQuantity(order, normalizedItems) : 0;
 }
 
-function deliveryProgressInfo(order) {
-    const total = orderQuantity(order);
-    const grossDelivered = deliveredQuantity(order);
+function deliveryProgressInfo(order, normalizedItems = null) {
+    const total = orderQuantity(order, normalizedItems);
+    const grossDelivered = deliveredQuantity(order, normalizedItems);
     const returned = Math.min(returnedQuantity(order), grossDelivered);
     const effectiveDelivered = Math.max(0, grossDelivered - returned);
     const delivered = Math.min(effectiveDelivered, total || effectiveDelivered);
@@ -7066,8 +7066,8 @@ function normalizedOrderStatus(order) {
     return 'normal';
 }
 
-function orderLifecycleInfo(order) {
-    const delivered = deliveredQuantity(order);
+function orderLifecycleInfo(order, normalizedItems = null) {
+    const delivered = deliveredQuantity(order, normalizedItems);
     const returned = Math.min(returnedQuantity(order), delivered);
     const effectiveDelivered = Math.max(0, delivered - returned);
     const status = normalizedOrderStatus(order);
@@ -7108,8 +7108,8 @@ function purchaseProgressInfo(order) {
     return {state:'not_required',label:'無需採購'};
 }
 
-function fulfillmentProgressInfo(order) {
-    const items=normalizedOrderItems(order).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+function fulfillmentProgressInfo(order, normalizedItems = null) {
+    const items=(normalizedItems || normalizedOrderItems(order)).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
     const total=items.reduce((s,item)=>s+Number(item.orderedQty||item.qty||0),0);
     const states=items.map(item=>itemDispatchState(order,item));
     const ready=states.reduce((s,state)=>s+state.reserved,0);
@@ -7146,8 +7146,8 @@ function itemDispatchState(order, item) {
     return { delivered, grossDelivered, returned, reserved, prepared, preparedOutstanding, shippable, pending };
 }
 
-function orderContextActionState(order) {
-    const items = normalizedOrderItems(order);
+function orderContextActionState(order, normalizedItems = null) {
+    const items = normalizedItems || normalizedOrderItems(order);
     const states = items.map(item => itemDispatchState(order, item));
     const grossDelivered = states.reduce((sum, state) => sum + Math.max(0, Number(state.grossDelivered || 0)), 0);
     const returned = states.reduce((sum, state) => sum + Math.max(0, Number(state.returned || 0)), 0);
@@ -7168,10 +7168,10 @@ function orderContextActionState(order) {
     };
 }
 
-function dispatchActionHtml(order) {
+function dispatchActionHtml(order, normalizedItems = null) {
     if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return '';
     if (normalizedOrderStatus(order) !== 'normal') return '';
-    return normalizedOrderItems(order)
+    return (normalizedItems || normalizedOrderItems(order))
         .filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')
         .map(item=>({item,state:itemDispatchState(order,item)}))
         .filter(x=>x.state.pending>0)
@@ -7234,9 +7234,9 @@ function canBusinessSelfOrder(order = null) {
         || (order.salesCode && currentUserCode && order.salesCode === currentUserCode);
 }
 
-function selfOrderActionHtml(order) {
+function selfOrderActionHtml(order, normalizedItems = null) {
     if (!canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
-    return normalizedOrderItems(order)
+    return (normalizedItems || normalizedOrderItems(order))
         .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
         .map(item => {
             const remaining=remainingProcurementQty(order,item);
@@ -7983,11 +7983,11 @@ window.renderOrdersList = function() {
         shown++;
 
         const tr = document.createElement('tr');
-        const lifecycle = orderLifecycleInfo(o);
+        const lifecycle = orderLifecycleInfo(o, allOrderItems);
         // 這些摘要都會掃描訂單品項；同一列只計算一次，避免列表重複做相同工作。
-        const deliveryProgress = canConfirmOrderDelivery ? deliveryProgressInfo(o) : null;
-        const fulfillmentProgress = canConfirmOrderDelivery ? fulfillmentProgressInfo(o) : null;
-        const contextActions = orderContextActionState(o);
+        const deliveryProgress = canConfirmOrderDelivery ? deliveryProgressInfo(o, allOrderItems) : null;
+        const fulfillmentProgress = canConfirmOrderDelivery ? fulfillmentProgressInfo(o, allOrderItems) : null;
+        const contextActions = orderContextActionState(o, allOrderItems);
         const deliveryPending = pendingDeliveryOrderIds.has(o.id);
         const billingPending = pendingOrderStatusKeys.has(o.id + ':isBilled');
         const lifecyclePending = pendingLifecycleOrderIds.has(o.id);
@@ -8029,8 +8029,8 @@ window.renderOrdersList = function() {
                             <button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>
                             ${contextActions.showReturn ? `<button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}`
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
-                            ${dispatchActionHtml(o)}
-                            ${selfOrderActionHtml(o)}
+                            ${dispatchActionHtml(o, allOrderItems)}
+                            ${selfOrderActionHtml(o, allOrderItems)}
                             ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
