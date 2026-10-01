@@ -2312,3 +2312,21 @@ test('customer helper and inventory detail reads are bounded', () => {
     const reservationEnd=appSource.indexOf('\nwindow.closeInventoryReservationDetails',reservationStart);
     assert.match(appSource.slice(reservationStart,reservationEnd),/firestoreReadWithTimeout/);
 });
+
+
+test('forecast warehouse and business product reads are bounded', () => {
+    const forecastStart=appSource.indexOf('window.loadForecasts = async function');
+    const forecastEnd=appSource.indexOf('let forecastHistorySearchActive',forecastStart);
+    assert.match(appSource.slice(forecastStart,forecastEnd),/firestoreReadWithTimeout\(query\.get\(\), 'Forecast 清單'\)/);
+
+    const warehouseStart=appSource.indexOf('async function warehouseStockSnapshot');
+    const warehouseEnd=appSource.indexOf('let orderWarehouseStockRefreshGeneration',warehouseStart);
+    assert.match(appSource.slice(warehouseStart,warehouseEnd),/firestoreReadWithTimeout\(ref\.get\(\), '倉庫庫存'\)/);
+
+    const searchStart=appSource.indexOf('window.searchBusinessProducts=async function');
+    const searchEnd=appSource.indexOf('let inventorySearchTimer',searchStart);
+    const searchSource=appSource.slice(searchStart,searchEnd);
+    assert.match(searchSource,/產品貨號搜尋/);
+    assert.match(searchSource,/產品名稱搜尋/);
+    assert.match(searchSource,/產品庫存搜尋/);
+});
