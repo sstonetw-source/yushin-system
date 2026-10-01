@@ -3199,3 +3199,32 @@ test('order rows reuse one dispatch snapshot across status summaries', () => {
     assert.match(listSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
     assert.match(listSource,/displayCategoriesByItem\.get\(item\)/);
 });
+
+
+test('procurement views reuse dispatch state while calculating quantities', () => {
+    const remainingStart=appSource.indexOf('function remainingProcurementQty');
+    const remainingEnd=appSource.indexOf('\nfunction pendingProcurementDisplayLines',remainingStart);
+    const remainingSource=appSource.slice(remainingStart,remainingEnd);
+    assert.match(remainingSource,/dispatchOverride = null/);
+    assert.match(remainingSource,/dispatchOverride \|\| itemDispatchState/);
+
+    const pendingStart=appSource.indexOf('function pendingProcurementDisplayLines');
+    const pendingEnd=appSource.indexOf('\nfunction renderPurchasingWorkCards',pendingStart);
+    const pendingSource=appSource.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
+    assert.match(pendingSource,/const dispatch = itemDispatchState\(order, item\)/);
+    assert.match(pendingSource,/orderItemWorkCategory\(order, item, lifecycle, dispatch\)/);
+    assert.match(pendingSource,/remainingProcurementQty\(order, item, dispatch\)/);
+
+    const completedStart=appSource.indexOf('function purchasingCompletedRows');
+    const completedEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',completedStart);
+    const completedSource=appSource.slice(completedStart,completedEnd);
+    assert.match(completedSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
+    assert.match(completedSource,/const state = itemDispatchState\(order, item\)/);
+    assert.match(completedSource,/orderItemWorkCategory\(order, item, lifecycle, state\)/);
+
+    const listStart=appSource.indexOf('window.renderOrdersList = function()');
+    const listEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',listStart);
+    const listSource=appSource.slice(listStart,listEnd);
+    assert.match(listSource,/selfOrderActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
+});
