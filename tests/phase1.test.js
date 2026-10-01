@@ -3916,3 +3916,36 @@ test('purchase-order PDF paginates rows repeats headers and uses mobile-safe ren
     assert.match(addSource,/canvas\.width = 1/);
     assert.match(addSource,/canvas\.height = 1/);
 });
+
+
+test('inventory lookup batches product-key in queries', () => {
+    const inventoryStart=appSource.indexOf('async function loadWarehouseStocksForInventoryPage');
+    const inventoryEnd=appSource.indexOf('\nwindow.loadInventory=',inventoryStart);
+    const inventorySource=appSource.slice(inventoryStart,inventoryEnd);
+    assert.match(inventorySource,/const chunkSize = 30/);
+    assert.match(inventorySource,/for \(let i = 0; i < productKeys\.length; i \+= chunkSize\)/);
+    assert.match(inventorySource,/const keys = productKeys\.slice\(i, i \+ chunkSize\)/);
+    assert.match(inventorySource,/where\('productKey', 'in', keys\)/);
+
+    const productStart=appSource.indexOf('window.searchBusinessProducts=async function');
+    const productEnd=appSource.indexOf('\n};',productStart)+3;
+    const productSource=appSource.slice(productStart,productEnd);
+    assert.match(productSource,/\.limit\(25\)/);
+    assert.match(productSource,/const products=\[\.\.\.map\.values\(\)\]\.slice\(0,25\)/);
+    assert.match(productSource,/where\('productKey','in',productKeys\)/);
+
+    const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
+    const priceEnd=appSource.indexOf('\nwindow.handlePriceExcelUpload',priceStart);
+    const priceSource=appSource.slice(priceStart,priceEnd);
+    assert.match(priceSource,/for \(let i = 0; i < deduped\.length; i \+= 10\)/);
+    assert.match(priceSource,/const chunk = deduped\.slice\(i, i \+ 10\)/);
+    assert.match(priceSource,/where\('normalizedPartNo', 'in', codes\)/);
+});
+
+test('mobile order list stays card based', () => {
+    assert.match(cssSource,/@media \(max-width: 650px\)[\s\S]*?#ordersTable thead[\s\S]*?display:\s*none/);
+    assert.match(cssSource,/@media \(max-width: 650px\)[\s\S]*?#ordersTable[\s\S]*?#ordersTable td[\s\S]*?display:\s*block/);
+    assert.match(cssSource,/#ordersTable td\[data-th\]::before[\s\S]*?content:\s*attr\(data-th\)/);
+    assert.match(cssSource,/#ordersTable td\[data-th="操作"\][\s\S]*?display:\s*flex/);
+    assert.match(cssSource,/@media \(max-width: 650px\)[\s\S]*?#orderSearch[\s\S]*?max-width:none/);
+});
