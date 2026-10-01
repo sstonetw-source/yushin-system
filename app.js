@@ -7126,10 +7126,12 @@ function fulfillmentProgressInfo(order) {
 const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
-    const orderItems=normalizedOrderItems(order);
-    const grossDelivered=savedDeliveryRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===item.itemId))
+    // 這裡只需要知道「是否為單品項訂單」來承接舊紀錄沒有 itemId 的情況；
+    // 不需要為每個品項重新 normalizedOrderItems(order)，避免工作卡／列表反覆整理整張訂單。
+    const singleItem = Array.isArray(order?.items) && order.items.length === 1;
+    const grossDelivered=savedDeliveryRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
         .reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const returned=savedReturnRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===item.itemId))
+    const returned=savedReturnRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
         .reduce((sum,r)=>sum+Number(r.qty||0),0);
     // 品項工作狀態使用有效送貨量。已送貨後若發生退貨，必須退出「已完成／待核銷」，
     // 回到仍需補送的物流狀態；grossDelivered 保留給庫存與歷史追蹤。
