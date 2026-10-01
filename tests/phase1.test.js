@@ -4222,3 +4222,19 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     assert.doesNotMatch(purchaserSource,/'productKey'/);
     assert.doesNotMatch(purchaserSource,/'warehouseId'/);
 });
+
+
+test('supply status must match operational quantities', () => {
+    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
+    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
+    const source=rulesSource.slice(stateStart,stateEnd);
+    assert.ok(stateStart>=0&&stateEnd>stateStart);
+
+    assert.match(source,/status', 'ORDERED'\) == 'ORDERED'[\s\S]*?receivedQty', 0\) == 0[\s\S]*?cancelledQty', 0\) == 0/);
+    assert.match(source,/status', 'ORDERED'\) == 'PARTIAL_RECEIPT'[\s\S]*?receivedQty', 0\) > 0[\s\S]*?receivedQty', 0\) < request\.resource\.data\.get\('qty'/);
+    assert.match(source,/status', 'ORDERED'\) == 'RECEIVED'[\s\S]*?receivedQty', 0\) == request\.resource\.data\.get\('qty'/);
+    assert.match(source,/status', 'ORDERED'\) == 'CANCELLED'[\s\S]*?cancelledQty', 0\)[\s\S]*?== request\.resource\.data\.get\('qty'[\s\S]*?- request\.resource\.data\.get\('receivedQty'/);
+    assert.match(source,/incomingRegisteredQty', 0\) == 0/);
+    assert.match(source,/cancelReason', ''\) != ''/);
+    assert.match(source,/cancelledByUid', ''\) == request\.auth\.uid/);
+});
