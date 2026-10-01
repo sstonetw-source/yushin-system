@@ -8130,6 +8130,10 @@ async function loadPurchasingDispatchOrders(reset=true) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
     purchasingDispatchError = '';
     purchasingDispatchLoading = true;
+    const refreshButton = document.getElementById(purchasingView === 'completed'
+        ? 'purchaseCompletedRefreshBtn'
+        : 'purchaseDispatchRefreshBtn');
+    if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
     if (purchasingView === 'completed') renderPurchasingCompletedOrders();
     else renderPurchasingDispatchOrders();
     try {
@@ -8144,6 +8148,7 @@ async function loadPurchasingDispatchOrders(reset=true) {
         purchasingDispatchError = `待打單清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         purchasingDispatchLoading = false;
+        if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
         if (purchasingView === 'completed') renderPurchasingCompletedOrders();
         else renderPurchasingDispatchOrders();
     }
@@ -8262,6 +8267,8 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po') || pendingPurchaseLoading) return;
     pendingPurchaseError = '';
     pendingPurchaseLoading = true;
+    const refreshButton = document.getElementById('purchasePendingRefreshBtn');
+    if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
     renderPendingPurchaseOrders();
     try {
         // 直接沿用訂單頁同一個分頁載入器與 ordersCache；同一時間不重複發 orders Query。
@@ -8274,6 +8281,7 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         pendingPurchaseError = `待採購清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         pendingPurchaseLoading = false;
+        if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
         renderPendingPurchaseOrders();
     }
 };
@@ -8448,10 +8456,16 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
 // 「採購訂單」列出所有已經產生過的訂購單紀錄（不分是誰產生的，只要是採購／管理員都看得到全部）
 function updatePoLoadMoreButton() {
     const button = document.getElementById('poLoadMoreBtn');
-    if (!button) return;
-    button.style.display = (poListHasMore || (purchasingView === 'receiving' && supplyReceivingHasMore)) ? '' : 'none';
-    button.disabled = poListPageLoading;
-    button.innerText = poListPageLoading ? '載入中…' : purchasingView === 'receiving' ? '載入更多待到貨資料' : '載入更多（每次 50 筆）';
+    const refreshButton = document.getElementById('purchasePoRefreshBtn');
+    if (button) {
+        button.style.display = (poListHasMore || (purchasingView === 'receiving' && supplyReceivingHasMore)) ? '' : 'none';
+        button.disabled = poListPageLoading;
+        button.innerText = poListPageLoading ? '載入中…' : purchasingView === 'receiving' ? '載入更多待到貨資料' : '載入更多（每次 50 筆）';
+    }
+    if (refreshButton) {
+        refreshButton.disabled = poListPageLoading;
+        refreshButton.textContent = poListPageLoading ? '更新中…' : '↻ 更新';
+    }
 }
 
 async function loadPurchaseOrderPage(reset) {
@@ -8488,8 +8502,8 @@ async function loadPurchaseOrderPage(reset) {
             : null;
         if (supplyQuery && supplyReceivingCursor) supplyQuery = supplyQuery.startAfter(supplyReceivingCursor);
         const [snapshot,supplySnapshot] = await Promise.all([
-            query ? query.get() : Promise.resolve({docs:[],size:0,empty:true}),
-            supplyQuery ? supplyQuery.get() : Promise.resolve({docs:[],size:0,empty:true})
+            query ? firestoreReadWithTimeout(query.get(), '訂購單清單') : Promise.resolve({docs:[],size:0,empty:true}),
+            supplyQuery ? firestoreReadWithTimeout(supplyQuery.get(), '待到貨供應') : Promise.resolve({docs:[],size:0,empty:true})
         ]);
         if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
         const freshSupply=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
@@ -8513,7 +8527,10 @@ async function loadPurchaseOrderPage(reset) {
         const missingSourceIds=sourceOrderIds.filter(id=>!nextSourceOrders.has(id));
         for(let i=0;i<missingSourceIds.length;i+=10){
             const batch=missingSourceIds.slice(i,i+10);
-            const sourceSnap=await db.collection('orders').where(firebase.firestore.FieldPath.documentId(),'in',batch).get();
+            const sourceSnap=await firestoreReadWithTimeout(
+                db.collection('orders').where(firebase.firestore.FieldPath.documentId(),'in',batch).get(),
+                '待到貨來源訂單'
+            );
             sourceSnap.docs.forEach(doc=>{
                 const sourceOrder={id:doc.id,...doc.data()};
                 nextSourceOrders.set(doc.id,sourceOrder);
