@@ -7234,12 +7234,12 @@ function canBusinessSelfOrder(order = null) {
         || (order.salesCode && currentUserCode && order.salesCode === currentUserCode);
 }
 
-function selfOrderActionHtml(order, normalizedItems = null) {
+function selfOrderActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
     if (!canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
     return (normalizedItems || normalizedOrderItems(order))
         .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
         .map(item => {
-            const remaining=remainingProcurementQty(order,item);
+            const remaining=remainingProcurementQty(order,item,dispatchStateByItem?.get(item) || null);
             return {item,remaining};
         })
         .filter(row=>row.remaining>0)
@@ -8042,7 +8042,7 @@ window.renderOrdersList = function() {
                             ${contextActions.showReturn ? `<button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}`
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o, allOrderItems, dispatchStateByItem)}
-                            ${selfOrderActionHtml(o, allOrderItems)}
+                            ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
@@ -8230,9 +8230,9 @@ function purchaseLineMatchesFilters(date, salesName, brand, context = null) {
     return !filters.selectedBrand || orderBrandFilterValue(brand, filters.selectableBrands) === filters.selectedBrand;
 }
 
-function remainingProcurementQty(order, item) {
+function remainingProcurementQty(order, item, dispatchOverride = null) {
     const returnedQty = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
-        ? itemDispatchState(order,item).returned
+        ? (dispatchOverride || itemDispatchState(order,item)).returned
         : Number(item.returnedQty || 0);
     const quantities = window.YushinWorkflow?.procurementQuantities({
         orderedQty:item.orderedQty ?? item.qty,
@@ -8258,9 +8258,12 @@ function pendingProcurementDisplayLines(order, normalizedItems = null) {
     // 工作卡與明細只讀訂單本身；不要在 render 階段解析成本／Product Master。
     // 同一輪採購頁 render 可直接沿用已 normalize 的品項快照。
     // 真正按「已訂購／產生訂購單」時，pendingPurchaseLines() 才補齊正式採購資料。
-    return (normalizedItems || normalizedOrderItems(order)).map((item, index) => {
-        if (orderItemWorkCategory(order, item) !== 'ordering') return null;
-        const qty = remainingProcurementQty(order, item);
+    const items = normalizedItems || normalizedOrderItems(order);
+    const lifecycle = orderLifecycleInfo(order, items);
+    return items.map((item, index) => {
+        const dispatch = itemDispatchState(order, item);
+        if (orderItemWorkCategory(order, item, lifecycle, dispatch) !== 'ordering') return null;
+        const qty = remainingProcurementQty(order, item, dispatch);
         if (!(qty > 0)) return null;
         return {
             orderId: order.id,
@@ -8319,18 +8322,22 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
 
 function purchasingCompletedRows(filters = purchaseFilterContext(), normalizedItemsByOrder = null) {
     const rows = [];
-    ordersCache.forEach(order => (normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order)).forEach(item => {
+    ordersCache.forEach(order => {
+        const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
         if (normalizedOrderStatus(order) !== 'normal') return;
-        const category = orderItemWorkCategory(order, item);
-        // 採購端只有在「待採購／待到貨」都結束後才算完成。
-        // 倉庫品項還要確認出貨單已打完；原廠直送沒有打單步驟，到貨確認後採購工作即完成。
-        if (['ordering', 'arrival', 'closed'].includes(category)) return;
-        const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
-        const state = itemDispatchState(order, item);
-        if (!directShip && (Number(item.dispatchPreparedQty || 0) <= 0 || Number(state.pending || 0) > 0)) return;
-        if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
-        rows.push({ order, item, state });
-    }));
+        const lifecycle = orderLifecycleInfo(order, items);
+        items.forEach(item => {
+            const state = itemDispatchState(order, item);
+            const category = orderItemWorkCategory(order, item, lifecycle, state);
+            // 採購端只有在「待採購／待到貨」都結束後才算完成。
+            // 倉庫品項還要確認出貨單已打完；原廠直送沒有打單步驟，到貨確認後採購工作即完成。
+            if (['ordering', 'arrival', 'closed'].includes(category)) return;
+            const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
+            if (!directShip && (Number(item.dispatchPreparedQty || 0) <= 0 || Number(state.pending || 0) > 0)) return;
+            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
+            rows.push({ order, item, state });
+        });
+    });
     return rows;
 }
 
