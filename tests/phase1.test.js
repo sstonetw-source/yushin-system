@@ -142,7 +142,7 @@ test('product management debounces full Product Master search', () => {
     assert.match(appSource, /scanPrefix\('normalizedPartNo', normalized/);
     assert.match(appSource, /scanPrefix\('productName', raw/);
     assert.match(appSource, /scanPrefix\('nameEn', raw/);
-    assert.match(indexSource, /貨號與中英文品名採開頭比對/);
+    assert.match(indexSource, /搜尋會查完整 Product Master/);
 });
 
 test('preview host selects isolated Firebase project and exposes a visible environment banner', () => {
@@ -1715,7 +1715,7 @@ test('V2 backup and storage audit include fulfillment and protected cost collect
 test('V2 admin UI no longer exposes the legacy migration deployment panel', () => {
     assert.doesNotMatch(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
     assert.doesNotMatch(indexSource, /庫存成本隔離，直到顯示 0/);
-    assert.match(indexSource, /匯入 Product Master/);
+    assert.match(indexSource, /匯入標準產品檔/);
 });
 
 
@@ -4065,7 +4065,7 @@ test('legacy standalone price and cost helpers stay isolated while UI uses unifi
     assert.match(indexSource,/id="productBatchMaintenance"/);
     assert.match(indexSource,/handlePriceExcelUpload\(this\)/);
     assert.match(indexSource,/下載標準範本/);
-    assert.match(indexSource,/只維護一種 Excel/);
+    assert.match(indexSource,/一份 Excel 維護產品、建議售價與標準成本/);
     assert.doesNotMatch(indexSource,/handleProductPriceExcelUpload\(this\)/);
     assert.doesNotMatch(indexSource,/handleProductCostExcelUpload\(this\)/);
 });
