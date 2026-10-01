@@ -9408,6 +9408,17 @@ function receivingEvidenceForWorkItem(order, item, itemIndex, evidenceIndex = nu
     return evidence;
 }
 
+function manualSupplyCancelActionHtml(supply) {
+    if (!supply || supply.type !== 'PURCHASING_MANUAL') return '';
+    if (!canCreatePurchaseOrderCapability()) return '';
+    if (String(supply.status || '').toUpperCase() === 'CANCELLED') return '';
+    const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
+    if (remaining <= 0) return '';
+    const key = `supply:${supply.id}`;
+    const pending = purchaseCancellationInProgress.has(key);
+    return `<button type="button" class="btn-small danger-menu-item" onclick="cancelManualSupplyOutstanding('${escapeAttr(supply.id)}')" ${pending ? 'disabled' : ''}>${pending ? '取消中…' : '取消未到貨'}</button>`;
+}
+
 function receivingWorkProgress(order, item) {
     const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
     const orderedQty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
@@ -9435,6 +9446,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     let standaloneSupplyCount = 0;
     const representedSupplyIds = new Set();
     const evidenceIndex = buildReceivingEvidenceIndex();
+    const supplyById = new Map(supplyReceivingCache.map(supply => [supply.id, supply]));
     const orderById = new Map(ordersCache.map(order => [order.id, order]));
 
     ordersCache.forEach(order => {
@@ -9458,7 +9470,9 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                 : evidence.length
                     ? evidence.map((entry, index) => {
                         const suffix = evidence.length > 1 ? ` ${index + 1}/${evidence.length}` : '';
-                        return `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(entry.id)}')">📥 到貨入庫${suffix}</button>`;
+                        const supply = supplyById.get(entry.id);
+                        const receiveButton = `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(entry.id)}')">📥 到貨入庫${suffix}</button>`;
+                        return [receiveButton, manualSupplyCancelActionHtml(supply)].filter(Boolean).join(' ');
                     }).join(' ')
                     : '<span class="order-progress-badge order-progress-warning">找不到採購紀錄</span>';
 
@@ -9493,11 +9507,15 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
 
         // 已取消訂單的原廠直送沒有倉庫可承接，因此只能顯示警示、不可確認到貨。
         const blockedDirectShip = directShip && sourceOrder && sourceStatus !== 'normal';
+        const cancelAction = manualSupplyCancelActionHtml(supply);
         const actionHtml = !canReceiveInventoryCapability()
             ? '<span class="order-progress-badge">唯讀</span>'
             : blockedDirectShip
-                ? '<span class="order-progress-badge order-progress-warning">來源訂單已取消，直送不可確認</span>'
-                : `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">${directShip ? '確認直送到貨' : '📥 到貨入庫'}</button>`;
+                ? ['<span class="order-progress-badge order-progress-warning">來源訂單已取消，直送不可確認</span>', cancelAction].filter(Boolean).join(' ')
+                : [
+                    `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">${directShip ? '確認直送到貨' : '📥 到貨入庫'}</button>`,
+                    cancelAction
+                ].filter(Boolean).join(' ');
 
         const customerLabel = sourceOrder?.customerName || sourceOrder?.customer || supply.customerName
             || (supply.orderId ? '來源訂單' : '庫存補貨');
@@ -9945,6 +9963,75 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
     if(result.productKey&&result.warehouseId)invalidateWarehouseStockCache(result.productKey,result.warehouseId);
     return result;
 }
+
+window.cancelManualSupplyOutstanding = async function(supplyId) {
+    if (!canCreatePurchaseOrderCapability()) {
+        alert('只有管理員或採購可以取消快速採購的未到貨數量。');
+        return;
+    }
+    const actionKey = `supply:${supplyId}`;
+    if (purchaseCancellationInProgress.has(actionKey)) return;
+
+    let supply;
+    try {
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('supplyOrders').doc(supplyId).get(),
+            '讀取快速採購狀態'
+        );
+        if (!snapshot.exists) throw new Error('找不到這筆供應紀錄。');
+        supply = { id:snapshot.id, ...snapshot.data() };
+    } catch (err) {
+        alert('無法讀取快速採購紀錄：' + (err?.message || err));
+        return;
+    }
+
+    if (supply.type !== 'PURCHASING_MANUAL') {
+        alert('這筆供應紀錄不是快速採購，請從對應的正式訂購單處理。');
+        return;
+    }
+    if (String(supply.status || '').toUpperCase() === 'CANCELLED') {
+        showActionFeedback('這筆快速採購的未到貨數量已取消。', 'success');
+        return;
+    }
+    const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
+    if (remaining <= 0) {
+        alert('這筆快速採購已全部到貨，沒有可取消的未到貨數量。');
+        return;
+    }
+
+    const reasonRaw = prompt(
+        `取消快速採購 ${supply.internalNo || supply.id} 尚未到貨的 ${remaining} 個。\n已實際到貨的數量不會回沖，原訂單會重新出現尚需採購的數量。\n\n請輸入取消原因：`
+    );
+    if (reasonRaw === null) return;
+    const reason = String(reasonRaw || '').trim();
+    if (!reason) {
+        alert('請填寫取消原因，方便後續追蹤。');
+        return;
+    }
+
+    purchaseCancellationInProgress.add(actionKey);
+    if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+    try {
+        const result = await cancelOutstandingSupplyRecord(
+            supply.internalNo || supply.id,
+            supply.id,
+            reason
+        );
+        supplyReceivingCache = supplyReceivingCache.filter(row => row.id !== supply.id);
+        if (result.orderId) await refreshAffectedOrderCaches([result.orderId]);
+        else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+        showActionFeedback(
+            `已取消快速採購 ${supply.internalNo || supply.id} 未到貨數量 ${result.cancelledQty || remaining}；在途庫存已同步。`,
+            'success'
+        );
+    } catch (err) {
+        console.error('取消快速採購未到貨失敗：', err);
+        alert('取消快速採購失敗：' + (err?.message || err) + '。可以重新執行；已成功的異動不會重複扣除。');
+    } finally {
+        purchaseCancellationInProgress.delete(actionKey);
+        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+    }
+};
 
 window.cancelPurchaseOrderOutstanding = async function(poId) {
     if(!canCreatePurchaseOrderCapability()){alert('只有管理員或採購可以取消訂購單未到貨數量。');return;}
