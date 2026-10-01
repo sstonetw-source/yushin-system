@@ -860,9 +860,13 @@ function initializePageData(mainKey, options = {}) {
         }).catch(err => console.warn('廠牌設定載入失敗：', err));
     }
     if (mainKey === 'forecast') {
-        // Forecast 列表不依賴完整業務名單；先畫資料，人員下拉選單在背景補齊。
+        // 一般業務只看自己，不需要讀完整 users 名單；只有可看全公司 Forecast 的角色才補齊業務篩選。
         loadForecasts(true);
-        ensureSalesListLoaded().then(populateForecastSalesFilter).catch(err => console.warn('業務名單載入失敗：', err));
+        if (canViewAllData('forecast')) {
+            ensureSalesListLoaded().then(populateForecastSalesFilter).catch(err => console.warn('業務名單載入失敗：', err));
+        } else {
+            populateForecastSalesFilter();
+        }
     }
     if (mainKey === 'quote') ensureQuoteFormInitialized();
     if (mainKey === 'products') {
@@ -2055,7 +2059,8 @@ window.loadForecasts = async function(reset = true) {
     }
 
     try {
-        await ensureSalesListLoaded();
+        if (canViewAllData('forecast')) await ensureSalesListLoaded();
+        else populateForecastSalesFilter();
 
         const status = document.getElementById('forecastStatusFilter')?.value || 'active';
 
