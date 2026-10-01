@@ -2486,13 +2486,18 @@ test('purchasing work tabs reuse one shared orders refresh', () => {
 });
 
 
-test('own-scope quote form avoids full staff preload', () => {
+test('quote form loads staff only for roles that need owner selection', () => {
     const start=appSource.indexOf('function ensureQuoteFormInitialized');
     const end=appSource.indexOf('\n\nwindow.openChangePasswordModal',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'purchaser'/);
+    assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'purchaser' \|\| currentUserRole === 'engineer'/);
     assert.match(source,/ensureSalesListLoaded\(\)/);
     assert.match(source,/else \{[\s\S]*?populateSalesDropdown\(\)/);
+
+    const selectorStart=appSource.indexOf('function populateSalesDropdown()');
+    const selectorEnd=appSource.indexOf('\n// 依目前輸入的業務姓名',selectorStart);
+    const selectorSource=appSource.slice(selectorStart,selectorEnd);
+    assert.match(selectorSource,/currentUserRole === 'engineer'[\s\S]*?s\.uid === currentUser\?\.uid \|\| role === 'sales'/);
 
     const phoneStart=appSource.indexOf('function updateSalesPhoneDisplay');
     const phoneEnd=appSource.indexOf('\nfunction populateEquipmentSalesDropdown',phoneStart);
