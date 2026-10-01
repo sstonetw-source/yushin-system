@@ -3349,3 +3349,20 @@ test('normalized order items index delivery records once per order', () => {
     assert.equal(single[0].deliveredQty,2);
     assert.equal(single[0].returnedQty,1);
 });
+
+
+test('order work cards and rows share dispatch snapshots', () => {
+    const cardsStart=appSource.indexOf('function renderOrderWorkCards');
+    const cardsEnd=appSource.indexOf('\nfunction createOrderPaginationState',cardsStart);
+    const cardsSource=appSource.slice(cardsStart,cardsEnd);
+    assert.match(cardsSource,/dispatchStatesByOrder = null/);
+    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?normalizedItemsByOrder,[\s\S]*?dispatchStatesByOrder/);
+
+    const listStart=appSource.indexOf('window.renderOrdersList = function()');
+    const listEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',listStart);
+    const listSource=appSource.slice(listStart,listEnd);
+    assert.match(listSource,/const dispatchStatesByOrder = new Map\(baseOrders\.map/);
+    assert.match(listSource,/itemDispatchState\(order, item\)/);
+    assert.match(listSource,/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder\)/);
+    assert.match(listSource,/const dispatchStateByItem = dispatchStatesByOrder\.get\(o\.id\) \|\| new Map\(\)/);
+});
