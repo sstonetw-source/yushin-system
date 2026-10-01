@@ -4348,3 +4348,13 @@ test('self-order wording stays role-neutral for business owners', () => {
     assert.doesNotMatch(appSource,/業務自行訂貨・由負責業務處理/);
     assert.match(appSource,/自行訂貨・由訂單負責人處理/);
 });
+
+
+test('admin exposes the loaded application asset version', () => {
+    assert.match(indexSource,/id="systemVersionLabel"/);
+    assert.match(appSource,/const APP_ASSET_VERSION = \(\(\) => \{/);
+    assert.match(appSource,/window\.YUSHIN_APP_VERSION = APP_ASSET_VERSION/);
+    assert.match(appSource,/function renderSystemVersionLabel\(\)/);
+    assert.match(appSource,/renderSystemVersionLabel\(\);/);
+    assert.match(appSource,/系統版本 \$\{APP_ASSET_VERSION\}/);
+});
