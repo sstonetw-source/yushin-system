@@ -8167,19 +8167,6 @@ function refreshPurchasingOrderCache(reset = true, options = {}) {
     return purchasingOrderRefreshPromise;
 }
 
-function purchasingArrivalWorkKeys(filters = purchaseFilterContext()) {
-    const keys = new Set();
-    ordersCache.forEach(order => {
-        if (normalizedOrderStatus(order) !== 'normal') return;
-        normalizedOrderItems(order).forEach((item, index) => {
-            if (!orderItemDisplayCategories(order, item).includes('arrival')) return;
-            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
-            keys.add(`${order.id}::${item.itemId || index}`);
-        });
-    });
-    return keys;
-}
-
 function loadPurchasingReceivingQueue(reset = true, options = {}) {
     if (purchasingReceivingLoadPromise) return purchasingReceivingLoadPromise;
     purchasingReceivingReady = false;
@@ -9122,29 +9109,6 @@ function receivingSourceOrderForItem(item, orderById = null) {
         || null;
 }
 
-function receivingSourceItem(order, item, normalizedItems = null) {
-    if (!order || !item) return null;
-    const items=normalizedItems || normalizedOrderItems(order);
-    return items.find(row=>item.itemId && row.itemId===item.itemId)
-        || items[Number(item.orderItemIndex)]
-        || null;
-}
-
-function receivingQueueContext(record, item, orderById = null, normalizedItemsByOrder = null) {
-    const sourceOrder=receivingSourceOrderForItem(item, orderById);
-    if(!sourceOrder || normalizedOrderStatus(sourceOrder)!=='normal')return null;
-    const sourceItems=normalizedItemsByOrder?.get(sourceOrder.id) || normalizedOrderItems(sourceOrder);
-    const sourceItem=receivingSourceItem(sourceOrder,item,sourceItems);
-    if(!sourceItem || !orderItemDisplayCategories(sourceOrder,sourceItem).includes('arrival'))return null;
-    const sourceIndex = sourceItems.indexOf(sourceItem);
-    return {
-        date:sourceOrder.orderDate||record.orderDate||record.poDate||'',
-        salesName:sourceOrder.salesName||item.salesName||record.salesName||'',
-        brand:sourceItem.brand||item.brand||'',
-        workKey:`${sourceOrder.id}::${sourceItem.itemId || sourceIndex}`
-    };
-}
-
 function receivingEvidenceEntry(supply) {
     const ordered = Math.max(0, Number(supply?.qty || 0));
     const received = Math.max(0, Number(supply?.receivedQty || 0));
@@ -9338,9 +9302,6 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
     tbody.innerHTML = '';
     const fragment = document.createDocumentFragment();
     let shown = 0;
-    let stockPending = 0;
-    const receivingItemKeys = new Set();
-    const arrivalWorkKeys = purchasingView === 'receiving' ? purchasingArrivalWorkKeys(filters) : new Set();
 
     const poRows = poHistorySearchActive ? poHistorySearchResults : poListCache;
     poRows.forEach(po => {
@@ -9387,53 +9348,9 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         });
     });
 
-    if (purchasingView === 'receiving') supplyReceivingCache.forEach(supply=>{
-        const ordered=Math.max(0,Number(supply.qty||0));
-        const received=Math.max(0,Number(supply.receivedQty||0));
-        const remaining=Math.max(0,ordered-received);
-        if(!remaining)return;
-        const context=receivingQueueContext(supply,supply);
-        if(!context){stockPending++;return;}
-        if(!purchaseLineMatchesFilters(context.date,context.salesName,context.brand,filters))return;
-        receivingItemKeys.add(context.workKey);
-        shown++;
-        const receiveAction = canEditPage('orders.po')
-            ? `<button type="button" class="btn-small btn-secondary" onclick="openSupplyReceipt('${escapeAttr(supply.id)}')">${(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'確認直送到貨':'📥 到貨入庫'}</button>`
-            : '<span class="order-progress-badge">唯讀</span>';
-        const tr=document.createElement('tr');
-        tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print">${receiveAction}</td>`;
-        fragment.appendChild(tr);
-    });
-
-    tbody.appendChild(fragment);
 
     const emptyHint = document.getElementById('poListEmptyHint');
-    const status = document.getElementById('poHistorySearchStatus');
-    if (purchasingView === 'receiving') {
-        const missingWorkCount = [...arrivalWorkKeys].filter(key => !receivingItemKeys.has(key)).length;
-        if (emptyHint) {
-            emptyHint.style.display = shown === 0 ? 'block' : 'none';
-            emptyHint.textContent = !purchasingReceivingReady
-                ? '正在載入待到貨採購紀錄…'
-                : arrivalWorkKeys.size
-                    ? '待到貨工作存在，但尚未找到可操作的採購紀錄。'
-                    : '目前沒有待到貨品項。';
-        }
-        if (status) {
-            const parts = [];
-            if (!purchasingReceivingReady) {
-                parts.push(`待到貨工作 ${arrivalWorkKeys.size} 個；採購紀錄載入中…`);
-            } else if (shown > 0) {
-                parts.push(`待到貨 ${receivingItemKeys.size} 個訂單品項；${shown} 筆採購紀錄`);
-                if (shown > receivingItemKeys.size) parts.push('同一品項有分批／多張採購紀錄');
-            }
-            if (purchasingReceivingReady && missingWorkCount > 0) {
-                parts.push(`有 ${missingWorkCount} 個待到貨品項尚未找到對應採購紀錄，請重新整理或檢查資料`);
-            }
-            if (stockPending > 0) parts.push(`另有 ${stockPending} 筆不屬於目前訂單「待到貨」狀態，不計入上方工作卡`);
-            status.textContent = parts.join('。');
-        }
-    } else if (emptyHint) {
+    if (emptyHint) {
         emptyHint.style.display = shown === 0 ? 'block' : 'none';
         emptyHint.textContent = '目前還沒有產生過任何訂購單。';
     }
