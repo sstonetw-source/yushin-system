@@ -13,7 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261001-6">
+        <link rel="stylesheet" href="styles.css?v=20261001-7">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -518,10 +518,14 @@
     <div id="quote-system" class="content-section active">
         <div class="sub-nav no-print">
             <div class="sub-tab active" id="qsub-create" data-permission-page="quote.create" onclick="switchQuoteView('create', this)">📝 建立估價單</div>
-            <div class="sub-tab" id="qsub-my" data-permission-page="quote.my" onclick="switchQuoteView('my', this)">📋 我的估價單</div>
+            <div class="sub-tab" id="qsub-my" data-permission-page="quote.my" onclick="switchQuoteView('my', this)">📋 全部估價單</div>
         </div>
 
         <div id="quoteCreatePanel">
+        <div id="quoteEditingBanner" class="quote-editing-banner no-print" style="display:none;">
+            <div><span>正在編輯：</span><strong id="quoteEditingNumber"></strong></div>
+            <button type="button" class="btn-secondary" onclick="saveLoadedQuoteAsNew()">另存為新估價單</button>
+        </div>
         <div class="sub-nav company-sub-nav no-print">
             <div class="sub-tab active" id="sub-yushin" onclick="switchCompany('yushin', this)">又鑫 (YS)</div>
             <div class="sub-tab" id="sub-morningstar" onclick="switchCompany('morningstar', this)">辰星 (MS)</div>
@@ -579,9 +583,10 @@
             <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
         </div>
+        <div id="quoteOutputStatus" class="quote-output-status no-print" style="display:none;"></div>
         </div> <!-- /#quoteCreatePanel -->
 
-        <!-- 我的估價單：只列出目前登入者自己名下的估價單 -->
+        <!-- 全部估價單：依目前角色權限顯示可查看的估價單 -->
         <div id="myQuotesPanel" style="display:none;">
             <div class="toolbar no-print">
                 <input type="text" id="myQuoteSearch" placeholder="搜尋全部歷史：單號 / 抬頭 / 客戶 / 廠牌 / 品項" oninput="scheduleQuoteHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();scheduleQuoteHistorySearch();}">
@@ -1423,6 +1428,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-7"></script>
+    <script src="app.js?v=20261001-8"></script>
 </body>
 </html>
