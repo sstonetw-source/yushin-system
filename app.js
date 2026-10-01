@@ -5483,6 +5483,7 @@ async function runQuoteHistorySearch() {
     const records = new Map();
     let cursor = null;
     let checked = 0;
+    let lastIntermediateRenderAt = 0;
     updateQuoteHistorySearchUi('正在搜尋全部歷史估價單…');
     renderMyQuotesList();
 
@@ -5498,9 +5499,13 @@ async function runQuoteHistorySearch() {
                 const data = { id: doc.id, ...doc.data() };
                 if (fullHistoryRecordMatches('quote', data, rawKeyword)) records.set(doc.id, data);
             });
-            quoteHistorySearchResults = [...records.values()]
-                .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
-            renderMyQuotesList();
+            const now = Date.now();
+            if (now - lastIntermediateRenderAt >= 100 || snapshot.size < DEFAULT_LIST_LIMIT) {
+                lastIntermediateRenderAt = now;
+                quoteHistorySearchResults = [...records.values()]
+                    .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
+                renderMyQuotesList();
+            }
             updateQuoteHistorySearchUi(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
 
             if (snapshot.size < DEFAULT_LIST_LIMIT) break;
@@ -5508,6 +5513,9 @@ async function runQuoteHistorySearch() {
             await Promise.resolve();
         }
         if (generation !== quoteHistorySearchGeneration) return;
+        quoteHistorySearchResults = [...records.values()]
+            .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
+        renderMyQuotesList();
         updateQuoteHistorySearchUi(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
         if (generation !== quoteHistorySearchGeneration) return;
@@ -7770,6 +7778,7 @@ async function runOrderHistorySearch() {
     const records = new Map();
     let cursor = null;
     let checked = 0;
+    let lastIntermediateRenderAt = 0;
     updateOrderHistorySearchUi('正在搜尋全部歷史訂單…');
     renderOrdersList();
 
@@ -7785,9 +7794,13 @@ async function runOrderHistorySearch() {
                 const data = { id: doc.id, ...doc.data() };
                 if (fullHistoryRecordMatches('order', data, rawKeyword)) records.set(doc.id, data);
             });
-            orderHistorySearchResults = [...records.values()]
-                .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
-            renderOrdersList();
+            const now = Date.now();
+            if (now - lastIntermediateRenderAt >= 100 || snapshot.size < DEFAULT_LIST_LIMIT) {
+                lastIntermediateRenderAt = now;
+                orderHistorySearchResults = [...records.values()]
+                    .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
+                renderOrdersList();
+            }
             updateOrderHistorySearchUi(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
 
             if (snapshot.size < DEFAULT_LIST_LIMIT) break;
@@ -7795,6 +7808,9 @@ async function runOrderHistorySearch() {
             await Promise.resolve();
         }
         if (generation !== orderHistorySearchGeneration) return;
+        orderHistorySearchResults = [...records.values()]
+            .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
+        renderOrdersList();
         updateOrderHistorySearchUi(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
         if (generation !== orderHistorySearchGeneration) return;
