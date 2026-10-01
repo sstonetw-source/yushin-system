@@ -550,12 +550,6 @@ function canEditPage(pageKey) {
 function hasBusinessCapability(role = currentUserRole) {
     return role === 'admin' || role === 'sales' || role === 'engineer';
 }
-function canCreateQuoteCapability(role = currentUserRole) {
-    return hasBusinessCapability(role) || role === 'purchaser';
-}
-function canCreateOrderCapability(role = currentUserRole) {
-    return hasBusinessCapability(role) || role === 'purchaser';
-}
 function canCreateForecastCapability(role = currentUserRole) {
     return role === 'admin' || role === 'sales';
 }
@@ -7459,25 +7453,6 @@ function orderWorkIndexFields(order) {
     };
 }
 
-function orderWorkStatusInfo(order) {
-    const categories=[...new Set(normalizedOrderItems(order).flatMap(item=>orderItemDisplayCategories(order,item)))];
-    const map={
-        ordering:{label:'待採購',css:'pending'},
-        arrival:{label:'待到貨',css:'pending'},
-        dispatch:{label:'待打單',css:'pending'},
-        shipping:{label:'待出貨',css:'active'},
-        billing:{label:'待核銷',css:'active'},
-        complete:{label:'已完成',css:'complete'},
-        closed:{label:orderLifecycleInfo(order).label,css:'invalid'}
-    };
-    const active=categories.filter(category=>category!=='complete');
-    const shown=active.length?active:categories;
-    return {
-        label:shown.map(category=>map[category]?.label).filter(Boolean).join('／')||'待採購',
-        css:shown.length===1?(map[shown[0]]?.css||'pending'):'partial'
-    };
-}
-
 function orderItemWorkAmount(order, item, category, totalQtyOverride = null, dispatchOverride = null) {
     const qty=Number(item.orderedQty||item.qty||0);
     const totalQty=totalQtyOverride === null ? orderQuantity(order) : totalQtyOverride;
@@ -7486,12 +7461,6 @@ function orderItemWorkAmount(order, item, category, totalQtyOverride = null, dis
     if(category==='delivery'||category==='dispatch'||category==='shipping')return Math.max(0,qty-state.delivered)*unitSales;
     if(category==='billing'||category==='complete')return Math.min(qty,state.delivered)*unitSales;
     return qty*unitSales;
-}
-
-function orderWorkAmount(order, category) {
-    return normalizedOrderItems(order)
-        .filter(item=>orderItemDisplayCategories(order,item).includes(category))
-        .reduce((sum,item)=>sum+orderItemWorkAmount(order,item,category),0);
 }
 
 function buildOrderItemWorkMetrics(orders, categories, include = null, normalizedItemsByOrder = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
@@ -14934,12 +14903,6 @@ async function preloadPurchaseCostsForItems(purchaseItems = []) {
         if (cost !== null && Number.isFinite(cost)) purchaseCostCache.set(id, cost);
     }));
 }
-
-async function preloadPurchaseCosts(orders) {
-    const purchaseItems = (orders || []).flatMap(order => purchaseItemsFromOrder(order));
-    return preloadPurchaseCostsForItems(purchaseItems);
-}
-
 
 function productMasterDocToPriceItem(doc) {
     const data = doc.data ? doc.data() : doc;
