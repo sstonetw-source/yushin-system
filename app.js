@@ -8406,7 +8406,10 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         // 因此不需要為了「開視窗」先做一個重複 Firestore read。
         let order = ordersCache.find(row => row.id === orderId) || null;
         if (!order) {
-            const snapshot = await db.collection('orders').doc(orderId).get();
+            const snapshot = await firestoreReadWithTimeout(
+                db.collection('orders').doc(orderId).get(),
+                '訂購單來源訂單'
+            );
             if (!snapshot.exists) throw new Error('找不到來源訂單');
             order = { id:snapshot.id, ...snapshot.data() };
         }
