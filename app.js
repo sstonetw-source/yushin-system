@@ -841,10 +841,6 @@ function hydratePageFromLocalCache(mainKey) {
             const orderCache = readAppDataCache('orders');
             if (orderCache?.records?.length) ordersCache = orderCache.records;
         }
-        const pending = readAppDataCache('purchase-pending');
-        const dispatch = readAppDataCache('purchase-dispatch');
-        if (!pendingPurchaseCache.length && pending?.records?.length) pendingPurchaseCache = pending.records;
-        if (!purchasingDispatchCache.length && dispatch?.records?.length) purchasingDispatchCache = dispatch.records;
         renderPurchasingWorkCards();
     }
 }
@@ -859,7 +855,6 @@ function initializePageData(mainKey, options = {}) {
             if (mainKey === 'quote') populateQuoteBrandDropdowns();
             if (mainKey === 'forecast' && canAccessPage('forecast')) renderForecastList();
             if (mainKey === 'orders.list' && canAccessPage('orders.list')) renderOrdersList();
-            if (mainKey === 'orders.po' && canAccessPage('orders.po')) renderPurchasingView();
             if (mainKey === 'inventory' && canAccessPage('inventory')) renderInventoryList();
             if (mainKey === 'equipment' && canAccessPage('equipment')) renderEquipmentList();
         }).catch(err => console.warn('廠牌設定載入失敗：', err));
@@ -877,7 +872,11 @@ function initializePageData(mainKey, options = {}) {
     if (mainKey === 'orders.list') {
         // 訂單列表本身不需要完整 Product Master。先載 50 筆訂單，避免 iPhone 每次進頁
         // 都等待 Product Master 與大量 datalist DOM 建立完成才顯示資料。
-        ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
+        if (canViewAllData('orders')) {
+            ensureSalesListLoaded().then(() => {
+                if (canAccessPage('orders.list')) renderOrdersList();
+            }).catch(err => console.warn('業務名單載入失敗：', err));
+        }
         loadOrdersFromCloud();
         // 廠牌資料由上方共用 ensureBrandSettingsLoaded() 處理；
         // 不再另外掛一個 loadBrandMaster().then(renderOrdersList)，避免同一批品牌完成時重畫兩次。
@@ -8107,8 +8106,6 @@ window.switchPurchasingView = function(view, tab) {
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
     if (view === 'ordering') {
-        const cached=readAppDataCache('purchase-pending');
-        if(!pendingPurchaseCache.length && cached?.records?.length) pendingPurchaseCache=cached.records;
         renderPendingPurchaseOrders();
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
@@ -8142,8 +8139,6 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'dispatch') {
-        const cached=readAppDataCache('purchase-dispatch');
-        if(!purchasingDispatchCache.length && cached?.records?.length) purchasingDispatchCache=cached.records;
         renderPurchasingDispatchOrders();
         if (!purchasingViewLoaded.has('dispatch')) {
             purchasingViewLoaded.add('dispatch');
@@ -8171,7 +8166,6 @@ async function loadPurchasingDispatchOrders(reset=true) {
             normalizedOrderItems(order).some(item => orderItemDisplayCategories(order,item).includes('dispatch'))
         );
         purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
         renderPurchasingWorkCards();
     } catch (err) {
         purchasingDispatchError = `待打單清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
@@ -8243,8 +8237,6 @@ function syncOrderIntoPurchasingCaches(order, options = {}) {
     ));
     receivingSourceOrderStatusCache.set(order.id, normalizedOrderStatus(order));
     receivingSourceOrderCache.set(order.id, order);
-    writeAppDataCache('purchase-pending', pendingPurchaseCache);
-    writeAppDataCache('purchase-dispatch', purchasingDispatchCache);
 
     if (options.render === false || !document.getElementById('purchasing-system')?.classList.contains('active')) return;
     renderPurchasingWorkCards();
@@ -8304,7 +8296,6 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         await refreshPurchasingOrderCache(reset);
         pendingPurchaseCache = ordersCache.filter(order => pendingProcurementDisplayLines(order).length > 0);
         pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        writeAppDataCache('purchase-pending', pendingPurchaseCache);
         renderPurchasingWorkCards();
     } catch (err) {
         pendingPurchaseError = `待採購清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
