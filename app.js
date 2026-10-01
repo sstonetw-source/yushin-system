@@ -16417,6 +16417,26 @@ async function readCollectionForMigration(name, pageSize = 300) {
     }
     return rows;
 }
+
+// 共用批次寫入：Firestore 單一 write batch 有筆數上限，因此大型 Product Master／成本更新分批提交。
+// 各操作需可安全重跑；若中途網路失敗，已完成的批次保留，使用者可再次執行未完成部分。
+async function commitMigrationBatch(operations, chunkSize = 400) {
+    const safeOperations = Array.isArray(operations)
+        ? operations.filter(operation => typeof operation === 'function')
+        : [];
+    if (!safeOperations.length) return 0;
+
+    const safeChunkSize = Math.max(1, Math.min(400, Number(chunkSize) || 400));
+    let committed = 0;
+    for (let i = 0; i < safeOperations.length; i += safeChunkSize) {
+        const chunk = safeOperations.slice(i, i + safeChunkSize);
+        const batch = db.batch();
+        chunk.forEach(operation => operation(batch));
+        await batch.commit();
+        committed += chunk.length;
+    }
+    return committed;
+}
 function recordContainsEmbeddedCost(record) {
     return !!record && (record.cogs !== undefined || (Array.isArray(record.lotAllocations) && record.lotAllocations.some(row => row && (row.cost !== undefined || row.unitCost !== undefined))));
 }
