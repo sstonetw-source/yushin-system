@@ -1287,7 +1287,7 @@ test('phase 19 Firestore rules enforce role boundaries for PO inventory reservat
     assert.match(rulesSource, /match \/purchaseOrders\/\{id\}/);
     assert.match(rulesSource, /allow read: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
     assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
-    assert.match(rulesSource, /businessOwner\(\) && owns\(resource\.data\)/);
+    assert.match(rulesSource, /businessReservationOperationalUpdate\(\)/);
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
     assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(businessOwner\(\) && owns\(resource\.data\)\)/);
     assert.match(rulesSource, /allow read, write: if false/);
@@ -3677,4 +3677,31 @@ test('warehouse receiving UI matches Firestore receive capability', () => {
     assert.match(rulesSource,/function canReceiveInventory\(\) \{[\s\S]*?admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
     assert.match(appSource,/倉管模式：可以確認到貨與入庫/);
     assert.match(appSource,/window\.receiveSupplyOrder = function\(supplyId\) \{[\s\S]*?canReceiveInventoryCapability\(\)/);
+});
+
+
+test('business reservation rules preserve reservation identity and narrow stock writes', () => {
+    const helperStart=rulesSource.indexOf('function businessReservationOperationalUpdate()');
+    const helperEnd=rulesSource.indexOf('\n\n    function businessInventoryLotOperationalUpdate',helperStart);
+    const helper=rulesSource.slice(helperStart,helperEnd);
+    assert.match(helper,/owns\(resource\.data\)/);
+    assert.match(helper,/owns\(request\.resource\.data\)/);
+    ['ownerUid','salesCode','orderId','itemId','productKey','warehouseId'].forEach(field => {
+        assert.match(helper,new RegExp(`get\\('${field}', ''\\) == resource\\.data\\.get\\('${field}', ''\\)`));
+    });
+    assert.match(helper,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'quantity'[\s\S]*?'shortageQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
+    assert.match(helper,/get\('quantity', 0\) >= 0/);
+    assert.match(helper,/get\('shortageQty', 0\) >= 0/);
+
+    const inventoryStart=rulesSource.indexOf('function businessInventoryOperationalUpdate()');
+    const inventoryEnd=rulesSource.indexOf('\n\n    function businessReservationOperationalUpdate',inventoryStart);
+    const inventoryHelper=rulesSource.slice(inventoryStart,inventoryEnd);
+    assert.match(inventoryHelper,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'onHand'[\s\S]*?'reserved'[\s\S]*?'updatedAt'/);
+    assert.doesNotMatch(inventoryHelper,/'lots'/);
+    assert.doesNotMatch(inventoryHelper,/'safetyStock'/);
+
+    const reservationStart=rulesSource.indexOf('match /inventoryReservations/{id}');
+    const reservationEnd=rulesSource.indexOf('\n\n    match /inventoryLots/{id}',reservationStart);
+    const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
+    assert.match(reservationRule,/allow update: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
