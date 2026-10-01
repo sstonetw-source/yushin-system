@@ -9500,6 +9500,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         const companyInfo = companyData[po.company];
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
 
+        const poCancelled=String(po.status||'').toUpperCase()==='CANCELLED';
         items.forEach((item,itemIndex)=>{
             const ordered=Math.max(0,Number(item.qty||0));
             if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
@@ -9515,7 +9516,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="建立天數">${escapeHtml(poWaitingDays(po)||'—')}</td>
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
-                <td data-th="文件狀態">已建立</td>
+                <td data-th="文件狀態">${poCancelled?'未到貨已取消':'已建立'}</td>
                 <td data-th="操作" class="no-print">${itemIndex===0?`
                     <div class="po-list-action-row">
                         <button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">載入</button>
@@ -9525,6 +9526,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                             <div class="po-more-menu-popover">
                                 ${(po.purchaseType==='stock'||items.every(line=>!line.orderId))?`<button type="button" onclick="copySavedPurchaseOrderAsNew('${escapeAttr(po.id)}')">複製成新訂購單</button>`:''}
                                 <button type="button" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">查看正式內容</button>
+                                ${canCreatePurchaseOrderCapability()&&!poCancelled?`<button type="button" class="danger-menu-item" onclick="cancelPurchaseOrderOutstanding('${escapeAttr(po.id)}')">取消未到貨</button>`:''}
                             </div>
                         </details>
                     </div>`:'—'}</td>
@@ -9545,11 +9547,13 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
 
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
 async function purchaseIncomingSyncPending(po) {
+    if (String(po?.status || '').toUpperCase() === 'CANCELLED') return false;
     const supplyIds = Array.isArray(po?.supplyOrderIds) ? po.supplyOrderIds.filter(Boolean) : [];
     if (!supplyIds.length) return false;
     const supplies = await readDocumentsByIds('supplyOrders', supplyIds);
     if (supplies.length !== new Set(supplyIds).size) return true;
     return supplies.some(supply => {
+        if (String(supply.status || '').toUpperCase() === 'CANCELLED') return false;
         if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return false;
         const targetQty = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
         const registeredQty = Math.max(0, Number(supply.incomingRegisteredQty || 0));
@@ -9580,6 +9584,13 @@ window.reprintPurchaseOrder = async function(poId) {
     renderPoItemsTable();
     updatePoModeUI();
     document.getElementById('poModalOverlay').classList.add('active');
+
+    if (String(po.status || '').toUpperCase() === 'CANCELLED') {
+        poIncomingSyncPending = false;
+        updatePoSaveStatus(`訂購單 ${po.poNo || po.id} 的未到貨數量已取消；此文件僅供查閱或重新輸出 PDF，不會重新增加在途庫存。`);
+        updatePoSaveButton();
+        return;
+    }
 
     poSaveInProgress = true;
     updatePoSaveStatus(`正在確認訂購單 ${po.poNo || po.id} 的在途同步狀態…`);
@@ -9694,6 +9705,7 @@ let poNoGeneration = 0;
 let poDirectStockOpenGeneration = 0;
 let poNoReady = false;
 let poNoLoading = false;
+const purchaseCancellationInProgress = new Set();
 
 function updatePoSaveStatus(message = '', isError = false) {
     const status = document.getElementById('poSaveStatus');
@@ -9716,6 +9728,7 @@ function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
 async function registerPurchaseIncoming(poId, poRecord) {
+    if (String(poRecord?.status || '').toUpperCase() === 'CANCELLED') return;
     const supplyIds = Array.isArray(poRecord?.supplyOrderIds) ? poRecord.supplyOrderIds : [];
     for (const supplyId of supplyIds) {
         await db.runTransaction(async tx => {
@@ -9723,6 +9736,7 @@ async function registerPurchaseIncoming(poId, poRecord) {
             const supplySnap = await tx.get(supplyRef);
             if (!supplySnap.exists) throw new Error(`找不到供應紀錄 ${supplyId}`);
             const supply = supplySnap.data();
+            if (String(supply.status || '').toUpperCase() === 'CANCELLED') return;
             if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
 
             const key = String(supply.productKey || supply.productId || '').trim();
@@ -9770,6 +9784,164 @@ async function registerPurchaseIncoming(poId, poRecord) {
         if (key && warehouseId) invalidateWarehouseStockCache(key,warehouseId);
     }
 }
+
+async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
+    let result={cancelledQty:0,orderId:'',productKey:'',warehouseId:''};
+    await db.runTransaction(async tx => {
+        const supplyRef=db.collection('supplyOrders').doc(supplyId);
+        const supplySnap=await tx.get(supplyRef);
+        if(!supplySnap.exists)throw new Error(`找不到供應紀錄 ${supplyId}`);
+        const supply=supplySnap.data()||{};
+        const ordered=Math.max(0,Number(supply.qty||0));
+        const received=Math.min(ordered,Math.max(0,Number(supply.receivedQty||0)));
+        const remaining=Math.max(0,ordered-received);
+        const existingCancelled=String(supply.status||'').toUpperCase()==='CANCELLED';
+        const productKey=String(supply.productKey||supply.productId||'').trim();
+        const warehouseId=String(supply.warehouseId||'').trim();
+        result={
+            cancelledQty:existingCancelled?Math.max(0,Number(supply.cancelledQty||remaining)):0,
+            orderId:String(supply.orderId||''),
+            productKey,
+            warehouseId
+        };
+        if(existingCancelled||remaining<=0)return;
+
+        const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+        const registeredIncoming=Math.max(0,Number(supply.incomingRegisteredQty||0));
+        const orderRef=supply.orderId?db.collection('orders').doc(supply.orderId):null;
+        const invRef=!directShip&&registeredIncoming>0&&productKey
+            ? db.collection('inventory').doc(encodeURIComponent(productKey)):null;
+        const whRef=!directShip&&registeredIncoming>0&&productKey&&warehouseId
+            ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
+
+        const orderSnap=orderRef?await tx.get(orderRef):null;
+        const invSnap=invRef?await tx.get(invRef):null;
+        const whSnap=whRef?await tx.get(whRef):null;
+        if(!directShip&&registeredIncoming>0&&(!productKey||!warehouseId||!invSnap?.exists||!whSnap?.exists)){
+            throw new Error(`供應紀錄 ${supplyId} 的在途庫存資料不完整，無法安全取消。`);
+        }
+
+        const now=new Date().toISOString();
+        if(orderSnap?.exists){
+            const order=orderSnap.data();
+            const items=normalizedOrderItems(order);
+            const itemIndex=items.findIndex(item=>String(item.itemId||'')===String(supply.itemId||''));
+            if(itemIndex<0)throw new Error(`來源訂單找不到供應紀錄 ${supplyId} 對應品項。`);
+            const item=items[itemIndex];
+            const currentSupplyOrdered=Math.max(0,Number(item.supplyOrderedQty||0));
+            const receivedForItem=Math.max(0,Number(item.receivedQty||0));
+            items[itemIndex]={
+                ...item,
+                supplyOrderedQty:Math.max(receivedForItem,currentSupplyOrdered-remaining)
+            };
+            const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+            tx.update(orderRef,{
+                items,itemCount:items.length,orderSchemaVersion:2,
+                ...orderWorkIndexFields(nextOrder),updatedAt:now
+            });
+        }
+
+        if(invRef&&whRef){
+            const inv=inventoryNumbers(invSnap.data());
+            const wh=inventoryNumbers(whSnap.data());
+            tx.update(invRef,{incoming:Math.max(0,inv.incoming-registeredIncoming),updatedAt:now});
+            tx.update(whRef,{incoming:Math.max(0,wh.incoming-registeredIncoming),updatedAt:now});
+            tx.set(db.collection('inventoryMovements').doc(),{
+                type:'purchase_incoming_cancel',
+                qty:-registeredIncoming,
+                productKey,warehouseId,
+                fulfillmentType:'WAREHOUSE',
+                sourceType:'SUPPLY_ORDER',
+                sourceId:supplyId,
+                purchaseDocumentId:poId,
+                reason,
+                ownerUid:supply.ownerUid||'',
+                salesCode:supply.salesCode||'',
+                createdAt:now,
+                createdBy:currentUserName||currentUser?.email||''
+            });
+        }
+
+        tx.update(supplyRef,{
+            status:'CANCELLED',
+            cancelledQty:remaining,
+            cancelReason:reason,
+            cancelledAt:now,
+            cancelledByUid:currentUser?.uid||'',
+            cancelledBy:currentUserName||currentUser?.email||'',
+            incomingRegisteredQty:0,
+            updatedAt:now
+        });
+        result={cancelledQty:remaining,orderId:String(supply.orderId||''),productKey,warehouseId};
+    });
+    if(result.productKey&&result.warehouseId)invalidateWarehouseStockCache(result.productKey,result.warehouseId);
+    return result;
+}
+
+window.cancelPurchaseOrderOutstanding = async function(poId) {
+    if(!canCreatePurchaseOrderCapability()){alert('只有管理員或採購可以取消訂購單未到貨數量。');return;}
+    if(purchaseCancellationInProgress.has(poId))return;
+    const cached=poListCache.find(po=>po.id===poId)||poHistorySearchResults.find(po=>po.id===poId);
+    let po=cached;
+    try{
+        const fresh=await firestoreReadWithTimeout(db.collection('purchaseOrders').doc(poId).get(),'讀取訂購單取消狀態');
+        if(!fresh.exists)throw new Error('找不到這張訂購單。');
+        po={id:fresh.id,...fresh.data()};
+    }catch(err){
+        alert('無法讀取訂購單：'+(err?.message||err));
+        return;
+    }
+    if(String(po.status||'').toUpperCase()==='CANCELLED'){
+        showActionFeedback('這張訂購單的未到貨數量已取消。','success');
+        return;
+    }
+    const reasonRaw=prompt(`取消訂購單 ${po.poNo||po.id} 尚未到貨的數量。\n已實際到貨的數量不會回沖；原訂單會重新出現尚需採購的數量。\n\n請輸入取消原因：`);
+    if(reasonRaw===null)return;
+    const reason=String(reasonRaw||'').trim();
+    if(!reason){alert('請填寫取消原因，方便後續追蹤。');return;}
+    const supplyIds=Array.isArray(po.supplyOrderIds)?po.supplyOrderIds.filter(Boolean):[];
+    if(!supplyIds.length){alert('這張訂購單沒有可追蹤的供應紀錄，無法安全取消。');return;}
+
+    purchaseCancellationInProgress.add(poId);
+    try{
+        let cancelledQty=0;
+        const affectedOrderIds=new Set();
+        for(const supplyId of supplyIds){
+            const result=await cancelOutstandingSupplyRecord(poId,supplyId,reason);
+            cancelledQty+=Math.max(0,Number(result.cancelledQty||0));
+            if(result.orderId)affectedOrderIds.add(result.orderId);
+        }
+        if(cancelledQty<=0){
+            alert('這張訂購單目前沒有尚未到貨的數量可取消。');
+            return;
+        }
+        const now=new Date().toISOString();
+        const patch={
+            status:'CANCELLED',
+            cancelledQty,
+            cancelReason:reason,
+            cancelledAt:now,
+            cancelledByUid:currentUser?.uid||'',
+            cancelledBy:currentUserName||currentUser?.email||'',
+            updatedAt:now
+        };
+        await db.collection('purchaseOrders').doc(poId).set(patch,{merge:true});
+        const applyPatch=row=>row?.id===poId?Object.assign(row,patch):row;
+        poListCache.forEach(applyPatch);
+        poHistorySearchResults.forEach(applyPatch);
+        supplyReceivingCache=supplyReceivingCache.filter(row=>!supplyIds.includes(row.id));
+        if(affectedOrderIds.size)await refreshAffectedOrderCaches([...affectedOrderIds]);
+        writeAppDataCache('purchase-history',poListCache);
+        if(document.getElementById('purchasing-system')?.classList.contains('active'))renderPurchasingView();
+        else renderPoList();
+        showActionFeedback(`已取消 ${po.poNo||poId} 尚未到貨數量 ${cancelledQty}；在途庫存與來源訂單待採購量已同步。`,'success');
+    }catch(err){
+        console.error('取消訂購單未到貨失敗：',err);
+        alert('取消未完全完成：'+(err?.message||err)+'。可以再次執行同一動作；已完成的供應紀錄不會重複扣除。');
+    }finally{
+        purchaseCancellationInProgress.delete(poId);
+    }
+};
 
 let poReceiptTargetId = '';
 let poReceiptSaveInProgress = false;
