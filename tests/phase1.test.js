@@ -2041,3 +2041,12 @@ test('purchasing refresh buttons provide feedback and purchasing reads are bound
     assert.match(dispatchSource,/purchaseDispatchRefreshBtn/);
     assert.match(dispatchSource,/更新中…/);
 });
+
+
+test('purchase draft fallback read is bounded', () => {
+    const start=appSource.indexOf('window.openOrderPurchaseDraft = async function');
+    const end=appSource.indexOf('function updatePoLoadMoreButton',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('orders'\)\.doc\(orderId\)\.get\(\)[\s\S]*?'訂購單來源訂單'/);
+    assert.match(source,/button\.textContent = '開啟中…'/);
+});
