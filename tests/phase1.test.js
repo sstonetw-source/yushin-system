@@ -2388,3 +2388,23 @@ test('test data reset reads are bounded', () => {
     assert.match(source,/firestoreReadWithTimeout\([\s\S]*?limit\(300\)\.get\(\)[\s\S]*?`\$\{name\} 清除批次`/);
     assert.match(source,/firestoreReadWithTimeout\(query\.get\(\), `\$\{name\} 庫存歸零批次`\)/);
 });
+
+
+test('own-scope equipment page avoids full staff preload', () => {
+    const dropdownStart=appSource.indexOf('function populateEquipmentSalesDropdown');
+    const dropdownEnd=appSource.indexOf('\nfunction loadCompanyAgencyBrandSettings',dropdownStart);
+    const dropdownSource=appSource.slice(dropdownStart,dropdownEnd);
+    assert.match(dropdownSource,/canViewAllEquipment\(\)[\s\S]*?salesList[\s\S]*?currentUserName/);
+
+    const assetStart=appSource.indexOf('function getNextAssetId');
+    const assetEnd=appSource.indexOf('// 型號輸入時',assetStart);
+    const assetSource=appSource.slice(assetStart,assetEnd);
+    assert.match(assetSource,/salesName === currentUserName && currentUserCode/);
+
+    const initStart=appSource.indexOf("if (mainKey === 'equipment') {");
+    const initEnd=appSource.indexOf("if (mainKey === 'admin')",initStart);
+    const initSource=appSource.slice(initStart,initEnd);
+    assert.match(initSource,/if \(canViewAllEquipment\(\)\) \{[\s\S]*?ensureSalesListLoaded\(\)/);
+    assert.match(initSource,/else \{[\s\S]*?populateEquipmentSalesDropdown\(\)/);
+    assert.doesNotMatch(initSource,/loadBrandMaster\(\)\.then\(renderEquipmentList\)/);
+});
