@@ -2408,3 +2408,12 @@ test('own-scope equipment page avoids full staff preload', () => {
     assert.match(initSource,/else \{[\s\S]*?populateEquipmentSalesDropdown\(\)/);
     assert.doesNotMatch(initSource,/loadBrandMaster\(\)\.then\(renderEquipmentList\)/);
 });
+
+
+test('company agency settings do not rebuild product datalists', () => {
+    const start=appSource.indexOf('function loadCompanyAgencyBrandSettings');
+    const end=appSource.indexOf('\nfunction loadSalesStatisticsSettings',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/renderCompanyAgencyBrandSettings\(\)/);
+    assert.doesNotMatch(source,/refreshPriceDatalists\(\)/);
+});
