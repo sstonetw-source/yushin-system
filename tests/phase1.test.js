@@ -3174,3 +3174,28 @@ test('work metrics reuse one dispatch state per item', () => {
     assert.match(metricsSource,/orderItemDisplayCategories\(order,item,lifecycle,dispatch\)/);
     assert.match(metricsSource,/orderItemWorkAmount\(order,item,category,totalQty,dispatch\)/);
 });
+
+
+test('order rows reuse one dispatch snapshot across status summaries', () => {
+    const fulfillmentStart=appSource.indexOf('function fulfillmentProgressInfo');
+    const fulfillmentEnd=appSource.indexOf('\nconst pendingDispatchOrderIds',fulfillmentStart);
+    const fulfillmentSource=appSource.slice(fulfillmentStart,fulfillmentEnd);
+    assert.match(fulfillmentSource,/dispatchStateByItem = null/);
+    assert.match(fulfillmentSource,/dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState/);
+
+    const contextStart=appSource.indexOf('function orderContextActionState');
+    const contextEnd=appSource.indexOf('\nfunction dispatchActionHtml',contextStart);
+    const contextSource=appSource.slice(contextStart,contextEnd);
+    assert.match(contextSource,/dispatchStateByItem = null/);
+    assert.match(contextSource,/dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState/);
+
+    const listStart=appSource.indexOf('window.renderOrdersList = function()');
+    const listEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',listStart);
+    const listSource=appSource.slice(listStart,listEnd);
+    assert.match(listSource,/const dispatchStateByItem = new Map/);
+    assert.match(listSource,/const displayCategoriesByItem = new Map/);
+    assert.match(listSource,/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.match(listSource,/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.match(listSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.match(listSource,/displayCategoriesByItem\.get\(item\)/);
+});
