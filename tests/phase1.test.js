@@ -1989,3 +1989,20 @@ test('order and equipment refresh buttons provide immediate loading feedback', (
     assert.match(equipmentSource,/firestore-read-timeout/);
     assert.match(equipmentSource,/refreshButton\.textContent = '↻ 更新'/);
 });
+
+
+test('quote history refresh provides immediate feedback and bounded read timeout', () => {
+    assert.match(indexSource, /id="quoteHistoryRefreshBtn"[^>]*>↻ 更新<\/button>/);
+    const buttonStart=appSource.indexOf('function updateMyQuotesLoadMoreButton');
+    const buttonEnd=appSource.indexOf('\n}',buttonStart)+2;
+    const buttonSource=appSource.slice(buttonStart,buttonEnd);
+    assert.match(buttonSource,/quoteHistoryRefreshBtn/);
+    assert.match(buttonSource,/refreshButton\.disabled = myQuotesPageLoading/);
+    assert.match(buttonSource,/更新中…/);
+
+    const loadStart=appSource.indexOf('async function loadMyQuotesPage');
+    const loadEnd=appSource.indexOf('window.loadMyQuotesFromCloud',loadStart);
+    const loadSource=appSource.slice(loadStart,loadEnd);
+    assert.match(loadSource,/firestoreReadWithTimeout\(query\.get\(\), '估價單'\)/);
+    assert.match(loadSource,/firestore-read-timeout/);
+});

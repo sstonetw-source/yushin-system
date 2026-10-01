@@ -5384,11 +5384,17 @@ function createMyQuotesPaginationState() {
 
 function updateMyQuotesLoadMoreButton() {
     const button = document.getElementById('myQuotesLoadMoreBtn');
-    if (!button) return;
+    const refreshButton = document.getElementById('quoteHistoryRefreshBtn');
     const hasMore = !!myQuotesPaginationState && myQuotesPaginationState.sourceIndex < myQuotesPaginationState.sources.length;
-    button.style.display = hasMore ? '' : 'none';
-    button.disabled = myQuotesPageLoading;
-    button.innerText = myQuotesPageLoading ? '載入中…' : '載入更多（每次 50 筆）';
+    if (button) {
+        button.style.display = hasMore ? '' : 'none';
+        button.disabled = myQuotesPageLoading;
+        button.innerText = myQuotesPageLoading ? '載入中…' : '載入更多（每次 50 筆）';
+    }
+    if (refreshButton) {
+        refreshButton.disabled = myQuotesPageLoading;
+        refreshButton.textContent = myQuotesPageLoading ? '更新中…' : '↻ 更新';
+    }
 }
 
 async function loadMyQuotesPage(reset) {
@@ -5421,7 +5427,7 @@ async function loadMyQuotesPage(reset) {
             const requested = remainingReads;
             let query = source.query().limit(requested);
             if (source.cursor) query = query.startAfter(source.cursor);
-            const snapshot = await query.get();
+            const snapshot = await firestoreReadWithTimeout(query.get(), '估價單');
             if (requestedRole !== currentUserRole) {
                 myQuotesReloadRequested = true;
                 return;
@@ -5445,7 +5451,9 @@ async function loadMyQuotesPage(reset) {
         console.error(err);
         myQuotesCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
         renderMyQuotesList();
-        alert('讀取我的估價單失敗，請確認 Firestore 權限設定。');
+        alert(err?.code === 'firestore-read-timeout'
+            ? '估價單資料讀取逾時，請再按一次更新。'
+            : '讀取估價單失敗，請確認網路或 Firestore 權限設定。');
     } finally {
         myQuotesPageLoading = false;
         updateMyQuotesLoadMoreButton();

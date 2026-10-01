@@ -609,7 +609,7 @@
                 </select>
                 <div class="quote-history-toolbar-actions">
                     <button type="button" class="btn-secondary" onclick="clearQuoteHistorySearch()">清除搜尋</button>
-                    <button type="button" class="btn-secondary" onclick="loadMyQuotesFromCloud()">↻ 更新</button>
+                    <button type="button" id="quoteHistoryRefreshBtn" class="btn-secondary" onclick="loadMyQuotesFromCloud()">↻ 更新</button>
                 </div>
                 <span id="quoteHistorySearchStatus" class="quote-history-search-status"></span>
             </div>
@@ -1447,6 +1447,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-27"></script>
+    <script src="app.js?v=20261001-28"></script>
 </body>
 </html>
