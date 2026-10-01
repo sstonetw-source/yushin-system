@@ -1054,7 +1054,11 @@ test('order brand filter uses selectable brands and groups alternate spelling an
     assert.equal(context.orderBrandFilterValue('B iorad', brands), 'Bio-Rad');
     assert.equal(context.orderBrandFilterValue('自行輸入品牌', brands), '其他廠牌');
     assert.equal(context.orderBrandFilterValue('', brands), '');
-    assert.match(appSource, /loadBrandMaster\(\)\.then\(\(\) => \{\s*if \(canAccessPage\('orders\.list'\)\) renderOrdersList\(\)/);
+    const initStart = appSource.indexOf('function initializePageData(mainKey');
+    const initEnd = appSource.indexOf('\nfunction ensureSalesListLoaded', initStart);
+    const initSource = appSource.slice(initStart, initEnd);
+    assert.match(initSource, /ensureBrandSettingsLoaded\(\)\.then/);
+    assert.match(initSource, /if \(mainKey === 'orders\.list' && canAccessPage\('orders\.list'\)\) renderOrdersList\(\)/);
     assert.match(appSource, /orderItems\.some\(item => orderBrandFilterValue\(item\.brand, selectableBrands\) === brandFilter\)/);
 });
 
@@ -1756,7 +1760,7 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const end = appSource.indexOf('window.retryOrderInventoryReservation', start);
     const actions = appSource.slice(start, end);
     assert.doesNotMatch(actions, /openOrderPurchaseDraft/);
-    const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders()');
+    const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders');
     const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?已訂購/);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?產生訂購單/);
@@ -2076,11 +2080,11 @@ test('purchase history reuses cache without resetting on every tab switch', () =
 });
 
 test('completed purchasing queue uses mobile card layout like other work queues', () => {
-    assert.match(stylesSource, /#purchasePendingStatus, #purchaseDispatchStatus, #purchaseCompletedStatus/);
-    assert.match(stylesSource, /#purchaseCompletedPanel \.table-wrap/);
-    assert.match(stylesSource, /#purchaseCompletedPanel table, #purchaseCompletedPanel tbody, #purchaseCompletedPanel tr, #purchaseCompletedPanel td/);
-    assert.match(stylesSource, /#purchaseCompletedPanel td\[data-th\]::before/);
-    assert.match(stylesSource, /#purchaseCompletedPanel td\[data-th="操作"\]/);
+    assert.match(cssSource, /#purchasePendingStatus, #purchaseDispatchStatus, #purchaseCompletedStatus/);
+    assert.match(cssSource, /#purchaseCompletedPanel \.table-wrap/);
+    assert.match(cssSource, /#purchaseCompletedPanel table, #purchaseCompletedPanel tbody, #purchaseCompletedPanel tr, #purchaseCompletedPanel td/);
+    assert.match(cssSource, /#purchaseCompletedPanel td\[data-th\]::before/);
+    assert.match(cssSource, /#purchaseCompletedPanel td\[data-th="操作"\]/);
 });
 
 
@@ -2145,7 +2149,8 @@ test('order and purchasing initialization avoid duplicate brand-driven renders',
     const orderEnd=source.indexOf("if (mainKey === 'orders.po')",orderStart);
     const orderSource=source.slice(orderStart,orderEnd);
     assert.match(orderSource,/loadOrdersFromCloud\(\)/);
-    assert.doesNotMatch(orderSource,/loadBrandMaster\(\)\.then/);
+    const orderExecutable = orderSource.replace(/\/\/.*$/gm, '');
+    assert.doesNotMatch(orderExecutable,/loadBrandMaster\(\)\.then/);
 
     const purchaseStart=source.indexOf("if (mainKey === 'orders.po')");
     const purchaseEnd=source.indexOf("if (mainKey === 'inventory')",purchaseStart);
@@ -2362,7 +2367,7 @@ test('admin maintenance reads are bounded', () => {
     const executeSource=appSource.slice(executeStart,executeEnd);
     assert.match(executeSource,/firestoreReadWithTimeout\([\s\S]*?'業務代號交接紀錄'/);
 
-    const indexStart=appSource.indexOf('window.migrateOrderSearchIndexes = async function');
+    const indexStart=appSource.indexOf('window.backfillOrderSearchIndex = async function');
     const indexEnd=appSource.indexOf('/* ---------- Product Master',indexStart);
     const indexSource=appSource.slice(indexStart,indexEnd);
     assert.match(indexSource,/firestoreReadWithTimeout\([\s\S]*?搜尋索引補建/);
@@ -2416,7 +2421,8 @@ test('company agency settings do not rebuild product datalists', () => {
     const end=appSource.indexOf('\nfunction loadSalesStatisticsSettings',start);
     const source=appSource.slice(start,end);
     assert.match(source,/renderCompanyAgencyBrandSettings\(\)/);
-    assert.doesNotMatch(source,/refreshPriceDatalists\(\)/);
+    const executable = source.replace(/\/\/.*$/gm, '');
+    assert.doesNotMatch(executable,/refreshPriceDatalists\(\)/);
 });
 
 
@@ -2498,9 +2504,11 @@ test('order list calculates row progress summaries once', () => {
     const start=appSource.indexOf('window.renderOrdersList = function()');
     const end=appSource.indexOf('window.retryOrderInventoryReservation',start);
     const source=appSource.slice(start,end);
-    assert.equal((source.match(/deliveryProgressInfo\(o\)/g) || []).length, 1);
-    assert.equal((source.match(/fulfillmentProgressInfo\(o\)/g) || []).length, 1);
-    assert.equal((source.match(/orderContextActionState\(o\)/g) || []).length, 1);
+    assert.equal((source.match(/deliveryProgressInfo\(o, allOrderItems\)/g) || []).length, 1);
+    assert.equal((source.match(/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/g) || []).length, 1);
+    assert.equal((source.match(/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/g) || []).length, 1);
+    assert.match(source,/const dispatchStateByItem = new Map/);
+    assert.match(source,/const displayCategoriesByItem = new Map/);
     assert.match(source,/const deliveryPending = pendingDeliveryOrderIds\.has\(o\.id\)/);
     assert.match(source,/const billingPending = pendingOrderStatusKeys\.has\(o\.id \+ ':isBilled'\)/);
     assert.match(source,/const lifecyclePending = pendingLifecycleOrderIds\.has\(o\.id\)/);
@@ -2518,7 +2526,8 @@ test('order work cards reuse normalized order items', () => {
     const metricsEnd=appSource.indexOf('\nwindow.setOrderWorkFilter',metricsStart);
     const metricsSource=appSource.slice(metricsStart,metricsEnd);
     assert.match(metricsSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
-    assert.match(metricsSource,/orderItemWorkAmount\(order,item,category,totalQty\)/);
+    assert.match(metricsSource,/orderItemWorkAmount\(order,item,category,totalQty,dispatch\)/);
+    assert.match(metricsSource,/const dispatch = orderDispatchStates\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
 
     const cardsStart=appSource.indexOf('function renderOrderWorkCards');
     const cardsEnd=appSource.indexOf('\nfunction createOrderPaginationState',cardsStart);
@@ -2614,7 +2623,7 @@ test('new quote persistence cannot overwrite an existing quote number', () => {
     assert.match(source,/transaction\.get\(quoteRef\)/);
     assert.match(source,/snapshot\.exists && !updatingExisting/);
     assert.match(source,/quote-number-conflict/);
-    assert.match(source,/transaction\.set\(quoteRef, quoteData\)/);
+    assert.match(source,/transaction\.set\(quoteRef, quoteData, \{ merge: true \}\)/);
     assert.match(source,/setQuoteEditingContext\(quoteData\.quoteNo\)/);
 });
 
@@ -2762,7 +2771,8 @@ test('product master search throttles intermediate table renders', () => {
     const source=appSource.slice(start,end);
     assert.match(source,/let lastIntermediateRenderAt = 0/);
     assert.match(source,/now - lastIntermediateRenderAt >= 100/);
-    assert.match(source,/renderProductManagementResults\(\);\s*if \(status\) status\.textContent = `完成/);
+    assert.match(source,/productManagementResults = \[\.\.\.map\.values\(\)\][\s\S]*?renderProductManagementResults\(\);[\s\S]*?if \(status\) \{/);
+    assert.match(source,/完成，共 \$\{productManagementResults\.length\} 筆/);
 });
 
 
@@ -2820,7 +2830,7 @@ test('Product Master search renders results in 100-row UI pages', () => {
     const renderSource=appSource.slice(renderStart,renderEnd);
     assert.match(renderSource,/productManagementResults\.slice\(0, productManagementVisibleLimit\)/);
     assert.match(renderSource,/productManagementVisibleLimit \+= PRODUCT_MANAGEMENT_RENDER_STEP/);
-    assert.match(stylesSource,/\.product-load-more-row/);
+    assert.match(cssSource,/\.product-load-more-row/);
 });
 
 
@@ -2851,8 +2861,8 @@ test('order list skips search-string work when no keyword and batches DOM insert
 test('high frequency lookup reads are bounded', () => {
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'Product Master'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('quotes'\)\.doc\(forecast\.sourceId\)\.get\(\)[\s\S]*?'Forecast 來源估價單'/);
-    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?orderBy\('quoteNo', 'desc'\)\.limit\(10\)\.get\(\)[\s\S]*?'最近客戶名單'/);
-    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價欄位偏好'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?orderBy\('quoteNo', 'desc'\)\.limit\(10\)\.get\(\)[\s\S]*?'最近客戶紀錄'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價偏好'/);
 });
 
 
@@ -2984,20 +2994,27 @@ test('receipt shortage allocation skips stale candidates without blocking later 
 
 
 test('successful history searches avoid duplicate final render', () => {
-    const orderStart=appSource.indexOf('function runOrderHistorySearch()');
-    const orderEnd=appSource.indexOf('\nwindow.scheduleOrderHistorySearch',orderStart);
-    const orderSuccess=appSource.slice(appSource.indexOf('if (generation !== orderHistorySearchGeneration) return;',orderStart),appSource.indexOf('} catch (err)',orderStart));
-    assert.doesNotMatch(orderSuccess,/renderOrdersList\(\)[\s\S]*?全歷史搜尋完成/);
-
-    const quoteStart=appSource.indexOf('function runQuoteHistorySearch()');
-    const quoteSuccess=appSource.slice(appSource.lastIndexOf('if (generation !== quoteHistorySearchGeneration) return;',appSource.indexOf('} catch (err)',quoteStart)),appSource.indexOf('} catch (err)',quoteStart));
-    assert.doesNotMatch(quoteSuccess,/renderMyQuotesList\(\)[\s\S]*?全歷史搜尋完成/);
-
-    const forecastStart=appSource.indexOf('async function runForecastHistorySearch');
-    const forecastSuccess=appSource.slice(appSource.lastIndexOf('if (generation !== forecastHistorySearchGeneration) return;',appSource.indexOf('} catch (err)',forecastStart)),appSource.indexOf('} catch (err)',forecastStart));
-    assert.doesNotMatch(forecastSuccess,/renderForecastList\(\)[\s\S]*?全歷史搜尋完成/);
+    const cases = [
+        ['async function runOrderHistorySearch', '\nwindow.scheduleOrderHistorySearch', 'orderHistorySearchResults', 'updateOrderHistorySearchUi', 'renderOrdersList'],
+        ['async function runQuoteHistorySearch', '\nwindow.scheduleQuoteHistorySearch', 'quoteHistorySearchResults', 'updateQuoteHistorySearchUi', 'renderMyQuotesList'],
+        ['async function runForecastHistorySearch', '\nwindow.scheduleForecastHistorySearch', 'forecastHistorySearchResults', 'updateForecastHistorySearchStatus', 'renderForecastList']
+    ];
+    cases.forEach(([startTerm,endTerm,resultName,statusName,renderName]) => {
+        const start=appSource.indexOf(startTerm);
+        const end=appSource.indexOf(endTerm,start);
+        const source=appSource.slice(start,end);
+        const catchAt=source.indexOf('} catch (err)');
+        const success=source.slice(0,catchAt);
+        const completionAt=success.lastIndexOf('全歷史搜尋完成');
+        assert.ok(completionAt > 0);
+        const completionWindow=success.slice(Math.max(0,completionAt-500));
+        assert.match(completionWindow,new RegExp(resultName + ' ='));
+        assert.match(completionWindow,new RegExp(statusName + '\\('));
+        assert.doesNotMatch(completionWindow,new RegExp(renderName + '\\(\\)'));
+        const finallySource=source.slice(source.indexOf('} finally {'));
+        assert.match(finallySource,new RegExp(renderName + '\\(\\)'));
+    });
 });
-
 
 test('receipt allocation retry resumes after committed receipt without duplicate stock', () => {
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
@@ -3025,7 +3042,7 @@ test('receipt allocation retry resumes after committed receipt without duplicate
 
 
 test('purchase receiving and history lists batch row insertion', () => {
-    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList()');
+    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
     const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
     const receivingSource=appSource.slice(receivingStart,receivingEnd);
     assert.match(receivingSource,/const fragment = document\.createDocumentFragment\(\)/);
@@ -3033,7 +3050,7 @@ test('purchase receiving and history lists batch row insertion', () => {
     assert.match(receivingSource,/tbody\.appendChild\(fragment\)/);
     assert.doesNotMatch(receivingSource,/tbody\.appendChild\(tr\)/);
 
-    const historyStart=appSource.indexOf('window.renderPoList = function()');
+    const historyStart=appSource.indexOf('window.renderPoList = function');
     const historyEnd=appSource.indexOf('\n};',historyStart)+3;
     const historySource=appSource.slice(historyStart,historyEnd);
     assert.match(historySource,/const fragment = document\.createDocumentFragment\(\)/);
