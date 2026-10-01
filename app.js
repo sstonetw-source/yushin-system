@@ -14680,6 +14680,7 @@ function inventoryAnalysisTotals(start,end) {
     // 在途價值直接由 supplyOrders 的未到貨數量計算；PO 文件不再維護到貨狀態。
     const incoming = inventoryAnalysisSupplyOrders
         .filter(supply => (supply.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
+        .filter(supply => String(supply.status || '').toUpperCase() !== 'CANCELLED')
         .reduce((sum, supply) => {
             const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
             return sum + remaining * Number(supply.unitCost || 0);
