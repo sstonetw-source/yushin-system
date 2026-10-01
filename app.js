@@ -9077,27 +9077,29 @@ async function runPurchaseOrderHistorySearch() {
     }
 }
 
-function receivingSourceOrderForItem(item) {
+function receivingSourceOrderForItem(item, orderById = null) {
     if (!item?.orderId) return null;
-    return ordersCache.find(order=>order.id===item.orderId)
+    return orderById?.get(item.orderId)
         || receivingSourceOrderCache.get(item.orderId)
+        || ordersCache.find(order=>order.id===item.orderId)
         || null;
 }
 
-function receivingSourceItem(order, item) {
+function receivingSourceItem(order, item, normalizedItems = null) {
     if (!order || !item) return null;
-    const items=normalizedOrderItems(order);
+    const items=normalizedItems || normalizedOrderItems(order);
     return items.find(row=>item.itemId && row.itemId===item.itemId)
         || items[Number(item.orderItemIndex)]
         || null;
 }
 
-function receivingQueueContext(record, item) {
-    const sourceOrder=receivingSourceOrderForItem(item);
+function receivingQueueContext(record, item, orderById = null, normalizedItemsByOrder = null) {
+    const sourceOrder=receivingSourceOrderForItem(item, orderById);
     if(!sourceOrder || normalizedOrderStatus(sourceOrder)!=='normal')return null;
-    const sourceItem=receivingSourceItem(sourceOrder,item);
+    const sourceItems=normalizedItemsByOrder?.get(sourceOrder.id) || normalizedOrderItems(sourceOrder);
+    const sourceItem=receivingSourceItem(sourceOrder,item,sourceItems);
     if(!sourceItem || !orderItemDisplayCategories(sourceOrder,sourceItem).includes('arrival'))return null;
-    const sourceIndex = normalizedOrderItems(sourceOrder).indexOf(sourceItem);
+    const sourceIndex = sourceItems.indexOf(sourceItem);
     return {
         date:sourceOrder.orderDate||record.orderDate||record.poDate||'',
         salesName:sourceOrder.salesName||item.salesName||record.salesName||'',
@@ -9183,6 +9185,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     let standaloneSupplyCount = 0;
     const representedSupplyIds = new Set();
     const evidenceIndex = buildReceivingEvidenceIndex();
+    const orderById = new Map(ordersCache.map(order => [order.id, order]));
 
     ordersCache.forEach(order => {
         if (normalizedOrderStatus(order) !== 'normal') return;
@@ -9226,7 +9229,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         const remaining = Math.max(0, ordered - received);
         if (remaining <= 0) return;
 
-        const sourceOrder = receivingSourceOrderForItem(supply);
+        const sourceOrder = receivingSourceOrderForItem(supply, orderById);
         const sourceStatus = sourceOrder ? normalizedOrderStatus(sourceOrder) : '';
         const directShip = (supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
         const date = sourceOrder?.orderDate || supply.orderDate || '';
