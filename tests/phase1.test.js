@@ -2872,3 +2872,17 @@ test('purchasing work queues batch DOM row insertion', () => {
     assert.match(dispatchSource,/body\.appendChild\(fragment\)/);
     assert.doesNotMatch(dispatchSource,/body\.appendChild\(tr\)/);
 });
+
+
+test('purchase history skips hidden work-card calculations', () => {
+    const renderStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const renderEnd=appSource.indexOf('\nwindow.changePurchasePeriod',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/if \(purchasingView === 'history'\) \{[\s\S]*?renderPoList\(\);[\s\S]*?return;/);
+
+    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
+    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
+    const switchSource=appSource.slice(switchStart,switchEnd);
+    assert.match(switchSource,/const normalizedItemsByOrder = view === 'history'[\s\S]*?\? null/);
+    assert.match(switchSource,/if \(view !== 'history'\) renderPurchasingWorkCards/);
+});
