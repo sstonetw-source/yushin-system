@@ -1171,6 +1171,93 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 }
 
 
+/* 建立估價單：載入既有紀錄時清楚標示正在編輯，避免誤把舊單當新單。 */
+.quote-editing-banner {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid #b9cce4;
+    border-radius: 10px;
+    background: #f3f7fc;
+    color: #173a63;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.quote-editing-banner > div { min-width: 0; }
+.quote-editing-banner strong { overflow-wrap: anywhere; }
+.quote-editing-banner button { flex: 0 0 auto; margin: 0; }
+.quote-output-status {
+    margin: 10px auto 0;
+    max-width: 680px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    background: #eef7ef;
+    color: #25652d;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+}
+.quote-output-status.is-error {
+    background: #fff1f0;
+    color: #a12622;
+}
+.quote-status-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.quote-status-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.quote-status-badge.is-quoted { background: #eef3f8; color: #44576b; }
+.quote-status-badge.is-three { background: #edf6ed; color: #2d6b35; }
+.quote-status-badge.is-deal { background: #e8f5e9; color: #24722d; }
+
+.quote-more-menu {
+    position: relative;
+    flex: 0 0 auto;
+}
+.quote-more-menu > summary {
+    list-style: none;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+.quote-more-menu > summary::-webkit-details-marker { display: none; }
+.quote-more-menu-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 5px);
+    z-index: 80;
+    display: flex;
+    min-width: 170px;
+    padding: 6px;
+    border: 1px solid #d6dde5;
+    border-radius: 9px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(0,0,0,.14);
+    flex-direction: column;
+    gap: 4px;
+}
+.quote-more-menu:not([open]) .quote-more-menu-popover { display: none; }
+.quote-more-menu-popover button {
+    width: 100% !important;
+    min-height: 36px;
+    border: 0;
+    border-radius: 6px;
+    background: #fff;
+    color: #24384b;
+    text-align: left;
+}
+.quote-more-menu-popover button:hover { background: #f2f5f8; }
+.quote-more-menu-popover .danger-menu-item { color: #b42318; }
+
 /* 全部估價單：操作按鈕維持同一列，手機版也不要放大成滿版按鈕。 */
 .quote-list-actions {
     white-space: nowrap;
@@ -1204,16 +1291,35 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     #myQuotesBody .quote-list-action-row {
         width: 100%;
         gap: 5px;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
+        overflow: visible;
         padding-bottom: 2px;
     }
-    #myQuotesBody .quote-list-action-row button {
-        flex: 1 0 auto;
-        min-height: 34px;
-        padding: 6px 10px !important;
+    #myQuotesBody .quote-list-action-row > button {
+        flex: 1 1 0;
+        min-height: 38px;
+        padding: 7px 10px !important;
         font-size: 12px !important;
     }
+    #myQuotesBody .quote-more-menu {
+        flex: 1 1 0;
+    }
+    #myQuotesBody .quote-more-menu > summary {
+        width: 100% !important;
+        min-height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 7px 10px !important;
+    }
+    #myQuotesBody .quote-more-menu-popover {
+        right: 0;
+        min-width: 190px;
+    }
+    .quote-editing-banner {
+        align-items: stretch;
+        flex-direction: column;
+    }
+    .quote-editing-banner button { width: 100%; min-height: 40px; }
 }
 
 @media screen and (max-width: 640px) {
