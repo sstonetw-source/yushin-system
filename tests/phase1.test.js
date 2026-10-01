@@ -4252,3 +4252,14 @@ test('receipt retry stays idempotent after outstanding supply is cancelled', () 
     assert.match(source,/processedReceipt=receipt/);
     assert.match(source,/此供應紀錄已取消，不能再確認到貨/);
 });
+
+
+test('mobile navigation resets toggle state after selecting a workspace', () => {
+    const navItems=[...indexSource.matchAll(/data-main-nav="[^"]+"[^>]+onclick="([^"]+)"/g)];
+    assert.ok(navItems.length>=8);
+    navItems.forEach(match => {
+        assert.match(match[1],/classList\.remove\('mobile-open'\)/);
+        assert.match(match[1],/setAttribute\('aria-expanded','false'\)/);
+        assert.match(match[1],/setAttribute\('aria-label','開啟功能選單'\)/);
+    });
+});
