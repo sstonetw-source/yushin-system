@@ -2199,7 +2199,7 @@ window.clearForecastFilters = function() {
     loadForecasts(true);
 };
 
-function populateForecastBrandDropdown(selectedBrand = '') {function populateForecastBrandDropdown(selectedBrand = '') {
+function populateForecastBrandDropdown(selectedBrand = '') {
     const input = document.getElementById('forecastBrand');
     const list = document.getElementById('forecastBrandList');
     if (!input || !list) return;
@@ -2540,7 +2540,7 @@ window.openForecastModal = function(id = '') {
     document.getElementById('forecastModalOverlay').classList.add('active');
 };
 
-window.closeForecastModal = function() {window.closeForecastModal = function() {
+window.closeForecastModal = function() {
     document.getElementById('forecastModalOverlay')?.classList.remove('active');
 };
 
