@@ -8,7 +8,9 @@ const workflow = require('../modules/workflow-core.js');
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
-const validation = app.match(/function assertPurchaseLinesAvailable\(order, lines\) \{[\s\S]*?\n\}\n(?=\nfunction printSavedPoDocument)/)?.[0];
+const validationStart = app.indexOf('function assertPurchaseLinesAvailable(order, lines) {');
+const validationEnd = app.indexOf('\n}\n\nfunction poPdfFileName', validationStart) + 2;
+const validation = validationStart >= 0 && validationEnd > validationStart ? app.slice(validationStart, validationEnd) : '';
 assert.ok(validation, 'The PO transaction must validate the live source order');
 const validate = vm.runInNewContext(`${validation}\nassertPurchaseLinesAvailable`, {
     normalizedOrderStatus: order => order.status === 'cancelled' ? 'cancelled' : 'normal',
