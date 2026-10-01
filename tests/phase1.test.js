@@ -4050,3 +4050,65 @@ test('product batch maintenance gives visible progress and blocks duplicate impo
     assert.match(costSource,/setProductBatchMaintenanceBusy\(true\)/);
     assert.match(costSource,/finally \{[\s\S]*?setProductBatchMaintenanceBusy\(false\)/);
 });
+
+
+test('supply order rules preserve identity and valid operational quantities', () => {
+    const identityStart=rulesSource.indexOf('function sameSupplyIdentity()');
+    const identityEnd=rulesSource.indexOf('\n\n    function validSupplyOperationalState()',identityStart);
+    const identitySource=rulesSource.slice(identityStart,identityEnd);
+    assert.ok(identityStart>=0&&identityEnd>identityStart);
+    ['type','orderId','itemId','ownerUid','salesCode','productId','productKey','fulfillmentType','warehouseId','purchaseDocumentId'].forEach(field => {
+        assert.match(identitySource,new RegExp("request\\.resource\\.data\\.get\\('"+field+"'"));
+        assert.match(identitySource,new RegExp("resource\\.data\\.get\\('"+field+"'"));
+    });
+
+    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
+    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
+    const stateSource=rulesSource.slice(stateStart,stateEnd);
+    assert.match(stateSource,/request\.resource\.data\.get\('qty', 0\) >= resource\.data\.get\('qty', 0\)/);
+    assert.match(stateSource,/receivedQty', 0\) <= request\.resource\.data\.get\('qty', 0\)/);
+    assert.match(stateSource,/incomingRegisteredQty', 0\) >= 0/);
+    assert.match(stateSource,/'ORDERED', 'PARTIAL_RECEIPT', 'RECEIVED', 'CANCELLED'/);
+
+    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
+    const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
+    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
+    assert.match(warehouseSource,/hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'incomingRegisteredQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
+    assert.doesNotMatch(warehouseSource,/'qty'/);
+
+    const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
+    const supplyEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyStart);
+    const supplySource=rulesSource.slice(supplyStart,supplyEnd);
+    assert.match(supplySource,/allow update: if admin\(\)[\s\S]*?purchaserSupplyOperationalUpdate\(\)[\s\S]*?warehouseSupplyOperationalUpdate\(\)/);
+    assert.doesNotMatch(supplySource,/allow update: if admin\(\) \|\| purchaser\(\)/);
+});
+
+test('supply rule tightening still covers current quick-order receipt and cancellation writes', () => {
+    const quickStart=appSource.indexOf('window.markPurchaseItemOrdered = async function');
+    const quickEnd=appSource.indexOf('\nwindow.',quickStart+30);
+    const quickSource=appSource.slice(quickStart,quickEnd);
+    assert.match(quickSource,/qty:nextSupplyQty/);
+    assert.match(quickSource,/receivedQty/);
+    assert.match(quickSource,/status:nextSupplyStatus/);
+    assert.match(quickSource,/tx\.set\(supplyRef/);
+
+    const registerStart=appSource.indexOf('async function registerPurchaseIncoming');
+    const registerEnd=appSource.indexOf('\nasync function cancelOutstandingSupplyRecord',registerStart);
+    const registerSource=appSource.slice(registerStart,registerEnd);
+    assert.match(registerSource,/incomingRegisteredQty:targetQty/);
+    assert.match(registerSource,/incomingRegisteredAt:now/);
+
+    const cancelStart=appSource.indexOf('async function cancelOutstandingSupplyRecord');
+    const cancelEnd=appSource.indexOf('\nwindow.cancelPurchaseOrderOutstanding',cancelStart);
+    const cancelSource=appSource.slice(cancelStart,cancelEnd);
+    assert.match(cancelSource,/status:'CANCELLED'/);
+    assert.match(cancelSource,/cancelledQty:remaining/);
+    assert.match(cancelSource,/incomingRegisteredQty:0/);
+
+    const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptSource=appSource.slice(receiptStart,receiptEnd);
+    assert.match(receiptSource,/receivedQty/);
+    assert.match(receiptSource,/PARTIAL_RECEIPT/);
+    assert.match(receiptSource,/RECEIVED/);
+});
