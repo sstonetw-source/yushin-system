@@ -4309,3 +4309,30 @@ test('primary work lists keep the default 50-row pagination guard', () => {
     const equipmentSource=appSource.slice(equipmentStart,equipmentEnd);
     assert.match(equipmentSource,/query = query\.limit\(DEFAULT_LIST_LIMIT\)/);
 });
+
+
+test('cancelled warehouse supply is excluded from incoming inventory value', () => {
+    const start=appSource.indexOf('function inventoryAnalysisTotals');
+    const end=appSource.indexOf('\nfunction renderInventoryAnalysisSummary',start);
+    const source=appSource.slice(start,end);
+    assert.ok(start>=0&&end>start);
+
+    const context=vm.createContext({
+        inventoryAnalysisReceipts:[],
+        inventoryAnalysisLotCosts:new Map(),
+        inventoryAnalysisDirectShipSupplyOrders:[],
+        salesStatisticsOrders:[],
+        salesStatisticOrderLines:()=>[],
+        calculateOrderStatsContribution:()=>({actualSales:0}),
+        inventoryAnalysisLots:[],
+        protectedHistoricalCogs:()=>0,
+        inventoryAnalysisSupplyOrders:[
+            {fulfillmentType:'WAREHOUSE',status:'ORDERED',qty:5,receivedQty:2,unitCost:100},
+            {fulfillmentType:'WAREHOUSE',status:'CANCELLED',qty:10,receivedQty:2,unitCost:100}
+        ]
+    });
+    vm.runInContext(source,context);
+    const totals=context.inventoryAnalysisTotals('2026-10-01','2026-10-31');
+    assert.equal(totals.incoming,300);
+    assert.match(source,/status \|\| ''\)\.toUpperCase\(\) !== 'CANCELLED'/);
+});
