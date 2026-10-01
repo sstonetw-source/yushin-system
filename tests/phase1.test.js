@@ -3985,3 +3985,35 @@ test('obsolete helper wrappers stay removed', () => {
 test('Product Master import cost helper stays removed', () => {
     assert.doesNotMatch(appSource,/function productCostRecordFromItem\(/);
 });
+
+
+test('product price and cost batch maintenance stay isolated', () => {
+    const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
+    const priceEnd=appSource.indexOf('\nwindow.handleProductCostExcelUpload',priceStart);
+    const priceSource=appSource.slice(priceStart,priceEnd);
+    assert.ok(priceStart>=0&&priceEnd>priceStart);
+    assert.match(priceSource,/listPrice:price/);
+    assert.match(priceSource,/collection\('products'\)/);
+    assert.doesNotMatch(priceSource,/collection\('productCosts'\)/);
+
+    const costStart=appSource.indexOf('window.handleProductCostExcelUpload = async function');
+    const costEnd=appSource.indexOf('\nwindow.handlePriceExcelUpload',costStart);
+    const costSource=appSource.slice(costStart,costEnd);
+    assert.ok(costStart>=0&&costEnd>costStart);
+    assert.match(costSource,/collection\('productCosts'\)/);
+    assert.match(costSource,/standardCost:\s*cost/);
+    assert.match(costSource,/source:\s*'COST_UPDATE'/);
+    assert.doesNotMatch(costSource,/listPrice/);
+    assert.doesNotMatch(costSource,/collection\('products'\)\.doc\([^)]*\)\.set/);
+    assert.match(costSource,/未寫入任何成本資料/);
+
+    const productImportStart=appSource.indexOf('window.handlePriceExcelUpload = async function');
+    const productImportSource=appSource.slice(productImportStart,productImportStart+12000);
+    assert.doesNotMatch(productImportSource,/costRaw/);
+    assert.doesNotMatch(productImportSource,/標準成本格式不正確/);
+
+    assert.match(indexSource,/id="productBatchMaintenance"/);
+    assert.match(indexSource,/handleProductPriceExcelUpload\(this\)/);
+    assert.match(indexSource,/handleProductCostExcelUpload\(this\)/);
+    assert.match(indexSource,/售價只更新 Product Master 的建議售價；成本只更新受保護的 productCosts/);
+});
