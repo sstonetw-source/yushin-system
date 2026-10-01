@@ -8280,7 +8280,19 @@ function remainingProcurementQty(order, item, dispatchOverride = null) {
     return Math.max(0, shortage - Math.max(0, ordered - received));
 }
 
-function pendingProcurementDisplayLines(order, normalizedItems = null) {
+function purchasingDispatchStateSnapshot(normalizedItemsByOrder, sourceOrders = ordersCache) {
+    const itemMap = normalizedItemsByOrder || new Map(
+        sourceOrders.map(order => [order.id, normalizedOrderItems(order)])
+    );
+    return new Map(
+        sourceOrders.map(order => {
+            const items = itemMap.get(order.id) || [];
+            return [order.id, new Map(items.map(item => [item, itemDispatchState(order, item)]))];
+        })
+    );
+}
+
+function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchStateByItem = null) {
     if (normalizedOrderStatus(order) !== 'normal') return [];
     // 工作卡與明細只讀訂單本身；不要在 render 階段解析成本／Product Master。
     // 同一輪採購頁 render 可直接沿用已 normalize 的品項快照。
@@ -8288,7 +8300,7 @@ function pendingProcurementDisplayLines(order, normalizedItems = null) {
     const items = normalizedItems || normalizedOrderItems(order);
     const lifecycle = orderLifecycleInfo(order, items);
     return items.map((item, index) => {
-        const dispatch = itemDispatchState(order, item);
+        const dispatch = dispatchStateByItem?.get(item) || itemDispatchState(order, item);
         if (orderItemWorkCategory(order, item, lifecycle, dispatch) !== 'ordering') return null;
         const qty = remainingProcurementQty(order, item, dispatch);
         if (!(qty > 0)) return null;
@@ -8322,12 +8334,7 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
     const itemMap = normalizedItemsByOrder || new Map(
         ordersCache.map(order => [order.id, normalizedOrderItems(order)])
     );
-    const stateMap = dispatchStatesByOrder || new Map(
-        ordersCache.map(order => {
-            const items = itemMap.get(order.id) || [];
-            return [order.id, new Map(items.map(item => [item, itemDispatchState(order, item)]))];
-        })
-    );
+    const stateMap = dispatchStatesByOrder || purchasingDispatchStateSnapshot(itemMap);
     // 訂單頁與採購頁共用完全相同的品項狀態與金額統計核心；
     // 採購頁只額外套自己的日期／業務／廠牌篩選，避免兩頁各算各的再次出現數字不一致。
     const metrics = buildOrderItemWorkMetrics(
@@ -8420,18 +8427,13 @@ window.renderPurchasingView = function() {
     const normalizedItemsByOrder = new Map(
         ordersCache.map(order => [order.id, normalizedOrderItems(order)])
     );
-    const dispatchStatesByOrder = new Map(
-        ordersCache.map(order => {
-            const items = normalizedItemsByOrder.get(order.id) || [];
-            return [order.id, new Map(items.map(item => [item, itemDispatchState(order, item)]))];
-        })
-    );
+    const dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
     const completedRows = purchasingView === 'completed'
         ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder)
         : null;
     renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder);
-    if (purchasingView === 'ordering') renderPendingPurchaseOrders(normalizedItemsByOrder, filters);
-    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders(normalizedItemsByOrder, filters);
+    if (purchasingView === 'ordering') renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
+    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
     else if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
     else renderPoList(normalizedItemsByOrder, filters);
 };
@@ -8460,10 +8462,13 @@ window.switchPurchasingView = function(view, tab) {
     const normalizedItemsByOrder = view === 'history'
         ? null
         : new Map(ordersCache.map(order => [order.id, normalizedOrderItems(order)]));
+    const dispatchStatesByOrder = view === 'history'
+        ? null
+        : purchasingDispatchStateSnapshot(normalizedItemsByOrder);
     const completedRows = view === 'completed'
-        ? purchasingCompletedRows(filters, normalizedItemsByOrder)
+        ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder)
         : null;
-    if (view !== 'history') renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
+    if (view !== 'history') renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder);
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
@@ -8480,7 +8485,7 @@ window.switchPurchasingView = function(view, tab) {
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
     if (view === 'ordering') {
-        renderPendingPurchaseOrders(normalizedItemsByOrder, filters);
+        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
             loadPendingPurchaseOrders(true, { reuseOrders:true }).catch(err => {
@@ -8513,7 +8518,7 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'dispatch') {
-        renderPurchasingDispatchOrders(normalizedItemsByOrder, filters);
+        renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
         if (!purchasingViewLoaded.has('dispatch')) {
             purchasingViewLoaded.add('dispatch');
             Promise.resolve(loadPurchasingDispatchOrders(true, { reuseOrders:true })).catch(err => {
@@ -8529,6 +8534,7 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
     purchasingDispatchError = '';
     purchasingDispatchLoading = true;
     let normalizedItemsByOrder = null;
+    let dispatchStatesByOrder = null;
     let filters = null;
     let completedRows = null;
     const refreshButton = document.getElementById(purchasingView === 'completed'
@@ -8542,30 +8548,34 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
         normalizedItemsByOrder = new Map(
             ordersCache.map(order => [order.id, normalizedOrderItems(order)])
         );
+        dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
         filters = purchaseFilterContext();
-        purchasingDispatchCache = ordersCache.filter(order =>
-            (normalizedItemsByOrder.get(order.id) || []).some(item =>
-                orderItemDisplayCategories(order,item).includes('dispatch')
-            )
-        );
+        purchasingDispatchCache = ordersCache.filter(order => {
+            const items = normalizedItemsByOrder.get(order.id) || [];
+            const lifecycle = orderLifecycleInfo(order, items);
+            const states = dispatchStatesByOrder.get(order.id);
+            return items.some(item =>
+                orderItemDisplayCategories(order, item, lifecycle, states?.get(item)).includes('dispatch')
+            );
+        });
         purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         completedRows = purchasingView === 'completed'
-            ? purchasingCompletedRows(filters, normalizedItemsByOrder)
+            ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder)
             : null;
-        renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
+        renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder);
     } catch (err) {
         purchasingDispatchError = `待打單清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         purchasingDispatchLoading = false;
         if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
         if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
-        else renderPurchasingDispatchOrders(normalizedItemsByOrder, filters);
+        else renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
     }
 }
 
 window.loadPurchasingDispatchOrders=loadPurchasingDispatchOrders;
 
-function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterContext = null) {
+function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
     const body=document.getElementById('purchaseDispatchBody');
     const status=document.getElementById('purchaseDispatchStatus');
     const more=document.getElementById('purchaseDispatchMoreBtn');
@@ -8576,9 +8586,15 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
     const sourceOrders = ordersCache.length ? ordersCache : purchasingDispatchCache;
     const filters=filterContext || purchaseFilterContext();
     sourceOrders.forEach(order=>{
-        const pending=(normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order))
-            .filter(item=>orderItemDisplayCategories(order,item).includes('dispatch'))
-            .map(item=>({item,state:itemDispatchState(order,item)}));
+        const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
+        const lifecycle = orderLifecycleInfo(order, items);
+        const states = dispatchStatesByOrder?.get(order.id) || null;
+        const pending=items.map(item=>{
+            const state = states?.get(item) || itemDispatchState(order,item);
+            return orderItemDisplayCategories(order, item, lifecycle, state).includes('dispatch')
+                ? {item,state}
+                : null;
+        }).filter(Boolean);
         pending.forEach(({item,state})=>{
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
@@ -8647,7 +8663,7 @@ function syncCommittedPurchaseOrderSources(orders) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 }
 
-function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContext = null) {
+function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
     body.innerHTML = '';
@@ -8656,7 +8672,11 @@ function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContex
     const sourceOrders = ordersCache.length ? ordersCache : pendingPurchaseCache;
     const filters = filterContext || purchaseFilterContext();
     for (const order of sourceOrders) {
-        const items = pendingProcurementDisplayLines(order, normalizedItemsByOrder?.get(order.id));
+        const items = pendingProcurementDisplayLines(
+            order,
+            normalizedItemsByOrder?.get(order.id),
+            dispatchStatesByOrder?.get(order.id)
+        );
         for (const item of items) {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) continue;
             const selfOrder = item.procurementType === 'SALES_SELF_ORDER';
@@ -8683,6 +8703,7 @@ window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
     pendingPurchaseError = '';
     pendingPurchaseLoading = true;
     let normalizedItemsByOrder = null;
+    let dispatchStatesByOrder = null;
     let filters = null;
     const refreshButton = document.getElementById('purchasePendingRefreshBtn');
     if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
@@ -8693,18 +8714,23 @@ window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
         normalizedItemsByOrder = new Map(
             ordersCache.map(order => [order.id, normalizedOrderItems(order)])
         );
+        dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
         filters = purchaseFilterContext();
         pendingPurchaseCache = ordersCache.filter(order =>
-            pendingProcurementDisplayLines(order, normalizedItemsByOrder.get(order.id)).length > 0
+            pendingProcurementDisplayLines(
+                order,
+                normalizedItemsByOrder.get(order.id),
+                dispatchStatesByOrder.get(order.id)
+            ).length > 0
         );
         pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        renderPurchasingWorkCards(normalizedItemsByOrder, null, filters);
+        renderPurchasingWorkCards(normalizedItemsByOrder, null, filters, dispatchStatesByOrder);
     } catch (err) {
         pendingPurchaseError = `待採購清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
     } finally {
         pendingPurchaseLoading = false;
         if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
-        renderPendingPurchaseOrders(normalizedItemsByOrder, filters);
+        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
     }
 };
 
