@@ -224,9 +224,26 @@ service cloud.firestore {
     function businessInventoryOperationalUpdate() {
       return businessOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'onHand', 'reserved', 'lots', 'safetyStock', 'updatedAt'
+          'onHand', 'reserved', 'updatedAt'
         ])
         && nonNegativeInventory(request.resource.data);
+    }
+
+    function businessReservationOperationalUpdate() {
+      return businessOwner()
+        && owns(resource.data)
+        && owns(request.resource.data)
+        && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+        && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
+        && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
+        && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
+        && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
+        && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'quantity', 'shortageQty', 'status', 'updatedAt'
+        ])
+        && request.resource.data.get('quantity', 0) >= 0
+        && request.resource.data.get('shortageQty', 0) >= 0;
     }
 
     function businessInventoryLotOperationalUpdate() {
@@ -430,11 +447,7 @@ service cloud.firestore {
       allow create: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(request.resource.data));
       allow update: if admin() || purchaser() || warehouse()
-        || (businessOwner()
-          && owns(resource.data)
-          && owns(request.resource.data)
-          && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
-          && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', ''));
+        || businessReservationOperationalUpdate();
       allow delete: if admin();
     }
 
