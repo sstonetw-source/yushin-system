@@ -1542,7 +1542,10 @@ function productManagementSource(product) {
         unitPrice: Number(product.listPrice ?? product.price ?? 0),
         qty: 1,
         productLine: product.productLine || '',
-        productType: product.category || product.productType || ''
+        productType: product.productType || product.category || '',
+        supplier: product.supplier || '',
+        authorizationType: product.authorizationType || '',
+        productMasterMatched: true
     };
 }
 
@@ -3793,6 +3796,12 @@ window.onItemModelChange = async function(input) {
 
     const match = await findProductByCode(value);
     if (!match) {
+        const row = input.closest('tr');
+        if (row) {
+            row.querySelector('.item-product-id').value = '';
+            row.querySelector('.item-product-line').value = '';
+            row.querySelector('.item-product-type').value = '';
+        }
         input.dataset.autofillStatus = 'not-found';
         showQuickProductButton(input, 'quote');
         return;
@@ -13293,11 +13302,31 @@ function applyQuoteProductMatch(row, match) {
 let quoteModelInputTimer = null;
 window.onItemModelInput = function(input) {
     clearTimeout(quoteModelInputTimer);
+    const row = input.closest('tr');
+    if (row) {
+        // 貨號一旦被手動改動，先清除上一個 Product Master 身分；
+        // 180ms 後若新貨號能比對成功，再由 applyQuoteProductMatch 寫回正確分類。
+        row.querySelector('.item-product-id').value = '';
+        row.querySelector('.item-product-line').value = '';
+        row.querySelector('.item-product-type').value = '';
+        input.dataset.autofillStatus = '';
+    }
     quoteModelInputTimer = setTimeout(async () => {
         const value = input.value.trim();
-        if (!value) return;
+        if (!value) {
+            clearQuickProductButton(input);
+            return;
+        }
         const match = await findProductByCode(value);
-        if (match && input.value.trim() === value) applyQuoteProductMatch(input.closest('tr'), match);
+        if (input.value.trim() !== value) return;
+        if (match) {
+            clearQuickProductButton(input);
+            input.dataset.autofillStatus = 'matched';
+            applyQuoteProductMatch(input.closest('tr'), match);
+        } else {
+            input.dataset.autofillStatus = 'not-found';
+            showQuickProductButton(input, 'quote');
+        }
     }, 180);
 };
 
@@ -15350,7 +15379,7 @@ window.downloadProductMasterTemplate = async function() {
     ws['!cols'] = [18,28,32,24,14,24,14,14,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '產品線名稱');
-    XLSX.writeFile(wb, '廠牌名稱_Product_Master_匯入範本.xlsx');
+    XLSX.writeFile(wb, '廠牌名稱.xlsx');
 };
 
 window.handlePriceExcelUpload = async function(input) {
@@ -15425,7 +15454,7 @@ window.handlePriceExcelUpload = async function(input) {
                     const costRaw = getField(row, ['含稅成本', '成本', '進貨成本']);
                     const cost = costRaw === '' ? null : parseFloat(costRaw) || 0;
 
-                    if (nameCn || nameEn || model) {
+                    if (model) {
                         imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, supplier, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost, source:'PRICE_LIST' });
                     }
                 });
@@ -15435,7 +15464,7 @@ window.handlePriceExcelUpload = async function(input) {
 
             if (!brandGroups.length) {
                 setPriceUploadProgress(0, '找不到可上傳的價格資料。');
-                alert('無法從 Excel 辨識出有效資料。請確認：檔名是廠牌名稱、分頁名稱是產品線、內容包含貨號或品名。');
+                alert('無法從 Excel 辨識出有效資料。請確認：檔名是廠牌名稱、分頁名稱是產品線，而且每筆產品都有貨號。');
                 input.value = '';
                 return;
             }
