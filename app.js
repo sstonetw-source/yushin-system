@@ -8106,12 +8106,20 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'history') {
-        // 訂購單紀錄與待到貨工作佇列分離：歷史顯示最近 50 張正式訂購單（含已完成）。
-        poListCache = [];
-        poListCursor = null;
-        poListHasMore = true;
+        // 全部訂購單採 Gmail 式 stale-while-revalidate：
+        // 先顯示上次快取，首次進入本次工作階段時才背景更新；切回此頁不重查第一頁。
+        if (!poListCache.length) {
+            const cached = readAppDataCache('purchase-history');
+            if (cached?.records?.length) poListCache = cached.records;
+        }
         renderPoList();
-        loadPurchaseOrderPage(true).catch(err => console.error('訂購單紀錄首次載入失敗：', err));
+        if (!purchasingViewLoaded.has('history')) {
+            purchasingViewLoaded.add('history');
+            loadPurchaseOrderPage(true).catch(err => {
+                purchasingViewLoaded.delete('history');
+                console.error('訂購單紀錄首次載入失敗：', err);
+            });
+        }
     } else if (view === 'dispatch') {
         const cached=readAppDataCache('purchase-dispatch');
         if(!purchasingDispatchCache.length && cached?.records?.length) purchasingDispatchCache=cached.records;
@@ -8460,8 +8468,9 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
 function updatePoLoadMoreButton() {
     const button = document.getElementById('poLoadMoreBtn');
     const refreshButton = document.getElementById('purchasePoRefreshBtn');
+    const hasMore = purchasingView === 'receiving' ? supplyReceivingHasMore : poListHasMore;
     if (button) {
-        button.style.display = (poListHasMore || (purchasingView === 'receiving' && supplyReceivingHasMore)) ? '' : 'none';
+        button.style.display = hasMore ? '' : 'none';
         button.disabled = poListPageLoading;
         button.innerText = poListPageLoading ? '載入中…' : purchasingView === 'receiving' ? '載入更多待到貨資料' : '載入更多（每次 50 筆）';
     }
@@ -8475,17 +8484,18 @@ async function loadPurchaseOrderPage(reset) {
     if (!canAccessPage('orders.po')) return;
     if (poListPageLoading) return;
     if (reset) {
-        poListCursor = null;
-        poListHasMore = true;
         if (purchasingView === 'receiving') {
             supplyReceivingCursor = null;
             supplyReceivingHasMore = true;
             supplyReceivingCache = [];
             receivingSourceOrderCache = new Map();
-        }
-        if (!poListCache.length) {
-            const cached = readAppDataCache('purchase-receiving');
-            if (cached?.records?.length) poListCache = cached.records;
+        } else {
+            poListCursor = null;
+            poListHasMore = true;
+            if (!poListCache.length) {
+                const cached = readAppDataCache('purchase-history');
+                if (cached?.records?.length) poListCache = cached.records;
+            }
         }
     }
     if (!poListHasMore && (purchasingView !== 'receiving' || !supplyReceivingHasMore)) return;
@@ -8552,16 +8562,18 @@ async function loadPurchaseOrderPage(reset) {
         }
         supplyReceivingCache=[...supplyRecords.values()]
             .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
-        if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
         if (!supplySnapshot.empty) supplyReceivingCursor = supplySnapshot.docs[supplySnapshot.docs.length - 1];
         if (purchasingView === 'receiving') supplyReceivingHasMore = supplySnapshot.size === DEFAULT_LIST_LIMIT;
-        const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const records = new Map((reset ? [] : poListCache).map(po => [po.id, po]));
-        freshRecords.forEach(po => records.set(po.id, po));
-        // reset 時雲端結果完整取代 stale cache；Load More 才追加。
-        poListCache = [...records.values()].sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
-        if (query) poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
-        writeAppDataCache(purchasingView === 'history' ? 'purchase-history' : 'purchase-receiving', poListCache);
+        if (query) {
+            if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
+            const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const records = new Map((reset ? [] : poListCache).map(po => [po.id, po]));
+            freshRecords.forEach(po => records.set(po.id, po));
+            // reset 時雲端結果完整取代 stale cache；Load More 才追加。
+            poListCache = [...records.values()].sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
+            poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
+            writeAppDataCache('purchase-history', poListCache);
+        }
         renderPoList();
     } catch (err) {
         console.error('讀取訂購單／待到貨資料失敗：', err);
