@@ -2162,3 +2162,45 @@ test('own-order viewers skip full sales-list load', () => {
     assert.match(source,/if \(canViewAllData\('orders'\)\) \{[\s\S]*?ensureSalesListLoaded\(\)/);
     assert.match(source,/loadOrdersFromCloud\(\)/);
 });
+
+
+test('purchase draft preloads only selected lines and bounds supporting reads', () => {
+    const helperStart=appSource.indexOf('async function preloadPurchaseCostsForItems');
+    const helperEnd=appSource.indexOf('\n\nasync function preloadPurchaseCosts(',helperStart);
+    const helperSource=appSource.slice(helperStart,helperEnd);
+    assert.match(helperSource,/purchaseItems \|\| \[\]/);
+    assert.match(helperSource,/findProductForPurchaseItem\(item\)/);
+    assert.match(helperSource,/loadVisibleProductCost\(item\)/);
+
+    const openStart=appSource.indexOf('window.openOrderPurchaseDraft = async function');
+    const openEnd=appSource.indexOf('function updatePoLoadMoreButton',openStart);
+    const openSource=appSource.slice(openStart,openEnd);
+    assert.match(openSource,/preloadPurchaseCostsForItems\(items\)/);
+    assert.doesNotMatch(openSource,/preloadPurchaseCosts\(\[order\]\)/);
+
+    const productStart=appSource.indexOf('async function findProductForPurchaseItem');
+    const productEnd=appSource.indexOf('async function preloadPurchaseCostsForItems',productStart);
+    assert.match(appSource.slice(productStart,productEnd),/firestoreReadWithTimeout\([\s\S]*?'採購 Product Master'/);
+
+    const costStart=appSource.indexOf('async function loadVisibleProductCost');
+    const costEnd=appSource.indexOf('function setOrderCostFieldForProduct',costStart);
+    assert.match(appSource.slice(costStart,costEnd),/firestoreReadWithTimeout\([\s\S]*?'產品成本'/);
+
+    const poNoStart=appSource.indexOf('window.generatePoNo = async function');
+    const poNoEnd=appSource.indexOf('function renderPoItemsTable',poNoStart);
+    assert.match(appSource.slice(poNoStart,poNoEnd),/firestoreReadWithTimeout\([\s\S]*?'訂購單號'/);
+});
+
+test('shared batch master reads are bounded', () => {
+    const collectionStart=appSource.indexOf('async function readCollectionInBatches');
+    const collectionEnd=appSource.indexOf('async function readQueryInBatches',collectionStart);
+    assert.match(appSource.slice(collectionStart,collectionEnd),/firestoreReadWithTimeout\(query\.get\(\), collectionName \+ ' 批次資料'\)/);
+
+    const queryStart=appSource.indexOf('async function readQueryInBatches');
+    const queryEnd=appSource.indexOf('function systemAuditProductKey',queryStart);
+    assert.match(appSource.slice(queryStart,queryEnd),/firestoreReadWithTimeout\(query\.get\(\), '批次查詢資料'\)/);
+
+    const warehouseStart=appSource.indexOf('async function loadWarehouseMaster');
+    const warehouseEnd=appSource.indexOf('async function loadSupplierWarehouseMasters',warehouseStart);
+    assert.match(appSource.slice(warehouseStart,warehouseEnd),/firestoreReadWithTimeout\([\s\S]*?'倉庫主檔'/);
+});
