@@ -861,7 +861,7 @@ test('full returns stay in fulfillment instead of closing the order', () => {
     }), 'delivery');
 
     const categoryStart=app.indexOf('function orderWorkCategories');
-    const categoryEnd=app.indexOf('\nfunction orderWorkStatusInfo',categoryStart);
+    const categoryEnd=app.indexOf('\nfunction orderWorkIndexFields',categoryStart);
     const categorySource=app.slice(categoryStart,categoryEnd);
     assert.ok(categoryStart>=0&&categoryEnd>categoryStart);
     assert.doesNotMatch(categorySource,/lifecycle\.returned>0&&lifecycle\.effectiveDelivered<=0/);
