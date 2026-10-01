@@ -3040,3 +3040,28 @@ test('purchase receiving and history lists batch row insertion', () => {
     assert.match(historySource,/tbody\.appendChild\(fragment\)/);
     assert.doesNotMatch(historySource,/tbody\.appendChild\(tr\)/);
 });
+
+
+test('receiving list reuses purchasing normalized item snapshot', () => {
+    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList(');
+    const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource,/normalizedItemsByOrder = null, filterContext = null/);
+    assert.match(receivingSource,/filterContext \|\| purchaseFilterContext\(\)/);
+    assert.match(receivingSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
+
+    const poStart=appSource.indexOf('window.renderPoList = function(');
+    const poEnd=appSource.indexOf('\n// 把「採購訂單」',poStart);
+    const poSource=appSource.slice(poStart,poEnd);
+    assert.match(poSource,/renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext\)/);
+
+    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
+    const viewSource=appSource.slice(viewStart,viewEnd);
+    assert.match(viewSource,/renderPoList\(normalizedItemsByOrder, filters\)/);
+
+    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
+    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
+    const switchSource=appSource.slice(switchStart,switchEnd);
+    assert.match(switchSource,/view === 'receiving'[\s\S]*?renderPoList\(normalizedItemsByOrder, filters\)/);
+});
