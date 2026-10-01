@@ -2491,3 +2491,16 @@ test('own-scope quote form avoids full staff preload', () => {
     assert.match(phoneSource,/selectedName === currentUserName/);
     assert.match(phoneSource,/currentUserPhone/);
 });
+
+
+test('order list calculates row progress summaries once', () => {
+    const start=appSource.indexOf('window.renderOrdersList = function()');
+    const end=appSource.indexOf('window.retryOrderInventoryReservation',start);
+    const source=appSource.slice(start,end);
+    assert.equal((source.match(/deliveryProgressInfo\(o\)/g) || []).length, 1);
+    assert.equal((source.match(/fulfillmentProgressInfo\(o\)/g) || []).length, 1);
+    assert.equal((source.match(/orderContextActionState\(o\)/g) || []).length, 1);
+    assert.match(source,/const deliveryPending = pendingDeliveryOrderIds\.has\(o\.id\)/);
+    assert.match(source,/const billingPending = pendingOrderStatusKeys\.has\(o\.id \+ ':isBilled'\)/);
+    assert.match(source,/const lifecyclePending = pendingLifecycleOrderIds\.has\(o\.id\)/);
+});
