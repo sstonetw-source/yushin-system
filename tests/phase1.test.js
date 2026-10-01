@@ -2980,3 +2980,19 @@ test('receipt shortage allocation skips stale candidates without blocking later 
     assert.match(source,/if\(take<=0\)\{stopAllocation=true;return;\}/);
     assert.match(source,/if\(stopAllocation\)break;/);
 });
+
+
+test('successful history searches avoid duplicate final render', () => {
+    const orderStart=appSource.indexOf('function runOrderHistorySearch()');
+    const orderEnd=appSource.indexOf('\nwindow.scheduleOrderHistorySearch',orderStart);
+    const orderSuccess=appSource.slice(appSource.indexOf('if (generation !== orderHistorySearchGeneration) return;',orderStart),appSource.indexOf('} catch (err)',orderStart));
+    assert.doesNotMatch(orderSuccess,/renderOrdersList\(\)[\s\S]*?全歷史搜尋完成/);
+
+    const quoteStart=appSource.indexOf('function runQuoteHistorySearch()');
+    const quoteSuccess=appSource.slice(appSource.lastIndexOf('if (generation !== quoteHistorySearchGeneration) return;',appSource.indexOf('} catch (err)',quoteStart)),appSource.indexOf('} catch (err)',quoteStart));
+    assert.doesNotMatch(quoteSuccess,/renderMyQuotesList\(\)[\s\S]*?全歷史搜尋完成/);
+
+    const forecastStart=appSource.indexOf('async function runForecastHistorySearch');
+    const forecastSuccess=appSource.slice(appSource.lastIndexOf('if (generation !== forecastHistorySearchGeneration) return;',appSource.indexOf('} catch (err)',forecastStart)),appSource.indexOf('} catch (err)',forecastStart));
+    assert.doesNotMatch(forecastSuccess,/renderForecastList\(\)[\s\S]*?全歷史搜尋完成/);
+});
