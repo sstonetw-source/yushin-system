@@ -2938,3 +2938,22 @@ test('equipment list reuses filter options and batches row insertion', () => {
     assert.match(renderSource,/tbody\.appendChild\(fragment\)/);
     assert.doesNotMatch(renderSource,/tbody\.appendChild\(tr\)/);
 });
+
+
+test('forecast list reuses filter options and batches row insertion', () => {
+    const brandStart=appSource.indexOf("let forecastBrandFilterSignature = ''");
+    const brandEnd=appSource.indexOf('\nfunction populateForecastBrandDropdown',brandStart);
+    const filterSource=appSource.slice(brandStart,brandEnd);
+    assert.match(filterSource,/if \(signature !== forecastBrandFilterSignature\)/);
+    assert.match(filterSource,/forecastBrandFilterSignature = signature/);
+    assert.match(filterSource,/if \(signature !== forecastSalesFilterSignature\)/);
+    assert.match(filterSource,/forecastSalesFilterSignature = signature/);
+
+    const renderStart=appSource.indexOf('window.renderForecastList = function()');
+    const renderEnd=appSource.indexOf('\nwindow.openForecastModal',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/const fragment = document\.createDocumentFragment\(\)/);
+    assert.match(renderSource,/fragment\.appendChild\(row\)/);
+    assert.match(renderSource,/body\.appendChild\(fragment\)/);
+    assert.doesNotMatch(renderSource,/body\.appendChild\(row\)/);
+});
