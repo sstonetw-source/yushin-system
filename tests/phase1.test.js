@@ -2081,3 +2081,17 @@ test('completed purchasing queue uses mobile card layout like other work queues'
     assert.match(stylesSource, /#purchaseCompletedPanel td\[data-th\]::before/);
     assert.match(stylesSource, /#purchaseCompletedPanel td\[data-th="操作"\]/);
 });
+
+
+test('admin view-role switch clears purchasing session state', () => {
+    const start=appSource.indexOf('window.switchViewRole = function(role)');
+    const end=appSource.indexOf('\nfunction actuallySwitchMainTab',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/pendingPurchaseCache = \[\]/);
+    assert.match(source,/poHistorySearchResults = \[\]/);
+    assert.match(source,/supplyReceivingCache = \[\]/);
+    assert.match(source,/receivingSourceOrderStatusCache = new Map\(\)/);
+    assert.match(source,/purchasingDispatchCache = \[\]/);
+    assert.match(source,/purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT/);
+    assert.match(source,/purchasingViewLoaded\.clear\(\)/);
+});
