@@ -5211,96 +5211,109 @@ let myQuotesPageLoading = false;
 let myQuotesReloadRequested = false;
 let quoteHistorySearchActive = false;
 let quoteHistorySearchLoading = false;
-let quoteHistorySearchCursor = null;
 let quoteHistorySearchKeyword = '';
 let quoteHistorySearchResults = [];
 let quoteHistorySearchTimer = null;
+let quoteHistorySearchGeneration = 0;
 
 function updateQuoteHistorySearchUi(message = '') {
     const status = document.getElementById('quoteHistorySearchStatus');
-    const more = document.getElementById('quoteHistorySearchMoreBtn');
     if (status) status.innerText = message;
-    if (more) {
-        more.style.display = quoteHistorySearchActive && quoteHistorySearchCursor ? '' : 'none';
-        more.disabled = quoteHistorySearchLoading;
-    }
 }
 
-async function runQuoteHistorySearch(reset = true) {
+async function runQuoteHistorySearch() {
+    const generation = ++quoteHistorySearchGeneration;
     const input = document.getElementById('myQuoteSearch');
     const rawKeyword = input?.value || '';
-    const queryToken = fullHistoryQueryToken('quote', rawKeyword);
-    if (!normalizeFullHistorySearchValue(rawKeyword)) {
+    const normalized = normalizeFullHistorySearchValue(rawKeyword);
+    if (!normalized) {
         quoteHistorySearchActive = false;
+        quoteHistorySearchLoading = false;
+        quoteHistorySearchKeyword = '';
         quoteHistorySearchResults = [];
-        quoteHistorySearchCursor = null;
         updateQuoteHistorySearchUi('');
         renderMyQuotesList();
         return;
     }
+    const queryToken = fullHistoryQueryToken('quote', rawKeyword);
     if (!queryToken) {
+        quoteHistorySearchActive = false;
+        quoteHistorySearchLoading = false;
+        quoteHistorySearchResults = [];
         updateQuoteHistorySearchUi('目前帳號缺少可用的資料歸屬資訊，無法進行全歷史搜尋。');
+        renderMyQuotesList();
         return;
     }
-    if (quoteHistorySearchLoading) return;
+
     quoteHistorySearchLoading = true;
-    if (reset || rawKeyword !== quoteHistorySearchKeyword) {
-        quoteHistorySearchKeyword = rawKeyword;
-        quoteHistorySearchResults = [];
-        quoteHistorySearchCursor = null;
-    }
+    quoteHistorySearchActive = true;
+    quoteHistorySearchKeyword = rawKeyword;
+    quoteHistorySearchResults = [];
+    const records = new Map();
+    let cursor = null;
+    let checked = 0;
     updateQuoteHistorySearchUi('正在搜尋全部歷史估價單…');
+    renderMyQuotesList();
+
     try {
-        let query = scopedHistorySearchQuery('quotes', queryToken).limit(DEFAULT_LIST_LIMIT);
-        if (quoteHistorySearchCursor) query = query.startAfter(quoteHistorySearchCursor);
-        const snapshot = await query.get();
-        const records = new Map(quoteHistorySearchResults.map(record => [record.id, record]));
-        snapshot.forEach(doc => {
-            const data = { id: doc.id, ...doc.data() };
-            if (fullHistoryRecordMatches('quote', data, rawKeyword)) records.set(doc.id, data);
-        });
-        quoteHistorySearchResults = [...records.values()]
-            .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
-        quoteHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
-        quoteHistorySearchActive = true;
-        updateQuoteHistorySearchUi(`全歷史搜尋：已找到 ${quoteHistorySearchResults.length} 筆${quoteHistorySearchCursor ? '，可繼續載入' : ''}`);
-        renderMyQuotesList();
+        while (true) {
+            let query = scopedHistorySearchQuery('quotes', queryToken).limit(DEFAULT_LIST_LIMIT);
+            if (cursor) query = query.startAfter(cursor);
+            const snapshot = await firestoreReadWithTimeout(query.get(), '估價單索引搜尋');
+            if (generation !== quoteHistorySearchGeneration) return;
+
+            checked += snapshot.size;
+            snapshot.forEach(doc => {
+                const data = { id: doc.id, ...doc.data() };
+                if (fullHistoryRecordMatches('quote', data, rawKeyword)) records.set(doc.id, data);
+            });
+            quoteHistorySearchResults = [...records.values()]
+                .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
+            renderMyQuotesList();
+            updateQuoteHistorySearchUi(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
+
+            if (snapshot.size < DEFAULT_LIST_LIMIT) break;
+            cursor = snapshot.docs[snapshot.docs.length - 1];
+            await Promise.resolve();
+        }
+        if (generation !== quoteHistorySearchGeneration) return;
+        updateQuoteHistorySearchUi(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
+        if (generation !== quoteHistorySearchGeneration) return;
         console.error('估價單全歷史搜尋失敗：', err);
         quoteHistorySearchActive = false;
-        quoteHistorySearchCursor = null;
+        quoteHistorySearchResults = [];
         updateQuoteHistorySearchUi('全歷史搜尋索引尚未補齊，請管理員到資料庫管理執行搜尋索引補建。');
         renderMyQuotesList();
     } finally {
-        quoteHistorySearchLoading = false;
-        updateQuoteHistorySearchUi(document.getElementById('quoteHistorySearchStatus')?.innerText || '');
+        if (generation === quoteHistorySearchGeneration) {
+            quoteHistorySearchLoading = false;
+            renderMyQuotesList();
+        }
     }
 }
 
 window.scheduleQuoteHistorySearch = function() {
     clearTimeout(quoteHistorySearchTimer);
     const keyword = document.getElementById('myQuoteSearch')?.value || '';
-    if (!normalizeFullHistorySearchValue(keyword)) return runQuoteHistorySearch(true);
-    quoteHistorySearchTimer = scheduleListSearch(quoteHistorySearchTimer, () => runQuoteHistorySearch(true));
-};
-
-window.loadMoreQuoteHistorySearch = function() {
-    return runQuoteHistorySearch(false);
+    if (!normalizeFullHistorySearchValue(keyword)) return runQuoteHistorySearch();
+    quoteHistorySearchTimer = scheduleListSearch(quoteHistorySearchTimer, () => runQuoteHistorySearch());
 };
 
 window.clearQuoteHistorySearch = function() {
     clearTimeout(quoteHistorySearchTimer);
+    quoteHistorySearchGeneration++;
+    quoteHistorySearchLoading = false;
     quoteHistorySearchActive = false;
     quoteHistorySearchKeyword = '';
     quoteHistorySearchResults = [];
-    quoteHistorySearchCursor = null;
     const input = document.getElementById('myQuoteSearch');
     if (input) input.value = '';
     updateQuoteHistorySearchUi('');
     renderMyQuotesList();
 };
 
-window.switchQuoteView = function(view, el, options = {}) {
+window.switchQuoteView = function(view, el, options = {}) {window.switchQuoteView = function(view, el, options = {}) {
     const pageKey = view === 'create' ? 'quote.create' : 'quote.my';
     const previousView = document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'my' : 'create';
     if (!options.skipHistory && previousView !== view) pushAppNavigationState({ tabId: 'quote-system', quoteView: view });
@@ -7422,94 +7435,110 @@ function fullHistoryRecordMatches(type, record, keyword) {
  */
 let orderHistorySearchActive = false;
 let orderHistorySearchLoading = false;
-let orderHistorySearchCursor = null;
 let orderHistorySearchKeyword = '';
 let orderHistorySearchResults = [];
 let orderHistorySearchTimer = null;
+let orderHistorySearchGeneration = 0;
 
 function updateOrderHistorySearchUi(message = '') {
     const status = document.getElementById('orderHistorySearchStatus');
-    const more = document.getElementById('orderHistorySearchMoreBtn');
     if (status) status.innerText = message;
-    if (more) {
-        more.style.display = orderHistorySearchActive && orderHistorySearchCursor ? '' : 'none';
-        more.disabled = orderHistorySearchLoading;
-    }
 }
 
-async function runOrderHistorySearch(reset = true) {
+async function runOrderHistorySearch() {
+    const generation = ++orderHistorySearchGeneration;
     const input = document.getElementById('orderSearch');
     const rawKeyword = input?.value || '';
-    const queryToken = fullHistoryQueryToken('order', rawKeyword);
-    if (!normalizeFullHistorySearchValue(rawKeyword)) {
+    const normalized = normalizeFullHistorySearchValue(rawKeyword);
+    if (!normalized) {
         orderHistorySearchActive = false;
+        orderHistorySearchLoading = false;
+        orderHistorySearchKeyword = '';
         orderHistorySearchResults = [];
-        orderHistorySearchCursor = null;
         updateOrderHistorySearchUi('');
         renderOrdersList();
         return;
     }
+    const queryToken = fullHistoryQueryToken('order', rawKeyword);
     if (!queryToken) {
+        orderHistorySearchActive = false;
+        orderHistorySearchLoading = false;
+        orderHistorySearchResults = [];
         updateOrderHistorySearchUi('目前帳號缺少可用的資料歸屬資訊，無法進行全歷史搜尋。');
+        renderOrdersList();
         return;
     }
-    if (orderHistorySearchLoading) return;
+
     orderHistorySearchLoading = true;
-    if (reset || rawKeyword !== orderHistorySearchKeyword) {
-        orderHistorySearchKeyword = rawKeyword;
-        orderHistorySearchResults = [];
-        orderHistorySearchCursor = null;
-    }
+    orderHistorySearchActive = true;
+    orderHistorySearchKeyword = rawKeyword;
+    orderHistorySearchResults = [];
+    const records = new Map();
+    let cursor = null;
+    let checked = 0;
     updateOrderHistorySearchUi('正在搜尋全部歷史訂單…');
+    renderOrdersList();
+
     try {
-        let query = scopedHistorySearchQuery('orders', queryToken).limit(DEFAULT_LIST_LIMIT);
-        if (orderHistorySearchCursor) query = query.startAfter(orderHistorySearchCursor);
-        const snapshot = await query.get();
-        const records = new Map(orderHistorySearchResults.map(record => [record.id, record]));
-        snapshot.forEach(doc => {
-            const data = { id: doc.id, ...doc.data() };
-            if (fullHistoryRecordMatches('order', data, rawKeyword)) records.set(doc.id, data);
-        });
-        orderHistorySearchResults = [...records.values()]
-            .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
-        orderHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
-        orderHistorySearchActive = true;
-        updateOrderHistorySearchUi(`全歷史搜尋：已找到 ${orderHistorySearchResults.length} 筆${orderHistorySearchCursor ? '，可繼續載入' : ''}`);
-        renderOrdersList();
+        while (true) {
+            let query = scopedHistorySearchQuery('orders', queryToken).limit(DEFAULT_LIST_LIMIT);
+            if (cursor) query = query.startAfter(cursor);
+            const snapshot = await firestoreReadWithTimeout(query.get(), '訂單索引搜尋');
+            if (generation !== orderHistorySearchGeneration) return;
+
+            checked += snapshot.size;
+            snapshot.forEach(doc => {
+                const data = { id: doc.id, ...doc.data() };
+                if (fullHistoryRecordMatches('order', data, rawKeyword)) records.set(doc.id, data);
+            });
+            orderHistorySearchResults = [...records.values()]
+                .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
+            renderOrdersList();
+            updateOrderHistorySearchUi(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
+
+            if (snapshot.size < DEFAULT_LIST_LIMIT) break;
+            cursor = snapshot.docs[snapshot.docs.length - 1];
+            await Promise.resolve();
+        }
+        if (generation !== orderHistorySearchGeneration) return;
+        updateOrderHistorySearchUi(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
+        if (generation !== orderHistorySearchGeneration) return;
         console.error('訂單全歷史搜尋失敗：', err);
         orderHistorySearchActive = false;
-        orderHistorySearchCursor = null;
+        orderHistorySearchResults = [];
         updateOrderHistorySearchUi('全歷史搜尋索引尚未補齊，請管理員到資料庫管理執行搜尋索引補建。');
         renderOrdersList();
     } finally {
-        orderHistorySearchLoading = false;
-        updateOrderHistorySearchUi(document.getElementById('orderHistorySearchStatus')?.innerText || '');
+        if (generation === orderHistorySearchGeneration) {
+            orderHistorySearchLoading = false;
+            renderOrdersList();
+        }
     }
 }
 
 window.scheduleOrderHistorySearch = function() {
     clearTimeout(orderHistorySearchTimer);
     const keyword = document.getElementById('orderSearch')?.value || '';
-    if (!normalizeFullHistorySearchValue(keyword)) return runOrderHistorySearch(true);
-    orderHistorySearchTimer = scheduleListSearch(orderHistorySearchTimer, () => runOrderHistorySearch(true));
+    if (!normalizeFullHistorySearchValue(keyword)) return runOrderHistorySearch();
+    orderHistorySearchTimer = scheduleListSearch(orderHistorySearchTimer, () => runOrderHistorySearch());
 };
 
-window.searchAllOrderHistory = function() { return runOrderHistorySearch(true); };
-window.loadMoreOrderHistorySearch = function() { return runOrderHistorySearch(false); };
+window.searchAllOrderHistory = function() { return runOrderHistorySearch(); };
 window.clearOrderHistorySearch = function() {
     clearTimeout(orderHistorySearchTimer);
+    orderHistorySearchGeneration++;
+    orderHistorySearchLoading = false;
     orderHistorySearchActive = false;
     orderHistorySearchKeyword = '';
     orderHistorySearchResults = [];
-    orderHistorySearchCursor = null;
     const input = document.getElementById('orderSearch');
     if (input) input.value = '';
     updateOrderHistorySearchUi('');
     renderOrdersList();
 };
 
-// 依「成本」跟「單價（售價）」計算利潤% = (售價－成本) / 成本 × 100，也就是以成本為基準的加成率
+// 依「成本」跟「單價（售價）」計算利潤%// 依「成本」跟「單價（售價）」計算利潤% = (售價－成本) / 成本 × 100，也就是以成本為基準的加成率
 function formatProfitPercent(unitPrice, costPrice) {
     const price = parseFloat(unitPrice);
     const cost = parseFloat(costPrice);

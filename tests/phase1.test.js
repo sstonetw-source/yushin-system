@@ -543,20 +543,33 @@ test('quote and order lists use global business-date ordering across companies',
 });
 
 
-test('quote and order full-history search use backend tokens and remain paginated', () => {
+test('quote and order full-history search scan every indexed match with progress feedback', () => {
     assert.match(appSource, /function buildFullHistorySearchTokens/);
     assert.match(appSource, /where\('searchTokens', 'array-contains', queryToken\)/);
-    assert.match(appSource, /limit\(DEFAULT_LIST_LIMIT\)/);
-    assert.match(appSource, /startAfter\(orderHistorySearchCursor\)/);
-    assert.match(appSource, /startAfter\(quoteHistorySearchCursor\)/);
     assert.match(appSource, /itemCodeKey: normalizeHistoryItemCode/);
     assert.match(indexSource, /搜尋全部歷史：單號 \/ 抬頭 \/ 客戶 \/ 廠牌 \/ 品項/);
     assert.match(indexSource, /搜尋全部歷史：客戶 \/ 廠牌 \/ 貨號 \/ 品名 \/ 單號/);
+    assert.doesNotMatch(indexSource, /orderHistorySearchMoreBtn|quoteHistorySearchMoreBtn/);
+
     const orderStart = appSource.indexOf('async function runOrderHistorySearch');
-    const orderEnd = appSource.indexOf('\n}\n\nwindow.scheduleOrderHistorySearch', orderStart) + 2;
+    const orderEnd = appSource.indexOf('window.scheduleOrderHistorySearch', orderStart);
     const orderSearch = appSource.slice(orderStart, orderEnd);
+    assert.match(orderSearch, /while \(true\)/);
+    assert.match(orderSearch, /firestoreReadWithTimeout\(query\.get\(\), '訂單索引搜尋'\)/);
+    assert.match(orderSearch, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(orderSearch, /全歷史搜尋中：已檢查/);
+    assert.match(orderSearch, /generation !== orderHistorySearchGeneration/);
     assert.doesNotMatch(orderSearch, /collection\('orders'\)\.get\(\)/);
-    assert.doesNotMatch(orderSearch, /while\s*\(/);
+
+    const quoteStart = appSource.indexOf('async function runQuoteHistorySearch');
+    const quoteEnd = appSource.indexOf('window.scheduleQuoteHistorySearch', quoteStart);
+    const quoteSearch = appSource.slice(quoteStart, quoteEnd);
+    assert.match(quoteSearch, /while \(true\)/);
+    assert.match(quoteSearch, /firestoreReadWithTimeout\(query\.get\(\), '估價單索引搜尋'\)/);
+    assert.match(quoteSearch, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(quoteSearch, /全歷史搜尋中：已檢查/);
+    assert.match(quoteSearch, /generation !== quoteHistorySearchGeneration/);
+    assert.doesNotMatch(quoteSearch, /collection\('quotes'\)\.get\(\)/);
 });
 
 test('browser history restores internal pages without forcing Firestore reloads', () => {

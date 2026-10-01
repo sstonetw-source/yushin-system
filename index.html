@@ -612,7 +612,6 @@
                     <button type="button" class="btn-secondary" onclick="loadMyQuotesFromCloud()">↻ 更新</button>
                 </div>
                 <span id="quoteHistorySearchStatus" class="quote-history-search-status"></span>
-                <button type="button" id="quoteHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreQuoteHistorySearch()">載入更多搜尋結果</button>
             </div>
             <div class="inventory-summary-note quote-history-note">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div>
             <table class="admin-users-table">
@@ -785,7 +784,6 @@
             <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
             <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
             <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
-            <button type="button" id="orderHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreOrderHistorySearch()">載入更多搜尋結果</button>
             <details class="order-export-tools">
                 <summary>⬇️ 匯出資料</summary>
                 <div class="order-export-panel">
@@ -1448,6 +1446,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-22"></script>
+    <script src="app.js?v=20261001-23"></script>
 </body>
 </html>
