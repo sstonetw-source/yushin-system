@@ -3066,3 +3066,22 @@ test('receiving list reuses purchasing normalized item snapshot', () => {
     const switchSource=appSource.slice(switchStart,switchEnd);
     assert.match(switchSource,/view === 'receiving'[\s\S]*?renderPoList\(normalizedItemsByOrder, filters\)/);
 });
+
+
+test('receipt allocation counter prevents concurrent retry over-allocation', () => {
+    const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
+    const allocateEnd=appSource.indexOf('\nasync function refreshAffectedOrderCaches',allocateStart);
+    const source=appSource.slice(allocateStart,allocateEnd);
+    assert.match(source,/const receiptRef=receiptId\?db\.collection\('receipts'\)\.doc\(receiptId\):null/);
+    assert.match(source,/receiptRemaining=receiptRef\?Math\.max\(0,receiptTarget-receiptAllocated\):remaining/);
+    assert.match(source,/const take=Math\.min\(remaining,receiptRemaining,liveShortage/);
+    assert.match(source,/autoAllocatedQty:nextAllocated/);
+    assert.match(source,/allocationCompleted:nextAllocated>=receiptTarget/);
+
+    const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptSource=appSource.slice(receiptStart,receiptEnd);
+    assert.match(receiptSource,/autoAllocatedQty:0/);
+    assert.match(receiptSource,/reconciledAllocated=Math\.max\(currentAllocated,alreadyAllocated\)/);
+    assert.match(receiptSource,/freeQty=Math\.max\(0,allocationTarget-reconciledAllocated\)/);
+});
