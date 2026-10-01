@@ -11245,6 +11245,7 @@ function resetQuoteFormForNextOne() {
 // 先在畫面上立即反應（樂觀更新），不用等雲端回應才變色，感覺上會快很多；
 // 如果雲端寫入失敗，才把狀態復原並提示錯誤
 window.toggleOrderStatus = function(orderId, field, newValue) {
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if (field !== 'isBilled') {
         alert('訂貨、到貨與送貨狀態已由 V2 採購／入庫／打單流程自動管理。');
         return;
