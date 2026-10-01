@@ -5313,7 +5313,7 @@ window.clearQuoteHistorySearch = function() {
     renderMyQuotesList();
 };
 
-window.switchQuoteView = function(view, el, options = {}) {window.switchQuoteView = function(view, el, options = {}) {
+window.switchQuoteView = function(view, el, options = {}) {
     const pageKey = view === 'create' ? 'quote.create' : 'quote.my';
     const previousView = document.getElementById('myQuotesPanel')?.style.display === 'block' ? 'my' : 'create';
     if (!options.skipHistory && previousView !== view) pushAppNavigationState({ tabId: 'quote-system', quoteView: view });
