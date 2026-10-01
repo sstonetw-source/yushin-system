@@ -134,6 +134,7 @@ function renderSystemVersionLabel() {
     if (!label) return;
     label.textContent = APP_ASSET_VERSION ? `系統版本 ${APP_ASSET_VERSION}` : '系統版本未標示';
 }
+renderSystemVersionLabel();
 const APP_DATA_CACHE_PREFIX = 'yushin-data-cache:';
 const APP_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
