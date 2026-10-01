@@ -9092,7 +9092,10 @@ async function loadPurchaseOrderPage(reset, options = {}) {
         if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
         receivingSourceOrderStatusCache=nextSourceStatuses;
         receivingSourceOrderCache=nextSourceOrders;
-        if (purchasingView === 'receiving' && nextSourceOrders.size) {
+        // loadPurchasingReceivingQueue() 以 deferRender 平行載入 orders + supply；
+        // 該 caller 會在兩條查詢都完成後再 merge 一次，避免先 merge 後又被較晚完成的 orders refresh 覆蓋。
+        // 單獨「載入更多待到貨」沒有 deferRender，仍在這裡立即 merge。
+        if (!deferRender && purchasingView === 'receiving' && nextSourceOrders.size) {
             mergeReceivingSourceOrdersIntoOrderCache();
         }
         supplyReceivingCache=[...supplyRecords.values()]
