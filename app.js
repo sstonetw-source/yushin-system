@@ -3949,7 +3949,10 @@ window.onOrderItemCodeInput = function(input) {
 
 // 客戶名稱自動完成：僅抓「最近 10 筆」估價單取樣，避免隨估價單累積而讀取量無上限增長
 function loadClientHistory() {
-    return db.collection('quotes').orderBy('quoteNo', 'desc').limit(10).get().then(snapshot => {
+    return firestoreReadWithTimeout(
+        db.collection('quotes').orderBy('quoteNo', 'desc').limit(10).get(),
+        '最近客戶紀錄'
+    ).then(snapshot => {
         const clientListDatalist = document.getElementById('clientList');
         if (!clientListDatalist) return;
 
@@ -4034,7 +4037,10 @@ window.applyCustomerQuotePreferences = async function(customerName) {
     const customerId = customerIdForName(name);
     if (!customerId || !currentUser) return;
     try {
-        const snapshot = await db.collection('customers').doc(customerId).get();
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('customers').doc(customerId).get(),
+            '客戶估價偏好'
+        );
         const fields = snapshot.exists && Array.isArray(snapshot.data()?.quoteOptionalFields)
             ? snapshot.data().quoteOptionalFields
             : [];
@@ -6654,7 +6660,10 @@ window.openInventoryReservationDetails = async function(productKey) {
     if (title) title.innerText = '已占用訂單';
     overlay.classList.add('active');
     try {
-        const snapshot = await db.collection('inventoryReservations').where('productKey', '==', productKey).where('status','==','active').limit(100).get();
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('inventoryReservations').where('productKey', '==', productKey).where('status','==','active').limit(100).get(),
+            '庫存占用明細'
+        );
         const rows = snapshot.docs
             .map(doc => ({ id: doc.id, ...doc.data() }))
             .filter(item => Number(item.quantity || 0) > 0)
