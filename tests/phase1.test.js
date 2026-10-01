@@ -3885,3 +3885,32 @@ test('critical role matrix stays aligned between UI capabilities and Firestore r
     assert.match(equipmentRules,/allow read: if admin\(\) \|\| engineer\(\)/);
     assert.match(equipmentRules,/allow update: if admin\(\) \|\| engineer\(\)/);
 });
+
+
+test('purchase-order PDF paginates rows repeats headers and uses mobile-safe rendering', () => {
+    const pageStart=appSource.indexOf('function createPoPdfPage');
+    const pageEnd=appSource.indexOf('\nfunction paginatePoPdfDocument',pageStart);
+    const pageSource=appSource.slice(pageStart,pageEnd);
+    assert.match(pageSource,/source\.querySelector\('table'\)/);
+    assert.match(pageSource,/thead\.cloneNode\(true\)/);
+    assert.match(pageSource,/document\.createElement\('tbody'\)/);
+
+    const paginateStart=appSource.indexOf('function paginatePoPdfDocument');
+    const paginateEnd=appSource.indexOf('\nasync function printSavedPoDocument',paginateStart);
+    const paginateSource=appSource.slice(paginateStart,paginateEnd);
+    assert.match(paginateSource,/sourceTable\.querySelectorAll\('tbody tr'\)/);
+    assert.match(paginateSource,/current\.page\.scrollHeight > maxHeight/);
+    assert.match(paginateSource,/createPoPdfPage\(stage, source, false\)/);
+    assert.match(paginateSource,/summaryClone/);
+    assert.match(paginateSource,/finalPage\.page\.appendChild\(summaryClone\)/);
+    assert.match(paginateSource,/finalPage\.tbody\.prepend\(candidate\)/);
+    assert.match(paginateSource,/donor\.tbody\.appendChild\(candidate\)/);
+
+    const addStart=appSource.indexOf('async function addDocumentPagesToPdf');
+    const addEnd=appSource.indexOf('\nfunction quotePdfFileName',addStart);
+    const addSource=appSource.slice(addStart,addEnd);
+    assert.match(addSource,/Android\|iPhone\|iPad\|iPod/);
+    assert.match(addSource,/\? 1\.15 : 1\.65/);
+    assert.match(addSource,/canvas\.width = 1/);
+    assert.match(addSource,/canvas\.height = 1/);
+});
