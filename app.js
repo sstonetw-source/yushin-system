@@ -8440,7 +8440,7 @@ window.renderPurchasingView = function() {
     if (purchasingView === 'ordering') renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
     else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder);
     else if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
-    else renderPoList(normalizedItemsByOrder, filters);
+    else renderPoList(normalizedItemsByOrder, filters, dispatchStatesByOrder);
 };
 
 window.changePurchasePeriod = function(value) {
@@ -8499,7 +8499,7 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'receiving') {
-        renderPoList(normalizedItemsByOrder, filters);
+        renderPoList(normalizedItemsByOrder, filters, dispatchStatesByOrder);
         if (!purchasingViewLoaded.has('receiving')) {
             purchasingViewLoaded.add('receiving');
             loadPurchasingReceivingQueue(true, { reuseOrders:true }).catch(err => {
@@ -9217,7 +9217,7 @@ function receivingWorkProgress(order, item) {
     return { target, received:Math.min(target, received), remaining:Math.max(0, target - received), directShip };
 }
 
-function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filterContext = null) {
+function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
     const tbody = document.getElementById('poListBody');
     const head = document.getElementById('poListHeadRow');
     const emptyHint = document.getElementById('poListEmptyHint');
@@ -9237,9 +9237,13 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     const orderById = new Map(ordersCache.map(order => [order.id, order]));
 
     ordersCache.forEach(order => {
-        if (normalizedOrderStatus(order) !== 'normal') return;
-        (normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order)).forEach((item, itemIndex) => {
-            if (!orderItemDisplayCategories(order, item).includes('arrival')) return;
+        const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
+        const lifecycle = orderLifecycleInfo(order, items);
+        if (lifecycle.status !== 'normal') return;
+        const orderDispatchStates = dispatchStatesByOrder?.get(order.id) || null;
+        items.forEach((item, itemIndex) => {
+            const dispatch = orderDispatchStates?.get(item) || itemDispatchState(order, item);
+            if (!orderItemDisplayCategories(order, item, lifecycle, dispatch).includes('arrival')) return;
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
             workCount++;
             const progress = receivingWorkProgress(order, item);
@@ -9334,9 +9338,9 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     }
 }
 
-window.renderPoList = function(normalizedItemsByOrder = null, filterContext = null) {
+window.renderPoList = function(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null) {
     if (purchasingView === 'receiving') {
-        renderPurchasingReceivingWorkList(normalizedItemsByOrder, filterContext);
+        renderPurchasingReceivingWorkList(normalizedItemsByOrder, filterContext, dispatchStatesByOrder);
         updatePoLoadMoreButton();
         return;
     }
