@@ -7508,7 +7508,7 @@ window.setOrderWorkFilter = function(filter) {
     renderOrdersList();
 };
 
-function renderOrderWorkCards(orders, normalizedItemsByOrder = null) {
+function renderOrderWorkCards(orders, normalizedItemsByOrder = null, dispatchStatesByOrder = null) {
     const container = document.getElementById('orderWorkCards');
     if (!container) return;
     const definitions = [
@@ -7523,7 +7523,8 @@ function renderOrderWorkCards(orders, normalizedItemsByOrder = null) {
         orders,
         definitions.map(([key]) => key),
         (order, item, category) => orderMatchesWorkPeriod(order, category),
-        normalizedItemsByOrder
+        normalizedItemsByOrder,
+        dispatchStatesByOrder
     );
     container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
 }
@@ -7996,15 +7997,18 @@ window.renderOrdersList = function() {
             && orderBrandFilterValue(o.brand, selectableBrands) !== brandFilter) return false;
         return true;
     });
-    renderOrderWorkCards(baseOrders, normalizedItemsByOrder);
+    // 工作圖卡與下方訂單列共用同一份 dispatch snapshot；
+    // 每個品項在一次 render 內只掃一次送貨／退貨紀錄。
+    const dispatchStatesByOrder = new Map(baseOrders.map(order => {
+        const items = normalizedItemsByOrder.get(order.id) || [];
+        return [order.id, new Map(items.map(item => [item, itemDispatchState(order, item)]))];
+    }));
+    renderOrderWorkCards(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder);
 
     baseOrders.forEach(o => {
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
         const lifecycle = orderLifecycleInfo(o, allOrderItems);
-        // 同一列每個品項只掃一次送貨／退貨紀錄；篩選、摘要、操作與產品狀態共用。
-        const dispatchStateByItem = new Map(
-            allOrderItems.map(item => [item, itemDispatchState(o, item)])
-        );
+        const dispatchStateByItem = dispatchStatesByOrder.get(o.id) || new Map();
         const displayCategoriesByItem = new Map(
             allOrderItems.map(item => [item, orderItemDisplayCategories(o, item, lifecycle, dispatchStateByItem.get(item))])
         );
