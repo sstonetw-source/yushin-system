@@ -2266,7 +2266,6 @@ async function runForecastHistorySearch(reset = true) {
         forecastHistorySearchResults = [...records.values()].sort(
             (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))
         );
-        renderForecastList();
         updateForecastHistorySearchStatus(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
         if (generation !== forecastHistorySearchGeneration) return;
@@ -5528,7 +5527,6 @@ async function runQuoteHistorySearch() {
         if (generation !== quoteHistorySearchGeneration) return;
         quoteHistorySearchResults = [...records.values()]
             .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
-        renderMyQuotesList();
         updateQuoteHistorySearchUi(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
         if (generation !== quoteHistorySearchGeneration) return;
@@ -7825,7 +7823,6 @@ async function runOrderHistorySearch() {
         if (generation !== orderHistorySearchGeneration) return;
         orderHistorySearchResults = [...records.values()]
             .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'orderDate','id'));
-        renderOrdersList();
         updateOrderHistorySearchUi(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
         if (generation !== orderHistorySearchGeneration) return;
