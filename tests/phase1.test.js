@@ -2920,3 +2920,21 @@ test('forecast and equipment history searches throttle intermediate renders', ()
     assert.match(equipmentSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
     assert.match(equipmentSource,/equipmentSearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderEquipmentList\(\)[\s\S]*?全資料搜尋完成/);
 });
+
+
+test('equipment list reuses filter options and batches row insertion', () => {
+    const filterStart=appSource.indexOf("let equipmentFilterOptionsSignature = ''");
+    const filterEnd=appSource.indexOf('\nwindow.renderEquipmentList',filterStart);
+    const filterSource=appSource.slice(filterStart,filterEnd);
+    assert.match(filterSource,/const signature = JSON\.stringify\(\[canSeeAll, names, brands\]\)/);
+    assert.match(filterSource,/if \(signature !== equipmentFilterOptionsSignature\)/);
+    assert.match(filterSource,/equipmentFilterOptionsSignature = signature/);
+
+    const renderStart=appSource.indexOf('window.renderEquipmentList = function()');
+    const renderEnd=appSource.indexOf('\nfunction escapeHtml',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/const fragment = document\.createDocumentFragment\(\)/);
+    assert.match(renderSource,/fragment\.appendChild\(tr\)/);
+    assert.match(renderSource,/tbody\.appendChild\(fragment\)/);
+    assert.doesNotMatch(renderSource,/tbody\.appendChild\(tr\)/);
+});
