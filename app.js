@@ -1353,10 +1353,14 @@ function updatePendingProductMasterButton() {
     const allowed = canManagePendingProductMaster();
     const pendingButton = document.getElementById('pendingProductMasterBtn');
     const createButton = document.getElementById('createProductMasterBtn');
+    const priceTemplateButton = document.getElementById('productPriceTemplateBtn');
+    const priceUploadButton = document.getElementById('productPriceUploadBtn');
     const costTemplateButton = document.getElementById('productCostTemplateBtn');
     const costUploadButton = document.getElementById('productCostUploadBtn');
     if (pendingButton) pendingButton.style.display = allowed ? '' : 'none';
     if (createButton) createButton.style.display = allowed ? '' : 'none';
+    if (priceTemplateButton) priceTemplateButton.style.display = allowed ? '' : 'none';
+    if (priceUploadButton) priceUploadButton.style.display = allowed ? '' : 'none';
     if (costTemplateButton) costTemplateButton.style.display = allowed ? '' : 'none';
     if (costUploadButton) costUploadButton.style.display = allowed ? '' : 'none';
 }
