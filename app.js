@@ -3291,7 +3291,10 @@ let warehouseMasterLoadPromise = null;
 
 async function loadWarehouseMaster(force = false) {
     if (warehouseMasterLoadPromise && !force) return warehouseMasterLoadPromise;
-    warehouseMasterLoadPromise = db.collection('warehouses').limit(50).get().then(snapshot => {
+    warehouseMasterLoadPromise = firestoreReadWithTimeout(
+        db.collection('warehouses').limit(50).get(),
+        '倉庫主檔'
+    ).then(snapshot => {
         warehouseMasterCache = snapshot.docs
             .map(doc => ({ id: doc.id, ...doc.data() }))
             .filter(item => item.active !== false)
@@ -8455,8 +8458,8 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         updatePoSaveStatus('正在載入供應商與進貨成本…');
         document.getElementById('poModalOverlay').classList.add('active');
 
-        // 視窗先出現，供應商／成本再補齊；重複開單時 preloadPurchaseCosts 會沿用快取。
-        await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCosts([order])]);
+        // 視窗先出現，供應商／成本再補齊；只預載這次訂購單真正選到的品項。
+        await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCostsForItems(items)]);
         if (!document.getElementById('poModalOverlay')?.classList.contains('active')) return;
         pendingItems = pendingPurchaseLines(order);
         items = itemId ? pendingItems.filter(item => item.itemId === itemId) : pendingItems.slice(0, 1);
@@ -9881,12 +9884,15 @@ window.generatePoNo = async function() {
     updatePoSaveButton();
 
     try {
-        const snapshot = await db.collection('purchaseOrders')
-            .where('poNo', '>=', prefix)
-            .where('poNo', '<=', prefix + '\uf8ff')
-            .orderBy('poNo', 'desc')
-            .limit(1)
-            .get();
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('purchaseOrders')
+                .where('poNo', '>=', prefix)
+                .where('poNo', '<=', prefix + '\uf8ff')
+                .orderBy('poNo', 'desc')
+                .limit(1)
+                .get(),
+            '訂購單號'
+        );
 
         // 使用者可能在查詢尚未回來時切換公司、關閉視窗或開啟另一張單。
         // 舊查詢結果不得再覆蓋目前畫面。
@@ -13935,7 +13941,10 @@ async function findProductForPurchaseItem(item) {
         const cached = priceList.find(product => String(product.productId || '') === productId);
         if (cached) return cached;
         try {
-            const snap = await db.collection('products').doc(productId).get();
+            const snap = await firestoreReadWithTimeout(
+                db.collection('products').doc(productId).get(),
+                '採購 Product Master'
+            );
             if (snap.exists) {
                 const product = productMasterDocToPriceItem(snap);
                 if (product.status !== 'INACTIVE' && product.active !== false) return cacheProductLookupItem(product);
@@ -13948,12 +13957,10 @@ async function findProductForPurchaseItem(item) {
     return code ? await findProductByCode(code) : null;
 }
 
-async function preloadPurchaseCosts(orders) {
-    // 不要每次開訂購單都把已解析的成本快取清空。
-    // productCosts 本身另有「角色＋productId」快取；這裡保留本次登入期間已解析結果，
-    // 讓第二次以後開啟訂購單不必重跑同一批 Product Master / 成本讀取。
-    const purchaseItems = (orders || []).flatMap(order => purchaseItemsFromOrder(order));
-    const resolved = await Promise.all(purchaseItems.map(async item => ({
+async function preloadPurchaseCostsForItems(purchaseItems = []) {
+    // 只解析這次訂購單真正會用到的品項；不要因來源訂單還有其他品項就全部查 Product Master / 成本。
+    // 已解析成本仍保留在本次登入快取，第二次開同品項不再重查。
+    const resolved = await Promise.all((purchaseItems || []).map(async item => ({
         item,
         product: await findProductForPurchaseItem(item)
     })));
@@ -13968,6 +13975,11 @@ async function preloadPurchaseCosts(orders) {
         const cost = await loadVisibleProductCost(item);
         if (cost !== null && Number.isFinite(cost)) purchaseCostCache.set(id, cost);
     }));
+}
+
+async function preloadPurchaseCosts(orders) {
+    const purchaseItems = (orders || []).flatMap(order => purchaseItemsFromOrder(order));
+    return preloadPurchaseCostsForItems(purchaseItems);
 }
 
 
@@ -14006,7 +14018,10 @@ async function loadVisibleProductCost(item) {
     const cacheKey = `${currentUserRole || ''}||${productId}`;
     if (visibleProductCostCache.has(cacheKey)) return visibleProductCostCache.get(cacheKey);
     try {
-        const doc = await db.collection('productCosts').doc(productId).get();
+        const doc = await firestoreReadWithTimeout(
+            db.collection('productCosts').doc(productId).get(),
+            '產品成本'
+        );
         if (!doc.exists) {
             visibleProductCostCache.set(cacheKey, null);
             return null;
@@ -15473,7 +15488,7 @@ async function readCollectionInBatches(collectionName, batchSize = 500) {
     while (true) {
         let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(batchSize);
         if (cursor) query = query.startAfter(cursor);
-        const snap = await query.get();
+        const snap = await firestoreReadWithTimeout(query.get(), collectionName + ' 批次資料');
         snap.forEach(doc => rows.push({ id:doc.id, ...doc.data() }));
         if (snap.size < batchSize) break;
         cursor = snap.docs[snap.docs.length - 1];
@@ -15487,7 +15502,7 @@ async function readQueryInBatches(baseQuery, batchSize = 500) {
     while (true) {
         let query = baseQuery.limit(batchSize);
         if (cursor) query = query.startAfter(cursor);
-        const snap = await query.get();
+        const snap = await firestoreReadWithTimeout(query.get(), '批次查詢資料');
         snap.forEach(doc => rows.push({ id:doc.id, ...doc.data() }));
         if (snap.size < batchSize) break;
         cursor = snap.docs[snap.docs.length - 1];
