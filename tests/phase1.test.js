@@ -2426,3 +2426,16 @@ test('inventory initialization avoids duplicate brand-driven render', () => {
     assert.match(source,/loadInventory\(true\)/);
     assert.doesNotMatch(source,/loadBrandMaster\(\)\.then\(renderInventoryList\)/);
 });
+
+
+test('purchasing order refresh updates cache without duplicate render', () => {
+    const orderStart=appSource.indexOf('async function loadOrderPage');
+    const orderEnd=appSource.indexOf('\nwindow.loadOrdersFromCloud',orderStart);
+    const orderSource=appSource.slice(orderStart,orderEnd);
+    assert.match(orderSource,/if \(!options\.skipRender\) \{[\s\S]*?renderOrdersList\(\)[\s\S]*?renderPurchasingWorkCards\(\)/);
+
+    const refreshStart=appSource.indexOf('function refreshPurchasingOrderCache');
+    const refreshEnd=appSource.indexOf('\nfunction purchasingArrivalWorkKeys',refreshStart);
+    const refreshSource=appSource.slice(refreshStart,refreshEnd);
+    assert.match(refreshSource,/loadOrderPage\(reset, \{ silent: true, skipRender: true \}\)/);
+});
