@@ -9496,6 +9496,8 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
     });
 
 
+    tbody.appendChild(fragment);
+
     const emptyHint = document.getElementById('poListEmptyHint');
     if (emptyHint) {
         emptyHint.style.display = shown === 0 ? 'block' : 'none';
