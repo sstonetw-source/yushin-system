@@ -3521,3 +3521,25 @@ test('purchasing background refresh reuses painted rows while preserving loading
     const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
     assert.match(dispatchSource,/if \(options\.reuseOrders\) \{[\s\S]*?purchaseDispatchStatus[\s\S]*?載入中…/);
 });
+
+
+test('receiving parallel refresh preserves older source orders', () => {
+    const helperStart=appSource.indexOf('function mergeReceivingSourceOrdersIntoOrderCache()');
+    const helperEnd=appSource.indexOf('\nasync function loadPurchaseOrderPage',helperStart);
+    const helperSource=appSource.slice(helperStart,helperEnd);
+    assert.match(helperSource,/receivingSourceOrderCache\.forEach/);
+    assert.match(helperSource,/new Map\(ordersCache\.map\(order => \[order\.id, order\]\)\)/);
+    assert.match(helperSource,/writeAppDataCache\('orders', ordersCache\)/);
+
+    const loaderStart=appSource.indexOf('async function loadPurchaseOrderPage');
+    const loaderEnd=appSource.indexOf('\nwindow.loadMyPurchaseOrders',loaderStart);
+    const loaderSource=appSource.slice(loaderStart,loaderEnd);
+    assert.match(loaderSource,/receivingSourceOrderCache=nextSourceOrders/);
+    assert.match(loaderSource,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
+
+    const queueStart=appSource.indexOf('function loadPurchasingReceivingQueue');
+    const queueEnd=appSource.indexOf('\nlet purchasingFilterOptionsSignature',queueStart);
+    const queueSource=appSource.slice(queueStart,queueEnd);
+    assert.match(queueSource,/Promise\.allSettled/);
+    assert.match(queueSource,/mergeReceivingSourceOrdersIntoOrderCache\(\)[\s\S]*?renderPurchasingView\(\)/);
+});
