@@ -1536,7 +1536,9 @@ window.searchProductManagement = async function() {
         const map = new Map();
         [...(codeSnap.docs || []), ...(nameSnap.docs || [])].forEach(doc => {
             const data = { id: doc.id, ...doc.data() };
-            if (data.status !== 'INACTIVE') map.set(doc.id, data);
+            if (canManagePendingProductMaster() || (data.status !== 'INACTIVE' && data.active !== false)) {
+                map.set(doc.id, data);
+            }
         });
         productManagementResults = [...map.values()].slice(0, 50);
         renderProductManagementResults();
@@ -1615,8 +1617,13 @@ function populateProductMasterEditor(product = {}, options = {}) {
     document.getElementById('pmEditProductId').value = product.productId || product.id || '';
     document.getElementById('pmEditCreatedAt').value = product.createdAt || '';
     document.getElementById('pmEditSource').value = source;
-    document.getElementById('pmEditBrand').value = product.brandName || product.brand || options.brand || '';
-    document.getElementById('pmEditCode').value = product.manufacturerPartNo || product.sku || options.itemCode || '';
+    const existingIdentity = !!(product.productId || product.id);
+    const brandInput = document.getElementById('pmEditBrand');
+    const codeInput = document.getElementById('pmEditCode');
+    brandInput.value = product.brandName || product.brand || options.brand || '';
+    codeInput.value = product.manufacturerPartNo || product.sku || options.itemCode || '';
+    brandInput.disabled = existingIdentity;
+    codeInput.disabled = existingIdentity;
     document.getElementById('pmEditNameCn').value = product.productName || product.nameCn || options.itemName || '';
     document.getElementById('pmEditNameEn').value = product.nameEn || '';
     document.getElementById('pmEditSpec').value = product.specification || product.spec || '';
@@ -1633,7 +1640,8 @@ function populateProductMasterEditor(product = {}, options = {}) {
     document.getElementById('pmEditExpiryTracked').checked = product.expiryTracked === true;
     document.getElementById('productMasterEditorTitle').textContent = product.productId || product.id ? '編輯 Product Master' : '建立 Product Master';
     document.getElementById('pmEditMeta').textContent =
-        `來源：${source || 'MANUAL'}${product.updatedAt ? '　最後更新：' + product.updatedAt : ''}`;
+        `來源：${source || 'MANUAL'}${product.updatedAt ? '　最後更新：' + product.updatedAt : ''}`
+        + (existingIdentity ? '　｜　廠牌與原廠貨號為產品身分；如貨號變更請建立新產品。' : '');
     overlay.classList.add('active');
 }
 
@@ -1662,6 +1670,10 @@ window.openPendingProductMasterEditor = function(index) {
 
 window.closeProductMasterEditor = function() {
     document.getElementById('productMasterEditorOverlay')?.classList.remove('active');
+    const brandInput = document.getElementById('pmEditBrand');
+    const codeInput = document.getElementById('pmEditCode');
+    if (brandInput) brandInput.disabled = false;
+    if (codeInput) codeInput.disabled = false;
 };
 
 window.saveProductMasterEditor = async function() {
