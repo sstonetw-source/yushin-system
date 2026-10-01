@@ -2708,3 +2708,12 @@ test('remaining interactive Firestore reads are bounded', () => {
     const equipmentSource=appSource.slice(equipmentStart,equipmentEnd);
     assert.match(equipmentSource,/firestoreReadWithTimeout\([\s\S]*?儀器單筆資料/);
 });
+
+
+test('completed purchasing load-more avoids double render after fetching', () => {
+    const start=appSource.indexOf('window.loadMorePurchasingCompleted = async function()');
+    const end=appSource.indexOf('\nwindow.renderPurchasingView',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/await loadPurchasingDispatchOrders\(false\);\s*return;/);
+    assert.match(source,/renderPurchasingCompletedOrders\(loadedRows\)/);
+});
