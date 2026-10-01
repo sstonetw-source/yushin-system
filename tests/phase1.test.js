@@ -3417,3 +3417,25 @@ test('purchasing work queues share one dispatch snapshot per render', () => {
     assert.match(pendingRenderSource,/dispatchStatesByOrder = null/);
     assert.match(pendingRenderSource,/dispatchStatesByOrder\?\.get\(order\.id\)/);
 });
+
+
+test('order work cards and rows share lifecycle snapshots', () => {
+    const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
+    const metricsEnd=appSource.indexOf('\nwindow.setOrderWorkFilter',metricsStart);
+    const metricsSource=appSource.slice(metricsStart,metricsEnd);
+    assert.match(metricsSource,/lifecyclesByOrder = null/);
+    assert.match(metricsSource,/lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo\(order, items\)/);
+
+    const cardsStart=appSource.indexOf('function renderOrderWorkCards');
+    const cardsEnd=appSource.indexOf('\nfunction createOrderPaginationState',cardsStart);
+    const cardsSource=appSource.slice(cardsStart,cardsEnd);
+    assert.match(cardsSource,/lifecyclesByOrder = null/);
+    assert.match(cardsSource,/dispatchStatesByOrder,[\s\S]*?lifecyclesByOrder/);
+
+    const listStart=appSource.indexOf('window.renderOrdersList = function()');
+    const listEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',listStart);
+    const listSource=appSource.slice(listStart,listEnd);
+    assert.match(listSource,/const lifecyclesByOrder = new Map\(baseOrders\.map/);
+    assert.match(listSource,/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(listSource,/const lifecycle = lifecyclesByOrder\.get\(o\.id\) \|\| orderLifecycleInfo\(o, allOrderItems\)/);
+});
