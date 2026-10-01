@@ -432,3 +432,36 @@ test('purchaser and warehouse may persist direct-ship delivery summary only with
     invoiceTitle:'Changed'
   }));
 });
+
+
+test("business owner cannot take over another user's reservation", async () => {
+  await seed('inventoryReservations/res-owned-sales2', {
+    ownerUid:'sales2', salesCode:'S02', orderId:'o2', itemId:'i1',
+    productKey:'p1', quantity:1, shortageQty:0, status:'active'
+  });
+
+  await assertFails(updateDoc(doc(db('sales1'), 'inventoryReservations/res-owned-sales2'), {
+    ownerUid:'sales1',
+    salesCode:'S01',
+    quantity:99
+  }));
+});
+
+test('business owner may update own reservation without changing ownership', async () => {
+  await seed('inventoryReservations/res-owned-sales1', {
+    ownerUid:'sales1', salesCode:'S01', orderId:'o1', itemId:'i1',
+    productKey:'p1', quantity:2, shortageQty:1, status:'active'
+  });
+
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventoryReservations/res-owned-sales1'), {
+    quantity:1,
+    shortageQty:2,
+    status:'active',
+    updatedAt:'2026-10-01T00:00:00Z'
+  }));
+
+  await assertFails(updateDoc(doc(db('sales1'), 'inventoryReservations/res-owned-sales1'), {
+    ownerUid:'sales2',
+    salesCode:'S02'
+  }));
+});
