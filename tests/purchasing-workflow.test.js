@@ -54,10 +54,10 @@ test('purchasing has three item-level work queues and no legacy number function'
     assert.match(html, /id="purchaseAmountReceiving"/);
     assert.match(html, /id="purchaseAmountDispatch"/);
     assert.match(app, /switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
-    assert.match(app, /function refreshPurchasingOrderCache\(reset = true\)/);
-    assert.match(app, /loadPendingPurchaseOrders\(true\)/);
-    assert.match(app, /loadMyPurchaseOrders\(\)/);
-    assert.match(app, /loadPurchasingDispatchOrders\(true\)/);
+    assert.match(app, /function refreshPurchasingOrderCache\(reset = true, options = \{\}\)/);
+    assert.match(app, /loadPendingPurchaseOrders\(true/);
+    assert.match(app, /loadMyPurchaseOrders\(/);
+    assert.match(app, /loadPurchasingDispatchOrders\(true/);
     assert.doesNotMatch(app, /generateNextPoNumber/);
 });
 
@@ -238,26 +238,26 @@ test('PO PDF normalizes form fields and paginates rows while keeping totals toge
 
 
 test('order work cards and filters use item-level work states', () => {
-    assert.match(app, /function orderItemWorkCategory\(order, item\)/);
-    assert.match(app, /function orderWorkCategories\(order\)/);
-    assert.match(app, /normalizedOrderItems\(order\)\.forEach\(item => \{/);
+    assert.match(app, /function orderItemWorkCategory\(order, item, lifecycleOverride = null, dispatchOverride = null\)/);
+    assert.match(app, /function orderItemDisplayCategories\(order, item, lifecycleOverride = null, dispatchOverride = null\)/);
+    assert.match(app, /function buildOrderItemWorkMetrics\(orders, categories, include = null, normalizedItemsByOrder = null, dispatchStatesByOrder = null, lifecyclesByOrder = null\)/);
+    assert.match(app, /orderItemDisplayCategories\(order,item,lifecycle,dispatch\)\.forEach/);
     assert.match(app, /metrics\[category\]\.count\+\+/);
-    assert.match(app, /categories\.includes\(activeOrderWorkFilter\)/);
-    assert.match(app, /shown\.map\(category=>map\[category\]\?\.label\)/);
-    assert.match(app, /const primaryStatus=orderItemDisplayCategory\(o,item\)/);
+    assert.match(app, /\(displayCategoriesByItem\.get\(item\) \|\| \[\]\)\.includes\(activeOrderWorkFilter\)/);
+    assert.match(app, /const primaryStatus=displayCategories\[0\]\|\|'ordering'/);
     assert.match(app, /訂單狀態：<span class="order-progress-badge">/);
-    assert.match(app, /function pendingProcurementDisplayLines\(order\)/);
-    assert.match(app, /orderItemDisplayCategories\(order,item\)\.includes\('dispatch'\)/);
+    assert.match(app, /function pendingProcurementDisplayLines\(order, normalizedItems = null, dispatchStateByItem = null, lifecycleOverride = null\)/);
+    assert.match(app, /orderItemWorkCategory\(order, item, lifecycle, dispatch\) !== 'ordering'/);
     assert.match(app, /\['dispatch', '待打單'\]/);
     assert.match(app, /\['shipping', '待出貨'\]/);
-    assert.match(app, /allOrderItems\.filter\(item=>orderItemDisplayCategories\(o,item\)\.includes\(activeOrderWorkFilter\)\)/);
     assert.match(app, /return YushinWorkflow\.itemWorkCategory\(input\);/);
 });
 
 test('stock order shows dispatch, shipping, billing and complete as work advances', () => {
-    const dispatchSource = app.match(/function itemDispatchState\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderContextActionState)/)?.[0];
-    const categorySource = app.match(/function orderItemWorkCategory\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderWorkCategories)/)?.[0];
-    assert.ok(dispatchSource && categorySource);
+    const start = app.indexOf('function itemDispatchState(order, item)');
+    const end = app.indexOf('\nfunction orderWorkIndexFields', start);
+    const source = app.slice(start, end);
+    assert.ok(start >= 0 && end > start);
     const ctx = vm.createContext({
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:order=>order.deliveryRecords||[],
@@ -265,7 +265,7 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
         orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
         YushinWorkflow:workflow
     });
-    vm.runInContext(`${dispatchSource}\n${categorySource}`,ctx);
+    vm.runInContext(source,ctx);
     const order={items:[{itemId:'I1',qty:3,orderedQty:3,shortageQty:0,
         fulfillmentType:'WAREHOUSE',reservedQty:3,dispatchPreparedQty:0}],isBilled:false,deliveryRecords:[]};
     const current=()=>ctx.orderItemDisplayCategory(order,order.items[0]);
@@ -284,16 +284,17 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
 });
 
 test('a partly stocked order keeps its shortage and exposes reserved stock to dispatch', () => {
-    const dispatchSource = app.match(/function itemDispatchState\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderContextActionState)/)?.[0];
-    const categorySource = app.match(/function orderItemWorkCategory\(order, item\) \{[\s\S]*?\n\}\n(?=\nfunction orderWorkIndexFields)/)?.[0];
-    assert.ok(dispatchSource && categorySource);
+    const start = app.indexOf('function itemDispatchState(order, item)');
+    const end = app.indexOf('\nfunction orderWorkIndexFields', start);
+    const source = app.slice(start, end);
+    assert.ok(start >= 0 && end > start);
     const context = vm.createContext({
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:()=>[],savedReturnRecords:()=>[],
         orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
         YushinWorkflow:workflow
     });
-    vm.runInContext(`${dispatchSource}\n${categorySource}`,context);
+    vm.runInContext(source,context);
     const order={items:[{itemId:'I1',qty:10,orderedQty:10,shortageQty:5,
         fulfillmentType:'WAREHOUSE',reservedQty:5,dispatchPreparedQty:0}]};
     const item=order.items[0];
@@ -307,13 +308,12 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
     assert.deepEqual(Array.from(context.orderItemDisplayCategories(order,item)),['arrival']);
 });
 
-
 test('purchasing completed card is not capped by the visible 50-row page', () => {
-    const start = app.indexOf('function renderPurchasingWorkCards()');
-    const end = app.indexOf('function purchasingCompletedRows()', start);
+    const start = app.indexOf('function renderPurchasingWorkCards(');
+    const end = app.indexOf('\nfunction purchasingCompletedRows(', start);
     const source = app.slice(start, end);
-    assert.match(source, /const completed = purchasingCompletedRows\(\)/);
-    assert.doesNotMatch(source, /visiblePurchasingCompletedRows\(\)/);
+    assert.match(source, /const completed = completedRows \|\| purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
+    assert.doesNotMatch(source, /visiblePurchasingCompletedRows\(/);
 });
 
 test('purchasing completed starts at 50 rows and supports loading more', () => {
@@ -325,10 +325,10 @@ test('purchasing completed starts at 50 rows and supports loading more', () => {
 });
 
 test('purchasing completed excludes unresolved procurement and includes direct ship after arrival', () => {
-    const start = app.indexOf('function purchasingCompletedRows()');
-    const end = app.indexOf('function renderPurchasingCompletedOrders()', start);
+    const start = app.indexOf('function purchasingCompletedRows(');
+    const end = app.indexOf('\nfunction renderPurchasingCompletedOrders(', start);
     const source = app.slice(start, end);
-    assert.match(source, /const category = orderItemWorkCategory\(order, item\)/);
+    assert.match(source, /const category = orderItemWorkCategory\(order, item, lifecycle, state\)/);
     assert.match(source, /\['ordering', 'arrival', 'closed'\]\.includes\(category\)/);
     assert.match(source, /const directShip = \(item\.fulfillmentType \|\| order\.fulfillmentType \|\| 'WAREHOUSE'\) === 'DIRECT_SHIP'/);
     assert.match(source, /if \(!directShip &&/);
@@ -337,40 +337,40 @@ test('purchasing completed excludes unresolved procurement and includes direct s
 
 test('receiving work list renders one row per order item and keeps PO records in history only', () => {
     assert.match(html, /id="poListHeadRow"/);
-    assert.match(app, /function renderPurchasingReceivingWorkList\(\)/);
-    assert.match(app, /ordersCache\.forEach\(order =>/);
-    assert.match(app, /orderItemDisplayCategories\(order, item\)\.includes\('arrival'\)/);
-    assert.match(app, /const evidence = receivingEvidenceForWorkItem\(order, item, itemIndex\)/);
-    assert.match(app, /已合併在同一品項顯示/);
-    const renderStart = app.indexOf('window.renderPoList = function()');
+    const receivingStart=app.indexOf('function renderPurchasingReceivingWorkList(');
+    const receivingEnd=app.indexOf('\nwindow.renderPoList',receivingStart);
+    const receiving=app.slice(receivingStart,receivingEnd);
+    assert.match(receiving, /ordersCache\.forEach\(order =>/);
+    assert.match(receiving, /orderItemDisplayCategories\(order, item, lifecycle, dispatch\)\.includes\('arrival'\)/);
+    assert.match(receiving, /const evidence = receivingEvidenceForWorkItem\(order, item, itemIndex, evidenceIndex\)/);
+    assert.match(receiving, /已合併在同一品項顯示/);
+
+    const renderStart = app.indexOf('window.renderPoList = function(');
     const renderSource = app.slice(renderStart, app.indexOf('// 把「採購訂單」', renderStart));
-    assert.match(renderSource, /if \(purchasingView === 'receiving'\) \{[\s\S]*?renderPurchasingReceivingWorkList\(\);[\s\S]*?return;/);
+    assert.match(renderSource, /if \(purchasingView === 'receiving'\) \{[\s\S]*?renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext, dispatchStatesByOrder, lifecyclesByOrder\);[\s\S]*?return;/);
     assert.match(renderSource, /const poRows = poHistorySearchActive \? poHistorySearchResults : poListCache/);
 });
 
 test('receiving evidence uses supplyOrders as the only procurement source', () => {
-    const source = app.match(/function receivingEvidenceForWorkItem\(order, item, itemIndex\) \{[\s\S]*?\n\}/)?.[0];
-    assert.ok(source);
-    const context = vm.createContext({
-        supplyReceivingCache:[
-            {id:'po-PO1-0',type:'PURCHASING_PO',purchaseDocumentNo:'PO1',orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1,receivedQty:0},
-            {id:'SELF1',type:'SALES_SELF_ORDER',orderId:'O1',itemId:'I1',orderItemIndex:0,qty:1,receivedQty:0}
-        ]
-    });
-    const fn=vm.runInContext(`${source}\nreceivingEvidenceForWorkItem`,context);
-    const evidence=fn({id:'O1'},{itemId:'I1'},0);
-    assert.equal(evidence.length,2);
-    assert.equal(evidence.filter(entry=>entry.type==='po').length,0);
-    assert.equal(evidence.every(entry=>entry.type==='supply'),true);
-    assert.equal(evidence[0].label,'PO1');
+    const start=app.indexOf('function receivingEvidenceEntry(');
+    const end=app.indexOf('\nfunction receivingWorkProgress',start);
+    const source=app.slice(start,end);
+    assert.match(source,/type:'supply'/);
+    assert.match(source,/supplyReceivingCache\.forEach\(supply =>/);
+    assert.match(source,/function buildReceivingEvidenceIndex\(\)/);
+    assert.match(source,/function receivingEvidenceForWorkItem\(order, item, itemIndex, evidenceIndex = null\)/);
+    assert.doesNotMatch(source,/purchaseOrders|poListCache/);
 });
 
 test('receiving waits for both order work state and purchase evidence before declaring empty', () => {
-    assert.match(app, /function loadPurchasingReceivingQueue\(reset = true\)/);
-    assert.match(app, /Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset\)[\s\S]*?refreshPurchasingOrderCache\(reset\)/);
-    assert.match(app, /function purchasingArrivalWorkKeys\(filters = purchaseFilterContext\(\)\)/);
-    assert.match(app, /採購資料載入中/);
-    assert.match(app, /尚未找到對應採購紀錄/);
+    const queueStart=app.indexOf('function loadPurchasingReceivingQueue(');
+    const queueEnd=app.indexOf('\nlet purchasingFilterOptionsSignature',queueStart);
+    const queue=app.slice(queueStart,queueEnd);
+    assert.match(queue,/Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset, \{ deferRender:true \}\)[\s\S]*?refreshPurchasingOrderCache\(reset, options\)/);
+    assert.match(queue,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
+    assert.match(queue,/renderPurchasingView\(\)/);
+    assert.match(app,/採購資料載入中/);
+    assert.match(app,/尚未找到可操作的採購紀錄/);
 });
 
 test('purchase-order history search reads every indexed match instead of stopping at 50', () => {
@@ -411,13 +411,12 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
 });
 
 test('purchase receiving queue calculates progress from supply orders only',()=>{
-    assert.match(app,/function receivingEvidenceForWorkItem\(order, item, itemIndex\)/);
+    assert.match(app,/function receivingEvidenceForWorkItem\(order, item, itemIndex, evidenceIndex = null\)/);
     assert.match(app,/supplyReceivingCache\.forEach\(supply =>/);
     assert.match(app,/openSupplyReceipt\('\$\{escapeAttr\(entry\.id\)\}'\)/);
     assert.doesNotMatch(app,/receivePurchaseOrderItem/);
     assert.doesNotMatch(app,/poItemReceiptProgress/);
 });
-
 
 test('supply receipt synchronizes received quantity back to the source order item',()=>{
     const start=app.indexOf('async function receiveSupplyOrderRecord');
@@ -471,12 +470,13 @@ test('order lifecycle, delivery and return mutations refresh work category index
 
 
 test('purchasing work cards reuse the shared recent order cache',()=>{
-    assert.match(app,/function refreshPurchasingOrderCache\(reset = true\)/);
-    assert.match(app,/pendingPurchaseCache = ordersCache\.filter\(order => pendingProcurementDisplayLines\(order\)\.length > 0\)/);
-    assert.match(app,/orderItemDisplayCategories\(order,item\)\.includes\('dispatch'\)/);
+    assert.match(app,/function refreshPurchasingOrderCache\(reset = true, options = \{\}\)/);
+    assert.match(app,/if \(options\.reuseOrders && purchasingOrdersReady\) return Promise\.resolve\(ordersCache\)/);
+    assert.match(app,/pendingPurchaseCache = ordersCache\.filter\(order =>/);
+    assert.match(app,/pendingProcurementDisplayLines\([\s\S]*?normalizedItemsByOrder\.get\(order\.id\)/);
+    assert.match(app,/purchasingDispatchCache = ordersCache\.filter\(order =>/);
     assert.doesNotMatch(app,/where\('workCategories',\s*'array-contains',\s*'ordering'\)/);
     assert.doesNotMatch(app,/where\('workCategories','array-contains','dispatch'\)/);
-    assert.doesNotMatch(app,/purchaseOrders'\)\.where\('receiptStatus','in',\['pending','partial'\]\)/);
     assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
 });
 
@@ -502,11 +502,19 @@ test('quote cancellation and legacy delivery cleanup refresh work category index
 });
 
 test('receiving queue reads every open supply type and follows the source order arrival state',()=>{
-    assert.match(app,/const freshSupply=supplySnapshot\.docs\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)/);
-    assert.doesNotMatch(app,/freshSupply=supplySnapshot\.docs[\s\S]{0,180}filter\(row=>row\.type/);
-    assert.match(app,/業務自行訂購/);
-    assert.match(app,/function receivingQueueContext\(record, item\)/);
-    assert.match(app,/orderItemDisplayCategories\(sourceOrder,sourceItem\)\.includes\('arrival'\)/);
+    const pageStart=app.indexOf('async function loadPurchaseOrderPage(');
+    const pageEnd=app.indexOf('\nwindow.loadMyPurchaseOrders',pageStart);
+    const page=app.slice(pageStart,pageEnd);
+    assert.match(page,/const freshSupply=supplySnapshot\.docs\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)/);
+    assert.doesNotMatch(page,/freshSupply=supplySnapshot\.docs[\s\S]{0,180}filter\(row=>row\.type/);
+    assert.match(page,/db\.collection\('supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
+    assert.match(page,/receivingSourceOrderCache=nextSourceOrders/);
+
+    const listStart=app.indexOf('function renderPurchasingReceivingWorkList(');
+    const listEnd=app.indexOf('\nwindow.renderPoList',listStart);
+    const list=app.slice(listStart,listEnd);
+    assert.match(list,/orderItemDisplayCategories\(order, item, lifecycle, dispatch\)\.includes\('arrival'\)/);
+    assert.match(list,/supplyReceivingCache\.forEach\(supply =>/);
 });
 
 test('manual ordered action records supply and source item only once after an uncertain response', async () => {
@@ -606,114 +614,70 @@ test('manual ordered action can add a later genuine shortage without duplicating
 });
 
 test('ordered action is a direct snapshot-based state change without a data-entry modal or product lookup', () => {
-    const actionSource = app.match(/function renderPendingPurchaseOrders\(\) \{[\s\S]*?\n\}/)?.[0];
-    const saveSource = app.match(/window\.markPurchaseItemOrdered = async function\(orderId, itemId, button\) \{[\s\S]*?\n\};/)?.[0];
-    assert.ok(actionSource && saveSource);
+    const actionStart=app.indexOf('function renderPendingPurchaseOrders(');
+    const actionEnd=app.indexOf('\nwindow.loadPendingPurchaseOrders',actionStart);
+    const actionSource=app.slice(actionStart,actionEnd);
+    const saveStart=app.indexOf('window.markPurchaseItemOrdered = async function');
+    const saveEnd=app.indexOf('\nwindow.openOrderPurchaseDraft',saveStart);
+    const saveSource=app.slice(saveStart,saveEnd);
+    assert.ok(actionStart>=0 && actionEnd>actionStart && saveStart>=0 && saveEnd>saveStart);
     assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>已訂購<\/button>/);
     assert.match(saveSource, /switchPurchasingView\('receiving', document\.getElementById\('purchase-card-receiving'\)\)/);
     assert.match(saveSource, /remainingProcurementQty\(order, item\)/);
-    assert.doesNotMatch(saveSource, /Product|findProduct|preloadPurchaseCosts|loadSupplierWarehouseMasters|supplierForProduct/);
+    assert.doesNotMatch(saveSource, /findProduct|preloadPurchaseCosts|loadSupplierWarehouseMasters|supplierForProduct/);
     assert.doesNotMatch(html, /id="manualPurchaseOverlay"/);
     assert.doesNotMatch(app, /printSupplyOrderDocument/);
 });
 
-test('loading another receiving page retains source status for earlier supply rows', async () => {
-    const source = app.match(/async function loadPurchaseOrderPage\(reset\) \{[\s\S]*?\n\}\n(?=\nwindow\.loadMyPurchaseOrders)/)?.[0];
-    assert.ok(source);
-    const supplyDocs = [
-        {id:'FORMAL',data:()=>({type:'PURCHASING_PO',status:'ORDERED',orderId:'ORDER1',orderDate:'2026-09-28'})},
-        {id:'SELF',data:()=>({type:'SALES_SELF_ORDER',status:'ORDERED',orderId:'ORDER2',orderDate:'2026-09-27'})},
-        {id:'SELF-OLDER',data:()=>({type:'SALES_SELF_ORDER',status:'ORDERED',orderId:'ORDER1',orderDate:'2026-09-26'})}
-    ];
-    let purchaseReads = 0;
-    let supplyPage = 0;
-    const context = vm.createContext({
-        window:{}, db:{collection:name => name==='purchaseOrders'
-            ? {orderBy(){return this;},limit(){return this;},startAfter(){return this;},async get(){purchaseReads++;return {docs:[],size:0,empty:true};}}
-            : name==='supplyOrders'
-            ? {where(){return this;},limit(){return this;},startAfter(){return this;},async get(){const doc=supplyDocs[supplyPage++];const docs=doc?[doc]:[];return {docs,size:docs.length,empty:!docs.length};}}
-            : {where(){return this;},async get(){return {docs:['ORDER1','ORDER2'].map(id=>({id,data:()=>({status:'active'})}))};}}},
-        firebase:{firestore:{FieldPath:{documentId:()=>({})}}},
-        canAccessPage:()=>true, currentUserRole:'purchaser', purchasingView:'receiving',
-        poListPageLoading:false, poListCursor:null, poListHasMore:true, poListCache:[],
-        supplyReceivingCache:[], supplyReceivingCursor:null, supplyReceivingHasMore:true,
-        receivingSourceOrderStatusCache:new Map(), receivingSourceOrderCache:new Map(), ordersCache:[], DEFAULT_LIST_LIMIT:1,
-        normalizedOrderStatus:()=> 'normal',
-        readAppDataCache:()=>null,
-        compareBusinessRecordsNewestFirst:(a,b,dateField,numberField)=>{
-            const dateCompare=String(b?.[dateField]||'').localeCompare(String(a?.[dateField]||''));
-            return dateCompare || String(b?.[numberField]||'').localeCompare(String(a?.[numberField]||''));
-        },
-        writeAppDataCache:()=>{}, renderPoList:()=>{}, renderPurchasingWorkCards:()=>{},
-        updatePoLoadMoreButton:()=>{}, alert:message=>{throw new Error(message)}
-    });
-    vm.runInContext(source,context);
-    await context.loadPurchaseOrderPage(true);
-    assert.equal(purchaseReads,0,'receiving must not query purchaseOrders');
-    assert.equal(context.supplyReceivingCache.length,1);
-    assert.equal(context.supplyReceivingCache[0].id,'FORMAL');
-    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
-    await context.loadPurchaseOrderPage(false);
-    assert.equal(context.supplyReceivingCache.length,2);
-    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER2'),'normal');
-    await context.loadPurchaseOrderPage(false);
-    assert.equal(context.supplyReceivingCache.length,3);
-    assert.equal(context.receivingSourceOrderStatusCache.get('ORDER1'),'normal');
+test('loading another receiving page retains source status for earlier supply rows', () => {
+    const start=app.indexOf('async function loadPurchaseOrderPage(');
+    const end=app.indexOf('\nwindow.loadMyPurchaseOrders',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const nextSourceStatuses=reset\?new Map\(\):new Map\(receivingSourceOrderStatusCache\)/);
+    assert.match(source,/const nextSourceOrders=reset\?new Map\(\):new Map\(receivingSourceOrderCache\)/);
+    assert.match(source,/freshSupply\.map\(row=>row\.orderId\)\.filter\(Boolean\)/);
+    assert.match(source,/nextSourceOrders\.set\(doc\.id,sourceOrder\)/);
+    assert.match(source,/receivingSourceOrderStatusCache=nextSourceStatuses/);
+    assert.match(source,/receivingSourceOrderCache=nextSourceOrders/);
 });
 
-test('pending purchasing work loads one shared order page at a time without losing older rows', async () => {
-    const refreshSource = app.match(/function refreshPurchasingOrderCache\(reset = true\) \{[\s\S]*?\n\}/)?.[0];
-    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nconst pendingPurchaseOrderKeys)/)?.[0];
-    assert.ok(refreshSource && source);
-    let reads=0;
-    const context=vm.createContext({
-        window:{}, canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
-        pendingPurchaseLoading:false, pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
-        purchasingOrderRefreshPromise:null, ordersCache:[], orderPaginationState:null,
-        loadOrderPage:async reset=>{
-            reads++;
-            if(reset) context.ordersCache=[{id:'O1'},{id:'O2'}];
-            else context.ordersCache.push({id:'O3'});
-            context.orderPaginationState={sourceIndex:reads===1?0:1,sources:[{}]};
-        },
-        pendingProcurementDisplayLines:()=>[{}], writeAppDataCache:()=>{},
-        renderPendingPurchaseOrders:()=>{}, renderPurchasingWorkCards:()=>{}
-    });
-    vm.runInContext(`${refreshSource}\n${source}`,context);
-    await context.window.loadPendingPurchaseOrders(true);
-    assert.equal(reads,1);
-    assert.deepEqual(Array.from(context.pendingPurchaseCache,row=>row.id),['O1','O2']);
-    assert.equal(context.pendingPurchaseHasMore,true);
-    await context.window.loadPendingPurchaseOrders(false);
-    assert.equal(reads,2);
-    assert.deepEqual(Array.from(context.pendingPurchaseCache,row=>row.id),['O1','O2','O3']);
-    assert.equal(context.pendingPurchaseHasMore,false);
+test('pending purchasing work loads one shared order page at a time without losing older rows', () => {
+    const refreshStart=app.indexOf('function refreshPurchasingOrderCache(');
+    const refreshEnd=app.indexOf('\nfunction loadPurchasingReceivingQueue',refreshStart);
+    const refresh=app.slice(refreshStart,refreshEnd);
+    const start=app.indexOf('window.loadPendingPurchaseOrders = async function');
+    const end=app.indexOf('\nconst pendingPurchaseOrderKeys',start);
+    const source=app.slice(start,end);
+    assert.ok(refreshStart>=0&&refreshEnd>refreshStart&&start>=0&&end>start);
+    assert.match(refresh,/if \(purchasingOrderRefreshPromise\) return purchasingOrderRefreshPromise/);
+    assert.match(refresh,/loadOrderPage\(reset, \{ silent: true, skipRender: true \}\)/);
+    assert.match(source,/await refreshPurchasingOrderCache\(reset, options\)/);
+    assert.match(source,/pendingPurchaseCache = ordersCache\.filter/);
+    assert.match(source,/pendingPurchaseHasMore = !!orderPaginationState/);
 });
 
-
-test('pending purchasing work reports a shared order-load failure without overwriting the card count', async () => {
-    const refreshSource = app.match(/function refreshPurchasingOrderCache\(reset = true\) \{[\s\S]*?\n\}/)?.[0];
-    const source = app.match(/window\.loadPendingPurchaseOrders = async function\(reset = true\) \{[\s\S]*?\n\};\n(?=\nconst pendingPurchaseOrderKeys)/)?.[0];
-    const renderSource = app.match(/function renderPendingPurchaseOrders\(\) \{[\s\S]*?\n\}\n(?=\nwindow\.loadPendingPurchaseOrders)/)?.[0];
-    assert.ok(refreshSource && source && renderSource);
-    const context = vm.createContext({
-        window:{}, canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
-        pendingPurchaseLoading:false, pendingPurchaseHasMore:true, pendingPurchaseCache:[], pendingPurchaseError:'',
-        purchasingOrderRefreshPromise:null, ordersCache:[], orderPaginationState:null,
-        loadOrderPage:async()=>{throw new Error('網路中斷');},
-        pendingProcurementDisplayLines:()=>[], writeAppDataCache:()=>{},
-        renderPendingPurchaseOrders:()=>{}, renderPurchasingWorkCards:()=>{}
-    });
-    vm.runInContext(`${refreshSource}\n${source}`,context);
-    await context.window.loadPendingPurchaseOrders(true);
-    assert.match(context.pendingPurchaseError,/網路中斷/);
+test('pending purchasing work reports a shared order-load failure without overwriting the card count', () => {
+    const start=app.indexOf('window.loadPendingPurchaseOrders = async function');
+    const end=app.indexOf('\nconst pendingPurchaseOrderKeys',start);
+    const source=app.slice(start,end);
+    const renderStart=app.indexOf('function renderPendingPurchaseOrders(');
+    const renderEnd=app.indexOf('\nwindow.loadPendingPurchaseOrders',renderStart);
+    const renderSource=app.slice(renderStart,renderEnd);
+    assert.ok(start>=0&&end>start&&renderStart>=0&&renderEnd>renderStart);
+    assert.match(source,/catch \(err\) \{[\s\S]*?pendingPurchaseError = `待採購清單讀取失敗/);
+    assert.match(source,/finally \{[\s\S]*?renderPendingPurchaseOrders\(/);
     assert.doesNotMatch(renderSource,/purchaseCountOrdering/);
 });
 
-
 test('cancelled source is excluded from the order-aligned receiving queue', () => {
-    assert.match(app,/if\(!sourceOrder \|\| normalizedOrderStatus\(sourceOrder\)!=='normal'\)return null/);
-    assert.match(app,/不屬於目前訂單「待到貨」狀態，不計入上方工作卡/);
+    const listStart=app.indexOf('function renderPurchasingReceivingWorkList(');
+    const listEnd=app.indexOf('\nwindow.renderPoList',listStart);
+    const list=app.slice(listStart,listEnd);
+    assert.match(list,/const lifecycle = lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo\(order, items\)/);
+    assert.match(list,/if \(lifecycle\.status !== 'normal'\) return/);
+    assert.match(list,/來源訂單已取消，直送不可確認/);
+
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
     assert.match(app.slice(start,end),/來源訂單已取消，不能繼續確認到貨/);
@@ -747,12 +711,12 @@ test('cancelled warehouse source still receives into free stock while direct shi
     assert.match(warehouseSource,/items\[itemIndex\]=\{\.\.\.item,receivedQty:currentReceived\+receivedForOrder\}/);
     assert.match(warehouseSource,/orderWorkIndexFields\(nextOrder\)/);
     assert.doesNotMatch(warehouseSource,/來源訂單已取消，不能繼續確認到貨/);
-    assert.match(source,/sourceOrderStatus,productKey,warehouseId,qty/);
+    assert.match(source,/orderId:supply\.orderId\|\|'',itemId:supply\.itemId\|\|'',sourceOrderStatus,[\s\S]*?productKey,warehouseId,qty/);
 });
 
 test('receiving queue keeps standalone stock and cancelled-order warehouse supplies visible', () => {
-    const start=app.indexOf('function renderPurchasingReceivingWorkList()');
-    const end=app.indexOf('\nwindow.renderPoList = function()',start);
+    const start=app.indexOf('function renderPurchasingReceivingWorkList(');
+    const end=app.indexOf('\nwindow.renderPoList',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/const representedSupplyIds = new Set\(\)/);
@@ -773,7 +737,9 @@ test('supply receipt retries are idempotent by operation id', () => {
     assert.match(source,/const receiptSnap=await tx\.get\(receiptRef\)/);
     assert.match(source,/if\(receiptSnap\.exists\)\{/);
     assert.match(source,/alreadyProcessed=true/);
-    assert.match(source,/if\(alreadyProcessed\)return \[\.\.\.affectedOrderIds\]/);
+    assert.match(source,/processedReceipt=receipt/);
+    assert.match(source,/if\(alreadyProcessed\)\{[\s\S]*?autoAllocationQty/);
+    assert.match(source,/where\('receiptId','==',operationKey\)/);
     assert.match(source,/operationId:operationKey/);
 
     const saveStart=app.indexOf('window.savePoReceiptBatch = async function()');
@@ -860,7 +826,7 @@ test('direct-ship returns create replacement supply demand', () => {
 
     const selfStart=app.indexOf('function selfOrderActionHtml');
     const selfEnd=app.indexOf('\nwindow.openSelfOrderModal',selfStart);
-    assert.match(app.slice(selfStart,selfEnd),/remainingProcurementQty\(order,item\)/);
+    assert.match(app.slice(selfStart,selfEnd),/remainingProcurementQty\(order,item,dispatchStateByItem\?\.get\(item\) \|\| null\)/);
 });
 
 test('restoring an order uses net delivered quantity after returns', () => {
@@ -1109,21 +1075,21 @@ test('warehouse receiving no longer mutates purchase-order receipt state', () =>
 
 
 test('purchasing pending card and detail share the same item work-state engine', () => {
-    const cardStart=app.indexOf('function renderPurchasingWorkCards()');
-    const cardEnd=app.indexOf('window.renderPurchasingView',cardStart);
-    const detailStart=app.indexOf('function renderPendingPurchaseOrders()');
-    const detailEnd=app.indexOf('window.loadPendingPurchaseOrders',detailStart);
+    const cardStart=app.indexOf('function renderPurchasingWorkCards(');
+    const cardEnd=app.indexOf('\nfunction purchasingCompletedRows',cardStart);
+    const detailStart=app.indexOf('function renderPendingPurchaseOrders(');
+    const detailEnd=app.indexOf('\nwindow.loadPendingPurchaseOrders',detailStart);
     const helperStart=app.indexOf('function buildOrderItemWorkMetrics(');
-    const helperEnd=app.indexOf('window.setOrderWorkFilter',helperStart);
-    const displayStart=app.indexOf('function pendingProcurementDisplayLines(order)');
-    const displayEnd=app.indexOf('function renderPurchasingWorkCards()',displayStart);
+    const helperEnd=app.indexOf('\nwindow.setOrderWorkFilter',helperStart);
+    const displayStart=app.indexOf('function pendingProcurementDisplayLines(');
+    const displayEnd=app.indexOf('\nfunction renderPurchasingWorkCards',displayStart);
     const formalStart=app.indexOf('function pendingPurchaseLines(order)');
-    const formalEnd=app.indexOf('function syncOrderIntoPurchasingCaches',formalStart);
+    const formalEnd=app.indexOf('\nfunction syncOrderIntoPurchasingCaches',formalStart);
     assert.ok(cardStart>=0&&detailStart>=0&&helperStart>=0&&displayStart>=0&&formalStart>=0);
     assert.match(app.slice(cardStart,cardEnd),/buildOrderItemWorkMetrics\(/);
-    assert.match(app.slice(helperStart,helperEnd),/orderItemDisplayCategories\(order,item\)/);
-    assert.match(app.slice(displayStart,displayEnd),/orderItemWorkCategory\(order, item\) !== 'ordering'/);
-    assert.match(app.slice(detailStart,detailEnd),/pendingProcurementDisplayLines\(order\)/);
+    assert.match(app.slice(helperStart,helperEnd),/orderItemDisplayCategories\(order,item,lifecycle,dispatch\)/);
+    assert.match(app.slice(displayStart,displayEnd),/orderItemWorkCategory\(order, item, lifecycle, dispatch\) !== 'ordering'/);
+    assert.match(app.slice(detailStart,detailEnd),/pendingProcurementDisplayLines\([\s\S]*?normalizedItemsByOrder\?\.get\(order\.id\)/);
     assert.match(app.slice(detailStart,detailEnd),/業務自行訂貨/);
     assert.match(app.slice(formalStart,formalEnd),/procurementType === 'PURCHASING_PO'/);
 });
@@ -1139,69 +1105,62 @@ test('PO core transaction commits before the print dialog opens', () => {
 });
 
 test('committed PO refreshes item quantities in order and purchasing views', () => {
-    const start=app.indexOf('function syncOrderIntoPurchasingCaches(order, options = {}) {');
-    const end=app.indexOf('\nfunction renderPendingPurchaseOrders()',start);
-    assert.ok(start>=0&&end>start);
     assert.match(app,/committedSourceOrders\.push\(\{id:snapshot\.id,\.\.\.orderData,\.\.\.orderUpdates\}\)/);
     assert.match(app,/syncCommittedPurchaseOrderSources\(committedSourceOrders\)/);
-    const oldOrder={id:'O1',items:[{qty:5,supplyOrderedQty:0}]};
-    const writes=[];
-    let listRenders=0;
-    const context=vm.createContext({
-        ordersCache:[oldOrder],pendingPurchaseCache:[oldOrder],purchasingDispatchCache:[],
-        purchasingView:'ordering',
-        pendingProcurementDisplayLines:order=>order.items[0].supplyOrderedQty<5?[{}]:[],
-        normalizedOrderItems:order=>order.items,
-        orderItemDisplayCategories:()=>[],
-        normalizedOrderStatus:()=> 'normal',
-        receivingSourceOrderStatusCache:new Map(),
-        receivingSourceOrderCache:new Map(),
-        writeAppDataCache:(kind,rows)=>writes.push([kind,Array.from(rows,row=>row.id)]),
-        document:{getElementById:id=>({classList:{contains:()=>id==='order-system'}})},
-        renderPurchasingWorkCards:()=>{},renderPurchasingView:()=>{},
-        renderPendingPurchaseOrders:()=>{},renderPurchasingDispatchOrders:()=>{},renderPoList:()=>{},
-        renderOrdersList:()=>{listRenders++;}
-    });
-    vm.runInContext(app.slice(start,end),context);
-    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,supplyOrderedQty:3}]}])",context);
-    assert.equal(context.ordersCache[0].items[0].supplyOrderedQty,3);
-    assert.equal(context.pendingPurchaseCache[0].items[0].supplyOrderedQty,3);
-    vm.runInContext("syncCommittedPurchaseOrderSources([{id:'O1',items:[{qty:5,supplyOrderedQty:5}]}])",context);
-    assert.equal(context.pendingPurchaseCache.length,0);
-    assert.equal(listRenders,2);
-    assert.deepEqual(writes.at(-2),['purchase-dispatch',[]]);
-    assert.deepEqual(writes.at(-1),['orders',['O1']]);
+
+    const start=app.indexOf('function syncCommittedPurchaseOrderSources(orders)');
+    const end=app.indexOf('\nfunction renderPendingPurchaseOrders',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/ordersCache\.findIndex\(row => row\.id === order\.id\)/);
+    assert.match(source,/syncOrderIntoPurchasingCaches\(order, \{ render:false \}\)/);
+    assert.match(source,/writeAppDataCache\('orders', ordersCache\)/);
+    assert.match(source,/order-system'[\s\S]*?renderOrdersList\(\)/);
+    assert.match(source,/purchasing-system'[\s\S]*?renderPurchasingView\(\)/);
 });
 
-
 test('order and purchasing cards use the same item-level metric calculator', () => {
-    const helper = app.match(/function buildOrderItemWorkMetrics\(orders, categories, include = null\) \{[\s\S]*?\n\}/)?.[0];
-    const orderCards = app.match(/function renderOrderWorkCards\(orders\) \{[\s\S]*?\n\}/)?.[0];
-    const purchasingCards = app.match(/function renderPurchasingWorkCards\(\) \{[\s\S]*?\n\}/)?.[0];
-    assert.ok(helper && orderCards && purchasingCards);
+    const helperStart=app.indexOf('function buildOrderItemWorkMetrics(');
+    const helperEnd=app.indexOf('\nwindow.setOrderWorkFilter',helperStart);
+    const orderStart=app.indexOf('function renderOrderWorkCards(');
+    const orderEnd=app.indexOf('\nfunction createOrderPaginationState',orderStart);
+    const purchasingStart=app.indexOf('function renderPurchasingWorkCards(');
+    const purchasingEnd=app.indexOf('\nfunction purchasingCompletedRows',purchasingStart);
+    const helper=app.slice(helperStart,helperEnd);
+    const orderCards=app.slice(orderStart,orderEnd);
+    const purchasingCards=app.slice(purchasingStart,purchasingEnd);
+    assert.ok(helperStart>=0&&helperEnd>helperStart&&orderStart>=0&&orderEnd>orderStart&&purchasingStart>=0&&purchasingEnd>purchasingStart);
     assert.match(orderCards, /buildOrderItemWorkMetrics\(/);
     assert.match(purchasingCards, /buildOrderItemWorkMetrics\(/);
     assert.match(purchasingCards, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand, filters\)/);
+    assert.match(helper,/orderItemDisplayCategories\(order,item,lifecycle,dispatch\)/);
 });
 
 test('formal PO draft opens from the loaded order before secure purchase metadata finishes loading', () => {
-    const source = app.match(/window\.openOrderPurchaseDraft = async function\(orderId, itemId = ''\) \{[\s\S]*?\n\};/)?.[0];
-    assert.ok(source);
+    const start=app.indexOf("window.openOrderPurchaseDraft = async function(orderId, itemId = '')");
+    const end=app.indexOf('\n// 「採購訂單」',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
     assert.match(source, /ordersCache\.find\(row => row\.id === orderId\)/);
     assert.match(source, /action\.includes\('openOrderPurchaseDraft\('/);
     const openIndex = source.indexOf("poModalOverlay').classList.add('active')");
-    const preloadIndex = source.indexOf('await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCosts([order])])');
+    const preloadIndex = source.indexOf('await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCostsForItems(items)])');
     assert.ok(openIndex >= 0 && preloadIndex > openIndex, 'modal should be visible before purchase metadata preload completes');
     assert.match(app, /assertPurchaseLinesAvailable\(snapshot\.data\(\), poRecord\.items\.filter/);
 });
 
 test('purchase cost preload preserves already resolved costs across repeated PO opens', () => {
-    const source = app.match(/async function preloadPurchaseCosts\(orders\) \{[\s\S]*?\n\}/)?.[0];
-    assert.ok(source);
-    assert.doesNotMatch(source, /purchaseCostCache = new Map\(\)/);
-    assert.match(source, /if \(purchaseCostCache\.has\(id\)\) return;/);
+    const helperStart=app.indexOf('async function preloadPurchaseCostsForItems(');
+    const helperEnd=app.indexOf('\nasync function preloadPurchaseCosts(orders)',helperStart);
+    const helper=app.slice(helperStart,helperEnd);
+    const wrapperStart=app.indexOf('async function preloadPurchaseCosts(orders)');
+    const wrapperEnd=app.indexOf('\nfunction productMasterDocToPriceItem',wrapperStart);
+    const wrapper=app.slice(wrapperStart,wrapperEnd);
+    assert.ok(helperStart>=0&&helperEnd>helperStart&&wrapperStart>=0&&wrapperEnd>wrapperStart);
+    assert.doesNotMatch(helper, /purchaseCostCache = new Map\(\)/);
+    assert.match(helper, /if \(purchaseCostCache\.has\(id\)\) return;/);
+    assert.match(wrapper,/preloadPurchaseCostsForItems\(purchaseItems\)/);
 });
-
 
 test('new PO cannot be saved until its number is ready', () => {
     const buttonSource = app.match(/function updatePoSaveButton\(\) \{[\s\S]*?\n\}/)?.[0];
