@@ -2957,3 +2957,14 @@ test('forecast list reuses filter options and batches row insertion', () => {
     assert.match(renderSource,/body\.appendChild\(fragment\)/);
     assert.doesNotMatch(renderSource,/body\.appendChild\(row\)/);
 });
+
+
+test('quote list batches row insertion', () => {
+    const start=appSource.indexOf('window.renderMyQuotesList = function()');
+    const end=appSource.indexOf('\n// 成交：',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const fragment = document\.createDocumentFragment\(\)/);
+    assert.match(source,/fragment\.appendChild\(tr\)/);
+    assert.match(source,/tbody\.appendChild\(fragment\)/);
+    assert.doesNotMatch(source,/tbody\.appendChild\(tr\)/);
+});
