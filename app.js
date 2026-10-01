@@ -1748,6 +1748,9 @@ window.saveProductMasterEditor = async function() {
         return;
     }
 
+    const state = beginActionButton(button, '檢查中…');
+    if (!state) return;
+    try {
     const originalId = String(document.getElementById('pmEditProductId').value || '').trim();
     const normalizedPartNo = normalizeItemCodeLoose(code);
     const duplicateSnap = await firestoreReadWithTimeout(
@@ -1795,9 +1798,7 @@ window.saveProductMasterEditor = async function() {
         updatedBy: currentUser?.uid || ''
     };
 
-    const state = beginActionButton(button, '儲存中…');
-    if (!state) return;
-    try {
+        if (button) button.textContent = '儲存中…';
         await db.collection('products').doc(productId).set(record, { merge:true });
         const cached = productMasterDocToPriceItem({ id:productId, data:() => record });
         cacheProductLookupItem(cached);
@@ -14277,6 +14278,10 @@ window.saveQuickProduct = async function() {
         return;
     }
 
+    const button = document.getElementById('saveQuickProductBtn');
+    const state = beginActionButton(button, '檢查中…');
+    if (!state) return;
+    try {
     const normalizedPartNo = normalizeItemCodeLoose(code);
     const brandEntry = brandMasterEntryForName(brand);
     const duplicateSnap = await firestoreReadWithTimeout(
@@ -14329,9 +14334,7 @@ window.saveQuickProduct = async function() {
         updatedAt: now,
         updatedBy: currentUser?.uid || ''
     };
-    const button = document.getElementById('saveQuickProductBtn');
-    if (button) { button.disabled = true; button.innerText = '儲存中…'; }
-    try {
+        if (button) button.textContent = '儲存中…';
         await db.collection('products').doc(productId).set(productDoc, { merge: true });
         const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
         priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
@@ -14347,7 +14350,7 @@ window.saveQuickProduct = async function() {
     } catch (err) {
         alert('快速新增產品失敗：' + err.message);
     } finally {
-        if (button) { button.disabled = false; button.innerText = '儲存並帶入'; }
+        endActionButton(button, state);
     }
 };
 
