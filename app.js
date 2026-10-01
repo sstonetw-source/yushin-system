@@ -7276,7 +7276,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
 
 function canBusinessSelfOrder(order = null) {
     if (currentUserRole === 'admin') return true;
-    if (currentUserRole !== 'sales') return false;
+    if (!canSelfOrderCapability(currentUserRole)) return false;
     if (!order) return true;
     return (order.ownerUid && order.ownerUid === currentUser?.uid)
         || (order.salesCode && currentUserCode && order.salesCode === currentUserCode);
