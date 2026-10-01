@@ -9296,7 +9296,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             while(hasMore&&rows.length<500){
                 let q=db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==',status).limit(50);
                 if(cursor)q=q.startAfter(cursor);
-                const page=await q.get();
+                const page=await firestoreReadWithTimeout(q.get(),'庫存占用候選');
                 page.docs.forEach(doc=>rows.push({id:doc.id,...doc.data()}));
                 cursor=page.empty?null:page.docs[page.docs.length-1];
                 hasMore=page.size===50;
@@ -9355,10 +9355,8 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
 async function refreshAffectedOrderCaches(orderIds = []) {
     const ids=[...new Set(orderIds.filter(Boolean))];
     if(!ids.length)return;
-    const snapshots=await Promise.all(ids.map(id=>db.collection('orders').doc(id).get()));
-    snapshots.forEach(snapshot=>{
-        if(!snapshot.exists)return;
-        const order={id:snapshot.id,...snapshot.data()};
+    const refreshedOrders=await readDocumentsByIds('orders',ids);
+    refreshedOrders.forEach(order=>{
         const index=ordersCache.findIndex(row=>row.id===order.id);
         if(index>=0)ordersCache[index]=order;else ordersCache.unshift(order);
         syncOrderIntoPurchasingCaches(order, { render:false });
@@ -10603,8 +10601,12 @@ window.showCustomerOrderHistory = async function(customerName) {
         const orderToken = fullHistoryQueryToken('order', customerName);
         const quoteToken = fullHistoryQueryToken('quote', customerName);
         const [orderSnap, quoteSnap] = await Promise.all([
-            orderToken ? scopedHistorySearchQuery('orders', orderToken).limit(DEFAULT_LIST_LIMIT).get() : Promise.resolve({ docs: [] }),
-            quoteToken ? scopedHistorySearchQuery('quotes', quoteToken).limit(DEFAULT_LIST_LIMIT).get() : Promise.resolve({ docs: [] })
+            orderToken
+                ? firestoreReadWithTimeout(scopedHistorySearchQuery('orders', orderToken).limit(DEFAULT_LIST_LIMIT).get(), '客戶訂單歷史')
+                : Promise.resolve({ docs: [] }),
+            quoteToken
+                ? firestoreReadWithTimeout(scopedHistorySearchQuery('quotes', quoteToken).limit(DEFAULT_LIST_LIMIT).get(), '客戶估價歷史')
+                : Promise.resolve({ docs: [] })
         ]);
         const exactCustomerKey = normalizeCustomerKey(customerName);
         const orders = (orderSnap.docs || [])
