@@ -13,7 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261001-9">
+        <link rel="stylesheet" href="styles.css?v=20261001-10">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -522,7 +522,7 @@
     </div>
     <!-- ============ 估價單系統 ============ -->
     <div id="quote-system" class="content-section active">
-        <div class="sub-nav no-print">
+        <div class="sub-nav quote-module-nav no-print">
             <div class="sub-tab active" id="qsub-create" data-permission-page="quote.create" onclick="switchQuoteView('create', this)">📝 建立估價單</div>
             <div class="sub-tab" id="qsub-my" data-permission-page="quote.my" onclick="switchQuoteView('my', this)">📋 全部估價單</div>
         </div>
@@ -594,17 +594,26 @@
 
         <!-- 全部估價單：依目前角色權限顯示可查看的估價單 -->
         <div id="myQuotesPanel" style="display:none;">
-            <div class="toolbar no-print">
+            <div class="toolbar no-print quote-history-toolbar">
                 <input type="text" id="myQuoteSearch" placeholder="搜尋全部歷史：單號 / 抬頭 / 客戶 / 廠牌 / 品項" oninput="scheduleQuoteHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();scheduleQuoteHistorySearch();}">
-                <button type="button" class="btn-secondary" onclick="clearQuoteHistorySearch()">清除搜尋</button>
-                <span id="quoteHistorySearchStatus" style="font-size:12px;color:#666;"></span>
-                <button type="button" id="quoteHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreQuoteHistorySearch()">載入更多搜尋結果</button>
                 <select id="myQuoteSalesFilter" aria-label="估價單負責業務" onchange="renderMyQuotesList()" style="display:none;"><option value="">全部業務</option></select>
-                <select id="myQuotePeriodFilter" onchange="renderMyQuotesList()">
+                <select id="myQuoteBrandFilter" aria-label="估價單廠牌" onchange="renderMyQuotesList()"><option value="">全部廠牌</option></select>
+                <select id="myQuoteStatusFilter" aria-label="估價單狀態" onchange="renderMyQuotesList()">
+                    <option value="">全部狀態</option>
+                    <option value="open">已報價</option>
+                    <option value="deal">已成交</option>
+                </select>
+                <select id="myQuotePeriodFilter" aria-label="估價單期間" onchange="renderMyQuotesList()">
                     <option value="this-month">本月</option><option value="last-month">上月</option><option value="this-quarter">本季</option><option value="this-year" selected>今年</option><option value="last-year">去年</option><option value="all">全部期間</option>
                 </select>
-                <button class="btn-secondary" onclick="loadMyQuotesFromCloud()">🔄 重新整理</button>
+                <div class="quote-history-toolbar-actions">
+                    <button type="button" class="btn-secondary" onclick="clearQuoteHistorySearch()">清除搜尋</button>
+                    <button type="button" class="btn-secondary" onclick="loadMyQuotesFromCloud()">↻ 更新</button>
+                </div>
+                <span id="quoteHistorySearchStatus" class="quote-history-search-status"></span>
+                <button type="button" id="quoteHistorySearchMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMoreQuoteHistorySearch()">載入更多搜尋結果</button>
             </div>
+            <div class="inventory-summary-note quote-history-note">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div>
             <table class="admin-users-table">
                 <thead><tr><th>單號</th><th>抬頭</th><th>客戶名稱</th><th id="myQuotesSalesHeader" style="display:none;">業務</th><th>日期</th><th>總計</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="myQuotesBody"></tbody>

@@ -1661,3 +1661,94 @@ html[data-app-environment="preview"] body { border-top: 0; }
         padding-top: 16px;
     }
 }
+
+
+/* ===== 2026-10-01：估價單工作區與全部估價單搜尋整理 ===== */
+.quote-module-nav {
+    margin-bottom: 12px;
+    border-radius: 7px;
+}
+.quote-history-toolbar {
+    align-items: stretch;
+}
+.quote-history-toolbar #myQuoteSearch {
+    flex: 1 1 360px;
+    max-width: none;
+}
+.quote-history-toolbar select {
+    min-width: 130px;
+}
+.quote-history-toolbar-actions {
+    display: flex;
+    gap: 8px;
+}
+.quote-history-toolbar-actions button {
+    white-space: nowrap;
+}
+.quote-history-search-status {
+    flex: 1 1 100%;
+    min-height: 16px;
+    color: #5d6a76;
+    font-size: 12px;
+}
+.quote-history-note {
+    margin-top: -4px;
+}
+@media screen and (max-width: 640px) {
+    #quote-system {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    #quote-system > .quote-module-nav {
+        position: sticky;
+        top: 62px;
+        z-index: 1100;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding: 6px;
+        margin: 0 0 10px;
+        border: 1px solid #d8e1ea;
+        background: rgba(247,249,251,.96);
+        backdrop-filter: blur(8px);
+    }
+    #quote-system > .quote-module-nav .sub-tab {
+        min-height: 42px;
+        padding: 8px 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        text-align: center;
+    }
+    .quote-history-toolbar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .quote-history-toolbar #myQuoteSearch,
+    .quote-history-toolbar #myQuoteSalesFilter,
+    .quote-history-search-status,
+    .quote-history-toolbar #quoteHistorySearchMoreBtn {
+        grid-column: 1 / -1;
+        width: 100%;
+        max-width: none;
+        box-sizing: border-box;
+    }
+    .quote-history-toolbar select {
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+    .quote-history-toolbar-actions {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .quote-history-toolbar-actions button,
+    .quote-history-toolbar #quoteHistorySearchMoreBtn {
+        min-height: 44px;
+    }
+}

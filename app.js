@@ -5369,6 +5369,29 @@ window.loadMoreMyQuotes = function() {
     return loadMyQuotesPage(false);
 };
 
+function quoteBrandsForRecord(quote = {}) {
+    return dedupeBrandsCaseInsensitive((quote.items || [])
+        .map(item => resolveBrandName(item.brand || ''))
+        .filter(Boolean));
+}
+
+function populateMyQuoteBrandFilter(source = []) {
+    const select = document.getElementById('myQuoteBrandFilter');
+    if (!select) return;
+    const selected = select.value;
+    const brands = new Map();
+    source.forEach(quote => {
+        quoteBrandsForRecord(quote).forEach(brand => {
+            const key = String(brand).trim().toLocaleLowerCase();
+            if (key && !brands.has(key)) brands.set(key, brand);
+        });
+    });
+    select.innerHTML = '<option value="">全部廠牌</option>' + [...brands.values()]
+        .sort((a,b)=>a.localeCompare(b,'zh-Hant'))
+        .map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
+    if ([...select.options].some(option => option.value === selected)) select.value = selected;
+}
+
 function populateMyQuoteSalesFilter() {
     const select = document.getElementById('myQuoteSalesFilter');
     if (!select) return;
@@ -5391,22 +5414,28 @@ window.renderMyQuotesList = function() {
     const searchInput = document.getElementById('myQuoteSearch');
     const keyword = (searchInput.value || '').toLowerCase();
     const periodFilter = document.getElementById('myQuotePeriodFilter')?.value || 'this-year';
+    const statusFilter = document.getElementById('myQuoteStatusFilter')?.value || '';
     tbody.innerHTML = '';
     let shown = 0;
 
     const isAdminViewingAll = canViewAllData('quotes');
+    const visibleQuoteSource = quoteHistorySearchActive ? quoteHistorySearchResults : myQuotesCache;
     populateMyQuoteSalesFilter();
+    populateMyQuoteBrandFilter(visibleQuoteSource);
     const salesFilter = document.getElementById('myQuoteSalesFilter')?.value || '';
+    const brandFilter = document.getElementById('myQuoteBrandFilter')?.value || '';
     const salesHeader = document.getElementById('myQuotesSalesHeader');
     if (salesHeader) salesHeader.style.display = isAdminViewingAll ? '' : 'none';
 
-    const visibleQuoteSource = quoteHistorySearchActive ? quoteHistorySearchResults : myQuotesCache;
     visibleQuoteSource.forEach(q => {
         const itemSearchText = (q.items || []).map(item => `${item.brand || ''} ${item.model || ''} ${item.nameCn || ''} ${item.nameEn || ''} ${item.spec || ''}`).join(' ');
         const searchable = `${q.quoteNo || ''} ${q.clientName || ''} ${q.ordererName || ''} ${q.salesName || ''} ${itemSearchText}`.toLowerCase();
         if (!quoteHistorySearchActive && keyword && !searchable.includes(keyword)) return;
         if (salesFilter && stripPhoneSuffix(q.salesName || '') !== salesFilter) return;
-        if (q.dealClosed && !dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
+        if (brandFilter && !quoteBrandsForRecord(q).includes(brandFilter)) return;
+        if (statusFilter === 'open' && q.dealClosed) return;
+        if (statusFilter === 'deal' && !q.dealClosed) return;
+        if (!dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
         shown++;
 
         const tr = document.createElement('tr');
