@@ -122,6 +122,18 @@ let salesListLoadPromise = null;
 let quickProductTarget = null;
 let quoteFormInitialized = false;
 const APP_CACHE_VERSION = 1;
+const APP_ASSET_VERSION = (() => {
+    try {
+        const script = [...document.scripts].find(node => /\/app\.js(?:\?|$)/.test(node.src || ''));
+        return script ? (new URL(script.src, window.location.href).searchParams.get('v') || '') : '';
+    } catch (_) { return ''; }
+})();
+window.YUSHIN_APP_VERSION = APP_ASSET_VERSION;
+function renderSystemVersionLabel() {
+    const label = document.getElementById('systemVersionLabel');
+    if (!label) return;
+    label.textContent = APP_ASSET_VERSION ? `系統版本 ${APP_ASSET_VERSION}` : '系統版本未標示';
+}
 const APP_DATA_CACHE_PREFIX = 'yushin-data-cache:';
 const APP_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
