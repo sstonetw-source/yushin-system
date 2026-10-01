@@ -3150,3 +3150,27 @@ test('receipt allocation progress has narrowly scoped Firestore update permissio
     assert.match(source,/autoAllocatedQty', 0\) >= resource\.data\.get\('autoAllocatedQty', 0\)/);
     assert.match(source,/autoAllocatedQty', 0\) <= resource\.data\.get\('autoAllocationQty', 0\)/);
 });
+
+
+test('work metrics reuse one dispatch state per item', () => {
+    const categoryStart=appSource.indexOf('function orderItemWorkCategory');
+    const categoryEnd=appSource.indexOf('\n// 倉庫品項',categoryStart);
+    const categorySource=appSource.slice(categoryStart,categoryEnd);
+    assert.match(categorySource,/lifecycleOverride = null, dispatchOverride = null/);
+    assert.match(categorySource,/dispatchOverride \|\| itemDispatchState/);
+
+    const displayStart=appSource.indexOf('function orderItemDisplayCategory');
+    const displayEnd=appSource.indexOf('\nfunction orderWorkCategories',displayStart);
+    const displaySource=appSource.slice(displayStart,displayEnd);
+    assert.match(displaySource,/dispatchOverride \|\| itemDispatchState/);
+    assert.match(displaySource,/orderItemWorkCategory\(order, item, lifecycleOverride, dispatch\)/);
+    assert.match(displaySource,/orderItemDisplayCategory\(order,item,lifecycleOverride,dispatch\)/);
+
+    const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
+    const metricsEnd=appSource.indexOf('\nwindow.setOrderWorkFilter',metricsStart);
+    const metricsSource=appSource.slice(metricsStart,metricsEnd);
+    assert.match(metricsSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
+    assert.match(metricsSource,/const dispatch = itemDispatchState\(order, item\)/);
+    assert.match(metricsSource,/orderItemDisplayCategories\(order,item,lifecycle,dispatch\)/);
+    assert.match(metricsSource,/orderItemWorkAmount\(order,item,category,totalQty,dispatch\)/);
+});
