@@ -3366,3 +3366,21 @@ test('order work cards and rows share dispatch snapshots', () => {
     assert.match(listSource,/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder\)/);
     assert.match(listSource,/const dispatchStateByItem = dispatchStatesByOrder\.get\(o\.id\) \|\| new Map\(\)/);
 });
+
+
+test('normalized fulfillment snapshot avoids rescanning delivery records', () => {
+    const normalizeStart=appSource.indexOf('function normalizedOrderItems(order)');
+    const normalizeEnd=appSource.indexOf('\nfunction ensureOrderItemCompatibility',normalizeStart);
+    const normalizeSource=appSource.slice(normalizeStart,normalizeEnd);
+    assert.match(normalizeSource,/Object\.defineProperty\(normalized, '__fulfillmentSnapshot'/);
+    assert.match(normalizeSource,/enumerable:false/);
+
+    const dispatchStart=appSource.indexOf('function itemDispatchState(order, item)');
+    const dispatchEnd=appSource.indexOf('\nfunction orderContextActionState',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/const hasSnapshot = item\?\.__fulfillmentSnapshot === true/);
+    assert.match(dispatchSource,/hasSnapshot[\s\S]*?item\.deliveredQty/);
+    assert.match(dispatchSource,/hasSnapshot[\s\S]*?item\.returnedQty/);
+    assert.match(dispatchSource,/: savedDeliveryRecords\(order\)\.filter/);
+    assert.match(dispatchSource,/: savedReturnRecords\(order\)\.filter/);
+});
