@@ -672,7 +672,7 @@
             <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
             <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
             <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 批量下載 Excel</button>
-            <button class="btn-secondary" onclick="loadEquipmentFromCloud()">↻ 更新</button>
+            <button type="button" id="equipmentRefreshBtn" class="btn-secondary" onclick="loadEquipmentFromCloud()">↻ 更新</button>
             <span style="font-size:12px;color:#666;">（批量上傳會依「儀器編號」比對：有既有紀錄就更新、沒有就新增，不會刪除任何既有資料，維修保養紀錄也會保留；一般業務只能新增/更新自己名下的儀器）</span>
         </div>
 
@@ -795,7 +795,7 @@
                     <button type="button" onclick="exportOrdersByDate()">匯出 Excel（供採購下單）</button>
                 </div>
             </details>
-            <button class="btn-secondary" onclick="loadOrdersFromCloud()">🔄 重新整理</button>
+            <button type="button" id="orderRefreshBtn" class="btn-secondary" onclick="loadOrdersFromCloud()">↻ 更新</button>
         </div>
         <table id="ordersTable">
             <thead>
@@ -864,7 +864,7 @@
         </div>
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
-                <button type="button" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">🔄 重新整理</button>
+                <button type="button" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">↻ 更新</button>
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
             <div class="table-wrap"><table>
@@ -878,7 +878,7 @@
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋全部採購單：單號 / 廠商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
                 <span id="poHistorySearchStatus" role="status"></span>
-                <button class="btn-secondary" onclick="loadMyPurchaseOrders()">🔄 重新整理</button>
+                <button class="btn-secondary" onclick="loadMyPurchaseOrders()">↻ 更新</button>
             </div>
             <table>
                 <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
@@ -889,7 +889,7 @@
         </div>
         <div id="purchaseDispatchPanel" style="display:none">
             <div class="toolbar no-print">
-                <button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">🔄 重新整理</button>
+                <button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">↻ 更新</button>
                 <span id="purchaseDispatchStatus" role="status"></span>
             </div>
             <div class="inventory-summary-note">顯示已到貨、尚有待打單數量的訂單。完成出貨單後按「已打單」，訂單即進入可出貨狀態。</div>
@@ -900,7 +900,7 @@
             <div class="po-load-more-row no-print"><button type="button" id="purchaseDispatchMoreBtn" class="btn-secondary" style="display:none" onclick="loadPurchasingDispatchOrders(false)">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseCompletedPanel" style="display:none">
-            <div class="toolbar no-print"><button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">🔄 重新整理</button><span id="purchaseCompletedStatus" role="status"></span></div>
+            <div class="toolbar no-print"><button type="button" class="btn-secondary" onclick="loadPurchasingDispatchOrders(true)">↻ 更新</button><span id="purchaseCompletedStatus" role="status"></span></div>
             <div class="inventory-summary-note">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div>
             <div class="table-wrap"><table><thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>已完成採購品項</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
@@ -1154,7 +1154,7 @@
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
             <div class="toolbar no-print">
-                <button class="btn-secondary" onclick="reloadSalesFromUsers()">🔄 重新整理</button>
+                <button class="btn-secondary" onclick="reloadSalesFromUsers()">↻ 更新</button>
                 <span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span>
             </div>
             <table>
@@ -1230,7 +1230,7 @@
                 <select id="salesStatsTypeFilter" onchange="renderSalesStatistics()"><option value="">全部類型</option></select>
                 <select id="salesStatsLineFilter" onchange="renderSalesStatistics()"><option value="">全部產品線</option></select>
                 <button type="button" onclick="exportSalesStatisticsExcel()">⬇️ 匯出季報 Excel</button>
-                <button class="btn-secondary" onclick="loadSalesStatistics()">🔄 重新整理</button>
+                <button class="btn-secondary" onclick="loadSalesStatistics()">↻ 更新</button>
                 <span style="font-size:12px;color:#666;">實際送貨依送貨日期計算，退貨依退貨日期負數沖銷；待出貨為截至迄日的未交餘額。</span>
             </div>
             <div class="sales-stat-cards">
@@ -1447,6 +1447,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-26"></script>
+    <script src="app.js?v=20261001-27"></script>
 </body>
 </html>

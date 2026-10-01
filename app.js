@@ -274,6 +274,7 @@ function ensureXlsxLoaded() {
 let equipmentList = [];
 let currentEquipmentId = null;
 let equipmentLoadGeneration = 0;
+let equipmentPageLoading = false;
 let equipmentCursor = null;
 let equipmentHasMore = false;
 let equipmentSearchActive = false;
@@ -7246,11 +7247,17 @@ function createOrderPaginationState() {
 
 function updateOrderLoadMoreButton() {
     const button = document.getElementById('orderLoadMoreBtn');
-    if (!button) return;
+    const refreshButton = document.getElementById('orderRefreshBtn');
     const hasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-    button.style.display = (hasMore || !!orderLoadErrorMessage) ? '' : 'none';
-    button.disabled = orderPageLoading;
-    button.innerText = orderPageLoading ? '載入中…' : orderLoadErrorMessage || '載入更多（每次 50 筆）';
+    if (button) {
+        button.style.display = (hasMore || !!orderLoadErrorMessage) ? '' : 'none';
+        button.disabled = orderPageLoading;
+        button.innerText = orderPageLoading ? '載入中…' : orderLoadErrorMessage || '載入更多（每次 50 筆）';
+    }
+    if (refreshButton) {
+        refreshButton.disabled = orderPageLoading;
+        refreshButton.textContent = orderPageLoading ? '更新中…' : '↻ 更新';
+    }
 }
 
 async function loadOrderPage(reset, options = {}) {
@@ -7462,8 +7469,8 @@ function fullHistoryRecordMatches(type, record, keyword) {
 }
 
 /*
- * 統一全歷史搜尋：估價單／訂單都使用 searchTokens 後端索引；
- * 一般列表仍每次只載入 50 筆，搜尋結果也以 50 筆分頁。
+ * 統一全歷史搜尋：估價單／訂單使用 searchTokens 後端索引；
+ * 一般列表仍每次只載入 50 筆，搜尋則自動逐頁讀完符合索引的候選資料。
  */
 let orderHistorySearchActive = false;
 let orderHistorySearchLoading = false;
@@ -12525,6 +12532,7 @@ function canViewAllEquipment() {
 window.loadEquipmentFromCloud = function(reset = true) {
     const generation = ++equipmentLoadGeneration;
     const requestedRole = currentUserRole;
+    equipmentPageLoading = true;
     if (reset) {
         equipmentCursor = null;
         equipmentHasMore = false;
@@ -12539,9 +12547,11 @@ window.loadEquipmentFromCloud = function(reset = true) {
     if (!reset && equipmentCursor) query = query.startAfter(equipmentCursor);
 
     const moreButton = document.getElementById('equipmentLoadMoreBtn');
+    const refreshButton = document.getElementById('equipmentRefreshBtn');
     if (moreButton) { moreButton.disabled = true; moreButton.textContent = '載入中…'; }
+    if (refreshButton) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
 
-    query.get().then(snapshot => {
+    return firestoreReadWithTimeout(query.get(), '儀器清單').then(snapshot => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         const nextRows = snapshot.docs
             .map(doc => ({ id:doc.id, ...doc.data() }))
@@ -12554,16 +12564,24 @@ window.loadEquipmentFromCloud = function(reset = true) {
         }
         writeAppDataCache('equipment', equipmentList);
         renderEquipmentList();
-        if (moreButton) {
-            moreButton.style.display = equipmentHasMore ? '' : 'none';
-            moreButton.disabled = false;
-            moreButton.textContent = '載入更多';
-        }
     }).catch(err => {
         if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
         console.error(err);
-        if (moreButton) { moreButton.disabled = false; moreButton.textContent = '載入更多'; }
-        alert('讀取儀器資料失敗，請確認 Firestore 權限設定。');
+        alert(err?.code === 'firestore-read-timeout'
+            ? '儀器資料讀取逾時，請再按一次更新。'
+            : '讀取儀器資料失敗，請確認 Firestore 權限設定。');
+    }).finally(() => {
+        if (generation !== equipmentLoadGeneration || requestedRole !== currentUserRole) return;
+        equipmentPageLoading = false;
+        if (moreButton) {
+            moreButton.style.display = equipmentHasMore && !equipmentSearchActive ? '' : 'none';
+            moreButton.disabled = false;
+            moreButton.textContent = '載入更多';
+        }
+        if (refreshButton) {
+            refreshButton.disabled = false;
+            refreshButton.textContent = '↻ 更新';
+        }
     });
 };
 
