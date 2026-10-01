@@ -3743,3 +3743,66 @@ test('multi-item Forecast conversion tracks inventory reservation outcome', () =
     assert.match(source,/reservationFailures:reservationResults\.filter/);
     assert.doesNotMatch(source,/Promise\.allSettled\(created\.map\(order=>reserveInventoryForNewOrder/);
 });
+
+
+test('order lifecycle follows procurement dispatch delivery billing and return states', () => {
+    const workflow = require('../modules/workflow-core.js');
+    const fulfillment = require('../modules/fulfillment-core.js');
+
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal', orderedQty:10, deliveredQty:0, isBilled:false,
+        fulfillmentType:'WAREHOUSE', shortageQty:6, supplyOrderedQty:0, receivedQty:0
+    }), 'ordering');
+
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal', orderedQty:10, deliveredQty:0, isBilled:false,
+        fulfillmentType:'WAREHOUSE', shortageQty:6, supplyOrderedQty:6, receivedQty:0
+    }), 'arrival');
+
+    let item=fulfillment.normalizeItem({
+        orderedQty:10, reservedQty:10, shortageQty:0,
+        supplyOrderedQty:6, receivedQty:6, dispatchPreparedQty:0,
+        deliveredQty:0, returnedQty:0
+    });
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal', orderedQty:item.orderedQty, deliveredQty:0, isBilled:false,
+        fulfillmentType:'WAREHOUSE', shortageQty:item.shortageQty,
+        supplyOrderedQty:item.supplyOrderedQty, receivedQty:item.receivedQty
+    }), 'delivery');
+    assert.equal(fulfillment.pendingDispatchQty(item),10);
+    assert.equal(fulfillment.shippableQty(item),0);
+
+    item=fulfillment.prepareDispatch(item,10);
+    assert.equal(fulfillment.pendingDispatchQty(item),0);
+    assert.equal(fulfillment.shippableQty(item),10);
+
+    item=fulfillment.deliver(item,10);
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal', orderedQty:item.orderedQty,
+        deliveredQty:item.deliveredQty-item.returnedQty, isBilled:false,
+        fulfillmentType:'WAREHOUSE', shortageQty:item.shortageQty,
+        supplyOrderedQty:item.supplyOrderedQty, receivedQty:item.receivedQty
+    }), 'billing');
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal', orderedQty:item.orderedQty,
+        deliveredQty:item.deliveredQty-item.returnedQty, isBilled:true,
+        fulfillmentType:'WAREHOUSE', shortageQty:item.shortageQty,
+        supplyOrderedQty:item.supplyOrderedQty, receivedQty:item.receivedQty
+    }), 'complete');
+
+    item=fulfillment.returnDelivery(item,2);
+    item=fulfillment.normalizeItem({...item,reservedQty:2});
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal', orderedQty:item.orderedQty,
+        deliveredQty:item.deliveredQty-item.returnedQty, isBilled:true,
+        fulfillmentType:'WAREHOUSE', shortageQty:item.shortageQty,
+        supplyOrderedQty:item.supplyOrderedQty, receivedQty:item.receivedQty
+    }), 'delivery');
+    assert.equal(fulfillment.pendingDispatchQty(item),2);
+
+    const displayStart=appSource.indexOf('function orderItemDisplayCategory');
+    const displayEnd=appSource.indexOf('\nfunction orderItemDisplayCategories',displayStart);
+    const displaySource=appSource.slice(displayStart,displayEnd);
+    assert.match(displaySource,/if \(category !== 'delivery'\) return category/);
+    assert.match(displaySource,/return dispatch\.pending > 0 \? 'dispatch' : 'shipping'/);
+});
