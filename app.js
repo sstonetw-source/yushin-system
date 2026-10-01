@@ -4817,7 +4817,22 @@ function quotePdfFileName(quoteData = {}) {
 
 function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
     quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
-    return db.collection('quotes').doc(quoteData.quoteNo).set(quoteData).then(() => {
+    const quoteRef = db.collection('quotes').doc(quoteData.quoteNo);
+    const updatingExisting = !!editingQuoteNo && editingQuoteNo === quoteData.quoteNo;
+
+    return db.runTransaction(async transaction => {
+        const snapshot = await transaction.get(quoteRef);
+        if (snapshot.exists && !updatingExisting) {
+            const conflict = new Error(`估價單號 ${quoteData.quoteNo} 已存在。為避免覆蓋既有估價單，請使用「另存為新估價單」取得新單號後再輸出。`);
+            conflict.code = 'quote-number-conflict';
+            throw conflict;
+        }
+        transaction.set(quoteRef, quoteData);
+    }).then(() => {
+        if (!editingQuoteNo) {
+            setQuoteEditingContext(quoteData.quoteNo);
+            saveQuoteDraft();
+        }
         if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
             return db.collection('forecasts').doc(quoteData.sourceId).set({
                 linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.QUOTE, quoteData.quoteNo, 'created')),
@@ -4826,7 +4841,9 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
         }
     }).catch(err => {
         console.error('儲存估價單到雲端失敗：', err);
-        alert('提醒：估價單存到雲端失敗（' + err.message + '）。' + outputLabel + '內容不受影響，請稍後確認網路後再重新同步。');
+        if (err?.code !== 'quote-number-conflict') {
+            alert('提醒：估價單存到雲端失敗（' + err.message + '）。' + outputLabel + '內容不受影響，請稍後確認網路後再重新同步。');
+        }
         throw err;
     });
 }
@@ -5115,16 +5132,26 @@ window.exportCurrentQuotePdf = async function() {
         quoteData.lastOutputAt = new Date().toISOString();
         quoteData.lastOutputType = 'PDF';
         rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
-        // 雲端同步與 PDF 產生平行執行，不讓 Firestore 網路速度阻塞使用者。
-        const syncPromise = persistQuoteOutputRecord(quoteData, 'PDF')
-            .then(() => {
-                setQuoteOutputStatus('✓ PDF 已產生，估價單已同步');
-                return true;
-            })
-            .catch(() => {
-                setQuoteOutputStatus('PDF 已產生，但雲端同步失敗，請稍後再試', true);
-                return false;
-            });
+        const isNewQuote = !editingQuoteNo || editingQuoteNo !== quoteData.quoteNo;
+        let syncPromise;
+        if (isNewQuote) {
+            // 新估價單先原子確認並建立雲端文件，避免撞號時先產出一份會與舊單重號的 PDF。
+            if (button) button.innerText = '正在確認估價單號…';
+            await persistQuoteOutputRecord(quoteData, 'PDF');
+            syncPromise = Promise.resolve(true);
+            setQuoteOutputStatus('估價單已同步；正在產生 PDF…');
+        } else {
+            // 已存在的估價單仍維持原本快速體驗：雲端更新與 PDF 產生平行進行。
+            syncPromise = persistQuoteOutputRecord(quoteData, 'PDF')
+                .then(() => {
+                    setQuoteOutputStatus('✓ PDF 已產生，估價單已同步');
+                    return true;
+                })
+                .catch(() => {
+                    setQuoteOutputStatus('PDF 已產生，但雲端同步失敗，請稍後再試', true);
+                    return false;
+                });
+        }
 
         const exportDom = createQuotePdfStage(quoteData);
         stage = exportDom.stage;
@@ -5145,7 +5172,8 @@ window.exportCurrentQuotePdf = async function() {
         });
         if (button) button.innerText = '正在下載 PDF…';
         pdf.save(quotePdfFileName(quoteData));
-        setQuoteOutputStatus('PDF 已產生；估價單同步中…');
+        if (isNewQuote) setQuoteOutputStatus('✓ PDF 已產生，估價單已同步');
+        else setQuoteOutputStatus('PDF 已產生；估價單同步中…');
         syncPromise.then(() => {});
     } catch (err) {
         console.error('匯出估價單 PDF 失敗：', err);
@@ -5168,36 +5196,52 @@ window.loadQuoteFromCloud = function() {
     fetchAndFillQuote(qNo);
 };
 
-function fetchAndFillQuote(qNo) {
-    db.collection('quotes').doc(qNo).get().then(doc => {
-        if (doc.exists) {
-            const data = doc.data();
-            if (!canViewAllData('quotes') && !belongsToCurrentUser(data.salesName, data.ownerUid)) {
-                alert('您只能查看自己的估價單。');
-                return;
-            }
-            actuallySwitchMainTab('quote-system');
-            switchQuoteView('create');
-            document.getElementById('quoteNo').value = data.quoteNo;
-            document.getElementById('clientName').value = data.clientName;
-            document.getElementById('ordererName').value = data.ordererName || '';
-            document.getElementById('salesName').value = data.salesName;
-            updateSalesPhoneDisplay();
-            document.getElementById('quoteDate').value = data.quoteDate;
-            document.getElementById('validDays').value = data.validDays;
-            document.getElementById('discountRateInput').value = data.discountRate || 0;
-            if (data.company) {
-                switchCompany(data.company);
-            }
-
-            document.getElementById('quoteItems').innerHTML = '';
-            data.items.forEach(item => addQuoteRow(item));
-        } else {
+async function fetchAndFillQuote(qNo) {
+    try {
+        const doc = await firestoreReadWithTimeout(
+            db.collection('quotes').doc(qNo).get(),
+            '載入估價單'
+        );
+        if (!doc.exists) {
             alert('找不到該估價單');
+            return;
         }
-    }).catch(() => {
-        alert('無法從雲端讀取');
-    });
+        const data = doc.data() || {};
+        if (!canViewAllData('quotes') && !belongsToCurrentUser(data.salesName, data.ownerUid)) {
+            alert('您只能查看自己的估價單。');
+            return;
+        }
+
+        if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
+            await ensureSalesListLoaded();
+        }
+        restoringQuoteDraft = true;
+        actuallySwitchMainTab('quote-system');
+        switchQuoteView('create');
+        applyCompanyTheme(data.company || 'yushin');
+        populateSalesDropdown();
+
+        document.getElementById('quoteNo').value = data.quoteNo || qNo;
+        document.getElementById('clientName').value = data.clientName || '';
+        document.getElementById('ordererName').value = data.ordererName || '';
+        document.getElementById('salesName').value = data.salesName || '';
+        updateSalesPhoneDisplay();
+        document.getElementById('quoteDate').value = data.quoteDate || '';
+        document.getElementById('validDays').value = data.validDays ?? 90;
+        document.getElementById('discountRateInput').value = data.discountRate || 0;
+        document.getElementById('quoteItems').innerHTML = '';
+        (Array.isArray(data.items) ? data.items : []).forEach(item => addQuoteRow(item));
+        if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
+        setQuoteEditingContext(data.quoteNo || qNo);
+        setQuoteOutputStatus('');
+        calculateTotals();
+        saveQuoteDraft();
+    } catch (err) {
+        console.error('無法從雲端讀取估價單：', err);
+        alert('無法從雲端讀取：' + (err?.message || err));
+    } finally {
+        restoringQuoteDraft = false;
+    }
 }
 
 window.openQuoteFromAdmin = async function(quoteNo) {
