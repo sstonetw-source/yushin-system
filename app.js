@@ -8474,6 +8474,8 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
     const more=document.getElementById('purchaseDispatchMoreBtn');
     if(!body)return;
     body.innerHTML='';
+    const fragment=document.createDocumentFragment();
+    let shown=0;
     const sourceOrders = ordersCache.length ? ordersCache : purchasingDispatchCache;
     const filters=filterContext || purchaseFilterContext();
     sourceOrders.forEach(order=>{
@@ -8488,10 +8490,12 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
-            body.appendChild(tr);
+            fragment.appendChild(tr);
+            shown++;
         });
     });
-    if(status)status.textContent=purchasingDispatchLoading?'載入中…':purchasingDispatchError||(body.children.length?`已顯示 ${body.children.length} 筆待打單品項`:'目前沒有待打單品項');
+    body.appendChild(fragment);
+    if(status)status.textContent=purchasingDispatchLoading?'載入中…':purchasingDispatchError||(shown?`已顯示 ${shown} 筆待打單品項`:'目前沒有待打單品項');
     if(more){more.style.display=purchasingDispatchHasMore?'':'none';more.disabled=purchasingDispatchLoading;}
 }
 
@@ -8550,6 +8554,8 @@ function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContex
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
     body.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    let shown = 0;
     const sourceOrders = ordersCache.length ? ordersCache : pendingPurchaseCache;
     const filters = filterContext || purchaseFilterContext();
     for (const order of sourceOrders) {
@@ -8564,11 +8570,13 @@ function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContex
                 : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}',this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
             const row = document.createElement('tr');
             row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '業務自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
-            body.appendChild(row);
+            fragment.appendChild(row);
+            shown++;
         }
     }
+    body.appendChild(fragment);
     const status = document.getElementById('purchasePendingStatus');
-    if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (body.children.length ? `已顯示 ${body.children.length} 筆待採購品項${pendingPurchaseHasMore ? '；較舊待辦請按載入更多' : ''}` : pendingPurchaseHasMore ? '這一頁沒有待採購品項；請按載入更多檢查較舊待辦' : '目前沒有待採購品項');
+    if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (shown ? `已顯示 ${shown} 筆待採購品項${pendingPurchaseHasMore ? '；較舊待辦請按載入更多' : ''}` : pendingPurchaseHasMore ? '這一頁沒有待採購品項；請按載入更多檢查較舊待辦' : '目前沒有待採購品項');
     const more = document.getElementById('purchasePendingMoreBtn');
     if (more) { more.style.display = pendingPurchaseHasMore ? '' : 'none'; more.disabled = pendingPurchaseLoading; }
 }
