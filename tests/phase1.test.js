@@ -3949,3 +3949,20 @@ test('mobile order list stays card based', () => {
     assert.match(cssSource,/#ordersTable td\[data-th="操作"\][\s\S]*?display:\s*flex/);
     assert.match(cssSource,/@media \(max-width: 650px\)[\s\S]*?#orderSearch[\s\S]*?max-width:none/);
 });
+
+
+test('obsolete helper wrappers stay removed', () => {
+    [
+      'mergeUniqueSearchResults',
+      'ensureClientHistoryLoaded',
+      'documentLinksFor',
+      'orderReservedQuantity',
+      'orderProgressInfo',
+      'renderOrderStatusLog',
+      'costAmount'
+    ].forEach(name => {
+        assert.doesNotMatch(appSource,new RegExp('(?:async\\s+)?function\\s+'+name+'\\s*\\('));
+    });
+    assert.doesNotMatch(appSource,/\bclientHistoryLoadPromise\b/);
+    assert.match(appSource,/function formatOrderStatusTime\(/);
+});
