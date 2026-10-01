@@ -9693,14 +9693,23 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const reservationRef=db.collection('inventoryReservations').doc(candidate.id);
             const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
             const whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
-            const [orderSnap,resSnap,invSnap,whSnap]=await Promise.all([tx.get(orderRef),tx.get(reservationRef),tx.get(invRef),tx.get(whRef)]);
+            const receiptRef=receiptId?db.collection('receipts').doc(receiptId):null;
+            const [orderSnap,resSnap,invSnap,whSnap,receiptSnap]=await Promise.all([
+                tx.get(orderRef),tx.get(reservationRef),tx.get(invRef),tx.get(whRef),
+                receiptRef?tx.get(receiptRef):Promise.resolve(null)
+            ]);
             if(!orderSnap.exists||!resSnap.exists||!whSnap.exists){skipCandidate=true;return;}
+            if(receiptRef&&!receiptSnap?.exists){stopAllocation=true;return;}
             const reservation=resSnap.data();
             const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
             const order={id:orderSnap.id,...orderSnap.data()};
             if(normalizedOrderStatus(order)!=='normal'||liveShortage<=0){skipCandidate=true;return;}
             const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}),wh=inventoryNumbers(whSnap.data());
-            const take=Math.min(remaining,liveShortage,Math.max(0,wh.available));
+            const receipt=receiptSnap?.exists?(receiptSnap.data()||{}):null;
+            const receiptTarget=receiptRef?Math.max(0,Number(receipt?.autoAllocationQty||0)):remaining;
+            const receiptAllocated=receiptRef?Math.max(0,Number(receipt?.autoAllocatedQty||0)):0;
+            const receiptRemaining=receiptRef?Math.max(0,receiptTarget-receiptAllocated):remaining;
+            const take=Math.min(remaining,receiptRemaining,liveShortage,Math.max(0,wh.available));
             if(take<=0){stopAllocation=true;return;}
             const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
@@ -9716,6 +9725,14 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
             if(invSnap.exists)tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
             tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
+            if(receiptRef){
+                const nextAllocated=receiptAllocated+take;
+                tx.update(receiptRef,{
+                    autoAllocatedQty:nextAllocated,
+                    allocationCompleted:nextAllocated>=receiptTarget,
+                    allocationUpdatedAt:now
+                });
+            }
             tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,candidate.orderId,productKey,actor,{
                 warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE',receiptId:receiptId||''
             }));
@@ -9890,7 +9907,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         tx.set(receiptRef,{
             receiptId:operationKey,operationId:operationKey,supplyOrderId:supplyId,
             orderId:supply.orderId||'',itemId:supply.itemId||'',sourceOrderStatus,
-            productKey,warehouseId,qty,autoAllocationQty,fulfillmentType:'WAREHOUSE',
+            productKey,warehouseId,qty,autoAllocationQty,autoAllocatedQty:0,allocationCompleted:autoAllocationQty===0,fulfillmentType:'WAREHOUSE',
             lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor
         });
         tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
@@ -9917,7 +9934,23 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             const alreadyAllocated=priorMovements
                 .filter(row=>row.type==='reserve_from_receipt')
                 .reduce((sum,row)=>sum+Math.max(0,Number(row.qty||0)),0);
-            freeQty=Math.max(0,allocationTarget-alreadyAllocated);
+            let reconciledAllocated=alreadyAllocated;
+            await db.runTransaction(async tx=>{
+                const receiptRef=db.collection('receipts').doc(operationKey);
+                const receiptSnap=await tx.get(receiptRef);
+                if(!receiptSnap.exists)return;
+                const receipt=receiptSnap.data()||{};
+                const currentAllocated=Math.max(0,Number(receipt.autoAllocatedQty||0));
+                reconciledAllocated=Math.max(currentAllocated,alreadyAllocated);
+                if(reconciledAllocated!==currentAllocated){
+                    tx.update(receiptRef,{
+                        autoAllocatedQty:reconciledAllocated,
+                        allocationCompleted:reconciledAllocated>=allocationTarget,
+                        allocationUpdatedAt:new Date().toISOString()
+                    });
+                }
+            });
+            freeQty=Math.max(0,allocationTarget-reconciledAllocated);
         }else{
             freeQty=0;
         }
