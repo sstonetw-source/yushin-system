@@ -430,7 +430,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
-        document.querySelectorAll('.order-more-menu[open], .quote-more-menu[open]').forEach(menu => { menu.open = false; });
+        document.querySelectorAll('.order-more-menu[open], .quote-more-menu[open], .po-more-menu[open]').forEach(menu => { menu.open = false; });
     });
 
     // 全部估價單「更多」：一次只開一個；點擊外部或完成動作就收起。
@@ -448,6 +448,22 @@ window.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (event.target.closest('.quote-more-menu-popover button')) menu.open = false;
+    });
+
+    document.addEventListener('toggle', event => {
+        const openedMenu = event.target.closest?.('.po-more-menu');
+        if (!openedMenu?.open) return;
+        document.querySelectorAll('.po-more-menu[open]').forEach(menu => {
+            if (menu !== openedMenu) menu.open = false;
+        });
+    }, true);
+    document.addEventListener('click', event => {
+        const menu = event.target.closest?.('.po-more-menu');
+        if (!menu) {
+            document.querySelectorAll('.po-more-menu[open]').forEach(openMenu => { openMenu.open = false; });
+            return;
+        }
+        if (event.target.closest('.po-more-menu-popover button')) menu.open = false;
     });
 
     // 估價單表單的草稿自動儲存：只要在「建立估價單」區塊裡打字/選擇/切換任何東西，
@@ -8282,7 +8298,18 @@ window.renderPoList = function() {
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
                 <td data-th="文件狀態">已建立</td>
-                <td data-th="操作" class="no-print">${itemIndex===0?`<button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">🖨️ 重新列印</button>`:'—'}</td>
+                <td data-th="操作" class="no-print">${itemIndex===0?`
+                    <div class="po-list-action-row">
+                        <button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">載入</button>
+                        <button type="button" class="btn-small btn-secondary" onclick="exportPurchaseOrderFromHistory('${escapeAttr(po.id)}')">PDF</button>
+                        <details class="po-more-menu">
+                            <summary class="btn-small btn-secondary">更多</summary>
+                            <div class="po-more-menu-popover">
+                                ${(po.purchaseType==='stock'||items.every(line=>!line.orderId))?`<button type="button" onclick="copySavedPurchaseOrderAsNew('${escapeAttr(po.id)}')">複製成新訂購單</button>`:''}
+                                <button type="button" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">查看正式內容</button>
+                            </div>
+                        </details>
+                    </div>`:'—'}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -8393,6 +8420,58 @@ window.reprintPurchaseOrder = async function(poId) {
     }
 };
 
+window.copySavedPurchaseOrderAsNew = async function(poId) {
+    const po = poListCache.find(item => item.id === poId);
+    if (!po) return alert('找不到這張訂購單，請重新整理。');
+
+    const sourceItems = purchaseItemsFromSavedPo(po);
+    if (po.purchaseType !== 'stock' && sourceItems.some(item => item.orderId)) {
+        alert('這張訂購單連結客戶訂單，為避免重複採購，請回到「待採購」從來源訂單建立新的訂購單。');
+        return;
+    }
+
+    poDirectStockOpenGeneration++;
+    poDirectStockMode = true;
+    poEditingId = null;
+    poIncomingSyncPending = false;
+    poAllItems = sourceItems.map(item => ({
+        ...item,
+        orderId: '',
+        itemId: '',
+        orderItemIndex: 0,
+        supplyOrderId: '',
+        purchaseDocumentNo: '',
+        purchaseDocumentNos: []
+    }));
+    poItems = poAllItems.map(item => ({ ...item }));
+
+    populatePoVendorSuggestions();
+    switchPoCompany(po.company || 'yushin', null, true);
+    document.getElementById('poVendorName').value = po.vendorName || '';
+    document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
+    document.getElementById('poDate').value = localDateString();
+    await generatePoNo();
+    renderPoItemsTable();
+    updatePoModeUI();
+    updatePoSaveStatus('已複製成新的庫存採購訂購單；確認數量、單價與廠商後再匯出 PDF。');
+    document.getElementById('poModalOverlay').classList.add('active');
+};
+
+window.exportPurchaseOrderFromHistory = async function(poId) {
+    const button = actionButtonFromEventOrSelector();
+    const buttonState = beginActionButton(button, '準備 PDF…');
+    if (button && !buttonState) return;
+    try {
+        await reprintPurchaseOrder(poId);
+        await printPurchaseOrder();
+    } catch (err) {
+        console.error('重新匯出訂購單 PDF 失敗：', err);
+        alert('重新匯出訂購單 PDF 失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, buttonState);
+    }
+};
+
 // 從原始訂單上的訂購單號直接開啟該張訂購單，避免還要切分頁搜尋。
 window.openPurchaseOrderFromOrder = function(poNo) {
     const open = po => {
@@ -8437,7 +8516,7 @@ function updatePoSaveButton() {
     button.disabled = poSaveInProgress || waitingForNumber;
     button.textContent = waitingForNumber
         ? (poNoLoading ? '產生單號中…' : '單號未就緒')
-        : '🖨️ 列印 / 存為 PDF（自動同步雲端）';
+        : '📄 匯出 PDF（自動同步雲端）';
 }
 
 function poIncomingKey(item) {
@@ -9053,12 +9132,28 @@ function updatePoModeUI() {
     const addBtn = document.getElementById('poAddStockItemBtn');
     const hint = document.getElementById('poModeHint');
     const brandList = document.getElementById('poBrandList');
+    const overlay = document.getElementById('poModalOverlay');
+    const title = document.getElementById('poModalTitle');
+    const existingBanner = document.getElementById('poExistingBanner');
+    const existingNumber = document.getElementById('poExistingNumber');
+    const copyBtn = document.getElementById('poCopyAsNewBtn');
     if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
-    if (addBtn) addBtn.style.display = poDirectStockMode ? '' : 'none';
-    if (hint) hint.textContent = poEditingId
-        ? '重新列印會使用已儲存的訂購單內容；畫面修改不會覆蓋原單。'
+
+    const viewingExisting = !!poEditingId;
+    overlay?.classList.toggle('po-viewing-existing', viewingExisting);
+    if (title) title.textContent = viewingExisting ? '查看訂購單' : '建立訂購單';
+    if (existingBanner) existingBanner.style.display = viewingExisting ? 'flex' : 'none';
+    if (existingNumber) existingNumber.textContent = viewingExisting ? (document.getElementById('poNo')?.innerText || poEditingId) : '';
+
+    const savedPo = viewingExisting ? poListCache.find(po => po.id === poEditingId) : null;
+    const canCopySafely = !!savedPo && (savedPo.purchaseType === 'stock' || purchaseItemsFromSavedPo(savedPo).every(item => !item.orderId));
+    if (copyBtn) copyBtn.style.display = canCopySafely ? '' : 'none';
+
+    if (addBtn) addBtn.style.display = !viewingExisting && poDirectStockMode ? '' : 'none';
+    if (hint) hint.textContent = viewingExisting
+        ? '這是已建立的正式訂購單。內容鎖定不直接修改；可重新匯出 PDF。'
         : poDirectStockMode
-            ? '新增採購單：可一次加入多個品項；完成後會正式產生訂購單並列入在途庫存。'
+            ? '建立庫存採購訂購單：可一次加入多個品項；建立後會列入在途庫存。'
             : '訂單採購：品項來自業務訂單，可調整採購數量與進貨單價。';
     updatePoSaveButton();
 }
@@ -9270,38 +9365,133 @@ function assertPurchaseLinesAvailable(order, lines) {
     }
 }
 
-function printSavedPoDocument(poNo, vendorName) {
-    const originalTitle = document.title;
-    document.title = `${poNo}＋${vendorName}`.replace(/[\\/:*?"<>|]/g, '_').replace(/[\u0000-\u001F]/g, '').trim();
-    document.body.classList.add('printing-po');
-    window._poOriginalTitle = originalTitle;
-
-    // 跟估價單相同：先把列印專用內容與版面更新完成，再等瀏覽器完成兩次重繪後開啟列印。
-    // 不直接同步 print()，避免 iPhone Safari 還拿著手機版 modal 的欄寬去產生預覽，
-    // 造成右側欄位／總計被裁掉，也避免使用者點下按鈕後長時間看不到任何回饋。
-    requestAnimationFrame(() => {
-        preparePurchaseOrderForPrint();
-        requestAnimationFrame(() => {
-            window.print();
-        });
-    });
+function poPdfFileName(poNo, vendorName) {
+    const raw = [poNo, vendorName].filter(Boolean).join('-') || '訂購單';
+    return raw.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() + '.pdf';
 }
 
-function preparePurchaseOrderForPrint() {
-    const root = document.getElementById('printablePO');
-    if (!root) return;
-
-    // 與估價單相同，列印時改用純文字鏡像，避免手機 Safari 裁切 input 內的長廠商名、貨號或數字。
+function normalizePoPdfFields(root) {
+    root.querySelectorAll('.no-print').forEach(node => node.remove());
     root.querySelectorAll('input').forEach(input => {
-        input.setAttribute('value', input.value);
-        let mirror = input.nextElementSibling;
-        if (!mirror || !mirror.classList.contains('po-print-field-mirror')) {
-            mirror = document.createElement('span');
-            mirror.className = 'po-print-field-mirror';
-            input.insertAdjacentElement('afterend', mirror);
-        }
-        mirror.textContent = input.value || '';
+        const span = document.createElement('span');
+        span.className = 'po-pdf-field-value';
+        span.textContent = input.value || '';
+        input.replaceWith(span);
     });
+    root.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+}
+
+function createPoPdfStage() {
+    const source = document.getElementById('printablePO');
+    if (!source) throw new Error('找不到訂購單內容');
+
+    const stage = document.createElement('div');
+    stage.className = 'quote-pdf-stage po-pdf-stage';
+    const documentNode = source.cloneNode(true);
+    documentNode.className = 'po-pdf-document';
+    normalizePoPdfFields(documentNode);
+    stage.appendChild(documentNode);
+    document.body.appendChild(stage);
+    return { stage, documentNode };
+}
+
+function createPoPdfPage(stage, source, includeHeader = false) {
+    const page = document.createElement('div');
+    page.className = 'po-pdf-page';
+
+    const sourceTable = source.querySelector('table');
+    if (includeHeader) {
+        for (const child of [...source.children]) {
+            if (child === sourceTable) break;
+            page.appendChild(child.cloneNode(true));
+        }
+    }
+
+    const table = sourceTable.cloneNode(false);
+    table.removeAttribute('id');
+    const thead = sourceTable.querySelector('thead');
+    if (thead) table.appendChild(thead.cloneNode(true));
+    const tbody = document.createElement('tbody');
+    table.appendChild(tbody);
+    page.appendChild(table);
+    stage.appendChild(page);
+    return { page, tbody };
+}
+
+function paginatePoPdfDocument(stage, source) {
+    const sourceTable = source.querySelector('table');
+    if (!sourceTable) return [source];
+    const rows = [...sourceTable.querySelectorAll('tbody tr')];
+    const summary = source.querySelector('.po-total-section');
+    const maxHeight = quotePdfPageHeightPx(stage);
+
+    source.style.display = 'none';
+    const pages = [];
+    let current = createPoPdfPage(stage, source, true);
+    pages.push(current);
+
+    for (const row of rows) {
+        const clone = row.cloneNode(true);
+        current.tbody.appendChild(clone);
+        if (current.page.scrollHeight > maxHeight && current.tbody.children.length > 1) {
+            clone.remove();
+            current = createPoPdfPage(stage, source, false);
+            pages.push(current);
+            current.tbody.appendChild(clone);
+        }
+    }
+
+    if (summary) {
+        const summaryClone = summary.cloneNode(true);
+        current.page.appendChild(summaryClone);
+        if (current.page.scrollHeight > maxHeight) {
+            summaryClone.remove();
+            current = createPoPdfPage(stage, source, false);
+            pages.push(current);
+            current.page.appendChild(summaryClone);
+        }
+    }
+
+    source.remove();
+    return pages.map(entry => entry.page);
+}
+
+async function printSavedPoDocument(poNo, vendorName) {
+    let stage = null;
+    const button = document.getElementById('printPurchaseOrderBtn');
+    try {
+        if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
+            throw new Error('PDF 元件尚未載入');
+        }
+
+        if (button) {
+            button.disabled = true;
+            button.innerText = '準備 PDF…';
+        }
+        updatePoSaveStatus('正在準備訂購單 PDF…');
+
+        const exportDom = createPoPdfStage();
+        stage = exportDom.stage;
+        await waitForPdfImages(exportDom.documentNode);
+
+        const pages = paginatePoPdfDocument(stage, exportDom.documentNode);
+        await waitForPdfImages(stage);
+
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const scale = isMobile ? 1.15 : 1.65;
+        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
+
+        await addQuotePagesToPdf(pdf, pages, scale, (pageNo, pageCount) => {
+            if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
+            updatePoSaveStatus(`正在產生訂購單 PDF… ${pageNo}/${pageCount}`);
+        });
+
+        if (button) button.innerText = '正在下載 PDF…';
+        pdf.save(poPdfFileName(poNo, vendorName));
+        updatePoSaveStatus('✓ 訂購單 PDF 已產生');
+    } finally {
+        stage?.remove();
+    }
 }
 
 window.printPurchaseOrder = async function() {
@@ -9315,11 +9505,21 @@ window.printPurchaseOrder = async function() {
         const savedPo = poListCache.find(po => po.id === poEditingId);
         if (!savedPo) { alert('找不到已儲存的訂購單，請重新整理。'); return; }
         if (!poIncomingSyncPending) {
-            try { printSavedPoDocument(savedPo.poNo, savedPo.vendorName); }
-            catch (err) {
-                document.body.classList.remove('printing-po');
-                if (window._poOriginalTitle !== undefined) document.title = window._poOriginalTitle;
-                updatePoSaveStatus('無法開啟列印視窗：' + err.message, true);
+            const button = document.getElementById('printPurchaseOrderBtn');
+            poSaveInProgress = true;
+            try {
+                await printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
+                db.collection('purchaseOrders').doc(savedPo.id).set({
+                    lastOutputAt: new Date().toISOString(),
+                    lastOutputType: 'PDF'
+                }, { merge:true }).catch(err => console.warn('更新訂購單輸出時間失敗：', err));
+            } catch (err) {
+                console.error('產生訂購單 PDF 失敗：', err);
+                updatePoSaveStatus('產生訂購單 PDF 失敗：' + (err?.message || err), true);
+            } finally {
+                poSaveInProgress = false;
+                if (button) button.disabled = false;
+                updatePoSaveButton();
             }
             return;
         }
@@ -9329,8 +9529,8 @@ window.printPurchaseOrder = async function() {
         try {
             await registerPurchaseIncoming(savedPo.id, savedPo);
             poIncomingSyncPending = false;
-            updatePoSaveStatus(`訂購單 ${savedPo.poNo} 已同步雲端，正在開啟列印 / PDF…`);
-            printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
+            updatePoSaveStatus(`訂購單 ${savedPo.poNo} 已同步雲端，正在產生 PDF…`);
+            await printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
         } catch (err) {
             updatePoSaveStatus(`訂購單已同步雲端，但在途庫存同步仍未完成：${err.message}`, true);
         } finally {
@@ -9398,6 +9598,8 @@ window.printPurchaseOrder = async function() {
         items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
         ...netAmountMetadata(poNetTotal),
         createdAt: new Date().toISOString(),
+        lastOutputAt: new Date().toISOString(),
+        lastOutputType: 'PDF',
         ...linkedDocumentFields(orderIds.length === 1 ? DOCUMENT_TYPES.ORDER : '', orderIds.length === 1 ? orderIds[0] : '', orderIds.map(orderId => documentLink(DOCUMENT_TYPES.ORDER, orderId, 'source')))
     };
     poRecord.searchTokens=purchaseOrderSearchTokens(poRecord);
@@ -9517,11 +9719,11 @@ window.printPurchaseOrder = async function() {
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
-        updatePoSaveStatus(`訂購單 ${poNo} 已同步雲端；正在開啟列印，在途庫存於背景同步…`);
+        updatePoSaveStatus(`訂購單 ${poNo} 已同步雲端；正在產生 PDF，在途庫存稍後背景同步…`);
 
-        // 核心 transaction 一完成就直接進列印；不要在列印前重畫採購卡與整張 PO 清單。
-        // syncCommittedPurchaseOrderSources 已更新同一份 ordersCache；其餘畫面可在列印後／背景同步完成時再刷新。
-        printSavedPoDocument(poNo, vendorName);
+        // 核心 transaction 完成後才輸出 PDF，確保使用者拿到的正式文件一定有對應的系統紀錄。
+        // PDF 使用與估價單相同的逐頁 Canvas → jsPDF 流程，不再依賴瀏覽器列印視窗。
+        await printSavedPoDocument(poNo, vendorName);
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立訂購單。
@@ -9554,14 +9756,6 @@ window.printPurchaseOrder = async function() {
         updatePoSaveButton();
     }
 };
-
-window.addEventListener('afterprint', () => {
-    document.body.classList.remove('printing-po');
-    if (window._poOriginalTitle !== undefined) {
-        document.title = window._poOriginalTitle;
-        delete window._poOriginalTitle;
-    }
-});
 
 // 「製作下一張估價單」：手動觸發，不會因為誤按列印視窗的取消鈕就被清空。
 // 按下後會先確認，避免不小心點到把還沒印的內容洗掉；確認後清空表單、單號跳下一號，
