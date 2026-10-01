@@ -3228,3 +3228,23 @@ test('procurement views reuse dispatch state while calculating quantities', () =
     const listSource=appSource.slice(listStart,listEnd);
     assert.match(listSource,/selfOrderActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
 });
+
+
+test('receiving source lookup uses indexed order map', () => {
+    const helperStart=appSource.indexOf('function receivingSourceOrderForItem');
+    const helperEnd=appSource.indexOf('\nfunction receivingEvidenceEntry',helperStart);
+    const helperSource=appSource.slice(helperStart,helperEnd);
+    assert.match(helperSource,/function receivingSourceOrderForItem\(item, orderById = null\)/);
+    assert.match(helperSource,/orderById\?\.get\(item\.orderId\)/);
+    assert.match(helperSource,/function receivingSourceItem\(order, item, normalizedItems = null\)/);
+    assert.match(helperSource,/normalizedItems \|\| normalizedOrderItems\(order\)/);
+    assert.match(helperSource,/function receivingQueueContext\(record, item, orderById = null, normalizedItemsByOrder = null\)/);
+    assert.match(helperSource,/const sourceItems=normalizedItemsByOrder\?\.get\(sourceOrder\.id\) \|\| normalizedOrderItems\(sourceOrder\)/);
+    assert.match(helperSource,/const sourceIndex = sourceItems\.indexOf\(sourceItem\)/);
+
+    const renderStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
+    const renderEnd=appSource.indexOf('\nwindow.renderPoList',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/const orderById = new Map\(ordersCache\.map\(order => \[order\.id, order\]\)\)/);
+    assert.match(renderSource,/receivingSourceOrderForItem\(supply, orderById\)/);
+});
