@@ -2821,3 +2821,15 @@ test('Product Master search renders results in 100-row UI pages', () => {
     assert.match(renderSource,/productManagementVisibleLimit \+= PRODUCT_MANAGEMENT_RENDER_STEP/);
     assert.match(stylesSource,/\.product-load-more-row/);
 });
+
+
+test('product master search sorts only when rendering', () => {
+    const start=appSource.indexOf('window.searchProductManagement = async function()');
+    const end=appSource.indexOf('\nfunction ensureProductMasterEditor',start);
+    const source=appSource.slice(start,end);
+    const throttleStart=source.indexOf('if (now - lastIntermediateRenderAt >= 100)');
+    const throttleEnd=source.indexOf('\n        }', throttleStart)+10;
+    const throttleSource=source.slice(throttleStart,throttleEnd);
+    assert.match(throttleSource,/productManagementResults = \[\.\.\.map\.values\(\)\]/);
+    assert.match(source,/if \(generation !== productManagementSearchGeneration\) return;\s*productManagementResults = \[\.\.\.map\.values\(\)\]/);
+});
