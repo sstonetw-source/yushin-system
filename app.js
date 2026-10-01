@@ -10184,10 +10184,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const receiptSnap=await tx.get(receiptRef);
         if(!supplySnap.exists)throw new Error('找不到供應紀錄。');
         const supply=supplySnap.data();
-        if (String(supply.status || '').toUpperCase() === 'CANCELLED') {
-            throw new Error('此供應紀錄已取消，不能再確認到貨。');
-        }
         if (supply.orderId) affectedOrderIds.add(supply.orderId);
+        // 已成功提交過的同一 receiptId 必須先走冪等重試；即使之後取消了剩餘未到貨，
+        // 也不能把已完成的到貨重試誤判成新的「取消後收貨」。
         if(receiptSnap.exists){
             const receipt=receiptSnap.data()||{};
             if(String(receipt.supplyOrderId||'')!==String(supplyId))throw new Error('到貨操作識別碼衝突，請重新開啟待到貨視窗。');
@@ -10199,6 +10198,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 sourceOrderId=receipt.orderId||supply.orderId||'';
             }
             return;
+        }
+        if (String(supply.status || '').toUpperCase() === 'CANCELLED') {
+            throw new Error('此供應紀錄已取消，不能再確認到貨。');
         }
         const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
         if(qty<=0||qty>remaining)throw new Error(`本次到貨數量不可超過 ${remaining}。`);
