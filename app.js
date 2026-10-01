@@ -8193,7 +8193,12 @@ function refreshPurchasingOrderCache(reset = true, options = {}) {
 function loadPurchasingReceivingQueue(reset = true, options = {}) {
     if (purchasingReceivingLoadPromise) return purchasingReceivingLoadPromise;
     purchasingReceivingReady = false;
-    renderPoList();
+    if (options.reuseOrders) {
+        const status = document.getElementById('poHistorySearchStatus');
+        if (status) status.textContent = '待到貨資料載入中…';
+    } else {
+        renderPoList();
+    }
     purchasingReceivingLoadPromise = Promise.allSettled([
         loadPurchaseOrderPage(reset, { deferRender:true }),
         refreshPurchasingOrderCache(reset, options)
@@ -8559,8 +8564,16 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
         ? 'purchaseCompletedRefreshBtn'
         : 'purchaseDispatchRefreshBtn');
     if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
-    if (purchasingView === 'completed') renderPurchasingCompletedOrders();
-    else renderPurchasingDispatchOrders();
+    if (options.reuseOrders) {
+        const status = document.getElementById(purchasingView === 'completed'
+            ? 'purchaseCompletedStatus'
+            : 'purchaseDispatchStatus');
+        if (status) status.textContent = '載入中…';
+    } else if (purchasingView === 'completed') {
+        renderPurchasingCompletedOrders();
+    } else {
+        renderPurchasingDispatchOrders();
+    }
     try {
         await refreshPurchasingOrderCache(reset, options);
         normalizedItemsByOrder = new Map(
@@ -8725,7 +8738,12 @@ window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
     let filters = null;
     const refreshButton = document.getElementById('purchasePendingRefreshBtn');
     if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
-    renderPendingPurchaseOrders();
+    if (options.reuseOrders) {
+        const status = document.getElementById('purchasePendingStatus');
+        if (status) status.textContent = '載入中…';
+    } else {
+        renderPendingPurchaseOrders();
+    }
     try {
         // 直接沿用訂單頁同一個分頁載入器與 ordersCache；同一時間不重複發 orders Query。
         await refreshPurchasingOrderCache(reset, options);
