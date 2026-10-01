@@ -2581,3 +2581,25 @@ test('purchasing render reuses normalized order items', () => {
     assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters\)/);
     assert.match(viewSource,/renderPurchasingCompletedOrders\(completedRows\)/);
 });
+
+
+test('page initialization avoids duplicate purchasing and quote brand renders', () => {
+    const hydrateStart=appSource.indexOf('function hydratePageFromLocalCache');
+    const hydrateEnd=appSource.indexOf('\nfunction initializePageData',hydrateStart);
+    const hydrateSource=appSource.slice(hydrateStart,hydrateEnd);
+    const poStart=hydrateSource.indexOf("if (mainKey === 'orders.po')");
+    const poSource=hydrateSource.slice(poStart);
+    assert.doesNotMatch(poSource,/renderPurchasingWorkCards\(\)/);
+
+    const initStart=appSource.indexOf('function initializePageData');
+    const initEnd=appSource.indexOf('\nfunction ensureSalesListLoaded',initStart);
+    const initSource=appSource.slice(initStart,initEnd);
+    assert.doesNotMatch(initSource,/if \(mainKey === 'quote'\) populateQuoteBrandDropdowns\(\)/);
+});
+
+test('quote number lookup has bounded Firestore wait', () => {
+    const start=appSource.indexOf('window.generateQuoteNo = async function()');
+    const end=appSource.indexOf('\nwindow.onSalesChange',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?collection\('quotes'\)[\s\S]*?'估價單號'/);
+});
