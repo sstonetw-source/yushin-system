@@ -2076,7 +2076,7 @@ window.loadForecasts = async function(reset = true) {
             query = query.startAfter(forecastCursor);
         }
 
-        const snapshot = await query.get();
+        const snapshot = await firestoreReadWithTimeout(query.get(), 'Forecast 清單');
 
         if (!snapshot.empty) {
             forecastCursor = snapshot.docs[snapshot.docs.length - 1];
@@ -3492,7 +3492,7 @@ async function warehouseStockSnapshot(productKey, warehouseId) {
     const cacheKey = warehouseId + '||' + productKey;
     if (warehouseStockCache.has(cacheKey)) return warehouseStockCache.get(cacheKey);
     const ref = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey));
-    const snap = await ref.get().catch(() => null);
+    const snap = await firestoreReadWithTimeout(ref.get(), '倉庫庫存').catch(() => null);
     const data = snap && snap.exists ? { id:snap.id, ...snap.data() } : null;
     warehouseStockCache.set(cacheKey, data);
     return data;
@@ -6164,15 +6164,24 @@ window.searchBusinessProducts=async function(){
  try{
    const normalized=normalizeItemCodeLoose(raw);const end=raw+'\uf8ff';
    const [codeSnap,nameSnap]=await Promise.all([
-     db.collection('products').where('normalizedPartNo','==',normalized).limit(25).get(),
-     db.collection('products').orderBy('productName').startAt(raw).endAt(end).limit(25).get().catch(()=>({docs:[]}))
+     firestoreReadWithTimeout(
+       db.collection('products').where('normalizedPartNo','==',normalized).limit(25).get(),
+       '產品貨號搜尋'
+     ),
+     firestoreReadWithTimeout(
+       db.collection('products').orderBy('productName').startAt(raw).endAt(end).limit(25).get(),
+       '產品名稱搜尋'
+     ).catch(()=>({docs:[]}))
    ]);
    const map=new Map();[...(codeSnap.docs||[]),...(nameSnap.docs||[])].forEach(doc=>map.set(doc.id,{id:doc.id,...doc.data()}));
    const products=[...map.values()].slice(0,25);
    const productKeys=[...new Set(products.map(product=>String(product.productId||product.id||'').trim()).filter(Boolean))];
    const stockByProduct=new Map();
    if(productKeys.length){
-     const stockSnap=await db.collection('warehouseStocks').where('productKey','in',productKeys).get();
+     const stockSnap=await firestoreReadWithTimeout(
+       db.collection('warehouseStocks').where('productKey','in',productKeys).get(),
+       '產品庫存搜尋'
+     );
      stockSnap.docs.forEach(doc=>{
        const row=doc.data(),key=String(row.productKey||row.productId||'').trim();
        if(!key)return;
