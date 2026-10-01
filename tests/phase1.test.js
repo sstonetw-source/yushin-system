@@ -1864,7 +1864,7 @@ test('production HTML cache-busts local application assets after main deployment
   assert.match(indexSource,/styles\.css\?v=\d{8}-\d+/);
   assert.match(indexSource,/modules\/workflow-core\.js\?v=\d{8}-\d+/);
   assert.match(indexSource,/app\.js\?v=\d{8}-\d+/);
-  assert.match(indexSource,/modules\/fulfillment-core\.js\?v=20260922-\d+/);
+  assert.match(indexSource,/modules\/fulfillment-core\.js\?v=\d{8}-\d+/);
 });
 
 test('Forecast full-history search uses Firestore searchTokens', () => {

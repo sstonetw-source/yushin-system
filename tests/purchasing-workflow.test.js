@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const workflow = require('../modules/workflow-core.js');
+const fulfillment = require('../modules/fulfillment-core.js');
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -956,6 +957,39 @@ test('delivery progress uses net delivered quantity after returns', () => {
     assert.equal(progress.delivered,8);
     assert.equal(progress.remaining,2);
     assert.equal(progress.state,'partial');
+});
+
+test('normalized order items derive fulfillment from delivery and return records', () => {
+    const start=app.indexOf('function normalizedOrderItems');
+    const end=app.indexOf('\nfunction ensureOrderItemCompatibility',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    const context=vm.createContext({
+        window:{YushinFulfillment:fulfillment},
+        normalizeHistoryItemCode:value=>String(value||'').toLowerCase(),
+        resolveBrandName:value=>value||'',
+        parseMoney:value=>Number(value||0)
+    });
+    vm.runInContext(source,context);
+    const [item]=context.normalizedOrderItems({
+        items:[{itemId:'I1',qty:10,reservedQty:2,shortageQty:0,deliveredQty:0,returnedQty:0,fulfillmentType:'WAREHOUSE'}],
+        deliveryRecords:[{itemId:'I1',qty:10}],
+        returnRecords:[{itemId:'I1',qty:2}]
+    });
+    assert.equal(item.deliveredQty,10);
+    assert.equal(item.returnedQty,2);
+    assert.equal(item.reservedQty,2);
+    assert.equal(item.shortageQty,0);
+    assert.equal(workflow.itemWorkCategory({
+        lifecycleStatus:'normal',
+        orderedQty:item.orderedQty,
+        deliveredQty:8,
+        returnedQty:2,
+        fulfillmentType:'WAREHOUSE',
+        shortageQty:item.shortageQty,
+        supplyOrderedQty:item.supplyOrderedQty,
+        receivedQty:item.receivedQty
+    }),'delivery');
 });
 
 test('dispatch readiness uses live reservation and supports later receipt batches', () => {

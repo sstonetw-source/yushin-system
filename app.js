@@ -6609,17 +6609,32 @@ async function reserveInventoryForNewOrder(orderId, order) {
 
 function normalizedOrderItems(order) {
     const source = Array.isArray(order?.items) ? order.items : [];
+    const deliveryRecords = Array.isArray(order?.deliveryRecords) ? order.deliveryRecords : null;
+    const returnRecords = Array.isArray(order?.returnRecords) ? order.returnRecords : null;
+    const singleItem = source.length === 1;
     return source.map((item, index) => {
+        const itemId = String(item.itemId || `item-${index + 1}`);
+        const matchesItem = row => String(row?.itemId || '') === itemId || (!row?.itemId && singleItem);
+        // 送貨／退貨紀錄是實際履約的權威來源。若只使用 items 內舊的累計欄位，
+        // 「已全數送貨 → 退貨 → 補送」時會把已送過的數量重新誤判成缺貨。
+        const grossDeliveredQty = deliveryRecords
+            ? deliveryRecords.filter(matchesItem).reduce((sum,row)=>sum+Math.max(0,Number(row?.qty||0)),0)
+            : Math.max(0,Number(item.deliveredQty||0));
+        const returnedQty = returnRecords
+            ? returnRecords.filter(matchesItem).reduce((sum,row)=>sum+Math.max(0,Number(row?.qty||0)),0)
+            : Math.max(0,Number(item.returnedQty||0));
         const base = {
             ...item,
-            itemId: String(item.itemId || `item-${index + 1}`),
+            itemId,
             itemCodeKey: item.itemCodeKey || normalizeHistoryItemCode(item.itemCode || ''),
             brand: resolveBrandName(item.brand || ''),
             qty: Number(item.qty || item.orderedQty || 0),
             unitPrice: parseMoney(item.unitPrice || 0),
             totalPrice: parseMoney(item.totalPrice || 0),
             fulfillmentType: item.fulfillmentType || 'WAREHOUSE',
-            warehouseId: item.fulfillmentType === 'DIRECT_SHIP' ? '' : (item.warehouseId || '')
+            warehouseId: item.fulfillmentType === 'DIRECT_SHIP' ? '' : (item.warehouseId || ''),
+            deliveredQty: grossDeliveredQty,
+            returnedQty
         };
         return window.YushinFulfillment ? window.YushinFulfillment.normalizeItem(base, index) : base;
     });
