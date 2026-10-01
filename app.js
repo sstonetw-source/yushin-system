@@ -9094,7 +9094,6 @@ async function loadPurchaseOrderPage(reset, options = {}) {
         receivingSourceOrderCache=nextSourceOrders;
         if (purchasingView === 'receiving' && nextSourceOrders.size) {
             mergeReceivingSourceOrdersIntoOrderCache();
-            if (!deferRender) renderPurchasingWorkCards();
         }
         supplyReceivingCache=[...supplyRecords.values()]
             .sort((a,b)=>String(b.orderDate||'').localeCompare(String(a.orderDate||'')));
@@ -9110,7 +9109,10 @@ async function loadPurchaseOrderPage(reset, options = {}) {
             poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
             writeAppDataCache('purchase-history', poListCache);
         }
-        if (!deferRender) renderPoList();
+        if (!deferRender) {
+            if (purchasingView === 'receiving') renderPurchasingView();
+            else renderPoList();
+        }
     } catch (err) {
         console.error('讀取訂購單／待到貨資料失敗：', err);
         const message = err?.message || String(err || '未知錯誤');
