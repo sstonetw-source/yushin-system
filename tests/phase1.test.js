@@ -1104,9 +1104,11 @@ test('purchasing and orders share brand names and date range semantics across wo
     controls.purchasePeriodEnd.value = '2026-09-25';
     assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'Biorad'), false);
     assert.equal(context.purchaseLineMatchesFilters('2026-09-24', '王先生', 'Biorad'), true);
-    assert.match(appSource, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand, filters\)/);
-    assert.doesNotMatch(appSource, /receivingQueueContext\(po,item\)/);
-    assert.match(appSource, /receivingQueueContext\(supply,supply\)/);
+    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
+    const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource, /purchaseLineMatchesFilters\(order\.orderDate, order\.salesName, item\.brand, filters\)/);
+    assert.match(receivingSource, /purchaseLineMatchesFilters\(date, salesName, brand, filters\)/);
     assert.match(indexSource, /id="poPeriodFilter" onchange="changePurchasePeriod\(this\.value\)"/);
 });
 
@@ -2442,7 +2444,7 @@ test('purchasing order refresh updates cache without duplicate render', () => {
     assert.match(orderSource,/if \(!options\.skipRender\) \{[\s\S]*?renderOrdersList\(\)[\s\S]*?renderPurchasingWorkCards\(\)/);
 
     const refreshStart=appSource.indexOf('function refreshPurchasingOrderCache');
-    const refreshEnd=appSource.indexOf('\nfunction purchasingArrivalWorkKeys',refreshStart);
+    const refreshEnd=appSource.indexOf('\nfunction loadPurchasingReceivingQueue',refreshStart);
     const refreshSource=appSource.slice(refreshStart,refreshEnd);
     assert.match(refreshSource,/loadOrderPage\(reset, \{ silent: true, skipRender: true \}\)/);
 });
@@ -2466,7 +2468,7 @@ test('purchasing work tabs reuse one shared orders refresh', () => {
     assert.match(appSource,/let purchasingOrdersReady = false/);
 
     const refreshStart=appSource.indexOf('function refreshPurchasingOrderCache');
-    const refreshEnd=appSource.indexOf('\nfunction purchasingArrivalWorkKeys',refreshStart);
+    const refreshEnd=appSource.indexOf('\nfunction loadPurchasingReceivingQueue',refreshStart);
     const refreshSource=appSource.slice(refreshStart,refreshEnd);
     assert.match(refreshSource,/options\.reuseOrders && purchasingOrdersReady/);
     assert.match(refreshSource,/purchasingOrdersReady = true/);
@@ -3253,11 +3255,7 @@ test('receiving source lookup uses indexed order map', () => {
     const helperSource=appSource.slice(helperStart,helperEnd);
     assert.match(helperSource,/function receivingSourceOrderForItem\(item, orderById = null\)/);
     assert.match(helperSource,/orderById\?\.get\(item\.orderId\)/);
-    assert.match(helperSource,/function receivingSourceItem\(order, item, normalizedItems = null\)/);
-    assert.match(helperSource,/normalizedItems \|\| normalizedOrderItems\(order\)/);
-    assert.match(helperSource,/function receivingQueueContext\(record, item, orderById = null, normalizedItemsByOrder = null\)/);
-    assert.match(helperSource,/const sourceItems=normalizedItemsByOrder\?\.get\(sourceOrder\.id\) \|\| normalizedOrderItems\(sourceOrder\)/);
-    assert.match(helperSource,/const sourceIndex = sourceItems\.indexOf\(sourceItem\)/);
+    assert.match(helperSource,/receivingSourceOrderCache\.get\(item\.orderId\)/);
 
     const renderStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
     const renderEnd=appSource.indexOf('\nwindow.renderPoList',renderStart);
@@ -3266,6 +3264,19 @@ test('receiving source lookup uses indexed order map', () => {
     assert.match(renderSource,/receivingSourceOrderForItem\(supply, orderById\)/);
 });
 
+test('purchase history removes unreachable legacy receiving path', () => {
+    assert.doesNotMatch(appSource,/function purchasingArrivalWorkKeys/);
+    assert.doesNotMatch(appSource,/function receivingQueueContext/);
+    assert.doesNotMatch(appSource,/function receivingSourceItem/);
+
+    const renderStart=appSource.indexOf('window.renderPoList = function');
+    const renderEnd=appSource.indexOf('\n// 把「採購訂單」',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/if \(purchasingView === 'receiving'\) \{[\s\S]*?renderPurchasingReceivingWorkList[\s\S]*?return;/);
+    assert.doesNotMatch(renderSource,/purchasingView === 'receiving'\) supplyReceivingCache\.forEach/);
+    assert.doesNotMatch(renderSource,/const arrivalWorkKeys/);
+    assert.doesNotMatch(renderSource,/const receivingItemKeys/);
+});
 
 test('purchasing cards and completed rows share dispatch snapshots', () => {
     const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
