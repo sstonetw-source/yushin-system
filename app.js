@@ -7917,6 +7917,7 @@ window.renderOrdersList = function() {
     const brandFilter = document.getElementById('orderBrandFilter')?.value || '';
     const keyword = (searchInput.value || '').toLowerCase();
     tbody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     let shown = 0;
 
     const visibleOrderSource = orderHistorySearchActive ? orderHistorySearchResults : ordersCache;
@@ -7924,11 +7925,13 @@ window.renderOrdersList = function() {
     const normalizedItemsByOrder = new Map(visibleOrderSource.map(o => [o.id, normalizedOrderItems(o)]));
     const baseOrders = visibleOrderSource.filter(o => {
         const orderItems = normalizedItemsByOrder.get(o.id) || [];
-        const itemSearchable = orderItems.flatMap(item => [
-            item.brand, item.itemCode, item.itemName, item.productLine, item.productType, item.spec
-        ]).join(' ');
-        const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''} ${itemSearchable}`.toLowerCase();
-        if (!orderHistorySearchActive && keyword && !searchable.includes(keyword)) return false;
+        if (!orderHistorySearchActive && keyword) {
+            const itemSearchable = orderItems.flatMap(item => [
+                item.brand, item.itemCode, item.itemName, item.productLine, item.productType, item.spec
+            ]).join(' ');
+            const searchable = `${o.customerName || ''} ${o.brand || ''} ${o.itemCode || ''} ${o.itemName || ''} ${o.quoteNo || ''} ${o.salesName || ''} ${itemSearchable}`.toLowerCase();
+            if (!searchable.includes(keyword)) return false;
+        }
         if (salesFilter && stripPhoneSuffix(o.salesName) !== salesFilter) return false;
         if (brandFilter && !orderItems.some(item => orderBrandFilterValue(item.brand, selectableBrands) === brandFilter)
             && orderBrandFilterValue(o.brand, selectableBrands) !== brandFilter) return false;
@@ -8016,8 +8019,9 @@ window.renderOrdersList = function() {
                 if (!action.includes('openOrderStatusHistory(')) button.remove();
             });
         }
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
     });
+    tbody.appendChild(fragment);
     document.getElementById('ordersEmptyHint').style.display = shown === 0 ? 'block' : 'none';
     // 採購頁打開時才重算其工作卡；切頁時會用同一份 ordersCache 立即產生。
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingWorkCards();
