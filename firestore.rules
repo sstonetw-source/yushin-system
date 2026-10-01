@@ -123,6 +123,47 @@ service cloud.firestore {
         && request.resource.data.salesCode == resource.data.salesCode;
     }
 
+    function sameSupplyIdentity() {
+      return request.resource.data.get('type', '') == resource.data.get('type', '')
+        && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
+        && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
+        && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+        && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
+        && request.resource.data.get('productId', '') == resource.data.get('productId', '')
+        && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
+        && request.resource.data.get('fulfillmentType', 'WAREHOUSE') == resource.data.get('fulfillmentType', 'WAREHOUSE')
+        && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
+        && request.resource.data.get('purchaseDocumentId', '') == resource.data.get('purchaseDocumentId', '');
+    }
+
+    function validSupplyOperationalState() {
+      return request.resource.data.get('qty', 0) is number
+        && request.resource.data.get('receivedQty', 0) is number
+        && request.resource.data.get('incomingRegisteredQty', 0) is number
+        && request.resource.data.get('qty', 0) >= resource.data.get('qty', 0)
+        && request.resource.data.get('receivedQty', 0) >= 0
+        && request.resource.data.get('receivedQty', 0) <= request.resource.data.get('qty', 0)
+        && request.resource.data.get('incomingRegisteredQty', 0) >= 0
+        && request.resource.data.get('status', 'ORDERED') in [
+          'ORDERED', 'PARTIAL_RECEIPT', 'RECEIVED', 'CANCELLED'
+        ];
+    }
+
+    function purchaserSupplyOperationalUpdate() {
+      return purchaser()
+        && sameSupplyIdentity()
+        && validSupplyOperationalState();
+    }
+
+    function warehouseSupplyOperationalUpdate() {
+      return warehouse()
+        && sameSupplyIdentity()
+        && validSupplyOperationalState()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'receivedQty', 'incomingRegisteredQty', 'status', 'updatedAt'
+        ]);
+    }
+
     // Creator identity is an audit field. Legacy documents without creator metadata
     // remain editable; once present, normal workflow edits cannot rewrite it.
     function preservesCreator() {
@@ -411,11 +452,9 @@ service cloud.firestore {
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
       // from bypassing procurement and receipt workflows.
-      allow update: if admin() || purchaser()
-        || (warehouse()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'receivedQty', 'incomingRegisteredQty', 'status', 'updatedAt'
-          ]));
+      allow update: if admin()
+        || purchaserSupplyOperationalUpdate()
+        || warehouseSupplyOperationalUpdate();
       allow delete: if admin();
     }
 
