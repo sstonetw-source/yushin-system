@@ -3731,3 +3731,15 @@ test('equipment data scope agrees with engineer all-company access', () => {
     assert.match(ruleSource,/allow create: if admin\(\) \|\| engineer\(\)/);
     assert.match(ruleSource,/allow update: if admin\(\) \|\| engineer\(\)/);
 });
+
+
+test('multi-item Forecast conversion tracks inventory reservation outcome', () => {
+    const start=appSource.indexOf('async function createForecastOrdersDirectly');
+    const end=appSource.indexOf('\nwindow.createOrderFromForecast',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/inventoryReservationStatus:'pending'/);
+    assert.match(source,/inventoryReservationStatus:'completed'/);
+    assert.match(source,/inventoryReservationStatus:'failed'/);
+    assert.match(source,/reservationFailures:reservationResults\.filter/);
+    assert.doesNotMatch(source,/Promise\.allSettled\(created\.map\(order=>reserveInventoryForNewOrder/);
+});
