@@ -2763,3 +2763,18 @@ test('product master search throttles intermediate table renders', () => {
     assert.match(source,/now - lastIntermediateRenderAt >= 100/);
     assert.match(source,/renderProductManagementResults\(\);\s*if \(status\) status\.textContent = `完成/);
 });
+
+
+test('quote list filters avoid rebuilding unchanged options', () => {
+    const brandStart=appSource.indexOf('function populateMyQuoteBrandFilter');
+    const brandEnd=appSource.indexOf('\nfunction populateMyQuoteSalesFilter',brandStart);
+    const brandSource=appSource.slice(brandStart,brandEnd);
+    assert.match(appSource,/let myQuoteBrandFilterSignature = ''/);
+    assert.match(brandSource,/signature !== myQuoteBrandFilterSignature/);
+
+    const salesStart=appSource.indexOf('function populateMyQuoteSalesFilter');
+    const salesEnd=appSource.indexOf('\nwindow.renderMyQuotesList',salesStart);
+    const salesSource=appSource.slice(salesStart,salesEnd);
+    assert.match(appSource,/let myQuoteSalesFilterSignature = ''/);
+    assert.match(salesSource,/signature !== myQuoteSalesFilterSignature/);
+});
