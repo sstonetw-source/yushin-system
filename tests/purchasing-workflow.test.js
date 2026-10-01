@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const workflow = require('../modules/workflow-core.js');
 const fulfillment = require('../modules/fulfillment-core.js');
+const supply = require('../modules/supply-core.js');
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -1234,4 +1235,41 @@ test('purchase identity fields stay editable and save-print keeps the secure tra
     assert.match(app, /'📄 匯出 PDF（自動同步雲端）'/);
     const save = app.match(/window\.printPurchaseOrder = async function\(\) \{[\s\S]*?\n\};/)?.[0] || '';
     assert.ok(save.indexOf('await commitPromise') < save.indexOf('printSavedPoDocument(poNo, vendorName)'));
+});
+
+
+test('cancelled supply records have no receivable remainder', () => {
+    const cancelled=supply.normalize({type:'PURCHASING_PO',qty:10,receivedQty:4,status:'CANCELLED'});
+    assert.equal(cancelled.status,'CANCELLED');
+    assert.equal(cancelled.receivedQty,4);
+    assert.equal(cancelled.remainingQty,0);
+    const retry=supply.applyReceipt(cancelled,2);
+    assert.equal(retry.appliedQty,0);
+    assert.equal(retry.record.receivedQty,4);
+});
+
+test('purchase cancellation releases incoming and returns outstanding quantity to procurement', () => {
+    const start=app.indexOf('async function cancelOutstandingSupplyRecord');
+    const end=app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const remaining=Math\.max\(0,ordered-received\)/);
+    assert.match(source,/supplyOrderedQty:Math\.max\(receivedForItem,currentSupplyOrdered-remaining\)/);
+    assert.match(source,/incoming:Math\.max\(0,inv\.incoming-registeredIncoming\)/);
+    assert.match(source,/incoming:Math\.max\(0,wh\.incoming-registeredIncoming\)/);
+    assert.match(source,/type:'purchase_incoming_cancel'/);
+    assert.match(source,/status:'CANCELLED'/);
+    assert.match(source,/incomingRegisteredQty:0/);
+
+    const registerStart=app.indexOf('async function registerPurchaseIncoming');
+    const registerEnd=app.indexOf('\nasync function cancelOutstandingSupplyRecord',registerStart);
+    const registerSource=app.slice(registerStart,registerEnd);
+    assert.match(registerSource,/poRecord\?\.status[\s\S]*?'CANCELLED'/);
+    assert.match(registerSource,/supply\.status[\s\S]*?'CANCELLED'/);
+
+    const pendingStart=app.indexOf('async function purchaseIncomingSyncPending');
+    const pendingEnd=app.indexOf('\nwindow.reprintPurchaseOrder',pendingStart);
+    const pendingSource=app.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/po\?\.status[\s\S]*?'CANCELLED'/);
+    assert.match(pendingSource,/supply\.status[\s\S]*?'CANCELLED'/);
 });
