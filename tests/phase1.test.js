@@ -1870,11 +1870,20 @@ test('production HTML cache-busts local application assets after main deployment
   assert.match(indexSource,/modules\/fulfillment-core\.js\?v=\d{8}-\d+/);
 });
 
-test('Forecast full-history search uses Firestore searchTokens', () => {
+test('Forecast full-history search scans every indexed match with progress feedback', () => {
     assert.match(indexSource, /id="forecastSearch"[\s\S]*?oninput="scheduleForecastHistorySearch\(\)"/);
+    assert.match(indexSource, /id="forecastHistorySearchStatus"/);
     assert.match(appSource, /buildFullHistorySearchTokens\('forecast', record\)/);
     assert.match(appSource, /scopedHistorySearchQuery\('forecasts', queryToken\)\.limit\(DEFAULT_LIST_LIMIT\)/);
     assert.match(appSource, /where\('searchTokens', 'array-contains', queryToken\)/);
+    const start = appSource.indexOf('async function runForecastHistorySearch');
+    const end = appSource.indexOf('window.scheduleForecastHistorySearch', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /while \(true\)/);
+    assert.match(source, /firestoreReadWithTimeout\(query\.get\(\), 'Forecast 索引搜尋'\)/);
+    assert.match(source, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(source, /全歷史搜尋中：已檢查/);
+    assert.match(source, /generation !== forecastHistorySearchGeneration/);
     assert.match(appSource, /forecastHistorySearchTimer = scheduleListSearch\(forecastHistorySearchTimer, \(\) => runForecastHistorySearch\(true\)\)/);
 });
 

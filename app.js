@@ -1984,10 +1984,15 @@ window.loadForecasts = async function(reset = true) {
 
     forecastLoading = true;
     const button = document.getElementById('forecastLoadMoreBtn');
+    const refreshButton = document.getElementById('forecastRefreshBtn');
 
     if (button) {
         button.disabled = true;
         button.innerText = '載入中…';
+    }
+    if (refreshButton && reset) {
+        refreshButton.disabled = true;
+        refreshButton.innerText = '載入中…';
     }
 
     try {
@@ -2042,6 +2047,10 @@ window.loadForecasts = async function(reset = true) {
             button.innerText = '載入更多（每次 50 筆）';
             button.style.display = forecastHasMore ? '' : 'none';
         }
+        if (refreshButton) {
+            refreshButton.disabled = false;
+            refreshButton.innerText = '↻ 更新';
+        }
     }
 };
 
@@ -2051,46 +2060,86 @@ let forecastHistorySearchCursor = null;
 let forecastHistorySearchKeyword = '';
 let forecastHistorySearchResults = [];
 let forecastHistorySearchTimer = null;
+let forecastHistorySearchGeneration = 0;
+
+function updateForecastHistorySearchStatus(message = '') {
+    const status = document.getElementById('forecastHistorySearchStatus');
+    if (status) status.textContent = message;
+}
 
 async function runForecastHistorySearch(reset = true) {
     const input = document.getElementById('forecastSearch');
     const rawKeyword = input?.value || '';
     const normalized = normalizeFullHistorySearchValue(rawKeyword);
+    const generation = ++forecastHistorySearchGeneration;
     if (!normalized) {
         forecastHistorySearchActive = false;
+        forecastHistorySearchLoading = false;
+        forecastHistorySearchKeyword = '';
         forecastHistorySearchResults = [];
         forecastHistorySearchCursor = null;
+        updateForecastHistorySearchStatus('');
         renderForecastList();
         return;
     }
     const queryToken = fullHistoryQueryToken('forecast', rawKeyword);
-    if (!queryToken || forecastHistorySearchLoading) return;
-    forecastHistorySearchLoading = true;
-    if (reset || rawKeyword !== forecastHistorySearchKeyword) {
-        forecastHistorySearchKeyword = rawKeyword;
-        forecastHistorySearchResults = [];
-        forecastHistorySearchCursor = null;
-    }
-    try {
-        let query = scopedHistorySearchQuery('forecasts', queryToken).limit(DEFAULT_LIST_LIMIT);
-        if (forecastHistorySearchCursor) query = query.startAfter(forecastHistorySearchCursor);
-        const snapshot = await query.get();
-        const records = new Map(forecastHistorySearchResults.map(record => [record.id, record]));
-        snapshot.forEach(doc => {
-            const data = { id: doc.id, ...doc.data() };
-            if (fullHistoryRecordMatches('forecast', data, rawKeyword)) records.set(doc.id, data);
-        });
-        forecastHistorySearchResults = [...records.values()].sort(
-            (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))
-        );
-        forecastHistorySearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
-        forecastHistorySearchActive = true;
-        renderForecastList();
-    } catch (err) {
-        console.error('Forecast 全歷史搜尋失敗：', err);
-        alert('Forecast 全歷史搜尋失敗，舊資料可能尚未完成搜尋索引補建。');
-    } finally {
+    if (!queryToken) {
+        forecastHistorySearchActive = false;
         forecastHistorySearchLoading = false;
+        updateForecastHistorySearchStatus('目前帳號缺少可用的資料歸屬資訊，無法搜尋完整 Forecast。');
+        renderForecastList();
+        return;
+    }
+
+    forecastHistorySearchLoading = true;
+    forecastHistorySearchActive = true;
+    forecastHistorySearchKeyword = rawKeyword;
+    forecastHistorySearchResults = [];
+    forecastHistorySearchCursor = null;
+    const records = new Map();
+    let cursor = null;
+    let checked = 0;
+    updateForecastHistorySearchStatus('正在搜尋全部 Forecast…');
+    renderForecastList();
+
+    try {
+        while (true) {
+            let query = scopedHistorySearchQuery('forecasts', queryToken).limit(DEFAULT_LIST_LIMIT);
+            if (cursor) query = query.startAfter(cursor);
+            const snapshot = await firestoreReadWithTimeout(query.get(), 'Forecast 索引搜尋');
+            if (generation !== forecastHistorySearchGeneration) return;
+
+            checked += snapshot.size;
+            snapshot.forEach(doc => {
+                const data = { id: doc.id, ...doc.data() };
+                if (fullHistoryRecordMatches('forecast', data, rawKeyword)) records.set(doc.id, data);
+            });
+            forecastHistorySearchResults = [...records.values()].sort(
+                (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))
+            );
+            renderForecastList();
+            updateForecastHistorySearchStatus(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
+
+            if (snapshot.size < DEFAULT_LIST_LIMIT) break;
+            cursor = snapshot.docs[snapshot.docs.length - 1];
+            forecastHistorySearchCursor = cursor;
+            await Promise.resolve();
+        }
+        if (generation !== forecastHistorySearchGeneration) return;
+        forecastHistorySearchCursor = null;
+        updateForecastHistorySearchStatus(`全歷史搜尋完成：找到 ${records.size} 筆`);
+    } catch (err) {
+        if (generation !== forecastHistorySearchGeneration) return;
+        console.error('Forecast 全歷史搜尋失敗：', err);
+        forecastHistorySearchActive = false;
+        forecastHistorySearchCursor = null;
+        updateForecastHistorySearchStatus('搜尋失敗；若為舊資料，請管理員確認搜尋索引已補建。');
+        renderForecastList();
+    } finally {
+        if (generation === forecastHistorySearchGeneration) {
+            forecastHistorySearchLoading = false;
+            renderForecastList();
+        }
     }
 }
 
