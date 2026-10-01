@@ -2020,20 +2020,39 @@ function populateForecastBrandFilter() {
     else if (select.value && !sortedBrands.includes(select.value)) select.value = '';
 }
 
+function forecastOwnSalesName() {
+    return stripPhoneSuffix(currentUserName || '').trim();
+}
+
+function forecastSalesCodeForName(name) {
+    const normalizedName = stripPhoneSuffix(name || '').trim();
+    if (!normalizedName) return '';
+    if (normalizedName === forecastOwnSalesName() && currentUserCode) return String(currentUserCode);
+    const match = salesList.find(person =>
+        String(person.role || 'sales').toLowerCase() === 'sales'
+        && stripPhoneSuffix(person.name || '') === normalizedName
+        && person.active !== false
+    );
+    return String(match?.code || '');
+}
+
 function populateForecastSalesFilter() {
     const select = document.getElementById('forecastSalesFilter');
     if (!select) return;
 
     const canSeeAll = canViewAllData('forecast');
+    const ownName = forecastOwnSalesName();
+
     if (!canSeeAll) {
-        const label = currentUserName || '我的 Forecast';
-        const signature = JSON.stringify(['own', currentUserName || '', label]);
+        const label = ownName ? `我的案件（${ownName}）` : '我的案件';
+        const signature = JSON.stringify(['own', ownName, label]);
         if (signature !== forecastSalesFilterSignature) {
-            select.innerHTML = `<option value="${escapeAttr(currentUserName || '')}">${escapeHtml(label)}</option>`;
+            select.innerHTML = `<option value="${escapeAttr(ownName)}">${escapeHtml(label)}</option>`;
             forecastSalesFilterSignature = signature;
         }
-        select.value = currentUserName || '';
+        select.value = ownName;
         select.disabled = true;
+        updateForecastFilterUi();
         return;
     }
 
@@ -2041,27 +2060,146 @@ function populateForecastSalesFilter() {
     const names = new Set();
 
     salesList
-        .filter(person => String(person.role || 'sales').toLowerCase() === 'sales')
+        .filter(person => String(person.role || 'sales').toLowerCase() === 'sales' && person.active !== false)
         .forEach(person => {
             const name = stripPhoneSuffix(person.name || '');
             if (name) names.add(name);
         });
 
+    const forecastRows = forecastHistorySearchActive ? forecastHistorySearchResults : forecastCache;
+    forecastRows.forEach(item => {
+        const name = stripPhoneSuffix(item.salesName || '');
+        if (name) names.add(name);
+    });
+    if (ownName) names.add(ownName);
+
     select.disabled = false;
     const sortedNames = [...names].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    const signature = JSON.stringify(['all', sortedNames]);
+    const signature = JSON.stringify(['all', ownName, sortedNames]);
+    const defaultKey = `${currentUser?.uid || ''}|${currentUserRole || ''}|${ownName}`;
+    const applyDefault = select.dataset.forecastDefaultKey !== defaultKey;
+
     if (signature !== forecastSalesFilterSignature) {
-        select.innerHTML = '<option value="">全部業務</option>' + sortedNames.map(name =>
-            `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`
-        ).join('');
+        const ownOption = ownName
+            ? `<option value="${escapeAttr(ownName)}">我的案件（${escapeHtml(ownName)}）</option>`
+            : '';
+        const otherOptions = sortedNames
+            .filter(name => name !== ownName)
+            .map(name => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`)
+            .join('');
+        select.innerHTML = '<option value="">全部業務</option>' + ownOption + otherOptions;
         forecastSalesFilterSignature = signature;
     }
 
-    if (sortedNames.includes(current)) select.value = current;
-    else if (select.value && !sortedNames.includes(select.value)) select.value = '';
+    if (applyDefault) {
+        select.dataset.forecastDefaultKey = defaultKey;
+        select.value = ownName || '';
+    } else if ([...select.options].some(option => option.value === current)) {
+        select.value = current;
+    } else {
+        select.value = '';
+    }
+
+    updateForecastFilterUi();
 }
 
-function populateForecastBrandDropdown(selectedBrand = '') {
+function updateForecastFilterUi() {
+    const mineButton = document.getElementById('forecastMineQuickBtn');
+    const activeButton = document.getElementById('forecastActiveQuickBtn');
+    const filterButton = document.getElementById('forecastFilterToggleBtn');
+    const salesFilter = document.getElementById('forecastSalesFilter');
+    const statusFilter = document.getElementById('forecastStatusFilter');
+    const ownName = forecastOwnSalesName();
+
+    const mineActive = !canViewAllData('forecast') || (!!ownName && salesFilter?.value === ownName);
+    const activeActive = (statusFilter?.value || 'active') === 'active';
+
+    mineButton?.classList.toggle('is-active', mineActive);
+    activeButton?.classList.toggle('is-active', activeActive);
+
+    let advancedCount = 0;
+    if ((document.getElementById('forecastBrandFilter')?.value || '')) advancedCount++;
+    if ((document.getElementById('forecastStageFilter')?.value || '')) advancedCount++;
+    if ((document.getElementById('forecastPeriodFilter')?.value || 'this-year') !== 'this-year') advancedCount++;
+    if ((statusFilter?.value || 'active') !== 'active') advancedCount++;
+    if (canViewAllData('forecast') && (salesFilter?.value || '') !== (ownName || '')) advancedCount++;
+
+    if (filterButton) {
+        filterButton.textContent = advancedCount ? `篩選（${advancedCount}）` : '篩選';
+    }
+}
+
+window.toggleForecastFilterPanel = function() {
+    const panel = document.getElementById('forecastFilterPanel');
+    const button = document.getElementById('forecastFilterToggleBtn');
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    if (button) button.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+};
+
+window.applyForecastLocalFilters = function() {
+    updateForecastFilterUi();
+    renderForecastList();
+};
+
+window.handleForecastStatusFilterChange = function() {
+    updateForecastFilterUi();
+    loadForecasts(true);
+};
+
+window.handleForecastSalesFilterChange = function() {
+    updateForecastFilterUi();
+    loadForecasts(true);
+};
+
+window.toggleForecastMineFilter = function() {
+    const select = document.getElementById('forecastSalesFilter');
+    if (!select) return;
+    const ownName = forecastOwnSalesName();
+
+    if (!canViewAllData('forecast')) {
+        select.value = ownName;
+        updateForecastFilterUi();
+        renderForecastList();
+        return;
+    }
+
+    select.value = ownName && select.value !== ownName ? ownName : '';
+    updateForecastFilterUi();
+    loadForecasts(true);
+};
+
+window.setForecastActiveFilter = function() {
+    const select = document.getElementById('forecastStatusFilter');
+    if (!select) return;
+    if (select.value === 'active') {
+        updateForecastFilterUi();
+        return;
+    }
+    select.value = 'active';
+    updateForecastFilterUi();
+    loadForecasts(true);
+};
+
+window.clearForecastFilters = function() {
+    const ownName = forecastOwnSalesName();
+    const brand = document.getElementById('forecastBrandFilter');
+    const sales = document.getElementById('forecastSalesFilter');
+    const status = document.getElementById('forecastStatusFilter');
+    const stage = document.getElementById('forecastStageFilter');
+    const period = document.getElementById('forecastPeriodFilter');
+
+    if (brand) brand.value = '';
+    if (sales) sales.value = canViewAllData('forecast') ? (ownName || '') : ownName;
+    if (status) status.value = 'active';
+    if (stage) stage.value = '';
+    if (period) period.value = 'this-year';
+
+    updateForecastFilterUi();
+    loadForecasts(true);
+};
+
+function populateForecastBrandDropdown(selectedBrand = '') {function populateForecastBrandDropdown(selectedBrand = '') {
     const input = document.getElementById('forecastBrand');
     const list = document.getElementById('forecastBrandList');
     if (!input || !list) return;
@@ -2107,9 +2245,10 @@ window.loadForecasts = async function(reset = true) {
 
     try {
         if (canViewAllData('forecast')) await ensureSalesListLoaded();
-        else populateForecastSalesFilter();
+        populateForecastSalesFilter();
 
         const status = document.getElementById('forecastStatusFilter')?.value || 'active';
+        const selectedSalesName = document.getElementById('forecastSalesFilter')?.value || '';
 
         let query = db.collection('forecasts').orderBy('updatedAt', 'desc');
 
@@ -2120,6 +2259,13 @@ window.loadForecasts = async function(reset = true) {
         if (!canViewAllData('forecast')) {
             if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
             else query = query.where('ownerUid', '==', currentUser?.uid || '');
+        } else if (selectedSalesName) {
+            const selectedSalesCode = forecastSalesCodeForName(selectedSalesName);
+            if (selectedSalesCode) {
+                query = query.where('salesCode', '==', selectedSalesCode);
+            } else if (selectedSalesName === forecastOwnSalesName() && currentUser?.uid) {
+                query = query.where('ownerUid', '==', currentUser.uid);
+            }
         }
 
         query = query.limit(DEFAULT_LIST_LIMIT);
@@ -2330,15 +2476,37 @@ window.renderForecastList = function() {
             ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="btn-small danger-menu-item" onclick="permanentlyDeleteForecast('${escapeAttr(item.id)}')">永久刪除</button>` : ''}
         `;
 
+        const estimatedAmount = Number(item.estimatedAmount || 0);
+        const updatedDate = dateOnlyFromTimestamp(item.latestProgressAt || item.updatedAt || item.createdAt)
+            .replace(/-/g, '/');
+
         row.innerHTML = `
-            <td data-th="客戶">${escapeHtml(item.customerName || '')}</td>
-            <td data-th="廠牌">${escapeHtml(brand || '')}</td>
-            <td data-th="產品／品項">${escapeHtml(item.productName || '')}</td>
-            <td data-th="預估金額">${Number(item.estimatedAmount || 0).toLocaleString()}</td>
-            <td data-th="Stage"><span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span></td>
-            <td data-th="狀態"><span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span></td>
-            <td data-th="最新進度" class="forecast-progress-cell">${escapeHtml(item.latestProgress || '')}</td>
-            <td data-th="業務">${escapeHtml(salesName)}</td>
+            <td class="forecast-mobile-summary">
+                <div class="forecast-card-heading">
+                    <div class="forecast-card-customer">
+                        <strong>${escapeHtml(item.customerName || '')}</strong>
+                        ${brand ? `<span>｜${escapeHtml(brand)}</span>` : ''}
+                    </div>
+                    ${estimatedAmount > 0 ? `<div class="forecast-card-amount">NT$ ${estimatedAmount.toLocaleString()}</div>` : ''}
+                </div>
+                <div class="forecast-card-product">${escapeHtml(item.productName || '')}</div>
+                <div class="forecast-card-badges">
+                    <span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span>
+                    <span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span>
+                </div>
+                <div class="forecast-card-progress">${escapeHtml(item.latestProgress || '尚未更新進度')}</div>
+                <div class="forecast-card-meta">
+                    ${escapeHtml(salesName || '未指定業務')}${updatedDate ? ` · ${escapeHtml(updatedDate)} 更新` : ''}
+                </div>
+            </td>
+            <td data-th="客戶" class="forecast-desktop-cell">${escapeHtml(item.customerName || '')}</td>
+            <td data-th="廠牌" class="forecast-desktop-cell">${escapeHtml(brand || '')}</td>
+            <td data-th="產品／品項" class="forecast-desktop-cell">${escapeHtml(item.productName || '')}</td>
+            <td data-th="預估金額" class="forecast-desktop-cell">${estimatedAmount.toLocaleString()}</td>
+            <td data-th="Stage" class="forecast-desktop-cell"><span class="forecast-stage-badge">${escapeHtml(forecastStageLabel(item.stage))}</span></td>
+            <td data-th="狀態" class="forecast-desktop-cell"><span class="forecast-status-badge ${statusClass}">${escapeHtml(forecastStatusLabel(item.status))}</span></td>
+            <td data-th="最新進度" class="forecast-progress-cell forecast-desktop-cell">${escapeHtml(item.latestProgress || '')}</td>
+            <td data-th="業務" class="forecast-desktop-cell">${escapeHtml(salesName)}</td>
             <td data-th="操作" class="no-print forecast-actions">${actions}</td>
         `;
 
@@ -2348,6 +2516,7 @@ window.renderForecastList = function() {
 
     const hint = document.getElementById('forecastEmptyHint');
     if (hint) hint.style.display = shown ? 'none' : 'block';
+    updateForecastFilterUi();
 };
 
 window.openForecastModal = function(id = '') {
@@ -2362,30 +2531,16 @@ window.openForecastModal = function(id = '') {
     document.getElementById('forecastAmount').value = item?.estimatedAmount || '';
     document.getElementById('forecastStage').value = item?.stage || 'stage1';
     document.getElementById('forecastStatus').value = item?.status || 'active';
+    document.getElementById('forecastProgress').value = '';
 
     const workflowSection = document.getElementById('forecastWorkflowSection');
-    const newProgressSection = document.getElementById('forecastNewProgressSection');
-    const currentProgressSection = document.getElementById('forecastCurrentProgressSection');
-    const progressInput = document.getElementById('forecastProgress');
-
-    if (item) {
-        // 編輯只處理基本資料。Stage／狀態／最新進度統一由「＋進度」修改，避免兩個入口互相覆蓋。
-        if (workflowSection) workflowSection.style.display = 'none';
-        if (newProgressSection) newProgressSection.style.display = 'none';
-        if (currentProgressSection) currentProgressSection.style.display = 'none';
-        if (progressInput) progressInput.value = '';
-    } else {
-        if (workflowSection) workflowSection.style.display = '';
-        if (newProgressSection) newProgressSection.style.display = '';
-        if (currentProgressSection) currentProgressSection.style.display = 'none';
-        if (progressInput) progressInput.value = '';
-    }
+    if (workflowSection) workflowSection.style.display = item ? 'none' : '';
 
     document.getElementById('forecastModalTitle').innerText = item ? '編輯 Forecast' : '新增 Forecast';
     document.getElementById('forecastModalOverlay').classList.add('active');
 };
 
-window.closeForecastModal = function() {
+window.closeForecastModal = function() {window.closeForecastModal = function() {
     document.getElementById('forecastModalOverlay')?.classList.remove('active');
 };
 
@@ -2414,12 +2569,8 @@ window.saveForecast = async function() {
         return;
     }
 
-    let stage = existing?.stage || document.getElementById('forecastStage').value || 'stage1';
-    const status = existing?.status || document.getElementById('forecastStatus').value || 'active';
-
-    if (!existing && status === 'won') {
-        stage = 'stage5';
-    }
+    const stage = existing?.stage || document.getElementById('forecastStage').value || 'stage1';
+    const status = existing?.status || 'active';
 
     const now = forecastNowIso();
     const estimatedAmount = Number(document.getElementById('forecastAmount').value) || 0;
@@ -2436,8 +2587,8 @@ window.saveForecast = async function() {
         const ref = id ? db.collection('forecasts').doc(id) : db.collection('forecasts').doc();
 
         if (!existing) {
-            const rawProgress = document.getElementById('forecastProgress').value.trim();
-            const latestProgress = buildForecastProgressText(rawProgress, '立案');
+            const rawProgress = '';
+            const latestProgress = buildForecastProgressText('', '立案');
 
             const record = {
                 customerName,
