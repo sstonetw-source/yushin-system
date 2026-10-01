@@ -2276,3 +2276,20 @@ test('interactive quote forecast product reads are bounded', () => {
     const dealEnd=appSource.indexOf('window.unmarkQuoteAsDeal',dealStart);
     assert.match(appSource.slice(dealStart,dealEnd),/firestoreReadWithTimeout/);
 });
+
+
+test('product save buttons show feedback during duplicate checks', () => {
+    const editorStart=appSource.indexOf('window.saveProductMasterEditor = async function');
+    const editorEnd=appSource.indexOf('\n};',editorStart)+3;
+    const editorSource=appSource.slice(editorStart,editorEnd);
+    assert.match(editorSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?Product Master 重複貨號檢查/);
+    assert.match(editorSource,/button\.textContent = '儲存中…'/);
+    assert.match(editorSource,/endActionButton\(button, state\)/);
+
+    const quickStart=appSource.indexOf('window.saveQuickProduct = async function');
+    const quickEnd=appSource.indexOf('\n};',quickStart)+3;
+    const quickSource=appSource.slice(quickStart,quickEnd);
+    assert.match(quickSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?Product Master 重複貨號檢查/);
+    assert.match(quickSource,/button\.textContent = '儲存中…'/);
+    assert.match(quickSource,/endActionButton\(button, state\)/);
+});
