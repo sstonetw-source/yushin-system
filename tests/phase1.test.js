@@ -3853,7 +3853,7 @@ test('order lifecycle actions are hidden from purchaser and guarded by business 
     assert.match(renderSource,/canManageOrderLifecycle[\s\S]*?quickSetOrderLifecycle/);
     assert.match(renderSource,/canManageOrderLifecycle[\s\S]*?openReturnManagement/);
 
-    ['quickSetOrderLifecycle','quickCompleteDelivery','quickCancelAllDelivery','saveDeliveryRecord','deleteDeliveryRecord','saveOrderLifecycleStatus','saveReturnRecord','deleteReturnRecord'].forEach(name => {
+    ['quickSetOrderLifecycle','quickCompleteDelivery','quickCancelAllDelivery','saveDeliveryRecord','deleteDeliveryRecord','saveOrderLifecycleStatus','saveReturnRecord','deleteReturnRecord','toggleOrderStatus'].forEach(name => {
         const start=appSource.indexOf('window.'+name+' =');
         const source=appSource.slice(start,start+500);
         assert.match(source,/canManageOrderLifecycleCapability\(\)/, name+' must enforce business lifecycle capability');
