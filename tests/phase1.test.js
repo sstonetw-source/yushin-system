@@ -2903,3 +2903,20 @@ test('history search throttles intermediate list renders', () => {
     assert.match(quoteSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
     assert.match(quoteSource,/quoteHistorySearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderMyQuotesList\(\)[\s\S]*?全歷史搜尋完成/);
 });
+
+
+test('forecast and equipment history searches throttle intermediate renders', () => {
+    const forecastStart=appSource.indexOf('async function runForecastHistorySearch');
+    const forecastEnd=appSource.indexOf('\nwindow.scheduleForecastHistorySearch',forecastStart);
+    const forecastSource=appSource.slice(forecastStart,forecastEnd);
+    assert.match(forecastSource,/let lastIntermediateRenderAt = 0/);
+    assert.match(forecastSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(forecastSource,/forecastHistorySearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderForecastList\(\)[\s\S]*?全歷史搜尋完成/);
+
+    const equipmentStart=appSource.indexOf('function runEquipmentSearch()');
+    const equipmentEnd=appSource.indexOf('\nwindow.scheduleEquipmentSearch',equipmentStart);
+    const equipmentSource=appSource.slice(equipmentStart,equipmentEnd);
+    assert.match(equipmentSource,/let lastIntermediateRenderAt = 0/);
+    assert.match(equipmentSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(equipmentSource,/equipmentSearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderEquipmentList\(\)[\s\S]*?全資料搜尋完成/);
+});
