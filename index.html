@@ -104,6 +104,20 @@
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
             <button type="button" id="createProductMasterBtn" class="btn-secondary" style="display:none;" onclick="openNewProductMasterEditor()">＋ 新增 Product Master</button>
             <button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補 Product Master</button>
+            <details id="productBatchMaintenance" class="order-export-menu" style="display:none;">
+                <summary class="btn-secondary">批次維護</summary>
+                <div class="order-export-panel">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button type="button" class="btn-secondary" onclick="downloadProductPriceUpdateTemplate()">下載售價範本</button>
+                        <button type="button" onclick="document.getElementById('productPriceExcelInput').click()">更新建議售價</button>
+                        <input type="file" id="productPriceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductPriceExcelUpload(this)">
+                        <button type="button" class="btn-secondary" onclick="downloadProductCostUpdateTemplate()">下載成本範本</button>
+                        <button type="button" onclick="document.getElementById('productCostExcelInput').click()">更新標準成本</button>
+                        <input type="file" id="productCostExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductCostExcelUpload(this)">
+                    </div>
+                    <span style="font-size:12px;color:#666;">售價只更新 Product Master 的建議售價；成本只更新受保護的 productCosts，兩者互不覆蓋。</span>
+                </div>
+            </details>
             <span id="productManagementSearchStatus" class="inline-status"></span>
         </div>
         <div class="inventory-summary-note">搜尋直接查詢完整 Product Master，不受目前畫面載入筆數限制；貨號與中英文品名採開頭比對，不掃描整個資料庫。管理員／採購可按「待補 Product Master」手動查看近期待補品項。</div>
@@ -1166,13 +1180,13 @@
             </table>
         </div>
 
-        <!-- Product Master：正式資料只存 products / productCosts。 -->
+        <!-- Product Master：主檔只寫 products；productCosts 由獨立成本維護工具更新。 -->
         <div id="admin-prices" class="admin-panel" style="display:none;">
             <div class="toolbar no-print">
                 <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ 下載標準匯入範本</button>
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 匯入 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">只維護一種 Excel：每列包含廠牌、產品線、貨號、產品資料、建議售價與標準成本。可只上傳要新增／修改的品項；未出現在檔案中的產品不會被刪除或停用。建議售價存 products，標準成本獨立存 productCosts。</span>
+                <span style="font-size:12px;color:#666;">Product Master Excel 只維護廠牌、產品線、貨號、產品資料與建議售價；可只上傳要新增／修改的品項，未出現在檔案中的產品不會被刪除或停用。少量售價或成本調整請到「產品管理 → 批次維護」，成本獨立存 productCosts。</span>
             </div>
             <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
                 <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
