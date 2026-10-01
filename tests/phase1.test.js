@@ -2968,3 +2968,15 @@ test('quote list batches row insertion', () => {
     assert.match(source,/tbody\.appendChild\(fragment\)/);
     assert.doesNotMatch(source,/tbody\.appendChild\(tr\)/);
 });
+
+
+test('receipt shortage allocation skips stale candidates without blocking later orders', () => {
+    const start=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
+    const end=appSource.indexOf('\nasync function refreshAffectedOrderCaches',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const skippedCandidateIds = new Set\(\)/);
+    assert.match(source,/filter\(row=>!skippedCandidateIds\.has\(row\.id\)\)/);
+    assert.match(source,/if\(skipCandidate\)\{[\s\S]*?skippedCandidateIds\.add\(candidate\.id\);[\s\S]*?continue;/);
+    assert.match(source,/if\(take<=0\)\{stopAllocation=true;return;\}/);
+    assert.match(source,/if\(stopAllocation\)break;/);
+});
