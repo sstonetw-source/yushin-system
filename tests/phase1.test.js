@@ -2717,3 +2717,19 @@ test('completed purchasing load-more avoids double render after fetching', () =>
     assert.match(source,/await loadPurchasingDispatchOrders\(false\);\s*return;/);
     assert.match(source,/renderPurchasingCompletedOrders\(loadedRows\)/);
 });
+
+
+test('receiving work list indexes supply evidence once per render', () => {
+    const indexStart=appSource.indexOf('function buildReceivingEvidenceIndex');
+    const indexEnd=appSource.indexOf('\nfunction receivingEvidenceForWorkItem',indexStart);
+    const indexSource=appSource.slice(indexStart,indexEnd);
+    assert.match(indexSource,/supplyReceivingCache\.forEach/);
+    assert.match(indexSource,/::id:/);
+    assert.match(indexSource,/::idx:/);
+
+    const renderStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
+    const renderEnd=appSource.indexOf('\nwindow.renderPoList',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/const evidenceIndex = buildReceivingEvidenceIndex\(\)/);
+    assert.match(renderSource,/receivingEvidenceForWorkItem\(order, item, itemIndex, evidenceIndex\)/);
+});
