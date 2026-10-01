@@ -1342,7 +1342,16 @@ function collectPendingProductRowsFromDocument(doc, sourceType) {
         .filter(row => row.itemCode || row.itemName);
 }
 
+function setProductManagementTableMode(mode = 'products') {
+    const head = document.getElementById('productManagementHead');
+    if (!head) return;
+    head.innerHTML = mode === 'pending'
+        ? '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>來源</th><th>最近使用</th><th>次數</th></tr>'
+        : '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>規格</th><th>建議售價</th><th class="no-print">快速操作</th></tr>';
+}
+
 function renderPendingProductMasterRows() {
+    setProductManagementTableMode('pending');
     const body = document.getElementById('productManagementBody');
     if (!body) return;
     if (!pendingProductMasterRows.length) {
@@ -1433,6 +1442,7 @@ function productManagementRow(product) {
 }
 
 function renderProductManagementResults() {
+    setProductManagementTableMode('products');
     const body = document.getElementById('productManagementBody');
     if (!body) return;
     body.innerHTML = productManagementResults.length
@@ -1442,6 +1452,8 @@ function renderProductManagementResults() {
 
 window.clearProductManagementSearch = function(options = {}) {
     productManagementResults = [];
+    pendingProductMasterRows = [];
+    setProductManagementTableMode('products');
     const input = document.getElementById('productManagementSearch');
     const status = document.getElementById('productManagementSearchStatus');
     const body = document.getElementById('productManagementBody');
