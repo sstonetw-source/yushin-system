@@ -7277,9 +7277,9 @@ function orderWorkStatusInfo(order) {
     };
 }
 
-function orderItemWorkAmount(order, item, category) {
+function orderItemWorkAmount(order, item, category, totalQtyOverride = null) {
     const qty=Number(item.orderedQty||item.qty||0);
-    const totalQty=orderQuantity(order);
+    const totalQty=totalQtyOverride === null ? orderQuantity(order) : totalQtyOverride;
     const unitSales=Number(item.unitPrice||item.salesPrice||0)||(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
     const state=itemDispatchState(order,item);
     if(category==='delivery'||category==='dispatch'||category==='shipping')return Math.max(0,qty-state.delivered)*unitSales;
@@ -7293,15 +7293,17 @@ function orderWorkAmount(order, category) {
         .reduce((sum,item)=>sum+orderItemWorkAmount(order,item,category),0);
 }
 
-function buildOrderItemWorkMetrics(orders, categories, include = null) {
+function buildOrderItemWorkMetrics(orders, categories, include = null, normalizedItemsByOrder = null) {
     const metrics = Object.fromEntries(categories.map(category => [category, { count:0, amount:0 }]));
     (orders || []).forEach(order => {
-        normalizedOrderItems(order).forEach(item => {
+        const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
+        const totalQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.qty || 0)), 0);
+        items.forEach(item => {
             orderItemDisplayCategories(order,item).forEach(category => {
                 if (!metrics[category]) return;
                 if (include && !include(order,item,category)) return;
                 metrics[category].count++;
-                metrics[category].amount += orderItemWorkAmount(order,item,category);
+                metrics[category].amount += orderItemWorkAmount(order,item,category,totalQty);
             });
         });
     });
@@ -7313,7 +7315,7 @@ window.setOrderWorkFilter = function(filter) {
     renderOrdersList();
 };
 
-function renderOrderWorkCards(orders) {
+function renderOrderWorkCards(orders, normalizedItemsByOrder = null) {
     const container = document.getElementById('orderWorkCards');
     if (!container) return;
     const definitions = [
@@ -7327,7 +7329,8 @@ function renderOrderWorkCards(orders) {
     const metrics = buildOrderItemWorkMetrics(
         orders,
         definitions.map(([key]) => key),
-        (order, item, category) => orderMatchesWorkPeriod(order, category)
+        (order, item, category) => orderMatchesWorkPeriod(order, category),
+        normalizedItemsByOrder
     );
     container.innerHTML = definitions.map(([key, label]) => `<button type="button" class="order-work-card ${activeOrderWorkFilter === key ? 'active' : ''}" onclick="setOrderWorkFilter('${key}')"><span>${label}</span><strong>${metrics[key].count} 筆</strong><small>${formatStatsMoney(metrics[key].amount)}</small></button>`).join('');
 }
@@ -7789,7 +7792,7 @@ window.renderOrdersList = function() {
             && orderBrandFilterValue(o.brand, selectableBrands) !== brandFilter) return false;
         return true;
     });
-    renderOrderWorkCards(baseOrders);
+    renderOrderWorkCards(baseOrders, normalizedItemsByOrder);
 
     baseOrders.forEach(o => {
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
