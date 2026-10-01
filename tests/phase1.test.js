@@ -2417,3 +2417,12 @@ test('company agency settings do not rebuild product datalists', () => {
     assert.match(source,/renderCompanyAgencyBrandSettings\(\)/);
     assert.doesNotMatch(source,/refreshPriceDatalists\(\)/);
 });
+
+
+test('inventory initialization avoids duplicate brand-driven render', () => {
+    const start=appSource.indexOf("if (mainKey === 'inventory') {");
+    const end=appSource.indexOf("if (mainKey === 'equipment')",start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/loadInventory\(true\)/);
+    assert.doesNotMatch(source,/loadBrandMaster\(\)\.then\(renderInventoryList\)/);
+});
