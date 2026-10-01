@@ -22,7 +22,15 @@ function loadPurchaseMapper() {
         purchaseCostCache: new Map(),
         stableProductId: item => 'prd:' + String(item?.brand || '').toLowerCase() + ':' + String(item?.model || ''),
         authorizationTypeForProduct: () => 'NON_AUTHORIZED',
-        normalizeItemCode: value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase()
+        normalizeItemCode: value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase(),
+        remainingProcurementQty: (order, item) => {
+            const ordered = Math.max(0, Number(item.supplyOrderedQty || 0));
+            const received = Math.max(0, Number(item.receivedQty || 0));
+            if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
+                return Math.max(0, Number(item.orderedQty ?? item.qty ?? 0) + Number(item.returnedQty || 0) - ordered);
+            }
+            return Math.max(0, Number(item.shortageQty || 0) - Math.max(0, ordered - received));
+        }
     };
     vm.createContext(context);
     vm.runInContext(appSource.slice(start, end), context);

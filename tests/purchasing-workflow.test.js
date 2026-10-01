@@ -854,7 +854,8 @@ test('direct-ship returns create replacement supply demand', () => {
     const remainingStart=app.indexOf('function remainingProcurementQty');
     const remainingEnd=app.indexOf('\nfunction pendingProcurementDisplayLines',remainingStart);
     const remainingSource=app.slice(remainingStart,remainingEnd);
-    assert.match(remainingSource,/qty \+ returned - ordered/);
+    assert.match(remainingSource,/YushinWorkflow\?\.procurementQuantities/);
+    assert.match(remainingSource,/remainingToOrderQty/);
 
     const selfStart=app.indexOf('function selfOrderActionHtml');
     const selfEnd=app.indexOf('\nwindow.openSelfOrderModal',selfStart);
