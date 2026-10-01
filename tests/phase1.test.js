@@ -2220,3 +2220,25 @@ test('opening linked purchase orders and supply sync checks are bounded', () => 
     assert.match(openSource,/await reprintPurchaseOrder\(po\.id\)/);
     assert.match(openSource,/endActionButton\(button, buttonState\)/);
 });
+
+
+test('receipt allocation and affected-order refresh use bounded batched reads', () => {
+    const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
+    const allocateEnd=appSource.indexOf('async function refreshAffectedOrderCaches',allocateStart);
+    const allocateSource=appSource.slice(allocateStart,allocateEnd);
+    assert.match(allocateSource,/firestoreReadWithTimeout\(q\.get\(\),'庫存占用候選'\)/);
+
+    const refreshStart=appSource.indexOf('async function refreshAffectedOrderCaches');
+    const refreshEnd=appSource.indexOf('async function receiveSupplyOrderRecord',refreshStart);
+    const refreshSource=appSource.slice(refreshStart,refreshEnd);
+    assert.match(refreshSource,/readDocumentsByIds\('orders',ids\)/);
+    assert.doesNotMatch(refreshSource,/\.doc\(id\)\.get\(\)/);
+});
+
+test('customer transaction history reads are bounded', () => {
+    const start=appSource.indexOf('window.showCustomerOrderHistory = async function');
+    const end=appSource.indexOf('window.closeCustomerOrderHistory',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/firestoreReadWithTimeout\(scopedHistorySearchQuery\('orders',[\s\S]*?'客戶訂單歷史'\)/);
+    assert.match(source,/firestoreReadWithTimeout\(scopedHistorySearchQuery\('quotes',[\s\S]*?'客戶估價歷史'\)/);
+});
