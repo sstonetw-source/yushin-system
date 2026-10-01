@@ -104,8 +104,8 @@
         <div class="inventory-summary-note">搜尋直接查詢 Product Master，不受目前畫面載入筆數限制。一般操作不會掃描歷史資料；管理員／採購可按「待補 Product Master」手動查看近期待補品項。</div>
         <div class="table-wrap">
             <table class="product-management-table">
-                <thead id="productManagementHead"><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>規格</th><th>建議售價</th><th class="no-print">快速操作</th></tr></thead>
-                <tbody id="productManagementBody"><tr><td colspan="6" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
+                <thead id="productManagementHead"><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>供應商</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
+                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
             </table>
         </div>
     </div>
@@ -1155,7 +1155,7 @@
                 <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">⬇️ 下載 Product Master Excel 範本</button>
                 <button onclick="document.getElementById('priceExcelInput').click()">📤 上傳 Excel 更新 Product Master</button>
                 <input type="file" id="priceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                <span style="font-size:12px;color:#666;">（每個工作表＝一個廠牌。同廠牌再次上傳會更新正式 Product Master；產品與售價寫入 products，成本只寫入 productCosts。）</span>
+                <span style="font-size:12px;color:#666;">（標準格式：Excel 檔名＝廠牌、工作表名稱＝產品線。每列只需維護貨號、品名、規格、類型、供應商與價格；產品與售價寫入 products，成本只寫入 productCosts。）</span>
             </div>
             <div id="priceUploadProgress" class="no-print" style="display:none;margin:-4px 0 12px;padding:10px 12px;background:#eef5ff;border-radius:5px;">
                 <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#244b68;"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -1171,7 +1171,7 @@
         <div id="admin-agencies" class="admin-panel" style="display:none;">
             <div class="panel">
                 <strong>主要代理廠牌</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">只有這裡儲存的主要代理廠牌會出現在一般廠牌選單並獨立統計；不需要先上傳價目表。未列入與未填的廠牌歸入「其他廠牌」，維修獨立統計。產品線可在建立訂單時填寫，不會產生新廠牌。</p>
+                <p style="font-size:12px;color:#666;margin:6px 0;">只有這裡儲存的主要代理廠牌會出現在一般廠牌選單並獨立統計；不需要先上傳價目表。未列入與未填的廠牌歸入「其他廠牌」，維修獨立統計。產品線由 Product Master 統一管理，建立訂單時由系統依貨號自動帶入，業務不需手動填寫。</p>
                 <div class="stat-brand-manager">
                     <div><h4>下拉選單與獨立統計廠牌</h4><div id="keyStatisticBrands"></div></div>
                     <div><h4>目前歸入其他廠牌</h4><div id="otherStatisticBrands"></div></div>
@@ -1433,6 +1433,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-14"></script>
+    <script src="app.js?v=20261001-15"></script>
 </body>
 </html>
