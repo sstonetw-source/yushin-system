@@ -1634,6 +1634,9 @@ test('engineer cannot open or create Forecast while sales and admin retain acces
     assert.equal(engineerPermissions?.[1], 'none');
     assert.equal(engineerScope?.[1], 'none');
     assert.match(appSource, /function canCreateForecastCapability\(role = currentUserRole\) \{\s*return role === 'admin' \|\| role === 'sales';/);
+    assert.match(appSource, /window\.openForecastModal = function\(id = ''\) \{\s*if \(!canCreateForecastCapability\(\) \|\| !canEditPage\('forecast'\)\) return;/);
+    assert.match(appSource, /window\.saveForecast = async function\(\) \{\s*if \(forecastSaveInProgress \|\| !canCreateForecastCapability\(\) \|\| !canEditPage\('forecast'\)\) return;/);
+    assert.match(appSource, /window\.createForecastFromQuote = async function\(quoteNo\) \{\s*if \(!canCreateForecastCapability\(\) \|\| !canEditPage\('forecast'\)\)/);
     assert.match(rulesSource, /match \/forecasts\/\{id\} \{\s*allow read: if admin\(\) \|\| \(sales\(\) && owns\(resource\.data\)\);/);
 });
 
@@ -3871,6 +3874,7 @@ test('critical role matrix stays aligned between UI capabilities and Firestore r
     assert.match(capabilities,/canCreatePurchaseOrderCapability[\s\S]*?role === 'admin' \|\| role === 'purchaser'/);
     assert.match(capabilities,/canReceiveInventoryCapability[\s\S]*?role === 'admin' \|\| role === 'purchaser' \|\| role === 'warehouse'/);
     assert.match(capabilities,/canManageEquipmentCapability[\s\S]*?role === 'admin' \|\| role === 'engineer'/);
+    assert.match(appSource,/function canViewAllEquipment\(\) \{\s*return canManageEquipmentCapability\(\);/);
 
     assert.match(appSource,/warehouse:\s*Object\.freeze\([^\n]*'orders\.po':'view'/);
     assert.match(appSource,/engineer:\s*Object\.freeze\([^\n]*'orders\.po':'none'[^\n]*equipment:'edit'/);
