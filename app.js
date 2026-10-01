@@ -8231,10 +8231,13 @@ window.loadMorePurchasingCompleted = async function() {
     purchasingCompletedVisibleLimit += DEFAULT_LIST_LIMIT;
     const loadedRows = purchasingCompletedRows();
     if (loadedRows.length < purchasingCompletedVisibleLimit && purchasingDispatchHasMore) {
+        // loadPurchasingDispatchOrders() 完成時已統一更新工作卡與已完成明細；
+        // 不再回到外層重畫第二次。
         await loadPurchasingDispatchOrders(false);
+        return;
     }
     renderPurchasingWorkCards();
-    renderPurchasingCompletedOrders();
+    renderPurchasingCompletedOrders(loadedRows);
 };
 
 window.renderPurchasingView = function() {
