@@ -6466,15 +6466,22 @@ async function runInventorySearch(){
  }finally{inventorySearchLoading=false;renderInventoryList();}
 }
 
+let inventoryBrandFilterSignature = '';
+
 function populateInventoryBrandFilter() {
  const select=document.getElementById('inventoryBrandFilter');
  if(!select)return [];
  const selected=select.value;
  const brands=getPriceListBrands(true);
- select.innerHTML='<option value="">全部廠牌</option>'+brands.map(brand=>
-   `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
-   +`<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+ const signature=JSON.stringify(brands);
+ if(signature!==inventoryBrandFilterSignature){
+   select.innerHTML='<option value="">全部廠牌</option>'+brands.map(brand=>
+     `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+     +`<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
+   inventoryBrandFilterSignature=signature;
+ }
  if(brands.includes(selected)||selected===OTHER_BRAND_OPTION_KEY)select.value=selected;
+ else if(selected)select.value='';
  return brands;
 }
 
@@ -6498,7 +6505,7 @@ window.renderInventoryList=function(){
  const stateFilter=document.getElementById('inventoryStateFilter')?.value||'all';
  const brands=populateInventoryBrandFilter();
  const brandFilter=document.getElementById('inventoryBrandFilter')?.value||'';
- body.innerHTML='';
+ const rowsHtml=[];
  const inventoryRows=inventorySearchActive?inventorySearchResults:inventoryCache;
  inventoryRows.forEach(x=>{
    if(brandFilter&&orderBrandFilterValue(x.brand,brands)!==brandFilter)return;
@@ -6519,7 +6526,7 @@ window.renderInventoryList=function(){
    ).join('') || '<span style="color:#888;">目前沒有分倉庫存</span>';
    const lotHtml=lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>');
    const reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails('${escapeAttr(x.productKey||x.id||'')}')">${n.reserved}</button>`:'0';
-   body.insertAdjacentHTML('beforeend',`<tr>
+   rowsHtml.push(`<tr>
       <td data-th="貨號">${escapeHtml(x.itemCode||'')}</td>
       <td data-th="品名">${escapeHtml(x.itemName||'')}</td>
       <td data-th="廠牌">${escapeHtml(x.brand||'')}</td>
@@ -6542,6 +6549,7 @@ window.renderInventoryList=function(){
       </td>
    </tr>`);
  });
+ body.innerHTML=rowsHtml.join('');
 };
 window.openInventoryReplenishment = async function(inventoryId) {
     if (!canEditPage('orders.po')) { alert('您沒有採購權限。'); return; }
