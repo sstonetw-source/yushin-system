@@ -64,9 +64,17 @@ test('engineer owns and can edit own quote and order, but cannot access Forecast
   await assertSucceeds(getDoc(doc(db('admin'), 'forecasts/f1')));
 });
 
-test('engineer cannot create documents for salesperson; purchaser assistance requires matching owner code', async () => {
-  await assertFails(setDoc(doc(db('eng1'), 'quotes/bad-owner-role'), {
+test('engineer may assist salesperson quotes but not salesperson orders; purchaser assistance still requires matching owner code', async () => {
+  const assistedQuote = {
     ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
+  };
+  await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/assisted-sales'), assistedQuote));
+  await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/assisted-sales')));
+  await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/assisted-sales'), { quoteDate:'2026-09-21' }));
+  await assertFails(setDoc(doc(db('eng1'), 'quotes/wrong-sales-code'), { ...assistedQuote, salesCode:'S02' }));
+  await assertFails(setDoc(doc(db('eng1'), 'orders/assisted-sales'), {
+    ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   }));
   await assertFails(setDoc(doc(db('buyer1'), 'orders/bad-owner-code'), {
@@ -464,4 +472,16 @@ test('business owner may update own reservation without changing ownership', asy
     ownerUid:'sales2',
     salesCode:'S02'
   }));
+});
+
+
+test('engineer assisted quote remains creator-scoped', async () => {
+  await seed('users/eng2', { role:'engineer', active:true, salesCode:'E02' });
+  await seed('quotes/engineer-assisted-scope', {
+    ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
+    createdByUid:'eng1', createdByName:'Engineer 1', createdByRole:'engineer'
+  });
+  await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope')));
+  await assertFails(getDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope')));
+  await assertFails(updateDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope'), { quoteDate:'2026-09-22' }));
 });
