@@ -1409,3 +1409,50 @@ test('acceptance flow handles partial receipt cancellation and return replacemen
     assert.deepEqual(inventory,{onHand:0,reserved:0,incoming:0});
     assert.equal(displayCategory(item,true),'complete');
 });
+
+
+test('acceptance flow keeps direct-ship procurement out of warehouse stock and handles replacements', () => {
+    const workflow=require('../modules/workflow-core.js');
+
+    const category=({ordered=10,supplyOrdered=0,received=0,grossDelivered=0,returned=0,billed=false})=>
+        workflow.itemWorkCategory({
+            lifecycleStatus:'normal',
+            orderedQty:ordered,
+            deliveredQty:Math.max(0,grossDelivered-returned),
+            returnedQty:returned,
+            fulfillmentType:'DIRECT_SHIP',
+            supplyOrderedQty:supplyOrdered,
+            receivedQty:received,
+            isBilled:billed
+        });
+
+    assert.equal(category({}), 'ordering');
+    assert.equal(category({supplyOrdered:10}), 'arrival');
+    assert.equal(category({supplyOrdered:10,received:4,grossDelivered:4}), 'arrival');
+    assert.equal(category({supplyOrdered:10,received:10,grossDelivered:10}), 'billing');
+    assert.equal(category({supplyOrdered:10,received:10,grossDelivered:10,billed:true}), 'complete');
+
+    const afterReturn={supplyOrdered:10,received:10,grossDelivered:10,returned:2,billed:true};
+    assert.equal(category(afterReturn), 'ordering');
+    assert.deepEqual(
+        workflow.procurementQuantities({
+            orderedQty:10,fulfillmentType:'DIRECT_SHIP',
+            supplyOrderedQty:10,receivedQty:10,returnedQty:2
+        }),
+        {requiredSupplyQty:12,supplyOrderedQty:10,receivedQty:10,inTransitQty:0,remainingToOrderQty:2}
+    );
+    assert.equal(category({...afterReturn,supplyOrdered:12}), 'arrival');
+    assert.equal(category({...afterReturn,supplyOrdered:12,received:12,grossDelivered:12}), 'complete');
+
+    const receiptStart=app.indexOf('async function receiveSupplyOrderRecord');
+    const receiptEnd=app.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptSource=app.slice(receiptStart,receiptEnd);
+    const directStart=receiptSource.indexOf("if(directShip){");
+    const warehouseStart=receiptSource.indexOf("const productKey=",directStart);
+    const directSource=receiptSource.slice(directStart,warehouseStart);
+    assert.match(directSource,/deliveryRecords/);
+    assert.match(directSource,/directShipDeliveredQty/);
+    assert.doesNotMatch(directSource,/collection\('inventory'\)/);
+    assert.doesNotMatch(directSource,/collection\('warehouseStocks'\)/);
+    assert.doesNotMatch(directSource,/inventoryMovements/);
+});
