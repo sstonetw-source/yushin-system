@@ -7366,9 +7366,9 @@ function orderWorkCategory(order) {
     return priority.find(category=>categories.includes(category))||'ordering';
 }
 
-function orderItemWorkCategory(order, item) {
-    const lifecycle=orderLifecycleInfo(order);
-    const dispatch=itemDispatchState(order,item);
+function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOverride = null) {
+    const lifecycle=lifecycleOverride || orderLifecycleInfo(order);
+    const dispatch=dispatchOverride || itemDispatchState(order,item);
     const input={
         lifecycleStatus:lifecycle.status,
         returnedQty:dispatch.returned,
@@ -7387,17 +7387,19 @@ function orderItemWorkCategory(order, item) {
 
 // 倉庫品項的採購／到貨／送貨仍共用原本的資料狀態；訂單頁依已打單量
 // 把可出貨前的工作分成待打單與待出貨，不另建會與庫存紀錄脫節的旗標。
-function orderItemDisplayCategory(order, item) {
-    const category = orderItemWorkCategory(order, item);
+function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatchOverride = null) {
+    const dispatch = dispatchOverride || itemDispatchState(order, item);
+    const category = orderItemWorkCategory(order, item, lifecycleOverride, dispatch);
     if (category !== 'delivery') return category;
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return 'shipping';
-    return itemDispatchState(order, item).pending > 0 ? 'dispatch' : 'shipping';
+    return dispatch.pending > 0 ? 'dispatch' : 'shipping';
 }
 
-function orderItemDisplayCategories(order, item) {
-    const category=orderItemDisplayCategory(order,item);
+function orderItemDisplayCategories(order, item, lifecycleOverride = null, dispatchOverride = null) {
+    const dispatch = dispatchOverride || itemDispatchState(order, item);
+    const category=orderItemDisplayCategory(order,item,lifecycleOverride,dispatch);
     const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
-    return warehouse && (category==='ordering'||category==='arrival') && itemDispatchState(order,item).pending>0
+    return warehouse && (category==='ordering'||category==='arrival') && dispatch.pending>0
         ? [category,'dispatch'] : [category];
 }
 
@@ -7442,11 +7444,11 @@ function orderWorkStatusInfo(order) {
     };
 }
 
-function orderItemWorkAmount(order, item, category, totalQtyOverride = null) {
+function orderItemWorkAmount(order, item, category, totalQtyOverride = null, dispatchOverride = null) {
     const qty=Number(item.orderedQty||item.qty||0);
     const totalQty=totalQtyOverride === null ? orderQuantity(order) : totalQtyOverride;
     const unitSales=Number(item.unitPrice||item.salesPrice||0)||(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
-    const state=itemDispatchState(order,item);
+    const state=dispatchOverride || itemDispatchState(order,item);
     if(category==='delivery'||category==='dispatch'||category==='shipping')return Math.max(0,qty-state.delivered)*unitSales;
     if(category==='billing'||category==='complete')return Math.min(qty,state.delivered)*unitSales;
     return qty*unitSales;
@@ -7463,12 +7465,15 @@ function buildOrderItemWorkMetrics(orders, categories, include = null, normalize
     (orders || []).forEach(order => {
         const items = normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order);
         const totalQty = items.reduce((sum, item) => sum + Math.max(0, Number(item.qty || 0)), 0);
+        const lifecycle = orderLifecycleInfo(order, items);
         items.forEach(item => {
-            orderItemDisplayCategories(order,item).forEach(category => {
+            // 工作圖卡同一品項只掃一次送貨／退貨紀錄；分類與金額共用同一份 dispatch state。
+            const dispatch = itemDispatchState(order, item);
+            orderItemDisplayCategories(order,item,lifecycle,dispatch).forEach(category => {
                 if (!metrics[category]) return;
                 if (include && !include(order,item,category)) return;
                 metrics[category].count++;
-                metrics[category].amount += orderItemWorkAmount(order,item,category,totalQty);
+                metrics[category].amount += orderItemWorkAmount(order,item,category,totalQty,dispatch);
             });
         });
     });
