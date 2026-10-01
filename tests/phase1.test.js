@@ -4017,3 +4017,36 @@ test('product price and cost batch maintenance stay isolated', () => {
     assert.match(indexSource,/handleProductCostExcelUpload\(this\)/);
     assert.match(indexSource,/售價只更新 Product Master 的建議售價；成本只更新受保護的 productCosts/);
 });
+
+
+test('product batch maintenance gives visible progress and blocks duplicate imports', () => {
+    assert.match(indexSource,/id="productBatchMaintenanceStatus"/);
+    assert.match(indexSource,/aria-live="polite"/);
+
+    const progressStart=appSource.indexOf('function setPriceUploadProgress');
+    const progressEnd=appSource.indexOf('\nasync function syncImportedBrandToFormalProductMaster',progressStart);
+    const progressSource=appSource.slice(progressStart,progressEnd);
+    assert.match(progressSource,/productBatchMaintenanceStatus/);
+    assert.match(progressSource,/safePercent/);
+
+    const busyStart=appSource.indexOf('function setProductBatchMaintenanceBusy');
+    const busyEnd=appSource.indexOf('\nfunction canManagePendingProductMaster',busyStart);
+    const busySource=appSource.slice(busyStart,busyEnd);
+    assert.match(busySource,/productBatchMaintenanceInProgress/);
+    assert.match(busySource,/querySelectorAll\('#productBatchMaintenance button'\)/);
+    assert.match(busySource,/button\.disabled = productBatchMaintenanceInProgress/);
+
+    const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
+    const priceEnd=appSource.indexOf('\nwindow.handleProductCostExcelUpload',priceStart);
+    const priceSource=appSource.slice(priceStart,priceEnd);
+    assert.match(priceSource,/if \(productBatchMaintenanceInProgress\)/);
+    assert.match(priceSource,/setProductBatchMaintenanceBusy\(true\)/);
+    assert.match(priceSource,/finally \{[\s\S]*?setProductBatchMaintenanceBusy\(false\)/);
+
+    const costStart=appSource.indexOf('window.handleProductCostExcelUpload = async function');
+    const costEnd=appSource.indexOf('\nwindow.handlePriceExcelUpload',costStart);
+    const costSource=appSource.slice(costStart,costEnd);
+    assert.match(costSource,/if \(productBatchMaintenanceInProgress\)/);
+    assert.match(costSource,/setProductBatchMaintenanceBusy\(true\)/);
+    assert.match(costSource,/finally \{[\s\S]*?setProductBatchMaintenanceBusy\(false\)/);
+});
