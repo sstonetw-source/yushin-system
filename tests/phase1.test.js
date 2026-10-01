@@ -3139,3 +3139,14 @@ test('order row summaries reuse normalized items', () => {
     assert.match(renderSource,/dispatchActionHtml\(o, allOrderItems\)/);
     assert.match(renderSource,/selfOrderActionHtml\(o, allOrderItems\)/);
 });
+
+
+test('receipt allocation progress has narrowly scoped Firestore update permission', () => {
+    const start=rulesSource.indexOf('match /receipts/{id}');
+    const end=rulesSource.indexOf('\n    // Purchaser records completion',start);
+    const source=rulesSource.slice(start,end);
+    assert.match(source,/allow update: if canReceiveInventory\(\)/);
+    assert.match(source,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'autoAllocatedQty'[\s\S]*?'allocationCompleted'[\s\S]*?'allocationUpdatedAt'/);
+    assert.match(source,/autoAllocatedQty', 0\) >= resource\.data\.get\('autoAllocatedQty', 0\)/);
+    assert.match(source,/autoAllocatedQty', 0\) <= resource\.data\.get\('autoAllocationQty', 0\)/);
+});
