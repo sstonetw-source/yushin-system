@@ -1347,7 +1347,7 @@ function setProductManagementTableMode(mode = 'products') {
     if (!head) return;
     head.innerHTML = mode === 'pending'
         ? '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>來源</th><th>最近使用</th><th>次數</th></tr>'
-        : '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>規格</th><th>建議售價</th><th class="no-print">快速操作</th></tr>';
+        : '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>供應商</th><th>狀態</th><th class="no-print">快速操作</th></tr>';
 }
 
 function renderPendingProductMasterRows() {
@@ -1428,12 +1428,17 @@ window.loadPendingProductMaster = async function() {
 function productManagementRow(product) {
     const productId = product.productId || product.id || '';
     const price = Number(product.listPrice ?? product.price ?? 0);
+    const status = product.status || (product.active === false ? 'INACTIVE' : 'ACTIVE');
     return `<tr>
       <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
       <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
       <td data-th="廠牌">${escapeHtml(product.brandName || product.brand || '')}</td>
+      <td data-th="產品線">${escapeHtml(product.productLine || '未分類')}</td>
+      <td data-th="類型">${escapeHtml(product.productType || product.category || '未分類')}</td>
       <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
       <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
+      <td data-th="供應商">${escapeHtml(product.supplier || '－')}</td>
+      <td data-th="狀態">${escapeHtml(status === 'TEMPORARY' ? '待補主檔' : status === 'INACTIVE' ? '停用' : '啟用')}</td>
       <td data-th="快速操作" class="no-print product-management-actions">
         ${canAccessPage('quote.create') ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
         ${canAccessPage('orders.list') ? `<button type="button" class="btn-small btn-secondary" onclick="addProductManagementToOrder('${escapeAttr(productId)}')">建立訂單</button>` : ''}
@@ -1447,7 +1452,7 @@ function renderProductManagementResults() {
     if (!body) return;
     body.innerHTML = productManagementResults.length
         ? productManagementResults.map(productManagementRow).join('')
-        : '<tr><td colspan="7" class="empty-hint">查無符合產品。</td></tr>';
+        : '<tr><td colspan="10" class="empty-hint">查無符合產品。</td></tr>';
 }
 
 window.clearProductManagementSearch = function(options = {}) {
@@ -1459,7 +1464,7 @@ window.clearProductManagementSearch = function(options = {}) {
     const body = document.getElementById('productManagementBody');
     if (input && !options.preserveInput) input.value = '';
     if (status) status.textContent = '';
-    if (body) body.innerHTML = '<tr><td colspan="7" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
 };
 
 window.queueProductManagementSearch = function() {
@@ -13305,16 +13310,23 @@ function stableProductId(item) {
 }
 
 function normalizeProductMasterItem(item) {
+    const status = String(item.status || '').trim().toUpperCase();
+    const active = item.active !== false && status !== 'INACTIVE';
     return {
         ...item,
         productId: item.productId || stableProductId(item),
         sku: item.sku || item.model || '',
-        supplier: item.supplier || '',
+        supplier: String(item.supplier || '').trim(),
         spec: item.spec || '',
+        productLine: String(item.productLine || '').trim(),
+        productType: String(item.productType || item.category || '').trim(),
+        authorizationType: String(item.authorizationType || '').trim().toUpperCase(),
+        source: String(item.source || '').trim().toUpperCase(),
+        status: status || (active ? 'ACTIVE' : 'INACTIVE'),
         inventoryTracked: !!item.inventoryTracked,
         lotTracked: !!item.lotTracked,
         expiryTracked: !!item.expiryTracked,
-        active: item.active !== false
+        active
     };
 }
 
@@ -13401,13 +13413,14 @@ function productMasterDocToPriceItem(doc) {
         nameCn: data.productName || data.nameCn || '',
         nameEn: data.nameEn || '',
         productLine: data.productLine || '',
-        productType: data.category || data.productType || '',
+        productType: data.productType || data.category || '',
         authorizationType: data.authorizationType || '',
         spec: data.specification || data.spec || '',
         price: data.listPrice ?? data.price ?? 0,
         supplier: data.supplier || '',
-        status: data.status || 'ACTIVE',
-        active: data.status !== 'INACTIVE'
+        source: data.source || '',
+        status: data.status || (data.active === false ? 'INACTIVE' : 'ACTIVE'),
+        active: data.active !== false && data.status !== 'INACTIVE'
     });
 }
 
@@ -13664,9 +13677,14 @@ window.saveQuickProduct = async function() {
         specification,
         productLine,
         productLineId: productLine,
+        category: '',
+        productType: '',
+        supplier: '',
         authorizationType,
         listPrice: Number(priceRaw) || 0,
         status: 'TEMPORARY',
+        active: true,
+        source: 'QUICK_CREATE',
         createdAt: now,
         createdBy: currentUser?.uid || '',
         updatedAt: now,
@@ -14802,10 +14820,11 @@ function productItemWithoutCost(item) {
     return clean;
 }
 
-function productMasterRecordFromItem(item) {
+function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
     const normalized = normalizeProductMasterItem(item);
     const brand = resolveBrandName(normalized.brand || '');
     const brandEntry = brandMasterEntryForName(brand);
+    const status = normalized.active === false ? 'INACTIVE' : 'ACTIVE';
     return {
         productId: normalized.productId || stableProductId(normalized),
         brandId: brandEntry?.id || '',
@@ -14814,14 +14833,17 @@ function productMasterRecordFromItem(item) {
         normalizedPartNo: normalizeItemCodeLoose(normalized.model || normalized.sku || ''),
         productName: normalized.nameCn || normalized.nameEn || '',
         nameEn: normalized.nameEn || '',
-        category: normalized.productType || '',
         productLine: normalized.productLine || '',
         productLineId: normalized.productLine || '',
+        category: normalized.productType || '',
+        productType: normalized.productType || '',
         specification: normalized.spec || '',
         listPrice: Number(normalized.price || 0),
+        supplier: normalized.supplier || '',
         authorizationType: authorizationTypeForProduct(normalized),
-        status: normalized.active === false ? 'INACTIVE' : 'ACTIVE',
-        source: 'product_master',
+        status,
+        active: status === 'ACTIVE',
+        source: String(source || normalized.source || 'PRODUCT_MASTER').toUpperCase(),
         updatedAt: new Date().toISOString(),
         updatedBy: currentUser?.uid || ''
     };
@@ -15261,15 +15283,15 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
 
     (imported || []).forEach(raw => {
         const item = normalizeProductMasterItem({ ...raw, brand: storedBrand });
-        const product = productMasterRecordFromItem(item);
+        const product = productMasterRecordFromItem(item, 'PRICE_LIST');
         product.status = item.active === false ? 'INACTIVE' : 'ACTIVE';
-        product.legacySource = 'excel_import';
+        product.active = product.status === 'ACTIVE';
         product.updatedAt = now;
         operations.push(batch => batch.set(db.collection('products').doc(product.productId), product, { merge: true }));
 
         const cost = productCostRecordFromItem(item, product);
         if (cost) {
-            cost.source = 'excel_import';
+            cost.source = 'PRICE_LIST';
             cost.updatedAt = now;
             operations.push(batch => batch.set(db.collection('productCosts').doc(product.productId), cost, { merge: true }));
         }
@@ -15303,14 +15325,14 @@ async function summarizeProductMasterImport(groups) {
             if (existingIds.has(item.productId)) { updated++; brandUpdated++; } else { added++; brandAdded++; }
             if (!item.active) inactive++;
         });
-        return { brand: group.brand, count: group.imported.length, added: brandAdded, updated: brandUpdated };
+        return { brand: group.brand, productLine: group.productLine || '', count: group.imported.length, added: brandAdded, updated: brandUpdated };
     });
     return { added, updated, inactive, total: added + updated, brands };
 }
 
 async function confirmProductMasterImport(groups) {
     const summary = await summarizeProductMasterImport(groups);
-    const lines = summary.brands.map(item => `${item.brand}：${item.count} 筆（新增 ${item.added}／更新 ${item.updated}）`);
+    const lines = summary.brands.map(item => `${item.brand} / ${item.productLine || '未分類'}：${item.count} 筆（新增 ${item.added}／更新 ${item.updated}）`);
     return confirm(`Product Master 匯入預覽\n\n${lines.join('\n')}\n\n合計 ${summary.total} 筆：新增 ${summary.added}、更新 ${summary.updated}、停用標記 ${summary.inactive}。\n\n資料將直接寫入 products / productCosts；歷史估價單與訂單快照不會被改寫。確定寫入雲端嗎？`);
 }
 
@@ -15322,13 +15344,13 @@ window.downloadProductMasterTemplate = async function() {
         alert(err.message);
         return;
     }
-    const headers = ['貨號','中文品名','英文品名','規格','產品線','類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
-    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','','耗材','','1000','600','是','是','否','否'];
+    const headers = ['貨號','中文品名','英文品名','規格','類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
+    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','耗材','','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [18,28,32,24,18,14,24,14,14,10,12,12,12].map(wch => ({ wch }));
+    ws['!cols'] = [18,28,32,24,14,24,14,14,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '品牌名稱');
-    XLSX.writeFile(wb, 'Product_Master_匯入範本.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws, '產品線名稱');
+    XLSX.writeFile(wb, '廠牌名稱_Product_Master_匯入範本.xlsx');
 };
 
 window.handlePriceExcelUpload = async function(input) {
@@ -15374,11 +15396,14 @@ window.handlePriceExcelUpload = async function(input) {
                 .replace(/\u3000/g, ' ')
                 .trim();
 
-            // 每個工作表視為一個廠牌，工作表名稱即為廠牌名稱。
+            // Product Master 標準格式：Excel 檔名 = 廠牌、工作表名稱 = 產品線。
+            // 例：Beckman Coulter.xlsx / Flow Cytometry 分頁。
+            const brand = toHalfWidth(String(file.name || '').replace(/\.(xlsx|xls)$/i, ''));
+            if (!brand) throw new Error('無法從檔名判斷廠牌，請將 Excel 檔名改成廠牌名稱。');
             const brandGroups = [];
             workbook.SheetNames.forEach(sheetName => {
-                const brand = toHalfWidth(sheetName);
-                if (!brand) return;
+                const productLine = toHalfWidth(sheetName);
+                if (!productLine) return;
                 const sheet = workbook.Sheets[sheetName];
                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
                 const imported = [];
@@ -15388,7 +15413,6 @@ window.handlePriceExcelUpload = async function(input) {
                     const nameEn = String(getField(row, ['英文品名', '英文名稱'])).trim();
                     const model = String(getField(row, ['貨號', '型號'])).trim();
                     const productType = String(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type'])).trim();
-                    const productLine = String(getField(row, ['產品線', '产品线', '產品類別', '产品类别', 'Product Line', 'ProductLine'])).trim();
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
                     const supplier = String(getField(row, ['供應商', '供应商', 'Supplier', 'Vendor'])).trim();
                     const activeRaw = String(getField(row, ['啟用', '启用', 'Active', 'Status'])).trim().toLocaleLowerCase();
@@ -15402,16 +15426,16 @@ window.handlePriceExcelUpload = async function(input) {
                     const cost = costRaw === '' ? null : parseFloat(costRaw) || 0;
 
                     if (nameCn || nameEn || model) {
-                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, supplier, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost });
+                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, supplier, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost, source:'PRICE_LIST' });
                     }
                 });
 
-                if (imported.length) brandGroups.push({ brand, imported });
+                if (imported.length) brandGroups.push({ brand, productLine, imported });
             });
 
             if (!brandGroups.length) {
                 setPriceUploadProgress(0, '找不到可上傳的價格資料。');
-                alert('無法從 Excel 辨識出有效的價格資料。請確認每個工作表的名稱就是廠牌名稱，且內容包含品名或貨號等欄位。');
+                alert('無法從 Excel 辨識出有效資料。請確認：檔名是廠牌名稱、分頁名稱是產品線、內容包含貨號或品名。');
                 input.value = '';
                 return;
             }
@@ -15423,19 +15447,16 @@ window.handlePriceExcelUpload = async function(input) {
             }
 
             const savedBrands = [];
-            for (let i = 0; i < brandGroups.length; i++) {
-                const { brand, imported } = brandGroups[i];
-                const basePercent = 55 + Math.round((i / brandGroups.length) * 40);
-                setPriceUploadProgress(basePercent, `正在儲存「${brand}」（${i + 1}/${brandGroups.length} 個廠牌）的 ${imported.length} 筆資料…`);
-                const storedBrand = await saveProductMasterBrand(imported, brand);
-                // 直接更新本機清單，其他廠牌不受這次上傳影響。
-                const normalizedImported = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
-                const visibleImported = (currentUserRole === 'admin' || currentUserRole === 'purchaser')
-                    ? normalizedImported
-                    : normalizedImported.map(productItemWithoutCost);
-                priceList = priceList.filter(item => (item.brand || '').trim().toLocaleLowerCase() !== storedBrand.toLocaleLowerCase()).concat(visibleImported);
-                savedBrands.push(`${storedBrand}（${imported.length} 筆）`);
-            }
+            const imported = brandGroups.flatMap(group => group.imported);
+            setPriceUploadProgress(70, `正在儲存「${brand}」的 ${imported.length} 筆 Product Master…`);
+            const storedBrand = await saveProductMasterBrand(imported, brand);
+            // 同一個檔案的所有分頁共同代表同一個廠牌；一次更新本機快取，避免分頁彼此覆蓋。
+            const normalizedImported = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
+            const visibleImported = (currentUserRole === 'admin' || currentUserRole === 'purchaser')
+                ? normalizedImported
+                : normalizedImported.map(productItemWithoutCost);
+            priceList = priceList.filter(item => (item.brand || '').trim().toLocaleLowerCase() !== storedBrand.toLocaleLowerCase()).concat(visibleImported);
+            savedBrands.push(`${storedBrand}（${imported.length} 筆／${brandGroups.length} 個產品線）`);
 
             refreshPriceDatalists();
             loadPriceCatalogSummary();
