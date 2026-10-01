@@ -3503,3 +3503,21 @@ test('purchasing cards and completed rows share lifecycle snapshots', () => {
     assert.match(viewSource,/const lifecyclesByOrder = purchasingLifecycleSnapshot\(normalizedItemsByOrder\)/);
     assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
+
+
+test('purchasing background refresh reuses painted rows while preserving loading feedback', () => {
+    const receivingStart=appSource.indexOf('function loadPurchasingReceivingQueue');
+    const receivingEnd=appSource.indexOf('\nlet purchasingFilterOptionsSignature',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource,/if \(options\.reuseOrders\) \{[\s\S]*?待到貨資料載入中…[\s\S]*?\} else \{[\s\S]*?renderPoList\(\)/);
+
+    const pendingStart=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
+    const pendingEnd=appSource.indexOf('\nconst pendingPurchaseOrderKeys',pendingStart);
+    const pendingSource=appSource.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/if \(options\.reuseOrders\) \{[\s\S]*?purchasePendingStatus[\s\S]*?載入中…[\s\S]*?\} else \{[\s\S]*?renderPendingPurchaseOrders\(\)/);
+
+    const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
+    const dispatchEnd=appSource.indexOf('\nwindow\.loadPurchasingDispatchOrders',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/if \(options\.reuseOrders\) \{[\s\S]*?purchaseDispatchStatus[\s\S]*?載入中…/);
+});
