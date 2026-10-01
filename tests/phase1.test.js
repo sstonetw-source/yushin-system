@@ -4263,3 +4263,17 @@ test('mobile navigation resets toggle state after selecting a workspace', () => 
         assert.match(match[1],/setAttribute\('aria-label','開啟功能選單'\)/);
     });
 });
+
+
+test('more menus share one delegated listener set', () => {
+    const start=appSource.indexOf("const moreMenuSelector = '.order-more-menu, .quote-more-menu, .po-more-menu'");
+    const end=appSource.indexOf('// 估價單表單的草稿自動儲存',start);
+    const source=appSource.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const openMoreMenuSelector = '\.order-more-menu\[open\], \.quote-more-menu\[open\], \.po-more-menu\[open\]'/);
+    assert.equal((source.match(/document\.addEventListener\('toggle'/g)||[]).length,1);
+    assert.equal((source.match(/document\.addEventListener\('click'/g)||[]).length,1);
+    assert.equal((source.match(/document\.addEventListener\('keydown'/g)||[]).length,1);
+    assert.match(source,/querySelectorAll\(openMoreMenuSelector\)/);
+    assert.match(source,/order-more-menu-popover button, \.quote-more-menu-popover button, \.po-more-menu-popover button/);
+});
