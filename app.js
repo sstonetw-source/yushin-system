@@ -5746,11 +5746,14 @@ window.createForecastFromQuote = async function(quoteNo) {
             throw new Error('找不到估價單');
         }
 
-        const existing = await db.collection('forecasts')
-            .where('sourceType', '==', DOCUMENT_TYPES.QUOTE)
-            .where('sourceId', '==', quoteNo)
-            .limit(1)
-            .get();
+        const existing = await firestoreReadWithTimeout(
+            db.collection('forecasts')
+                .where('sourceType', '==', DOCUMENT_TYPES.QUOTE)
+                .where('sourceId', '==', quoteNo)
+                .limit(1)
+                .get(),
+            'Forecast 重複來源檢查'
+        );
 
         if (!existing.empty) {
             alert('這張估價單已建立 Forecast。');
@@ -6182,11 +6185,13 @@ async function loadWarehouseStocksForInventoryPage() {
         for (let i = 0; i < productKeys.length; i += chunkSize) {
             const keys = productKeys.slice(i, i + chunkSize);
             jobs.push(
-                db.collection('warehouseStocks')
-                    .where('warehouseId', '==', warehouse.id)
-                    .where('productKey', 'in', keys)
-                    .get()
-                    .then(snapshot => {
+                firestoreReadWithTimeout(
+                    db.collection('warehouseStocks')
+                        .where('warehouseId', '==', warehouse.id)
+                        .where('productKey', 'in', keys)
+                        .get(),
+                    '倉庫庫存批次'
+                ).then(snapshot => {
                         snapshot.docs.forEach(doc => {
                             const data = { id: doc.id, ...doc.data() };
                             const productKey = String(data.productKey || data.productId || '').trim();
@@ -13360,7 +13365,10 @@ window.deleteEquipmentLog = function(eqId, logIndex) {
 
 function loadEquipmentFromCloudThenReopen(eqId) {
     // Editing a record must not reload the entire equipment history.
-    db.collection('equipment').doc(eqId).get().then(snapshot => {
+    firestoreReadWithTimeout(
+        db.collection('equipment').doc(eqId).get(),
+        '儀器單筆資料'
+    ).then(snapshot => {
         if (!snapshot.exists) throw new Error('找不到儀器資料。');
         const saved={ id:snapshot.id, ...snapshot.data() };
         const index=equipmentList.findIndex(item=>item.id===eqId);
