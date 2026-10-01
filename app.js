@@ -8122,11 +8122,12 @@ function remainingProcurementQty(order, item) {
     return Math.max(0, shortage - Math.max(0, ordered - received));
 }
 
-function pendingProcurementDisplayLines(order) {
+function pendingProcurementDisplayLines(order, normalizedItems = null) {
     if (normalizedOrderStatus(order) !== 'normal') return [];
     // 工作卡與明細只讀訂單本身；不要在 render 階段解析成本／Product Master。
+    // 同一輪採購頁 render 可直接沿用已 normalize 的品項快照。
     // 真正按「已訂購／產生訂購單」時，pendingPurchaseLines() 才補齊正式採購資料。
-    return normalizedOrderItems(order).map((item, index) => {
+    return (normalizedItems || normalizedOrderItems(order)).map((item, index) => {
         if (orderItemWorkCategory(order, item) !== 'ordering') return null;
         const qty = remainingProcurementQty(order, item);
         if (!(qty > 0)) return null;
@@ -8241,8 +8242,8 @@ window.renderPurchasingView = function() {
         ? purchasingCompletedRows(filters, normalizedItemsByOrder)
         : null;
     renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters);
-    if (purchasingView === 'ordering') renderPendingPurchaseOrders();
-    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
+    if (purchasingView === 'ordering') renderPendingPurchaseOrders(normalizedItemsByOrder, filters);
+    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders(normalizedItemsByOrder, filters);
     else if (purchasingView === 'completed') renderPurchasingCompletedOrders(completedRows);
     else renderPoList();
 };
@@ -8291,7 +8292,7 @@ window.switchPurchasingView = function(view, tab) {
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
     if (view === 'ordering') {
-        renderPendingPurchaseOrders();
+        renderPendingPurchaseOrders(normalizedItemsByOrder, filters);
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
             loadPendingPurchaseOrders(true, { reuseOrders:true }).catch(err => {
@@ -8324,7 +8325,7 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'dispatch') {
-        renderPurchasingDispatchOrders();
+        renderPurchasingDispatchOrders(normalizedItemsByOrder, filters);
         if (!purchasingViewLoaded.has('dispatch')) {
             purchasingViewLoaded.add('dispatch');
             Promise.resolve(loadPurchasingDispatchOrders(true, { reuseOrders:true })).catch(err => {
@@ -8364,16 +8365,16 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
 
 window.loadPurchasingDispatchOrders=loadPurchasingDispatchOrders;
 
-function renderPurchasingDispatchOrders() {
+function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterContext = null) {
     const body=document.getElementById('purchaseDispatchBody');
     const status=document.getElementById('purchaseDispatchStatus');
     const more=document.getElementById('purchaseDispatchMoreBtn');
     if(!body)return;
     body.innerHTML='';
     const sourceOrders = ordersCache.length ? ordersCache : purchasingDispatchCache;
-    const filters=purchaseFilterContext();
+    const filters=filterContext || purchaseFilterContext();
     sourceOrders.forEach(order=>{
-        const pending=normalizedOrderItems(order)
+        const pending=(normalizedItemsByOrder?.get(order.id) || normalizedOrderItems(order))
             .filter(item=>orderItemDisplayCategories(order,item).includes('dispatch'))
             .map(item=>({item,state:itemDispatchState(order,item)}));
         pending.forEach(({item,state})=>{
@@ -8442,14 +8443,14 @@ function syncCommittedPurchaseOrderSources(orders) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 }
 
-function renderPendingPurchaseOrders() {
+function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContext = null) {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
     body.innerHTML = '';
     const sourceOrders = ordersCache.length ? ordersCache : pendingPurchaseCache;
-    const filters = purchaseFilterContext();
+    const filters = filterContext || purchaseFilterContext();
     for (const order of sourceOrders) {
-        const items = pendingProcurementDisplayLines(order);
+        const items = pendingProcurementDisplayLines(order, normalizedItemsByOrder?.get(order.id));
         for (const item of items) {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) continue;
             const selfOrder = item.procurementType === 'SALES_SELF_ORDER';
