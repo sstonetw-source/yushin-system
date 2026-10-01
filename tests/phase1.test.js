@@ -1951,3 +1951,20 @@ test('three-quote output compacts layout as item count grows', () => {
     assert.match(cssSource, /\.comparison-style-b\.comparison-quote-compact \.comparison-product-list \{ gap:1\.5mm; margin-top:2mm; \}/);
     assert.match(cssSource, /\.comparison-style-a\.comparison-quote-dense \.comparison-product-item \{ min-height:7\.5mm; padding:1mm 0; \}/);
 });
+
+
+test('equipment full-history search scans every indexed match with progress feedback', () => {
+    assert.match(indexSource, /id="eqSearchInput"[^>]+oninput="scheduleEquipmentSearch\(\)"/);
+    assert.match(indexSource, /id="equipmentSearchStatus"/);
+    const start = appSource.indexOf('async function runEquipmentSearch');
+    const end = appSource.indexOf('function populateEquipmentListFilters', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /while \(true\)/);
+    assert.match(source, /where\('searchTokens', 'array-contains', queryToken\)/);
+    assert.match(source, /firestoreReadWithTimeout\(query\.get\(\), '儀器索引搜尋'\)/);
+    assert.match(source, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(source, /全資料搜尋中：已檢查/);
+    assert.match(source, /generation !== equipmentSearchGeneration/);
+    assert.doesNotMatch(source, /equipmentSearchCursor/);
+    assert.match(appSource, /if \(equipmentSearchActive\) return;[\s\S]*?loadEquipmentFromCloud\(false\)/);
+});

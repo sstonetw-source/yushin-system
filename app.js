@@ -278,10 +278,10 @@ let equipmentCursor = null;
 let equipmentHasMore = false;
 let equipmentSearchActive = false;
 let equipmentSearchLoading = false;
-let equipmentSearchCursor = null;
 let equipmentSearchKeyword = '';
 let equipmentSearchResults = [];
 let equipmentSearchTimer = null;
+let equipmentSearchGeneration = 0;
 
 // 管理員後台狀態
 let allUsersCache = [];
@@ -12568,7 +12568,8 @@ window.loadEquipmentFromCloud = function(reset = true) {
 };
 
 window.loadMoreEquipment = function() {
-    if (equipmentSearchActive) return runEquipmentSearch(false);
+    // 搜尋模式會自動把所有索引候選讀完；這個按鈕只負責一般列表的 50 筆分頁。
+    if (equipmentSearchActive) return;
     if (!equipmentHasMore || !equipmentCursor) return;
     loadEquipmentFromCloud(false);
 };
@@ -12610,70 +12611,100 @@ function fmtDate(d) {
 const statusLabel = { ok: '正常', soon: '即將到期', overdue: '已逾期', unknown: '尚無紀錄', none: '免保養' };
 const statusClass = { ok: 'status-ok', soon: 'status-soon', overdue: 'status-overdue', unknown: 'status-unknown', none: 'status-none' };
 
-async function runEquipmentSearch(reset = true) {
+async function runEquipmentSearch() {
+    const generation = ++equipmentSearchGeneration;
     const input = document.getElementById('eqSearchInput');
+    const status = document.getElementById('equipmentSearchStatus');
+    const moreButton = document.getElementById('equipmentLoadMoreBtn');
     const rawKeyword = input?.value || '';
     const normalized = normalizeFullHistorySearchValue(rawKeyword);
-    const moreButton = document.getElementById('equipmentLoadMoreBtn');
+
     if (!normalized) {
         equipmentSearchActive = false;
-        equipmentSearchResults = [];
-        equipmentSearchCursor = null;
+        equipmentSearchLoading = false;
         equipmentSearchKeyword = '';
-        if (moreButton) moreButton.style.display = equipmentHasMore ? '' : 'none';
+        equipmentSearchResults = [];
+        if (status) status.textContent = '';
+        if (moreButton) {
+            moreButton.style.display = equipmentHasMore ? '' : 'none';
+            moreButton.disabled = false;
+            moreButton.textContent = '載入更多';
+        }
         renderEquipmentList();
         return;
     }
-    if (equipmentSearchLoading) return;
+
     const queryToken = fullHistoryQueryToken('equipment', rawKeyword);
-    if (!queryToken) return;
-    equipmentSearchLoading = true;
-    if (reset || rawKeyword !== equipmentSearchKeyword) {
-        equipmentSearchKeyword = rawKeyword;
+    if (!queryToken) {
+        equipmentSearchActive = false;
+        equipmentSearchLoading = false;
         equipmentSearchResults = [];
-        equipmentSearchCursor = null;
-    }
-    if (moreButton) { moreButton.disabled = true; moreButton.textContent = '搜尋中…'; }
-    try {
-        let query = db.collection('equipment').where('searchTokens', 'array-contains', queryToken);
-        if (!canViewAllEquipment()) {
-            if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
-            else if (currentUser?.uid) query = query.where('ownerUid', '==', currentUser.uid);
-        }
-        query = query.limit(DEFAULT_LIST_LIMIT);
-        if (equipmentSearchCursor) query = query.startAfter(equipmentSearchCursor);
-        const snapshot = await query.get();
-        const records = new Map(equipmentSearchResults.map(record => [record.id, record]));
-        snapshot.forEach(doc => {
-            const data = { id:doc.id, ...doc.data() };
-            if (data.active !== false && fullHistoryRecordMatches('equipment', data, rawKeyword)) records.set(doc.id, data);
-        });
-        equipmentSearchResults = [...records.values()]
-            .sort((a,b)=>String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant'));
-        equipmentSearchCursor = snapshot.size === DEFAULT_LIST_LIMIT ? snapshot.docs[snapshot.docs.length - 1] : null;
-        equipmentSearchActive = true;
+        if (status) status.textContent = '目前帳號缺少可用的資料歸屬資訊，無法搜尋全部儀器。';
         renderEquipmentList();
-        if (moreButton) {
-            moreButton.style.display = equipmentSearchCursor ? '' : 'none';
-            moreButton.textContent = '載入更多搜尋結果';
+        return;
+    }
+
+    equipmentSearchLoading = true;
+    equipmentSearchActive = true;
+    equipmentSearchKeyword = rawKeyword;
+    equipmentSearchResults = [];
+    const records = new Map();
+    let cursor = null;
+    let checked = 0;
+    if (status) status.textContent = '正在搜尋全部儀器…';
+    if (moreButton) moreButton.style.display = 'none';
+    renderEquipmentList();
+
+    try {
+        while (true) {
+            let query = db.collection('equipment').where('searchTokens', 'array-contains', queryToken);
+            if (!canViewAllEquipment()) {
+                if (currentUserCode) query = query.where('salesCode', '==', currentUserCode);
+                else if (currentUser?.uid) query = query.where('ownerUid', '==', currentUser.uid);
+            }
+            query = query.limit(DEFAULT_LIST_LIMIT);
+            if (cursor) query = query.startAfter(cursor);
+
+            const snapshot = await firestoreReadWithTimeout(query.get(), '儀器索引搜尋');
+            if (generation !== equipmentSearchGeneration) return;
+
+            checked += snapshot.size;
+            snapshot.forEach(doc => {
+                const data = { id:doc.id, ...doc.data() };
+                if (data.active !== false && fullHistoryRecordMatches('equipment', data, rawKeyword)) records.set(doc.id, data);
+            });
+            equipmentSearchResults = [...records.values()]
+                .sort((a,b)=>String(a.customerName||'').localeCompare(String(b.customerName||''),'zh-Hant'));
+            renderEquipmentList();
+            if (status) status.textContent = `全資料搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`;
+
+            if (snapshot.size < DEFAULT_LIST_LIMIT) break;
+            cursor = snapshot.docs[snapshot.docs.length - 1];
+            await Promise.resolve();
         }
+
+        if (generation !== equipmentSearchGeneration) return;
+        if (status) status.textContent = `全資料搜尋完成：找到 ${records.size} 筆`;
     } catch (err) {
+        if (generation !== equipmentSearchGeneration) return;
         console.error('儀器全資料搜尋失敗：', err);
         equipmentSearchActive = false;
-        equipmentSearchCursor = null;
-        alert('儀器搜尋索引尚未補齊，請管理員到資料庫管理執行搜尋索引補建。');
+        equipmentSearchResults = [];
+        if (status) status.textContent = '儀器搜尋索引尚未補齊，請管理員到資料庫管理執行搜尋索引補建。';
         renderEquipmentList();
     } finally {
-        equipmentSearchLoading = false;
-        if (moreButton) moreButton.disabled = false;
+        if (generation === equipmentSearchGeneration) {
+            equipmentSearchLoading = false;
+            if (!equipmentSearchActive && moreButton) moreButton.style.display = equipmentHasMore ? '' : 'none';
+        }
     }
 }
 
 window.scheduleEquipmentSearch = function() {
     clearTimeout(equipmentSearchTimer);
     const keyword = document.getElementById('eqSearchInput')?.value || '';
-    if (!normalizeFullHistorySearchValue(keyword)) return runEquipmentSearch(true);
-    equipmentSearchTimer = scheduleListSearch(equipmentSearchTimer, () => runEquipmentSearch(true));
+    if (!normalizeFullHistorySearchValue(keyword)) return runEquipmentSearch();
+    equipmentSearchTimer = scheduleListSearch(equipmentSearchTimer, () => runEquipmentSearch());
 };
 
 function populateEquipmentListFilters() {
@@ -12686,7 +12717,8 @@ function populateEquipmentListFilters() {
     const selectedSales = salesSelect.value;
     const names = [...new Set([
         ...salesList.filter(person => String(person.role || 'sales').toLowerCase() === 'sales').map(person => stripPhoneSuffix(person.name || '')),
-        ...equipmentList.map(item => stripPhoneSuffix(item.salesName || ''))
+        ...equipmentList.map(item => stripPhoneSuffix(item.salesName || '')),
+        ...equipmentSearchResults.map(item => stripPhoneSuffix(item.salesName || ''))
     ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     if (canSeeAll) {
         salesSelect.innerHTML = '<option value="">全部業務</option>' + names.map(name =>
@@ -12695,7 +12727,8 @@ function populateEquipmentListFilters() {
     }
     const selectedBrand = brandSelect.value;
     const brands = dedupeBrandsCaseInsensitive([
-        ...getPriceListBrands(true), ...equipmentList.map(item => resolveBrandName(item.brand || ''))
+        ...getPriceListBrands(true), ...equipmentList.map(item => resolveBrandName(item.brand || '')),
+        ...equipmentSearchResults.map(item => resolveBrandName(item.brand || ''))
     ]).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
         `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
