@@ -1762,10 +1762,36 @@ html[data-app-environment="preview"] body { border-top: 0; }
     box-sizing: border-box;
 }
 .forecast-progress-cell {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-all;
     line-height: 1.45;
+}
+
+/* 桌機 Forecast 表格固定欄寬，避免「最新進度」中的長字串把其他欄位擠壞。 */
+@media (min-width: 769px) {
+    #forecastTable {
+        width: 100%;
+        table-layout: fixed;
+    }
+    #forecastTable th:nth-child(1) { width: 11%; }
+    #forecastTable th:nth-child(2) { width: 8%; }
+    #forecastTable th:nth-child(3) { width: 13%; }
+    #forecastTable th:nth-child(4) { width: 9%; }
+    #forecastTable th:nth-child(5) { width: 7%; }
+    #forecastTable th:nth-child(6) { width: 7%; }
+    #forecastTable th:nth-child(7) { width: 24%; }
+    #forecastTable th:nth-child(8) { width: 8%; }
+    #forecastTable th:nth-child(9) { width: 13%; }
+
+    #forecastTable td {
+        min-width: 0;
+    }
+    #forecastTable .forecast-progress-cell {
+        white-space: pre-wrap !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-all;
+    }
 }
 .forecast-mobile-summary {
     display: none;
@@ -1929,6 +1955,9 @@ html[data-app-environment="preview"] body { border-top: 0; }
         color: #394956;
         font-size: 13px;
         line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-all;
     }
     .forecast-card-meta {
         margin-top: 8px;
