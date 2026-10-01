@@ -4416,3 +4416,10 @@ test('product management can batch-select products into one quote or one order',
     assert.match(appSource, /newOrderDraftItems = sources\.slice\(1\)\.map\(normalizeNewOrderItem\)/);
     assert.match(appSource, /saveOrderDraft\(\);\s*clearProductManagementSelection\(\);/);
 });
+
+
+test('product navigation uses the short product label', () => {
+    assert.match(indexSource, /data-main-nav="products"[\s\S]*?<\/svg>產品<\/div>/);
+    assert.match(indexSource, /<h2>產品<\/h2>/);
+    assert.match(appSource, /\{ key: 'products', label: '產品', system: true \}/);
+});

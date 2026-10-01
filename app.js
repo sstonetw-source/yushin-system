@@ -90,7 +90,7 @@ const PERMISSION_PAGES = [
     { key: 'quote', label: '📄 估價單系統', system: true },
     { key: 'quote.create', label: '　建立估價單' },
     { key: 'quote.my', label: '　我的估價單' },
-    { key: 'products', label: '產品管理', system: true },
+    { key: 'products', label: '產品', system: true },
     { key: 'orders', label: '📦 訂單管理系統', system: true },
     { key: 'orders.list', label: '　業務訂單' },
     { key: 'orders.po', label: '　採購訂單' },
