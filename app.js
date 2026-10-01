@@ -6168,7 +6168,7 @@ window.renderInventoryList=function(){
       <td data-th="操作" class="no-print">
         ${canEditPage('inventory') ? `
           <div class="inventory-row-actions">
-            ${safetyStock>0 && n.available<=safetyStock && canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment('${escapeAttr(x.id)}')">建立補庫採購</button>` : ''}
+            ${safetyStock>0 && n.available<=safetyStock && n.available+n.incoming<safetyStock && canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment('${escapeAttr(x.id)}')">建立補庫採購</button>` : ''}
             <button type="button" class="btn-small" onclick="openInventoryItemAdjustment('decrease','${escapeAttr(x.id)}')">減庫存</button>
             <button type="button" class="btn-small btn-secondary" onclick="openInventoryItemAdjustment('return','${escapeAttr(x.id)}')">退貨</button>
             <button type="button" class="btn-small btn-danger" onclick="openInventoryItemAdjustment('scrap','${escapeAttr(x.id)}')">報廢</button>
@@ -6185,7 +6185,12 @@ window.openInventoryReplenishment = async function(inventoryId) {
     await loadSupplierWarehouseMasters();
     const stock = warehouseStockTotals(item.productKey||item.productId||'');
     const safetyStock = Math.max(0, Number(item.safetyStock || 0));
-    const suggestedQty = Math.max(1, safetyStock - stock.available);
+    const projectedAvailable = stock.available + stock.incoming;
+    if (safetyStock > 0 && projectedAvailable >= safetyStock) {
+        alert(`目前可用 ${stock.available}、在途 ${stock.incoming}；既有在途到貨後已可達安全庫存 ${safetyStock}，不需重複建立補庫採購。`);
+        return;
+    }
+    const suggestedQty = Math.max(1, safetyStock - projectedAvailable);
     const match = await findProductByCode(item.itemCode || '');
     let unitPrice = 0;
     if (match) {
@@ -6214,7 +6219,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
     generatePoNo();
     updatePoModeUI();
     const hint = document.getElementById('poModeHint');
-    if (hint) hint.textContent = `安全庫存補貨：目前可用 ${stock.available}，安全庫存 ${safetyStock}，建議採購 ${suggestedQty}。`;
+    if (hint) hint.textContent = `安全庫存補貨：目前可用 ${stock.available}，在途 ${stock.incoming}，到貨後預估可用 ${projectedAvailable}，安全庫存 ${safetyStock}，建議採購 ${suggestedQty}。`;
     document.getElementById('poModalOverlay').classList.add('active');
 };
 

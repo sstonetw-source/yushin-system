@@ -233,11 +233,14 @@ test('purchaser order form assigns a salesperson while preserving creator identi
     assert.match(saveOrder, /\.\.\.commercialCreatorFields\(\)/);
 });
 
-test('low-stock inventory can hand off to formal replenishment purchase flow', () => {
+test('low-stock inventory can hand off to formal replenishment purchase flow without duplicating incoming stock', () => {
     assert.match(appSource, /openInventoryReplenishment/);
-    assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && canEditPage\('orders\.po'\)/);
+    assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && n\.available\+n\.incoming<safetyStock && canEditPage\('orders\.po'\)/);
+    assert.match(appSource, /const projectedAvailable = stock\.available \+ stock\.incoming/);
+    assert.match(appSource, /projectedAvailable >= safetyStock/);
+    assert.match(appSource, /不需重複建立補庫採購/);
     assert.match(appSource, /poDirectStockMode = true/);
-    assert.match(appSource, /suggestedQty = Math\.max\(1, safetyStock - stock\.available\)/);
+    assert.match(appSource, /suggestedQty = Math\.max\(1, safetyStock - projectedAvailable\)/);
     assert.match(appSource, /generatePoNo\(\)/);
 });
 
