@@ -8437,14 +8437,31 @@ function renderPurchasingCompletedOrders(completedRows = null) {
 window.loadMorePurchasingCompleted = async function() {
     if (purchasingDispatchLoading) return;
     purchasingCompletedVisibleLimit += DEFAULT_LIST_LIMIT;
-    const loadedRows = purchasingCompletedRows();
+    const filters = purchaseFilterContext();
+    const normalizedItemsByOrder = new Map(
+        ordersCache.map(order => [order.id, normalizedOrderItems(order)])
+    );
+    const dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
+    const lifecyclesByOrder = purchasingLifecycleSnapshot(normalizedItemsByOrder);
+    const loadedRows = purchasingCompletedRows(
+        filters,
+        normalizedItemsByOrder,
+        dispatchStatesByOrder,
+        lifecyclesByOrder
+    );
     if (loadedRows.length < purchasingCompletedVisibleLimit && purchasingDispatchHasMore) {
         // loadPurchasingDispatchOrders() 完成時已統一更新工作卡與已完成明細；
         // 不再回到外層重畫第二次。
         await loadPurchasingDispatchOrders(false);
         return;
     }
-    renderPurchasingWorkCards();
+    renderPurchasingWorkCards(
+        normalizedItemsByOrder,
+        loadedRows,
+        filters,
+        dispatchStatesByOrder,
+        lifecyclesByOrder
+    );
     renderPurchasingCompletedOrders(loadedRows);
 };
 
