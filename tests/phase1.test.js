@@ -3850,8 +3850,6 @@ test('Product Import is incremental, splits standard cost securely, and never re
 });
 
 
-test('order lifecycle actions are hidden from purchaser and guarded by business capability'
-
 
 test('order lifecycle actions are hidden from purchaser and guarded by business capability', () => {
     const capabilityStart=appSource.indexOf('function canManageOrderLifecycleCapability');
