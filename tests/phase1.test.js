@@ -4075,6 +4075,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
     const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
     assert.match(warehouseSource,/hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'incomingRegisteredQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
+    assert.match(warehouseSource,/status', 'ORDERED'\) != 'CANCELLED'/);
     assert.doesNotMatch(warehouseSource,/'qty'/);
 
     const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
