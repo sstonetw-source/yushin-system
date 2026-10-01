@@ -4178,3 +4178,47 @@ test('cancelled supply is terminal and cannot be received again', () => {
     const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
     assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
 });
+
+
+test('quick purchase keeps immutable supply snapshot and rules restrict mutable fields', () => {
+    const quickStart=appSource.indexOf('window.markPurchaseItemOrdered = async function');
+    const quickEnd=appSource.indexOf('\nwindow.openOrderPurchaseDraft',quickStart);
+    const quickSource=appSource.slice(quickStart,quickEnd);
+    assert.ok(quickStart>=0&&quickEnd>quickStart);
+    assert.match(quickSource,/existingSupply\?\.productKey \|\| currentProductKey/);
+    assert.match(quickSource,/existingSupply\?\.fulfillmentType \|\| currentFulfillmentType/);
+    assert.match(quickSource,/existingSupply\?\.warehouseId \|\| currentWarehouseId/);
+    assert.match(quickSource,/產品識別不可在追加採購前變更/);
+    assert.match(quickSource,/訂貨方式不可在追加採購前變更/);
+    assert.match(quickSource,/入庫倉庫不可在追加採購前變更/);
+    assert.match(quickSource,/type:existingSupply\?\.type\|\|'PURCHASING_MANUAL'/);
+    assert.match(quickSource,/ownerUid:existingSupply\?\.ownerUid\|\|order\.ownerUid/);
+    assert.match(quickSource,/itemCode:existingSupply\?\.itemCode\|\|item\.itemCode/);
+    assert.match(quickSource,/createdByUid:existingSupply\?\.createdByUid\|\|currentUser\?\.uid/);
+    assert.match(quickSource,/incomingRegisteredQty:targetIncomingQty/);
+    assert.match(quickSource,/inv\.incoming\+incomingDelta/);
+
+    const identityStart=rulesSource.indexOf('function sameSupplyIdentity()');
+    const identityEnd=rulesSource.indexOf('\n\n    function validSupplyOperationalState()',identityStart);
+    const identitySource=rulesSource.slice(identityStart,identityEnd);
+    [
+      'internalNo','purchaseDocumentId','purchaseDocumentNo','orderId','itemId','orderItemIndex',
+      'ownerUid','salesCode','salesName','customerName','company',
+      'productId','productKey','itemCode','itemName','brand','productLine',
+      'fulfillmentType','warehouseId','orderDate',
+      'createdAt','createdByUid','createdBy','createdByRole'
+    ].forEach(field => {
+        assert.match(identitySource,new RegExp("request\\.resource\\.data\\.get\\('"+field+"'"));
+    });
+
+    const purchaserStart=rulesSource.indexOf('function purchaserSupplyOperationalUpdate()');
+    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate()',purchaserStart);
+    const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
+    assert.match(purchaserSource,/affectedKeys\(\)\.hasOnly/);
+    ['qty','receivedQty','incomingRegisteredQty','incomingRegisteredAt','status','supplier','unitCost','lastOrderedAt','orderEvents','cancelledQty','cancelReason','cancelledAt','cancelledByUid','cancelledBy','updatedAt'].forEach(field => {
+        assert.match(purchaserSource,new RegExp("'"+field+"'"));
+    });
+    assert.doesNotMatch(purchaserSource,/'createdByUid'/);
+    assert.doesNotMatch(purchaserSource,/'productKey'/);
+    assert.doesNotMatch(purchaserSource,/'warehouseId'/);
+});
