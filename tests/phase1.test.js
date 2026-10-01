@@ -2151,17 +2151,17 @@ test('order and purchasing initialization avoid duplicate brand-driven renders',
     const orderEnd=source.indexOf("if (mainKey === 'orders.po')",orderStart);
     const orderSource=source.slice(orderStart,orderEnd);
     assert.match(orderSource,/loadOrdersFromCloud\(\)/);
-    const orderExecutable = orderSource.replace(/\/\/.*$/gm, '');
-    assert.doesNotMatch(orderExecutable,/loadBrandMaster\(\)\.then/);
+    assert.doesNotMatch(orderSource.replace(/\/\/.*$/gm, ''),/loadBrandMaster\(\)\.then/);
 
     const purchaseStart=source.indexOf("if (mainKey === 'orders.po')");
     const purchaseEnd=source.indexOf("if (mainKey === 'inventory')",purchaseStart);
     const purchaseSource=source.slice(purchaseStart,purchaseEnd);
+    assert.match(purchaseSource,/switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
     assert.match(purchaseSource,/Promise\.allSettled\(\[ensureSalesListLoaded\(\), ensureBrandSettingsLoaded\(\)\]\)/);
-    assert.equal((purchaseSource.match(/renderPurchasingView\(\)/g) || []).length, 1);
+    assert.equal((purchaseSource.match(/renderPurchasingView\(\)/g) || []).length, 0);
+    assert.equal((purchaseSource.match(/populatePurchasingFilters\(\)/g) || []).length, 1);
     assert.doesNotMatch(purchaseSource,/loadBrandMaster\(\)\.then/);
 });
-
 
 test('own-order viewers skip full sales-list load', () => {
     const start=appSource.indexOf("if (mainKey === 'orders.list') {");
@@ -2441,14 +2441,14 @@ test('purchasing order refresh updates cache without duplicate render', () => {
     const orderStart=appSource.indexOf('async function loadOrderPage');
     const orderEnd=appSource.indexOf('\nwindow.loadOrdersFromCloud',orderStart);
     const orderSource=appSource.slice(orderStart,orderEnd);
-    assert.match(orderSource,/if \(!options\.skipRender\) \{[\s\S]*?renderOrdersList\(\)[\s\S]*?renderPurchasingWorkCards\(\)/);
+    assert.match(orderSource,/if \(!options\.skipRender\) \{[\s\S]*?renderOrdersList\(\)[\s\S]*?renderPurchasingView\(\)/);
+    assert.doesNotMatch(orderSource,/if \(!options\.skipRender\) \{[\s\S]*?renderPurchasingWorkCards\(\)/);
 
     const refreshStart=appSource.indexOf('function refreshPurchasingOrderCache');
     const refreshEnd=appSource.indexOf('\nfunction loadPurchasingReceivingQueue',refreshStart);
     const refreshSource=appSource.slice(refreshStart,refreshEnd);
     assert.match(refreshSource,/loadOrderPage\(reset, \{ silent: true, skipRender: true \}\)/);
 });
-
 
 test('purchaser order edit fields match visible order UI', () => {
     const start=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
@@ -2509,13 +2509,13 @@ test('order list calculates row progress summaries once', () => {
     assert.equal((source.match(/deliveryProgressInfo\(o, allOrderItems\)/g) || []).length, 1);
     assert.equal((source.match(/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/g) || []).length, 1);
     assert.equal((source.match(/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/g) || []).length, 1);
-    assert.match(source,/const dispatchStateByItem = new Map/);
+    assert.match(source,/const dispatchStatesByOrder = new Map\(baseOrders\.map/);
+    assert.match(source,/const dispatchStateByItem = dispatchStatesByOrder\.get\(o\.id\) \|\| new Map\(\)/);
     assert.match(source,/const displayCategoriesByItem = new Map/);
     assert.match(source,/const deliveryPending = pendingDeliveryOrderIds\.has\(o\.id\)/);
     assert.match(source,/const billingPending = pendingOrderStatusKeys\.has\(o\.id \+ ':isBilled'\)/);
     assert.match(source,/const lifecyclePending = pendingLifecycleOrderIds\.has\(o\.id\)/);
 });
-
 
 test('order work cards reuse normalized order items', () => {
     const amountStart=appSource.indexOf('function orderItemWorkAmount');
@@ -2533,13 +2533,14 @@ test('order work cards reuse normalized order items', () => {
 
     const cardsStart=appSource.indexOf('function renderOrderWorkCards');
     const cardsEnd=appSource.indexOf('\nfunction createOrderPaginationState',cardsStart);
-    assert.match(appSource.slice(cardsStart,cardsEnd),/normalizedItemsByOrder/);
+    const cardsSource=appSource.slice(cardsStart,cardsEnd);
+    assert.match(cardsSource,/normalizedItemsByOrder = null, dispatchStatesByOrder = null, lifecyclesByOrder = null/);
 
     const listStart=appSource.indexOf('window.renderOrdersList = function()');
     const listEnd=appSource.indexOf('window.retryOrderInventoryReservation',listStart);
-    assert.match(appSource.slice(listStart,listEnd),/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder\)/);
+    const listSource=appSource.slice(listStart,listEnd);
+    assert.match(listSource,/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
-
 
 test('read-only order roles see non-editable row controls', () => {
     const start=appSource.indexOf('window.renderOrdersList = function()');
@@ -2578,22 +2579,26 @@ test('purchasing render reuses normalized order items', () => {
     const cardsEnd=appSource.indexOf('\nfunction purchasingCompletedRows',cardsStart);
     const cardsSource=appSource.slice(cardsStart,cardsEnd);
     assert.match(cardsSource,/const itemMap = normalizedItemsByOrder \|\| new Map/);
-    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap/);
-    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap\)/);
+    assert.match(cardsSource,/const stateMap = dispatchStatesByOrder \|\| purchasingDispatchStateSnapshot\(itemMap\)/);
+    assert.match(cardsSource,/const lifecycleMap = lifecyclesByOrder \|\| purchasingLifecycleSnapshot\(itemMap\)/);
+    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap,[\s\S]*?stateMap,[\s\S]*?lifecycleMap/);
+    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
 
     const rowsStart=appSource.indexOf('function purchasingCompletedRows');
     const rowsEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',rowsStart);
     const rowsSource=appSource.slice(rowsStart,rowsEnd);
     assert.match(rowsSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
+    assert.match(rowsSource,/dispatchStatesByOrder\?\.get\(order\.id\)/);
+    assert.match(rowsSource,/lifecyclesByOrder\?\.get\(order\.id\)/);
 
     const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
     const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
     const viewSource=appSource.slice(viewStart,viewEnd);
     assert.match(viewSource,/const normalizedItemsByOrder = new Map/);
-    assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters\)/);
-    assert.match(viewSource,/renderPurchasingCompletedOrders\(completedRows\)/);
+    assert.match(viewSource,/const dispatchStatesByOrder = purchasingDispatchStateSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(viewSource,/const lifecyclesByOrder = purchasingLifecycleSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
-
 
 test('page initialization avoids duplicate purchasing and quote brand renders', () => {
     const hydrateStart=appSource.indexOf('function hydratePageFromLocalCache');
@@ -2662,10 +2667,9 @@ test('receiving refresh coalesces final purchasing render', () => {
     const pageEnd=appSource.indexOf('\nwindow.loadMyPurchaseOrders',pageStart);
     const pageSource=appSource.slice(pageStart,pageEnd);
     assert.match(pageSource,/const deferRender = options\.deferRender === true/);
-    assert.match(pageSource,/if \(!deferRender\) renderPurchasingWorkCards\(\)/);
-    assert.match(pageSource,/if \(!deferRender\) renderPoList\(\)/);
+    assert.match(pageSource,/if \(!deferRender\) \{[\s\S]*?purchasingView === 'receiving'\) renderPurchasingView\(\)[\s\S]*?else renderPoList\(\)/);
+    assert.doesNotMatch(pageSource,/if \(!deferRender\) renderPurchasingWorkCards\(\)/);
 });
-
 
 test('existing quote output preserves audit and background metadata', () => {
     const start=appSource.indexOf('function persistQuoteOutputRecord');
@@ -2685,24 +2689,16 @@ test('purchasing detail render reuses normalized item snapshots', () => {
     const pendingLinesEnd=appSource.indexOf('\nfunction renderPurchasingWorkCards',pendingLinesStart);
     const pendingLinesSource=appSource.slice(pendingLinesStart,pendingLinesEnd);
     assert.match(pendingLinesSource,/normalizedItems \|\| normalizedOrderItems\(order\)/);
-
-    const pendingStart=appSource.indexOf('function renderPendingPurchaseOrders');
-    const pendingEnd=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',pendingStart);
-    const pendingSource=appSource.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/normalizedItemsByOrder\?\.get\(order\.id\)/);
-
-    const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders');
-    const dispatchEnd=appSource.indexOf('\nfunction pendingPurchaseLines',dispatchStart);
-    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
-    assert.match(dispatchSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
+    assert.match(pendingLinesSource,/dispatchStateByItem\?\.get\(item\)/);
+    assert.match(pendingLinesSource,/lifecycleOverride \|\| orderLifecycleInfo\(order, items\)/);
 
     const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
     const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
     const viewSource=appSource.slice(viewStart,viewEnd);
-    assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters\)/);
-    assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters\)/);
+    assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(viewSource,/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
-
 
 test('remaining interactive Firestore reads are bounded', () => {
     const forecastStart=appSource.indexOf('window.createForecastFromQuote = async function');
@@ -2807,17 +2803,16 @@ test('purchasing refresh loaders reuse normalized item snapshots', () => {
     const pendingEnd=appSource.indexOf('\nconst pendingPurchaseOrderKeys',pendingStart);
     const pendingSource=appSource.slice(pendingStart,pendingEnd);
     assert.match(pendingSource,/normalizedItemsByOrder = new Map/);
-    assert.match(pendingSource,/pendingProcurementDisplayLines\(order, normalizedItemsByOrder\.get\(order\.id\)\)/);
-    assert.match(pendingSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters\)/);
+    assert.match(pendingSource,/pendingProcurementDisplayLines\([\s\S]*?normalizedItemsByOrder\.get\(order\.id\),[\s\S]*?dispatchStatesByOrder\.get\(order\.id\),[\s\S]*?lifecyclesByOrder\.get\(order\.id\)/);
+    assert.match(pendingSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 
     const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
     const dispatchEnd=appSource.indexOf('\nwindow.loadPurchasingDispatchOrders',dispatchStart);
     const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
     assert.match(dispatchSource,/normalizedItemsByOrder = new Map/);
-    assert.match(dispatchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters\)/);
+    assert.match(dispatchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
     assert.match(dispatchSource,/renderPurchasingCompletedOrders\(completedRows\)/);
 });
-
 
 test('Product Master search renders results in 100-row UI pages', () => {
     assert.match(indexSource,/id="productManagementMoreRow"/);
@@ -3053,7 +3048,7 @@ test('purchase receiving and history lists batch row insertion', () => {
     assert.doesNotMatch(receivingSource,/tbody\.appendChild\(tr\)/);
 
     const historyStart=appSource.indexOf('window.renderPoList = function');
-    const historyEnd=appSource.indexOf('\n};',historyStart)+3;
+    const historyEnd=appSource.indexOf('\n\/\/ 把「採購訂單」',historyStart);
     const historySource=appSource.slice(historyStart,historyEnd);
     assert.match(historySource,/const fragment = document\.createDocumentFragment\(\)/);
     assert.match(historySource,/fragment\.appendChild\(tr\)/);
@@ -3061,31 +3056,25 @@ test('purchase receiving and history lists batch row insertion', () => {
     assert.doesNotMatch(historySource,/tbody\.appendChild\(tr\)/);
 });
 
-
 test('receiving list reuses purchasing normalized item snapshot', () => {
     const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList(');
     const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
     const receivingSource=appSource.slice(receivingStart,receivingEnd);
-    assert.match(receivingSource,/normalizedItemsByOrder = null, filterContext = null/);
-    assert.match(receivingSource,/filterContext \|\| purchaseFilterContext\(\)/);
+    assert.match(receivingSource,/normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null/);
     assert.match(receivingSource,/normalizedItemsByOrder\?\.get\(order\.id\) \|\| normalizedOrderItems\(order\)/);
+    assert.match(receivingSource,/dispatchStatesByOrder\?\.get\(order\.id\)/);
+    assert.match(receivingSource,/lifecyclesByOrder\?\.get\(order\.id\)/);
 
     const poStart=appSource.indexOf('window.renderPoList = function(');
     const poEnd=appSource.indexOf('\n// 把「採購訂單」',poStart);
     const poSource=appSource.slice(poStart,poEnd);
-    assert.match(poSource,/renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext\)/);
+    assert.match(poSource,/renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext, dispatchStatesByOrder, lifecyclesByOrder\)/);
 
     const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
     const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
     const viewSource=appSource.slice(viewStart,viewEnd);
-    assert.match(viewSource,/renderPoList\(normalizedItemsByOrder, filters\)/);
-
-    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
-    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
-    const switchSource=appSource.slice(switchStart,switchEnd);
-    assert.match(switchSource,/view === 'receiving'[\s\S]*?renderPoList\(normalizedItemsByOrder, filters\)/);
+    assert.match(viewSource,/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
-
 
 test('receipt allocation counter prevents concurrent retry over-allocation', () => {
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
@@ -3135,30 +3124,22 @@ test('order row summaries reuse normalized items', () => {
     assert.match(progressSource,/orderQuantity\(order, normalizedItems\)/);
     assert.match(progressSource,/deliveredQuantity\(order, normalizedItems\)/);
 
-    const fulfillmentStart=appSource.indexOf('function fulfillmentProgressInfo(order, normalizedItems = null)');
-    const fulfillmentEnd=appSource.indexOf('\nconst pendingDispatchOrderIds',fulfillmentStart);
-    assert.match(appSource.slice(fulfillmentStart,fulfillmentEnd),/normalizedItems \|\| normalizedOrderItems\(order\)/);
-
-    const contextStart=appSource.indexOf('function orderContextActionState(order, normalizedItems = null)');
+    const contextStart=appSource.indexOf('function orderContextActionState');
     const contextEnd=appSource.indexOf('\nwindow.markOrderItemDispatchPrepared',contextStart);
     const contextSource=appSource.slice(contextStart,contextEnd);
-    assert.match(contextSource,/normalizedItems \|\| normalizedOrderItems\(order\)/);
-    assert.match(contextSource,/function dispatchActionHtml\(order, normalizedItems = null\)/);
-
-    const selfStart=appSource.indexOf('function selfOrderActionHtml(order, normalizedItems = null)');
-    const selfEnd=appSource.indexOf('\nwindow.openSelfOrderModal',selfStart);
-    assert.match(appSource.slice(selfStart,selfEnd),/normalizedItems \|\| normalizedOrderItems\(order\)/);
+    assert.match(contextSource,/dispatchStateByItem = null/);
+    assert.match(contextSource,/function dispatchActionHtml\(order, normalizedItems = null, dispatchStateByItem = null\)/);
+    assert.match(contextSource,/function selfOrderActionHtml\(order, normalizedItems = null, dispatchStateByItem = null\)/);
 
     const renderStart=appSource.indexOf('window.renderOrdersList = function()');
-    const renderEnd=appSource.indexOf('\n};',renderStart)+3;
+    const renderEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',renderStart);
     const renderSource=appSource.slice(renderStart,renderEnd);
     assert.match(renderSource,/deliveryProgressInfo\(o, allOrderItems\)/);
-    assert.match(renderSource,/fulfillmentProgressInfo\(o, allOrderItems\)/);
-    assert.match(renderSource,/orderContextActionState\(o, allOrderItems\)/);
-    assert.match(renderSource,/dispatchActionHtml\(o, allOrderItems\)/);
-    assert.match(renderSource,/selfOrderActionHtml\(o, allOrderItems\)/);
+    assert.match(renderSource,/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.match(renderSource,/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.match(renderSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.match(renderSource,/selfOrderActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
 });
-
 
 test('receipt allocation progress has narrowly scoped Firestore update permission', () => {
     const start=rulesSource.indexOf('match /receipts/{id}');
@@ -3178,22 +3159,15 @@ test('work metrics reuse one dispatch state per item', () => {
     assert.match(categorySource,/lifecycleOverride = null, dispatchOverride = null/);
     assert.match(categorySource,/dispatchOverride \|\| itemDispatchState/);
 
-    const displayStart=appSource.indexOf('function orderItemDisplayCategory');
-    const displayEnd=appSource.indexOf('\nfunction orderWorkCategories',displayStart);
-    const displaySource=appSource.slice(displayStart,displayEnd);
-    assert.match(displaySource,/dispatchOverride \|\| itemDispatchState/);
-    assert.match(displaySource,/orderItemWorkCategory\(order, item, lifecycleOverride, dispatch\)/);
-    assert.match(displaySource,/orderItemDisplayCategory\(order,item,lifecycleOverride,dispatch\)/);
-
     const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
     const metricsEnd=appSource.indexOf('\nwindow.setOrderWorkFilter',metricsStart);
     const metricsSource=appSource.slice(metricsStart,metricsEnd);
-    assert.match(metricsSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
-    assert.match(metricsSource,/const dispatch = itemDispatchState\(order, item\)/);
+    assert.match(metricsSource,/const lifecycle = lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo\(order, items\)/);
+    assert.match(metricsSource,/const orderDispatchStates = dispatchStatesByOrder\?\.get\(order\.id\) \|\| null/);
+    assert.match(metricsSource,/const dispatch = orderDispatchStates\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
     assert.match(metricsSource,/orderItemDisplayCategories\(order,item,lifecycle,dispatch\)/);
     assert.match(metricsSource,/orderItemWorkAmount\(order,item,category,totalQty,dispatch\)/);
 });
-
 
 test('order rows reuse one dispatch snapshot across status summaries', () => {
     const fulfillmentStart=appSource.indexOf('function fulfillmentProgressInfo');
@@ -3202,23 +3176,16 @@ test('order rows reuse one dispatch snapshot across status summaries', () => {
     assert.match(fulfillmentSource,/dispatchStateByItem = null/);
     assert.match(fulfillmentSource,/dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState/);
 
-    const contextStart=appSource.indexOf('function orderContextActionState');
-    const contextEnd=appSource.indexOf('\nfunction dispatchActionHtml',contextStart);
-    const contextSource=appSource.slice(contextStart,contextEnd);
-    assert.match(contextSource,/dispatchStateByItem = null/);
-    assert.match(contextSource,/dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState/);
-
     const listStart=appSource.indexOf('window.renderOrdersList = function()');
     const listEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',listStart);
     const listSource=appSource.slice(listStart,listEnd);
-    assert.match(listSource,/const dispatchStateByItem = new Map/);
+    assert.match(listSource,/const dispatchStatesByOrder = new Map\(baseOrders\.map/);
+    assert.match(listSource,/const dispatchStateByItem = dispatchStatesByOrder\.get\(o\.id\) \|\| new Map\(\)/);
     assert.match(listSource,/const displayCategoriesByItem = new Map/);
     assert.match(listSource,/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/);
     assert.match(listSource,/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/);
     assert.match(listSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
-    assert.match(listSource,/displayCategoriesByItem\.get\(item\)/);
 });
-
 
 test('procurement views reuse dispatch state while calculating quantities', () => {
     const remainingStart=appSource.indexOf('function remainingProcurementQty');
@@ -3279,27 +3246,22 @@ test('purchase history removes unreachable legacy receiving path', () => {
 });
 
 test('purchasing cards and completed rows share dispatch snapshots', () => {
-    const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
-    const metricsEnd=appSource.indexOf('\nwindow.setOrderWorkFilter',metricsStart);
-    const metricsSource=appSource.slice(metricsStart,metricsEnd);
-    assert.match(metricsSource,/dispatchStatesByOrder = null/);
-    assert.match(metricsSource,/orderDispatchStates\?\.get\(item\) \|\| itemDispatchState/);
-
     const cardsStart=appSource.indexOf('function renderPurchasingWorkCards');
     const cardsEnd=appSource.indexOf('\nfunction purchasingCompletedRows',cardsStart);
     const cardsSource=appSource.slice(cardsStart,cardsEnd);
-    assert.match(cardsSource,/const stateMap = dispatchStatesByOrder \|\| new Map/);
-    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap,[\s\S]*?stateMap/);
-    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap\)/);
+    assert.match(cardsSource,/const stateMap = dispatchStatesByOrder \|\| purchasingDispatchStateSnapshot\(itemMap\)/);
+    assert.match(cardsSource,/const lifecycleMap = lifecyclesByOrder \|\| purchasingLifecycleSnapshot\(itemMap\)/);
+    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap,[\s\S]*?stateMap,[\s\S]*?lifecycleMap/);
+    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
 
     const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
     const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
     const viewSource=appSource.slice(viewStart,viewEnd);
-    assert.match(viewSource,/const dispatchStatesByOrder = new Map/);
-    assert.match(viewSource,/purchasingCompletedRows\(filters, normalizedItemsByOrder, dispatchStatesByOrder\)/);
-    assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder\)/);
+    assert.match(viewSource,/const dispatchStatesByOrder = purchasingDispatchStateSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(viewSource,/const lifecyclesByOrder = purchasingLifecycleSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(viewSource,/purchasingCompletedRows\(filters, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
-
 
 test('normalized order items index delivery records once per order', () => {
     const start=appSource.indexOf('function normalizedOrderItems(order)');
@@ -3355,18 +3317,17 @@ test('order work cards and rows share dispatch snapshots', () => {
     const cardsStart=appSource.indexOf('function renderOrderWorkCards');
     const cardsEnd=appSource.indexOf('\nfunction createOrderPaginationState',cardsStart);
     const cardsSource=appSource.slice(cardsStart,cardsEnd);
-    assert.match(cardsSource,/dispatchStatesByOrder = null/);
-    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?normalizedItemsByOrder,[\s\S]*?dispatchStatesByOrder/);
+    assert.match(cardsSource,/dispatchStatesByOrder = null, lifecyclesByOrder = null/);
+    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?normalizedItemsByOrder,[\s\S]*?dispatchStatesByOrder,[\s\S]*?lifecyclesByOrder/);
 
     const listStart=appSource.indexOf('window.renderOrdersList = function()');
     const listEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',listStart);
     const listSource=appSource.slice(listStart,listEnd);
     assert.match(listSource,/const dispatchStatesByOrder = new Map\(baseOrders\.map/);
     assert.match(listSource,/itemDispatchState\(order, item\)/);
-    assert.match(listSource,/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder\)/);
+    assert.match(listSource,/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder\)/);
     assert.match(listSource,/const dispatchStateByItem = dispatchStatesByOrder\.get\(o\.id\) \|\| new Map\(\)/);
 });
-
 
 test('normalized fulfillment snapshot avoids rescanning delivery records', () => {
     const normalizeStart=appSource.indexOf('function normalizedOrderItems(order)');
