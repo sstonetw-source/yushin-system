@@ -1344,6 +1344,14 @@ let productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
 
 let pendingProductMasterLoading = false;
 let pendingProductMasterRows = [];
+let productBatchMaintenanceInProgress = false;
+
+function setProductBatchMaintenanceBusy(busy) {
+    productBatchMaintenanceInProgress = !!busy;
+    document.querySelectorAll('#productBatchMaintenance button').forEach(button => {
+        button.disabled = productBatchMaintenanceInProgress;
+    });
+}
 
 function canManagePendingProductMaster() {
     return currentUserRole === 'admin' || currentUserRole === 'purchaser';
@@ -16660,12 +16668,18 @@ function setPriceUploadProgress(percent, status, keepVisible = true) {
     const statusEl = document.getElementById('priceUploadStatus');
     const percentEl = document.getElementById('priceUploadPercent');
     const bar = document.getElementById('priceUploadProgressBar');
-    if (!wrap || !statusEl || !percentEl || !bar) return;
-    wrap.style.display = keepVisible ? '' : 'none';
     const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
-    statusEl.innerText = status;
-    percentEl.innerText = `${safePercent}%`;
-    bar.style.width = `${safePercent}%`;
+    if (wrap && statusEl && percentEl && bar) {
+        wrap.style.display = keepVisible ? '' : 'none';
+        statusEl.innerText = status;
+        percentEl.innerText = `${safePercent}%`;
+        bar.style.width = `${safePercent}%`;
+    }
+    const batchStatus = document.getElementById('productBatchMaintenanceStatus');
+    if (batchStatus) {
+        batchStatus.textContent = status ? `${status} ${safePercent}%` : '';
+        batchStatus.style.color = /失敗|錯誤|中斷/.test(String(status || '')) ? '#b42318' : '#12502b';
+    }
 }
 
 async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
@@ -16788,6 +16802,11 @@ window.handleProductPriceExcelUpload = async function(input) {
         input.value = '';
         return;
     }
+    if (productBatchMaintenanceInProgress) {
+        input.value = '';
+        return;
+    }
+    setProductBatchMaintenanceBusy(true);
     try {
         await ensureXlsxLoaded();
         setPriceUploadProgress(5, '讀取建議售價更新檔…');
@@ -16886,6 +16905,8 @@ window.handleProductPriceExcelUpload = async function(input) {
         setPriceUploadProgress(0, '更新失敗：' + (err?.message || err));
         alert('建議售價更新失敗：' + (err?.message || err));
         input.value = '';
+    } finally {
+        setProductBatchMaintenanceBusy(false);
     }
 };
 
@@ -16898,6 +16919,11 @@ window.handleProductCostExcelUpload = async function(input) {
         input.value = '';
         return;
     }
+    if (productBatchMaintenanceInProgress) {
+        input.value = '';
+        return;
+    }
+    setProductBatchMaintenanceBusy(true);
     try {
         await ensureXlsxLoaded();
         setPriceUploadProgress(5, '讀取成本更新檔…');
@@ -17006,6 +17032,8 @@ window.handleProductCostExcelUpload = async function(input) {
         setPriceUploadProgress(0, '成本更新失敗：' + (err?.message || err));
         alert('產品成本更新失敗：' + (err?.message || err));
         input.value = '';
+    } finally {
+        setProductBatchMaintenanceBusy(false);
     }
 };
 
