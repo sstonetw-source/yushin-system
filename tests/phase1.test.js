@@ -2653,3 +2653,16 @@ test('receiving refresh coalesces final purchasing render', () => {
     assert.match(pageSource,/if \(!deferRender\) renderPurchasingWorkCards\(\)/);
     assert.match(pageSource,/if \(!deferRender\) renderPoList\(\)/);
 });
+
+
+test('existing quote output preserves audit and background metadata', () => {
+    const start=appSource.indexOf('function persistQuoteOutputRecord');
+    const end=appSource.indexOf('\nfunction quoteDataForPdfExport',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/if \(snapshot\.exists && updatingExisting\)/);
+    assert.match(source,/quoteData\.createdAt = existing\.createdAt \|\| quoteData\.createdAt/);
+    assert.match(source,/quoteData\.createdByUid = existing\.createdByUid/);
+    assert.match(source,/quoteData\.createdByName = existing\.createdByName/);
+    assert.match(source,/quoteData\.createdByRole = existing\.createdByRole/);
+    assert.match(source,/transaction\.set\(quoteRef, quoteData, \{ merge: true \}\)/);
+});
