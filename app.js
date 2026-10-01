@@ -3152,16 +3152,17 @@ window.onSalesChange = function() {
     updateSalesPhoneDisplay();
 };
 
-// 估價單可歸屬業務或工程師；本人登入時只選自己，採購／管理員可代兩種角色建立。
+// 估價單可歸屬業務或工程師：業務只開自己名下；工程師可開自己或協助業務；
+ // 採購／管理員可代業務或工程師建立。
 function populateSalesDropdown() {
     const select = document.getElementById('salesName');
     if (!select) return;
 
     const visibleList = salesList.filter(s => {
         const role = (s.role || 'sales').toLowerCase();
-        return currentUserRole === 'sales' || currentUserRole === 'engineer'
-            ? s.uid === currentUser?.uid
-            : role === 'sales' || role === 'engineer';
+        if (currentUserRole === 'sales') return s.uid === currentUser?.uid;
+        if (currentUserRole === 'engineer') return s.uid === currentUser?.uid || role === 'sales';
+        return role === 'sales' || role === 'engineer';
     });
 
     if ((currentUserRole === 'sales' || currentUserRole === 'engineer') && currentUser?.uid && currentUserName
