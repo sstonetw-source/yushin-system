@@ -1683,7 +1683,7 @@ function ensureProductMasterEditor() {
           <div><label>中文品名 *</label><input id="pmEditNameCn" type="text" autocomplete="off"></div>
           <div><label>英文品名</label><input id="pmEditNameEn" type="text" autocomplete="off"></div>
           <div style="grid-column:1/-1;"><label>規格／包裝</label><input id="pmEditSpec" type="text" autocomplete="off"></div>
-          <div><label>產品線 *</label><input id="pmEditProductLine" type="text" placeholder="例如：Flow Cytometry"></div>
+          <div><label>產品線</label><input id="pmEditProductLine" type="text" placeholder="選填，例如：Flow Cytometry"></div>
           <div><label>產品類型</label><input id="pmEditProductType" type="text" list="pmProductTypeList" placeholder="例如：Reagent"></div>
           <datalist id="pmProductTypeList">
             <option value="Instrument"></option><option value="Reagent"></option><option value="Consumable"></option>
@@ -1792,8 +1792,8 @@ window.saveProductMasterEditor = async function() {
     const code = String(document.getElementById('pmEditCode').value || '').trim();
     const productName = String(document.getElementById('pmEditNameCn').value || '').trim();
     const productLine = String(document.getElementById('pmEditProductLine').value || '').trim();
-    if (!brand || !code || !productName || !productLine) {
-        alert('請至少完成廠牌、原廠貨號、中文品名與產品線。');
+    if (!brand || !code || !productName) {
+        alert('請至少完成廠牌、原廠貨號與中文品名。');
         return;
     }
 
@@ -17342,13 +17342,12 @@ window.handlePriceExcelUpload = async function(input) {
                 .replace(/\u3000/g, ' ')
                 .trim();
 
-            // 標準格式以欄位為主：廠牌、產品線都存在每一列。
-            // 為了讓既有整理好的檔案仍可使用，若欄位空白才退回用「檔名＝廠牌、分頁＝產品線」。
+            // 標準格式以欄位為主。廠牌空白仍可由檔名補；產品線為選填，
+            // 不從分頁名稱自動推導，避免沒有產品線的廠牌被誤分類。
             const fallbackBrand = toHalfWidth(String(file.name || '').replace(/\.(xlsx|xls)$/i, '').replace(/^(Product Master|Product Import|又鑫_Product_Import)$/i, ''));
             const brandGroupsMap = new Map();
             const seenProductIds = new Set();
             workbook.SheetNames.forEach(sheetName => {
-                const fallbackProductLine = toHalfWidth(sheetName === '產品資料' ? '' : sheetName);
                 const sheet = workbook.Sheets[sheetName];
                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
@@ -17359,9 +17358,8 @@ window.handlePriceExcelUpload = async function(input) {
                     if (!model) return;
 
                     const brand = toHalfWidth(getField(row, ['廠牌', '品牌', 'Brand']) || fallbackBrand);
-                    const productLine = toHalfWidth(getField(row, ['產品線', 'Product Line', 'ProductLine']) || fallbackProductLine);
+                    const productLine = toHalfWidth(getField(row, ['產品線', 'Product Line', 'ProductLine']));
                     if (!brand) throw new Error(`貨號「${model}」缺少廠牌。請填寫「廠牌」欄位。`);
-                    if (!productLine) throw new Error(`貨號「${model}」缺少產品線。請填寫「產品線」欄位。`);
 
                     const productType = normalizeProductTypeValue(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type']));
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();

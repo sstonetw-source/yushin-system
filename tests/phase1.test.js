@@ -3816,6 +3816,20 @@ test('order lifecycle follows procurement dispatch delivery billing and return s
 });
 
 
+
+test('Product Master product line is optional in manual editor', () => {
+    const uiStart=appSource.indexOf('function ensureProductMasterEditor');
+    const uiEnd=appSource.indexOf('\nfunction populateProductMasterEditor',uiStart);
+    const uiSource=appSource.slice(uiStart,uiEnd);
+    assert.match(uiSource,/<label>產品線<\/label>/);
+    assert.doesNotMatch(uiSource,/產品線 \*/);
+
+    const saveStart=appSource.indexOf('window.saveProductMasterEditor = async function');
+    const saveEnd=appSource.indexOf('\nfunction productManagementSource',saveStart);
+    const saveSource=appSource.slice(saveStart,saveEnd);
+    assert.match(saveSource,/if \(!brand \|\| !code \|\| !productName\)/);
+    assert.doesNotMatch(saveSource,/!productLine\)/);
+});
 test('Product Import is incremental, splits standard cost securely, and never removes omitted products', () => {
     const syncStart=appSource.indexOf('async function syncImportedBrandToFormalProductMaster');
     const syncEnd=appSource.indexOf('\nasync function saveProductMasterBrand',syncStart);
@@ -3841,6 +3855,8 @@ test('Product Import is incremental, splits standard cost securely, and never re
     assert.match(uploadSource,/以 productId 增量合併本機快取/);
     assert.match(uploadSource,/未出現在檔案中的產品不會被刪除或停用/);
     assert.match(uploadSource,/標準成本與實際採購價分開保存/);
+    assert.doesNotMatch(uploadSource,/缺少產品線/);
+    assert.doesNotMatch(uploadSource,/fallbackProductLine/);
 
     const confirmStart=appSource.indexOf('async function confirmProductMasterImport');
     const confirmEnd=appSource.indexOf('\n\nwindow.downloadProductMasterTemplate',confirmStart);
