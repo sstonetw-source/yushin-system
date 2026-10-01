@@ -1456,3 +1456,38 @@ test('acceptance flow keeps direct-ship procurement out of warehouse stock and h
     assert.doesNotMatch(directSource,/collection\('warehouseStocks'\)/);
     assert.doesNotMatch(directSource,/inventoryMovements/);
 });
+
+
+test('cancelled outstanding quantity becomes purchasable again', () => {
+    const workflow=require('../modules/workflow-core.js');
+    const before=workflow.procurementQuantities({
+        orderedQty:10,
+        fulfillmentType:'WAREHOUSE',
+        shortageQty:4,
+        supplyOrderedQty:6,
+        receivedQty:2
+    });
+    assert.equal(before.inTransitQty,4);
+    assert.equal(before.remainingToOrderQty,0);
+
+    const after=workflow.procurementQuantities({
+        orderedQty:10,
+        fulfillmentType:'WAREHOUSE',
+        shortageQty:4,
+        supplyOrderedQty:2,
+        receivedQty:2
+    });
+    assert.equal(after.inTransitQty,0);
+    assert.equal(after.remainingToOrderQty,4);
+
+    const cancelStart=app.indexOf('async function cancelOutstandingSupplyRecord');
+    const cancelEnd=app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',cancelStart);
+    const cancelSource=app.slice(cancelStart,cancelEnd);
+    assert.match(cancelSource,/supplyOrderedQty:Math\.max\(receivedForItem,currentSupplyOrdered-remaining\)/);
+
+    const validateStart=app.indexOf('function assertPurchaseLinesAvailable');
+    const validateEnd=app.indexOf('\nfunction purchaseItemsFromSavedPo',validateStart);
+    const validateSource=app.slice(validateStart,validateEnd);
+    assert.match(validateSource,/const remaining = remainingProcurementQty\(order, source\)/);
+    assert.doesNotMatch(validateSource,/purchaseDocumentNos/);
+});
