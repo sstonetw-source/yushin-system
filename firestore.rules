@@ -180,6 +180,36 @@ service cloud.firestore {
         );
     }
 
+    function directShipReceiptOrderUpdate(orderId) {
+      let beforeRecords = resource.data.get('deliveryRecords', []);
+      let afterRecords = request.resource.data.get('deliveryRecords', []);
+      let newRecord = afterRecords[afterRecords.size() - 1];
+      let supplyId = newRecord.get('sourceId', '');
+      let supplyPath = /databases/$(database)/documents/supplyOrders/$(supplyId);
+      let supplyBefore = get(supplyPath).data;
+      let supplyAfter = getAfter(supplyPath).data;
+      return (purchaser() || warehouse())
+        && sameCommercialOwner()
+        && afterRecords.size() == beforeRecords.size() + 1
+        && afterRecords[0:beforeRecords.size()] == beforeRecords
+        && newRecord.get('sourceType', '') == 'DIRECT_SHIP_RECEIPT'
+        && newRecord.get('qty', 0) is number
+        && newRecord.get('qty', 0) > 0
+        && supplyBefore.get('orderId', '') == orderId
+        && supplyAfter.get('orderId', '') == orderId
+        && supplyBefore.get('itemId', '') == newRecord.get('itemId', '')
+        && supplyAfter.get('itemId', '') == newRecord.get('itemId', '')
+        && supplyBefore.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+        && supplyAfter.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+        && supplyAfter.get('receivedQty', 0) == supplyBefore.get('receivedQty', 0) + newRecord.get('qty', 0)
+        && supplyAfter.get('receivedQty', 0) <= supplyAfter.get('qty', 0)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items', 'itemCount', 'orderSchemaVersion',
+          'deliveryRecords', 'deliveredQty', 'isDelivered',
+          'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+        ]);
+    }
+
     function purchaserOrderWorkflowUpdate() {
       return purchaser()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -188,7 +218,6 @@ service cloud.firestore {
           'linkedDocuments',
           'costPrice', 'transactionType', 'invoiceTitle', 'remarks', 'invoiceDate', 'fieldEditHistory',
           'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt',
-          'deliveryRecords', 'deliveredQty', 'isDelivered',
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
@@ -200,7 +229,6 @@ service cloud.firestore {
           'items', 'itemCount', 'orderSchemaVersion',
           'inventoryReservedQty', 'inventoryShortageQty',
           'receivedQty',
-          'deliveryRecords', 'deliveredQty', 'isDelivered',
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
@@ -423,7 +451,8 @@ service cloud.firestore {
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || purchaserOrderWorkflowUpdate()
-        || warehouseOrderWorkflowUpdate();
+        || warehouseOrderWorkflowUpdate()
+        || directShipReceiptOrderUpdate(id);
       allow delete: if admin();
     }
 
