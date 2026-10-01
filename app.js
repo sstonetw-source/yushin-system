@@ -10099,6 +10099,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const receiptSnap=await tx.get(receiptRef);
         if(!supplySnap.exists)throw new Error('找不到供應紀錄。');
         const supply=supplySnap.data();
+        if (String(supply.status || '').toUpperCase() === 'CANCELLED') {
+            throw new Error('此供應紀錄已取消，不能再確認到貨。');
+        }
         if (supply.orderId) affectedOrderIds.add(supply.orderId);
         if(receiptSnap.exists){
             const receipt=receiptSnap.data()||{};
