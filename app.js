@@ -1388,10 +1388,33 @@ window.loadPendingProductMaster = async function() {
                 '待補 Product Master－訂單'
             )
         ]);
-        const rows = [
+        let rows = [
             ...(quoteSnap.docs || []).flatMap(doc => collectPendingProductRowsFromDocument({ id:doc.id, ...doc.data() }, 'quote')),
             ...(orderSnap.docs || []).flatMap(doc => collectPendingProductRowsFromDocument({ id:doc.id, ...doc.data() }, 'order'))
         ];
+
+        // 交易文件上的 matched=false 是當時快照；之後若主檔已補齊，待補清單不應一直殘留。
+        // 這段只在使用者主動按「待補 Product Master」時執行，且用貨號分批查詢，不影響日常頁面效能。
+        const uniqueCodes = [...new Set(rows.map(row => normalizeItemCodeLoose(row.itemCode)).filter(Boolean))];
+        const existingKeys = new Set();
+        for (let i = 0; i < uniqueCodes.length; i += 10) {
+            const chunk = uniqueCodes.slice(i, i + 10);
+            const snap = await firestoreReadWithTimeout(
+                db.collection('products').where('normalizedPartNo', 'in', chunk).get(),
+                '核對待補 Product Master'
+            );
+            snap.docs.forEach(doc => {
+                const data = doc.data() || {};
+                if (data.status === 'INACTIVE' || data.active === false) return;
+                existingKeys.add(`${normalizeBrandLookupKey(data.brandName || data.brand || '')}::${data.normalizedPartNo || normalizeItemCodeLoose(data.manufacturerPartNo || data.sku || '')}`);
+            });
+        }
+        rows = rows.filter(row => {
+            const code = normalizeItemCodeLoose(row.itemCode);
+            if (!code) return true;
+            return !existingKeys.has(`${normalizeBrandLookupKey(row.brand || '')}::${code}`);
+        });
+
         const grouped = new Map();
         rows.forEach(row => {
             const key = row.key || `${row.sourceType}::${row.reference}::${row.itemCode}::${row.itemName}`;
@@ -1693,6 +1716,7 @@ window.saveProductMasterEditor = async function() {
         active: status === 'ACTIVE',
         source: String(document.getElementById('pmEditSource').value || 'MANUAL').toUpperCase(),
         createdAt: document.getElementById('pmEditCreatedAt').value || now,
+        ...(originalId ? {} : { createdBy: currentUser?.uid || '' }),
         updatedAt: now,
         updatedBy: currentUser?.uid || ''
     };
