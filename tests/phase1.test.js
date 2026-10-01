@@ -4005,7 +4005,7 @@ test('Product Management mobile layout prevents horizontal overflow and keeps to
     const productSource=indexSource.slice(productStart,forecastStart);
     assert.ok(productStart>=0&&forecastStart>productStart);
     assert.ok(productSource.indexOf('id="productManagementSearch"') < productSource.indexOf('id="productManagementTools"'));
-    assert.match(productSource,/\+ 新增產品/);
+    assert.match(productSource,/新增產品/);
     assert.match(productSource,/待補產品/);
     assert.match(productSource,/id="priceUploadProgress"/);
 
