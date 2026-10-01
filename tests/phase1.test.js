@@ -3843,3 +3843,45 @@ test('order lifecycle actions are hidden from purchaser and guarded by business 
         assert.match(source,/canManageOrderLifecycleCapability\(\)/, name+' must enforce business lifecycle capability');
     });
 });
+
+
+test('critical role matrix stays aligned between UI capabilities and Firestore rules', () => {
+    const capabilityStart=appSource.indexOf('function hasBusinessCapability');
+    const capabilityEnd=appSource.indexOf('\nfunction commercialCreatorFields',capabilityStart);
+    const capabilities=appSource.slice(capabilityStart,capabilityEnd);
+    assert.match(capabilities,/hasBusinessCapability[\s\S]*?role === 'admin' \|\| role === 'sales' \|\| role === 'engineer'/);
+    assert.match(capabilities,/canManageOrderLifecycleCapability[\s\S]*?return hasBusinessCapability\(role\)/);
+    assert.match(capabilities,/canCreatePurchaseOrderCapability[\s\S]*?role === 'admin' \|\| role === 'purchaser'/);
+    assert.match(capabilities,/canReceiveInventoryCapability[\s\S]*?role === 'admin' \|\| role === 'purchaser' \|\| role === 'warehouse'/);
+    assert.match(capabilities,/canManageEquipmentCapability[\s\S]*?role === 'admin' \|\| role === 'engineer'/);
+
+    assert.match(appSource,/warehouse:\s*Object\.freeze\([^\n]*'orders\.po':'view'/);
+    assert.match(appSource,/engineer:\s*Object\.freeze\([^\n]*'orders\.po':'none'[^\n]*equipment:'edit'/);
+    assert.match(appSource,/purchaser:\s*Object\.freeze\([^\n]*'orders\.po':'edit'[^\n]*inventory:'edit'/);
+
+    const dispatchStart=appSource.indexOf('function dispatchActionHtml');
+    const dispatchEnd=appSource.indexOf('\nfunction canBusinessSelfOrder',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/currentUserRole === 'purchaser' \|\| currentUserRole === 'admin'/);
+    assert.doesNotMatch(dispatchSource,/currentUserRole === 'warehouse'/);
+
+    const ruleHelperStart=rulesSource.indexOf('function businessOwner()');
+    const ruleHelperEnd=rulesSource.indexOf('\n\n    function salesCode()',ruleHelperStart);
+    const helperSource=rulesSource.slice(ruleHelperStart,ruleHelperEnd);
+    assert.match(helperSource,/return sales\(\) \|\| engineer\(\)/);
+    assert.match(helperSource,/function canPurchase\(\)[\s\S]*?admin\(\) \|\| purchaser\(\)/);
+    assert.match(helperSource,/function canReceiveInventory\(\)[\s\S]*?admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
+    assert.match(helperSource,/function canManageEquipment\(\)[\s\S]*?admin\(\) \|\| engineer\(\)/);
+
+    const purchaseRuleStart=rulesSource.indexOf('match /purchaseOrders/{id}');
+    const purchaseRuleEnd=rulesSource.indexOf('\n\n    // Unified source/order evidence',purchaseRuleStart);
+    const purchaseRules=rulesSource.slice(purchaseRuleStart,purchaseRuleEnd);
+    assert.match(purchaseRules,/allow create: if canPurchase\(\)/);
+    assert.doesNotMatch(purchaseRules,/warehouse\(\).*allow create/);
+
+    const equipmentRuleStart=rulesSource.indexOf('match /equipment/{id}');
+    const equipmentRuleEnd=rulesSource.indexOf('\n\n    match /{document=\*\*}',equipmentRuleStart);
+    const equipmentRules=rulesSource.slice(equipmentRuleStart,equipmentRuleEnd);
+    assert.match(equipmentRules,/allow read: if admin\(\) \|\| engineer\(\)/);
+    assert.match(equipmentRules,/allow update: if admin\(\) \|\| engineer\(\)/);
+});
