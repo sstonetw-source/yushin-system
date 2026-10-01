@@ -13,7 +13,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261001-7">
+        <link rel="stylesheet" href="styles.css?v=20261001-8">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -821,11 +821,11 @@
     <div id="purchasing-system" class="content-section">
         <div class="module-header no-print">
             <h2>採購管理</h2>
-            <button type="button" onclick="openDirectStockPurchase()">＋ 新增採購單</button>
+            <button type="button" onclick="openDirectStockPurchase()">＋ 建立訂購單</button>
         </div>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購工作</button>
-            <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">全部採購單</button>
+            <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">全部訂購單</button>
         </div>
         <div id="purchaseWorkCards" class="order-work-cards no-print" aria-label="採購工作狀態">
             <button type="button" class="order-work-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)"><span>待採購</span><strong id="purchaseCountOrdering">0 筆</strong><small id="purchaseAmountOrdering">NT$ 0</small></button>
@@ -1037,8 +1037,12 @@
     <div class="eq-modal-overlay" id="poModalOverlay" onclick="if(event.target===this) closePurchaseOrderModal()">
         <div class="eq-modal-box" style="max-width:820px;">
             <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;">
-                <h3 style="margin:0;">產生訂購單</h3>
+                <h3 id="poModalTitle" style="margin:0;">建立訂購單</h3>
                 <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">✕ 關閉</button>
+            </div>
+            <div id="poExistingBanner" class="po-existing-banner no-print" style="display:none;">
+                <div><span>正在查看：</span><strong id="poExistingNumber"></strong></div>
+                <button type="button" id="poCopyAsNewBtn" class="btn-secondary" style="display:none;" onclick="copySavedPurchaseOrderAsNew(poEditingId)">複製成新訂購單</button>
             </div>
             <div class="no-print" id="poModeHint" style="font-size:12px;color:#666;margin:6px 0;">
                 訂單採購：品項來自業務訂單，可調整採購數量與進貨單價。
@@ -1095,7 +1099,7 @@
 
             <div class="no-print" style="margin-top:16px;text-align:right;border-top:1px solid #eee;padding-top:12px;">
                 <p id="poSaveStatus" role="status" aria-live="polite" style="text-align:left;margin:0 0 10px;"></p>
-                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">🖨️ 列印 / 存為 PDF（自動同步雲端）</button>
+                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 匯出 PDF（自動同步雲端）</button>
             </div>
         </div>
     </div>
@@ -1428,6 +1432,6 @@
     <script src="modules/supply-core.js?v=20260922-5"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261001-9"></script>
+    <script src="app.js?v=20261001-10"></script>
 </body>
 </html>
