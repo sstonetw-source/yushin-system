@@ -839,10 +839,8 @@ function hydratePageFromLocalCache(mainKey) {
             if (orderCache?.records?.length) ordersCache = orderCache.records;
         }
         const pending = readAppDataCache('purchase-pending');
-        const receiving = readAppDataCache('purchase-receiving');
         const dispatch = readAppDataCache('purchase-dispatch');
         if (!pendingPurchaseCache.length && pending?.records?.length) pendingPurchaseCache = pending.records;
-        if (!poListCache.length && receiving?.records?.length) poListCache = receiving.records;
         if (!purchasingDispatchCache.length && dispatch?.records?.length) purchasingDispatchCache = dispatch.records;
         renderPurchasingWorkCards();
     }
@@ -8111,8 +8109,6 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'receiving') {
-        const cached=readAppDataCache('purchase-receiving');
-        if(!poListCache.length && cached?.records?.length) poListCache=cached.records;
         renderPoList();
         if (!purchasingViewLoaded.has('receiving')) {
             purchasingViewLoaded.add('receiving');
