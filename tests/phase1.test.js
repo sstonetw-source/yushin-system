@@ -2690,3 +2690,21 @@ test('purchasing detail render reuses normalized item snapshots', () => {
     assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters\)/);
     assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters\)/);
 });
+
+
+test('remaining interactive Firestore reads are bounded', () => {
+    const forecastStart=appSource.indexOf('window.createForecastFromQuote = async function');
+    const forecastEnd=appSource.indexOf('\nwindow.markQuoteAsDeal',forecastStart);
+    const forecastSource=appSource.slice(forecastStart,forecastEnd);
+    assert.match(forecastSource,/firestoreReadWithTimeout\([\s\S]*?Forecast 重複來源檢查/);
+
+    const inventoryStart=appSource.indexOf('async function loadWarehouseStocksForInventoryPage');
+    const inventoryEnd=appSource.indexOf('\nwindow.loadInventory=',inventoryStart);
+    const inventorySource=appSource.slice(inventoryStart,inventoryEnd);
+    assert.match(inventorySource,/firestoreReadWithTimeout\([\s\S]*?倉庫庫存批次/);
+
+    const equipmentStart=appSource.indexOf('function loadEquipmentFromCloudThenReopen');
+    const equipmentEnd=appSource.indexOf('\n// 依 Firestore batch',equipmentStart);
+    const equipmentSource=appSource.slice(equipmentStart,equipmentEnd);
+    assert.match(equipmentSource,/firestoreReadWithTimeout\([\s\S]*?儀器單筆資料/);
+});
