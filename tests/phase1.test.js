@@ -2183,7 +2183,7 @@ test('own-order viewers skip full sales-list load', () => {
 
 test('purchase draft preloads only selected lines and bounds supporting reads', () => {
     const helperStart=appSource.indexOf('async function preloadPurchaseCostsForItems');
-    const helperEnd=appSource.indexOf('\n\nasync function preloadPurchaseCosts(',helperStart);
+    const helperEnd=appSource.indexOf('\n\nfunction productMasterDocToPriceItem',helperStart);
     const helperSource=appSource.slice(helperStart,helperEnd);
     assert.match(helperSource,/purchaseItems \|\| \[\]/);
     assert.match(helperSource,/findProductForPurchaseItem\(item\)/);
@@ -2533,7 +2533,7 @@ test('order list calculates row progress summaries once', () => {
 
 test('order work cards reuse normalized order items', () => {
     const amountStart=appSource.indexOf('function orderItemWorkAmount');
-    const amountEnd=appSource.indexOf('\nfunction orderWorkAmount',amountStart);
+    const amountEnd=appSource.indexOf('\nfunction buildOrderItemWorkMetrics',amountStart);
     const amountSource=appSource.slice(amountStart,amountEnd);
     assert.match(amountSource,/totalQtyOverride = null/);
     assert.match(amountSource,/totalQtyOverride === null \? orderQuantity\(order\) : totalQtyOverride/);
