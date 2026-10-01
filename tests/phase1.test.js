@@ -3806,3 +3806,19 @@ test('order lifecycle follows procurement dispatch delivery billing and return s
     assert.match(displaySource,/if \(category !== 'delivery'\) return category/);
     assert.match(displaySource,/return dispatch\.pending > 0 \? 'dispatch' : 'shipping'/);
 });
+
+
+test('Product Master Excel import is incremental and never removes omitted products', () => {
+    const syncStart=appSource.indexOf('async function syncImportedBrandToFormalProductMaster');
+    const syncEnd=appSource.indexOf('\nasync function saveProductMasterBrand',syncStart);
+    const syncSource=appSource.slice(syncStart,syncEnd);
+    assert.match(syncSource,/batch\.set\(db\.collection\('products'\)\.doc\(product\.productId\), product, \{ merge: true \}\)/);
+    assert.match(syncSource,/batch\.set\(db\.collection\('productCosts'\)\.doc\(product\.productId\), cost, \{ merge: true \}\)/);
+    assert.doesNotMatch(syncSource,/\.delete\(/);
+
+    const uploadStart=appSource.indexOf('window.handlePriceExcelUpload = async function');
+    const uploadSource=appSource.slice(uploadStart, uploadStart + 12000);
+    assert.match(uploadSource,/以 productId 增量合併本機快取/);
+    assert.match(uploadSource,/未出現在檔案中的產品不受影響/);
+    assert.match(uploadSource,/其他產品不會被刪除或停用/);
+});
