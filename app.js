@@ -892,7 +892,8 @@ function initializePageData(mainKey, options = {}) {
         Promise.allSettled([ensureSalesListLoaded(), ensureBrandSettingsLoaded()]).then(results => {
             const failed = results.filter(result => result.status === 'rejected');
             failed.forEach(result => console.warn('採購頁背景設定載入失敗：', result.reason));
-            if (canAccessPage('orders.po')) renderPurchasingView();
+            // 人員／品牌完成只會改變篩選選項；目前沒有選擇篩選時，不需要把整批訂單再 normalize / 重算一次。
+            if (canAccessPage('orders.po')) populatePurchasingFilters();
         });
     }
     if (mainKey === 'inventory') {
