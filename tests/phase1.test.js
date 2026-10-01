@@ -3636,3 +3636,25 @@ test('purchasing cache sync performs one unified active render', () => {
     assert.doesNotMatch(source,/renderPurchasingDispatchOrders\(\)/);
     assert.doesNotMatch(source,/renderPoList\(\)/);
 });
+
+
+test('purchasing queues reuse already loaded order cache without duplicate render work', () => {
+    const orderLoadStart=appSource.indexOf('async function loadOrderPage');
+    const orderLoadEnd=appSource.indexOf('\nwindow.loadOrdersFromCloud',orderLoadStart);
+    const orderLoadSource=appSource.slice(orderLoadStart,orderLoadEnd);
+    assert.match(orderLoadSource,/writeAppDataCache\('orders', ordersCache\);[\s\S]*?purchasingOrdersReady = true/);
+
+    const pendingStart=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
+    const pendingEnd=appSource.indexOf('\nconst pendingPurchaseOrderKeys',pendingStart);
+    const pendingSource=appSource.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/if \(options\.reuseOrders && purchasingOrdersReady\)/);
+    assert.match(pendingSource,/pendingPurchaseHasMore = !!orderPaginationState/);
+    assert.match(pendingSource,/return ordersCache/);
+
+    const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
+    const dispatchEnd=appSource.indexOf('\nwindow\.loadPurchasingDispatchOrders',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/if \(options\.reuseOrders && purchasingOrdersReady\)/);
+    assert.match(dispatchSource,/purchasingDispatchHasMore = !!orderPaginationState/);
+    assert.match(dispatchSource,/return ordersCache/);
+});
