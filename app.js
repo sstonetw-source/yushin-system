@@ -3162,7 +3162,8 @@ function loadCompanyAgencyBrandSettings() {
             }, { merge: true }).catch(err => console.error('清理小寫 thermo 設定失敗：', err));
         }
         renderCompanyAgencyBrandSettings();
-        refreshPriceDatalists();
+        // 代理廠牌設定只影響可選廠牌；不重建整份產品 datalist。
+        // Product Master 真正新增／匯入時才呼叫 refreshPriceDatalists()。
     }).catch(() => {
         companyAgencyBrandsConfigured = false;
     });
