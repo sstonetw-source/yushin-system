@@ -173,7 +173,7 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
     await pendingPrint;
     assert.equal(printCalls, 2, 'successful repair should continue directly to print');
     assert.equal(button.disabled, false);
-    assert.match(messages.at(-1), /正在開啟列印/);
+    assert.match(messages.at(-1), /正在產生 PDF/);
 
     vm.runInContext('poIncomingSyncPending=true', context);
     context.registerPurchaseIncoming = async () => { throw new Error('網路中斷'); };
@@ -183,21 +183,16 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
     assert.match(messages.at(-1), /在途庫存同步仍未完成.*網路中斷/);
 });
 
-test('PO print opens directly from the user action', () => {
-    const start = app.indexOf('function printSavedPoDocument(poNo, vendorName)');
-    const end = app.indexOf('\n}\n', start) + 2;
-    const calls = [];
-    const doc = { title:'訂單', body:{classList:{add:name=>calls.push(name)}} };
-    const context = vm.createContext({
-        document:doc,
-        window:{ print:()=>calls.push('print') },
-        preparePurchaseOrderForPrint:()=>calls.push('prepare'),
-        requestAnimationFrame:callback=>callback()
-    });
-    vm.runInContext(app.slice(start,end),context);
-    context.printSavedPoDocument('PO-1','供應商');
-    assert.deepEqual(calls,['printing-po','prepare','print']);
-    assert.equal(doc.title,'PO-1＋供應商');
+test('PO PDF export starts from the user action without browser print', () => {
+    const start = app.indexOf('async function printSavedPoDocument(poNo, vendorName)');
+    const end = app.indexOf('\n}\n\nwindow.printPurchaseOrder', start) + 2;
+    const source = app.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    assert.match(source, /createPoPdfStage\(\)/);
+    assert.match(source, /paginatePoPdfDocument/);
+    assert.match(source, /addDocumentPagesToPdf/);
+    assert.match(source, /pdf\.save\(poPdfFileName\(poNo, vendorName\)\)/);
+    assert.doesNotMatch(source, /window\.print\(/);
 });
 
 test('direct stock PO opens before supplier and warehouse masters finish loading', () => {
@@ -210,14 +205,17 @@ test('direct stock PO opens before supplier and warehouse masters finish loading
     assert.doesNotMatch(source.slice(awaitIndex), /renderPoItemsTable\(/);
 });
 
-test('PO print prepares text mirrors and keeps rows and totals together', () => {
-    const helper = app.match(/function preparePurchaseOrderForPrint\(\) \{[\s\S]*?\n\}/)?.[0];
-    assert.ok(helper);
-    assert.match(helper, /po-print-field-mirror/);
-    assert.match(helper, /input\.setAttribute\('value', input\.value\)/);
-    assert.match(styles, /body\.printing-po #printablePO input \{ display:none !important; \}/);
-    assert.match(styles, /body\.printing-po \.po-total-section/);
-    assert.match(styles, /page-break-inside:avoid !important/);
+test('PO PDF normalizes form fields and paginates rows while keeping totals together', () => {
+    const normalize = app.match(/function normalizePoPdfFields\(root\) \{[\s\S]*?\n\}/)?.[0];
+    const paginateStart = app.indexOf('function paginatePoPdfDocument(stage, source)');
+    const paginateEnd = app.indexOf('\n}\n\nasync function printSavedPoDocument', paginateStart) + 2;
+    const paginate = app.slice(paginateStart, paginateEnd);
+    assert.ok(normalize);
+    assert.match(normalize, /querySelectorAll\('input'\)/);
+    assert.match(normalize, /po-pdf-field-value/);
+    assert.match(paginate, /source\.querySelector\('\.po-total-section'\)/);
+    assert.match(paginate, /current\.page\.scrollHeight > maxHeight/);
+    assert.match(paginate, /finalPage\.page\.appendChild\(summaryClone\)/);
     assert.match(html, /class="po-total-section"/);
 });
 
