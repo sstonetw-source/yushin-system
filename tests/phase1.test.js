@@ -643,17 +643,19 @@ test('quote PDF paginates by item rows and repeats the column header on each pag
     assert.match(appSource, /finalPage\.page\.appendChild\(summaryClone\)/);
     assert.match(appSource, /finalPage\.items\.prepend\(candidate\)/);
     assert.match(appSource, /donor\.items\.appendChild\(candidate\)/);
-    assert.match(appSource, /function addQuotePagesToPdf\(pdf, pages, scale\)/);
+    assert.match(appSource, /async function addDocumentPagesToPdf\(pdf, pages, options = \{\}\)/);
 });
 
-test('quote browser-print code is removed while purchase-order printing remains', () => {
+test('quote and purchase-order browser-print code is removed in favor of the shared PDF engine', () => {
     assert.doesNotMatch(appSource, /handleSaveAndPrint/);
     assert.doesNotMatch(appSource, /printing-quote/);
     assert.doesNotMatch(appSource, /printing-three-quotes/);
     assert.doesNotMatch(appSource, /prepareQuoteForPrint/);
     assert.doesNotMatch(appSource, /markQuotePrintPagination/);
+    assert.doesNotMatch(appSource, /printing-po/);
     assert.match(appSource, /window\.printPurchaseOrder = async function/);
-    assert.match(appSource, /body\.classList\.add\('printing-po'\)/);
+    assert.match(appSource, /async function addDocumentPagesToPdf/);
+    assert.match(appSource, /async function printSavedPoDocument/);
 });
 
 test('primary quote export generates PDF directly without browser print', () => {
@@ -662,7 +664,7 @@ test('primary quote export generates PDF directly without browser print', () => 
     assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
     assert.match(appSource, /printBtn\.addEventListener\('click', exportCurrentQuotePdf\)/);
     assert.match(appSource, /window\.exportCurrentQuotePdf = async function/);
-    assert.match(appSource, /addQuotePagesToPdf/);
+    assert.match(appSource, /addDocumentPagesToPdf/);
     assert.match(appSource, /new window\.jspdf\.jsPDF/);
     assert.match(appSource, /pdf\.save\(quotePdfFileName\(quoteData\)\)/);
     assert.match(appSource, /persistQuoteOutputRecord\(quoteData, 'PDF'\)/);
@@ -679,7 +681,7 @@ test('three-quote export uses the same direct PDF engine', () => {
     assert.match(source, /new window\.jspdf\.jsPDF/);
     assert.match(source, /paginateQuotePdfDocument/);
     assert.match(source, /comparisonStage\.querySelectorAll\('\.comparison-quote-page'\)/);
-    assert.match(source, /pdf\.addPage\('a4', 'p'\)/);
+    assert.match(source, /addDocumentPagesToPdf\(pdf, comparisonPages/);
     assert.match(source, /-三家估價\.pdf/);
     assert.doesNotMatch(source, /window\.print\(\)/);
 });
