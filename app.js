@@ -9152,6 +9152,7 @@ function renderPurchasingReceivingWorkList() {
     if (!tbody) return;
     if (head) head.innerHTML = '<th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待到貨品項</th><th>到貨進度</th><th class="no-print">操作</th>';
     tbody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
 
     const filters = purchaseFilterContext();
     let workCount = 0;
@@ -9190,7 +9191,7 @@ function renderPurchasingReceivingWorkList() {
                 <td data-th="待到貨品項">${escapeHtml(item.itemCode || item.itemName || item.itemId || '未命名品項')} × ${progress.target}</td>
                 <td data-th="到貨進度">${progress.received > 0 ? `部分到貨 ${progress.received}/${progress.target}` : `待到貨 0/${progress.target}`}</td>
                 <td data-th="操作" class="no-print">${actionHtml}</td>`;
-            tbody.appendChild(tr);
+            fragment.appendChild(tr);
         });
     });
 
@@ -9236,9 +9237,11 @@ function renderPurchasingReceivingWorkList() {
             <td data-th="待到貨品項">${escapeHtml(supply.itemCode || supply.itemName || supply.id)} × ${ordered}</td>
             <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${received > 0 ? `部分到貨 ${received}/${ordered}` : `待到貨 0/${ordered}`}</td>
             <td data-th="操作" class="no-print">${actionHtml}</td>`;
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
         standaloneSupplyCount++;
     });
+
+    tbody.appendChild(fragment);
 
     const totalRows = workCount + standaloneSupplyCount;
     if (emptyHint) {
@@ -9271,6 +9274,7 @@ window.renderPoList = function() {
     const keyword = (searchInput.value || '').toLowerCase();
     const filters = purchaseFilterContext();
     tbody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     let shown = 0;
     let stockPending = 0;
     const receivingItemKeys = new Set();
@@ -9317,7 +9321,7 @@ window.renderPoList = function() {
                         </details>
                     </div>`:'—'}</td>
             `;
-            tbody.appendChild(tr);
+            fragment.appendChild(tr);
         });
     });
 
@@ -9336,8 +9340,10 @@ window.renderPoList = function() {
             : '<span class="order-progress-badge">唯讀</span>';
         const tr=document.createElement('tr');
         tr.innerHTML=`<td data-th="單號">${escapeHtml(supply.internalNo||supply.id)}</td><td data-th="公司">${supply.type==='SALES_SELF_ORDER'?'業務自行訂購':'採購已訂購'}</td><td data-th="廠商">${escapeHtml(supply.supplier||'')}</td><td data-th="採購人員">${escapeHtml(supply.createdBy||supply.salesName||'')}</td><td data-th="訂購日期">${escapeHtml(supply.orderDate||'')}</td><td data-th="等待天數">${escapeHtml(waitingDaysFromDate(supply.orderDate)||'—')}</td><td data-th="品項數">${escapeHtml(supply.itemCode||supply.itemName||'單一品項')} × ${ordered}</td><td data-th="總計金額">${supply.unitCost?Math.round(ordered*Number(supply.unitCost||0)*1.05).toLocaleString():'—'}</td><td data-th="到貨進度">${received>0?`部分到貨 ${received}/${ordered}`:`待到貨 0/${ordered}`}</td><td data-th="操作" class="no-print">${receiveAction}</td>`;
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
     });
+
+    tbody.appendChild(fragment);
 
     const emptyHint = document.getElementById('poListEmptyHint');
     const status = document.getElementById('poHistorySearchStatus');
