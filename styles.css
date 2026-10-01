@@ -574,7 +574,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-work-card span { display:block; font-size:12px; font-weight:bold; }
 .order-work-card strong { display:block; margin-top:4px; font-size:18px; }
 .order-work-card small { display:block; margin-top:3px; font-size:10px; opacity:.8; overflow:hidden; text-overflow:ellipsis; }
-.order-load-more-row, .quote-load-more-row, .po-load-more-row { padding:12px 0 4px; text-align:center; }
+.order-load-more-row, .quote-load-more-row, .po-load-more-row, .product-load-more-row { padding:12px 0 4px; text-align:center; }
 .order-workflow-steps { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:12px 0 18px; }
 .workflow-step { background:#e3e7eb; color:#444; padding:10px 6px; font-size:13px; }
 .workflow-step span { display:inline-flex; width:20px; height:20px; margin-right:5px; border-radius:50%; align-items:center; justify-content:center; background:#fff; color:#555; }
