@@ -21,7 +21,7 @@ test('purchase order action always uses the one-click print and cloud-sync label
     const start = app.indexOf('function updatePoSaveButton()');
     const end = app.indexOf('function poIncomingKey', start);
     const source = app.slice(start, end);
-    assert.match(source, /列印 \/ 存為 PDF（自動同步雲端）/);
+    assert.match(source, /📄 匯出 PDF（自動同步雲端）/);
     assert.doesNotMatch(source, /重試同步在途庫存/);
 });
 
@@ -29,7 +29,7 @@ test('purchasing user-facing copy avoids legacy stock-order and source-order wor
     assert.doesNotMatch(html, /來源訂單日期/);
     assert.doesNotMatch(app, /原廠備貨是公司庫存採購/);
     assert.match(html, /全部採購單則依正式訂購日期查詢/);
-    assert.match(html, /🖨️ 列印 \/ 存為 PDF（自動同步雲端）/);
+    assert.match(html, /📄 匯出 PDF（自動同步雲端）/);
     assert.doesNotMatch(app, /確認品項、廠商與單價後再儲存|完成後即可儲存|檢查並儲存中/);
     assert.match(app, /正在同步訂購單到雲端/);
 });
@@ -1207,7 +1207,7 @@ test('order and purchasing sales filters use the same stable staff source', () =
 
 test('purchasing workspace exposes work and history tabs with four order-derived queues', () => {
     assert.match(html, /id="purchase-tab-work"[^>]*>採購工作</);
-    assert.match(html, /id="purchase-tab-history"[^>]*>全部採購單</);
+    assert.match(html, /id="purchase-tab-history"[^>]*>全部訂購單</);
     for (const id of ['purchase-card-ordering','purchase-card-receiving','purchase-card-dispatch','purchase-card-completed']) {
         assert.match(html, new RegExp(`id="${id}"`));
     }
@@ -1219,7 +1219,7 @@ test('purchase identity fields stay editable and save-print keeps the secure tra
     assert.match(render, /onchange="updateDirectPoText\(\$\{idx\},'itemName'/);
     assert.match(render, /onchange="onDirectPoCodeChange\(\$\{idx\},this\.value\)"/);
     assert.match(render, /onchange="updateDirectPoText\(\$\{idx\},'brand'/);
-    assert.match(app, /'🖨️ 列印 \/ 存為 PDF（自動同步雲端）'/);
+    assert.match(app, /'📄 匯出 PDF（自動同步雲端）'/);
     const save = app.match(/window\.printPurchaseOrder = async function\(\) \{[\s\S]*?\n\};/)?.[0] || '';
     assert.ok(save.indexOf('await commitPromise') < save.indexOf('printSavedPoDocument(poNo, vendorName)'));
 });
