@@ -5235,10 +5235,19 @@ window.exportCurrentQuotePdf = async function() {
         // 手機降低 Canvas 倍率以減少記憶體與等待時間；桌機維持較高解析度。
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         const scale = isMobile ? 1.15 : 1.65;
-        const pages = paginateQuotePdfDocument(stage, exportDom.documentNode);
-        await waitForPdfImages(stage);
+        // 大多數日常估價單只有一頁：先量實際排版高度，能放進 A4 就直接輸出，
+        // 不再建立分頁 DOM、逐筆量高度，也不再重複等待同一批圖片。
+        // 保留約 12px 安全邊界，避免 iPhone Safari 的字型/像素換算誤差造成底部裁切。
+        const singlePageLimit = quotePdfPageHeightPx(stage) - 12;
+        const isSinglePage = exportDom.documentNode.scrollHeight <= singlePageLimit;
+        const pages = isSinglePage
+            ? [exportDom.documentNode]
+            : paginateQuotePdfDocument(stage, exportDom.documentNode);
+        if (!isSinglePage) await waitForPdfImages(stage);
 
-        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+        // 單頁本身只有一張已壓縮 JPEG，關閉 jsPDF 額外 stream 壓縮可減少手機 CPU 等待；
+        // 多頁仍保留原本壓縮設定，避免檔案過大。
+        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: !isSinglePage });
         await addDocumentPagesToPdf(pdf, pages, {
             scale,
             onProgress: (pageNo, pageCount) => {
