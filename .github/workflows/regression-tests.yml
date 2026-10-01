@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: regression-main
+  cancel-in-progress: true
+
 jobs:
   node-regression:
     name: Node regression suite
