@@ -2958,7 +2958,10 @@ async function createForecastOrdersDirectly(forecast, items) {
             salesName:forecast.salesName||currentUserName||'',
             salesCode:forecast.salesCode||currentUserCode||'',
             ownerUid:forecast.ownerUid||currentUser?.uid||'',
-            isDelivered:false,isBilled:false,invoiceDate:''
+            isDelivered:false,isBilled:false,invoiceDate:'',
+            inventoryReservationStatus:'pending',
+            inventoryReservationError:'',
+            inventoryReservationUpdatedAt:now
         };
         orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
         batch.set(orderRef,orderData);
@@ -2969,10 +2972,37 @@ async function createForecastOrdersDirectly(forecast, items) {
         created.push({id:orderRef.id,data:orderData});
     });
     await batch.commit();
-    await Promise.allSettled(created.map(order=>reserveInventoryForNewOrder(order.id,order.data)));
+    const reservationResults = await Promise.all(created.map(async order => {
+        try {
+            await reserveInventoryForNewOrder(order.id, order.data);
+            const completedAt = new Date().toISOString();
+            const updates = {
+                inventoryReservationStatus:'completed',
+                inventoryReservationError:'',
+                inventoryReservationUpdatedAt:completedAt
+            };
+            await db.collection('orders').doc(order.id).set(updates,{merge:true});
+            Object.assign(order.data, updates);
+            return { id:order.id, status:'completed' };
+        } catch (err) {
+            const failedAt = new Date().toISOString();
+            const updates = {
+                inventoryReservationStatus:'failed',
+                inventoryReservationError:String(err?.message||err),
+                inventoryReservationUpdatedAt:failedAt
+            };
+            await db.collection('orders').doc(order.id).set(updates,{merge:true})
+                .catch(markErr=>console.error('Forecast 訂單庫存占用失敗狀態寫入失敗：',markErr));
+            Object.assign(order.data, updates);
+            return { id:order.id, status:'failed', error:updates.inventoryReservationError };
+        }
+    }));
     ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))]
         .sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
-    return created;
+    return {
+        created,
+        reservationFailures:reservationResults.filter(result=>result.status==='failed')
+    };
 }
 
 window.createOrderFromForecast = async function(id) {
@@ -2993,11 +3023,15 @@ window.createOrderFromForecast = async function(id) {
         }
 
         if (!confirm(`此 Forecast 含 ${items.length} 個品項，將拆成 ${items.length} 筆獨立訂單。確定繼續？`)) return;
-        await createForecastOrdersDirectly(forecast, items);
+        const result = await createForecastOrdersDirectly(forecast, items);
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-        alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單。`);
+        if (result.reservationFailures.length) {
+            alert(`已建立 ${items.length} 筆訂單；其中 ${result.reservationFailures.length} 筆庫存占用未完成，訂單已標記為「庫存同步失敗」，請由管理員或採購在訂單頁重新同步，請勿重複建立訂單。`);
+        } else {
+            alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單，庫存占用已同步。`);
+        }
         if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
             loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
         }
