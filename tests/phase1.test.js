@@ -2453,3 +2453,25 @@ test('purchaser order edit fields match visible order UI', () => {
     assert.doesNotMatch(source,/'salesCode'/);
     assert.doesNotMatch(source,/'unitPrice'/);
 });
+
+
+test('purchasing work tabs reuse one shared orders refresh', () => {
+    assert.match(appSource,/let purchasingOrdersReady = false/);
+
+    const refreshStart=appSource.indexOf('function refreshPurchasingOrderCache');
+    const refreshEnd=appSource.indexOf('\nfunction purchasingArrivalWorkKeys',refreshStart);
+    const refreshSource=appSource.slice(refreshStart,refreshEnd);
+    assert.match(refreshSource,/options\.reuseOrders && purchasingOrdersReady/);
+    assert.match(refreshSource,/purchasingOrdersReady = true/);
+
+    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
+    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
+    const switchSource=appSource.slice(switchStart,switchEnd);
+    assert.match(switchSource,/loadPendingPurchaseOrders\(true, \{ reuseOrders:true \}\)/);
+    assert.match(switchSource,/loadPurchasingReceivingQueue\(true, \{ reuseOrders:true \}\)/);
+    assert.match(switchSource,/loadPurchasingDispatchOrders\(true, \{ reuseOrders:true \}\)/);
+
+    const roleStart=appSource.indexOf('window.switchViewRole = function');
+    const roleEnd=appSource.indexOf('\nfunction actuallySwitchMainTab',roleStart);
+    assert.match(appSource.slice(roleStart,roleEnd),/purchasingOrdersReady = false/);
+});
