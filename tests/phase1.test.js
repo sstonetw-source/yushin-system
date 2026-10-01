@@ -3271,3 +3271,53 @@ test('purchasing cards and completed rows share dispatch snapshots', () => {
     assert.match(viewSource,/purchasingCompletedRows\(filters, normalizedItemsByOrder, dispatchStatesByOrder\)/);
     assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder\)/);
 });
+
+
+test('normalized order items index delivery records once per order', () => {
+    const start=appSource.indexOf('function normalizedOrderItems(order)');
+    const end=appSource.indexOf('\nfunction ensureOrderItemCompatibility',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const deliveryQtyByItemId = new Map\(\)/);
+    assert.match(source,/const returnQtyByItemId = new Map\(\)/);
+    assert.match(source,/deliveryRecords\.forEach/);
+    assert.match(source,/returnRecords\.forEach/);
+    assert.match(source,/deliveryQtyByItemId\.get\(itemId\)/);
+    assert.match(source,/returnQtyByItemId\.get\(itemId\)/);
+    assert.doesNotMatch(source,/deliveryRecords\.filter/);
+    assert.doesNotMatch(source,/returnRecords\.filter/);
+
+    const context=vm.createContext({
+        window:{},
+        Map,
+        Number,
+        String,
+        Math,
+        normalizeHistoryItemCode:value=>String(value||'').toUpperCase(),
+        resolveBrandName:value=>value,
+        parseMoney:value=>Number(value||0)
+    });
+    vm.runInContext(source,context);
+    const rows=context.normalizedOrderItems({
+        items:[
+            {itemId:'a',itemCode:'A',brand:'Roche',qty:2,unitPrice:10},
+            {itemId:'b',itemCode:'B',brand:'Bio-Rad',qty:3,unitPrice:20}
+        ],
+        deliveryRecords:[
+            {itemId:'a',qty:1},{itemId:'a',qty:1},{itemId:'b',qty:2}
+        ],
+        returnRecords:[{itemId:'b',qty:1}]
+    });
+    assert.equal(rows[0].deliveredQty,2);
+    assert.equal(rows[0].returnedQty,0);
+    assert.equal(rows[1].deliveredQty,2);
+    assert.equal(rows[1].returnedQty,1);
+
+    const single=context.normalizedOrderItems({
+        items:[{itemCode:'ONLY',qty:2}],
+        deliveryRecords:[{qty:2}],
+        returnRecords:[{qty:1}]
+    });
+    assert.equal(single[0].itemId,'item-1');
+    assert.equal(single[0].deliveredQty,2);
+    assert.equal(single[0].returnedQty,1);
+});
