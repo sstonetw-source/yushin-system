@@ -11783,6 +11783,7 @@ function renderDeliveryModal() {
         <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
         <button type="button" class="workflow-step ${order.isBilled?'done':''}" ${editableSteps?`onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"`:'disabled'}><span>4</span>${order.isBilled?'已報帳':'未報帳'}</button>`;
     const deliveryItems=normalizedOrderItems(order);
+    const deliveryItemNameById=new Map(deliveryItems.map(item=>[item.itemId,item.itemName||item.itemId||'']));
     const itemSummary=deliveryItems.map(item=>{
         const grossDelivered=savedDeliveryRecords(order)
             .filter(r=>(r.itemId||((deliveryItems.length===1&&deliveryItems[0]?.itemId)||''))===item.itemId)
@@ -11820,7 +11821,7 @@ function renderDeliveryModal() {
     if (records.length) {
         tbody.innerHTML = records.map(record => `<tr>
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
-            <td>${record.itemId ? escapeHtml(normalizedOrderItems(order).find(item=>item.itemId===record.itemId)?.itemName||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
+            <td>${record.itemId ? escapeHtml(deliveryItemNameById.get(record.itemId)||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
             <td>${editable ? `<button type="button" class="btn-small" onclick="editDeliveryRecord('${escapeAttr(record.id)}')">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord('${escapeAttr(record.id)}')">刪除</button>` : '僅可查看'}</td>
         </tr>`).join('');
