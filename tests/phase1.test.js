@@ -3586,3 +3586,23 @@ test('completed purchasing load-more reuses one render snapshot', () => {
     assert.match(source,/renderPurchasingWorkCards\([\s\S]*?loadedRows,[\s\S]*?dispatchStatesByOrder,[\s\S]*?lifecyclesByOrder/);
     assert.doesNotMatch(source,/renderPurchasingWorkCards\(\)/);
 });
+
+
+test('order cache refresh avoids hidden purchasing renders', () => {
+    const loadStart=appSource.indexOf('async function loadOrderPage');
+    const loadEnd=appSource.indexOf('\nwindow.loadOrdersFromCloud',loadStart);
+    const loadSource=appSource.slice(loadStart,loadEnd);
+    assert.doesNotMatch(loadSource,/else if \(canAccessPage\('orders\.po'\)\) renderPurchasingWorkCards\(\)/);
+    assert.match(loadSource,/document\.getElementById\('purchasing-system'\)\?\.classList\.contains\('active'\)\) renderPurchasingView\(\)/);
+
+    const listStart=appSource.indexOf('window.renderOrdersList = function()');
+    const listEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',listStart);
+    const listSource=appSource.slice(listStart,listEnd);
+    assert.match(listSource,/purchasing-system[\s\S]*?renderPurchasingView\(\)/);
+    assert.doesNotMatch(listSource,/purchasing-system[\s\S]*?renderPurchasingWorkCards\(\)/);
+
+    const forecastStart=appSource.indexOf('window.createOrderFromForecast = async function');
+    const forecastEnd=appSource.indexOf('\n\n\n\/\* =========================================================',forecastStart);
+    const forecastSource=appSource.slice(forecastStart,forecastEnd);
+    assert.doesNotMatch(forecastSource,/if \(canAccessPage\('orders\.po'\)\) renderPurchasingWorkCards\(\)/);
+});
