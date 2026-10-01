@@ -3110,7 +3110,10 @@ function populateEquipmentSalesDropdown() {
 }
 
 function loadCompanyAgencyBrandSettings() {
-    return db.collection('settings').doc('companyAgencyBrands').get().then(doc => {
+    return firestoreReadWithTimeout(
+        db.collection('settings').doc('companyAgencyBrands').get(),
+        '公司代理廠牌設定'
+    ).then(doc => {
         companyAgencyBrandsConfigured = doc.exists;
         const data = doc.exists ? doc.data() : {};
         const saved = data.companies || {};
@@ -3139,7 +3142,10 @@ function loadCompanyAgencyBrandSettings() {
 }
 
 function loadSalesStatisticsSettings() {
-    return db.collection('settings').doc('salesStatistics').get().then(doc => {
+    return firestoreReadWithTimeout(
+        db.collection('settings').doc('salesStatistics').get(),
+        '重點廠牌設定'
+    ).then(doc => {
         const savedBrands = doc.exists ? (doc.data().keyBrands || []) : DEFAULT_KEY_STATISTIC_BRANDS;
         keyStatisticBrands = normalizeThermoBrandList(savedBrands).filter(brand => normalizeStatisticBrandKey(brand) !== normalizeStatisticBrandKey('維修'));
         const savedAliases = doc.exists && doc.data().brandAliases ? doc.data().brandAliases : {};
