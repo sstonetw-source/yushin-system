@@ -3085,3 +3085,13 @@ test('receipt allocation counter prevents concurrent retry over-allocation', () 
     assert.match(receiptSource,/reconciledAllocated=Math\.max\(currentAllocated,alreadyAllocated\)/);
     assert.match(receiptSource,/freeQty=Math\.max\(0,allocationTarget-reconciledAllocated\)/);
 });
+
+
+test('item dispatch state avoids renormalizing the whole order', () => {
+    const start=appSource.indexOf('function itemDispatchState(order, item)');
+    const end=appSource.indexOf('\nfunction orderContextActionState',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const singleItem = Array\.isArray\(order\?\.items\) && order\.items\.length === 1/);
+    assert.doesNotMatch(source,/normalizedOrderItems\(order\)/);
+    assert.match(source,/!r\.itemId&&singleItem/);
+});
