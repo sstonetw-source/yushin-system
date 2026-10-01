@@ -7644,6 +7644,9 @@ async function loadOrderPage(reset, options = {}) {
         if (generation !== orderLoadGeneration) return;
         ordersCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'orderDate', 'id'));
         writeAppDataCache('orders', ordersCache);
+        // 訂單頁與採購頁共用同一份 ordersCache；只要這次雲端訂單讀取已成功，
+        // 採購頁第一次切入待採購／待打單時就直接沿用，不再重查同一批 orders。
+        purchasingOrdersReady = true;
         if (!options.skipRender) {
             if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
             else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
@@ -8585,6 +8588,13 @@ window.switchPurchasingView = function(view, tab) {
 
 async function loadPurchasingDispatchOrders(reset=true, options={}) {
     if (!canAccessPage('orders.po') || purchasingDispatchLoading) return;
+    // 切到待打單時若共用訂單 cache 已完成雲端讀取，畫面在 switchPurchasingView()
+    // 已經算好並畫出，避免同一批資料立刻再跑一次 dispatch/lifecycle snapshot。
+    if (options.reuseOrders && purchasingOrdersReady) {
+        purchasingDispatchError = '';
+        purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
+        return ordersCache;
+    }
     purchasingDispatchError = '';
     purchasingDispatchLoading = true;
     let normalizedItemsByOrder = null;
@@ -8764,6 +8774,13 @@ function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContex
 
 window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po') || pendingPurchaseLoading) return;
+    // switchPurchasingView() 已用同一份 ordersCache 畫過一次；
+    // 若訂單資料已是最新，就不要再做第二輪 normalize / snapshot / render。
+    if (options.reuseOrders && purchasingOrdersReady) {
+        pendingPurchaseError = '';
+        pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
+        return ordersCache;
+    }
     pendingPurchaseError = '';
     pendingPurchaseLoading = true;
     let normalizedItemsByOrder = null;
