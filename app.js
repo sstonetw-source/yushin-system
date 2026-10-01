@@ -854,7 +854,7 @@ function initializePageData(mainKey, options = {}) {
     hydratePageFromLocalCache(mainKey);
     if (!force && loadedMainPages.has(mainKey)) return;
     loadedMainPages.add(mainKey);
-    if (['quote', 'forecast', 'orders.list', 'orders.po', 'inventory', 'equipment', 'admin'].includes(mainKey)) {
+    if (['quote', 'forecast', 'orders.list', 'inventory', 'equipment', 'admin'].includes(mainKey)) {
         ensureBrandSettingsLoaded().then(() => {
             if (mainKey === 'quote') populateQuoteBrandDropdowns();
             if (mainKey === 'forecast' && canAccessPage('forecast')) renderForecastList();
@@ -879,15 +879,18 @@ function initializePageData(mainKey, options = {}) {
         // 都等待 Product Master 與大量 datalist DOM 建立完成才顯示資料。
         ensureSalesListLoaded().catch(err => console.warn('業務名單載入失敗：', err));
         loadOrdersFromCloud();
-        loadBrandMaster().then(() => {
-            if (canAccessPage('orders.list')) renderOrdersList();
-        }).catch(err => console.warn('廠牌名單載入失敗：', err));
+        // 廠牌資料由上方共用 ensureBrandSettingsLoaded() 處理；
+        // 不再另外掛一個 loadBrandMaster().then(renderOrdersList)，避免同一批品牌完成時重畫兩次。
     }
     if (mainKey === 'orders.po') {
         // 採購頁只啟動一個共用 orders 背景更新；各工作分頁都沿用同一份 ordersCache。
+        // 先立即畫快取，業務名單＋品牌設定在背景完成後只補畫一次，避免手機重複掃同一批訂單。
         switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
-        ensureSalesListLoaded().then(renderPurchasingView).catch(err => console.warn('業務名單載入失敗：', err));
-        loadBrandMaster().then(renderPurchasingView).catch(err => console.warn('廠牌名單載入失敗：', err));
+        Promise.allSettled([ensureSalesListLoaded(), ensureBrandSettingsLoaded()]).then(results => {
+            const failed = results.filter(result => result.status === 'rejected');
+            failed.forEach(result => console.warn('採購頁背景設定載入失敗：', result.reason));
+            if (canAccessPage('orders.po')) renderPurchasingView();
+        });
     }
     if (mainKey === 'inventory') {
         loadInventory(true);
