@@ -386,3 +386,49 @@ test('admin without active field can run the exact Forecast list query', async (
   );
   await assertSucceeds(getDocs(q));
 });
+
+
+test('purchaser may update reservation retry metadata but not commercial fields', async () => {
+  await seed('orders/reservation-retry', {
+    ownerUid:'sales1', salesCode:'S01', customerName:'A',
+    inventoryReservationStatus:'failed',
+    inventoryReservationError:'timeout',
+    inventoryReservationUpdatedAt:'2026-09-20T00:00:00Z'
+  });
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/reservation-retry'), {
+    inventoryReservationStatus:'pending',
+    inventoryReservationError:'',
+    inventoryReservationUpdatedAt:'2026-09-21T00:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/reservation-retry'), {
+    customerName:'Changed'
+  }));
+});
+
+test('purchaser and warehouse may persist direct-ship delivery summary only within workflow fields', async () => {
+  const seedOrder = {
+    ownerUid:'sales1', salesCode:'S01', customerName:'A',
+    items:[{ itemId:'i1', qty:2, receivedQty:0, deliveredQty:0 }],
+    deliveryRecords:[], deliveredQty:0, isDelivered:false
+  };
+  await seed('orders/direct-buyer', seedOrder);
+  await seed('orders/direct-warehouse', seedOrder);
+
+  const directFields = {
+    items:[{ itemId:'i1', qty:2, receivedQty:2, deliveredQty:2 }],
+    itemCount:1,
+    orderSchemaVersion:2,
+    deliveryRecords:[{ id:'r1', itemId:'i1', qty:2 }],
+    deliveredQty:2,
+    isDelivered:true,
+    workCategories:['billing'],
+    workCategoryUpdatedAt:'2026-09-21T00:00:00Z',
+    updatedAt:'2026-09-21T00:00:00Z'
+  };
+
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/direct-buyer'), directFields));
+  await assertSucceeds(updateDoc(doc(db('wh1'), 'orders/direct-warehouse'), directFields));
+  await assertFails(updateDoc(doc(db('wh1'), 'orders/direct-warehouse'), {
+    invoiceTitle:'Changed'
+  }));
+});
