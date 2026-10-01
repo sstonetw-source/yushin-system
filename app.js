@@ -8709,10 +8709,9 @@ function syncOrderIntoPurchasingCaches(order, options = {}) {
     receivingSourceOrderCache.set(order.id, order);
 
     if (options.render === false || !document.getElementById('purchasing-system')?.classList.contains('active')) return;
-    renderPurchasingWorkCards();
-    if (purchasingView === 'ordering') renderPendingPurchaseOrders();
-    else if (purchasingView === 'dispatch') renderPurchasingDispatchOrders();
-    else if (purchasingView === 'receiving') renderPoList();
+    // 單筆訂單狀態更新後只走一次統一 renderer；
+    // 工作卡與目前明細共用同一批 normalize / dispatch / lifecycle snapshot。
+    renderPurchasingView();
 }
 
 function syncCommittedPurchaseOrderSources(orders) {
