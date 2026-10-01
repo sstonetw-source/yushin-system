@@ -5547,7 +5547,7 @@ window.scheduleQuoteHistorySearch = function() {
     clearTimeout(quoteHistorySearchTimer);
     const keyword = document.getElementById('myQuoteSearch')?.value || '';
     if (!normalizeFullHistorySearchValue(keyword)) return runQuoteHistorySearch();
-    quoteHistorySearchTimer = scheduleListSearch(quoteHistorySearchTimer, () => runQuoteHistorySearch());
+    quoteHistorySearchTimer = scheduleListSearch(quoteHistorySearchTimer, () => runQuoteHistorySearch(), 500);
 };
 
 window.clearQuoteHistorySearch = function() {
@@ -5669,7 +5669,7 @@ async function loadMyQuotesPage(reset) {
         myQuotesCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
         renderMyQuotesList();
         alert(err?.code === 'firestore-read-timeout'
-            ? '估價單資料讀取逾時，請再按一次更新。'
+            ? '估價單資料讀取逾時，請稍候片刻後再試。'
             : '讀取估價單失敗，請確認網路或 Firestore 權限設定。');
     } finally {
         myQuotesPageLoading = false;
