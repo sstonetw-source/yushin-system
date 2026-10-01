@@ -15546,7 +15546,7 @@ window.loadPriceCatalogSummary = async function() {
     }
 };
 
-// 價格表僅能透過上傳 Excel 整批更新，不開放在網頁上逐筆編輯／新增／刪除
+// Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。
 function setPriceUploadProgress(percent, status, keepVisible = true) {
     const wrap = document.getElementById('priceUploadProgress');
     const statusEl = document.getElementById('priceUploadStatus');
@@ -15629,13 +15629,13 @@ window.downloadProductMasterTemplate = async function() {
         alert(err.message);
         return;
     }
-    const headers = ['貨號','中文品名','英文品名','規格','產品類型','建議售價（含稅）','含稅成本','啟用','庫存管理','批號管理','效期管理'];
-    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','1000','600','是','是','否','否'];
+    const headers = ['廠牌','產品線','貨號','中文品名','英文品名','規格','產品類型','建議售價（含稅）','標準成本（含稅）','啟用','庫存管理','批號管理','效期管理'];
+    const example = ['Beckman Coulter','Centrifuge','EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [18,28,32,24,14,16,14,10,12,12,12].map(wch => ({ wch }));
+    ws['!cols'] = [22,20,18,28,32,24,14,16,16,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '產品線名稱');
-    XLSX.writeFile(wb, '廠牌名稱.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws, '產品資料');
+    XLSX.writeFile(wb, 'Product Master.xlsx');
 };
 
 window.downloadProductPriceUpdateTemplate = async function() {
@@ -15767,6 +15767,11 @@ window.handleProductPriceExcelUpload = async function(input) {
 window.handlePriceExcelUpload = async function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
+    if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser')) {
+        alert('只有管理員或採購可以匯入 Product Master。');
+        input.value = '';
+        return;
+    }
 
     try {
         await ensureXlsxLoaded();
@@ -15807,22 +15812,26 @@ window.handlePriceExcelUpload = async function(input) {
                 .replace(/\u3000/g, ' ')
                 .trim();
 
-            // Product Master 標準格式：Excel 檔名 = 廠牌、工作表名稱 = 產品線。
-            // 例：Beckman Coulter.xlsx / Flow Cytometry 分頁。
-            const brand = toHalfWidth(String(file.name || '').replace(/\.(xlsx|xls)$/i, ''));
-            if (!brand) throw new Error('無法從檔名判斷廠牌，請將 Excel 檔名改成廠牌名稱。');
-            const brandGroups = [];
+            // 標準格式以欄位為主：廠牌、產品線都存在每一列。
+            // 為了讓既有整理好的檔案仍可使用，若欄位空白才退回用「檔名＝廠牌、分頁＝產品線」。
+            const fallbackBrand = toHalfWidth(String(file.name || '').replace(/\.(xlsx|xls)$/i, '').replace(/^Product Master$/i, ''));
+            const brandGroupsMap = new Map();
             workbook.SheetNames.forEach(sheetName => {
-                const productLine = toHalfWidth(sheetName);
-                if (!productLine) return;
+                const fallbackProductLine = toHalfWidth(sheetName === '產品資料' ? '' : sheetName);
                 const sheet = workbook.Sheets[sheetName];
                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-                const imported = [];
 
                 rows.forEach(row => {
                     const nameCn = String(getField(row, ['中文品名', '品名', '中文名稱'])).trim();
                     const nameEn = String(getField(row, ['英文品名', '英文名稱'])).trim();
                     const model = String(getField(row, ['貨號', '型號'])).trim();
+                    if (!model) return;
+
+                    const brand = toHalfWidth(getField(row, ['廠牌', '品牌', 'Brand']) || fallbackBrand);
+                    const productLine = toHalfWidth(getField(row, ['產品線', 'Product Line', 'ProductLine']) || fallbackProductLine);
+                    if (!brand) throw new Error(`貨號「${model}」缺少廠牌。請填寫「廠牌」欄位。`);
+                    if (!productLine) throw new Error(`貨號「${model}」缺少產品線。請填寫「產品線」欄位。`);
+
                     const productType = normalizeProductTypeValue(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type']));
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
                     const activeRaw = String(getField(row, ['啟用', '启用', 'Active', 'Status'])).trim().toLocaleLowerCase();
@@ -15831,21 +15840,29 @@ window.handlePriceExcelUpload = async function(input) {
                     const lotTracked = yes(getField(row, ['批號管理', '批号管理', 'Lot Tracked', 'Lot']));
                     const expiryTracked = yes(getField(row, ['效期管理', 'Expiry Tracked', 'Expiry']));
 
-                    const price = parseFloat(getField(row, ['建議售價（含稅）', '建議售價', '含稅單價', '單價', '價格'])) || 0;
-                    const costRaw = getField(row, ['含稅成本', '成本', '進貨成本']);
-                    const cost = costRaw === '' ? null : parseFloat(costRaw) || 0;
+                    const priceRaw = getField(row, ['建議售價（含稅）', '建議售價', '含稅單價', '單價', '價格']);
+                    const costRaw = getField(row, ['標準成本（含稅）', '含稅成本', '標準成本', '成本', '進貨成本']);
+                    const price = priceRaw === '' ? 0 : Number(String(priceRaw).replace(/,/g, '').trim());
+                    const cost = costRaw === '' ? null : Number(String(costRaw).replace(/,/g, '').trim());
+                    if (!Number.isFinite(price) || price < 0) throw new Error(`貨號「${model}」的建議售價格式不正確。`);
+                    if (cost !== null && (!Number.isFinite(cost) || cost < 0)) throw new Error(`貨號「${model}」的標準成本格式不正確。`);
 
-                    if (model) {
-                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost, source:'PRICE_LIST' });
-                    }
+                    const importedItem = {
+                        nameCn, nameEn, model, brand, productType, productLine, spec,
+                        inventoryTracked, lotTracked, expiryTracked,
+                        active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true,
+                        price, cost, source:'PRODUCT_MASTER'
+                    };
+                    const groupKey = `${normalizeBrandLookupKey(brand)}::${productLine.toLocaleLowerCase()}`;
+                    if (!brandGroupsMap.has(groupKey)) brandGroupsMap.set(groupKey, { brand, productLine, imported:[] });
+                    brandGroupsMap.get(groupKey).imported.push(importedItem);
                 });
-
-                if (imported.length) brandGroups.push({ brand, productLine, imported });
             });
+            const brandGroups = [...brandGroupsMap.values()];
 
             if (!brandGroups.length) {
                 setPriceUploadProgress(0, '找不到可上傳的價格資料。');
-                alert('無法從 Excel 辨識出有效資料。請確認：檔名是廠牌名稱、分頁名稱是產品線，而且每筆產品都有貨號。');
+                alert('無法從 Excel 辨識出有效資料。請確認每筆產品都有廠牌、產品線與貨號。');
                 input.value = '';
                 return;
             }
@@ -15858,21 +15875,37 @@ window.handlePriceExcelUpload = async function(input) {
 
             const savedBrands = [];
             const imported = brandGroups.flatMap(group => group.imported);
-            setPriceUploadProgress(70, `正在儲存「${brand}」的 ${imported.length} 筆 Product Master…`);
-            const storedBrand = await saveProductMasterBrand(imported, brand);
-            // 同一個檔案的所有分頁共同代表同一個廠牌；一次更新本機快取，避免分頁彼此覆蓋。
-            const normalizedImported = normalizeProductMasterList(imported.map(item => ({ ...item, brand: storedBrand })));
-            const visibleImported = (currentUserRole === 'admin' || currentUserRole === 'purchaser')
-                ? normalizedImported
-                : normalizedImported.map(productItemWithoutCost);
-            priceList = priceList.filter(item => (item.brand || '').trim().toLocaleLowerCase() !== storedBrand.toLocaleLowerCase()).concat(visibleImported);
-            savedBrands.push(`${storedBrand}（${imported.length} 筆／${brandGroups.length} 個產品線）`);
+            const itemsByBrand = new Map();
+            imported.forEach(item => {
+                const key = normalizeBrandLookupKey(item.brand);
+                if (!itemsByBrand.has(key)) itemsByBrand.set(key, { brand:item.brand, items:[] });
+                itemsByBrand.get(key).items.push(item);
+            });
+
+            let savedCount = 0;
+            for (const { brand, items } of itemsByBrand.values()) {
+                setPriceUploadProgress(70 + (savedCount / Math.max(1, itemsByBrand.size)) * 20, `正在儲存「${brand}」的 ${items.length} 筆 Product Master…`);
+                const storedBrand = await saveProductMasterBrand(items, brand);
+                const normalizedImported = normalizeProductMasterList(items.map(item => ({ ...item, brand: storedBrand })));
+                const visibleImported = (currentUserRole === 'admin' || currentUserRole === 'purchaser')
+                    ? normalizedImported
+                    : normalizedImported.map(productItemWithoutCost);
+
+                // 以 productId 增量合併本機快取。只上傳幾筆時，不可把同廠牌其他產品從目前畫面暫時移除。
+                const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
+                visibleImported.forEach(item => merged.set(item.productId || stableProductId(item), item));
+                priceList = [...merged.values()];
+
+                const lineCount = new Set(items.map(item => item.productLine || '')).size;
+                savedBrands.push(`${storedBrand}（${items.length} 筆／${lineCount} 個產品線）`);
+                savedCount += 1;
+            }
 
             refreshPriceDatalists();
             loadPriceCatalogSummary();
             renderCompanyAgencyBrandSettings();
-            setPriceUploadProgress(100, `完成：已更新 ${savedBrands.length} 個廠牌的價格資料。`);
-            alert(`已成功上傳：\n${savedBrands.join('\n')}`);
+            setPriceUploadProgress(100, `完成：已匯入 ${imported.length} 筆 Product Master，未出現在檔案中的產品不受影響。`);
+            alert(`Product Master 匯入完成：\n${savedBrands.join('\n')}\n\n本次只新增／更新檔案中的品項，其他產品不會被刪除或停用。`);
         } catch (err) {
             setPriceUploadProgress(0, '儲存雲端失敗，請稍後再試。');
             alert('上傳失敗：' + err.message);
