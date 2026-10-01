@@ -2996,3 +2996,28 @@ test('successful history searches avoid duplicate final render', () => {
     const forecastSuccess=appSource.slice(appSource.lastIndexOf('if (generation !== forecastHistorySearchGeneration) return;',appSource.indexOf('} catch (err)',forecastStart)),appSource.indexOf('} catch (err)',forecastStart));
     assert.doesNotMatch(forecastSuccess,/renderForecastList\(\)[\s\S]*?全歷史搜尋完成/);
 });
+
+
+test('receipt allocation retry resumes after committed receipt without duplicate stock', () => {
+    const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
+    const allocateEnd=appSource.indexOf('\nasync function refreshAffectedOrderCaches',allocateStart);
+    const allocateSource=appSource.slice(allocateStart,allocateEnd);
+    assert.match(allocateSource,/receiptId=''/);
+    assert.match(allocateSource,/receiptId:receiptId\|\|''/);
+
+    const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptSource=appSource.slice(receiptStart,receiptEnd);
+    assert.match(receiptSource,/autoAllocationQty/);
+    assert.match(receiptSource,/processedReceipt=receipt/);
+    assert.match(receiptSource,/where\('receiptId','==',operationKey\)/);
+    assert.match(receiptSource,/alreadyAllocated/);
+    assert.match(receiptSource,/receipt-allocation-pending/);
+    assert.doesNotMatch(receiptSource,/if\(alreadyProcessed\)return/);
+
+    const saveStart=appSource.indexOf('window.savePoReceiptBatch = async function()');
+    const saveEnd=appSource.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
+    const saveSource=appSource.slice(saveStart,saveEnd);
+    assert.match(saveSource,/err\?\.code==='receipt-allocation-pending'/);
+    assert.match(saveSource,/保留同一個 operationId/);
+});
