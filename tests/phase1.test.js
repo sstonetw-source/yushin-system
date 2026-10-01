@@ -2787,3 +2787,20 @@ test('quote list builds item search text only when searching', () => {
     assert.match(source,/if \(!quoteHistorySearchActive && keyword\) \{[\s\S]*?const itemSearchText/);
     assert.match(source,/if \(!searchable\.includes\(keyword\)\) return/);
 });
+
+
+test('purchasing refresh loaders reuse normalized item snapshots', () => {
+    const pendingStart=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
+    const pendingEnd=appSource.indexOf('\nconst pendingPurchaseOrderKeys',pendingStart);
+    const pendingSource=appSource.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/normalizedItemsByOrder = new Map/);
+    assert.match(pendingSource,/pendingProcurementDisplayLines\(order, normalizedItemsByOrder\.get\(order\.id\)\)/);
+    assert.match(pendingSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters\)/);
+
+    const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
+    const dispatchEnd=appSource.indexOf('\nwindow.loadPurchasingDispatchOrders',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/normalizedItemsByOrder = new Map/);
+    assert.match(dispatchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters\)/);
+    assert.match(dispatchSource,/renderPurchasingCompletedOrders\(completedRows\)/);
+});
