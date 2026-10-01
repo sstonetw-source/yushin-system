@@ -700,7 +700,11 @@ function updateReadonlyNotice() {
     const notice = document.createElement('div');
     notice.className = 'readonly-notice no-print';
     notice.style.display = 'block';
-    notice.innerText = '🔒 此分頁目前為「僅可查看」，您可以瀏覽與搜尋，但不能新增、修改或刪除資料。';
+    if (pageKey === 'orders.po' && currentUserRole === 'warehouse' && canReceiveInventoryCapability()) {
+        notice.innerText = '📦 倉管模式：可以確認到貨與入庫；建立採購單、補庫採購與打單仍由採購或管理員處理。';
+    } else {
+        notice.innerText = '🔒 此分頁目前為「僅可查看」，您可以瀏覽與搜尋，但不能新增、修改或刪除資料。';
+    }
     section.prepend(notice);
 }
 
@@ -6602,7 +6606,7 @@ window.setInventorySafetyStock=async function(inventoryId){
  const safetyStock=Number(raw);if(!Number.isFinite(safetyStock)||safetyStock<0){alert('安全庫存必須是 0 以上數字。');return;}
  try{await db.collection('inventory').doc(inventoryId).update({safetyStock,updatedAt:new Date().toISOString()});item.safetyStock=safetyStock;renderInventoryList();}catch(err){alert('安全庫存更新失敗：'+err.message);}
 };
-window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;const supplies=pendingSupplyCache.map(x=>{const remaining=Math.max(0,Number(x.qty||0)-Number(x.receivedQty||0));const label=x.purchaseDocumentNo||x.internalNo||'供應紀錄';return `<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${remaining}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態"><button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(label)}・入庫</button></td></tr>`;});body.innerHTML=supplies.join('');if(hint)hint.style.display=supplies.length?'none':'block';};
+window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;const supplies=pendingSupplyCache.map(x=>{const remaining=Math.max(0,Number(x.qty||0)-Number(x.receivedQty||0));const label=x.purchaseDocumentNo||x.internalNo||'供應紀錄';const action=canReceiveInventoryCapability()?`<button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(label)}・入庫</button>`:'僅可查看';return `<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${remaining}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">${action}</td></tr>`;});body.innerHTML=supplies.join('');if(hint)hint.style.display=supplies.length?'none':'block';};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
 
@@ -9347,7 +9351,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             evidenceCount += evidence.length;
             if (!evidence.length) missingEvidence++;
 
-            const actionHtml = !canEditPage('orders.po')
+            const actionHtml = !canReceiveInventoryCapability()
                 ? '<span class="order-progress-badge">唯讀</span>'
                 : evidence.length
                     ? evidence.map((entry, index) => {
@@ -9387,7 +9391,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
 
         // 已取消訂單的原廠直送沒有倉庫可承接，因此只能顯示警示、不可確認到貨。
         const blockedDirectShip = directShip && sourceOrder && sourceStatus !== 'normal';
-        const actionHtml = !canEditPage('orders.po')
+        const actionHtml = !canReceiveInventoryCapability()
             ? '<span class="order-progress-badge">唯讀</span>'
             : blockedDirectShip
                 ? '<span class="order-progress-badge order-progress-warning">來源訂單已取消，直送不可確認</span>'
@@ -9764,6 +9768,7 @@ window.closePoReceiptBatch = function() {
 
 
 window.receiveSupplyOrder = function(supplyId) {
+    if (!canReceiveInventoryCapability()) { alert('您沒有到貨入庫權限。'); return; }
     const supply=pendingSupplyCache.find(row=>row.id===supplyId);
     if(!supply)return;
     const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
@@ -10104,7 +10109,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
 }
 
 window.openSupplyReceipt = function(supplyId) {
-    if (!canEditPage('orders.po')) return;
+    if (!canReceiveInventoryCapability()) return;
     const supply = supplyReceivingCache.find(row => row.id === supplyId);
     if (!supply) { alert('找不到這筆待到貨紀錄，請重新整理。'); return; }
 
@@ -10135,7 +10140,7 @@ window.openSupplyReceipt = function(supplyId) {
 };
 
 window.savePoReceiptBatch = async function() {
-    if (!canEditPage('orders.po') || poReceiptSaveInProgress) return;
+    if (!canReceiveInventoryCapability() || poReceiptSaveInProgress) return;
     const poId = poReceiptTargetId;
     const button = document.getElementById('savePoReceiptBatchBtn');
     const rows = [...document.querySelectorAll('#poReceiptBatchBody tr')];
