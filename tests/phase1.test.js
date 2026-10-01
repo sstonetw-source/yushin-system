@@ -3384,3 +3384,36 @@ test('normalized fulfillment snapshot avoids rescanning delivery records', () =>
     assert.match(dispatchSource,/: savedDeliveryRecords\(order\)\.filter/);
     assert.match(dispatchSource,/: savedReturnRecords\(order\)\.filter/);
 });
+
+
+test('purchasing work queues share one dispatch snapshot per render', () => {
+    const helperStart=appSource.indexOf('function purchasingDispatchStateSnapshot');
+    const helperEnd=appSource.indexOf('\nfunction pendingProcurementDisplayLines',helperStart);
+    const helperSource=appSource.slice(helperStart,helperEnd);
+    assert.match(helperSource,/new Map\(items\.map\(item => \[item, itemDispatchState\(order, item\)\]\)\)/);
+
+    const pendingLinesStart=appSource.indexOf('function pendingProcurementDisplayLines');
+    const pendingLinesEnd=appSource.indexOf('\nfunction renderPurchasingWorkCards',pendingLinesStart);
+    const pendingLinesSource=appSource.slice(pendingLinesStart,pendingLinesEnd);
+    assert.match(pendingLinesSource,/dispatchStateByItem = null/);
+    assert.match(pendingLinesSource,/dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState/);
+
+    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
+    const viewSource=appSource.slice(viewStart,viewEnd);
+    assert.match(viewSource,/purchasingDispatchStateSnapshot\(normalizedItemsByOrder\)/);
+    assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
+    assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
+
+    const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders');
+    const dispatchEnd=appSource.indexOf('\nfunction pendingPurchaseLines',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/dispatchStatesByOrder = null/);
+    assert.match(dispatchSource,/states\?\.get\(item\) \|\| itemDispatchState/);
+
+    const pendingRenderStart=appSource.indexOf('function renderPendingPurchaseOrders');
+    const pendingRenderEnd=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',pendingRenderStart);
+    const pendingRenderSource=appSource.slice(pendingRenderStart,pendingRenderEnd);
+    assert.match(pendingRenderSource,/dispatchStatesByOrder = null/);
+    assert.match(pendingRenderSource,/dispatchStatesByOrder\?\.get\(order\.id\)/);
+});
