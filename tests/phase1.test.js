@@ -2527,3 +2527,17 @@ test('order work cards reuse normalized order items', () => {
     const listEnd=appSource.indexOf('window.retryOrderInventoryReservation',listStart);
     assert.match(appSource.slice(listStart,listEnd),/renderOrderWorkCards\(baseOrders, normalizedItemsByOrder\)/);
 });
+
+
+test('read-only order roles see non-editable row controls', () => {
+    const start=appSource.indexOf('window.renderOrdersList = function()');
+    const end=appSource.indexOf('\nwindow.retryOrderInventoryReservation',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const canEditOrders = canEditPage\('orders\.list'\)/);
+    assert.match(source,/if \(!canEditOrders\)/);
+    assert.match(source,/order-transaction-cell select, \.order-transaction-cell input/);
+    assert.match(source,/td\[data-th="備註"\] input/);
+    assert.match(source,/control\.disabled = true/);
+    assert.match(source,/openOrderStatusHistory/);
+    assert.match(source,/button\.remove\(\)/);
+});
