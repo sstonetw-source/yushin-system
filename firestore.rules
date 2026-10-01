@@ -415,8 +415,14 @@ service cloud.firestore {
     match /inventoryReservations/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create, update: if admin() || purchaser() || warehouse()
+      allow create: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(request.resource.data));
+      allow update: if admin() || purchaser() || warehouse()
+        || (businessOwner()
+          && owns(resource.data)
+          && owns(request.resource.data)
+          && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+          && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', ''));
       allow delete: if admin();
     }
 
