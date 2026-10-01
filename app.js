@@ -16789,7 +16789,7 @@ window.runInventoryCostMigration = async function() {
     catch(err){console.error('庫存成本隔離失敗：',err);if(status)status.innerText='隔離中斷：'+(err.message||err)+'。流程可重複執行。';if(runButton)runButton.disabled=false;}
     finally{if(previewButton)previewButton.disabled=false;}
 };
-// Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。// Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。
+// Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。
 function setPriceUploadProgress(percent, status, keepVisible = true) {
     const wrap = document.getElementById('priceUploadProgress');
     const statusEl = document.getElementById('priceUploadStatus');

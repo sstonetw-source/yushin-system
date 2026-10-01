@@ -1697,8 +1697,6 @@ html[data-app-environment="preview"] body { border-top: 0; }
 
 
 .action-feedback {
-
-.action-feedback {
     position: fixed;
     left: 50%;
     bottom: calc(24px + env(safe-area-inset-bottom, 0px));
