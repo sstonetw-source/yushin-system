@@ -3230,16 +3230,16 @@ test('procurement views reuse dispatch state while calculating quantities', () =
     const pendingStart=appSource.indexOf('function pendingProcurementDisplayLines');
     const pendingEnd=appSource.indexOf('\nfunction renderPurchasingWorkCards',pendingStart);
     const pendingSource=appSource.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
-    assert.match(pendingSource,/const dispatch = itemDispatchState\(order, item\)/);
+    assert.match(pendingSource,/const lifecycle = lifecycleOverride \|\| orderLifecycleInfo\(order, items\)/);
+    assert.match(pendingSource,/const dispatch = dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
     assert.match(pendingSource,/orderItemWorkCategory\(order, item, lifecycle, dispatch\)/);
     assert.match(pendingSource,/remainingProcurementQty\(order, item, dispatch\)/);
 
     const completedStart=appSource.indexOf('function purchasingCompletedRows');
     const completedEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',completedStart);
     const completedSource=appSource.slice(completedStart,completedEnd);
-    assert.match(completedSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
-    assert.match(completedSource,/const state = itemDispatchState\(order, item\)/);
+    assert.match(completedSource,/const lifecycle = lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo\(order, items\)/);
+    assert.match(completedSource,/const state = orderDispatchStates\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
     assert.match(completedSource,/orderItemWorkCategory\(order, item, lifecycle, state\)/);
 
     const listStart=appSource.indexOf('window.renderOrdersList = function()');
@@ -3446,7 +3446,7 @@ test('receiving details reuse purchasing dispatch snapshots', () => {
     const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
     const receivingSource=appSource.slice(receivingStart,receivingEnd);
     assert.match(receivingSource,/dispatchStatesByOrder = null/);
-    assert.match(receivingSource,/const lifecycle = orderLifecycleInfo\(order, items\)/);
+    assert.match(receivingSource,/const lifecycle = lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo\(order, items\)/);
     assert.match(receivingSource,/const orderDispatchStates = dispatchStatesByOrder\?\.get\(order\.id\) \|\| null/);
     assert.match(receivingSource,/const dispatch = orderDispatchStates\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
     assert.match(receivingSource,/orderItemDisplayCategories\(order, item, lifecycle, dispatch\)/);
@@ -3455,15 +3455,16 @@ test('receiving details reuse purchasing dispatch snapshots', () => {
     const poEnd=appSource.indexOf('\n// 把「採購訂單」',poStart);
     const poSource=appSource.slice(poStart,poEnd);
     assert.match(poSource,/dispatchStatesByOrder = null/);
-    assert.match(poSource,/renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext, dispatchStatesByOrder\)/);
+    assert.match(poSource,/lifecyclesByOrder = null/);
+    assert.match(poSource,/renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext, dispatchStatesByOrder, lifecyclesByOrder\)/);
 
     const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
     const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
-    assert.match(appSource.slice(viewStart,viewEnd),/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
+    assert.match(appSource.slice(viewStart,viewEnd),/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 
     const switchStart=appSource.indexOf('window.switchPurchasingView = function');
     const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
-    assert.match(appSource.slice(switchStart,switchEnd),/view === 'receiving'[\s\S]*?renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
+    assert.match(appSource.slice(switchStart,switchEnd),/view === 'receiving'[\s\S]*?renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
 
 
@@ -3542,4 +3543,33 @@ test('receiving parallel refresh preserves older source orders', () => {
     const queueSource=appSource.slice(queueStart,queueEnd);
     assert.match(queueSource,/Promise\.allSettled/);
     assert.match(queueSource,/mergeReceivingSourceOrdersIntoOrderCache\(\)[\s\S]*?renderPurchasingView\(\)/);
+});
+
+
+test('purchasing detail queues reuse lifecycle snapshots', () => {
+    const pendingStart=appSource.indexOf('function renderPendingPurchaseOrders');
+    const pendingEnd=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',pendingStart);
+    const pendingSource=appSource.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/lifecyclesByOrder = null/);
+    assert.match(pendingSource,/lifecyclesByOrder\?\.get\(order\.id\)/);
+
+    const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders');
+    const dispatchEnd=appSource.indexOf('\nfunction pendingPurchaseLines',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/lifecyclesByOrder = null/);
+    assert.match(dispatchSource,/lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo/);
+
+    const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
+    const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource,/lifecyclesByOrder = null/);
+    assert.match(receivingSource,/lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo/);
+
+    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
+    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
+    const switchSource=appSource.slice(switchStart,switchEnd);
+    assert.match(switchSource,/const lifecyclesByOrder = view === 'history'/);
+    assert.match(switchSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(switchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(switchSource,/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 });
