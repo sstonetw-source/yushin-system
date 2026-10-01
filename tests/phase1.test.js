@@ -3402,8 +3402,8 @@ test('purchasing work queues share one dispatch snapshot per render', () => {
     const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
     const viewSource=appSource.slice(viewStart,viewEnd);
     assert.match(viewSource,/purchasingDispatchStateSnapshot\(normalizedItemsByOrder\)/);
-    assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
-    assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder\)/);
+    assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
 
     const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders');
     const dispatchEnd=appSource.indexOf('\nfunction pendingPurchaseLines',dispatchStart);
