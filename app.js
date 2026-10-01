@@ -897,7 +897,8 @@ function initializePageData(mainKey, options = {}) {
     }
     if (mainKey === 'inventory') {
         loadInventory(true);
-        loadBrandMaster().then(renderInventoryList).catch(err => console.warn('廠牌名單載入失敗：', err));
+        // Brand Master 已由上方 ensureBrandSettingsLoaded() 共用載入；
+        // 完成後會統一 renderInventoryList，不再額外重畫一次。
     }
     if (mainKey === 'equipment') {
         // 儀器列表先載入；只有能看全公司儀器的身份才需要完整 users 名單。
