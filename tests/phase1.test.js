@@ -4277,3 +4277,28 @@ test('more menus share one delegated listener set', () => {
     assert.match(source,/querySelectorAll\(openMoreMenuSelector\)/);
     assert.match(source,/order-more-menu-popover button, \.quote-more-menu-popover button, \.po-more-menu-popover button/);
 });
+
+
+test('primary work lists keep the default 50-row pagination guard', () => {
+    const forecastStart=appSource.indexOf('window.loadForecasts = async function');
+    const forecastEnd=appSource.indexOf('let forecastHistorySearchActive',forecastStart);
+    const forecastSource=appSource.slice(forecastStart,forecastEnd);
+    assert.match(forecastSource,/query = query\.limit\(DEFAULT_LIST_LIMIT\)/);
+
+    const orderStart=appSource.indexOf('function loadOrderPage');
+    const orderEnd=appSource.indexOf('// 訂單資料範圍由固定角色權限決定',orderStart);
+    const orderSource=appSource.slice(orderStart,orderEnd);
+    assert.match(orderSource,/let remainingReads = DEFAULT_LIST_LIMIT/);
+    assert.match(orderSource,/source\.query\(\)\.limit\(requested\)/);
+
+    const purchaseStart=appSource.indexOf('async function loadPurchaseOrderPage');
+    const purchaseEnd=appSource.indexOf('window.loadMyPurchaseOrders',purchaseStart);
+    const purchaseSource=appSource.slice(purchaseStart,purchaseEnd);
+    assert.match(purchaseSource,/orderBy\('poNo','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(purchaseSource,/where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+
+    const equipmentStart=appSource.indexOf('window.loadEquipmentFromCloud = function');
+    const equipmentEnd=appSource.indexOf('window.loadMoreEquipment',equipmentStart);
+    const equipmentSource=appSource.slice(equipmentStart,equipmentEnd);
+    assert.match(equipmentSource,/query = query\.limit\(DEFAULT_LIST_LIMIT\)/);
+});
