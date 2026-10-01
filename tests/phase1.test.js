@@ -2475,3 +2475,19 @@ test('purchasing work tabs reuse one shared orders refresh', () => {
     const roleEnd=appSource.indexOf('\nfunction actuallySwitchMainTab',roleStart);
     assert.match(appSource.slice(roleStart,roleEnd),/purchasingOrdersReady = false/);
 });
+
+
+test('own-scope quote form avoids full staff preload', () => {
+    const start=appSource.indexOf('function ensureQuoteFormInitialized');
+    const end=appSource.indexOf('\n\nwindow.openChangePasswordModal',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'purchaser'/);
+    assert.match(source,/ensureSalesListLoaded\(\)/);
+    assert.match(source,/else \{[\s\S]*?populateSalesDropdown\(\)/);
+
+    const phoneStart=appSource.indexOf('function updateSalesPhoneDisplay');
+    const phoneEnd=appSource.indexOf('\nfunction populateEquipmentSalesDropdown',phoneStart);
+    const phoneSource=appSource.slice(phoneStart,phoneEnd);
+    assert.match(phoneSource,/selectedName === currentUserName/);
+    assert.match(phoneSource,/currentUserPhone/);
+});
