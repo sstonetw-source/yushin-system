@@ -1273,3 +1273,139 @@ test('purchase cancellation releases incoming and returns outstanding quantity t
     assert.match(pendingSource,/po\?\.status[\s\S]*?'CANCELLED'/);
     assert.match(pendingSource,/supply\.status[\s\S]*?'CANCELLED'/);
 });
+
+
+test('acceptance flow keeps inventory and work states aligned through procurement to completion', () => {
+    const fulfillment=require('../modules/fulfillment-core.js');
+    const workflow=require('../modules/workflow-core.js');
+
+    const displayCategory=(item,isBilled=false)=>{
+        const effectiveDelivered=Math.max(0,Number(item.deliveredQty||0)-Number(item.returnedQty||0));
+        const core=workflow.itemWorkCategory({
+            lifecycleStatus:'normal',
+            orderedQty:item.orderedQty,
+            deliveredQty:effectiveDelivered,
+            returnedQty:item.returnedQty,
+            isBilled,
+            fulfillmentType:'WAREHOUSE',
+            shortageQty:item.shortageQty,
+            supplyOrderedQty:item.supplyOrderedQty,
+            receivedQty:item.receivedQty
+        });
+        if(core!=='delivery')return core;
+        return fulfillment.pendingDispatchQty(item)>0?'dispatch':'shipping';
+    };
+
+    let inventory={onHand:4,reserved:0,incoming:0};
+    let item=fulfillment.reserveFromAvailable({orderedQty:10,fulfillmentType:'WAREHOUSE'},4);
+    inventory.reserved=item.reservedQty;
+    assert.deepEqual(
+        {onHand:inventory.onHand,reserved:inventory.reserved,incoming:inventory.incoming,category:displayCategory(item)},
+        {onHand:4,reserved:4,incoming:0,category:'ordering'}
+    );
+
+    item=fulfillment.normalizeItem({...item,supplyOrderedQty:6});
+    inventory.incoming+=6;
+    assert.equal(displayCategory(item),'arrival');
+    assert.deepEqual(inventory,{onHand:4,reserved:4,incoming:6});
+
+    item=fulfillment.applyReceipt(item,2);
+    inventory.onHand+=2;
+    inventory.incoming-=2;
+    inventory.reserved=item.reservedQty;
+    assert.equal(displayCategory(item),'arrival');
+    assert.deepEqual(inventory,{onHand:6,reserved:6,incoming:4});
+
+    item=fulfillment.applyReceipt(item,4);
+    inventory.onHand+=4;
+    inventory.incoming-=4;
+    inventory.reserved=item.reservedQty;
+    assert.equal(displayCategory(item),'dispatch');
+    assert.deepEqual(inventory,{onHand:10,reserved:10,incoming:0});
+
+    item=fulfillment.prepareDispatch(item,10);
+    assert.equal(displayCategory(item),'shipping');
+
+    item=fulfillment.deliver(item,10);
+    inventory.onHand-=10;
+    inventory.reserved=item.reservedQty;
+    assert.equal(displayCategory(item),'billing');
+    assert.deepEqual(inventory,{onHand:0,reserved:0,incoming:0});
+
+    assert.equal(displayCategory(item,true),'complete');
+});
+
+test('acceptance flow handles partial receipt cancellation and return replacement without stock drift', () => {
+    const fulfillment=require('../modules/fulfillment-core.js');
+    const workflow=require('../modules/workflow-core.js');
+
+    const displayCategory=(item,isBilled=false)=>{
+        const effectiveDelivered=Math.max(0,Number(item.deliveredQty||0)-Number(item.returnedQty||0));
+        const core=workflow.itemWorkCategory({
+            lifecycleStatus:'normal',
+            orderedQty:item.orderedQty,
+            deliveredQty:effectiveDelivered,
+            returnedQty:item.returnedQty,
+            isBilled,
+            fulfillmentType:'WAREHOUSE',
+            shortageQty:item.shortageQty,
+            supplyOrderedQty:item.supplyOrderedQty,
+            receivedQty:item.receivedQty
+        });
+        if(core!=='delivery')return core;
+        const gross=Math.max(0,Number(item.deliveredQty||0));
+        const reserved=Math.max(0,Number(item.reservedQty||0));
+        const prepared=Math.max(0,Number(item.dispatchPreparedQty||0));
+        const preparedOutstanding=Math.max(0,prepared-gross);
+        const shippable=Math.max(0,Math.min(reserved,preparedOutstanding));
+        const pending=Math.max(0,reserved-shippable);
+        return pending>0?'dispatch':'shipping';
+    };
+
+    let inventory={onHand:4,reserved:0,incoming:0};
+    let item=fulfillment.reserveFromAvailable({orderedQty:10,fulfillmentType:'WAREHOUSE'},4);
+    inventory.reserved=item.reservedQty;
+    item=fulfillment.normalizeItem({...item,supplyOrderedQty:6});
+    inventory.incoming=6;
+    item=fulfillment.applyReceipt(item,2);
+    inventory.onHand+=2;
+    inventory.incoming-=2;
+    inventory.reserved=item.reservedQty;
+
+    const cancelledOutstanding=Math.max(0,item.supplyOrderedQty-item.receivedQty);
+    item=fulfillment.normalizeItem({
+        ...item,
+        supplyOrderedQty:Math.max(item.receivedQty,item.supplyOrderedQty-cancelledOutstanding)
+    });
+    inventory.incoming=Math.max(0,inventory.incoming-cancelledOutstanding);
+    assert.deepEqual(inventory,{onHand:6,reserved:6,incoming:0});
+    assert.equal(item.shortageQty,4);
+    assert.equal(displayCategory(item),'ordering');
+
+    item=fulfillment.normalizeItem({
+        orderedQty:10,reservedQty:10,shortageQty:0,
+        supplyOrderedQty:6,receivedQty:6,dispatchPreparedQty:10,
+        deliveredQty:0,returnedQty:0,fulfillmentType:'WAREHOUSE'
+    });
+    inventory={onHand:10,reserved:10,incoming:0};
+    item=fulfillment.deliver(item,10);
+    inventory.onHand-=10;
+    inventory.reserved=item.reservedQty;
+    assert.equal(displayCategory(item,true),'complete');
+
+    item=fulfillment.returnDelivery(item,2);
+    inventory.onHand+=2;
+    item=fulfillment.normalizeItem({...item,reservedQty:2});
+    inventory.reserved=item.reservedQty;
+    assert.deepEqual(inventory,{onHand:2,reserved:2,incoming:0});
+    assert.equal(displayCategory(item,true),'dispatch');
+
+    item=fulfillment.prepareDispatch(item,2);
+    assert.equal(displayCategory(item,true),'shipping');
+
+    item=fulfillment.deliver(item,2);
+    inventory.onHand-=2;
+    inventory.reserved=item.reservedQty;
+    assert.deepEqual(inventory,{onHand:0,reserved:0,incoming:0});
+    assert.equal(displayCategory(item,true),'complete');
+});
