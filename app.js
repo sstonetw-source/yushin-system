@@ -9656,9 +9656,11 @@ window.receiveSupplyOrder = function(supplyId) {
 async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='') {
     let remaining=Math.max(0,Number(maxQty||0)),allocatedQty=0;
     const affectedOrderIds = new Set();
+    const skippedCandidateIds = new Set();
     if(!remaining||!productKey||!warehouseId)return {allocatedQty:0,unallocatedQty:remaining,affectedOrderIds:[]};
     // Allocate one live shortage at a time. Re-reading candidates after every successful
     // transaction preserves oldest-first ordering even when multiple receipts run concurrently.
+    // 已失效／取消的最舊候選只跳過，不可阻塞後面的正常缺貨訂單。
     while(remaining>0){
         const loadCandidates=async status=>{
             const rows=[]; let cursor=null,hasMore=true;
@@ -9675,10 +9677,11 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
         const [shortageRows,activeRows]=await Promise.all([loadCandidates('shortage'),loadCandidates('active')]);
         const candidate=[...shortageRows,...activeRows]
             .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0)
+            .filter(row=>!skippedCandidateIds.has(row.id))
             .filter((row,index,all)=>all.findIndex(x=>x.id===row.id)===index)
             .sort((a,b)=>String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))||String(a.id).localeCompare(String(b.id)))[0];
         if(!candidate)break;
-        let took=0,skipCandidate=false;
+        let took=0,skipCandidate=false,stopAllocation=false;
         await db.runTransaction(async tx=>{
             const orderRef=db.collection('orders').doc(candidate.orderId);
             const reservationRef=db.collection('inventoryReservations').doc(candidate.id);
@@ -9692,7 +9695,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             if(normalizedOrderStatus(order)!=='normal'||liveShortage<=0){skipCandidate=true;return;}
             const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}),wh=inventoryNumbers(whSnap.data());
             const take=Math.min(remaining,liveShortage,Math.max(0,wh.available));
-            if(take<=0){skipCandidate=true;return;}
+            if(take<=0){stopAllocation=true;return;}
             const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
             if(index<0){skipCandidate=true;return;}
@@ -9712,10 +9715,11 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
         });
         if(took>0){invalidateWarehouseStockCache(productKey,warehouseId);allocatedQty+=took;remaining-=took;affectedOrderIds.add(candidate.orderId);continue;}
         if(skipCandidate){
-            // Avoid repeatedly selecting a stale row during this invocation.
-            // A later receipt will re-evaluate it after lifecycle/reservation cleanup.
-            break;
+            // 避免同一輪一直選到已取消／失效的舊 reservation；改看下一個候選。
+            skippedCandidateIds.add(candidate.id);
+            continue;
         }
+        if(stopAllocation)break;
         break;
     }
     return {allocatedQty,unallocatedQty:remaining,affectedOrderIds:[...affectedOrderIds]};
