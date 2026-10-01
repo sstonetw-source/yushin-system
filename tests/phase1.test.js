@@ -769,7 +769,7 @@ test('new quotes and orders persist createdAt and normalized order item-code key
 });
 
 
-test('phase 2 product master keeps formal product identity and legacy migration compatibility without Unit', () => {
+test('phase 2 product master keeps formal product identity and supports normalized Unit', () => {
     assert.match(appSource, /function stableProductId\(item\)/);
     assert.match(appSource, /function normalizeProductMasterItem\(item\)/);
     assert.match(appSource, /productId:/);
@@ -780,7 +780,7 @@ test('phase 2 product master keeps formal product identity and legacy migration 
     const productStart = appSource.indexOf('function normalizeProductMasterItem(item)');
     const productEnd = appSource.indexOf('function normalizeProductMasterList', productStart);
     const productSource = appSource.slice(productStart, productEnd);
-    assert.doesNotMatch(productSource, /\bunit\s*:/);
+    assert.match(productSource, /\bunit:\s*String\(item\.unit \|\| item\.uom \|\| ''\)\.trim\(\)/);
     assert.match(appSource, /spec:/);
     assert.match(appSource, /normalizeProductMasterList\(/);
     assert.match(appSource, /collection\('products'\)/);
@@ -798,12 +798,14 @@ test('phase 2 documents link to productId while retaining historical snapshots',
     assert.match(appSource, /data\.spec = priceMatch\.spec/);
 });
 
-test('phase 2 product-master Excel import supports enrichment fields and preview', () => {
-    assert.match(appSource, /Product Master 匯入預覽/);
+test('phase 2 Product Import supports normalized fields, cost split and preview', () => {
+    assert.match(appSource, /又鑫標準 Product Import 匯入預覽/);
     assert.match(appSource, /confirmProductMasterImport\(brandGroups\)/);
-    for (const field of ['供應商', '庫存管理', '批號管理', '效期管理', '啟用']) {
+    for (const field of ['單位', '標準成本（含稅）', '庫存管理', '批號管理', '效期管理', '啟用']) {
         assert.ok(appSource.includes(field), `missing import field: ${field}`);
     }
+    assert.match(appSource, /standardCostProvided/);
+    assert.match(appSource, /collection\('productCosts'\)/);
 });
 
 
@@ -3998,7 +4000,7 @@ test('Product Master import cost helper stays removed', () => {
 });
 
 
-test('product price and cost batch maintenance stay isolated', () => {
+test('legacy standalone price and cost helpers stay isolated while UI uses unified Product Import', () => {
     const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
     const priceEnd=appSource.indexOf('\nwindow.handleProductCostExcelUpload',priceStart);
     const priceSource=appSource.slice(priceStart,priceEnd);
@@ -4016,19 +4018,20 @@ test('product price and cost batch maintenance stay isolated', () => {
     assert.match(costSource,/source:\s*'COST_UPDATE'/);
     assert.doesNotMatch(costSource,/listPrice/);
     assert.doesNotMatch(costSource,/collection\('products'\)\.doc\([^)]*\)\.set/);
-    assert.match(costSource,/未寫入任何成本資料/);
 
     const productImportStart=appSource.indexOf('window.handlePriceExcelUpload = async function');
-    const productImportSource=appSource.slice(productImportStart,productImportStart+12000);
-    assert.doesNotMatch(productImportSource,/costRaw/);
-    assert.doesNotMatch(productImportSource,/標準成本格式不正確/);
+    const productImportSource=appSource.slice(productImportStart,productImportStart+16000);
+    assert.match(productImportSource,/standardCostRaw/);
+    assert.match(productImportSource,/標準成本格式不正確/);
+    assert.match(productImportSource,/標準成本與實際採購價分開保存/);
 
     assert.match(indexSource,/id="productBatchMaintenance"/);
-    assert.match(indexSource,/handleProductPriceExcelUpload\(this\)/);
-    assert.match(indexSource,/handleProductCostExcelUpload\(this\)/);
-    assert.match(indexSource,/售價只更新 Product Master 的建議售價；成本只更新受保護的 productCosts/);
+    assert.match(indexSource,/handlePriceExcelUpload\(this\)/);
+    assert.match(indexSource,/下載標準 Product Import 範本/);
+    assert.match(indexSource,/只維護一種 Excel/);
+    assert.doesNotMatch(indexSource,/handleProductPriceExcelUpload\(this\)/);
+    assert.doesNotMatch(indexSource,/handleProductCostExcelUpload\(this\)/);
 });
-
 
 test('product batch maintenance gives visible progress and blocks duplicate imports', () => {
     assert.match(indexSource,/id="productBatchMaintenanceStatus"/);
