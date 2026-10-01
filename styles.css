@@ -1340,6 +1340,159 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 }
 
 
+/* 訂購單：已建立文件採唯讀查看；PDF 版面與估價單共用相同逐頁輸出核心。 */
+.po-existing-banner {
+    margin: 8px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid #b9cce4;
+    border-radius: 10px;
+    background: #f3f7fc;
+    color: #173a63;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.po-existing-banner strong { overflow-wrap: anywhere; }
+.po-viewing-existing #printablePO input {
+    pointer-events: none;
+    background: #f7f8fa;
+    color: #333;
+}
+.po-viewing-existing #poItemsBody .no-print,
+.po-viewing-existing #poAddStockItemBtn {
+    display: none !important;
+}
+.po-viewing-existing #poModalOverlay .sub-tab,
+.po-viewing-existing .sub-nav .sub-tab {
+    pointer-events: none;
+    opacity: .72;
+}
+
+.po-pdf-stage {
+    width: 190mm;
+}
+.po-pdf-document,
+.po-pdf-page {
+    box-sizing: border-box;
+    width: 190mm;
+    background: #fff;
+    color: #000;
+}
+.po-pdf-page {
+    min-height: 0;
+    margin: 0 0 8mm;
+    overflow: visible;
+}
+.po-pdf-page table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+.po-pdf-page th,
+.po-pdf-page td {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+.po-pdf-field-value {
+    display: inline-block;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.po-pdf-page .meta-row-three {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr 1fr;
+    gap: 8px;
+    align-items: end;
+}
+.po-pdf-page .po-total-section {
+    break-inside: avoid;
+}
+
+.po-list-action-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 5px;
+}
+.po-list-action-row > button,
+.po-list-action-row > .po-more-menu > summary {
+    min-height: 32px;
+    margin: 0 !important;
+    padding: 5px 9px !important;
+    font-size: 12px !important;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+.po-more-menu {
+    position: relative;
+    flex: 0 0 auto;
+}
+.po-more-menu > summary {
+    list-style: none;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+.po-more-menu > summary::-webkit-details-marker { display: none; }
+.po-more-menu-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 5px);
+    z-index: 90;
+    display: flex;
+    min-width: 180px;
+    padding: 6px;
+    border: 1px solid #d6dde5;
+    border-radius: 9px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(0,0,0,.14);
+    flex-direction: column;
+    gap: 4px;
+}
+.po-more-menu:not([open]) .po-more-menu-popover { display: none; }
+.po-more-menu-popover button {
+    width: 100% !important;
+    min-height: 36px;
+    border: 0;
+    border-radius: 6px;
+    background: #fff;
+    color: #24384b;
+    text-align: left;
+}
+.po-more-menu-popover button:hover { background: #f2f5f8; }
+
+@media screen and (max-width: 640px) {
+    .po-existing-banner {
+        align-items: stretch;
+        flex-direction: column;
+    }
+    .po-existing-banner button {
+        width: 100%;
+        min-height: 40px;
+    }
+    #poListBody .po-list-action-row {
+        width: 100%;
+        gap: 5px;
+        overflow: visible;
+    }
+    #poListBody .po-list-action-row > button,
+    #poListBody .po-more-menu {
+        flex: 1 1 0;
+    }
+    #poListBody .po-more-menu > summary {
+        width: 100%;
+        min-height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    #poListBody .po-more-menu-popover {
+        right: 0;
+        min-width: 190px;
+    }
+}
+
 /* Preview environment must remain visually unmistakable on desktop and mobile. */
 .preview-environment-banner {
     position: sticky;
