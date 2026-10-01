@@ -3822,3 +3822,24 @@ test('Product Master Excel import is incremental and never removes omitted produ
     assert.match(uploadSource,/未出現在檔案中的產品不受影響/);
     assert.match(uploadSource,/其他產品不會被刪除或停用/);
 });
+
+
+test('order lifecycle actions are hidden from purchaser and guarded by business capability', () => {
+    const capabilityStart=appSource.indexOf('function canManageOrderLifecycleCapability');
+    const capabilityEnd=appSource.indexOf('\nfunction canCreatePurchaseOrderCapability',capabilityStart);
+    const capabilitySource=appSource.slice(capabilityStart,capabilityEnd);
+    assert.match(capabilitySource,/return hasBusinessCapability\(role\)/);
+
+    const renderStart=appSource.indexOf('window.renderOrdersList = function');
+    const renderEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/const canManageOrderLifecycle = canManageOrderLifecycleCapability\(\)/);
+    assert.match(renderSource,/canManageOrderLifecycle[\s\S]*?quickSetOrderLifecycle/);
+    assert.match(renderSource,/canManageOrderLifecycle[\s\S]*?openReturnManagement/);
+
+    ['quickSetOrderLifecycle','quickCompleteDelivery','quickCancelAllDelivery','saveDeliveryRecord','deleteDeliveryRecord','saveOrderLifecycleStatus','saveReturnRecord','deleteReturnRecord'].forEach(name => {
+        const start=appSource.indexOf('window.'+name+' =');
+        const source=appSource.slice(start,start+500);
+        assert.match(source,/canManageOrderLifecycleCapability\(\)/, name+' must enforce business lifecycle capability');
+    });
+});
