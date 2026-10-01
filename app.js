@@ -1577,6 +1577,7 @@ window.searchProductManagement = async function() {
 
     const map = new Map();
     let checked = 0;
+    let lastIntermediateRenderAt = 0;
     const canSeeInactive = canManagePendingProductMaster();
     const addDocs = docs => {
         (docs || []).forEach(doc => {
@@ -1585,8 +1586,15 @@ window.searchProductManagement = async function() {
         });
         productManagementResults = [...map.values()]
             .sort((a,b) => String(a.manufacturerPartNo || '').localeCompare(String(b.manufacturerPartNo || ''), 'zh-Hant'));
-        renderProductManagementResults();
-        if (status) status.textContent = `搜尋中：已檢查 ${checked} 筆候選資料，找到 ${productManagementResults.length} 筆…`;
+
+        // 三條 prefix query 會平行分頁；大量資料時不要每 50 筆就重建一次整張表。
+        // 搜尋途中最多約每 100ms 更新一次，完成時再做最後完整 render。
+        const now = Date.now();
+        if (now - lastIntermediateRenderAt >= 100) {
+            lastIntermediateRenderAt = now;
+            renderProductManagementResults();
+            if (status) status.textContent = `搜尋中：已檢查 ${checked} 筆候選資料，找到 ${productManagementResults.length} 筆…`;
+        }
     };
 
     const scanPrefix = async (field, value, label) => {
@@ -1617,6 +1625,7 @@ window.searchProductManagement = async function() {
             scanPrefix('nameEn', raw, '產品英文品名搜尋')
         ]);
         if (generation !== productManagementSearchGeneration) return;
+        renderProductManagementResults();
         if (status) status.textContent = `完成，共 ${productManagementResults.length} 筆。`;
     } catch (err) {
         if (generation !== productManagementSearchGeneration) return;
