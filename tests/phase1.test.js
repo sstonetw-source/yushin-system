@@ -1680,7 +1680,8 @@ test('formal purchase document derives ordered progress from supplyOrders only',
     assert.match(appSource, /supplyOrderedQty:cumulative/);
     assert.doesNotMatch(appSource, /purchaseOrderedQty:cumulative/);
     assert.match(appSource, /function purchaseProgressInfo/);
-    assert.match(appSource, /已訂貨 \$\{ordered\}\/\$\{required\}/);
+    assert.match(appSource, /procurementQuantities/);
+    assert.match(appSource, /已訂貨・待到貨/);
 });
 
 

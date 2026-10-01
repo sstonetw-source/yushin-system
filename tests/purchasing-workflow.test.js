@@ -14,7 +14,15 @@ const validation = validationStart >= 0 && validationEnd > validationStart ? app
 assert.ok(validation, 'The PO transaction must validate the live source order');
 const validate = vm.runInNewContext(`${validation}\nassertPurchaseLinesAvailable`, {
     normalizedOrderStatus: order => order.status === 'cancelled' ? 'cancelled' : 'normal',
-    normalizedOrderItems: order => order.items
+    normalizedOrderItems: order => order.items,
+    remainingProcurementQty: (order, item) => workflow.procurementQuantities({
+        orderedQty:item.orderedQty ?? item.qty,
+        fulfillmentType:item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
+        shortageQty:item.shortageQty,
+        supplyOrderedQty:item.supplyOrderedQty,
+        receivedQty:item.receivedQty,
+        returnedQty:item.returnedQty
+    }).remainingToOrderQty
 });
 
 test('purchase order action always uses the one-click print and cloud-sync label', () => {
@@ -80,6 +88,12 @@ test('a self order reduces the quantity available to the formal PO', () => {
     const order = { items:[{ itemCode:'A', qty:8, shortageQty:5, supplyOrderedQty:4 }] };
     validate(order, [{orderItemIndex:0,itemCode:'A',qty:1}]);
     assert.throws(() => validate(order, [{orderItemIndex:0,itemCode:'A',qty:2}]), /待採購數量/);
+});
+
+test('a fully received partial PO leaves the remaining shortage available for a new PO', () => {
+    const order = { items:[{ itemCode:'A', qty:10, shortageQty:3, supplyOrderedQty:4, receivedQty:4 }] };
+    assert.doesNotThrow(() => validate(order, [{orderItemIndex:0,itemCode:'A',qty:3}]));
+    assert.throws(() => validate(order, [{orderItemIndex:0,itemCode:'A',qty:4}]), /待採購數量/);
 });
 
 test('repeating an incoming-stock update does not count the same supply twice', async () => {
