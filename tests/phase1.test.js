@@ -3248,3 +3248,26 @@ test('receiving source lookup uses indexed order map', () => {
     assert.match(renderSource,/const orderById = new Map\(ordersCache\.map\(order => \[order\.id, order\]\)\)/);
     assert.match(renderSource,/receivingSourceOrderForItem\(supply, orderById\)/);
 });
+
+
+test('purchasing cards and completed rows share dispatch snapshots', () => {
+    const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
+    const metricsEnd=appSource.indexOf('\nwindow.setOrderWorkFilter',metricsStart);
+    const metricsSource=appSource.slice(metricsStart,metricsEnd);
+    assert.match(metricsSource,/dispatchStatesByOrder = null/);
+    assert.match(metricsSource,/orderDispatchStates\?\.get\(item\) \|\| itemDispatchState/);
+
+    const cardsStart=appSource.indexOf('function renderPurchasingWorkCards');
+    const cardsEnd=appSource.indexOf('\nfunction purchasingCompletedRows',cardsStart);
+    const cardsSource=appSource.slice(cardsStart,cardsEnd);
+    assert.match(cardsSource,/const stateMap = dispatchStatesByOrder \|\| new Map/);
+    assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap,[\s\S]*?stateMap/);
+    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap\)/);
+
+    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
+    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
+    const viewSource=appSource.slice(viewStart,viewEnd);
+    assert.match(viewSource,/const dispatchStatesByOrder = new Map/);
+    assert.match(viewSource,/purchasingCompletedRows\(filters, normalizedItemsByOrder, dispatchStatesByOrder\)/);
+    assert.match(viewSource,/renderPurchasingWorkCards\(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder\)/);
+});
