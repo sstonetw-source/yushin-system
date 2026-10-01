@@ -7766,6 +7766,7 @@ window.renderOrdersList = function() {
     if (!tbody || !searchInput) return;
 
     const canManageOrderOps = currentUserRole === 'purchaser' || currentUserRole === 'admin';
+    const canEditOrders = canEditPage('orders.list');
     const canConfirmOrderDelivery = hasBusinessCapability();
     const costHeader = document.getElementById('orderCostHeader');
     if (costHeader) costHeader.style.display = canManageOrderOps ? '' : 'none';
@@ -7864,6 +7865,16 @@ window.renderOrdersList = function() {
                 </div>
             </td>
         `;
+        if (!canEditOrders) {
+            tr.querySelectorAll('.order-transaction-cell select, .order-transaction-cell input, td[data-th="備註"] input').forEach(control => {
+                control.disabled = true;
+                control.setAttribute('aria-readonly', 'true');
+            });
+            tr.querySelectorAll('.order-more-menu-popover button').forEach(button => {
+                const action = button.getAttribute('onclick') || '';
+                if (!action.includes('openOrderStatusHistory(')) button.remove();
+            });
+        }
         tbody.appendChild(tr);
     });
     document.getElementById('ordersEmptyHint').style.display = shown === 0 ? 'block' : 'none';
