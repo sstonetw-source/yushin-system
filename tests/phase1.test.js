@@ -3606,3 +3606,19 @@ test('order cache refresh avoids hidden purchasing renders', () => {
     const forecastSource=appSource.slice(forecastStart,forecastEnd);
     assert.doesNotMatch(forecastSource,/if \(canAccessPage\('orders\.po'\)\) renderPurchasingWorkCards\(\)/);
 });
+
+
+test('self-order capability is aligned between frontend and Firestore rules', () => {
+    const capabilityStart=appSource.indexOf('function canSelfOrderCapability');
+    const capabilityEnd=appSource.indexOf('\nfunction canCreatePurchaseOrderCapability',capabilityStart);
+    const capabilitySource=appSource.slice(capabilityStart,capabilityEnd);
+    assert.match(capabilitySource,/return hasBusinessCapability\(role\)/);
+
+    const ruleStart=rulesSource.indexOf('match /supplyOrders/{id}');
+    const ruleEnd=rulesSource.indexOf('\n    match /inventory/{id}',ruleStart);
+    const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
+    assert.match(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
+    assert.match(ruleSource,/request\.resource\.data\.ownerUid == request\.auth\.uid/);
+    assert.match(ruleSource,/request\.resource\.data\.salesCode == salesCode\(\)/);
+    assert.doesNotMatch(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?\|\| \(sales\(\)/);
+});
