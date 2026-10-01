@@ -3129,7 +3129,11 @@ test('order row summaries reuse normalized items', () => {
     const contextSource=appSource.slice(contextStart,contextEnd);
     assert.match(contextSource,/dispatchStateByItem = null/);
     assert.match(contextSource,/function dispatchActionHtml\(order, normalizedItems = null, dispatchStateByItem = null\)/);
-    assert.match(contextSource,/function selfOrderActionHtml\(order, normalizedItems = null, dispatchStateByItem = null\)/);
+
+    const selfStart=appSource.indexOf('function selfOrderActionHtml');
+    const selfEnd=appSource.indexOf('\nwindow.openSelfOrderModal',selfStart);
+    const selfSource=appSource.slice(selfStart,selfEnd);
+    assert.match(selfSource,/function selfOrderActionHtml\(order, normalizedItems = null, dispatchStateByItem = null\)/);
 
     const renderStart=appSource.indexOf('window.renderOrdersList = function()');
     const renderEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',renderStart);
