@@ -1724,8 +1724,8 @@ window.saveProductMasterEditor = async function() {
         specification: String(document.getElementById('pmEditSpec').value || '').trim(),
         productLine,
         productLineId: productLine,
-        productType: String(document.getElementById('pmEditProductType').value || '').trim(),
-        category: String(document.getElementById('pmEditProductType').value || '').trim(),
+        productType: normalizeProductTypeValue(document.getElementById('pmEditProductType').value || ''),
+        category: normalizeProductTypeValue(document.getElementById('pmEditProductType').value || ''),
         supplier: String(document.getElementById('pmEditSupplier').value || '').trim(),
         listPrice: Number(document.getElementById('pmEditListPrice').value || 0),
         authorizationType: document.getElementById('pmEditAuthorization').value || 'NON_AUTHORIZED',
@@ -13579,6 +13579,20 @@ function stableProductId(item) {
     return `prd:${encodeURIComponent(brand)}:name:${encodeURIComponent(name)}`;
 }
 
+function normalizeProductTypeValue(value) {
+    const raw = String(value || '').normalize('NFKC').trim();
+    if (!raw) return '';
+    const key = raw.replace(/[\s_-]+/g, '').toLocaleLowerCase();
+    const aliases = {
+        instrument:'Instrument', instruments:'Instrument', 儀器:'Instrument', 仪器:'Instrument', 機器:'Instrument', 机器:'Instrument',
+        reagent:'Reagent', reagents:'Reagent', 試劑:'Reagent', 试剂:'Reagent',
+        consumable:'Consumable', consumables:'Consumable', 耗材:'Consumable', 消耗品:'Consumable',
+        accessory:'Accessory', accessories:'Accessory', 配件:'Accessory', 附件:'Accessory',
+        service:'Service', services:'Service', 服務:'Service', 服务:'Service', 維修:'Service', 维修:'Service'
+    };
+    return aliases[key] || raw;
+}
+
 function normalizeProductMasterItem(item) {
     const status = String(item.status || '').trim().toUpperCase();
     const active = item.active !== false && status !== 'INACTIVE';
@@ -13589,7 +13603,7 @@ function normalizeProductMasterItem(item) {
         supplier: String(item.supplier || '').trim(),
         spec: item.spec || '',
         productLine: String(item.productLine || '').trim(),
-        productType: String(item.productType || item.category || '').trim(),
+        productType: normalizeProductTypeValue(item.productType || item.category || ''),
         authorizationType: String(item.authorizationType || '').trim().toUpperCase(),
         source: String(item.source || '').trim().toUpperCase(),
         status: status || (active ? 'ACTIVE' : 'INACTIVE'),
@@ -15622,7 +15636,7 @@ window.downloadProductMasterTemplate = async function() {
         return;
     }
     const headers = ['貨號','中文品名','英文品名','規格','產品類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
-    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','耗材','','1000','600','是','是','否','否'];
+    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
     ws['!cols'] = [18,28,32,24,14,24,14,14,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
@@ -15689,7 +15703,7 @@ window.handlePriceExcelUpload = async function(input) {
                     const nameCn = String(getField(row, ['中文品名', '品名', '中文名稱'])).trim();
                     const nameEn = String(getField(row, ['英文品名', '英文名稱'])).trim();
                     const model = String(getField(row, ['貨號', '型號'])).trim();
-                    const productType = String(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type'])).trim();
+                    const productType = normalizeProductTypeValue(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type']));
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
                     const supplier = String(getField(row, ['供應商', '供应商', 'Supplier', 'Vendor'])).trim();
                     const activeRaw = String(getField(row, ['啟用', '启用', 'Active', 'Status'])).trim().toLocaleLowerCase();
