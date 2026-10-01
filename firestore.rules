@@ -98,6 +98,15 @@ service cloud.firestore {
       );
     }
 
+    // Engineer may assist a salesperson with a quote, but only quotes the engineer created.
+    // Ownership remains with the salesperson; orders are intentionally not covered here.
+    function engineerAssistedSalesQuote(data) {
+      return engineer()
+        && validSalesOwner(data)
+        && data.get('createdByUid', '') == request.auth.uid
+        && data.get('createdByRole', '') == 'engineer';
+    }
+
     function validOwnedCommercialCreate(data) {
       return admin() ||
         (commercialDocumentOwner() &&
@@ -315,14 +324,17 @@ service cloud.firestore {
     }
 
     match /quotes/{id} {
-      allow read: if admin() || purchaser() || owns(resource.data);
+      allow read: if admin() || purchaser() || owns(resource.data)
+        || engineerAssistedSalesQuote(resource.data);
       allow create: if canCreateCommercialDoc() && (
         validOwnedCommercialCreate(request.resource.data)
+        || engineerAssistedSalesQuote(request.resource.data)
         || (purchaser() && validQuoteOwner(request.resource.data)
           && request.resource.data.ownerUid != request.auth.uid)
       );
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
+        || (engineerAssistedSalesQuote(resource.data) && sameCommercialOwner() && preservesCreator())
         || (purchaser() && sameCommercialOwner() && preservesCreator());
       allow delete: if admin();
     }
