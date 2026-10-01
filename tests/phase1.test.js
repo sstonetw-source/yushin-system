@@ -3668,3 +3668,18 @@ test('receiving page load performs one unified render', () => {
     assert.doesNotMatch(source,/mergeReceivingSourceOrdersIntoOrderCache\(\);[\s\S]{0,120}renderPurchasingWorkCards\(\)/);
     assert.match(source,/if \(!deferRender\) \{[\s\S]*?purchasingView === 'receiving'\) renderPurchasingView\(\);[\s\S]*?else renderPoList\(\)/);
 });
+
+
+test('deferred receiving load merges source orders only after parallel reads finish', () => {
+    const pageStart=appSource.indexOf('async function loadPurchaseOrderPage');
+    const pageEnd=appSource.indexOf('\nwindow.loadMyPurchaseOrders',pageStart);
+    const pageSource=appSource.slice(pageStart,pageEnd);
+    assert.match(pageSource,/if \(!deferRender && purchasingView === 'receiving' && nextSourceOrders\.size\) \{/);
+
+    const queueStart=appSource.indexOf('function loadPurchasingReceivingQueue');
+    const queueEnd=appSource.indexOf('\nlet purchasingFilterOptionsSignature',queueStart);
+    const queueSource=appSource.slice(queueStart,queueEnd);
+    assert.match(queueSource,/loadPurchaseOrderPage\(reset, \{ deferRender:true \}\)/);
+    assert.match(queueSource,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
+    assert.match(queueSource,/renderPurchasingView\(\)/);
+});
