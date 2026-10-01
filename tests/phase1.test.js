@@ -2255,3 +2255,24 @@ test('shared brand settings reads are bounded', () => {
     const statsSource=appSource.slice(statsStart,statsEnd);
     assert.match(statsSource,/firestoreReadWithTimeout\([\s\S]*?salesStatistics[\s\S]*?'重點廠牌設定'/);
 });
+
+
+test('interactive quote forecast product reads are bounded', () => {
+    assert.equal((appSource.match(/Product Master 重複貨號檢查/g) || []).length, 2);
+    for (const label of [
+        'Forecast 歷史紀錄',
+        'Forecast Product Master',
+        'Forecast 來源估價單',
+        '複製估價單',
+        '建立 Forecast 的估價單',
+        '成交轉訂單估價單'
+    ]) assert.match(appSource, new RegExp(label));
+
+    const copyStart=appSource.indexOf('window.copyQuoteAsNew = async function');
+    const copyEnd=appSource.indexOf('/* ---------- 我的估價單',copyStart);
+    assert.match(appSource.slice(copyStart,copyEnd),/firestoreReadWithTimeout/);
+
+    const dealStart=appSource.indexOf('window.markQuoteAsDeal = async function');
+    const dealEnd=appSource.indexOf('window.unmarkQuoteAsDeal',dealStart);
+    assert.match(appSource.slice(dealStart,dealEnd),/firestoreReadWithTimeout/);
+});
