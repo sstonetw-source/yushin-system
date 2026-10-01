@@ -7805,6 +7805,13 @@ window.renderOrdersList = function() {
 
         const tr = document.createElement('tr');
         const lifecycle = orderLifecycleInfo(o);
+        // 這些摘要都會掃描訂單品項；同一列只計算一次，避免列表重複做相同工作。
+        const deliveryProgress = canConfirmOrderDelivery ? deliveryProgressInfo(o) : null;
+        const fulfillmentProgress = canConfirmOrderDelivery ? fulfillmentProgressInfo(o) : null;
+        const contextActions = orderContextActionState(o);
+        const deliveryPending = pendingDeliveryOrderIds.has(o.id);
+        const billingPending = pendingOrderStatusKeys.has(o.id + ':isBilled');
+        const lifecyclePending = pendingLifecycleOrderIds.has(o.id);
         if (lifecycle.status !== 'normal') {
             tr.classList.add('order-row-closed');
         }
@@ -7831,17 +7838,17 @@ window.renderOrdersList = function() {
             <td class="no-print" data-th="操作">
                 <div class="order-compact-actions">
                     
-                    ${canConfirmOrderDelivery ? `<button type="button" class="btn-small ${pendingDeliveryOrderIds.has(o.id) ? 'btn-secondary' : deliveryProgressInfo(o).state === 'complete' ? 'status-ok' : deliveryProgressInfo(o).state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${normalizedOrderStatus(o) !== 'normal' || pendingDeliveryOrderIds.has(o.id) || deliveryProgressInfo(o).state === 'complete' || fulfillmentProgressInfo(o).shippable<=0 ? 'disabled' : ''}>${pendingDeliveryOrderIds.has(o.id) ? '處理中…' : deliveryProgressInfo(o).state === 'complete' ? '已送貨' : fulfillmentProgressInfo(o).shippable>0 ? '已送貨' : '待打單'}</button>` : ''}
-                    ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${normalizedOrderStatus(o) !== 'normal' || pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? 'disabled' : ''}>${pendingOrderStatusKeys.has(`${o.id}:isBilled`) ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
+                    ${canConfirmOrderDelivery ? `<button type="button" class="btn-small ${deliveryPending ? 'btn-secondary' : deliveryProgress.state === 'complete' ? 'status-ok' : deliveryProgress.state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : deliveryProgress.state === 'complete' ? '已送貨' : fulfillmentProgress.shippable>0 ? '已送貨' : '待打單'}</button>` : ''}
+                    ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
-                            ${pendingLifecycleOrderIds.has(o.id)
+                            ${lifecyclePending
                                 ? '<button type="button" disabled>處理中…</button>'
-                                : normalizedOrderStatus(o) === 'normal'
-                                    ? `${orderContextActionState(o).showPartialDelivery ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>` : ''}
+                                : lifecycle.status === 'normal'
+                                    ? `${contextActions.showPartialDelivery ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>` : ''}
                             <button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">取消訂單</button>
-                            ${orderContextActionState(o).showReturn ? `<button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}`
+                            ${contextActions.showReturn ? `<button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}`
                                     : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`}
                             ${dispatchActionHtml(o)}
                             ${selfOrderActionHtml(o)}
