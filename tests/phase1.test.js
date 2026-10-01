@@ -2853,3 +2853,22 @@ test('high frequency lookup reads are bounded', () => {
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?orderBy\('quoteNo', 'desc'\)\.limit\(10\)\.get\(\)[\s\S]*?'最近客戶名單'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價欄位偏好'/);
 });
+
+
+test('purchasing work queues batch DOM row insertion', () => {
+    const pendingStart=appSource.indexOf('function renderPendingPurchaseOrders(');
+    const pendingEnd=appSource.indexOf('window.loadPendingPurchaseOrders =',pendingStart);
+    const pendingSource=appSource.slice(pendingStart,pendingEnd);
+    assert.match(pendingSource,/const fragment = document\.createDocumentFragment\(\)/);
+    assert.match(pendingSource,/fragment\.appendChild\(row\)/);
+    assert.match(pendingSource,/body\.appendChild\(fragment\)/);
+    assert.doesNotMatch(pendingSource,/body\.appendChild\(row\)/);
+
+    const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders(');
+    const dispatchEnd=appSource.indexOf('function pendingPurchaseLines(',dispatchStart);
+    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
+    assert.match(dispatchSource,/const fragment=document\.createDocumentFragment\(\)/);
+    assert.match(dispatchSource,/fragment\.appendChild\(tr\)/);
+    assert.match(dispatchSource,/body\.appendChild\(fragment\)/);
+    assert.doesNotMatch(dispatchSource,/body\.appendChild\(tr\)/);
+});
