@@ -2845,3 +2845,11 @@ test('order list skips search-string work when no keyword and batches DOM insert
     assert.match(source,/tbody\.appendChild\(fragment\)/);
     assert.doesNotMatch(source,/tbody\.appendChild\(tr\)/);
 });
+
+
+test('high frequency lookup reads are bounded', () => {
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'Product Master'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('quotes'\)\.doc\(forecast\.sourceId\)\.get\(\)[\s\S]*?'Forecast 來源估價單'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?orderBy\('quoteNo', 'desc'\)\.limit\(10\)\.get\(\)[\s\S]*?'最近客戶名單'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價欄位偏好'/);
+});
