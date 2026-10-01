@@ -135,59 +135,96 @@
 
     <!-- ============ Forecast 系統 ============ -->
 <div id="forecast-system" class="content-section">
-    <div class="section-header no-print">
-        <h2>Forecast</h2>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button type="button" class="btn-secondary" onclick="openForecastStageInfo()">ⓘ Stage 說明</button>
-            <button type="button" onclick="openForecastModal()">＋ 新增 Forecast</button>
-        </div>
+    <div class="section-header no-print forecast-section-header">
+        <h2>
+            Forecast
+            <button
+                type="button"
+                class="forecast-stage-info-trigger"
+                onclick="openForecastStageInfo()"
+                aria-label="查看 Forecast Stage 說明"
+                title="Stage 說明"
+            >ⓘ</button>
+        </h2>
+        <button type="button" onclick="openForecastModal()">＋ 新增</button>
     </div>
 
     <div class="toolbar no-print forecast-toolbar">
-        <input
-            id="forecastSearch"
-            type="search"
-            placeholder="搜尋客戶、廠牌、產品、最新進度"
-            oninput="scheduleForecastHistorySearch()"
-        >
-        <span id="forecastHistorySearchStatus" class="inline-status" role="status"></span>
+        <div class="forecast-search-row">
+            <input
+                id="forecastSearch"
+                type="search"
+                placeholder="搜尋客戶、廠牌、產品、最新進度"
+                oninput="scheduleForecastHistorySearch()"
+            >
+            <span id="forecastHistorySearchStatus" class="inline-status" role="status"></span>
+        </div>
 
-        <select id="forecastBrandFilter" onchange="renderForecastList()">
-            <option value="">全部廠牌</option>
-        </select>
+        <div class="forecast-quick-filters" aria-label="Forecast 快速篩選">
+            <button
+                type="button"
+                id="forecastMineQuickBtn"
+                class="forecast-filter-chip"
+                onclick="toggleForecastMineFilter()"
+            >我的案件</button>
+            <button
+                type="button"
+                id="forecastActiveQuickBtn"
+                class="forecast-filter-chip"
+                onclick="setForecastActiveFilter()"
+            >進行中</button>
+            <button
+                type="button"
+                id="forecastFilterToggleBtn"
+                class="forecast-filter-chip"
+                onclick="toggleForecastFilterPanel()"
+                aria-expanded="false"
+                aria-controls="forecastFilterPanel"
+            >篩選</button>
+        </div>
 
-        <select id="forecastSalesFilter" onchange="renderForecastList()">
-            <option value="">全部業務</option>
-        </select>
+        <div id="forecastFilterPanel" class="forecast-filter-panel" hidden>
+            <div class="forecast-filter-grid">
+                <select id="forecastBrandFilter" aria-label="Forecast 廠牌" onchange="applyForecastLocalFilters()">
+                    <option value="">全部廠牌</option>
+                </select>
 
-        <select id="forecastStatusFilter" onchange="loadForecasts(true)">
-            <option value="active">進行中</option>
-            <option value="won">Win</option>
-            <option value="lost">Lost</option>
-            <option value="all">全部狀態</option>
-        </select>
+                <select id="forecastSalesFilter" aria-label="Forecast 業務" onchange="handleForecastSalesFilterChange()">
+                    <option value="">全部業務</option>
+                </select>
 
-        <select id="forecastStageFilter" onchange="renderForecastList()">
-            <option value="">全部 Stage</option>
-            <option value="stage1">Stage 1</option>
-            <option value="stage2">Stage 2</option>
-            <option value="stage3">Stage 3</option>
-            <option value="stage4">Stage 4</option>
-            <option value="stage5">Stage 5</option>
-        </select>
+                <select id="forecastStatusFilter" aria-label="Forecast 狀態" onchange="handleForecastStatusFilterChange()">
+                    <option value="active" selected>進行中</option>
+                    <option value="won">Win</option>
+                    <option value="lost">Lost</option>
+                    <option value="all">全部狀態</option>
+                </select>
 
-        <select id="forecastPeriodFilter" onchange="renderForecastList()">
-            <option value="this-month">本月</option>
-            <option value="last-month">上月</option>
-            <option value="this-quarter">本季</option>
-            <option value="this-year" selected>今年</option>
-            <option value="last-year">去年</option>
-            <option value="all">全部期間</option>
-        </select>
-        <button type="button" id="forecastRefreshBtn" class="btn-secondary" onclick="loadForecasts(true)">↻ 更新</button>
+                <select id="forecastStageFilter" aria-label="Forecast Stage" onchange="applyForecastLocalFilters()">
+                    <option value="">全部 Stage</option>
+                    <option value="stage1">Stage 1</option>
+                    <option value="stage2">Stage 2</option>
+                    <option value="stage3">Stage 3</option>
+                    <option value="stage4">Stage 4</option>
+                    <option value="stage5">Stage 5</option>
+                </select>
+
+                <select id="forecastPeriodFilter" aria-label="Forecast 期間" onchange="applyForecastLocalFilters()">
+                    <option value="this-month">本月</option>
+                    <option value="last-month">上月</option>
+                    <option value="this-quarter">本季</option>
+                    <option value="this-year" selected>今年</option>
+                    <option value="last-year">去年</option>
+                    <option value="all">全部期間</option>
+                </select>
+            </div>
+            <div class="forecast-filter-actions">
+                <button type="button" class="btn-secondary" onclick="clearForecastFilters()">清除篩選</button>
+            </div>
+        </div>
     </div>
 
-    <div class="table-wrap">
+    <div class="table-wrap forecast-table-wrap">
         <table id="forecastTable">
             <thead>
                 <tr>
@@ -230,6 +267,8 @@
         <h3 id="forecastModalTitle">新增 Forecast</h3>
 
         <input type="hidden" id="forecastId">
+        <input type="hidden" id="forecastStatus" value="active">
+        <input type="hidden" id="forecastProgress" value="">
 
         <label>客戶名稱 *</label>
         <input
@@ -258,45 +297,17 @@
             placeholder="例如：2500000"
         >
 
-        <div class="forecast-form-grid" id="forecastWorkflowSection">
-            <div>
-                <label>Stage *</label>
-                <select id="forecastStage">
-                    <option value="stage1">Stage 1</option>
-                    <option value="stage2">Stage 2</option>
-                    <option value="stage3">Stage 3</option>
-                    <option value="stage4">Stage 4</option>
-                    <option value="stage5">Stage 5</option>
-                </select>
-            </div>
-
-            <div>
-                <label>狀態 *</label>
-                <select id="forecastStatus">
-                    <option value="active">進行中</option>
-                    <option value="won">Win</option>
-                    <option value="lost">Lost</option>
-                </select>
-            </div>
-        </div>
-
-        <div id="forecastNewProgressSection">
-            <label>立案進度</label>
-            <textarea
-                id="forecastProgress"
-                rows="4"
-                placeholder="可不填；若空白，系統會自動記錄「MM/DD 立案」"
-            ></textarea>
+        <div id="forecastWorkflowSection">
+            <label>Stage *</label>
+            <select id="forecastStage">
+                <option value="stage1">Stage 1</option>
+                <option value="stage2">Stage 2</option>
+                <option value="stage3">Stage 3</option>
+                <option value="stage4">Stage 4</option>
+                <option value="stage5">Stage 5</option>
+            </select>
             <div class="forecast-form-note">
-                日期由系統自動加入，不需要自行輸入日期。
-            </div>
-        </div>
-
-        <div id="forecastCurrentProgressSection" style="display:none;">
-            <label>目前最新進度</label>
-            <div id="forecastCurrentProgress" class="forecast-current-progress"></div>
-            <div class="forecast-form-note">
-                若要新增追蹤紀錄，請使用主列表的「＋進度」。
+                新增後狀態自動設為「進行中」，立案日期與第一筆紀錄由系統自動建立。
             </div>
         </div>
 
@@ -435,37 +446,18 @@
     <div class="modal forecast-stage-info-modal">
         <h3>Forecast Stage 定義</h3>
 
-        <div class="forecast-stage-info-list">
-            <div class="forecast-stage-info-item">
-                <strong>Stage 1</strong>
-                <span>介紹機台／產品，確認客戶需求以及是否需要 Demo。</span>
-            </div>
-
-            <div class="forecast-stage-info-item">
-                <strong>Stage 2</strong>
-                <span>提供詳細報價、產品規格與購機方案。</span>
-            </div>
-
-            <div class="forecast-stage-info-item">
-                <strong>Stage 3</strong>
-                <span>使用者進入預算編列、經費申請或等待預算核准。</span>
-            </div>
-
-            <div class="forecast-stage-info-item">
-                <strong>Stage 4</strong>
-                <span>進入標案、請購、議價或其他正式採購程序。</span>
-            </div>
-
-            <div class="forecast-stage-info-item">
-                <strong>Stage 5</strong>
-                <span>案件成交／交機。</span>
-            </div>
+        <div class="forecast-stage-compact-grid">
+            <div><strong>Stage 1</strong><span>需求確認 / Demo</span></div>
+            <div><strong>Stage 2</strong><span>報價 / 規格 / 方案</span></div>
+            <div><strong>Stage 3</strong><span>預算 / 經費申請</span></div>
+            <div><strong>Stage 4</strong><span>採購 / 標案 / 議價</span></div>
+            <div><strong>Stage 5</strong><span>成交 / 交機</span></div>
         </div>
 
-        <div class="forecast-status-info">
-            <div><strong>進行中：</strong>案件仍在持續追蹤。</div>
-            <div><strong>Win：</strong>案件已成交，資料仍保留供日後查詢與統計。</div>
-            <div><strong>Lost：</strong>案件未成交，保留失敗前最後 Stage 與歷史進度。</div>
+        <div class="forecast-status-compact">
+            <div><strong>進行中</strong><span>持續追蹤</span></div>
+            <div><strong>Win</strong><span>成交結案</span></div>
+            <div><strong>Lost</strong><span>未成交結案</span></div>
         </div>
 
         <div class="modal-actions">
