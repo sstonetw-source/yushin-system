@@ -2603,3 +2603,37 @@ test('quote number lookup has bounded Firestore wait', () => {
     const source=appSource.slice(start,end);
     assert.match(source,/firestoreReadWithTimeout\([\s\S]*?collection\('quotes'\)[\s\S]*?'估價單號'/);
 });
+
+
+test('new quote persistence cannot overwrite an existing quote number', () => {
+    const start=appSource.indexOf('function persistQuoteOutputRecord');
+    const end=appSource.indexOf('\nfunction quoteDataForPdfExport',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/db\.runTransaction\(async transaction/);
+    assert.match(source,/transaction\.get\(quoteRef\)/);
+    assert.match(source,/snapshot\.exists && !updatingExisting/);
+    assert.match(source,/quote-number-conflict/);
+    assert.match(source,/transaction\.set\(quoteRef, quoteData\)/);
+    assert.match(source,/setQuoteEditingContext\(quoteData\.quoteNo\)/);
+});
+
+test('first quote PDF waits for safe quote creation before rendering', () => {
+    const start=appSource.indexOf('window.exportCurrentQuotePdf = async function()');
+    const end=appSource.indexOf('\nwindow.loadQuoteFromCloud',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const isNewQuote = !editingQuoteNo \|\| editingQuoteNo !== quoteData\.quoteNo/);
+    assert.match(source,/if \(isNewQuote\)[\s\S]*?await persistQuoteOutputRecord\(quoteData, 'PDF'\)/);
+    const persistIndex=source.indexOf("await persistQuoteOutputRecord(quoteData, 'PDF')");
+    const stageIndex=source.indexOf('createQuotePdfStage(quoteData)');
+    assert.ok(persistIndex >= 0 && stageIndex > persistIndex);
+});
+
+test('legacy quote lookup keeps the loaded quote number and editing context', () => {
+    const start=appSource.indexOf('async function fetchAndFillQuote');
+    const end=appSource.indexOf('\nwindow.openQuoteFromAdmin',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?'載入估價單'/);
+    assert.match(source,/applyCompanyTheme\(data\.company \|\| 'yushin'\)/);
+    assert.doesNotMatch(source,/switchCompany\(/);
+    assert.match(source,/setQuoteEditingContext\(data\.quoteNo \|\| qNo\)/);
+});
