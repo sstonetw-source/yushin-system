@@ -2244,8 +2244,10 @@ window.loadForecasts = async function(reset = true) {
     }
 
     try {
-        if (canViewAllData('forecast')) await ensureSalesListLoaded();
-        populateForecastSalesFilter();
+        if (canViewAllData('forecast')) {
+            await ensureSalesListLoaded();
+            populateForecastSalesFilter();
+        } else populateForecastSalesFilter();
 
         const status = document.getElementById('forecastStatusFilter')?.value || 'active';
         const selectedSalesName = document.getElementById('forecastSalesFilter')?.value || '';
@@ -2536,7 +2538,10 @@ window.openForecastModal = function(id = '') {
     document.getElementById('forecastProgress').value = '';
 
     const workflowSection = document.getElementById('forecastWorkflowSection');
-    if (workflowSection) workflowSection.style.display = item ? 'none' : '';
+    if (workflowSection) {
+        if (item) workflowSection.style.display = 'none';
+        else workflowSection.style.display = '';
+    }
 
     document.getElementById('forecastModalTitle').innerText = item ? '編輯 Forecast' : '新增 Forecast';
     document.getElementById('forecastModalOverlay').classList.add('active');
