@@ -168,3 +168,40 @@ test('cross-module shortage purchase and partial receipts stay numerically align
   assert.equal(w.itemWorkCategory(item),'delivery');
   assert.equal(fulfillment.pendingDispatchQty(item),10);
 });
+
+
+test('procurement quantity stays open after a partial purchase is fully received',()=>{
+  const beforeReceipt=w.procurementQuantities({
+    orderedQty:10,shortageQty:7,supplyOrderedQty:4,receivedQty:0,fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(beforeReceipt.remainingToOrderQty,3);
+  assert.equal(beforeReceipt.inTransitQty,4);
+
+  const afterReceipt=w.procurementQuantities({
+    orderedQty:10,shortageQty:3,supplyOrderedQty:4,receivedQty:4,fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(afterReceipt.remainingToOrderQty,3);
+  assert.equal(afterReceipt.inTransitQty,0);
+  assert.equal(w.itemWorkCategory({
+    orderedQty:10,shortageQty:3,supplyOrderedQty:4,receivedQty:4,fulfillmentType:'WAREHOUSE'
+  }),'ordering');
+});
+
+test('procurement quantity moves to arrival only when in-transit supply covers the live shortage',()=>{
+  const partial=w.procurementQuantities({
+    orderedQty:10,shortageQty:7,supplyOrderedQty:4,receivedQty:0,fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(partial.remainingToOrderQty,3);
+  assert.equal(w.itemWorkCategory({
+    orderedQty:10,shortageQty:7,supplyOrderedQty:4,receivedQty:0,fulfillmentType:'WAREHOUSE'
+  }),'ordering');
+
+  const covered=w.procurementQuantities({
+    orderedQty:10,shortageQty:7,supplyOrderedQty:7,receivedQty:0,fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(covered.remainingToOrderQty,0);
+  assert.equal(covered.inTransitQty,7);
+  assert.equal(w.itemWorkCategory({
+    orderedQty:10,shortageQty:7,supplyOrderedQty:7,receivedQty:0,fulfillmentType:'WAREHOUSE'
+  }),'arrival');
+});

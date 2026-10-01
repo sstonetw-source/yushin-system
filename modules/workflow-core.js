@@ -27,29 +27,46 @@
     COMPLETE:'complete',
     CLOSED:'closed'
   });
+  function procurementQuantities(input={}){
+    const qty=n(input.orderedQty??input.qty);
+    const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
+    const ordered=n(input.supplyOrderedQty);
+    const received=n(input.receivedQty);
+    const inTransitQty=Math.max(0,ordered-received);
+    if(fulfillmentType==='DIRECT_SHIP'){
+      const requiredSupplyQty=qty+n(input.returnedQty);
+      return {
+        requiredSupplyQty,
+        supplyOrderedQty:ordered,
+        receivedQty:received,
+        inTransitQty,
+        remainingToOrderQty:Math.max(0,requiredSupplyQty-ordered)
+      };
+    }
+    const shortageQty=n(input.shortageQty);
+    return {
+      requiredSupplyQty:shortageQty+inTransitQty,
+      supplyOrderedQty:ordered,
+      receivedQty:received,
+      inTransitQty,
+      remainingToOrderQty:Math.max(0,shortageQty-inTransitQty)
+    };
+  }
   function itemWorkCategory(input={}){
     if(input.lifecycleStatus&&input.lifecycleStatus!=='normal')return ITEM_WORK_CATEGORIES.CLOSED;
     const qty=n(input.orderedQty??input.qty);
     const delivered=n(input.deliveredQty);
     if(qty>0&&delivered>=qty)return input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
-    const ordered=n(input.supplyOrderedQty);
-    const received=n(input.receivedQty);
+    const supply=procurementQuantities(input);
     if(fulfillmentType==='DIRECT_SHIP'){
-      // 直送退貨後需要由供應商補送；供應需求因此是原訂購量 + 已退貨量。
-      // supplyOrderedQty / receivedQty 保留累計量，補送批次可自然超過原始訂購量。
-      const requiredSupply=qty+n(input.returnedQty);
-      if(requiredSupply>ordered)return ITEM_WORK_CATEGORIES.ORDERING;
-      if(received<requiredSupply)return ITEM_WORK_CATEGORIES.ARRIVAL;
+      if(supply.remainingToOrderQty>0)return ITEM_WORK_CATEGORIES.ORDERING;
+      if(supply.receivedQty<supply.requiredSupplyQty)return ITEM_WORK_CATEGORIES.ARRIVAL;
       return ITEM_WORK_CATEGORIES.DELIVERY;
     }
     const shortage=n(input.shortageQty);
-    // shortage 仍包含「已發單但尚未到貨」的缺口，因此先扣掉尚在途的供應。
-    // 只有在途數量覆蓋不了的部分才仍屬於待採購；已被 PO 覆蓋但未收貨則是待到貨。
-    const outstandingSupply=Math.max(0,ordered-received);
-    const uncoveredShortage=Math.max(0,shortage-outstandingSupply);
-    if(uncoveredShortage>0)return ITEM_WORK_CATEGORIES.ORDERING;
-    if(shortage>0||ordered>received)return ITEM_WORK_CATEGORIES.ARRIVAL;
+    if(supply.remainingToOrderQty>0)return ITEM_WORK_CATEGORIES.ORDERING;
+    if(shortage>0||supply.inTransitQty>0)return ITEM_WORK_CATEGORIES.ARRIVAL;
     return ITEM_WORK_CATEGORIES.DELIVERY;
   }
   function normalizeSupplyAllocations(item={}){
@@ -105,6 +122,6 @@
       && !!String(advance.customerOrderReference||'').trim()
       && !!advance.completedAt;
   }
-  return {SUPPLY_SOURCE_TYPES,RELEASE_MODES,ADVANCE_STATUSES,ITEM_WORK_CATEGORIES,itemWorkCategory,normalizeSupplyAllocations,validateSupplyAllocations,normalizeCommercialRelease,validateAdvanceRequest,canDeliver,canBill};
+  return {SUPPLY_SOURCE_TYPES,RELEASE_MODES,ADVANCE_STATUSES,ITEM_WORK_CATEGORIES,procurementQuantities,itemWorkCategory,normalizeSupplyAllocations,validateSupplyAllocations,normalizeCommercialRelease,validateAdvanceRequest,canDeliver,canBill};
 });
 

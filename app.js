@@ -6692,15 +6692,33 @@ function orderLifecycleInfo(order) {
 
 function purchaseProgressInfo(order) {
     const items=normalizedOrderItems(order);
-    const direct=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP');
-    const warehouse=items.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
-    if(items.length&&direct.length===items.length)return {state:'direct',label:'原廠直送'};
-    const required=warehouse.reduce((s,item)=>s+Math.max(0,Number(item.shortageQty||0)),0);
-    const ordered=warehouse.reduce((s,item)=>s+Math.min(Math.max(0,Number(item.shortageQty||0)),Math.max(0,Number(item.supplyOrderedQty||0))),0);
-    if(required<=0)return {state:'not_required',label:'無需採購'};
-    if(ordered>=required)return {state:'ordered',label:`已訂貨 ${ordered}/${required}`};
-    if(ordered>0)return {state:'partial',label:`部分訂貨 ${ordered}/${required}`};
-    return {state:'pending',label:`待採購 ${required}`};
+    if (!items.length) return {state:'not_required',label:'無需採購'};
+    let pending=0,inTransit=0,everOrdered=0;
+    let allDirect=true;
+    items.forEach(item=>{
+        const direct=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+        if(!direct) allDirect=false;
+        const returnedQty=direct?itemDispatchState(order,item).returned:Number(item.returnedQty||0);
+        const quantities=window.YushinWorkflow?.procurementQuantities({
+            orderedQty:item.orderedQty??item.qty,
+            fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+            shortageQty:item.shortageQty,
+            supplyOrderedQty:item.supplyOrderedQty,
+            receivedQty:item.receivedQty,
+            returnedQty
+        });
+        const ordered=Math.max(0,Number(item.supplyOrderedQty||0));
+        const received=Math.max(0,Number(item.receivedQty||0));
+        pending+=quantities?quantities.remainingToOrderQty:remainingProcurementQty(order,item);
+        inTransit+=quantities?quantities.inTransitQty:Math.max(0,ordered-received);
+        everOrdered+=ordered;
+    });
+    if(pending>0&&inTransit>0)return {state:'partial',label:`待採購 ${pending}／在途 ${inTransit}`};
+    if(pending>0)return {state:'pending',label:`待採購 ${pending}`};
+    if(inTransit>0)return {state:'ordered',label:`已訂貨・待到貨 ${inTransit}`};
+    if(everOrdered>0)return {state:'ordered',label:'採購完成'};
+    if(allDirect)return {state:'direct',label:'原廠直送'};
+    return {state:'not_required',label:'無需採購'};
 }
 
 function fulfillmentProgressInfo(order) {
@@ -7746,16 +7764,26 @@ function purchaseLineMatchesFilters(date, salesName, brand, context = null) {
 }
 
 function remainingProcurementQty(order, item) {
+    const returnedQty = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
+        ? itemDispatchState(order,item).returned
+        : Number(item.returnedQty || 0);
+    const quantities = window.YushinWorkflow?.procurementQuantities({
+        orderedQty:item.orderedQty ?? item.qty,
+        fulfillmentType:item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
+        shortageQty:item.shortageQty,
+        supplyOrderedQty:item.supplyOrderedQty,
+        receivedQty:item.receivedQty,
+        returnedQty
+    });
+    if (quantities) return quantities.remainingToOrderQty;
     const qty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
     const ordered = Math.max(0, Number(item.supplyOrderedQty || 0));
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
-        const returned=itemDispatchState(order,item).returned;
-        return Math.max(0, qty + returned - ordered);
+        return Math.max(0, qty + Math.max(0, Number(returnedQty || 0)) - ordered);
     }
     const shortage = Math.max(0, Number(item.shortageQty || 0));
     const received = Math.max(0, Number(item.receivedQty || 0));
-    const outstandingSupply = Math.max(0, ordered - received);
-    return Math.max(0, shortage - outstandingSupply);
+    return Math.max(0, shortage - Math.max(0, ordered - received));
 }
 
 function pendingProcurementDisplayLines(order) {
@@ -9428,9 +9456,10 @@ function purchaseItemsFromOrder(order) {
         const fullQty=Number.isFinite(parsedQty)&&parsedQty>0?parsedQty:1;
         const procurementType=item.procurementType||order.procurementType||'PURCHASING_PO';
         if(procurementType==='SALES_SELF_ORDER') return null;
-        const procurementRequired=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
-            ? fullQty : Math.max(0,Number(item.shortageQty||0));
-        const remainingPurchase=Math.max(0,procurementRequired-Math.max(0,Number(item.supplyOrderedQty||0)));
+        // 待採購數量必須與採購頁、訂單工作狀態共用同一公式。
+        // shortageQty 會在到貨時下降，不能再直接減累計 supplyOrderedQty，
+        // 否則「部分採購已全部到貨、但仍有剩餘缺口」會被誤算成 0。
+        const remainingPurchase=remainingProcurementQty(order,item);
         return {
             orderId: order.id,
             orderItemIndex: index,
@@ -9773,10 +9802,7 @@ function assertPurchaseLinesAvailable(order, lines) {
     }
     for (const [index, qty] of requestedByIndex) {
         const source = sourceItems[index];
-        const required = (source.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
-            ? Math.max(0, Number(source.qty || 0)) + itemDispatchState(order,source).returned
-            : Math.max(0, Number(source.shortageQty || 0));
-        const remaining = Math.max(0, required - Math.max(0, Number(source.supplyOrderedQty || 0)));
+        const remaining = remainingProcurementQty(order, source);
         if (!(qty > 0) || qty > remaining + 1e-9) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
     }
 }
