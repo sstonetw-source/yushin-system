@@ -3024,6 +3024,12 @@ function getFormattedDateCode() {
 }
 
 window.generateQuoteNo = async function() {
+    const quoteNoInput = document.getElementById('quoteNo');
+    if (editingQuoteNo && !restoringQuoteDraft) {
+        if (quoteNoInput) quoteNoInput.value = editingQuoteNo;
+        return editingQuoteNo;
+    }
+
     const info = companyData[currentCompany];
     const dateStr = getFormattedDateCode();
 
@@ -3066,15 +3072,22 @@ window.generateQuoteNo = async function() {
             }
         });
         const count = maxSeq + 1;
-        document.getElementById('quoteNo').value = `${prefix}${String(count).padStart(2, '0')}`;
+        if (quoteNoInput) quoteNoInput.value = `${prefix}${String(count).padStart(2, '0')}`;
+        const outputStatus = document.getElementById('quoteOutputStatus');
+        if (outputStatus?.classList.contains('is-error') && outputStatus.innerText.includes('無法取得安全的估價單號')) {
+            setQuoteOutputStatus('');
+        }
     } catch (e) {
-        document.getElementById('quoteNo').value = `${prefix}01`;
+        console.error('取得估價單號失敗：', e);
+        if (quoteNoInput) quoteNoInput.value = '';
+        setQuoteOutputStatus('無法取得安全的估價單號，請確認網路後再試一次。', true);
     }
     if (!restoringQuoteDraft) saveQuoteDraft();
+    return quoteNoInput?.value || '';
 };
 
 window.onSalesChange = function() {
-    generateQuoteNo();
+    if (!editingQuoteNo) generateQuoteNo();
     updateSalesPhoneDisplay();
 };
 
@@ -3116,8 +3129,8 @@ function populateSalesDropdown() {
     select.value = visibleList.some(s => s.name === valueToApply) ? valueToApply
         : ((currentUserRole === 'sales' || currentUserRole === 'engineer') ? currentUserName : '');
 
-    // 還原草稿的過程中不要重新產生單號，沿用草稿裡存的那組
-    if (!restoringQuoteDraft) generateQuoteNo();
+    // 還原草稿與編輯既有估價單時都沿用原單號；只有真正的新單才重新取號。
+    if (!restoringQuoteDraft && !editingQuoteNo) generateQuoteNo();
     updateSalesPhoneDisplay();
 }
 
