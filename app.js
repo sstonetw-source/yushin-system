@@ -1353,8 +1353,12 @@ function updatePendingProductMasterButton() {
     const allowed = canManagePendingProductMaster();
     const pendingButton = document.getElementById('pendingProductMasterBtn');
     const createButton = document.getElementById('createProductMasterBtn');
+    const costTemplateButton = document.getElementById('productCostTemplateBtn');
+    const costUploadButton = document.getElementById('productCostUploadBtn');
     if (pendingButton) pendingButton.style.display = allowed ? '' : 'none';
     if (createButton) createButton.style.display = allowed ? '' : 'none';
+    if (costTemplateButton) costTemplateButton.style.display = allowed ? '' : 'none';
+    if (costUploadButton) costUploadButton.style.display = allowed ? '' : 'none';
 }
 
 function pendingProductKey(item = {}) {
@@ -16760,6 +16764,24 @@ window.downloadProductPriceUpdateTemplate = async function() {
     XLSX.writeFile(wb, '廠牌名稱-價格更新.xlsx');
 };
 
+window.downloadProductCostUpdateTemplate = async function() {
+    if (!canManagePendingProductMaster()) return;
+    try {
+        await ensureXlsxLoaded();
+    } catch (err) {
+        alert(err.message);
+        return;
+    }
+    const ws = XLSX.utils.aoa_to_sheet([
+        ['貨號','標準成本（含稅）'],
+        ['EXAMPLE-001','600']
+    ]);
+    ws['!cols'] = [{ wch:20 }, { wch:18 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '成本更新');
+    XLSX.writeFile(wb, '廠牌名稱-成本更新.xlsx');
+};
+
 window.handleProductPriceExcelUpload = async function(input) {
     const file = input?.files?.[0];
     if (!file) return;
@@ -16865,6 +16887,126 @@ window.handleProductPriceExcelUpload = async function(input) {
         console.error('建議售價增量更新失敗：', err);
         setPriceUploadProgress(0, '更新失敗：' + (err?.message || err));
         alert('建議售價更新失敗：' + (err?.message || err));
+        input.value = '';
+    }
+};
+
+
+window.handleProductCostExcelUpload = async function(input) {
+    const file = input?.files?.[0];
+    if (!file) return;
+    if (!canManagePendingProductMaster()) {
+        alert('只有管理員或採購可以批次更新產品成本。');
+        input.value = '';
+        return;
+    }
+    try {
+        await ensureXlsxLoaded();
+        setPriceUploadProgress(5, '讀取成本更新檔…');
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(new Uint8Array(buffer), { type:'array' });
+        const brand = String(file.name || '')
+            .replace(/-成本更新\.(xlsx|xls)$/i, '')
+            .replace(/\.(xlsx|xls)$/i, '')
+            .normalize('NFKC').trim();
+        if (!brand) throw new Error('請將檔名設為「廠牌名稱-成本更新.xlsx」。');
+
+        const normalizeHeader = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
+        const rows = [];
+        workbook.SheetNames.forEach(sheetName => {
+            XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval:'' }).forEach(row => {
+                const entries = Object.entries(row);
+                const find = names => {
+                    const wanted = new Set(names.map(normalizeHeader));
+                    const pair = entries.find(([key]) => wanted.has(normalizeHeader(key)));
+                    return pair ? pair[1] : '';
+                };
+                const code = String(find(['貨號','型號','Cat No.','Catalog No.'])).trim();
+                const rawCost = find(['標準成本（含稅）','標準成本','含稅成本','成本','進貨成本']);
+                if (!code && String(rawCost).trim() === '') return;
+                const cost = Number(String(rawCost).replace(/,/g,'').trim());
+                if (!code || !Number.isFinite(cost) || cost < 0) {
+                    throw new Error(`成本更新檔有無效資料：貨號「${code || '空白'}」、成本「${rawCost}」。`);
+                }
+                rows.push({ code, cost });
+            });
+        });
+        if (!rows.length) throw new Error('檔案中沒有可更新的貨號與標準成本。');
+
+        const deduped = [...new Map(rows.map(row => [normalizeItemCodeLoose(row.code), row])).values()];
+        setPriceUploadProgress(25, `核對 ${deduped.length} 個貨號…`);
+        const resolved = [];
+        const missing = [];
+        for (let i = 0; i < deduped.length; i += 10) {
+            const chunk = deduped.slice(i, i + 10);
+            const codes = chunk.map(row => normalizeItemCodeLoose(row.code));
+            const snap = await firestoreReadWithTimeout(
+                db.collection('products').where('normalizedPartNo', 'in', codes).get(),
+                '批次產品成本貨號核對'
+            );
+            const docs = snap.docs.map(doc => ({ id:doc.id, ...doc.data() }));
+            chunk.forEach(row => {
+                const normalizedCode = normalizeItemCodeLoose(row.code);
+                const matches = docs.filter(doc =>
+                    normalizeItemCodeLoose(doc.manufacturerPartNo || doc.sku || '') === normalizedCode &&
+                    normalizeBrandLookupKey(doc.brandName || doc.brand || '') === normalizeBrandLookupKey(brand)
+                );
+                if (matches.length === 1) resolved.push({ product:matches[0], cost:row.cost });
+                else missing.push(row.code);
+            });
+        }
+        if (missing.length) {
+            throw new Error(`有 ${missing.length} 個貨號找不到「${brand}」唯一 Product Master：${missing.slice(0,10).join('、')}${missing.length > 10 ? '…' : ''}。未寫入任何成本資料。`);
+        }
+
+        const existingCosts = new Map();
+        for (let i = 0; i < resolved.length; i += 10) {
+            const ids = resolved.slice(i, i + 10).map(({product}) => product.id || product.productId);
+            const snap = await firestoreReadWithTimeout(
+                db.collection('productCosts')
+                    .where(firebase.firestore.FieldPath.documentId(), 'in', ids)
+                    .get(),
+                '既有產品成本核對'
+            );
+            snap.docs.forEach(doc => existingCosts.set(doc.id, doc.data() || {}));
+        }
+        const changed = resolved.filter(({product, cost}) => {
+            const id = product.id || product.productId;
+            return Number(existingCosts.get(id)?.standardCost ?? NaN) !== cost;
+        });
+        if (!changed.length) {
+            setPriceUploadProgress(100, '檔案中的標準成本都已是最新值。');
+            input.value = '';
+            return;
+        }
+        if (!confirm(`產品成本增量更新\n\n廠牌：${brand}\n檔案共 ${deduped.length} 筆\n實際需要更新 ${changed.length} 筆\n\n只會修改 productCosts 的 standardCost，不會修改 Product Master、建議售價或歷史訂單。確定更新嗎？`)) {
+            setPriceUploadProgress(0, '已取消，未修改成本資料。', false);
+            input.value = '';
+            return;
+        }
+
+        const now = new Date().toISOString();
+        const operations = changed.map(({product, cost}) => batch => {
+            const productId = product.id || product.productId;
+            batch.set(db.collection('productCosts').doc(productId), {
+                productId,
+                productLineId: product.productLineId || product.productLine || '',
+                standardCost: cost,
+                salesVisible: (product.authorizationType || 'NON_AUTHORIZED') === 'NON_AUTHORIZED',
+                source: 'COST_UPDATE',
+                updatedAt: now,
+                updatedBy: currentUser?.uid || ''
+            }, { merge:true });
+        });
+        setPriceUploadProgress(60, `更新 ${changed.length} 筆標準成本…`);
+        await commitMigrationBatch(operations);
+        visibleProductCostCache.clear();
+        setPriceUploadProgress(100, `完成：已更新 ${changed.length} 筆標準成本；Product Master 與建議售價未變更。`);
+        input.value = '';
+    } catch (err) {
+        console.error('產品成本增量更新失敗：', err);
+        setPriceUploadProgress(0, '成本更新失敗：' + (err?.message || err));
+        alert('產品成本更新失敗：' + (err?.message || err));
         input.value = '';
     }
 };
