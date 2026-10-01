@@ -2992,7 +2992,7 @@ window.createOrderFromForecast = async function(id) {
         await createForecastOrdersDirectly(forecast, items);
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
-        if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單。`);
         if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
             loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
@@ -7603,7 +7603,7 @@ async function loadOrderPage(reset, options = {}) {
         ordersCache = [];
         orderPaginationState = null;
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-        else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+        else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         updateOrderLoadMoreButton();
         return;
     }
@@ -7646,7 +7646,7 @@ async function loadOrderPage(reset, options = {}) {
         writeAppDataCache('orders', ordersCache);
         if (!options.skipRender) {
             if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-            else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+            else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         }
     } catch (err) {
         if (generation !== orderLoadGeneration) return;
@@ -7656,7 +7656,7 @@ async function loadOrderPage(reset, options = {}) {
         }
         if (!options.skipRender) {
             if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-            else if (canAccessPage('orders.po')) renderPurchasingWorkCards();
+            else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         }
         if (err?.code === 'firestore-read-timeout') {
             orderLoadErrorMessage = '連線逾時，點此重試';
@@ -8121,7 +8121,7 @@ window.renderOrdersList = function() {
     tbody.appendChild(fragment);
     document.getElementById('ordersEmptyHint').style.display = shown === 0 ? 'block' : 'none';
     // 採購頁打開時才重算其工作卡；切頁時會用同一份 ordersCache 立即產生。
-    if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingWorkCards();
+    if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 };
 
 window.retryOrderInventoryReservation = async function(orderId) {
