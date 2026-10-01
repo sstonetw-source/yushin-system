@@ -9111,16 +9111,31 @@ window.exportPurchaseOrderFromHistory = async function(poId) {
 };
 
 // 從原始訂單上的訂購單號直接開啟該張訂購單，避免還要切分頁搜尋。
-window.openPurchaseOrderFromOrder = function(poNo) {
-    const open = po => {
+window.openPurchaseOrderFromOrder = async function(poNo) {
+    const button = actionButtonFromEventOrSelector();
+    const buttonState = beginActionButton(button, '開啟中…');
+    if (button && !buttonState) return;
+    const open = async po => {
         if (!po) { alert('找不到這張訂購單紀錄。'); return; }
         if (!poListCache.some(item => item.id === po.id)) poListCache.push(po);
-        reprintPurchaseOrder(po.id);
+        await reprintPurchaseOrder(po.id);
     };
-    const cached = poListCache.find(po => po.poNo === poNo || po.id === poNo);
-    if (cached) { open(cached); return; }
-    db.collection('purchaseOrders').doc(poNo).get().then(doc => open(doc.exists ? { id: doc.id, ...doc.data() } : null))
-        .catch(err => alert('讀取訂購單失敗：' + err.message));
+    try {
+        const cached = poListCache.find(po => po.poNo === poNo || po.id === poNo);
+        if (cached) {
+            await open(cached);
+            return;
+        }
+        const doc = await firestoreReadWithTimeout(
+            db.collection('purchaseOrders').doc(poNo).get(),
+            '訂購單紀錄'
+        );
+        await open(doc.exists ? { id: doc.id, ...doc.data() } : null);
+    } catch (err) {
+        alert('讀取訂購單失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, buttonState);
+    }
 };
 
 /* =========================================================
@@ -13628,9 +13643,12 @@ async function readDocumentsByIds(collectionName, ids, chunkSize = 30) {
     const rows = [];
     for (let i = 0; i < uniqueIds.length; i += chunkSize) {
         const chunk = uniqueIds.slice(i, i + chunkSize);
-        const snapshot = await db.collection(collectionName)
-            .where(firebase.firestore.FieldPath.documentId(), 'in', chunk)
-            .get();
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection(collectionName)
+                .where(firebase.firestore.FieldPath.documentId(), 'in', chunk)
+                .get(),
+            collectionName + ' 指定文件'
+        );
         snapshot.forEach(doc => rows.push({ id:doc.id, ...doc.data() }));
     }
     return rows;
