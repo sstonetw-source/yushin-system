@@ -1350,7 +1350,7 @@ function setProductManagementTableMode(mode = 'products') {
     if (!head) return;
     head.innerHTML = mode === 'pending'
         ? '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>來源</th><th>最近使用</th><th>次數</th><th class="no-print">操作</th></tr>'
-        : '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>供應商</th><th>狀態</th><th class="no-print">快速操作</th></tr>';
+        : '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr>';
 }
 
 function renderPendingProductMasterRows() {
@@ -1464,7 +1464,6 @@ function productManagementRow(product) {
       <td data-th="類型">${escapeHtml(product.productType || product.category || '未分類')}</td>
       <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
       <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
-      <td data-th="供應商">${escapeHtml(product.supplier || '－')}</td>
       <td data-th="狀態">${escapeHtml(status === 'TEMPORARY' ? '待補主檔' : status === 'INACTIVE' ? '停用' : '啟用')}</td>
       <td data-th="快速操作" class="no-print product-management-actions">
         ${canAccessPage('quote.create') ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
@@ -1480,7 +1479,7 @@ function renderProductManagementResults() {
     if (!body) return;
     body.innerHTML = productManagementResults.length
         ? productManagementResults.map(productManagementRow).join('')
-        : '<tr><td colspan="10" class="empty-hint">查無符合產品。</td></tr>';
+        : '<tr><td colspan="9" class="empty-hint">查無符合產品。</td></tr>';
 }
 
 window.clearProductManagementSearch = function(options = {}) {
@@ -1492,7 +1491,7 @@ window.clearProductManagementSearch = function(options = {}) {
     const body = document.getElementById('productManagementBody');
     if (input && !options.preserveInput) input.value = '';
     if (status) status.textContent = '';
-    if (body) body.innerHTML = '<tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="9" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
 };
 
 window.queueProductManagementSearch = function() {
@@ -1586,7 +1585,6 @@ function ensureProductMasterEditor() {
             <option value="Instrument"></option><option value="Reagent"></option><option value="Consumable"></option>
             <option value="Accessory"></option><option value="Service"></option>
           </datalist>
-          <div><label>主要供應商</label><input id="pmEditSupplier" type="text" autocomplete="off"></div>
           <div><label>建議售價（含稅）</label><input id="pmEditListPrice" type="number" min="0" step="0.01"></div>
           <div><label>代理屬性</label>
             <select id="pmEditAuthorization">
@@ -1632,7 +1630,6 @@ function populateProductMasterEditor(product = {}, options = {}) {
     document.getElementById('pmEditSpec').value = product.specification || product.spec || '';
     document.getElementById('pmEditProductLine').value = product.productLine || '';
     document.getElementById('pmEditProductType').value = product.productType || product.category || '';
-    document.getElementById('pmEditSupplier').value = product.supplier || '';
     document.getElementById('pmEditListPrice').value = product.listPrice ?? product.price ?? '';
     const inferredAuthorization = product.authorizationType
         || (isBrandAuthorizedForCurrentCompany(product.brandName || product.brand || options.brand || '') ? 'AUTHORIZED' : 'NON_AUTHORIZED');
@@ -1726,7 +1723,6 @@ window.saveProductMasterEditor = async function() {
         productLineId: productLine,
         productType: normalizeProductTypeValue(document.getElementById('pmEditProductType').value || ''),
         category: normalizeProductTypeValue(document.getElementById('pmEditProductType').value || ''),
-        supplier: String(document.getElementById('pmEditSupplier').value || '').trim(),
         listPrice: Number(document.getElementById('pmEditListPrice').value || 0),
         authorizationType: document.getElementById('pmEditAuthorization').value || 'NON_AUTHORIZED',
         inventoryTracked: document.getElementById('pmEditInventoryTracked').checked,
@@ -1779,7 +1775,6 @@ function productManagementSource(product) {
         qty: 1,
         productLine: product.productLine || '',
         productType: product.productType || product.category || '',
-        supplier: product.supplier || '',
         authorizationType: product.authorizationType || '',
         productMasterMatched: true
     };
@@ -15126,7 +15121,6 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
         productType: normalized.productType || '',
         specification: normalized.spec || '',
         listPrice: Number(normalized.price || 0),
-        supplier: normalized.supplier || '',
         inventoryTracked: !!normalized.inventoryTracked,
         lotTracked: !!normalized.lotTracked,
         expiryTracked: !!normalized.expiryTracked,
@@ -15635,13 +15629,139 @@ window.downloadProductMasterTemplate = async function() {
         alert(err.message);
         return;
     }
-    const headers = ['貨號','中文品名','英文品名','規格','產品類型','供應商','含稅單價','含稅成本','啟用','庫存管理','批號管理','效期管理'];
-    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','','1000','600','是','是','否','否'];
+    const headers = ['貨號','中文品名','英文品名','規格','產品類型','建議售價（含稅）','含稅成本','啟用','庫存管理','批號管理','效期管理'];
+    const example = ['EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [18,28,32,24,14,24,14,14,10,12,12,12].map(wch => ({ wch }));
+    ws['!cols'] = [18,28,32,24,14,16,14,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '產品線名稱');
     XLSX.writeFile(wb, '廠牌名稱.xlsx');
+};
+
+window.downloadProductPriceUpdateTemplate = async function() {
+    try {
+        await ensureXlsxLoaded();
+    } catch (err) {
+        alert(err.message);
+        return;
+    }
+    const ws = XLSX.utils.aoa_to_sheet([
+        ['貨號','建議售價（含稅）'],
+        ['EXAMPLE-001','1200']
+    ]);
+    ws['!cols'] = [{ wch:20 }, { wch:18 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '價格更新');
+    XLSX.writeFile(wb, '廠牌名稱-價格更新.xlsx');
+};
+
+window.handleProductPriceExcelUpload = async function(input) {
+    const file = input?.files?.[0];
+    if (!file) return;
+    if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser')) {
+        alert('只有管理員或採購可以批次更新建議售價。');
+        input.value = '';
+        return;
+    }
+    try {
+        await ensureXlsxLoaded();
+        setPriceUploadProgress(5, '讀取建議售價更新檔…');
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(new Uint8Array(buffer), { type:'array' });
+        const brand = String(file.name || '')
+            .replace(/-價格更新.(xlsx|xls)$/i, '')
+            .replace(/.(xlsx|xls)$/i, '')
+            .normalize('NFKC').trim();
+        if (!brand) throw new Error('請將檔名設為「廠牌名稱-價格更新.xlsx」。');
+
+        const normalizeHeader = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
+        const rows = [];
+        workbook.SheetNames.forEach(sheetName => {
+            XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval:'' }).forEach(row => {
+                const entries = Object.entries(row);
+                const find = names => {
+                    const wanted = new Set(names.map(normalizeHeader));
+                    const pair = entries.find(([key]) => wanted.has(normalizeHeader(key)));
+                    return pair ? pair[1] : '';
+                };
+                const code = String(find(['貨號','型號','Cat No.','Catalog No.'])).trim();
+                const rawPrice = find(['建議售價（含稅）','建議售價','含稅單價','單價','價格']);
+                if (!code && String(rawPrice).trim() === '') return;
+                const price = Number(String(rawPrice).replace(/,/g,'').trim());
+                if (!code || !Number.isFinite(price) || price < 0) {
+                    throw new Error(`價格更新檔有無效資料：貨號「${code || '空白'}」、價格「${rawPrice}」。`);
+                }
+                rows.push({ code, price });
+            });
+        });
+        if (!rows.length) throw new Error('檔案中沒有可更新的貨號與建議售價。');
+
+        const deduped = [...new Map(rows.map(row => [normalizeItemCodeLoose(row.code), row])).values()];
+        setPriceUploadProgress(25, `核對 ${deduped.length} 個貨號…`);
+        const resolved = [];
+        const missing = [];
+        for (let i = 0; i < deduped.length; i += 10) {
+            const chunk = deduped.slice(i, i + 10);
+            const codes = chunk.map(row => normalizeItemCodeLoose(row.code));
+            const snap = await firestoreReadWithTimeout(
+                db.collection('products').where('normalizedPartNo', 'in', codes).get(),
+                '批次建議售價貨號核對'
+            );
+            const docs = snap.docs.map(doc => ({ id:doc.id, ...doc.data() }));
+            chunk.forEach(row => {
+                const normalizedCode = normalizeItemCodeLoose(row.code);
+                const matches = docs.filter(doc =>
+                    normalizeItemCodeLoose(doc.manufacturerPartNo || doc.sku || '') === normalizedCode &&
+                    normalizeBrandLookupKey(doc.brandName || doc.brand || '') === normalizeBrandLookupKey(brand)
+                );
+                if (matches.length === 1) resolved.push({ product:matches[0], price:row.price });
+                else missing.push(row.code);
+            });
+        }
+        if (missing.length) {
+            throw new Error(`有 ${missing.length} 個貨號找不到「${brand}」唯一 Product Master：${missing.slice(0,10).join('、')}${missing.length > 10 ? '…' : ''}。未寫入任何資料。`);
+        }
+
+        const changed = resolved.filter(({product, price}) => Number(product.listPrice || 0) !== price);
+        if (!changed.length) {
+            setPriceUploadProgress(100, '檔案中的建議售價都已是最新值。');
+            input.value = '';
+            return;
+        }
+        if (!confirm(`建議售價增量更新\n\n廠牌：${brand}\n檔案共 ${deduped.length} 筆\n實際需要更新 ${changed.length} 筆\n\n只會修改這些產品的 listPrice，不會動品名、規格、分類或其他產品。確定更新嗎？`)) {
+            setPriceUploadProgress(0, '已取消，未修改資料。', false);
+            input.value = '';
+            return;
+        }
+
+        const now = new Date().toISOString();
+        const operations = changed.map(({product, price}) => batch => {
+            batch.set(db.collection('products').doc(product.id || product.productId), {
+                listPrice:price,
+                updatedAt:now,
+                updatedBy:currentUser?.uid || ''
+            }, { merge:true });
+        });
+        setPriceUploadProgress(60, `更新 ${changed.length} 筆建議售價…`);
+        await commitMigrationBatch(operations);
+
+        changed.forEach(({product, price}) => {
+            const id = product.id || product.productId;
+            const cached = priceList.find(item => (item.productId || '') === id);
+            if (cached) cached.price = price;
+            const result = productManagementResults.find(item => (item.productId || item.id) === id);
+            if (result) result.listPrice = price;
+        });
+        rebuildPriceItemLookup();
+        if (productManagementResults.length) renderProductManagementResults();
+        setPriceUploadProgress(100, `完成：已更新 ${changed.length} 筆建議售價；其他 Product Master 未變更。`);
+        input.value = '';
+    } catch (err) {
+        console.error('建議售價增量更新失敗：', err);
+        setPriceUploadProgress(0, '更新失敗：' + (err?.message || err));
+        alert('建議售價更新失敗：' + (err?.message || err));
+        input.value = '';
+    }
 };
 
 window.handlePriceExcelUpload = async function(input) {
@@ -15705,19 +15825,18 @@ window.handlePriceExcelUpload = async function(input) {
                     const model = String(getField(row, ['貨號', '型號'])).trim();
                     const productType = normalizeProductTypeValue(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type']));
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
-                    const supplier = String(getField(row, ['供應商', '供应商', 'Supplier', 'Vendor'])).trim();
                     const activeRaw = String(getField(row, ['啟用', '启用', 'Active', 'Status'])).trim().toLocaleLowerCase();
                     const yes = value => ['1', 'true', 'yes', 'y', '是', '啟用', '启用'].includes(String(value || '').trim().toLocaleLowerCase());
                     const inventoryTracked = yes(getField(row, ['庫存管理', '库存管理', 'Inventory Tracked', 'Inventory']));
                     const lotTracked = yes(getField(row, ['批號管理', '批号管理', 'Lot Tracked', 'Lot']));
                     const expiryTracked = yes(getField(row, ['效期管理', 'Expiry Tracked', 'Expiry']));
 
-                    const price = parseFloat(getField(row, ['含稅單價', '單價', '價格'])) || 0;
+                    const price = parseFloat(getField(row, ['建議售價（含稅）', '建議售價', '含稅單價', '單價', '價格'])) || 0;
                     const costRaw = getField(row, ['含稅成本', '成本', '進貨成本']);
                     const cost = costRaw === '' ? null : parseFloat(costRaw) || 0;
 
                     if (model) {
-                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, supplier, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost, source:'PRICE_LIST' });
+                        imported.push({ nameCn, nameEn, model, brand, productType, productLine, spec, inventoryTracked, lotTracked, expiryTracked, active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true, price, cost, source:'PRICE_LIST' });
                     }
                 });
 
