@@ -372,16 +372,15 @@ service cloud.firestore {
           && request.resource.data.type == 'SALES_SELF_ORDER'
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.salesCode == salesCode());
+      // Sales owns the commercial intent and may create/read its own self-order,
+      // but supply execution becomes operational evidence after creation. Only purchasing
+      // or receiving roles may mutate quantities/status; this prevents direct API edits
+      // from bypassing procurement and receipt workflows.
       allow update: if admin() || purchaser()
         || (warehouse()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'receivedQty', 'incomingRegisteredQty', 'status', 'updatedAt'
-          ]))
-        || (sales()
-          && resource.data.type == 'SALES_SELF_ORDER'
-          && resource.data.ownerUid == request.auth.uid
-          && request.resource.data.ownerUid == request.auth.uid
-          && request.resource.data.type == resource.data.type);
+          ]));
       allow delete: if admin();
     }
 
