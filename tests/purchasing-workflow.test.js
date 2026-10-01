@@ -1592,3 +1592,52 @@ test('quick ordered action writes incoming inside the same transaction', () => {
     assert.match(source,/incomingRegisteredQty:targetIncomingQty/);
     assert.match(source,/單純重試時不增加訂購量或事件，但仍會修復曾中斷的 incoming 同步/);
 });
+
+
+test('quick manual supply can cancel outstanding quantity from the receiving queue', () => {
+    const helperStart=app.indexOf('function manualSupplyCancelActionHtml');
+    const helperEnd=app.indexOf('\nfunction receivingWorkProgress',helperStart);
+    const helperSource=app.slice(helperStart,helperEnd);
+    assert.ok(helperStart>=0&&helperEnd>helperStart);
+    assert.match(helperSource,/supply\.type !== 'PURCHASING_MANUAL'/);
+    assert.match(helperSource,/canCreatePurchaseOrderCapability\(\)/);
+    assert.match(helperSource,/purchaseCancellationInProgress\.has\(key\)/);
+    assert.match(helperSource,/cancelManualSupplyOutstanding/);
+
+    const listStart=app.indexOf('function renderPurchasingReceivingWorkList');
+    const listEnd=app.indexOf('\nwindow.renderPoList',listStart);
+    const listSource=app.slice(listStart,listEnd);
+    assert.match(listSource,/const supplyById = new Map\(supplyReceivingCache\.map/);
+    assert.match(listSource,/manualSupplyCancelActionHtml\(supply\)/);
+    assert.equal((listSource.match(/manualSupplyCancelActionHtml\(/g)||[]).length,2);
+
+    const cancelStart=app.indexOf('window.cancelManualSupplyOutstanding = async function');
+    const cancelEnd=app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',cancelStart);
+    const cancelSource=app.slice(cancelStart,cancelEnd);
+    assert.ok(cancelStart>=0&&cancelEnd>cancelStart);
+    assert.match(cancelSource,/canCreatePurchaseOrderCapability\(\)/);
+    assert.match(cancelSource,/supply\.type !== 'PURCHASING_MANUAL'/);
+    assert.match(cancelSource,/const actionKey = `supply:\$\{supplyId\}`/);
+    assert.match(cancelSource,/purchaseCancellationInProgress\.add\(actionKey\)/);
+    assert.match(cancelSource,/await cancelOutstandingSupplyRecord\(/);
+    assert.match(cancelSource,/supplyReceivingCache = supplyReceivingCache\.filter\(row => row\.id !== supply\.id\)/);
+    assert.match(cancelSource,/refreshAffectedOrderCaches\(\[result\.orderId\]\)/);
+    assert.match(cancelSource,/purchaseCancellationInProgress\.delete\(actionKey\)/);
+});
+
+test('quick manual cancellation reuses the same audited cancellation transaction as formal PO cancellation', () => {
+    const coreStart=app.indexOf('async function cancelOutstandingSupplyRecord');
+    const coreEnd=app.indexOf('\nwindow.cancelManualSupplyOutstanding',coreStart);
+    const coreSource=app.slice(coreStart,coreEnd);
+    assert.match(coreSource,/incoming:Math\.max\(0,inv\.incoming-registeredIncoming\)/);
+    assert.match(coreSource,/incoming:Math\.max\(0,wh\.incoming-registeredIncoming\)/);
+    assert.match(coreSource,/supplyOrderedQty:Math\.max\(receivedForItem,currentSupplyOrdered-remaining\)/);
+    assert.match(coreSource,/type:'purchase_incoming_cancel'/);
+    assert.match(coreSource,/status:'CANCELLED'/);
+    assert.match(coreSource,/incomingRegisteredQty:0/);
+
+    const formalStart=app.indexOf('window.cancelPurchaseOrderOutstanding = async function');
+    const formalEnd=app.indexOf('\nlet poReceiptTargetId',formalStart);
+    const formalSource=app.slice(formalStart,formalEnd);
+    assert.match(formalSource,/cancelOutstandingSupplyRecord\(poId,supplyId,reason\)/);
+});
