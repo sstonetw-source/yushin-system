@@ -5751,6 +5751,7 @@ window.renderMyQuotesList = function() {
     const periodFilter = document.getElementById('myQuotePeriodFilter')?.value || 'this-year';
     const statusFilter = document.getElementById('myQuoteStatusFilter')?.value || '';
     tbody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     let shown = 0;
 
     const isAdminViewingAll = canViewAllData('quotes');
@@ -5821,8 +5822,9 @@ window.renderMyQuotesList = function() {
                 </div>
             </td>
         `;
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
     });
+    tbody.appendChild(fragment);
 
     document.getElementById('myQuotesEmptyHint').style.display = shown === 0 ? 'block' : 'none';
 };
