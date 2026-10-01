@@ -2097,20 +2097,25 @@ test('admin view-role switch clears purchasing session state', () => {
 });
 
 
-test('receiving queue no longer contaminates purchase history cache', () => {
+test('purchasing work queues reuse orders cache without duplicate local copies', () => {
     assert.doesNotMatch(appSource, /purchase-receiving/);
+    assert.doesNotMatch(appSource, /['"]purchase-pending['"]/);
+    assert.doesNotMatch(appSource, /['"]purchase-dispatch['"]/);
+
     const hydrateStart=appSource.indexOf("if (mainKey === 'orders.po') {");
     const hydrateEnd=appSource.indexOf('\n    }\n}',hydrateStart)+7;
     const hydrateSource=appSource.slice(hydrateStart,hydrateEnd);
-    assert.match(hydrateSource,/readAppDataCache\('purchase-pending'\)/);
-    assert.match(hydrateSource,/readAppDataCache\('purchase-dispatch'\)/);
-    assert.doesNotMatch(hydrateSource,/poListCache/);
+    assert.match(hydrateSource,/readAppDataCache\('orders'\)/);
+    assert.doesNotMatch(hydrateSource,/pendingPurchaseCache = cached/);
+    assert.doesNotMatch(hydrateSource,/purchasingDispatchCache = cached/);
 
-    const receivingStart=appSource.indexOf("} else if (view === 'receiving') {");
-    const receivingEnd=appSource.indexOf("} else if (view === 'history') {",receivingStart);
-    const receivingSource=appSource.slice(receivingStart,receivingEnd);
-    assert.doesNotMatch(receivingSource,/readAppDataCache/);
-    assert.match(receivingSource,/loadPurchasingReceivingQueue\(true\)/);
+    const orderingStart=appSource.indexOf("if (view === 'ordering') {");
+    const orderingEnd=appSource.indexOf("} else if (view === 'receiving') {",orderingStart);
+    assert.doesNotMatch(appSource.slice(orderingStart,orderingEnd),/readAppDataCache/);
+
+    const dispatchStart=appSource.indexOf("} else if (view === 'dispatch') {");
+    const dispatchEnd=appSource.indexOf("} else renderPurchasingCompletedOrders",dispatchStart);
+    assert.doesNotMatch(appSource.slice(dispatchStart,dispatchEnd),/readAppDataCache/);
 });
 
 
@@ -2147,4 +2152,13 @@ test('order and purchasing initialization avoid duplicate brand-driven renders',
     assert.match(purchaseSource,/Promise\.allSettled\(\[ensureSalesListLoaded\(\), ensureBrandSettingsLoaded\(\)\]\)/);
     assert.equal((purchaseSource.match(/renderPurchasingView\(\)/g) || []).length, 1);
     assert.doesNotMatch(purchaseSource,/loadBrandMaster\(\)\.then/);
+});
+
+
+test('own-order viewers skip full sales-list load', () => {
+    const start=appSource.indexOf("if (mainKey === 'orders.list') {");
+    const end=appSource.indexOf("if (mainKey === 'orders.po')",start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/if \(canViewAllData\('orders'\)\) \{[\s\S]*?ensureSalesListLoaded\(\)/);
+    assert.match(source,/loadOrdersFromCloud\(\)/);
 });
