@@ -2242,3 +2242,16 @@ test('customer transaction history reads are bounded', () => {
     assert.match(source,/firestoreReadWithTimeout\(scopedHistorySearchQuery\('orders',[\s\S]*?'客戶訂單歷史'\)/);
     assert.match(source,/firestoreReadWithTimeout\(scopedHistorySearchQuery\('quotes',[\s\S]*?'客戶估價歷史'\)/);
 });
+
+
+test('shared brand settings reads are bounded', () => {
+    const companyStart=appSource.indexOf('function loadCompanyAgencyBrandSettings');
+    const companyEnd=appSource.indexOf('\nfunction loadSalesStatisticsSettings',companyStart);
+    const companySource=appSource.slice(companyStart,companyEnd);
+    assert.match(companySource,/firestoreReadWithTimeout\([\s\S]*?companyAgencyBrands[\s\S]*?'公司代理廠牌設定'/);
+
+    const statsStart=appSource.indexOf('function loadSalesStatisticsSettings');
+    const statsEnd=appSource.indexOf('\nlet brandSettingsLoadPromise',statsStart);
+    const statsSource=appSource.slice(statsStart,statsEnd);
+    assert.match(statsSource,/firestoreReadWithTimeout\([\s\S]*?salesStatistics[\s\S]*?'重點廠牌設定'/);
+});
