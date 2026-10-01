@@ -8939,22 +8939,52 @@ function receivingQueueContext(record, item) {
     };
 }
 
-function receivingEvidenceForWorkItem(order, item, itemIndex) {
+function receivingEvidenceEntry(supply) {
+    const ordered = Math.max(0, Number(supply?.qty || 0));
+    const received = Math.max(0, Number(supply?.receivedQty || 0));
+    const remaining = Math.max(0, ordered - received);
+    if (!supply?.id || remaining <= 0) return null;
+    return {
+        type:'supply', id:supply.id,
+        label:supply.purchaseDocumentNo || supply.internalNo || supply.id,
+        progress:{ordered,received,remaining,directShip:(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'}
+    };
+}
+
+function buildReceivingEvidenceIndex() {
+    const index = new Map();
+    const add = (key, entry) => {
+        if (!key || !entry) return;
+        if (!index.has(key)) index.set(key, []);
+        index.get(key).push(entry);
+    };
+    supplyReceivingCache.forEach(supply => {
+        if (!supply?.orderId) return;
+        const entry = receivingEvidenceEntry(supply);
+        if (!entry) return;
+        if (supply.itemId) add(`${supply.orderId}::id:${supply.itemId}`, entry);
+        const sourceIndex = Number(supply.orderItemIndex);
+        if (Number.isFinite(sourceIndex)) add(`${supply.orderId}::idx:${sourceIndex}`, entry);
+    });
+    return index;
+}
+
+function receivingEvidenceForWorkItem(order, item, itemIndex, evidenceIndex = null) {
+    if (evidenceIndex) {
+        const matches = [
+            ...(item?.itemId ? (evidenceIndex.get(`${order.id}::id:${item.itemId}`) || []) : []),
+            ...(evidenceIndex.get(`${order.id}::idx:${Number(itemIndex)}`) || [])
+        ];
+        return [...new Map(matches.map(entry => [entry.id, entry])).values()];
+    }
     const evidence = [];
     supplyReceivingCache.forEach(supply => {
         if (!supply?.orderId || supply.orderId !== order.id) return;
         const sameItem = (supply.itemId && item.itemId && supply.itemId === item.itemId)
             || Number(supply.orderItemIndex) === Number(itemIndex);
         if (!sameItem) return;
-        const ordered = Math.max(0, Number(supply.qty || 0));
-        const received = Math.max(0, Number(supply.receivedQty || 0));
-        const remaining = Math.max(0, ordered - received);
-        if (remaining <= 0) return;
-        evidence.push({
-            type:'supply', id:supply.id,
-            label:supply.purchaseDocumentNo || supply.internalNo || supply.id,
-            progress:{ordered,received,remaining,directShip:(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'}
-        });
+        const entry = receivingEvidenceEntry(supply);
+        if (entry) evidence.push(entry);
     });
     return evidence;
 }
@@ -8984,6 +9014,7 @@ function renderPurchasingReceivingWorkList() {
     let evidenceCount = 0;
     let standaloneSupplyCount = 0;
     const representedSupplyIds = new Set();
+    const evidenceIndex = buildReceivingEvidenceIndex();
 
     ordersCache.forEach(order => {
         if (normalizedOrderStatus(order) !== 'normal') return;
@@ -8992,7 +9023,7 @@ function renderPurchasingReceivingWorkList() {
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
             workCount++;
             const progress = receivingWorkProgress(order, item);
-            const evidence = receivingEvidenceForWorkItem(order, item, itemIndex);
+            const evidence = receivingEvidenceForWorkItem(order, item, itemIndex, evidenceIndex);
             evidence.forEach(entry => representedSupplyIds.add(entry.id));
             evidenceCount += evidence.length;
             if (!evidence.length) missingEvidence++;
