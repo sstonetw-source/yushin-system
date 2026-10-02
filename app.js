@@ -1238,6 +1238,7 @@ window.switchViewRole = function(role) {
     poHistorySearchResults = [];
     poHistorySearchActive = false;
     poHistorySearchLoading = false;
+    purchaseHistorySupplyCache = new Map();
     supplyReceivingCache = [];
     supplyReceivingCursor = null;
     supplyReceivingHasMore = true;
@@ -8815,6 +8816,7 @@ let poHistorySearchActive = false;
 let poHistorySearchLoading = false;
 let poHistorySearchTimer = null;
 let poHistorySearchGeneration = 0;
+let purchaseHistorySupplyCache = new Map();
 let supplyReceivingCache = [];
 let supplyReceivingCursor = null;
 let supplyReceivingHasMore = true;
@@ -10045,6 +10047,8 @@ async function loadPurchaseOrderPage(reset, options = {}) {
             // reset 時雲端結果完整取代 stale cache；Load More 才追加。
             poListCache = [...records.values()].sort((a, b) => (b.poNo || '').localeCompare(a.poNo || ''));
             poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
+            await loadPurchaseHistorySupplyProjection(freshRecords, reset);
+            if (requestedRole !== currentUserRole || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
             writeAppDataCache('purchase-history', poListCache);
         }
         if (!deferRender) {
@@ -10086,6 +10090,29 @@ function waitingDaysFromDate(date) {
 
 function poWaitingDays(po) {
     return waitingDaysFromDate(po.poDate);
+}
+
+async function loadPurchaseHistorySupplyProjection(poRows = [], reset = false) {
+    if (reset) purchaseHistorySupplyCache = new Map();
+    const ids = [...new Set((poRows || []).flatMap(po =>
+        Array.isArray(po?.supplyOrderIds) ? po.supplyOrderIds : []
+    ).map(id => String(id || '').trim()).filter(Boolean))];
+    const missing = ids.filter(id => !purchaseHistorySupplyCache.has(id));
+    if (!missing.length) return;
+    const rows = await readDocumentsByIds('supplyOrders', missing);
+    rows.forEach(row => purchaseHistorySupplyCache.set(row.id, row));
+}
+
+function purchaseHistoryItemReceiptProgress(po, itemIndex = 0) {
+    const supplyId = Array.isArray(po?.supplyOrderIds) ? String(po.supplyOrderIds[itemIndex] || '') : '';
+    const supply = supplyId ? purchaseHistorySupplyCache.get(supplyId) : null;
+    if (supply && globalThis.YushinSupply?.receiptProgress) {
+        return globalThis.YushinSupply.receiptProgress(supply);
+    }
+    if (String(po?.status || '').toUpperCase() === 'CANCELLED') {
+        return { status:'CANCELLED', label:'未到貨已取消', orderedQty:0, receivedQty:0, remainingQty:0, percent:0 };
+    }
+    return { status:'UNKNOWN', label:'已建立', orderedQty:0, receivedQty:0, remainingQty:0, percent:0 };
 }
 
 function purchaseOrderSearchTokens(po={}) {
@@ -10165,6 +10192,8 @@ async function runPurchaseOrderHistorySearch() {
                 cursor=snapshot.docs[snapshot.docs.length-1];
             }
         }
+        if(generation!==poHistorySearchGeneration)return;
+        await loadPurchaseHistorySupplyProjection([...results.values()], false);
         if(generation!==poHistorySearchGeneration)return;
         if(status)status.textContent=`全歷史搜尋完成：找到 ${results.size} 筆`;
     }catch(err){
@@ -10427,6 +10456,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
             if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
             shown++;
             const itemTotal=Math.round(ordered*Number(item.unitPrice||0)*1.05);
+            const receiptProgress=purchaseHistoryItemReceiptProgress(po,itemIndex);
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td data-th="單號">${escapeHtml(po.poNo || '')}</td>
@@ -10437,7 +10467,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="建立天數">${escapeHtml(poWaitingDays(po)||'—')}</td>
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
-                <td data-th="文件狀態">${poCancelled?'未到貨已取消':'已建立'}</td>
+                <td data-th="文件狀態">${escapeHtml(receiptProgress.label)}</td>
                 <td data-th="操作" class="no-print">${itemIndex===0?`
                     <div class="po-list-action-row">
                         <button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">載入</button>
