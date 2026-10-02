@@ -981,6 +981,20 @@
                 <div style="margin-top:8px;"><button type="button" onclick="saveSupplierMapping()">💾 儲存對應</button></div>
                 <div id="supplierMappingStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
                 <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>訂購單抬頭</th><th>訂購 Email</th><th>操作</th></tr></thead><tbody id="supplierMappingBody"></tbody></table></div>
+
+                <hr style="border:0;border-top:1px solid #e5e7eb;margin:20px 0;">
+                <strong>產品 → 供應商來源</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">參考 ERPNext／Odoo：產品指定供應來源優先於廠牌預設。這裡只存供應商貨號、優先序與交期，不另外存成本價格。</p>
+                <div class="form-grid">
+                    <div><label>產品貨號</label><input id="productSupplierItemCode" type="text" list="priceModelList" placeholder="輸入又鑫產品貨號"></div>
+                    <div><label>供應商</label><input id="productSupplierSupplier" type="text" list="supplierMasterSuggestions" placeholder="選擇供應商"></div>
+                    <div><label>供應商貨號（選填）</label><input id="productSupplierPartNo" type="text" placeholder="Vendor Part No."></div>
+                    <div><label>優先序</label><input id="productSupplierPriority" type="number" min="1" step="1" value="1"></div>
+                    <div><label>交期天數（選填）</label><input id="productSupplierLeadTime" type="number" min="0" step="1" value="0"></div>
+                </div>
+                <div style="margin-top:8px;"><button type="button" onclick="saveProductSupplierMapping()">💾 儲存產品供應來源</button></div>
+                <div id="productSupplierMappingStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
+                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>產品貨號</th><th>供應商</th><th>供應商貨號</th><th>優先序</th><th>交期</th><th>操作</th></tr></thead><tbody id="productSupplierMappingBody"></tbody></table></div>
             </div>
         </div>
     </div>
