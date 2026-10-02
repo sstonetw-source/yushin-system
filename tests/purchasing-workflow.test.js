@@ -1820,3 +1820,38 @@ test('purchase history derives receipt status from batched supply records', () =
     const loadEnd=app.indexOf('\nwindow.loadMyPurchaseOrders',loadStart);
     assert.match(app.slice(loadStart,loadEnd),/await loadPurchaseHistorySupplyProjection\(freshRecords, reset\)/);
 });
+
+test('standalone receiving and inventory pending rows use canonical supply receipt progress', () => {
+    const receivingStart=app.indexOf('function renderPurchasingReceivingWorkList');
+    const receivingEnd=app.indexOf('\nwindow.renderPoList',receivingStart);
+    const receivingSource=app.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource,/YushinSupply\?\.receiptProgress\(supply\)/);
+    assert.match(receivingSource,/supplyProgress\.label/);
+
+    const inventoryStart=app.indexOf('window.renderPendingInventoryItems=function');
+    const inventoryEnd=app.indexOf('\nwindow.renderInventoryLedger',inventoryStart);
+    const inventorySource=app.slice(inventoryStart,inventoryEnd);
+    assert.match(inventorySource,/YushinSupply\?\.receiptProgress\(x\)/);
+    assert.match(inventorySource,/progress\.remainingQty/);
+    assert.match(inventorySource,/progress\.label/);
+});
+
+test('procurement analytics is limited to purchaser and admin capability', () => {
+    const loadStart=app.indexOf('window.loadPurchasingAnalytics = async function');
+    const loadEnd=app.indexOf('\nwindow.renderPurchasingView',loadStart);
+    assert.match(app.slice(loadStart,loadEnd),/!canCreatePurchaseOrderCapability\(\)/);
+
+    const switchStart=app.indexOf('window.switchPurchasingView = function');
+    const switchEnd=app.indexOf('\nwindow.changePurchasePeriod',switchStart);
+    assert.match(app.slice(switchStart,switchEnd),/view === 'analytics' && !canCreatePurchaseOrderCapability\(\)/);
+    assert.match(app,/purchaseAnalysisTab\.style\.display = canCreatePurchaseOrderCapability\(\) \? '' : 'none'/);
+});
+
+test('purchase history header remains aligned with expected receipt date and receipt progress', () => {
+    const start=app.indexOf('window.renderPoList = function');
+    const end=app.indexOf('\nasync function purchaseIncomingSyncPending',start);
+    const source=app.slice(start,end);
+    assert.match(source,/預計到貨/);
+    assert.match(source,/到貨進度/);
+    assert.match(source,/purchaseHistoryItemReceiptProgress\(po,itemIndex\)/);
+});
