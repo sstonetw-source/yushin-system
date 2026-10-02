@@ -1,38 +1,35 @@
 (function(root,factory){
-  const receiving=typeof module==='object'&&module.exports?require('./receiving-core.js'):(root&&root.YushinReceiving);
-  const api=factory(receiving);
+  const supply=typeof module==='object'&&module.exports?require('./supply-core.js'):(root&&root.YushinSupply);
+  const api=factory(supply);
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinPurchasingAnalytics=api;
-})(typeof globalThis!=='undefined'?globalThis:this,function(receiving){
+})(typeof globalThis!=='undefined'?globalThis:this,function(supply){
   function n(value){
     const number=Number(value);
     return Number.isFinite(number)?Math.max(0,number):0;
   }
 
   function projectSupply(record={}){
-    if(!receiving)throw new Error('Receiving core is required.');
-    const supply=receiving.normalizeSupply(record);
-    const unitCost=n(record.unitCost);
-    const cancelled=supply.status==='CANCELLED';
-    // 取消後尚未到貨的數量不再算有效採購；已實際到貨仍保留歷史金額。
-    const effectiveOrderedQty=cancelled?supply.receivedQty:supply.qty;
-    const receivedQty=Math.min(effectiveOrderedQty,supply.receivedQty);
-    const incomingQty=cancelled?0:supply.remainingQty;
-    const sourceType=String(record.sourceType||'').trim();
-    const sourceId=String(record.sourceId||record.orderId||'').trim();
-    const isStockReplenishment=sourceType
-      ? sourceType==='STOCK_REPLENISHMENT'
-      : !sourceId&&record.method!=='SALES_SELF_ORDER'&&record.type!=='SALES_SELF_ORDER';
-    const documentKey=String(record.purchaseDocumentId||record.purchaseDocumentNo||record.internalNo||record.id||'').trim();
-    const supplier=String(record.supplier||record.supplierName||record.vendorName||'未指定供應商').trim()||'未指定供應商';
-    const supplierKey=String(record.supplierId||supplier).trim()||supplier;
+    if(!supply)throw new Error('Supply core is required.');
+    const x=supply.normalize(record);
+    const unitCost=n(x.unitCost);
+    const cancelled=x.status==='CANCELLED';
+    const effectiveOrderedQty=cancelled?x.receivedQty:x.qty;
+    const receivedQty=Math.min(effectiveOrderedQty,x.receivedQty);
+    const incomingQty=cancelled?0:x.remainingQty;
+    const isStockReplenishment=x.sourceType===supply.SOURCES.STOCK_REPLENISHMENT;
+    const documentKey=String(x.purchaseDocumentId||x.purchaseDocumentNo||x.internalNo||x.id||'').trim();
+    const supplierName=String(x.supplier||x.supplierName||'未指定供應商').trim()||'未指定供應商';
+    const supplierId=String(x.supplierId||'').trim();
+    const supplierKey=supplierId?('id:'+supplierId):('name:'+supplierName.normalize('NFKC').toLocaleLowerCase());
+
     return {
-      record,
-      supplier,
+      record:x,
+      supplier:supplierName,
       supplierKey,
-      sourceType:sourceType||(isStockReplenishment?'STOCK_REPLENISHMENT':'SALES_ORDER'),
-      sourceId,
       documentKey,
+      method:x.method,
+      sourceType:x.sourceType,
       unitCost,
       effectiveOrderedQty,
       receivedQty,
