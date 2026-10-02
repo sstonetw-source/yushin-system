@@ -496,7 +496,7 @@
       <div class="section-header no-print"><h2>庫存管理</h2><div style="display:flex;gap:8px;flex-wrap:wrap;"><button onclick="openInventoryAdjustment('initial')">＋ 新增庫存</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
       <div class="toolbar no-print"><input id="inventorySearch" type="search" placeholder="搜尋全部庫存：貨號 / 品名 / 廠牌 / 批號" oninput="scheduleInventorySearch()"><span id="inventorySearchStatus" role="status"></span><select id="inventoryBrandFilter" aria-label="庫存廠牌" onchange="renderInventoryList()"><option value="">全部廠牌</option></select><select id="inventoryPolicyFilter" aria-label="庫存策略" onchange="renderInventoryList()"><option value="">全部策略</option><option value="NO_STOCK">不備庫</option><option value="SAFETY_STOCK">安全庫存</option><option value="ORDER_ONLY">依訂單採購</option></select><select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">需補貨（預計庫存不足）</option><option value="out">缺貨</option><option value="reserved">有占用</option></select><button type="button" id="inventoryRefreshBtn" class="btn-secondary" onclick="loadInventory(true)">↻ 更新</button></div>
       <div class="toolbar no-print"><input id="businessProductSearch" type="search" placeholder="查貨號或品名（伺服器查詢，最多 25 筆）" oninput="queueBusinessProductSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchBusinessProducts();}"><button type="button" onclick="searchBusinessProducts()">查產品／售價／庫存</button><span id="businessProductSearchStatus"></span></div>
-      <div id="businessProductSearchResults" class="table-wrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table></div>
+      <div id="businessProductSearchResults" class="table-wrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table></div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨；預計庫存 = 可用庫存 + 在途。庫存策略：不備庫＝不設定主動補貨目標；安全庫存＝預計庫存低於門檻才列入補貨中心；依訂單採購＝由客戶訂單缺口進入既有採購需求流程。</div>
       <div class="panel no-print" style="margin:12px 0;">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
@@ -1173,7 +1173,7 @@
             </div>
             </div>
             <div class="order-progress-secondary" id="orderStatusHistorySection">
-                <h4 style="margin:0 0 8px;">操作紀錄</h4>
+                <h4 style="margin:0 0 8px;">完整時間軸</h4>
                 <div id="orderStatusOrderedBy" style="font-size:12px;color:#555;margin-bottom:8px;"></div>
                 <table class="log-table"><thead><tr><th>時間</th><th>動作</th><th>操作人</th><th>說明</th></tr></thead><tbody id="orderStatusHistoryBody"></tbody></table>
             </div>
@@ -1443,7 +1443,7 @@
                 <div class="toolbar no-print" style="display:block;margin-top:12px;">
                     <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">執行資料健康檢查</button>
                     <span style="display:block;margin-top:7px;font-size:12px;color:#666;">
-                        會列出 Product Master 缺少廠牌／貨號／品名、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
+                        會列出 Product Master 缺少廠牌／貨號／品名／建議售價、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
                     </span>
                     <div id="systemDataAuditStatus" style="margin-top:10px;font-size:13px;white-space:pre-line;"></div>
                     <div id="systemDataAuditResults" style="margin-top:10px;"></div>
@@ -1586,6 +1586,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261002-51"></script>
+    <script src="app.js?v=20261002-52"></script>
 </body>
 </html>
