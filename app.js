@@ -7897,7 +7897,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
 
 window.setInventoryStockPolicy=async function(inventoryId,policy){
  if(!canEditPage('inventory'))return;
- const item=inventoryCache.find(x=>x.id===inventoryId);if(!item)return;
+ const item=inventoryCache.find(x=>x.id===inventoryId)||inventorySearchResults.find(x=>x.id===inventoryId);if(!item)return;
  const next=String(policy||'').toUpperCase();
  if(!Object.values(INVENTORY_STOCK_POLICIES).includes(next)){renderInventoryList();return;}
  let safetyStock=Math.max(0,Number(item.safetyStock||0));
@@ -7912,6 +7912,8 @@ window.setInventoryStockPolicy=async function(inventoryId,policy){
    if(next===INVENTORY_STOCK_POLICIES.SAFETY_STOCK)patch.safetyStock=safetyStock;
    await db.collection('inventory').doc(inventoryId).update(patch);
    Object.assign(item,patch);
+   const cached=inventoryCache.find(x=>x.id===inventoryId);if(cached&&cached!==item)Object.assign(cached,patch);
+   const searched=inventorySearchResults.find(x=>x.id===inventoryId);if(searched&&searched!==item)Object.assign(searched,patch);
    renderInventoryList();
    showActionFeedback(`庫存策略已更新為「${inventoryStockPolicyLabel(next)}」。`);
  }catch(err){renderInventoryList();alert('庫存策略更新失敗：'+err.message);}
@@ -7919,7 +7921,7 @@ window.setInventoryStockPolicy=async function(inventoryId,policy){
 
 window.setInventorySafetyStock=async function(inventoryId){
  if(!canEditPage('inventory'))return;
- const item=inventoryCache.find(x=>x.id===inventoryId);if(!item)return;
+ const item=inventoryCache.find(x=>x.id===inventoryId)||inventorySearchResults.find(x=>x.id===inventoryId);if(!item)return;
  if(inventoryStockPolicy(item)!==INVENTORY_STOCK_POLICIES.SAFETY_STOCK){
    alert('請先把庫存策略設為「安全庫存」。');
    return;
@@ -7930,6 +7932,8 @@ window.setInventorySafetyStock=async function(inventoryId){
    await db.collection('inventory').doc(inventoryId).update({stockPolicy:INVENTORY_STOCK_POLICIES.SAFETY_STOCK,safetyStock,updatedAt:new Date().toISOString()});
    item.stockPolicy=INVENTORY_STOCK_POLICIES.SAFETY_STOCK;
    item.safetyStock=safetyStock;
+   const cached=inventoryCache.find(x=>x.id===inventoryId);if(cached&&cached!==item){cached.stockPolicy=INVENTORY_STOCK_POLICIES.SAFETY_STOCK;cached.safetyStock=safetyStock;}
+   const searched=inventorySearchResults.find(x=>x.id===inventoryId);if(searched&&searched!==item){searched.stockPolicy=INVENTORY_STOCK_POLICIES.SAFETY_STOCK;searched.safetyStock=safetyStock;}
    renderInventoryList();
  }catch(err){alert('安全庫存更新失敗：'+err.message);}
 };
