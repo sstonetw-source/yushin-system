@@ -1272,6 +1272,11 @@ test('order brand filter uses selectable brands and groups alternate spelling an
         normalizeBrandLookupKey: normalize,
         resolveBrandName: value => normalize(value) === 'biorad' ? 'Bio-Rad' : value,
         getPriceListBrands: () => ['Beckman', 'Bio-Rad'],
+        getUnifiedBrandEntries: () => [
+            { name:'Beckman', active:true, isKeyBrand:true },
+            { name:'Bio-Rad', active:true, isKeyBrand:true },
+            { name:'自行輸入品牌', active:true, isKeyBrand:false }
+        ],
         canViewAllData: () => true,
         stripPhoneSuffix: value => value,
         escapeAttr: value => value,
@@ -1315,6 +1320,7 @@ test('purchasing and orders share brand names and date range semantics across wo
         escapeAttr: value => value, escapeHtml: value => value,
         stripPhoneSuffix: value => value,
         workflowSalesFilterNames: () => ['王先生'],
+        workflowPurchasingBrandNames: () => ['Bio-Rad', 'Beckman'],
         unifiedPeriodRange: key => key === 'this-year' ? { start: '2026-01-01', end: '2026-12-31' } : { start: '', end: '' },
         normalizeBusinessDate: value => value,
         orderBrandFilterValue: value => String(value || '').replace(/[\s-]/g, '').toLowerCase() === 'biorad' ? 'Bio-Rad' : value,
