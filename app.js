@@ -8837,6 +8837,7 @@ let purchasingDispatchLoading = false;
 let purchasingDispatchError = '';
 let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
 let purchasingAnalyticsRows = [];
+let purchasingAnalyticsReceiptRows = [];
 let purchasingAnalyticsLoading = false;
 let purchasingAnalyticsLoadedRangeKey = '';
 
@@ -9186,10 +9187,13 @@ function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = pu
         throw new Error('Purchasing analytics core 未載入，無法計算採購分析。');
     }
     const filtered=(rows||[]).filter(row=>purchasingAnalyticsRowMatches(row,filters));
-    return globalThis.YushinPurchasingAnalytics.summarize(filtered);
+    return globalThis.YushinPurchasingAnalytics.summarize(filtered,purchasingAnalyticsReceiptRows);
 }
 
-function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel) {
+function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime = false) {
+    const leadTimeCell = row => includeLeadTime
+        ? `<td>${row.leadTimeCount ? Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '－'}</td>`
+        : '';
     return rows.length ? rows.map(row => `<tr>
         <td>${escapeHtml(row[labelKey] || '')}</td>
         <td>${row.documentCount}</td>
@@ -9197,9 +9201,10 @@ function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel) {
         <td>${formatStatsMoney(row.orderedAmount)}</td>
         <td>${formatStatsMoney(row.receivedAmount)}</td>
         <td>${formatStatsMoney(row.incomingAmount)}</td>
+        ${leadTimeCell(row)}
         <td>${formatStatsMoney(row.stockAmount)}</td>
         <td>${formatStatsMoney(row.customerOrderAmount)}</td>
-    </tr>`).join('') : `<tr><td colspan="8" style="color:#888;">${emptyLabel}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="${includeLeadTime?9:8}" style="color:#888;">${emptyLabel}</td></tr>`;
 }
 
 function renderPurchasingAnalytics() {
@@ -9221,7 +9226,9 @@ function renderPurchasingAnalytics() {
     const orderedDetail = document.getElementById('purchaseAnalyticsOrderedDetail');
     if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.documentCount} 張採購單`;
     const receivedDetail = document.getElementById('purchaseAnalyticsReceivedDetail');
-    if (receivedDetail) receivedDetail.textContent = totals.receivedAmount ? '依實際已到貨數量計算' : '期間內尚無已到貨金額';
+    if (receivedDetail) receivedDetail.textContent = totals.leadTimeCount
+        ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆品項）`
+        : (totals.receivedAmount ? '已有部分到貨，尚無完整到貨交期樣本' : '期間內尚無已到貨金額');
     const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
     if (incomingDetail) incomingDetail.textContent = totals.incomingAmount ? '已下單、尚未到貨' : '目前沒有在途金額';
     const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
@@ -9230,7 +9237,8 @@ function renderPurchasingAnalytics() {
     supplierBody.innerHTML = purchasingAnalyticsRowsHtml(
         bySupplier.map(row=>({...row,label:row.supplier})),
         'label',
-        '目前篩選期間沒有採購資料。'
+        '目前篩選期間沒有採購資料。',
+        true
     );
     if (brandBody) brandBody.innerHTML = purchasingAnalyticsRowsHtml(byBrand, 'brand', '目前沒有廠牌採購資料。');
     if (monthBody) monthBody.innerHTML = purchasingAnalyticsRowsHtml(byMonth, 'month', '目前沒有月份採購資料。');
@@ -9260,7 +9268,18 @@ window.loadPurchasingAnalytics = async function(force = false) {
         if (filters.start) query = query.where('orderDate', '>=', filters.start);
         if (filters.end) query = query.where('orderDate', '<=', filters.end);
         query = query.orderBy('orderDate', 'desc');
-        purchasingAnalyticsRows = await readQueryInBatches(query);
+
+        let receiptQuery = db.collection('receipts');
+        if (filters.start) receiptQuery = receiptQuery.where('supplyOrderDate', '>=', filters.start);
+        if (filters.end) receiptQuery = receiptQuery.where('supplyOrderDate', '<=', filters.end);
+        receiptQuery = receiptQuery.orderBy('supplyOrderDate', 'desc');
+
+        const [supplyRows,receiptRows] = await Promise.all([
+            readQueryInBatches(query),
+            readQueryInBatches(receiptQuery)
+        ]);
+        purchasingAnalyticsRows = supplyRows;
+        purchasingAnalyticsReceiptRows = receiptRows;
         purchasingAnalyticsLoadedRangeKey = rangeKey;
         return purchasingAnalyticsRows;
     } catch (err) {
