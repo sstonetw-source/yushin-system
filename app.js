@@ -11183,6 +11183,17 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const receiptSnap=await tx.get(receiptRef);
         if(!supplySnap.exists)throw new Error('找不到供應紀錄。');
         const supply=supplySnap.data();
+        if (!globalThis.YushinSupply?.normalize || !globalThis.YushinReceiving?.buildReceiptSnapshot) {
+            throw new Error('Supply／Receiving core 未載入，無法建立可追溯的到貨紀錄。');
+        }
+        const procurement=globalThis.YushinSupply.normalize({...supply,id:supplyId});
+        const buildReceipt=(event={})=>globalThis.YushinReceiving.buildReceiptSnapshot(procurement,{
+            supplyOrderId:supplyId,
+            receiptDate:localDateString(),
+            createdAt:now,
+            createdBy:actor,
+            ...event
+        });
         if (supply.orderId) affectedOrderIds.add(supply.orderId);
         // 已成功提交過的同一 receiptId 必須先走冪等重試；即使之後取消了剩餘未到貨，
         // 也不能把已完成的到貨重試誤判成新的「取消後收貨」。
@@ -11236,10 +11247,17 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 deliveryRecords,deliveredQty:grossDelivered,isDelivered:nextOrder.isDelivered,
                 ...orderWorkIndexFields(nextOrder),updatedAt:now
             });
-            const receiptPlan=window.YushinReceiving.applyReceipt(supply,qty);
+            const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
             const receivedQty=receiptPlan.record.receivedQty;
             tx.update(supplyRef,{receivedQty,status:receiptPlan.record.status,updatedAt:now});
-            tx.set(receiptRef,{receiptId:operationKey,operationId:operationKey,supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,cumulativeReceivedQty:receivedQty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
+            tx.set(receiptRef,buildReceipt({
+                receiptId:operationKey,
+                operationId:operationKey,
+                qty,
+                cumulativeReceivedQty:receivedQty,
+                fulfillmentType:'DIRECT_SHIP',
+                warehouseId:''
+            }));
             return;
         }
         const productKey=supply.productKey||supply.productId||(supply.itemCode?`code:${normalizeHistoryItemCode(supply.itemCode)}`:'');
@@ -11296,7 +11314,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 }
             }
         }
-        const receiptPlan=window.YushinReceiving.applyReceipt(supply,qty);
+        const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
         const registeredIncoming=Math.max(0,Number(supply.incomingRegisteredQty||0));
         const incomingRelease=receiptPlan.incomingReleaseQty;
         const embeddedLots=[...(invSnap.exists?(invSnap.data().lots||[]):[])];
@@ -11313,12 +11331,24 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
         const autoAllocationQty=Math.max(0,Number(qty||0)-reserveQty);
-        tx.set(receiptRef,{
-            receiptId:operationKey,operationId:operationKey,supplyOrderId:supplyId,
-            orderId:supply.orderId||'',itemId:supply.itemId||'',sourceOrderStatus,
-            productKey,warehouseId,qty,autoAllocationQty,autoAllocatedQty:0,allocationCompleted:autoAllocationQty===0,fulfillmentType:'WAREHOUSE',
-            lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor
-        });
+        tx.set(receiptRef,buildReceipt({
+            receiptId:operationKey,
+            operationId:operationKey,
+            qty,
+            cumulativeReceivedQty:receiptPlan.record.receivedQty,
+            productKey,
+            warehouseId,
+            fulfillmentType:'WAREHOUSE',
+            extra:{
+                sourceOrderStatus,
+                autoAllocationQty,
+                autoAllocatedQty:0,
+                allocationCompleted:autoAllocationQty===0,
+                lotId:lotRef.id,
+                lotNo,
+                expiryDate
+            }
+        }));
         tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
         tx.update(supplyRef,{
             receivedQty:receiptPlan.record.receivedQty,
