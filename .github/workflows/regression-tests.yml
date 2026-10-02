@@ -36,6 +36,7 @@ jobs:
           node --check modules/supply-core.js
           node --check modules/reservation-core.js
           node --check modules/workflow-core.js
+          node --check modules/purchasing-analytics-core.js
 
       - name: Run pure Node regression tests
-        run: node --test tests/phase1.test.js tests/purchasing-workflow.test.js tests/v2-inventory-core.test.js tests/v2-receiving-core.test.js tests/v2-fulfillment-core.test.js tests/v2-supply-core.test.js tests/v2-reservation-core.test.js tests/v2-workflow-core.test.js
+        run: node --test tests/phase1.test.js tests/purchasing-workflow.test.js tests/v2-inventory-core.test.js tests/v2-receiving-core.test.js tests/v2-fulfillment-core.test.js tests/v2-supply-core.test.js tests/v2-reservation-core.test.js tests/v2-workflow-core.test.js tests/v2-purchasing-analytics-core.test.js
