@@ -5086,3 +5086,18 @@ test('quick purchase incoming keeps canonical product and brand identity across 
     assert.match(source, /productId,\s*productKey/);
     assert.match(source, /type:'purchase_incoming',qty:incomingDelta,productKey,productId,warehouseId/);
 });
+
+
+test('rules allow business stock reads when inventory documents do not exist', () => {
+    assert.match(rulesSource, /match \/inventory\/\{id\}[\s\S]*resource == null/);
+    assert.match(rulesSource, /match \/warehouseStocks\/\{id\}[\s\S]*resource == null/);
+    assert.match(rulesSource, /function owns\(data\)[\s\S]*data\.get\('ownerUid', ''\)[\s\S]*data\.get\('salesCode', ''\)/);
+});
+
+test('new order inventory reservation writes explicit ownership metadata', () => {
+    const start = appSource.indexOf('async function reserveSingleOrderItem');
+    const end = appSource.indexOf('function orderReservationSummary', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /ownerUid:order\.ownerUid\|\|currentUser\?\.uid\|\|''/);
+    assert.match(source, /salesCode:order\.salesCode\|\|currentUserCode\|\|''/);
+});

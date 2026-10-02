@@ -8662,19 +8662,28 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         if(plan.releaseQty>0){
             tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(
                 'release',-plan.releaseQty,orderId,oldProductKey||productKey,actor,
-                {reason:'reservation_reconcile',warehouseId:oldWarehouseId||warehouseId,itemId,fulfillmentType:'WAREHOUSE'}
+                {
+                    reason:'reservation_reconcile',warehouseId:oldWarehouseId||warehouseId,itemId,
+                    fulfillmentType:'WAREHOUSE',ownerUid:order.ownerUid||currentUser?.uid||'',
+                    salesCode:order.salesCode||currentUserCode||''
+                }
             ));
         }
         if(plan.additionalReserveQty>0){
             tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(
                 'reserve',plan.additionalReserveQty,orderId,productKey,actor,
-                {warehouseId,itemId,fulfillmentType:'WAREHOUSE'}
+                {
+                    warehouseId,itemId,fulfillmentType:'WAREHOUSE',
+                    ownerUid:order.ownerUid||currentUser?.uid||'',
+                    salesCode:order.salesCode||currentUserCode||''
+                }
             ));
         }
 
         tx.set(reservationRef,{
             orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
             itemCode:item.itemCode||'',itemName:item.itemName||'',customerName:order.customerName||'',
+            ownerUid:order.ownerUid||currentUser?.uid||'',
             salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',
             orderDate:order.orderDate||'',quantity:plan.reservedQty,shortageQty:plan.shortageQty,
             status:plan.status,warehouseId,updatedAt:now
