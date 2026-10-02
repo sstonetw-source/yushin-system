@@ -7916,6 +7916,41 @@ function orderReservationSummary(order) {
     };
 }
 
+async function persistOrderProcurementDemands(orderId, order, items = []) {
+    if(!globalThis.YushinProcurementDemand?.demandDocument)return;
+    const now=new Date().toISOString();
+    const batch=db.batch();
+    let writes=0;
+    const orderSnapshot={...order,id:orderId,items,itemCount:items.length,orderSchemaVersion:2};
+    for(const item of items){
+        const demand=procurementDemandForOrderItem(orderSnapshot,item);
+        // Fully stock-covered warehouse items do not need a Material Request.
+        if(!(demand.requestedQty>0||demand.orderedQty>0||demand.receivedQty>0))continue;
+        const ref=procurementDemandRef(demand.demandId);
+        if(!ref)continue;
+        const doc=procurementDemandDocument(demand,{
+            productId:item.productId||'',
+            productKey:inventoryProductKey(item),
+            itemCode:item.itemCode||'',
+            itemName:item.itemName||'',
+            brand:item.brand||'',
+            fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+            warehouseId:(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
+                ? '' : (item.warehouseId||order.warehouseId||defaultWarehouse()?.id||''),
+            ownerUid:order.ownerUid||currentUser?.uid||'',
+            salesCode:order.salesCode||currentUserCode||'',
+            salesName:order.salesName||currentUserName||'',
+            scheduleDate:item.scheduleDate||order.expectedDate||''
+        },{
+            createdAt:order.createdAt||now,
+            updatedAt:now
+        });
+        batch.set(ref,doc,{merge:true});
+        writes++;
+    }
+    if(writes)await batch.commit();
+}
+
 async function reserveInventoryForNewOrder(orderId, order) {
     if(!warehouseMasterCache.length)await loadWarehouseMaster();
     const items=normalizedOrderItems(order);
@@ -7930,6 +7965,7 @@ async function reserveInventoryForNewOrder(orderId, order) {
         Object.assign(order,updates);
         Object.assign(updates,orderWorkIndexFields(order));
         await db.collection('orders').doc(orderId).set(updates,{merge:true});
+        await persistOrderProcurementDemands(orderId,order,[item]);
         return {reservedQty:Number(item.reservedQty||0),shortageQty:Number(item.shortageQty||0),items:[item]};
     }
     const reservedItems=[];
@@ -7940,6 +7976,7 @@ async function reserveInventoryForNewOrder(orderId, order) {
     Object.assign(order,updates);
     Object.assign(updates,orderWorkIndexFields(order));
     await db.collection('orders').doc(orderId).set(updates,{merge:true});
+    await persistOrderProcurementDemands(orderId,order,reservedItems);
     return {reservedQty,shortageQty,items:reservedItems};
 }
 
