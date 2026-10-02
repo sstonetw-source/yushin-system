@@ -18722,6 +18722,14 @@ window.runSystemDataAudit = async function() {
         const supplyIds = new Set(supplyOrders.map(row => String(row.id || '').trim()).filter(Boolean));
         const orderById = new Map(orders.map(order => [String(order.id || '').trim(), order]));
         const demandById = new Map(procurementDemands.map(demand => [String(demand.demandId || '').trim(), demand]).filter(([id]) => id));
+        const suppliesByDemand = new Map();
+        supplyOrders.forEach(supply => {
+            const demandId=String(supply.demandId||'').trim();
+            if(!demandId)return;
+            const rows=suppliesByDemand.get(demandId)||[];
+            rows.push(supply);
+            suppliesByDemand.set(demandId,rows);
+        });
 
         procurementDemands.forEach(demand => {
             const demandId=String(demand.demandId||'').trim();
@@ -18732,6 +18740,16 @@ window.runSystemDataAudit = async function() {
             const ordered=Math.max(0,Number(demand.orderedQty||0));
             const received=Math.max(0,Number(demand.receivedQty||0));
             if(!demandId)issues.push({ type:'採購需求缺少識別碼', detail:demand.id || '未知文件' });
+            const linkedSupplies=suppliesByDemand.get(demandId)||[];
+            if(demandId&&linkedSupplies.length&&globalThis.YushinProcurementDemand?.reconcileLinkedSupplies){
+                const linkedProjection=globalThis.YushinProcurementDemand.reconcileLinkedSupplies(demand,linkedSupplies);
+                if(Math.abs(linkedProjection.orderedQty-ordered)>1e-9||Math.abs(linkedProjection.receivedQty-received)>1e-9){
+                    issues.push({
+                        type:'採購需求與供應紀錄不同步',
+                        detail:`${demandId}｜Demand 已訂 ${ordered}／已到 ${received}；Supply 回推 已訂 ${linkedProjection.orderedQty}／已到 ${linkedProjection.receivedQty}`
+                    });
+                }
+            }
             if(received>ordered||ordered>requested){
                 issues.push({ type:'採購需求數量異常', detail:`${demandId || demand.id}｜需求 ${requested}／已訂 ${ordered}／已到 ${received}` });
             }
