@@ -2292,18 +2292,12 @@ test('quote history pagination uses bounded read timeout without requiring a man
 });
 
 
-test('purchasing refresh buttons provide feedback and purchasing reads are bounded', () => {
-    assert.match(indexSource, /id="purchasePendingRefreshBtn"[^>]*>↻ 更新<\/button>/);
-    assert.match(indexSource, /id="purchasePoRefreshBtn"[^>]*>↻ 更新<\/button>/);
-    assert.match(indexSource, /id="purchaseDispatchRefreshBtn"[^>]*>↻ 更新<\/button>/);
-    assert.match(indexSource, /id="purchaseCompletedRefreshBtn"[^>]*>↻ 更新<\/button>/);
-
-    const poButtonStart=appSource.indexOf('function updatePoLoadMoreButton');
-    const poButtonEnd=appSource.indexOf('\n}',poButtonStart)+2;
-    const poButtonSource=appSource.slice(poButtonStart,poButtonEnd);
-    assert.match(poButtonSource,/purchasePoRefreshBtn/);
-    assert.match(poButtonSource,/refreshButton\.disabled = poListPageLoading/);
-    assert.match(poButtonSource,/更新中…/);
+test('purchasing auto-loads without manual refresh buttons and reads stay bounded', () => {
+    assert.equal(indexSource.includes('id="purchasePendingRefreshBtn"'), false);
+    assert.equal(indexSource.includes('id="purchasePoRefreshBtn"'), false);
+    assert.equal(indexSource.includes('id="purchaseDispatchRefreshBtn"'), false);
+    assert.equal(indexSource.includes('id="purchaseCompletedRefreshBtn"'), false);
+    assert.equal(indexSource.includes('id="purchaseAnalyticsRefreshBtn"'), false);
 
     const pageStart=appSource.indexOf('async function loadPurchaseOrderPage');
     const pageEnd=appSource.indexOf('window.loadMyPurchaseOrders',pageStart);
@@ -2312,18 +2306,13 @@ test('purchasing refresh buttons provide feedback and purchasing reads are bound
     assert.match(pageSource,/firestoreReadWithTimeout\(supplyQuery\.get\(\), '待到貨供應'\)/);
     assert.match(pageSource,/待到貨來源訂單/);
 
-    const pendingStart=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
-    const pendingEnd=appSource.indexOf('const pendingPurchaseOrderKeys',pendingStart);
-    const pendingSource=appSource.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/purchasePendingRefreshBtn/);
-    assert.match(pendingSource,/更新中…/);
-
-    const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
-    const dispatchEnd=appSource.indexOf('window.loadPurchasingDispatchOrders',dispatchStart);
-    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
-    assert.match(dispatchSource,/purchaseCompletedRefreshBtn/);
-    assert.match(dispatchSource,/purchaseDispatchRefreshBtn/);
-    assert.match(dispatchSource,/更新中…/);
+    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
+    const switchEnd=appSource.indexOf('async function loadPurchasingDispatchOrders',switchStart);
+    const switchSource=appSource.slice(switchStart,switchEnd);
+    assert.match(switchSource,/loadPendingPurchaseOrders\(true\)/);
+    assert.match(switchSource,/loadPurchasingReceivingQueue\(true/);
+    assert.match(switchSource,/loadPurchaseOrderPage\(true\)/);
+    assert.match(switchSource,/loadPurchasingAnalytics\(false\)/);
 });
 
 
