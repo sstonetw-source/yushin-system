@@ -166,7 +166,7 @@ test('quote owner selector lets engineer assist sales while keeping sales self-o
     assert.match(rulesSource, /match \/quotes\/\{id\}[\s\S]*?engineerAssistedSalesQuote\(request\.resource\.data\)/);
 });
 
-test('main brand list ignores Product Master and non-key Brand Master entries', () => {
+test('Brand Master drives the main brand list while statistics grouping remains independent', () => {
     assert.match(appSource, /function initializePageData\(mainKey, options = \{\}\)[\s\S]*?ensureBrandSettingsLoaded\(\)/);
     assert.match(appSource, /function ensureBrandSettingsLoaded\(\)[\s\S]*?loadSalesStatisticsSettings\(\), loadCompanyAgencyBrandSettings\(\), loadBrandMaster\(\)/);
     const start = appSource.indexOf('function getUnifiedBrandEntries(includeMaintenance = false)');
@@ -180,8 +180,8 @@ test('main brand list ignores Product Master and non-key Brand Master entries', 
         includesBrandCaseInsensitive:(values, name) => values.includes(name)
     });
     vm.runInContext(appSource.slice(start, end), context);
-    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Thermo']);
-    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Thermo', '維修']));
+    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Thermo', 'Unlisted Excel Brand']);
+    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Thermo', 'Unlisted Excel Brand', '維修']));
     const classificationStart = appSource.indexOf('function statisticBrandForOrder(order)');
     const classificationEnd = appSource.indexOf('\n}\n', classificationStart) + 2;
     Object.assign(context, {
