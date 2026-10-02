@@ -590,6 +590,8 @@ test('manual ordered action records supply and source item only once after an un
         procurementDemandDocument:record=>record,
         remainingProcurementQty:(record,item)=>Math.max(0,2-Number(item.supplyOrderedQty||0)),
         poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-09-29',
+        brandIdentityForRecord:record=>({brand:record?.brand||'',brandId:record?.brandId||''}),
+        resolveBrandName:value=>value||'',brandIdForName:()=> '',
         normalizedOrderStatus:()=> 'normal',
         normalizedOrderItems:record=>record.items,orderWorkIndexFields:()=>({workCategories:['arrival']}),
         ordersCache:[],supplyReceivingCache:[],purchasingView:'ordering',
@@ -652,6 +654,8 @@ test('manual ordered action can add a later genuine shortage without duplicating
             return Math.max(0,Number(item.shortageQty||0)-Math.max(0,ordered-received));
         },
         poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-09-30',
+        brandIdentityForRecord:record=>({brand:record?.brand||'',brandId:record?.brandId||''}),
+        resolveBrandName:value=>value||'',brandIdForName:()=> '',
         normalizedOrderStatus:()=> 'normal',normalizedOrderItems:record=>record.items,
         orderWorkIndexFields:()=>({workCategories:['arrival']}),ordersCache:[],supplyReceivingCache:[],
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
@@ -1718,7 +1722,8 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
             onHand:Number(data?.onHand||0),reserved:Number(data?.reserved||0),incoming:Number(data?.incoming||0)
         }),
         warehouseStockDocId:(warehouse,key)=>warehouse+'__'+key,
-        resolveBrandName:value=>value||'',
+        brandIdentityForRecord:record=>({brand:record?.brand||'',brandId:record?.brandId||''}),
+        resolveBrandName:value=>value||'',brandIdForName:()=> '',
         buildInventorySearchTokens:()=>['p1'],
         invalidateWarehouseStockCache:()=>{},
         ordersCache:[],supplyReceivingCache:[],
