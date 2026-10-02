@@ -2,14 +2,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const f = require('../modules/fulfillment-core.js');
 
-test('reserve 20 with 8 available => reserved 8 shortage 12', () => {
-  const x=f.reserveFromAvailable({orderedQty:20},8);
-  assert.equal(x.reservedQty,8); assert.equal(x.shortageQty,12);
+test('fulfillment core does not own receiving or reservation',()=>{
+  assert.equal(f.applyReceipt,undefined);
+  assert.equal(f.reserveFromAvailable,undefined);
 });
-test('full availability reserves all',()=>{const x=f.reserveFromAvailable({orderedQty:20},20);assert.equal(x.reservedQty,20);assert.equal(x.shortageQty,0);});
-test('zero availability leaves full shortage',()=>{const x=f.reserveFromAvailable({orderedQty:20},0);assert.equal(x.reservedQty,0);assert.equal(x.shortageQty,20);});
-test('fulfillment core does not own receiving',()=>{assert.equal(f.applyReceipt,undefined);});
-test('dispatch paperwork gates shippable quantity',()=>{let x=f.reserveFromAvailable({orderedQty:20},8);assert.equal(f.pendingDispatchQty(x),8);assert.equal(f.shippableQty(x),0);x=f.prepareDispatch(x,8);assert.equal(f.shippableQty(x),8);});
+test('dispatch paperwork gates shippable quantity',()=>{
+  let x=f.normalizeItem({orderedQty:20,reservedQty:8});
+  assert.equal(f.pendingDispatchQty(x),8);
+  assert.equal(f.shippableQty(x),0);
+  x=f.prepareDispatch(x,8);
+  assert.equal(f.shippableQty(x),8);
+});
 
 test('dispatch state is the single source for pending and shippable quantities',()=>{
   const state=f.dispatchState({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1});
