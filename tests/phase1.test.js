@@ -3304,7 +3304,9 @@ test('procurement views reuse dispatch state while calculating quantities', () =
     assert.match(pendingSource,/const lifecycle = lifecycleOverride \|\| orderLifecycleInfo\(order, items\)/);
     assert.match(pendingSource,/const dispatch = dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
     assert.match(pendingSource,/orderItemWorkCategory\(order, item, lifecycle, dispatch\)/);
-    assert.match(pendingSource,/remainingProcurementQty\(order, item, dispatch\)/);
+    assert.match(pendingSource,/const demand = procurementDemandForOrderItem\(order, item, dispatch\)/);
+    assert.match(pendingSource,/const qty = demand\.remainingToOrderQty/);
+    assert.match(pendingSource,/demandStatusLabel:globalThis\.YushinProcurementDemand/);
 
     const completedStart=appSource.indexOf('function purchasingCompletedRows');
     const completedEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',completedStart);
