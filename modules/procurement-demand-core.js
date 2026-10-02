@@ -21,6 +21,16 @@
     return Number.isFinite(number)?Math.max(0,number):0;
   }
 
+  function demandIdForSource(record={}){
+    const sourceType=Object.values(SOURCES).includes(record.sourceType)?record.sourceType:SOURCES.SALES_ORDER;
+    const sourceId=String(record.sourceId||'').trim();
+    const sourceItemId=String(record.sourceItemId||'').trim();
+    if(sourceType===SOURCES.SALES_ORDER){
+      return sourceId&&sourceItemId?`${sourceType}:${sourceId}:${sourceItemId}`:'';
+    }
+    return sourceId?`${sourceType}:${sourceId}`:'';
+  }
+
   function normalizeDemand(record={}){
     const requestedQty=n(record.requestedQty??record.qty);
     const orderedQty=n(record.orderedQty);
@@ -37,11 +47,15 @@
 
     const perOrdered=requestedQty>0?Math.min(100,(orderedQty/requestedQty)*100):0;
     const perReceived=requestedQty>0?Math.min(100,(receivedQty/requestedQty)*100):0;
+    const sourceType=Object.values(SOURCES).includes(record.sourceType)?record.sourceType:SOURCES.SALES_ORDER;
+    const sourceId=String(record.sourceId||'');
+    const sourceItemId=String(record.sourceItemId||'');
     return {
       ...record,
-      sourceType:Object.values(SOURCES).includes(record.sourceType)?record.sourceType:SOURCES.SALES_ORDER,
-      sourceId:String(record.sourceId||''),
-      sourceItemId:String(record.sourceItemId||''),
+      sourceType,
+      sourceId,
+      sourceItemId,
+      demandId:String(record.demandId||demandIdForSource({sourceType,sourceId,sourceItemId})),
       scheduleDate:String(record.scheduleDate||record.expectedDate||record.needByDate||''),
       requestedQty,
       orderedQty,
@@ -100,5 +114,5 @@
     }
   }
 
-  return {SOURCES,STATUSES,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel};
+  return {SOURCES,STATUSES,demandIdForSource,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel};
 });
