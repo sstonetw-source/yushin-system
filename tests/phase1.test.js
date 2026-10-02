@@ -4516,6 +4516,15 @@ test('quick Product Master creation keeps list price optional', () => {
 });
 
 
+test('copying an order preserves Product Master identity and procurement mode', () => {
+    const start=appSource.indexOf('window.copyOrderAsNew = function(orderId)');
+    const end=appSource.indexOf('\nwindow.closeOrderModal',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const copiedItems=normalizedOrderItems\(source\)\.map\(normalizeNewOrderItem\)/);
+    assert.match(source,/setOrderModalItem\(first\)/);
+    assert.doesNotMatch(source,/document\.getElementById\('orderItemCode'\)\.value = first\.itemCode/);
+});
+
 test('quote quick Product Master creation is optional while formal orders require a real product id', () => {
     assert.match(appSource, /建立 Product Master（選填）/);
     const saveStart=appSource.indexOf('window.saveNewOrder = function()');

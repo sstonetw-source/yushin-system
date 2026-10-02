@@ -13379,22 +13379,10 @@ window.copyOrderAsNew = function(orderId) {
     document.getElementById('orderCustomer').value = source.customerName || '';
     const copiedItems=normalizedOrderItems(source).map(normalizeNewOrderItem);
     const first=copiedItems[0]||normalizeNewOrderItem(source);
+    // 複製訂單要沿用正式的品項填入流程，才能保留 Product Master 身分、
+    // 訂貨方式、倉庫與品項屬性；不可只複製畫面文字後再依目前快取猜產品。
+    setOrderModalItem(first);
     newOrderDraftItems=copiedItems.slice(1);renderNewOrderDraftItems();
-    document.getElementById('orderItemCode').value = first.itemCode || '';
-    document.getElementById('orderItemName').value = first.itemName || '';
-    document.getElementById('orderProductLine').value = first.productLine || '';
-    if (first.brand) selectBrandInDropdown(document.getElementById('orderBrand'), first.brand);
-    onOrderBrandSelectChange();
-    document.getElementById('orderQty').value = first.qty || 1;
-    document.getElementById('orderUnitPrice').value = first.unitPrice || 0;
-    document.getElementById('orderFulfillmentType').value = first.fulfillmentType || 'WAREHOUSE';
-    populateOrderWarehouseOptions(first.warehouseId || '');
-    onOrderFulfillmentChange();
-    if (source.totalPrice !== undefined && source.totalPrice !== null && String(source.totalPrice).trim() !== '') {
-        document.getElementById('orderTotalPrice').value = String(source.totalPrice).replace(/,/g, '');
-    } else {
-        calcOrderTotal();
-    }
     const transactionType = source.transactionType || '';
     document.getElementById('orderTransactionType').value = transactionType;
     const invoiceInput = document.getElementById('orderInvoiceTitle');
