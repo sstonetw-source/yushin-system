@@ -136,6 +136,16 @@ test('reopened demand restores derived ordering state',()=>{
   assert.equal(reopened.remainingToReceiveQty,2);
 });
 
+test('closed supplier commitment contributes only the physically received quantity',()=>{
+  const demand={demandId:'SALES_ORDER:o1:i1',requestedQty:10};
+  const reconciled=d.reconcileLinkedSupplies(demand,[
+    {demandId:demand.demandId,qty:10,receivedQty:4,status:'CLOSED'}
+  ]);
+  assert.equal(reconciled.orderedQty,4);
+  assert.equal(reconciled.receivedQty,4);
+  assert.equal(reconciled.remainingToOrderQty,6);
+});
+
 test('linked supplier commitments reopen demand when an unreceived remainder is cancelled',()=>{
   const current=d.normalizeDemand({demandId:'SALES_ORDER:o1:i1',requestedQty:10,orderedQty:10,receivedQty:4});
   const result=d.applySupplyCancellation(current,{demandId:current.demandId,qty:10,receivedQty:4,status:'PARTIAL_RECEIPT'});
