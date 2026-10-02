@@ -18140,10 +18140,11 @@ window.onItemModelInput = function(input) {
 };
 
 function stableProductId(item) {
-    const brand = String(item?.brand || '').trim().toLocaleLowerCase();
-    const code = normalizeItemCode(item?.model);
+    const canonicalBrand = resolveBrandName(item?.brand || item?.brandName || '');
+    const brand = normalizeBrandLookupKey(canonicalBrand);
+    const code = normalizeItemCode(item?.model || item?.manufacturerPartNo || item?.sku || '');
     if (code) return `prd:${encodeURIComponent(brand)}:${encodeURIComponent(code)}`;
-    const name = String(item?.nameCn || item?.nameEn || '').normalize('NFKC').trim().toLocaleLowerCase();
+    const name = String(item?.nameCn || item?.productName || item?.nameEn || '').normalize('NFKC').trim().toLocaleLowerCase();
     return `prd:${encodeURIComponent(brand)}:name:${encodeURIComponent(name)}`;
 }
 
@@ -18366,40 +18367,38 @@ function showProductMatchChoices(input, matches, mode) {
 }
 
 function ensureQuickProductModal() {
-    let overlay = document.getElementById('quickProductOverlay');
-    if (overlay) return overlay;
-    overlay = document.createElement('div');
-    overlay.id = 'quickProductOverlay';
-    overlay.className = 'eq-modal-overlay no-print';
-    overlay.innerHTML = `
-      <div class="eq-modal-box" style="max-width:620px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-          <h3 style="margin:0;">快速新增產品</h3>
-          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">✕ 暫存並關閉</button>
+    let panel = document.getElementById('quickProductOverlay');
+    if (panel) return panel;
+    panel = document.createElement('div');
+    panel.id = 'quickProductOverlay';
+    panel.className = 'quick-product-inline-panel no-print';
+    panel.innerHTML = `
+      <div class="quick-product-inline-head">
+        <div>
+          <strong>快速建立產品</strong>
+          <span>不離開目前單據；填完後直接帶回原本貨號欄位。</span>
         </div>
-        <div style="font-size:12px;color:#666;margin:8px 0 14px;">只填銷售當下需要的資料，其餘欄位可由採購或管理員後補。</div>
-        <div class="form-grid">
-          <div><label>廠牌</label><input id="quickProductBrand" type="text" list="quickProductBrandList" autocomplete="off"><datalist id="quickProductBrandList"></datalist></div>
-          <div><label>貨號</label><input id="quickProductCode" type="text" autocomplete="off"></div>
-          <div style="grid-column:1/-1;"><label>中文品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
-          <div style="grid-column:1/-1;"><label>英文品名</label><input id="quickProductNameEn" type="text" autocomplete="off"></div>
-          <div><label>規格</label><input id="quickProductSpec" type="text" autocomplete="off"></div>
-          <div><label>建議售價（選填）</label><input id="quickProductPrice" type="number" min="0"></div>
-          <input id="quickProductLine" type="hidden">
-        </div>
-        <div style="margin-top:14px;text-align:right;">
-          <button type="button" id="saveQuickProductBtn" onclick="saveQuickProduct()">儲存並帶入</button>
-          <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">暫存並關閉</button>
-        </div>
+        <button type="button" class="btn-small btn-secondary" onclick="closeQuickProductCreate()">收合</button>
+      </div>
+      <div class="quick-product-inline-grid">
+        <label>廠牌<input id="quickProductBrand" type="text" list="quickProductBrandList" autocomplete="off"><datalist id="quickProductBrandList"></datalist></label>
+        <label>貨號<input id="quickProductCode" type="text" autocomplete="off"></label>
+        <label class="quick-product-span-2">中文品名<input id="quickProductName" type="text" autocomplete="off"></label>
+        <label class="quick-product-span-2">英文品名<input id="quickProductNameEn" type="text" autocomplete="off"></label>
+        <label>規格<input id="quickProductSpec" type="text" autocomplete="off"></label>
+        <label>建議售價（選填）<input id="quickProductPrice" type="number" min="0"></label>
+        <input id="quickProductLine" type="hidden">
+      </div>
+      <div class="quick-product-inline-actions">
+        <button type="button" id="saveQuickProductBtn" onclick="saveQuickProduct()">儲存並帶入</button>
+        <button type="button" class="btn-secondary" onclick="closeQuickProductCreate()">稍後再補</button>
       </div>`;
-    // A backdrop tap on a phone must not discard a partially entered product.
-    overlay.addEventListener('input', saveQuickProductDraft);
-    overlay.addEventListener('change', saveQuickProductDraft);
-    document.body.appendChild(overlay);
-    return overlay;
+    panel.addEventListener('input', saveQuickProductDraft);
+    panel.addEventListener('change', saveQuickProductDraft);
+    return panel;
 }
 
-const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Line', 'Price'];
+const QUICK_PRODUCT_FIELDS =const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Line', 'Price'];
 function quickProductDraftKey() {
     return currentUser?.uid ? `quick-product-draft:${currentUser.uid}` : '';
 }
@@ -18422,8 +18421,13 @@ function clearQuickProductDraft() {
 
 
 window.openQuickProductCreate = function(mode, input) {
-    const overlay = ensureQuickProductModal();
+    const panel = ensureQuickProductModal();
+    if (panel.classList.contains('active') && quickProductTarget?.input !== input) saveQuickProductDraft();
+
     quickProductTarget = { mode, input, row: mode === 'quote' ? input.closest('tr') : null };
+    const anchor = mode === 'quote' ? input.closest('.field-row') : input.parentElement;
+    if (anchor?.parentElement) anchor.insertAdjacentElement('afterend', panel);
+
     const brandList = document.getElementById('quickProductBrandList');
     if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
     const currentBrand = mode === 'quote'
@@ -18436,7 +18440,7 @@ window.openQuickProductCreate = function(mode, input) {
         : (document.getElementById('orderItemName')?.value || '');
     document.getElementById('quickProductNameEn').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-en')?.value || '')
-        : '';
+        : (document.getElementById('orderItemNameEn')?.value || '');
     document.getElementById('quickProductSpec').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.item-spec')?.value || '')
         : (document.getElementById('orderSpec')?.value || '');
@@ -18446,22 +18450,22 @@ window.openQuickProductCreate = function(mode, input) {
     document.getElementById('quickProductPrice').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.inc-price')?.value || '')
         : (document.getElementById('orderUnitPrice')?.value || '');
+
     const draft = readQuickProductDraft();
-    // Resume only the same product; another item's form must not inherit stale values.
     if (draft && normalizeItemCodeLoose(draft.Code) === normalizeItemCodeLoose(input.value.trim())
-        && normalizeBrandLookupKey(draft.Brand) === normalizeBrandLookupKey(currentBrand)) {
+        && normalizeBrandLookupKey(resolveBrandName(draft.Brand)) === normalizeBrandLookupKey(resolveBrandName(currentBrand))) {
         QUICK_PRODUCT_FIELDS.forEach(field => {
             const node = document.getElementById(`quickProduct${field}`);
             if (node) node.value = draft[field] || '';
         });
     }
-    overlay.classList.add('active');
+    panel.classList.add('active');
 };
 
 window.closeQuickProductCreate = function() {
-    const overlay = document.getElementById('quickProductOverlay');
-    if (overlay?.classList.contains('active')) saveQuickProductDraft();
-    if (overlay) overlay.classList.remove('active');
+    const panel = document.getElementById('quickProductOverlay');
+    if (panel?.classList.contains('active')) saveQuickProductDraft();
+    if (panel) panel.classList.remove('active');
     quickProductTarget = null;
 };
 

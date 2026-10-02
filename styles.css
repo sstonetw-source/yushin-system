@@ -2581,3 +2581,57 @@ html[data-app-environment="preview"] body { border-top: 0; }
   .product-360-warehouse{display:block}
   .product-360-warehouse span{display:block;margin-top:3px}
 }
+
+
+/* Quick Product Master is inline: it expands below the current item code instead of covering the form. */
+.quick-product-inline-panel {
+    display:none;
+    grid-column:1 / -1;
+    width:100%;
+    margin:6px 0 10px;
+    padding:10px 12px;
+    border:1px solid #c7d6e5;
+    border-radius:8px;
+    background:#f8fbfe;
+    box-shadow:none;
+    box-sizing:border-box;
+}
+.quick-product-inline-panel.active { display:block; }
+.quick-product-inline-head {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:9px;
+}
+.quick-product-inline-head strong { display:block; color:#173a63; font-size:13px; }
+.quick-product-inline-head span { display:block; margin-top:2px; color:#66727d; font-size:11px; line-height:1.4; }
+.quick-product-inline-grid {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:8px 10px;
+}
+.quick-product-inline-grid label { min-width:0; color:#333; font-size:11px; font-weight:700; }
+.quick-product-inline-grid input {
+    width:100%;
+    margin-top:3px;
+    padding:6px 8px;
+    border:1px solid #bfcbd7;
+    border-radius:5px;
+    background:#fff;
+    box-sizing:border-box;
+    font:inherit;
+}
+.quick-product-span-2 { grid-column:1 / -1; }
+.quick-product-inline-actions {
+    display:flex;
+    justify-content:flex-end;
+    gap:7px;
+    margin-top:9px;
+}
+@media (max-width: 700px) {
+    .quick-product-inline-grid { grid-template-columns:1fr; }
+    .quick-product-span-2 { grid-column:auto; }
+    .quick-product-inline-actions { justify-content:stretch; }
+    .quick-product-inline-actions button { flex:1; }
+}

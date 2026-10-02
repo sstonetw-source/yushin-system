@@ -1707,6 +1707,29 @@ test('quick product creation is temporary, duplicate-safe and can be used from q
     assert.match(appSource, /showQuickProductButton\(input, 'order'\)/);
 });
 
+test('quick product editor expands inline without covering the source field', () => {
+    const start = appSource.indexOf('function ensureQuickProductModal()');
+    const end = appSource.indexOf('const QUICK_PRODUCT_FIELDS', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /quick-product-inline-panel/);
+    assert.doesNotMatch(source, /eq-modal-overlay/);
+    assert.doesNotMatch(source, /document\.body\.appendChild/);
+
+    const openStart = appSource.indexOf('window.openQuickProductCreate = function');
+    const openEnd = appSource.indexOf('window.saveQuickProduct = async function', openStart);
+    const openSource = appSource.slice(openStart, openEnd);
+    assert.match(openSource, /insertAdjacentElement\('afterend', panel\)/);
+    assert.match(cssSource, /\.quick-product-inline-panel/);
+});
+
+test('new product ids canonicalize brand aliases before composing identity', () => {
+    const start = appSource.indexOf('function stableProductId(item)');
+    const end = appSource.indexOf('function normalizeProductTypeValue', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /resolveBrandName\(item\?\.brand \|\| item\?\.brandName/);
+    assert.match(source, /normalizeBrandLookupKey\(canonicalBrand\)/);
+});
+
 test('standard product costs are restricted to purchaser/admin', () => {
     const start = appSource.indexOf('async function loadVisibleProductCost');
     const end = appSource.indexOf('\nfunction setOrderCostFieldForProduct', start);
