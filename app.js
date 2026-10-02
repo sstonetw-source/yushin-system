@@ -7209,6 +7209,8 @@ window.openInventoryReplenishment = async function(inventoryId) {
     await autoFillPoSupplier(poItems);
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
+    const poExpectedDateInput=document.getElementById('poExpectedDate');
+    if(poExpectedDateInput)poExpectedDateInput.value='';
     switchPoCompany(currentCompany || 'yushin', null, true);
     generatePoNo();
     updatePoModeUI();
@@ -9902,6 +9904,8 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         document.getElementById('poVendorName').value = '';
         document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
         document.getElementById('poDate').value = localDateString();
+    const poExpectedDateInput=document.getElementById('poExpectedDate');
+    if(poExpectedDateInput)poExpectedDateInput.value='';
         switchPoCompany(bestPurchaseOrderCompany([order], items, order.company), null, true);
         generatePoNo();
         renderPoItemsTable();
@@ -10464,6 +10468,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="廠商">${escapeHtml(po.vendorName || '')}</td>
                 <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
                 <td data-th="訂購日期">${escapeHtml(po.poDate || '')}</td>
+                <td data-th="預計到貨">${escapeHtml(po.expectedDate || po.scheduleDate || '—')}${(po.expectedDate||po.scheduleDate)&&receiptProgress.remainingQty>0&&(po.expectedDate||po.scheduleDate)<localDateString()?'・逾期':''}</td>
                 <td data-th="建立天數">${escapeHtml(poWaitingDays(po)||'—')}</td>
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
@@ -10532,6 +10537,8 @@ window.reprintPurchaseOrder = async function(poId) {
     window.updatePoSupplierEmailHint?.(po);
     document.getElementById('poBuyerName').innerText = po.buyerName || '';
     document.getElementById('poDate').value = po.poDate || '';
+    const poExpectedDateInput=document.getElementById('poExpectedDate');
+    if(poExpectedDateInput)poExpectedDateInput.value=po.expectedDate||po.scheduleDate||'';
     document.getElementById('poNo').innerText = po.poNo || '';
 
     renderPoItemsTable();
@@ -10593,6 +10600,8 @@ window.copySavedPurchaseOrderAsNew = async function(poId) {
     window.updatePoSupplierEmailHint?.({vendorName:po.vendorName,supplierId:po.supplierId,supplierEmail:po.supplierEmail});
     document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
     document.getElementById('poDate').value = localDateString();
+    const poExpectedDateInput=document.getElementById('poExpectedDate');
+    if(poExpectedDateInput)poExpectedDateInput.value='';
     await generatePoNo();
     renderPoItemsTable();
     updatePoModeUI();
@@ -11660,6 +11669,8 @@ window.openDirectStockPurchase = async function() {
     document.getElementById('poVendorName').value = '';
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
+    const poExpectedDateInput=document.getElementById('poExpectedDate');
+    if(poExpectedDateInput)poExpectedDateInput.value='';
     switchPoCompany(currentCompany || 'yushin', null, true);
     generatePoNo();
     addDirectPoItem();
@@ -12233,6 +12244,8 @@ window.printPurchaseOrder = async function() {
         supplierEmail:normalizeSupplierEmail(supplierContact?.email||''),
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
+        expectedDate: document.getElementById('poExpectedDate')?.value || '',
+        scheduleDate: document.getElementById('poExpectedDate')?.value || '',
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
         items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
         ...netAmountMetadata(poNetTotal),
@@ -12302,6 +12315,8 @@ window.printPurchaseOrder = async function() {
                     supplierEmail:poRecord.supplierEmail||'',
                     unitCost:Number(item.unitPrice||0),
                     orderDate:poRecord.poDate,
+                    expectedDate:poRecord.expectedDate||'',
+                    scheduleDate:poRecord.scheduleDate||poRecord.expectedDate||'',
                     fulfillmentType:item.fulfillmentType||'WAREHOUSE',
                     warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
                     createdAt:poRecord.createdAt,
