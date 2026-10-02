@@ -1,9 +1,8 @@
 (function (root, factory) {
-  const receiving = typeof module === 'object' && module.exports ? require('./receiving-core.js') : (root && root.YushinReceiving);
-  const api = factory(receiving);
+  const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.YushinFulfillment = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (receiving) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   function n(value) {
     const num = Number(value);
     return Number.isFinite(num) ? Math.max(0, num) : 0;
@@ -46,11 +45,6 @@
     const outstanding = Math.max(0, next.orderedQty - (next.deliveredQty - next.returnedQty));
     const target = Math.min(outstanding, n(availableQty));
     return normalizeItem({ ...next, reservedQty: target });
-  }
-
-  function applyReceipt(item, qty) {
-    if (!receiving) throw new Error('Receiving core is required.');
-    return normalizeItem(receiving.applyReceiptToOrderItem(normalizeItem(item), qty).item);
   }
 
   function dispatchState(item = {}) {
@@ -101,7 +95,6 @@
   return {
     normalizeItem,
     reserveFromAvailable,
-    applyReceipt,
     dispatchState,
     pendingDispatchQty,
     shippableQty,
