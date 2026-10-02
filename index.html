@@ -1331,6 +1331,16 @@
                 <button style="margin-top:10px;" onclick="saveKeyStatisticBrands()">💾 儲存廠牌與統計設定</button>
             </div>
             <div class="panel" style="margin-top:16px;">
+                <strong>廠牌標準名稱與別名</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">Product Master、估價、訂單與進銷存分析只使用「標準名稱」。常見縮寫或舊名稱請放在別名，例如標準名稱「Beckman Coulter」，別名可填「Beckman」。輸入別名時系統會自動轉成標準名稱，不再建立第二個廠牌。</p>
+                <div style="overflow-x:auto;margin-top:10px;">
+                    <table>
+                        <thead><tr><th style="min-width:170px;">標準名稱</th><th style="min-width:320px;">別名（逗號分隔）</th><th class="no-print">操作</th></tr></thead>
+                        <tbody id="brandAliasManagerBody"><tr><td colspan="3" style="color:#888;">正在載入 Brand Master…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="panel" style="margin-top:16px;">
                 <strong>報價公司限制</strong>
                 <p style="font-size:12px;color:#666;margin:6px 0;">只有少數簽在特定分公司的廠牌需要設定。某廠牌若完全未勾選任何公司＝三家公司都可報價；若有勾選＝只能使用勾選公司的估價單抬頭。受限制廠牌在其他公司的估價單仍會顯示，但不能選取。</p>
                 <div id="companyAgencyBrandSettings"></div>
@@ -1586,6 +1596,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261002-58"></script>
+    <script src="app.js?v=20261002-59"></script>
 </body>
 </html>

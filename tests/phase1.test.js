@@ -203,7 +203,9 @@ test('Brand Master drives the main brand list while statistics grouping remains 
         keyStatisticBrandAliases:{}, companyAgencyBrands:{ yushin:[], morningstar:[], 'MULTI-LIFE':[] },
         normalizeBrandLookupKey:value => String(value || '').trim().toLowerCase(),
         dedupeBrandsCaseInsensitive:values => [...new Set(values)],
-        includesBrandCaseInsensitive:(values, name) => values.includes(name)
+        includesBrandCaseInsensitive:(values, name) => values.includes(name),
+        defaultCanonicalBrandName:value => value,
+        defaultBrandAliasesForCanonical:() => []
     });
     vm.runInContext(appSource.slice(start, end), context);
     assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Unlisted Excel Brand']);
@@ -219,6 +221,27 @@ test('Brand Master drives the main brand list while statistics grouping remains 
     assert.equal(context.statisticBrandForOrder({ brand:'Unlisted Excel Brand' }), '其他廠牌');
     assert.equal(context.statisticBrandForOrder({ brand:'' }), '其他廠牌');
     assert.equal(context.statisticBrandForOrder({ brand:'維修' }), '維修');
+});
+
+test('brand aliases collapse Beckman and Beckman Coulter into one canonical brand', () => {
+    assert.match(appSource, /'Beckman Coulter': \['Beckman', 'Beckman Coulter Life Sciences'\]/);
+    assert.match(appSource, /const rawBrand = toHalfWidth[\s\S]*?const brand = resolveBrandName\(rawBrand\)/);
+    assert.match(appSource, /resolveBrandName\(data\.brandName \|\| data\.brand \|\| ''\)/);
+    assert.match(indexSource, /id="brandAliasManagerBody"/);
+
+    const defaultStart = appSource.indexOf('function defaultCanonicalBrandName(value)');
+    const defaultEnd = appSource.indexOf('\n}\n', defaultStart) + 2;
+    const context = vm.createContext({
+        DEFAULT_CANONICAL_BRAND_ALIASES:{
+            'Beckman Coulter':['Beckman','Beckman Coulter Life Sciences'],
+            Thermo:['Thermo Fisher']
+        },
+        normalizeBrandLookupKey:value => String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[\\s\\-_]+/g, '')
+    });
+    vm.runInContext(appSource.slice(defaultStart, defaultEnd), context);
+    assert.equal(context.defaultCanonicalBrandName('Beckman'), 'Beckman Coulter');
+    assert.equal(context.defaultCanonicalBrandName('Beckman Coulter'), 'Beckman Coulter');
+    assert.equal(context.defaultCanonicalBrandName('Thermo Fisher'), 'Thermo');
 });
 
 test('multi-brand sales statistics split delivery and returns by item without duplicating amounts', () => {

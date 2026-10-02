@@ -305,8 +305,15 @@ let inventoryAnalysisSupplyOrders = [];
 let inventoryAnalysisDirectShipSupplyOrders = [];
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
-const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman', 'Thermo'];
-const DEFAULT_STATISTIC_BRAND_ALIASES = { 'Bio-Rad': ['Biorad', 'Bio Rad', 'BIO-RAD'], 'Thermo': ['Thermo Fisher', 'Thermo Fisher Scientific'] };
+const DEFAULT_CANONICAL_BRAND_ALIASES = {
+    'Beckman Coulter': ['Beckman', 'Beckman Coulter Life Sciences'],
+    'Bio-Rad': ['Biorad', 'Bio Rad', 'BIO-RAD'],
+    'Thermo': ['Thermo Fisher', 'Thermo Fisher Scientific'],
+    'Roche': ['Roche Diagnostics'],
+    'Tanbead': ['Tan Bead']
+};
+const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman Coulter', 'Thermo'];
+const DEFAULT_STATISTIC_BRAND_ALIASES = JSON.parse(JSON.stringify(DEFAULT_CANONICAL_BRAND_ALIASES));
 let companyAgencyBrands = { yushin: [], morningstar: [], 'MULTI-LIFE': [] };
 let companyAgencyBrandsConfigured = false;
 // Phase 1：Brand Master 為全系統正式廠牌來源；尚未完成舊資料移轉前，仍合併價目表／統計／分公司舊設定以保持相容。
@@ -1432,8 +1439,13 @@ async function fetchProductBrandBrowsePage(reset = false) {
         productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
     }
 
+    const brandEntry = brandMasterEntryForName(brand);
+    const storedBrandNames = dedupeBrandsCaseInsensitive([
+        brand,
+        ...(brandEntry?.aliases || [])
+    ]).slice(0, 10);
     let query = db.collection('products')
-        .where('brandName', '==', brand)
+        .where('brandName', storedBrandNames.length > 1 ? 'in' : '==', storedBrandNames.length > 1 ? storedBrandNames : brand)
         .orderBy(firebase.firestore.FieldPath.documentId())
         .limit(PRODUCT_BRAND_BROWSE_PAGE_SIZE);
     if (productBrandBrowseCursor) query = query.startAfter(productBrandBrowseCursor);
@@ -1486,7 +1498,7 @@ window.reloadCurrentProductBrand = function() {
 };
 
 function pendingProductKey(item = {}) {
-    const brand = normalizeBrandLookupKey(item.brand || '');
+    const brand = normalizeBrandLookupKey(resolveBrandName(item.brand || ''));
     const code = normalizeItemCodeLoose(item.itemCode || item.model || '');
     const name = String(item.itemName || item.nameCn || item.nameEn || '').normalize('NFKC').trim().toLocaleLowerCase();
     return code ? `${brand}::${code}` : `${brand}::name:${name}`;
@@ -1767,7 +1779,7 @@ function productManagementRow(product) {
       <td data-th="選取" class="no-print product-management-select-cell"><input type="checkbox" ${selected ? 'checked' : ''} ${productId && !inactive && (canQuote || canOrder) ? '' : 'disabled'} aria-label="選取 ${escapeAttr(product.productName || product.nameCn || product.nameEn || product.manufacturerPartNo || product.sku || '產品')}" onchange="toggleProductManagementSelection('${escapeAttr(productId)}', this.checked)"></td>
       <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
       <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
-      <td data-th="廠牌">${escapeHtml(product.brandName || product.brand || '')}</td>
+      <td data-th="廠牌">${escapeHtml(resolveBrandName(product.brandName || product.brand || ''))}</td>
       <td data-th="產品線">${escapeHtml(product.productLine || '未分類')}</td>
       <td data-th="類型">${escapeHtml(product.productType || product.category || '未分類')}</td>
       <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
@@ -2217,7 +2229,7 @@ window.searchProductManagement = async function() {
         const values = [
             data.manufacturerPartNo, data.normalizedPartNo, data.sku,
             data.productName, data.nameCn, data.nameEn,
-            data.brandName, data.brand, data.productLine,
+            data.brandName, data.brand, resolveBrandName(data.brandName || data.brand || ''), data.productLine,
             data.productType, data.category, data.specification, data.spec, data.unit
         ];
         const haystack = values
@@ -2595,7 +2607,7 @@ window.saveProductMasterEditor = async function() {
     const duplicate = duplicateSnap.docs.find(doc => {
         if (doc.id === originalId) return false;
         const data = doc.data() || {};
-        return normalizeBrandLookupKey(data.brandName || data.brand || '') === normalizeBrandLookupKey(brand);
+        return normalizeBrandLookupKey(resolveBrandName(data.brandName || data.brand || '')) === normalizeBrandLookupKey(brand);
     });
     if (duplicate) {
         alert('這個廠牌與貨號已經存在於 Product Master，請直接編輯既有產品。');
@@ -2661,7 +2673,7 @@ function productManagementSource(product) {
         nameCn: product.productName || product.nameCn || '',
         nameEn: product.nameEn || '',
         itemName: product.productName || product.nameCn || product.nameEn || '',
-        brand: product.brandName || product.brand || '',
+        brand: resolveBrandName(product.brandName || product.brand || ''),
         spec: product.specification || product.spec || '',
         price: Number(product.listPrice ?? product.price ?? 0),
         unitPrice: Number(product.listPrice ?? product.price ?? 0),
@@ -4237,6 +4249,7 @@ function ensureBrandSettingsLoaded() {
             populateEquipmentBrandDropdown();
             if (typeof populateForecastBrandDropdown === 'function')
                 populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+            renderBrandAliasManager();
             renderCompanyAgencyBrandSettings();
         }).catch(err => {
             brandSettingsLoadPromise = null;
@@ -4288,6 +4301,26 @@ function normalizeBrandLookupKey(value) {
     return String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/[\s\-_]+/g, '');
 }
 
+function defaultCanonicalBrandName(value) {
+    const input = String(value || '').normalize('NFKC').trim();
+    if (!input) return '';
+    const key = normalizeBrandLookupKey(input);
+    for (const [canonical, aliases] of Object.entries(DEFAULT_CANONICAL_BRAND_ALIASES)) {
+        if (normalizeBrandLookupKey(canonical) === key) return canonical;
+        if ((aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)) return canonical;
+    }
+    return input;
+}
+
+function defaultBrandAliasesForCanonical(value) {
+    const canonical = defaultCanonicalBrandName(value);
+    const key = normalizeBrandLookupKey(canonical);
+    for (const [name, aliases] of Object.entries(DEFAULT_CANONICAL_BRAND_ALIASES)) {
+        if (normalizeBrandLookupKey(name) === key) return dedupeBrandsCaseInsensitive(aliases || []);
+    }
+    return [];
+}
+
 function normalizeBrandMasterRecord(id, data = {}) {
     const name = String(data.name || data.brand || id || '').trim();
     return {
@@ -4301,39 +4334,83 @@ function normalizeBrandMasterRecord(id, data = {}) {
 }
 
 function getUnifiedBrandEntries(includeMaintenance = false) {
-    // Brand Master 是一般廠牌選單的正式來源；「是否獨立統計」只影響進銷存分組，
-    // 不再決定這個廠牌能不能出現在估價、訂單、Forecast 等一般廠牌選單。
+    // Brand Master 的「標準名稱」是全系統唯一廠牌名稱；別名只用來辨識輸入，
+    // 不應在 Product Master、估價、訂單或進銷存分析中形成第二個廠牌。
     const entries = new Map();
     const companyKeys = ['yushin', 'morningstar', 'MULTI-LIFE'];
+    const masters = brandMasterCache.filter(master => master?.name && master.active !== false);
 
-    const statisticConfigForEntry = master => keyStatisticBrands.find(configuredName => {
-        const configuredKey = normalizeBrandLookupKey(configuredName);
-        const configuredAliases = keyStatisticBrandAliases[configuredName] || [];
-        return configuredKey === normalizeBrandLookupKey(master.name)
-            || (master.aliases || []).some(alias => normalizeBrandLookupKey(alias) === configuredKey)
-            || configuredAliases.some(alias => normalizeBrandLookupKey(alias) === normalizeBrandLookupKey(master.name));
+    const explicitAliasOwners = new Map();
+    masters.forEach(master => {
+        const ownerName = defaultCanonicalBrandName(master.name);
+        (master.aliases || []).forEach(alias => {
+            const key = normalizeBrandLookupKey(alias);
+            if (key && key !== normalizeBrandLookupKey(ownerName) && !explicitAliasOwners.has(key)) {
+                explicitAliasOwners.set(key, ownerName);
+            }
+        });
+    });
+
+    const canonicalForMaster = master => {
+        const rawName = String(master?.name || '').trim();
+        const aliasOwner = explicitAliasOwners.get(normalizeBrandLookupKey(rawName));
+        return defaultCanonicalBrandName(aliasOwner || rawName);
+    };
+
+    const statisticConfigForEntry = (master, canonicalName, aliases) => keyStatisticBrands.find(configuredName => {
+        const configuredCanonical = defaultCanonicalBrandName(configuredName);
+        const configuredKey = normalizeBrandLookupKey(configuredCanonical);
+        const configuredAliases = keyStatisticBrandAliases[configuredName]
+            || keyStatisticBrandAliases[configuredCanonical]
+            || [];
+        return configuredKey === normalizeBrandLookupKey(canonicalName)
+            || aliases.some(alias => normalizeBrandLookupKey(alias) === configuredKey)
+            || configuredAliases.some(alias => normalizeBrandLookupKey(alias) === normalizeBrandLookupKey(canonicalName));
     }) || '';
 
-    brandMasterCache.filter(master => master?.name && master.active !== false).forEach(master => {
-        const key = normalizeBrandLookupKey(master.name);
-        if (!key || key === normalizeBrandLookupKey('維修') || entries.has(key)) return;
-        const statisticConfig = statisticConfigForEntry(master);
-        const aliases = dedupeBrandsCaseInsensitive([
+    masters.forEach(master => {
+        const canonicalName = canonicalForMaster(master);
+        const key = normalizeBrandLookupKey(canonicalName);
+        if (!key || key === normalizeBrandLookupKey('維修')) return;
+
+        const baseAliases = dedupeBrandsCaseInsensitive([
             ...(master.aliases || []),
+            ...defaultBrandAliasesForCanonical(canonicalName),
+            ...(normalizeBrandLookupKey(master.name) !== key ? [master.name] : [])
+        ]).filter(alias => normalizeBrandLookupKey(alias) !== key);
+        const statisticConfig = statisticConfigForEntry(master, canonicalName, baseAliases);
+        const aliases = dedupeBrandsCaseInsensitive([
+            ...baseAliases,
             ...(statisticConfig ? (keyStatisticBrandAliases[statisticConfig] || []) : [])
         ]).filter(alias => normalizeBrandLookupKey(alias) !== key);
         const companies = companyKeys.filter(company =>
             (master.companies || []).includes(company)
-            || includesBrandCaseInsensitive(companyAgencyBrands[company] || [], master.name)
+            || includesBrandCaseInsensitive(companyAgencyBrands[company] || [], canonicalName)
             || aliases.some(alias => includesBrandCaseInsensitive(companyAgencyBrands[company] || [], alias))
         );
-        entries.set(key, {
-            ...master,
-            aliases,
-            isKeyBrand: !!statisticConfig,
-            companies,
-            active: true
-        });
+
+        const existing = entries.get(key);
+        if (existing) {
+            const masterIsCanonical = normalizeBrandLookupKey(master.name) === key;
+            entries.set(key, {
+                ...existing,
+                id: masterIsCanonical ? master.id : existing.id,
+                name: canonicalName,
+                aliases: dedupeBrandsCaseInsensitive([...(existing.aliases || []), ...aliases]),
+                isKeyBrand: existing.isKeyBrand || !!statisticConfig,
+                companies: [...new Set([...(existing.companies || []), ...companies])],
+                active: true
+            });
+        } else {
+            entries.set(key, {
+                ...master,
+                name: canonicalName,
+                aliases,
+                isKeyBrand: !!statisticConfig,
+                companies,
+                active: true
+            });
+        }
     });
 
     if (includeMaintenance) entries.set(normalizeBrandLookupKey('維修'), {
@@ -4789,12 +4866,14 @@ function resolveBrandName(value) {
     const input = String(value || '').trim();
     if (!input) return '';
     const key = normalizeBrandLookupKey(input);
+    const defaultCanonical = defaultCanonicalBrandName(input);
 
     for (const entry of getUnifiedBrandEntries(true)) {
         if (normalizeBrandLookupKey(entry.name) === key) return entry.name;
+        if (normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(defaultCanonical)) return entry.name;
         if ((entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)) return entry.name;
     }
-    return input;
+    return defaultCanonical;
 }
 
 function loadBrandMaster() {
@@ -4819,15 +4898,17 @@ function brandMasterDocumentId(name) {
 }
 
 async function upsertBrandMaster(name, patch = {}) {
-    const canonicalName = String(name || '').trim();
+    const canonicalName = resolveBrandName(name);
     if (!canonicalName || canonicalName === '其他' || canonicalName === OTHER_BRAND_OPTION_KEY || canonicalName === '維修') return;
     const id = brandMasterDocumentId(canonicalName);
-    const current = brandMasterCache.find(item => normalizeBrandLookupKey(item.name) === normalizeBrandLookupKey(canonicalName));
+    const current = brandMasterCache.find(item =>
+        normalizeBrandLookupKey(defaultCanonicalBrandName(item.name)) === normalizeBrandLookupKey(canonicalName)
+    );
     const payload = {
-        name: current?.name || canonicalName,
+        name: canonicalName,
         aliases: patch.replaceAliases
-            ? dedupeBrandsCaseInsensitive(patch.aliases || [])
-            : dedupeBrandsCaseInsensitive([...(current?.aliases || []), ...(patch.aliases || [])]),
+            ? dedupeBrandsCaseInsensitive([...(patch.aliases || []), ...defaultBrandAliasesForCanonical(canonicalName)])
+            : dedupeBrandsCaseInsensitive([...(current?.aliases || []), ...(patch.aliases || []), ...defaultBrandAliasesForCanonical(canonicalName)]),
         isKeyBrand: patch.isKeyBrand ?? current?.isKeyBrand ?? false,
         companies: patch.replaceCompanies
             ? [...new Set(patch.companies || [])]
@@ -4974,9 +5055,7 @@ window.previewBrandMasterCompatibilityAudit = async function() {
 
 
 function normalizeThermoBrandList(brands) {
-    return dedupeBrandsCaseInsensitive((brands || []).map(value =>
-        String(value || '').trim().toLocaleLowerCase() === 'thermo' ? 'Thermo' : value
-    ));
+    return dedupeBrandsCaseInsensitive((brands || []).map(value => resolveBrandName(value)).filter(Boolean));
 }
 
 function includesBrandCaseInsensitive(brands, brand) {
@@ -17363,6 +17442,7 @@ window.switchAdminTab = function(tab, el) {
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
     if (tab === 'agencies') Promise.all([ensureBrandSettingsLoaded(), loadSupplierWarehouseMasters()]).then(() => {
         renderKeyStatisticBrands();
+        renderBrandAliasManager();
         renderCompanyAgencyBrandSettings();
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
@@ -17371,6 +17451,51 @@ window.switchAdminTab = function(tab, el) {
     if (tab === 'statistics') ensureBrandSettingsLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
     if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
+};
+
+function renderBrandAliasManager() {
+    const body = document.getElementById('brandAliasManagerBody');
+    if (!body) return;
+    const entries = getUnifiedBrandEntries(false);
+    body.innerHTML = entries.length ? entries.map(entry => `
+        <tr>
+            <td><strong>${escapeHtml(entry.name)}</strong></td>
+            <td><input type="text" class="brand-alias-input" value="${escapeAttr((entry.aliases || []).join(', '))}" placeholder="例如：Beckman, Beckman Coulter Life Sciences" style="width:100%;box-sizing:border-box;"></td>
+            <td class="no-print"><button type="button" class="btn-small btn-secondary" onclick="saveBrandAliases('${escapeAttr(entry.name)}', this)">儲存別名</button></td>
+        </tr>`).join('') : '<tr><td colspan="3" style="color:#888;">尚未建立 Brand Master。</td></tr>';
+}
+
+window.saveBrandAliases = async function(brandName, button) {
+    if (currentUserRole !== 'admin') return;
+    const canonical = resolveBrandName(brandName);
+    const row = button?.closest?.('tr');
+    const raw = String(row?.querySelector('.brand-alias-input')?.value || '');
+    const aliases = dedupeBrandsCaseInsensitive(
+        raw.split(/[,，\n]+/).map(value => String(value || '').trim()).filter(Boolean)
+    ).filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(canonical));
+    if (aliases.length > 9) {
+        alert('每個標準廠牌最多設定 9 個別名，請刪除不必要的名稱。');
+        return;
+    }
+    const state = beginActionButton(button, '儲存中…');
+    if (!state) return;
+    try {
+        await upsertBrandMaster(canonical, { aliases, replaceAliases:true, active:true });
+        renderBrandAliasManager();
+        renderProductBrandBrowser();
+        populateQuoteBrandDropdowns();
+        populateOrderBrandDropdown();
+        populateEquipmentBrandDropdown();
+        if (typeof populateForecastBrandDropdown === 'function')
+            populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+        if (salesStatisticsOrders.length) renderSalesStatistics();
+        showActionFeedback(`已更新「${canonical}」廠牌別名。別名只用來辨識輸入，系統會統一顯示標準名稱。`);
+    } catch (err) {
+        console.error('儲存廠牌別名失敗：', err);
+        alert('儲存廠牌別名失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, state);
+    }
 };
 
 function renderKeyStatisticBrands() {
@@ -17552,6 +17677,7 @@ window.syncBrandsFromProductMaster = async function() {
         if (typeof populateForecastBrandDropdown === 'function')
             populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
         renderKeyStatisticBrands();
+        renderBrandAliasManager();
         renderCompanyAgencyBrandSettings();
 
         const message = `同步完成：掃描 ${scanned} 筆產品，辨識 ${brands.size} 個廠牌，新增 ${missing.length} 個 Brand Master；既有獨立統計與報價公司限制未變更。`;
@@ -18040,7 +18166,7 @@ function productMasterDocToPriceItem(doc) {
     return normalizeProductMasterItem({
         productId: data.productId || doc.id || '',
         brandId: data.brandId || '',
-        brand: data.brandName || data.brand || '',
+        brand: resolveBrandName(data.brandName || data.brand || ''),
         model: data.manufacturerPartNo || data.sku || '',
         sku: data.manufacturerPartNo || data.sku || '',
         nameCn: data.productName || data.nameCn || '',
@@ -18256,7 +18382,7 @@ window.saveQuickProduct = async function() {
     );
     const duplicate = duplicateSnap.docs.find(doc => {
         const data = doc.data() || {};
-        return normalizeBrandLookupKey(data.brandName || data.brand || '') === normalizeBrandLookupKey(brand);
+        return normalizeBrandLookupKey(resolveBrandName(data.brandName || data.brand || '')) === normalizeBrandLookupKey(brand);
     });
     if (duplicate) {
         const existing = productMasterDocToPriceItem(duplicate);
@@ -20118,6 +20244,7 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
 }
 
 async function saveProductMasterBrand(imported, brand) {
+    brand = resolveBrandName(brand);
     if (!brandMasterEntryForName(brand)) {
         if (currentUserRole === 'admin') {
             await upsertBrandMaster(brand, { active:true });
@@ -20656,7 +20783,8 @@ window.handlePriceExcelUpload = async function(input) {
                     const model = String(getField(row, ['貨號', '型號'])).trim();
                     if (!model) return;
 
-                    const brand = toHalfWidth(getField(row, ['廠牌', '品牌', 'Brand']) || fallbackBrand);
+                    const rawBrand = toHalfWidth(getField(row, ['廠牌', '品牌', 'Brand']) || fallbackBrand);
+                    const brand = resolveBrandName(rawBrand);
                     const productLine = toHalfWidth(getField(row, ['產品線', 'Product Line', 'ProductLine']));
                     if (!brand) { importErrors.push(`貨號「${model}」缺少廠牌。請填寫「廠牌」欄位。`); return; }
 
