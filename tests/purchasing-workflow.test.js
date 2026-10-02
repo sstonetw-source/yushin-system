@@ -1795,14 +1795,14 @@ test('quick purchase outstanding cancellation reuses safe supply cancellation', 
     assert.match(cancelSource,/purchaseCancellationInProgress\.delete\(actionKey\)/);
 });
 
-test('purchase order email/share uses supplier master email and generated PDF blob', () => {
+test('purchase order email/share uses supplier core contact and generated PDF blob', () => {
     assert.match(app, /function purchaseOrderSupplierContact\(po=\{\}\)/);
-    assert.match(app, /email:\s*normalizeSupplierEmail\(live\?\.email \|\| po\.supplierEmail \|\| ''\)/);
+    assert.match(app, /YushinSupplier\.purchaseOrderContact\(po,supplierMasterCache\)/);
     assert.match(app, /window\.emailPurchaseOrder = async function\(poId\)/);
     assert.match(app, /printSavedPoDocument\(po\.poNo,po\.vendorName,\{download:false\}\)/);
     assert.match(app, /navigator\.canShare\(\{files:\[file\]\}\)/);
     assert.match(app, /mailto:\$\{contact\.email\}/);
-    assert.match(app, /lastShareType:shared\?'WEB_SHARE':'MAILTO'/);
+    assert.match(app, /recordPurchaseOrderCommunication\(po,contact,communicationChannel\)/);
 });
 
 test('purchase order PDF renderer can return a blob without downloading', () => {
@@ -1815,7 +1815,7 @@ test('purchase order PDF renderer can return a blob without downloading', () => 
     assert.match(source,/return \{blob,fileName\}/);
 });
 
-test('supplier master owns canonical contact fields and PO snapshots supplierEmail', () => {
+test('supplier master owns canonical contact fields and PO snapshots supplier contact', () => {
     assert.match(html,/id="supplierMasterEmail"/);
     assert.match(html,/id="supplierMasterBody"/);
     const start=app.indexOf('window.saveSupplierMaster = async function');
@@ -1824,7 +1824,9 @@ test('supplier master owns canonical contact fields and PO snapshots supplierEma
     assert.ok(start>=0&&end>start);
     assert.match(source,/db\.collection\('suppliers'\)\.doc\(supplierId\)/);
     assert.match(source,/email:supplierEmail/);
-    assert.match(app,/supplierEmail:normalizeSupplierEmail\(supplierContact\?\.email\|\|''\)/);
+    assert.match(app,/snapshotForPurchaseOrder/);
+    assert.match(app,/supplierEmail:supplierSnapshot\.email\|\|''/);
+    assert.match(app,/supplierSnapshot,/);
     assert.doesNotMatch(app,/poVendorEmail|purchaseEmail|vendorEmail/);
 });
 
@@ -1855,9 +1857,11 @@ test('purchase order snapshots supplier identity and email onto PO and supply re
     const start=app.indexOf('const supplierContact = supplierForVendorName\(vendorName\);');
     const end=app.indexOf('poRecord.searchTokens=purchaseOrderSearchTokens',start);
     const source=app.slice(start,end);
-    assert.match(source,/supplierId:supplierContact\?\.id\|\|supplierContact\?\.supplierId\|\|''/);
-    assert.match(source,/supplierName:supplierContact\?\.supplierName\|\|vendorName/);
-    assert.match(source,/supplierEmail:normalizeSupplierEmail\(supplierContact\?\.email\|\|''\)/);
+    assert.match(source,/const supplierSnapshot=globalThis\.YushinSupplier\.snapshotForPurchaseOrder/);
+    assert.match(source,/supplierId:supplierSnapshot\.supplierId\|\|''/);
+    assert.match(source,/supplierName:supplierSnapshot\.supplierName\|\|vendorName/);
+    assert.match(source,/supplierEmail:supplierSnapshot\.email\|\|''/);
+    assert.match(source,/supplierSnapshot,/);
     const supplyStart=app.indexOf('const supplyRecord={',end);
     const supplyEnd=app.indexOf('transaction.set\(supplyRef,supplyRecord\)',supplyStart);
     const supplySource=app.slice(supplyStart,supplyEnd);
