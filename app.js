@@ -305,6 +305,7 @@ let inventoryAnalysisSupplyOrders = [];
 let inventoryAnalysisDirectShipSupplyOrders = [];
 let keyStatisticBrands = [];
 let keyStatisticBrandAliases = {};
+let maintenanceBrandMigrationPending = false;
 const DEFAULT_CANONICAL_BRAND_ALIASES = {
     'Beckman Coulter': ['Beckman', 'Beckman Coulter Life Sciences'],
     'Bio-Rad': ['Biorad', 'Bio Rad', 'BIO-RAD'],
@@ -312,7 +313,7 @@ const DEFAULT_CANONICAL_BRAND_ALIASES = {
     'Roche': ['Roche Diagnostics'],
     'Tanbead': ['Tan Bead']
 };
-const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman Coulter', 'Thermo'];
+const DEFAULT_KEY_STATISTIC_BRANDS = ['Roche', 'Tanbead', 'Qiagen', 'Bio-Rad', 'Beckman Coulter', 'Thermo', '維修'];
 const DEFAULT_STATISTIC_BRAND_ALIASES = JSON.parse(JSON.stringify(DEFAULT_CANONICAL_BRAND_ALIASES));
 let companyAgencyBrands = { yushin: [], morningstar: [], 'MULTI-LIFE': [] };
 let companyAgencyBrandsConfigured = false;
@@ -4222,9 +4223,14 @@ function loadSalesStatisticsSettings() {
         db.collection('settings').doc('salesStatistics').get(),
         '重點廠牌設定'
     ).then(doc => {
-        const savedBrands = doc.exists ? (doc.data().keyBrands || []) : DEFAULT_KEY_STATISTIC_BRANDS;
-        keyStatisticBrands = normalizeThermoBrandList(savedBrands).filter(brand => normalizeStatisticBrandKey(brand) !== normalizeStatisticBrandKey('維修'));
-        const savedAliases = doc.exists && doc.data().brandAliases ? doc.data().brandAliases : {};
+        const saved = doc.exists ? doc.data() : {};
+        const savedBrands = doc.exists ? (saved.keyBrands || []) : DEFAULT_KEY_STATISTIC_BRANDS;
+        keyStatisticBrands = normalizeThermoBrandList(savedBrands);
+        maintenanceBrandMigrationPending = saved.maintenanceBrandManaged !== true;
+        if (maintenanceBrandMigrationPending && !includesBrandCaseInsensitive(keyStatisticBrands, '維修')) {
+            keyStatisticBrands.push('維修');
+        }
+        const savedAliases = saved.brandAliases || {};
         const aliasBrands = new Set([...Object.keys(DEFAULT_STATISTIC_BRAND_ALIASES), ...Object.keys(savedAliases)]);
         keyStatisticBrandAliases = {};
         aliasBrands.forEach(brand => {
@@ -4242,6 +4248,7 @@ function loadSalesStatisticsSettings() {
     }).catch(() => {
         keyStatisticBrands = DEFAULT_KEY_STATISTIC_BRANDS.slice();
         keyStatisticBrandAliases = JSON.parse(JSON.stringify(DEFAULT_STATISTIC_BRAND_ALIASES));
+        maintenanceBrandMigrationPending = true;
         renderKeyStatisticBrands();
     });
 }
@@ -4251,7 +4258,15 @@ function ensureBrandSettingsLoaded() {
     if (!brandSettingsLoadPromise) {
         brandSettingsLoadPromise = Promise.all([
             loadSalesStatisticsSettings(), loadCompanyAgencyBrandSettings(), loadBrandMaster()
-        ]).then(() => {
+        ]).then(async () => {
+            if (maintenanceBrandMigrationPending && trueUserRole === 'admin') {
+                await upsertBrandMaster('維修', { isKeyBrand:true, active:true });
+                await db.collection('settings').doc('salesStatistics').set({
+                    keyBrands: normalizeThermoBrandList(keyStatisticBrands),
+                    maintenanceBrandManaged: true
+                }, { merge:true });
+                maintenanceBrandMigrationPending = false;
+            }
             populateQuoteBrandDropdowns();
             populateOrderBrandDropdown();
             populateEquipmentBrandDropdown();
@@ -4430,7 +4445,7 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
     masters.forEach(master => {
         const canonicalName = canonicalForMaster(master);
         const key = normalizeBrandLookupKey(canonicalName);
-        if (!key || key === normalizeBrandLookupKey('維修')) return;
+        if (!key) return;
 
         const baseAliases = dedupeBrandsCaseInsensitive([
             ...(master.aliases || []),
@@ -4472,9 +4487,6 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
         }
     });
 
-    if (includeMaintenance) entries.set(normalizeBrandLookupKey('維修'), {
-        id: '', name: '維修', aliases: [], isKeyBrand: false, companies: [], active: true
-    });
     return [...entries.values()]
         .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hant'));
 }
@@ -4958,7 +4970,7 @@ function brandMasterDocumentId(name) {
 
 async function upsertBrandMaster(name, patch = {}) {
     const canonicalName = resolveBrandName(name);
-    if (!canonicalName || canonicalName === '其他' || canonicalName === OTHER_BRAND_OPTION_KEY || canonicalName === '維修') return;
+    if (!canonicalName || canonicalName === '其他' || canonicalName === OTHER_BRAND_OPTION_KEY) return;
     const id = brandMasterDocumentId(canonicalName);
     const current = brandMasterCache.find(item =>
         normalizeBrandLookupKey(defaultCanonicalBrandName(item.name)) === normalizeBrandLookupKey(canonicalName)
@@ -5031,7 +5043,7 @@ function buildBrandMasterCompatibilityAudit(masterEntries, sources) {
             brandAuditNamesFromRecord(source, row).forEach(raw => {
                 const name = String(raw || '').trim();
                 const key = normalizeBrandLookupKey(name);
-                if (!key || ['其他', '其他廠牌', '維修'].some(skip => normalizeBrandLookupKey(skip) === key)) return;
+                if (!key || ['其他', '其他廠牌'].some(skip => normalizeBrandLookupKey(skip) === key)) return;
                 if (!found.has(key)) found.set(key, { name, sources: new Set(), blocking: false });
                 const item = found.get(key);
                 item.sources.add(source);
@@ -5126,9 +5138,9 @@ function includesBrandCaseInsensitive(brands, brand) {
 const OTHER_BRAND_OPTION_KEY = '其他廠牌';
 
 function isCompanyBrandAllowed(company, brand) {
-    // 「維修」可由三間分公司開立；尚未建立設定時保留既有的全部廠牌行為。
+    // 尚未建立設定時保留既有的全部廠牌行為。
     const normalizedBrand = String(brand || '').trim();
-    if (normalizedBrand === '維修' || normalizedBrand === '其他' || normalizedBrand === OTHER_BRAND_OPTION_KEY || !companyAgencyBrandsConfigured) return true;
+    if (normalizedBrand === '其他' || normalizedBrand === OTHER_BRAND_OPTION_KEY || !companyAgencyBrandsConfigured) return true;
 
     // 「其他」的訂單會保存使用者實際輸入的廠牌名稱，因此不能只靠品牌名稱判斷。
     // 只有明確列在任一分公司代理清單中的品牌才受公司限制；
@@ -5145,7 +5157,7 @@ function isCompanyOtherOptionAllowed(company) {
 }
 
 function getCompanySelectableBrands(company) {
-    return getUnifiedBrandNames(true);
+    return getUnifiedBrandNames(false);
 }
 
 function quoteAllowedCompaniesForBrand(brand) {
@@ -17661,9 +17673,9 @@ window.saveBrandAliases = async function(brandName, button) {
 function renderKeyStatisticBrands() {
     const container = document.getElementById('keyStatisticBrands');
     if (!container) return;
-    const brands = [...keyStatisticBrands, '維修'];
+    const brands = [...keyStatisticBrands];
     container.innerHTML = brands.map(brand => `<div class="stat-brand-card">
-            <div class="stat-brand-card-head"><span>${escapeHtml(brand)}${brand === '維修' ? '（固定）' : ''}</span>${brand === '維修' ? '' : `<button type="button" class="btn-small btn-secondary" onclick="removeStatisticBrand('${escapeAttr(brand)}')">歸回其他</button>`}</div>
+            <div class="stat-brand-card-head"><span>${escapeHtml(brand)}</span><button type="button" class="btn-small btn-secondary" onclick="removeStatisticBrand('${escapeAttr(brand)}')">歸回其他</button></div>
         </div>`).join('');
     renderOtherStatisticBrands();
 }
@@ -17674,8 +17686,8 @@ function normalizeStatisticBrandKey(value) {
 
 function statisticBrandAliasLookup() {
     const lookup = new Map();
-    const masterEntries = getUnifiedBrandEntries(true);
-    [...keyStatisticBrands, '維修'].forEach(brand => {
+    const masterEntries = getUnifiedBrandEntries(false);
+    keyStatisticBrands.forEach(brand => {
         const canonical = resolveBrandName(brand) || brand;
         lookup.set(normalizeStatisticBrandKey(canonical), canonical);
         lookup.set(normalizeStatisticBrandKey(brand), canonical);
@@ -17704,7 +17716,7 @@ function rawBrandsWithOrderCounts() {
     const lines = salesStatisticsOrders.flatMap(salesStatisticOrderLines);
     lines.forEach(order => {
         const brand = String(order.brand || '').trim();
-        if (!brand || brand === '維修') return;
+        if (!brand) return;
         const key = normalizeStatisticBrandKey(brand);
         if (!entries.has(key)) entries.set(key, { name: brand, count: 0 });
         entries.get(key).count++;
@@ -17754,11 +17766,6 @@ window.addStatisticBrand = function() {
     const brand = String(input?.value || '').trim();
     const independent = document.getElementById('newStatisticBrandIndependent')?.checked === true;
     if (!brand) { alert('請輸入廠牌名稱。'); return; }
-    if (normalizeStatisticBrandKey(brand) === normalizeStatisticBrandKey('維修')) {
-        alert('「維修」是系統固定分類，不需要另外建立廠牌。');
-        return;
-    }
-
     const existing = getUnifiedBrandEntries(false).find(entry =>
         normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(brand)
         || (entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === normalizeBrandLookupKey(brand))
@@ -17854,9 +17861,9 @@ window.syncBrandsFromProductMaster = async function() {
 
 window.saveKeyStatisticBrands = async function() {
     if (currentUserRole !== 'admin') return;
-    const selected = normalizeThermoBrandList(keyStatisticBrands).filter(brand => normalizeStatisticBrandKey(brand) !== normalizeStatisticBrandKey('維修'));
+    const selected = normalizeThermoBrandList(keyStatisticBrands);
     const aliases = {};
-    [...selected, '維修'].forEach(brand => { aliases[brand] = dedupeBrandsCaseInsensitive(keyStatisticBrandAliases[brand] || []); });
+    selected.forEach(brand => { aliases[brand] = dedupeBrandsCaseInsensitive(keyStatisticBrandAliases[brand] || []); });
     try {
         await db.collection('settings').doc('salesStatistics').set({ keyBrands: selected, brandAliases: aliases }, { merge: true });
         keyStatisticBrands = selected;
@@ -18755,7 +18762,6 @@ function productTypeForOrder(order) {
 function statisticBrandForOrder(order) {
     const identity = brandIdentityForRecord(order);
     const brand = identity.brand;
-    if (brand === '維修') return '維修';
     return statisticBrandAliasLookup().get(normalizeStatisticBrandKey(brand)) || '其他廠牌';
 }
 
