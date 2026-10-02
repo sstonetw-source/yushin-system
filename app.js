@@ -12715,6 +12715,25 @@ window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = 
     return expected;
 };
 
+function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', headerExpectedDate = '', expectedDateSource = '') {
+    const manualHeader = expectedDateSource === 'manual'
+        || (!!headerExpectedDate && expectedDateSource !== 'lead-time');
+    return (items || []).map(item => {
+        let scheduleDate = '';
+        if (manualHeader) {
+            scheduleDate = headerExpectedDate || '';
+        } else if (supplierId && globalThis.YushinSupplier?.itemExpectedArrivalDate) {
+            scheduleDate = globalThis.YushinSupplier.itemExpectedArrivalDate(
+                item,
+                productSupplierMappingCache,
+                orderDate,
+                supplierId
+            );
+        }
+        return { ...item, scheduleDate };
+    });
+}
+
 async function autoFillPoSupplier(items) {
     await loadSupplierWarehouseMasters();
     const rows=items||[];
@@ -13193,6 +13212,18 @@ window.printPurchaseOrder = async function() {
         supplierContact||{},
         {supplierName:vendorName,purchaseHeaderName:vendorName}
     );
+    const poDate=document.getElementById('poDate').value;
+    const expectedDateInput=document.getElementById('poExpectedDate');
+    const expectedDate=expectedDateInput?.value||'';
+    const expectedDateSource=expectedDateInput?.dataset.expectedDateSource
+        || (expectedDate ? 'manual' : '');
+    const scheduledPoItems=poItemsWithScheduleDates(
+        poItems,
+        supplierSnapshot.supplierId||'',
+        poDate,
+        expectedDate,
+        expectedDateSource
+    );
     const poRecord = {
         poNo,
         company: poCurrentCompany,
@@ -13202,11 +13233,12 @@ window.printPurchaseOrder = async function() {
         supplierEmail:supplierSnapshot.email||'',
         supplierSnapshot,
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
-        poDate: document.getElementById('poDate').value,
-        expectedDate: document.getElementById('poExpectedDate')?.value || '',
-        scheduleDate: document.getElementById('poExpectedDate')?.value || '',
+        poDate,
+        expectedDate,
+        expectedDateSource,
+        scheduleDate:expectedDate,
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
-        items: poItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
+        items: scheduledPoItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
         ...netAmountMetadata(poNetTotal),
         createdAt: new Date().toISOString(),
         lastOutputAt: new Date().toISOString(),
@@ -13264,7 +13296,7 @@ window.printPurchaseOrder = async function() {
                         requestedQty:Number(item.demandRequestedQty??item.qty??0),
                         orderedQty:Number(item.demandOrderedQty||0),
                         receivedQty:Number(item.demandReceivedQty||0),
-                        scheduleDate:poRecord.expectedDate||''
+                        scheduleDate:item.scheduleDate||poRecord.expectedDate||''
                     });
                 }
                 const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demandProjection,Number(item.qty||0));
@@ -13284,7 +13316,7 @@ window.printPurchaseOrder = async function() {
                     ownerUid:item.ownerUid||sourceOrderForDemand?.ownerUid||'',
                     salesCode:item.salesCode||sourceOrderForDemand?.salesCode||'',
                     salesName:item.salesName||sourceOrderForDemand?.salesName||'',
-                    scheduleDate:poRecord.expectedDate||''
+                    scheduleDate:item.scheduleDate||poRecord.expectedDate||''
                 },{
                     createdAt:sourceOrderForDemand?.createdAt||poRecord.createdAt,
                     updatedAt:poRecord.createdAt
@@ -13325,8 +13357,8 @@ window.printPurchaseOrder = async function() {
                     supplierEmail:poRecord.supplierEmail||'',
                     unitCost:Number(item.unitPrice||0),
                     orderDate:poRecord.poDate,
-                    expectedDate:poRecord.expectedDate||'',
-                    scheduleDate:poRecord.scheduleDate||poRecord.expectedDate||'',
+                    expectedDate:item.scheduleDate||poRecord.expectedDate||'',
+                    scheduleDate:item.scheduleDate||poRecord.scheduleDate||poRecord.expectedDate||'',
                     fulfillmentType:item.fulfillmentType||'WAREHOUSE',
                     warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
                     createdAt:poRecord.createdAt,
