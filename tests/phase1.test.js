@@ -1627,7 +1627,7 @@ test('quote product lookup tolerates harmless item-code punctuation only when un
 
 
 test('order item-code autofill waits for Product Master and fills sale/cost fields', () => {
-    const start = appSource.indexOf('window.onOrderItemCodeChange');
+    const start = appSource.indexOf('async function applyOrderProductMatch');
     const end = appSource.indexOf('window.saveToStorage', start);
     const s = appSource.slice(start, end);
     assert.match(s, /await findProductsByCode/);
