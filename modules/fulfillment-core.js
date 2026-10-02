@@ -40,13 +40,6 @@
     };
   }
 
-  function reserveFromAvailable(item, availableQty) {
-    const next = normalizeItem(item);
-    const outstanding = Math.max(0, next.orderedQty - (next.deliveredQty - next.returnedQty));
-    const target = Math.min(outstanding, n(availableQty));
-    return normalizeItem({ ...next, reservedQty: target });
-  }
-
   function dispatchState(item = {}) {
     // Dispatch 只需要物流事件量與「目前仍被占用」的庫存。
     // 不先 normalizeItem()，避免在缺少 orderedQty 的輕量快照中把 live reservedQty 截成 0。
@@ -94,7 +87,6 @@
 
   return {
     normalizeItem,
-    reserveFromAvailable,
     dispatchState,
     pendingDispatchQty,
     shippableQty,
