@@ -4259,24 +4259,75 @@ function ensureBrandSettingsLoaded() {
     return brandSettingsLoadPromise;
 }
 
+const PRODUCT_DATALIST_RECENT_LIMIT = 50;
+const PRODUCT_CODE_SUGGESTION_LIMIT = 20;
+let productCodeSuggestionTimer = null;
+let productCodeSuggestionGeneration = 0;
+const productCodeMatchCache = new Map();
+
+function recentProductSuggestions(limit = PRODUCT_DATALIST_RECENT_LIMIT) {
+    return [...priceList]
+        .filter(item => item.status !== 'INACTIVE' && item.active !== false)
+        .slice(-limit)
+        .reverse();
+}
+
+function renderProductCodeSuggestions(items = recentProductSuggestions()) {
+    const modelList = document.getElementById('priceModelList');
+    if (!modelList) return;
+    modelList.innerHTML = (items || []).slice(0, PRODUCT_DATALIST_RECENT_LIMIT).map(item => {
+        const label = [resolveBrandName(item.brand || ''), item.nameCn || item.nameEn || ''].filter(Boolean).join('｜');
+        return `<option value="${escapeAttr(item.model || '')}" label="${escapeAttr(label)}"></option>`;
+    }).join('');
+}
+
+window.queueProductCodeSuggestions = function(value) {
+    clearTimeout(productCodeSuggestionTimer);
+    const normalized = normalizeItemCodeLoose(value);
+    const generation = ++productCodeSuggestionGeneration;
+    if (normalized.length < 2) {
+        renderProductCodeSuggestions();
+        return;
+    }
+    productCodeSuggestionTimer = setTimeout(async () => {
+        try {
+            const snapshot = await firestoreReadWithTimeout(
+                db.collection('products')
+                    .orderBy('normalizedPartNo')
+                    .startAt(normalized)
+                    .endAt(normalized + '\uf8ff')
+                    .limit(PRODUCT_CODE_SUGGESTION_LIMIT)
+                    .get(),
+                'Product Master 貨號建議'
+            );
+            if (generation !== productCodeSuggestionGeneration) return;
+            const matches = snapshot.docs
+                .map(productMasterDocToPriceItem)
+                .filter(item => item.status !== 'INACTIVE' && item.active !== false);
+            const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
+            matches.forEach(item => merged.set(item.productId || stableProductId(item), item));
+            priceList = [...merged.values()];
+            rebuildPriceItemLookup();
+            renderProductCodeSuggestions(matches);
+        } catch (err) {
+            if (generation === productCodeSuggestionGeneration) {
+                console.warn('Product Master 貨號建議讀取失敗：', err);
+                renderProductCodeSuggestions();
+            }
+        }
+    }, 180);
+};
+
 function refreshPriceDatalists() {
+    productCodeMatchCache.clear();
     rebuildPriceItemLookup();
     const cnList = document.getElementById('priceNameCnList');
     const enList = document.getElementById('priceNameEnList');
-    const modelList = document.getElementById('priceModelList');
     if (!cnList || !enList) return;
-    const cnOptions = [];
-    const enOptions = [];
-    const modelOptions = [];
-    priceList.forEach(p => {
-        if (p.nameCn) cnOptions.push(`<option value="${escapeAttr(p.nameCn)}"></option>`);
-        if (p.nameEn) enOptions.push(`<option value="${escapeAttr(p.nameEn)}"></option>`);
-        if (p.model && modelList) modelOptions.push(`<option value="${escapeAttr(p.model)}"></option>`);
-    });
-    // 大型價格表改用一次性寫入，避免逐筆新增數萬個選項反覆觸發瀏覽器排版。
-    cnList.innerHTML = cnOptions.join('');
-    enList.innerHTML = enOptions.join('');
-    if (modelList) modelList.innerHTML = modelOptions.join('');
+    const recent = recentProductSuggestions();
+    cnList.innerHTML = recent.filter(p => p.nameCn).map(p => `<option value="${escapeAttr(p.nameCn)}"></option>`).join('');
+    enList.innerHTML = recent.filter(p => p.nameEn).map(p => `<option value="${escapeAttr(p.nameEn)}"></option>`).join('');
+    renderProductCodeSuggestions(recent);
     populateOrderBrandDropdown();
     populateEquipmentBrandDropdown();
     populateQuoteBrandDropdowns();
@@ -5349,37 +5400,25 @@ function clearOrderProductMatch(input) {
     }
     const hiddenProductLine = document.getElementById('orderProductLine');
     if (hiddenProductLine) hiddenProductLine.value = '';
+    const brandSelect = document.getElementById('orderBrand');
+    const brandOther = document.getElementById('orderBrandOther');
+    if (brandSelect) brandSelect.value = '';
+    if (brandOther) { brandOther.value = ''; brandOther.style.display = 'none'; }
     window._orderModalProductId = '';
     setOrderCostFieldForProduct(null);
 }
 
-window.onOrderItemCodeChange = async function(input) {
-    const value = input.value.trim();
-    if (!value) {
-        clearOrderProductMatch(input);
-        clearQuickProductButton(input);
-        return;
-    }
-    const match = await findProductByCode(value);
-    // 使用者可能在查詢尚未完成時繼續改貨號；舊查詢不可覆蓋新的輸入。
-    if (input.value.trim() !== value) return;
-    if (!match) {
-        clearOrderProductMatch(input);
-        input.dataset.autofillStatus = 'not-found';
-        showQuickProductButton(input, 'order');
-        return;
-    }
-
+async function applyOrderProductMatch(input, match) {
+    if (!input || !match) return;
     clearQuickProductButton(input);
+    clearProductMatchChoices(input);
     input.dataset.autofillStatus = 'matched';
-    input.value = match.model || value;
+    input.value = match.model || input.value;
     window._orderModalProductId = match.productId || stableProductId(match);
-
     if (match.brand) {
         selectBrandInDropdown(document.getElementById('orderBrand'), resolveBrandName(match.brand));
         onOrderBrandSelectChange();
     }
-
     const itemNameInput = document.getElementById('orderItemName');
     if (itemNameInput) itemNameInput.value = match.nameCn || match.nameEn || '';
     const itemNameEnInput=document.getElementById('orderItemNameEn');if(itemNameEnInput)itemNameEnInput.value=match.nameEn||'';
@@ -5389,26 +5428,42 @@ window.onOrderItemCodeChange = async function(input) {
         priceInput.value = match.price;
         calcOrderTotal();
     }
-
     input.dataset.productLine = match.productLine || '';
     input.dataset.productMasterMatched = '1';
     const hiddenProductLine = document.getElementById('orderProductLine');
     if (hiddenProductLine) hiddenProductLine.value = match.productLine || '';
     input.dataset.productType = match.productType || '';
+    await Promise.all([applyOrderProductCost(match), refreshOrderWarehouseStock()]);
+}
 
-    // 成本與庫存彼此獨立；平行查詢，避免成本讀取阻塞庫存提示。
-    await Promise.all([
-        applyOrderProductCost(match),
-        refreshOrderWarehouseStock()
-    ]);
+window.onOrderItemCodeChange = async function(input) {
+    const value = input.value.trim();
+    if (!value) {
+        clearOrderProductMatch(input);
+        clearQuickProductButton(input);
+        clearProductMatchChoices(input);
+        return;
+    }
+    const matches = await findProductsByCode(value);
+    if (input.value.trim() !== value) return;
+    const match = selectProductCodeMatch(matches);
+    if (!match) {
+        clearOrderProductMatch(input);
+        input.dataset.autofillStatus = 'not-found';
+        if (matches.length > 1) showProductMatchChoices(input, matches, 'order');
+        else showQuickProductButton(input, 'order');
+        return;
+    }
+    await applyOrderProductMatch(input, match);
 };
 
 let orderItemCodeTimer = null;
 window.onOrderItemCodeInput = function(input) {
     clearTimeout(orderItemCodeTimer);
-    // 貨號一改就先撤銷上一個 Product Master 身分，避免使用者在 180ms 查詢完成前儲存到舊 productId。
+    queueProductCodeSuggestions(input.value);
     clearOrderProductMatch(input);
     clearQuickProductButton(input);
+    clearProductMatchChoices(input);
     const value = input.value.trim();
     if (!value) return;
     orderItemCodeTimer = setTimeout(() => onOrderItemCodeChange(input), 180);
@@ -5600,23 +5655,25 @@ window.onItemCnChange = function(input) {
 window.onItemModelChange = async function(input) {
     const value = input.value.trim();
     if (!value) return;
-
-    const match = await findProductByCode(value);
+    const row = input.closest('tr');
+    const matches = await findProductsByCode(value);
+    if (input.value.trim() !== value) return;
+    const match = selectProductCodeMatch(matches, quoteRowBrandValue(row));
     if (!match) {
-        const row = input.closest('tr');
         if (row) {
             row.querySelector('.item-product-id').value = '';
             row.querySelector('.item-product-line').value = '';
             row.querySelector('.item-product-type').value = '';
         }
         input.dataset.autofillStatus = 'not-found';
-        showQuickProductButton(input, 'quote');
+        if (matches.length > 1) showProductMatchChoices(input, matches, 'quote');
+        else showQuickProductButton(input, 'quote');
         return;
     }
-
     clearQuickProductButton(input);
+    clearProductMatchChoices(input);
     input.dataset.autofillStatus = 'matched';
-    applyQuoteProductMatch(input.closest('tr'), match);
+    applyQuoteProductMatch(row, match);
 };
 
 window.onIncPriceChange = function(input) {
@@ -17954,24 +18011,19 @@ function normalizeItemCodeLoose(value) {
     return normalizeItemCode(value).replace(/[\-_.\/]+/g, '');
 }
 
-function findPriceItemByCodeValue(value) {
+function findPriceItemByCodeValue(value, preferredBrand = '') {
     const normalized = normalizeItemCode(value);
-    if (!normalized) return null;
-
-    const direct = priceItemLookup.get(`code:${normalized}`);
-    if (direct && direct.status !== 'INACTIVE' && direct.active !== false) return direct;
-
-    const exact = priceList.find(item => normalizeItemCode(item.model) === normalized && item.status !== 'INACTIVE' && item.active !== false);
-    if (exact) return exact;
-
-    // 有些價目表貨號帶有空格、-、/ 或 .；只有在寬鬆比對結果唯一時才自動帶入，避免誤抓錯品項。
     const loose = normalizeItemCodeLoose(value);
-    if (!loose) return null;
-    const candidates = priceList.filter(item =>
-        normalizeItemCodeLoose(item.model) === loose
-        && item.status !== 'INACTIVE'
-        && item.active !== false
-    );
+    if (!normalized && !loose) return null;
+    const preferredKey = normalizeBrandLookupKey(resolveBrandName(preferredBrand || ''));
+    const candidates = priceList.filter(item => {
+        if (item.status === 'INACTIVE' || item.active === false) return false;
+        const codeMatches = normalizeItemCode(item.model) === normalized
+            || (!!loose && normalizeItemCodeLoose(item.model) === loose);
+        if (!codeMatches) return false;
+        if (!preferredKey) return true;
+        return normalizeBrandLookupKey(resolveBrandName(item.brand || '')) === preferredKey;
+    });
     return candidates.length === 1 ? candidates[0] : null;
 }
 
@@ -17981,15 +18033,15 @@ function cacheProductLookupItem(item) {
     const next = normalizeProductMasterItem({ ...item, productId });
     priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId);
     if (next.status !== 'INACTIVE' && next.active !== false) priceList.push(next);
+    productCodeMatchCache.delete(normalizeItemCodeLoose(next.model || ''));
     rebuildPriceItemLookup();
     return next;
 }
 
-async function findProductByCode(value) {
-    const cached = findPriceItemByCodeValue(value);
-    if (cached) return cached;
+async function findProductsByCode(value) {
     const normalized = normalizeItemCodeLoose(value);
-    if (!normalized) return null;
+    if (!normalized) return [];
+    if (productCodeMatchCache.has(normalized)) return productCodeMatchCache.get(normalized);
     try {
         const snapshot = await firestoreReadWithTimeout(
             db.collection('products').where('normalizedPartNo', '==', normalized).limit(20).get(),
@@ -17998,12 +18050,31 @@ async function findProductByCode(value) {
         const active = snapshot.docs
             .map(productMasterDocToPriceItem)
             .filter(item => item.status !== 'INACTIVE' && item.active !== false);
-        if (active.length !== 1) return null;
-        return cacheProductLookupItem(active[0]);
+        const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
+        active.forEach(item => merged.set(item.productId || stableProductId(item), item));
+        priceList = [...merged.values()];
+        rebuildPriceItemLookup();
+        productCodeMatchCache.set(normalized, active);
+        return active;
     } catch (err) {
         console.warn('Product Master 貨號查詢失敗：', err);
-        return null;
+        return [];
     }
+}
+
+function selectProductCodeMatch(matches, preferredBrand = '') {
+    const preferredKey = normalizeBrandLookupKey(resolveBrandName(preferredBrand || ''));
+    if (preferredKey) {
+        const preferred = matches.filter(item =>
+            normalizeBrandLookupKey(resolveBrandName(item.brand || '')) === preferredKey
+        );
+        if (preferred.length === 1) return preferred[0];
+    }
+    return matches.length === 1 ? matches[0] : null;
+}
+
+async function findProductByCode(value, preferredBrand = '') {
+    return selectProductCodeMatch(await findProductsByCode(value), preferredBrand);
 }
 
 function applyQuoteProductMatch(row, match) {
@@ -18037,10 +18108,10 @@ function applyQuoteProductMatch(row, match) {
 let quoteModelInputTimer = null;
 window.onItemModelInput = function(input) {
     clearTimeout(quoteModelInputTimer);
+    queueProductCodeSuggestions(input.value);
+    clearProductMatchChoices(input);
     const row = input.closest('tr');
     if (row) {
-        // 貨號一旦被手動改動，先清除上一個 Product Master 身分；
-        // 180ms 後若新貨號能比對成功，再由 applyQuoteProductMatch 寫回正確分類。
         row.querySelector('.item-product-id').value = '';
         row.querySelector('.item-product-line').value = '';
         row.querySelector('.item-product-type').value = '';
@@ -18052,15 +18123,18 @@ window.onItemModelInput = function(input) {
             clearQuickProductButton(input);
             return;
         }
-        const match = await findProductByCode(value);
+        const matches = await findProductsByCode(value);
         if (input.value.trim() !== value) return;
+        const match = selectProductCodeMatch(matches, quoteRowBrandValue(input.closest('tr')));
         if (match) {
             clearQuickProductButton(input);
+            clearProductMatchChoices(input);
             input.dataset.autofillStatus = 'matched';
             applyQuoteProductMatch(input.closest('tr'), match);
         } else {
             input.dataset.autofillStatus = 'not-found';
-            showQuickProductButton(input, 'quote');
+            if (matches.length > 1) showProductMatchChoices(input, matches, 'quote');
+            else showQuickProductButton(input, 'quote');
         }
     }, 180);
 };
@@ -18236,21 +18310,59 @@ async function applyOrderProductCost(item) {
 }
 
 function clearQuickProductButton(input) {
-    const next = input?.parentElement?.querySelector?.('.quick-product-create-btn');
-    if (next) next.remove();
+    input?.parentElement?.querySelector?.('.quick-product-inline')?.remove();
+}
+
+function clearProductMatchChoices(input) {
+    input?.parentElement?.querySelector?.('.product-match-choices')?.remove();
 }
 
 function showQuickProductButton(input, mode) {
     if (!input || !input.parentElement) return;
     clearQuickProductButton(input);
+    clearProductMatchChoices(input);
+    const wrap = document.createElement('div');
+    wrap.className = 'quick-product-inline';
+    wrap.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:12px;color:#6b7280;';
+    const hint = document.createElement('span');
+    hint.textContent = mode === 'quote' ? '未建檔（估價可直接繼續）' : '此貨號尚未建立產品';
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'btn-secondary quick-product-create-btn';
-    button.style.marginTop = '4px';
-    button.style.width = '100%';
-    button.textContent = mode === 'quote' ? '＋ 建立 Product Master（選填）' : '＋ 建立產品後加入訂單';
+    button.className = 'btn-small btn-secondary quick-product-create-btn';
+    button.textContent = mode === 'quote' ? '＋ 建立' : '＋ 快速建立';
     button.onclick = () => openQuickProductCreate(mode, input);
-    input.parentElement.appendChild(button);
+    wrap.append(hint, button);
+    input.parentElement.appendChild(wrap);
+}
+
+function showProductMatchChoices(input, matches, mode) {
+    if (!input || !input.parentElement || !Array.isArray(matches) || matches.length < 2) return;
+    clearQuickProductButton(input);
+    clearProductMatchChoices(input);
+    const wrap = document.createElement('div');
+    wrap.className = 'product-match-choices';
+    wrap.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:12px;color:#6b7280;';
+    const hint = document.createElement('span');
+    hint.textContent = '同一貨號有多個廠牌，請選擇：';
+    wrap.appendChild(hint);
+    matches.slice(0, 6).forEach(match => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-small btn-secondary';
+        button.textContent = [resolveBrandName(match.brand || ''), match.nameCn || match.nameEn || match.model || '產品'].filter(Boolean).join('｜');
+        button.onclick = async () => {
+            clearProductMatchChoices(input);
+            input.value = match.model || input.value;
+            if (mode === 'quote') {
+                input.dataset.autofillStatus = 'matched';
+                applyQuoteProductMatch(input.closest('tr'), match);
+            } else {
+                await applyOrderProductMatch(input, match);
+            }
+        };
+        wrap.appendChild(button);
+    });
+    input.parentElement.appendChild(wrap);
 }
 
 function ensureQuickProductModal() {
@@ -18447,20 +18559,38 @@ window.saveQuickProduct = async function() {
 
 function rebuildPriceItemLookup() {
     priceItemLookup = new Map();
+    const codeBuckets = new Map();
     priceList.forEach(item => {
+        if (item.status === 'INACTIVE' || item.active === false) return;
         const code = normalizeItemCode(item.model);
         if (!code) return;
-        const brand = String(item.brand || '').trim().toLocaleLowerCase();
-        if (!priceItemLookup.has(`code:${code}`)) priceItemLookup.set(`code:${code}`, item);
-        if (brand && !priceItemLookup.has(`brand:${brand}:${code}`)) priceItemLookup.set(`brand:${brand}:${code}`, item);
+        const brand = normalizeBrandLookupKey(resolveBrandName(item.brand || ''));
+        const bucket = codeBuckets.get(code) || [];
+        bucket.push(item);
+        codeBuckets.set(code, bucket);
+        if (brand && !priceItemLookup.has(`brand:${brand}:${code}`)) {
+            priceItemLookup.set(`brand:${brand}:${code}`, item);
+        }
+    });
+    codeBuckets.forEach((items, code) => {
+        if (items.length === 1) priceItemLookup.set(`code:${code}`, items[0]);
     });
 }
 
-function findPriceItemForOrder(order) {
+function findPriceItemForOrder(order = {}) {
+    const savedProductId = String(order.productId || '').trim();
+    if (savedProductId) {
+        const byId = priceList.find(item =>
+            String(item.productId || '') === savedProductId
+            && item.status !== 'INACTIVE' && item.active !== false
+        );
+        if (byId) return byId;
+    }
     const code = normalizeItemCode(order.itemCode);
     if (!code) return null;
-    const orderBrand = String(order.brand || '').trim().toLocaleLowerCase();
-    return (orderBrand && priceItemLookup.get(`brand:${orderBrand}:${code}`)) || priceItemLookup.get(`code:${code}`) || null;
+    const orderBrand = normalizeBrandLookupKey(resolveBrandName(order.brand || ''));
+    if (orderBrand) return priceItemLookup.get(`brand:${orderBrand}:${code}`) || null;
+    return priceItemLookup.get(`code:${code}`) || null;
 }
 
 function productLineForOrder(order) {

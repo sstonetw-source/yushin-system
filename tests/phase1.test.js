@@ -156,6 +156,17 @@ test('product identity handoffs clear stale hidden state before saving', () => {
     assert.match(appSource, /invalidateQuoteProductIdentityIfBrandChanged\(input\);\n    renderQuoteBrandSuggestions/);
 });
 
+test('product code matching is ambiguity-safe and datalists stay bounded', () => {
+    assert.match(appSource, /const PRODUCT_DATALIST_RECENT_LIMIT = 50/);
+    assert.match(appSource, /const PRODUCT_CODE_SUGGESTION_LIMIT = 20/);
+    assert.match(appSource, /orderBy\('normalizedPartNo'\)[\s\S]*?limit\(PRODUCT_CODE_SUGGESTION_LIMIT\)/);
+    assert.match(appSource, /codeBuckets\.forEach\(\(items, code\) => \{[\s\S]*?items\.length === 1/);
+    assert.match(appSource, /function findPriceItemByCodeValue\(value, preferredBrand = ''\)/);
+    assert.match(appSource, /function showProductMatchChoices\(input, matches, mode\)/);
+    assert.match(appSource, /未建檔（估價可直接繼續）/);
+    assert.doesNotMatch(appSource, /button\.style\.width = '100%'/);
+});
+
 test('inventory product lookup debounces server search', () => {
     assert.match(indexSource, /id="businessProductSearch"[^>]+oninput="queueBusinessProductSearch\(\)"/);
     assert.match(appSource, /businessProductSearchTimer=scheduleListSearch\(businessProductSearchTimer,\(\)=>searchBusinessProducts\(\)\)/);
@@ -1589,7 +1600,7 @@ test('quote item-code auto-fill waits for Product Master and reacts while typing
     assert.match(appSource, /function findPriceItemByCodeValue/);
     assert.match(appSource, /function applyQuoteProductMatch/);
     assert.match(appSource, /window\.onItemModelInput/);
-    assert.match(appSource, /await findProductByCode\(value\)/);
+    assert.match(appSource, /await findProductsByCode\(value\)/);
     assert.match(appSource, /oninput="onItemModelInput\(this\)"/);
 });
 
@@ -1611,7 +1622,7 @@ test('quote product lookup tolerates harmless item-code punctuation only when un
     const end = appSource.indexOf('function applyQuoteProductMatch', start);
     const s = appSource.slice(start, end);
     assert.match(s, /normalizeItemCodeLoose/);
-    assert.match(s, /candidates\.length === 1/);
+    assert.match(s, /candidates\.length === 1 \? candidates\[0\] : null/);
 });
 
 
@@ -4855,7 +4866,7 @@ test('copying an order preserves Product Master identity and procurement mode', 
 });
 
 test('quote quick Product Master creation is optional while formal orders require a real product id', () => {
-    assert.match(appSource, /建立 Product Master（選填）/);
+    assert.match(appSource, /未建檔（估價可直接繼續）/);
     const saveStart=appSource.indexOf('window.saveNewOrder = function()');
     const saveEnd=appSource.indexOf('\nfunction loadOrdersFromCloud',saveStart);
     const source=appSource.slice(saveStart,saveEnd);
