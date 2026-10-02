@@ -3069,6 +3069,7 @@ function forecastItemToOrderSource(forecast, item) {
         sourceType: DOCUMENT_TYPES.FORECAST,
         sourceId: forecast.id,
         productId: item.productId || match?.productId || '',
+        productMasterMatched: !!(item.productId || match?.productId),
         productLine: item.productLine || match?.productLine || '',
         productType: item.productType || match?.productType || '',
         spec: item.spec || match?.spec || '',
@@ -3084,6 +3085,15 @@ async function createForecastOrdersDirectly(forecast, items) {
         return { ...normalizeNewOrderItem(source), itemId:'item-1', sourceItemIndex:index };
     }).filter(item => item.itemName || item.itemCode);
     if (!normalizedItems.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
+    const unmatchedItem=normalizedItems.find(item=>item.productMasterMatched!==true);
+    if(unmatchedItem){
+        throw new Error(`Forecast 品項「${unmatchedItem.itemName||unmatchedItem.itemCode||'未命名品項'}」尚未對應 Product Master，請先建立／對應產品後再轉訂單。`);
+    }
+    const restrictedItem=normalizedItems.find(item=>item.brand&&!isCompanyBrandAllowed(currentCompany||'yushin',item.brand));
+    if(restrictedItem){
+        const restriction=quoteBrandRestrictionText(restrictedItem.brand);
+        throw new Error(`${restrictedItem.brand}${restriction ? '（'+restriction+'）' : ''} 不能使用目前公司抬頭建立訂單。`);
+    }
 
     const batch=db.batch();
     const created=[];
@@ -13449,6 +13459,13 @@ window.saveNewOrder = function() {
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
     if(items.some(item=>item.productMasterMatched!==true)){alert('正式訂單的每個品項都必須對應 Product Master。請先選擇既有產品，或用「快速新增產品」建立基本資料。');return;}
+    const orderCompany=window._orderModalQuoteContext?.company||currentCompany||'yushin';
+    const restrictedItem=items.find(item=>item.brand&&!isCompanyBrandAllowed(orderCompany,item.brand));
+    if(restrictedItem){
+        const restriction=quoteBrandRestrictionText(restrictedItem.brand);
+        alert(`${restrictedItem.brand}${restriction ? '（'+restriction+'）' : ''} 不能使用目前公司抬頭建立訂單，請更換公司或產品。`);
+        return;
+    }
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
     const assistedOwner = currentUserRole === 'purchaser'
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
@@ -15266,7 +15283,7 @@ function ensureQuickProductModal() {
           <div style="grid-column:1/-1;"><label>中文品名</label><input id="quickProductName" type="text" autocomplete="off"></div>
           <div style="grid-column:1/-1;"><label>英文品名</label><input id="quickProductNameEn" type="text" autocomplete="off"></div>
           <div><label>規格</label><input id="quickProductSpec" type="text" autocomplete="off"></div>
-          <div><label>建議售價</label><input id="quickProductPrice" type="number" min="0"></div>
+          <div><label>建議售價（選填）</label><input id="quickProductPrice" type="number" min="0"></div>
           <input id="quickProductLine" type="hidden">
           <input id="quickProductAuthorization" type="hidden">
           <input id="quickProductCost" type="hidden">

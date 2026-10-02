@@ -4462,3 +4462,31 @@ test('Product Master and Product Import use active Brand Master brands', () => {
     assert.match(source, /upsertBrandMaster\(brand, \{ active:true \}\)/);
     assert.match(source, /尚未建立 Brand Master/);
 });
+
+
+test('direct orders enforce company brand restrictions after Product Master matching', () => {
+    const start=appSource.indexOf('window.saveNewOrder = function()');
+    const end=appSource.indexOf('\n};',start)+3;
+    const source=appSource.slice(start,end);
+    assert.match(source,/const orderCompany=window\._orderModalQuoteContext\?\.company\|\|currentCompany\|\|'yushin'/);
+    assert.match(source,/isCompanyBrandAllowed\(orderCompany,item\.brand\)/);
+    assert.match(source,/不能使用目前公司抬頭建立訂單/);
+});
+
+test('Forecast direct order conversion cannot bypass Product Master or company restrictions', () => {
+    const start=appSource.indexOf('async function createForecastOrdersDirectly');
+    const end=appSource.indexOf('\nasync function',start+20);
+    const source=appSource.slice(start,end);
+    assert.match(source,/productMasterMatched!==true/);
+    assert.match(source,/尚未對應 Product Master/);
+    assert.match(source,/isCompanyBrandAllowed\(currentCompany\|\|'yushin',item\.brand\)/);
+});
+
+test('quick Product Master creation keeps list price optional', () => {
+    assert.match(appSource,/建議售價（選填）/);
+    const start=appSource.indexOf('window.saveQuickProduct = async function');
+    const end=appSource.indexOf('\n};',start)+3;
+    const source=appSource.slice(start,end);
+    assert.match(source,/if \(!brand \|\| !code \|\| !productName\)/);
+    assert.doesNotMatch(source,/!brand \|\| !code \|\| !productName \|\| String\(priceRaw\)/);
+});
