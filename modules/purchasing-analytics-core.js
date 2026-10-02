@@ -18,12 +18,20 @@
     const effectiveOrderedQty=cancelled?supply.receivedQty:supply.qty;
     const receivedQty=Math.min(effectiveOrderedQty,supply.receivedQty);
     const incomingQty=cancelled?0:supply.remainingQty;
-    const isStockReplenishment=record.type==='STOCK_REPLENISHMENT'||(!String(record.orderId||'').trim()&&record.type!=='SALES_SELF_ORDER');
+    const sourceType=String(record.sourceType||'').trim();
+    const sourceId=String(record.sourceId||record.orderId||'').trim();
+    const isStockReplenishment=sourceType
+      ? sourceType==='STOCK_REPLENISHMENT'
+      : !sourceId&&record.method!=='SALES_SELF_ORDER'&&record.type!=='SALES_SELF_ORDER';
     const documentKey=String(record.purchaseDocumentId||record.purchaseDocumentNo||record.internalNo||record.id||'').trim();
-    const supplier=String(record.supplier||record.supplierName||'未指定供應商').trim()||'未指定供應商';
+    const supplier=String(record.supplier||record.supplierName||record.vendorName||'未指定供應商').trim()||'未指定供應商';
+    const supplierKey=String(record.supplierId||supplier).trim()||supplier;
     return {
       record,
       supplier,
+      supplierKey,
+      sourceType:sourceType||(isStockReplenishment?'STOCK_REPLENISHMENT':'SALES_ORDER'),
+      sourceId,
       documentKey,
       unitCost,
       effectiveOrderedQty,
@@ -58,8 +66,8 @@
       totals.stockAmount+=row.stockAmount;
       totals.customerOrderAmount+=row.customerOrderAmount;
 
-      if(!suppliers.has(row.supplier)){
-        suppliers.set(row.supplier,{
+      if(!suppliers.has(row.supplierKey)){
+        suppliers.set(row.supplierKey,{
           supplier:row.supplier,
           documents:new Set(),
           lineCount:0,
@@ -70,7 +78,7 @@
           customerOrderAmount:0
         });
       }
-      const bucket=suppliers.get(row.supplier);
+      const bucket=suppliers.get(row.supplierKey);
       if(row.documentKey)bucket.documents.add(row.documentKey);
       bucket.lineCount++;
       bucket.orderedAmount+=row.orderedAmount;
