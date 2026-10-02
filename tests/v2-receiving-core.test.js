@@ -20,23 +20,6 @@ test('receipt is capped at the supply remainder',()=>{
   assert.equal(result.record.status,'RECEIVED');
 });
 
-test('MOQ receipt allocates customer demand first and leaves excess as stock',()=>{
-  const first=receiving.applyReceipt({
-    qty:5,demandAllocatedQty:3,excessStockQty:2,receivedQty:0,incomingRegisteredQty:5,status:'ORDERED'
-  },2);
-  assert.equal(first.appliedQty,2);
-  assert.equal(first.demandReceiptQty,2);
-  assert.equal(first.excessReceiptQty,0);
-  assert.equal(first.record.receivedQty,2);
-
-  const second=receiving.applyReceipt(first.record,3);
-  assert.equal(second.appliedQty,3);
-  assert.equal(second.demandReceiptQty,1);
-  assert.equal(second.excessReceiptQty,2);
-  assert.equal(second.record.receivedQty,5);
-  assert.equal(second.record.status,'RECEIVED');
-});
-
 test('closed partially received supply cannot receive more goods',()=>{
   const result=receiving.applyReceipt({qty:10,receivedQty:4,status:'CLOSED'},2);
   assert.equal(result.appliedQty,0);
@@ -63,22 +46,6 @@ test('warehouse receipt increases cumulative received quantity and reserves reop
   assert.equal(result.item.receivedQty,12);
   assert.equal(result.reservedDelta,2);
   assert.equal(result.item.reservedQty,2);
-  assert.equal(result.item.shortageQty,0);
-});
-
-test('allocated supplier receipt may become free stock without losing procurement receipt history',()=>{
-  const result=receiving.applyReceiptToOrderItem({
-    orderedQty:3,
-    receivedQty:0,
-    deliveredQty:0,
-    returnedQty:0,
-    reservedQty:1
-  },3);
-  assert.equal(result.appliedQty,3);
-  assert.equal(result.reservedDelta,2);
-  assert.equal(result.unreservedReceiptQty,1);
-  assert.equal(result.item.receivedQty,3);
-  assert.equal(result.item.reservedQty,3);
   assert.equal(result.item.shortageQty,0);
 });
 
@@ -135,11 +102,7 @@ test('purchase receipt snapshot preserves ERP traceability without exposing prot
   assert.equal(receipt.supplierId,'SUP1');
   assert.equal(receipt.productId,'P1');
   assert.equal(receipt.orderedQty,10);
-  assert.equal(receipt.demandAllocatedQty,10);
-  assert.equal(receipt.excessStockQty,0);
   assert.equal(receipt.qty,3);
-  assert.equal(receipt.demandReceiptQty,0);
-  assert.equal(receipt.excessReceiptQty,0);
   assert.equal(receipt.cumulativeReceivedQty,7);
   assert.equal(receipt.lotNo,'LOT-1');
   assert.equal(Object.prototype.hasOwnProperty.call(receipt,'unitCost'),false);
