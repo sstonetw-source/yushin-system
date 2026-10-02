@@ -249,11 +249,13 @@ test('purchaser order form assigns a salesperson while preserving creator identi
 test('low-stock inventory can hand off to formal replenishment purchase flow without duplicating incoming stock', () => {
     assert.match(appSource, /openInventoryReplenishment/);
     assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && n\.available\+n\.incoming<safetyStock && canEditPage\('orders\.po'\)/);
-    assert.match(appSource, /const projectedAvailable = stock\.available \+ stock\.incoming/);
-    assert.match(appSource, /projectedAvailable >= safetyStock/);
+    assert.match(appSource, /YushinProcurementDemand\?\.fromStockReplenishment/);
+    assert.match(appSource, /available:stock\.available/);
+    assert.match(appSource, /incoming:stock\.incoming/);
+    assert.match(appSource, /demand\.remainingToOrderQty > 0/);
     assert.match(appSource, /不需重複建立補庫採購/);
     assert.match(appSource, /poDirectStockMode = true/);
-    assert.match(appSource, /suggestedQty = Math\.max\(1, safetyStock - projectedAvailable\)/);
+    assert.match(appSource, /suggestedQty = demand\.remainingToOrderQty/);
     assert.match(appSource, /generatePoNo\(\)/);
 });
 
@@ -1005,7 +1007,7 @@ test('phase 6 supply receipt decreases incoming and increases warehouse stock wi
     const end=appSource.indexOf('window.openSupplyReceipt',start);
     const s=appSource.slice(start,end);
     assert.match(s,/onHand:inv\.onHand\+qty/);
-    assert.match(s,/const receiptPlan=window\.YushinReceiving\.applyReceipt\(supply,qty\)/);
+    assert.match(s,/const receiptPlan=globalThis\.YushinSupply\.applyReceipt\(procurement,qty\)/);
     assert.match(s,/const incomingRelease=receiptPlan\.incomingReleaseQty/);
     assert.match(s,/incoming:Math\.max\(0,inv\.incoming-incomingRelease\)/);
     assert.match(s,/onHand:wh\.onHand\+qty/);
@@ -3283,7 +3285,13 @@ test('procurement views reuse dispatch state while calculating quantities', () =
     const remainingEnd=appSource.indexOf('\nfunction pendingProcurementDisplayLines',remainingStart);
     const remainingSource=appSource.slice(remainingStart,remainingEnd);
     assert.match(remainingSource,/dispatchOverride = null/);
-    assert.match(remainingSource,/dispatchOverride \|\| itemDispatchState/);
+    assert.match(remainingSource,/procurementDemandForOrderItem\(order,item,dispatchOverride\)/);
+    const demandStart=appSource.indexOf('function procurementDemandForOrderItem');
+    const demandEnd=appSource.indexOf('\nfunction remainingProcurementQty',demandStart);
+    const demandSource=appSource.slice(demandStart,demandEnd);
+    assert.match(demandSource,/dispatchOverride \|\| itemDispatchState/);
+    assert.match(demandSource,/YushinWorkflow\?\.procurementQuantities/);
+    assert.match(demandSource,/YushinProcurementDemand\?\.fromSalesOrder/);
 
     const pendingStart=appSource.indexOf('function pendingProcurementDisplayLines');
     const pendingEnd=appSource.indexOf('\nfunction renderPurchasingWorkCards',pendingStart);
@@ -4241,7 +4249,8 @@ test('supply rule tightening still covers current quick-order receipt and cancel
     const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
     const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
     const receiptSource=appSource.slice(receiptStart,receiptEnd);
-    assert.match(receiptSource,/YushinReceiving\.applyReceipt\(supply,qty\)/);
+    assert.match(receiptSource,/YushinSupply\.applyReceipt\(procurement,qty\)/);
+    assert.match(receiptSource,/YushinReceiving\.buildReceiptSnapshot/);
     assert.match(receiptSource,/receiptPlan\.record\.receivedQty/);
     assert.match(receiptSource,/receiptPlan\.record\.status/);
 });
@@ -4300,7 +4309,7 @@ test('direct ship receipt transaction writes the supply delta required by securi
     const directSource=receiptSource.slice(directStart,warehouseStart);
     assert.match(directSource,/deliveryRecord=\{[\s\S]*?sourceType:'DIRECT_SHIP_RECEIPT'[\s\S]*?sourceId:supplyId/);
     assert.match(directSource,/deliveryRecords=\[\.\.\.savedDeliveryRecords\(order\),deliveryRecord\]/);
-    assert.match(directSource,/const receiptPlan=window\.YushinReceiving\.applyReceipt\(supply,qty\)/);
+    assert.match(directSource,/const receiptPlan=globalThis\.YushinSupply\.applyReceipt\(procurement,qty\)/);
     assert.match(directSource,/const receivedQty=receiptPlan\.record\.receivedQty/);
     assert.match(directSource,/tx\.update\(supplyRef,\{receivedQty,status:receiptPlan\.record\.status/);
     assert.match(directSource,/tx\.update\(orderRef,\{[\s\S]*?deliveryRecords,deliveredQty:grossDelivered,isDelivered:/);
