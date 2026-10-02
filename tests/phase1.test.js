@@ -3847,6 +3847,8 @@ test('Product Import is incremental, splits standard cost securely, and never re
     assert.match(syncSource,/db\.collection\('productCosts'\)/);
     assert.match(syncSource,/salesVisible: false/);
     assert.match(syncSource,/PRODUCT_MASTER_IMPORT_FIELDS/);
+    assert.match(syncSource,/item\.listPriceProvided !== true\) delete product\.listPrice/);
+    assert.match(syncSource,/field === 'listPrice' && item\.listPriceProvided !== true/);
     assert.match(syncSource,/commitMigrationBatch\(operations, 200\)/);
     assert.doesNotMatch(syncSource,/\.delete\(/);
 
@@ -3862,6 +3864,9 @@ test('Product Import is incremental, splits standard cost securely, and never re
     const uploadSource=appSource.slice(uploadStart, uploadStart + 16000);
     assert.match(uploadSource,/standardCostRaw/);
     assert.match(uploadSource,/標準成本格式不正確/);
+    assert.match(uploadSource,/const listPriceProvided = String\(priceRaw \?\? ''\)\.trim\(\) !== ''/);
+    assert.match(uploadSource,/price, listPriceProvided, standardCost, standardCostProvided/);
+    assert.match(uploadSource,/price:previous\.price/);
     assert.match(uploadSource,/以 productId 增量合併本機快取/);
     assert.match(uploadSource,/未出現在檔案中的產品不會被刪除或停用/);
     assert.match(uploadSource,/標準成本與實際採購價分開保存/);
