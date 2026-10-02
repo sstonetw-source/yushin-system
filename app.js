@@ -10663,8 +10663,9 @@ function purchaseHistoryItemReceiptProgress(po, itemIndex = 0) {
     if (supply && globalThis.YushinSupply?.receiptProgress) {
         return globalThis.YushinSupply.receiptProgress(supply);
     }
-    if (String(po?.status || '').toUpperCase() === 'CANCELLED') {
-        return { status:'CANCELLED', label:'未到貨已取消', orderedQty:0, receivedQty:0, remainingQty:0, percent:0 };
+    if (isPurchaseTerminalStatus(po?.status)) {
+        const closed=String(po?.status||'').toUpperCase()==='CLOSED';
+        return { status:closed?'CLOSED':'CANCELLED', label:closed?'已結案':'未到貨已取消', orderedQty:0, receivedQty:0, remainingQty:0, percent:0 };
     }
     return { status:'UNKNOWN', label:'已建立', orderedQty:0, receivedQty:0, remainingQty:0, percent:0 };
 }
@@ -10962,7 +10963,7 @@ function receivingEvidenceForWorkItem(order, item, itemIndex, evidenceIndex = nu
 function manualSupplyCancelActionHtml(supply) {
     if (!supply || supply.type !== 'PURCHASING_MANUAL') return '';
     if (!canCreatePurchaseOrderCapability()) return '';
-    if (String(supply.status || '').toUpperCase() === 'CANCELLED') return '';
+    if (isPurchaseTerminalStatus(supply.status)) return '';
     const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
     if (remaining <= 0) return '';
     const key = `supply:${supply.id}`;
@@ -11144,7 +11145,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
         const supplierContact = purchaseOrderSupplierContact(po);
 
-        const poCancelled=String(po.status||'').toUpperCase()==='CANCELLED';
+        const poTerminal=isPurchaseTerminalStatus(po.status);
         items.forEach((item,itemIndex)=>{
             const ordered=Math.max(0,Number(item.qty||0));
             if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
@@ -11175,7 +11176,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                             <div class="po-more-menu-popover">
                                 ${(po.purchaseType==='stock'||items.every(line=>!line.orderId))?`<button type="button" onclick="copySavedPurchaseOrderAsNew('${escapeAttr(po.id)}')">複製成新訂購單</button>`:''}
                                 <button type="button" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">查看正式內容</button>
-                                ${canCreatePurchaseOrderCapability()&&!poCancelled?`<button type="button" class="danger-menu-item" onclick="cancelPurchaseOrderOutstanding('${escapeAttr(po.id)}')">取消未到貨</button>`:''}
+                                ${canCreatePurchaseOrderCapability()&&!poTerminal?`<button type="button" class="danger-menu-item" onclick="cancelPurchaseOrderOutstanding('${escapeAttr(po.id)}')">停止未到貨</button>`:''}
                             </div>
                         </details>
                     </div>`:'—'}</td>
@@ -11196,13 +11197,13 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
 
 // 把「採購訂單」裡一筆舊的訂購單紀錄，重新載回訂購單視窗，維持原本的單號，方便再列印一次
 async function purchaseIncomingSyncPending(po) {
-    if (String(po?.status || '').toUpperCase() === 'CANCELLED') return false;
+    if (isPurchaseTerminalStatus(po?.status)) return false;
     const supplyIds = Array.isArray(po?.supplyOrderIds) ? po.supplyOrderIds.filter(Boolean) : [];
     if (!supplyIds.length) return false;
     const supplies = await readDocumentsByIds('supplyOrders', supplyIds);
     if (supplies.length !== new Set(supplyIds).size) return true;
     return supplies.some(supply => {
-        if (String(supply.status || '').toUpperCase() === 'CANCELLED') return false;
+        if (isPurchaseTerminalStatus(supply.status)) return false;
         if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return false;
         const targetQty = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
         const registeredQty = Math.max(0, Number(supply.incomingRegisteredQty || 0));
@@ -11237,9 +11238,10 @@ window.reprintPurchaseOrder = async function(poId) {
     updatePoModeUI();
     document.getElementById('poModalOverlay').classList.add('active');
 
-    if (String(po.status || '').toUpperCase() === 'CANCELLED') {
+    if (isPurchaseTerminalStatus(po.status)) {
         poIncomingSyncPending = false;
-        updatePoSaveStatus(`訂購單 ${po.poNo || po.id} 的未到貨數量已取消；此文件僅供查閱或重新輸出 PDF，不會重新增加在途庫存。`);
+        const terminalLabel=String(po.status||'').toUpperCase()==='CLOSED'?'已結案':'已取消';
+        updatePoSaveStatus(`訂購單 ${po.poNo || po.id} ${terminalLabel}；此文件僅供查閱或重新輸出 PDF，不會重新增加在途庫存。`);
         updatePoSaveButton();
         return;
     }
@@ -11525,7 +11527,7 @@ function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
 async function registerPurchaseIncoming(poId, poRecord) {
-    if (String(poRecord?.status || '').toUpperCase() === 'CANCELLED') return;
+    if (isPurchaseTerminalStatus(poRecord?.status)) return;
     const supplyIds = Array.isArray(poRecord?.supplyOrderIds) ? poRecord.supplyOrderIds : [];
     for (const supplyId of supplyIds) {
         await db.runTransaction(async tx => {
@@ -11533,7 +11535,7 @@ async function registerPurchaseIncoming(poId, poRecord) {
             const supplySnap = await tx.get(supplyRef);
             if (!supplySnap.exists) throw new Error(`找不到供應紀錄 ${supplyId}`);
             const supply = supplySnap.data();
-            if (String(supply.status || '').toUpperCase() === 'CANCELLED') return;
+            if (isPurchaseTerminalStatus(supply.status)) return;
             if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
 
             const key = String(supply.productKey || supply.productId || '').trim();
@@ -12076,8 +12078,10 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             }
             return;
         }
-        if (String(supply.status || '').toUpperCase() === 'CANCELLED') {
-            throw new Error('此供應紀錄已取消，不能再確認到貨。');
+        if (isPurchaseTerminalStatus(supply.status)) {
+            throw new Error(String(supply.status||'').toUpperCase()==='CLOSED'
+                ? '此供應紀錄已結案，不能再確認到貨。'
+                : '此供應紀錄已取消，不能再確認到貨。');
         }
         const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
         if(qty<=0||qty>remaining)throw new Error(`本次到貨數量不可超過 ${remaining}。`);
@@ -16773,7 +16777,7 @@ function inventoryAnalysisTotals(start,end) {
     // 在途價值直接由 supplyOrders 的未到貨數量計算；PO 文件不再維護到貨狀態。
     const incoming = inventoryAnalysisSupplyOrders
         .filter(supply => (supply.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP')
-        .filter(supply => String(supply.status || '').toUpperCase() !== 'CANCELLED')
+        .filter(supply => !isPurchaseTerminalStatus(supply.status))
         .reduce((sum, supply) => {
             const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
             return sum + remaining * Number(supply.unitCost || 0);
