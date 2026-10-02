@@ -11467,7 +11467,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
         const mappedSupplier = supplierForProduct(match.brand, match.productLine);
         if (!document.getElementById('poVendorName').value && mappedSupplier) {
             document.getElementById('poVendorName').value = mappedSupplier.purchaseHeaderName || mappedSupplier.supplierName || '';
-            document.getElementById('poVendorEmail').value = mappedSupplier.purchaseEmail || '';
+            window.updatePoSupplierEmailHint?.();
         } else if (!document.getElementById('poVendorName').value && match.supplier) {
             document.getElementById('poVendorName').value = match.supplier;
         }
