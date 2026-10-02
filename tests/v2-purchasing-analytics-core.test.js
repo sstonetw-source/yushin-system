@@ -179,3 +179,29 @@ test('late incoming purchase is surfaced by count amount and days overdue',()=>{
   assert.equal(result.totals.maxLateDays,5);
   assert.equal(result.bySupplier[0].lateLineCount,1);
 });
+
+
+test('supplier service level tracks received quantity against effective purchased quantity',()=>{
+  const result=analytics.summarize([
+    {
+      id:'S1',
+      supplierId:'SUP1',
+      supplier:'Vendor A',
+      method:'PURCHASING_PO',
+      sourceType:'STOCK_REPLENISHMENT',
+      qty:10,
+      receivedQty:6,
+      status:'PARTIAL_RECEIPT',
+      unitCost:100,
+      orderDate:'2026-10-01'
+    }
+  ]);
+
+  assert.equal(result.totals.orderedQty,10);
+  assert.equal(result.totals.receivedQty,6);
+  assert.equal(result.totals.incomingQty,4);
+  assert.equal(result.totals.serviceLevel,60);
+  assert.equal(result.bySupplier[0].orderedQty,10);
+  assert.equal(result.bySupplier[0].receivedQty,6);
+  assert.equal(result.bySupplier[0].serviceLevel,60);
+});
