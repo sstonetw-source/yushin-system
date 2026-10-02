@@ -2101,29 +2101,6 @@ test('purchase history exposes a read-only ERP-style purchase timeline', () => {
     assert.doesNotMatch(source,/db\.collection\([^\n]+\)\.(?:add|set|update)\(/);
 });
 
-test('product supplier relation overrides brand fallback and is managed in purchasing', () => {
-    assert.match(html,/id="productSupplierMappingBody"/);
-    assert.match(html,/id="productSupplierItemCode"/);
-    assert.match(html,/id="productSupplierSupplier"/);
-    assert.match(app,/readCollectionInBatches\('productSupplierMappings'\)/);
-    assert.match(app,/selectProductSupplierMapping\(\s*productSupplierMappingCache/);
-    assert.match(app,/window\.saveProductSupplierMapping = async function/);
-    assert.match(app,/collection\('productSupplierMappings'\)\.doc\(mappingId\)/);
-    assert.match(app,/window\.disableProductSupplierMapping = async function/);
-    const resolverStart=app.indexOf("function supplierForProduct(");
-    const resolverEnd=app.indexOf("\nfunction normalizeSupplierEmail",resolverStart);
-    const source=app.slice(resolverStart,resolverEnd);
-    assert.ok(source.indexOf("selectProductSupplierMapping") < source.indexOf("supplierMappingCache.filter"));
-});
-
-test('supplier cannot be disabled while product supplier relations still reference it', () => {
-    const start=app.indexOf('window.disableSupplierMaster = async function');
-    const end=app.indexOf('\nwindow.saveSupplierMapping',start);
-    const source=app.slice(start,end);
-    assert.match(source,/productSupplierMappingCache\.filter\(mapping=>mapping\.supplierId===id\)/);
-    assert.match(source,/activeMappings\.length\|\|activeProductMappings\.length/);
-});
-
 test('lead-time PO date controls preserve manual overrides and recompute automatic dates', () => {
     const start = app.indexOf('window.autoFillPoExpectedDate = function');
     const end = app.indexOf('\nasync function autoFillPoSupplier', start);
@@ -2180,7 +2157,7 @@ test('receiving due info ranks overdue work ahead of today, future, and unschedu
 });
 
 
-test('item-level PO schedule dates flow into supply records while manual header dates stay authoritative', () => {
+test('supplier-level PO lead time applies one ETA to all items while manual header stays authoritative', () => {
     const helperStart = app.indexOf('function poItemsWithScheduleDates');
     const helperEnd = app.indexOf('\n\nasync function autoFillPoSupplier', helperStart);
     assert.ok(helperStart >= 0 && helperEnd > helperStart);
@@ -2188,12 +2165,11 @@ test('item-level PO schedule dates flow into supply records while manual header 
     const helper = vm.runInNewContext(`${helperSource}\npoItemsWithScheduleDates`, {
         globalThis:{
             YushinSupplier:{
-                itemExpectedArrivalDate:(item,mappings,orderDate,supplierId)=>
-                    item.itemCode==='A' ? '2026-10-05' : '2026-10-09'
+                itemExpectedArrivalDate:(item,supplier,orderDate)=>
+                    supplier.leadTimeDays===7 && orderDate==='2026-10-02' ? '2026-10-09' : ''
             }
         },
-        productSupplierMappingCache:[],
-        poSupplierPartNoForItem:()=> ''
+        supplierMasterCache:[{id:'S1',supplierId:'S1',leadTimeDays:7}]
     });
 
     const automatic=helper(
@@ -2203,7 +2179,7 @@ test('item-level PO schedule dates flow into supply records while manual header 
         '2026-10-09',
         'lead-time'
     );
-    assert.equal(automatic[0].scheduleDate,'2026-10-05');
+    assert.equal(automatic[0].scheduleDate,'2026-10-09');
     assert.equal(automatic[1].scheduleDate,'2026-10-09');
 
     const manual=helper(
@@ -2252,35 +2228,6 @@ test('procurement need date stays separate from supplier ETA', () => {
     assert.match(poSource,/scheduleDate:item\.scheduleDate\|\|poRecord\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
 });
 
-
-test('formal PO snapshots supplier part numbers and keeps internal product identity', () => {
-    const helperStart=app.indexOf('function productSupplierMappingForPoItem');
-    const helperEnd=app.indexOf('\nasync function autoFillPoSupplier',helperStart);
-    const helperSource=app.slice(helperStart,helperEnd);
-    assert.ok(helperStart>=0&&helperEnd>helperStart);
-    assert.match(helperSource,/mapping\.supplierId/);
-    assert.match(helperSource,/poEditingId && snapshot/);
-    assert.match(helperSource,/supplierPartNo/);
-
-    const renderStart=app.indexOf('function renderPoItemsTable()');
-    const renderEnd=app.indexOf('\nwindow.updatePoItem',renderStart);
-    const renderSource=app.slice(renderStart,renderEnd);
-    assert.match(renderSource,/供應商貨號：/);
-    assert.match(renderSource,/poSupplierPartNoForItem/);
-
-    const printStart=app.indexOf('window.printPurchaseOrder = async function()');
-    const printEnd=app.indexOf('\nwindow.openDirectStockPurchase',printStart);
-    const printSource=app.slice(printStart,printEnd);
-    assert.match(printSource,/supplierPartNo:item\.supplierPartNo\|\|''/);
-    assert.match(printSource,/items: scheduledPoItems\.map/);
-
-    const searchStart=app.indexOf('function purchaseOrderSearchTokens');
-    const searchEnd=app.indexOf('\nwindow.schedulePurchaseOrderHistorySearch',searchStart);
-    const searchSource=app.slice(searchStart,searchEnd);
-    assert.match(searchSource,/item\.supplierPartNo/);
-
-    assert.match(html,/id="poVendorName"[^>]+renderPoItemsTable\(\)/);
-});
 
 
 test('grouped procurement selection only builds compatible warehouse purchase orders', () => {
