@@ -7728,25 +7728,27 @@ function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByI
 const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
-    // normalizedOrderItems() 已將 deliveryRecords / returnRecords 依 itemId 索引完成時，
-    // 直接使用該記憶體快照；只有原始 item 才回退掃描事件紀錄。
+    // deliveryRecords / returnRecords 仍由頁面層整理；所有物流數量公式交給 fulfillment-core。
+    // 這樣訂單頁、採購頁與實際送貨動作不會各自維護一套「待打單／可出貨」算法。
     const hasSnapshot = item?.__fulfillmentSnapshot === true;
     const singleItem = Array.isArray(order?.items) && order.items.length === 1;
-    const grossDelivered=hasSnapshot
-        ? Math.max(0,Number(item.deliveredQty||0))
-        : savedDeliveryRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
-            .reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const returned=hasSnapshot
-        ? Math.max(0,Number(item.returnedQty||0))
-        : savedReturnRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
-            .reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const state=YushinFulfillment?.dispatchState({
+    const grossDelivered = hasSnapshot
+        ? Math.max(0, Number(item.deliveredQty || 0))
+        : savedDeliveryRecords(order).filter(r => ((!r.itemId && singleItem) || r.itemId === item.itemId))
+            .reduce((sum, r) => sum + Number(r.qty || 0), 0);
+    const returned = hasSnapshot
+        ? Math.max(0, Number(item.returnedQty || 0))
+        : savedReturnRecords(order).filter(r => ((!r.itemId && singleItem) || r.itemId === item.itemId))
+            .reduce((sum, r) => sum + Number(r.qty || 0), 0);
+    if (!window.YushinFulfillment?.dispatchState) {
+        throw new Error('Fulfillment core 未載入，無法計算出貨狀態。');
+    }
+    return window.YushinFulfillment.dispatchState({
         ...item,
-        deliveredQty:grossDelivered,
-        returnedQty:returned
+        orderedQty: item.orderedQty ?? item.qty,
+        deliveredQty: grossDelivered,
+        returnedQty: returned
     });
-    if(!state)throw new Error('Fulfillment core 未載入，無法計算出貨狀態。');
-    return state;
 }
 
 function orderContextActionState(order, normalizedItems = null, dispatchStateByItem = null) {
