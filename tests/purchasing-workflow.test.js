@@ -1143,6 +1143,16 @@ test('receipt modal close function exists and does not discard retry key', () =>
     assert.doesNotMatch(source,/clearReceiptOperationId/);
 });
 
+test('direct-ship replacement receipts preserve cumulative gross delivery events', () => {
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('window.openSupplyReceipt',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const delivered=Number\(item\.deliveredQty\|\|0\)\+qty/);
+    assert.doesNotMatch(source,/const delivered=Math\.min\(Number\(\(item\.orderedQty \?\? item\.qty\)/);
+    assert.match(source,/grossDelivered-returned/);
+});
+
 test('receiving persists immutable ERP receipt snapshots through receiving core', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
