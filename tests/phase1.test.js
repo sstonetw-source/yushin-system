@@ -4516,6 +4516,13 @@ test('quick Product Master creation keeps list price optional', () => {
 });
 
 
+test('quote-to-order conversion preserves an explicitly matched Product Master item', () => {
+    const start=appSource.indexOf('const toOrderItem=(sourceItem,index)=>');
+    const end=appSource.indexOf('const items=sourceItems.map(toOrderItem);',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/productMasterMatched:sourceItem\.productMasterMatched===true&&!!sourceItem\.productId/);
+});
+
 test('copying an order preserves Product Master identity and procurement mode', () => {
     const start=appSource.indexOf('window.copyOrderAsNew = function(orderId)');
     const end=appSource.indexOf('\nwindow.closeOrderModal',start);

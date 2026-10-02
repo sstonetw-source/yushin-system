@@ -6175,6 +6175,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
             return normalizeNewOrderItem({
                 itemId:`quote-${index+1}`,
                 productId:sourceItem.productId||priceMatch?.productId||(priceMatch?stableProductId(priceMatch):''),
+                productMasterMatched:sourceItem.productMasterMatched===true&&!!sourceItem.productId,
                 itemCode:sourceItem.model||'', itemName:sourceItem.nameCn||sourceItem.nameEn||'',
                 itemNameEn:sourceItem.nameEn||'', brand,
                 productLine:sourceItem.productLine||priceMatch?.productLine||'',
