@@ -4866,13 +4866,22 @@ test('admin data health is a dedicated read-only check and validates Product Mas
     assert.match(appSource,/安全庫存設定異常/);
 });
 
-test('cross-module navigation revalidates operational pages without requiring manual refresh', () => {
-    assert.match(appSource,/const previousTabId = document\.querySelector\('\.content-section\.active'\)\?\.id \|\| ''/);
-    assert.match(appSource,/const forceRefresh = !!previousTabId && previousTabId !== tabId/);
-    assert.match(appSource,/initializePageData\('forecast', \{ force: forceRefresh \}\)/);
-    assert.match(appSource,/initializePageData\('orders\.list', \{ force: forceRefresh \}\)/);
-    assert.match(appSource,/initializePageData\('orders\.po', \{ force: forceRefresh \}\)/);
-    assert.match(appSource,/initializePageData\('inventory', \{ force: forceRefresh \}\)/);
+test('cross-module navigation refreshes dirty operational pages without re-querying every tab switch', () => {
+    assert.match(appSource,/const dirtyMainPages = new Set\(\)/);
+    assert.match(appSource,/function markMainPageDirty\(\.\.\.mainKeys\)/);
+    assert.match(appSource,/const force = options\.force === true \|\| dirtyMainPages\.has\(mainKey\)/);
+    assert.match(appSource,/dirtyMainPages\.delete\(mainKey\)/);
+    assert.match(appSource,/initializePageData\('forecast'\)/);
+    assert.match(appSource,/initializePageData\('orders\.list'\)/);
+    assert.match(appSource,/initializePageData\('orders\.po'\)/);
+    assert.match(appSource,/initializePageData\('inventory'\)/);
+    assert.doesNotMatch(appSource,/const forceRefresh = !!previousTabId/);
+    const inventoryStart=appSource.indexOf("function invalidateWarehouseStockCache");
+    const inventoryEnd=appSource.indexOf("\nfunction expiryDays",inventoryStart);
+    assert.match(appSource.slice(inventoryStart,inventoryEnd),/markMainPageDirty\('inventory'\)/);
+    const demandStart=appSource.indexOf("function invalidateProcurementDemandQueue");
+    const demandEnd=appSource.indexOf("\nlet pendingPurchaseError",demandStart);
+    assert.match(appSource.slice(demandStart,demandEnd),/markMainPageDirty\('orders\.po'\)/);
 });
 
 test('replenishment center derives projected stock from authoritative warehouse stocks', () => {

@@ -783,6 +783,11 @@ function showApp() {
 
 let lastShowAppInitKey = '';
 const loadedMainPages = new Set();
+const dirtyMainPages = new Set();
+
+function markMainPageDirty(...mainKeys) {
+    mainKeys.flat().filter(Boolean).forEach(mainKey => dirtyMainPages.add(mainKey));
+}
 
 function hydratePageFromLocalCache(mainKey) {
     // Gmail-style stale-while-revalidate: cached content paints immediately; Firestore refresh follows in background.
@@ -834,9 +839,10 @@ function hydratePageFromLocalCache(mainKey) {
 }
 
 function initializePageData(mainKey, options = {}) {
-    const force = options.force === true;
+    const force = options.force === true || dirtyMainPages.has(mainKey);
     hydratePageFromLocalCache(mainKey);
     if (!force && loadedMainPages.has(mainKey)) return;
+    dirtyMainPages.delete(mainKey);
     loadedMainPages.add(mainKey);
     if (['quote', 'forecast', 'orders.list', 'inventory', 'equipment', 'admin'].includes(mainKey)) {
         ensureBrandSettingsLoaded().then(() => {
@@ -1285,8 +1291,6 @@ window.switchViewRole = function(role) {
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
-    const previousTabId = document.querySelector('.content-section.active')?.id || '';
-    const forceRefresh = !!previousTabId && previousTabId !== tabId;
     const mainKey = { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders.list', 'purchasing-system':'orders.po', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[tabId];
     if (!mainKey || !canAccessPage(mainKey) || (mainKey === 'admin' && trueUserRole !== 'admin')) {
         alert('您沒有權限進入這個系統。');
@@ -1305,17 +1309,17 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
     }
 
     if (tabId === 'inventory-system') {
-        if (!options.skipReload) initializePageData('inventory', { force: forceRefresh });
+        if (!options.skipReload) initializePageData('inventory');
     } else if (tabId === 'forecast-system') {
-        if (!options.skipReload) initializePageData('forecast', { force: forceRefresh });
+        if (!options.skipReload) initializePageData('forecast');
     } else if (tabId === 'equipment-system') {
         if (!options.skipReload) initializePageData('equipment');
     } else if (tabId === 'product-system') {
         if (!options.skipReload) initializePageData('products');
     } else if (tabId === 'order-system') {
-        if (!options.skipReload) initializePageData('orders.list', { force: forceRefresh });
+        if (!options.skipReload) initializePageData('orders.list');
     } else if (tabId === 'purchasing-system') {
-        if (!options.skipReload) initializePageData('orders.po', { force: forceRefresh });
+        if (!options.skipReload) initializePageData('orders.po');
     } else if (tabId === 'quote-system') {
         if (!options.skipReload) initializePageData('quote');
         const quoteView = canAccessPage('quote.create') ? 'create' : 'my';
@@ -7485,6 +7489,7 @@ window.changeOrderPeriod = function(value) {
 let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[], pendingSupplyCache=[];
 let warehouseStockCache = new Map();
 function invalidateWarehouseStockCache(productKey = '', warehouseId = '') {
+    markMainPageDirty('inventory');
     if (productKey && warehouseId) {
         warehouseStockCache.delete(warehouseId + '||' + productKey);
         return;
@@ -9783,6 +9788,7 @@ let procurementDemandSourceOrderCache = new Map();
 const selectedPendingPurchaseDemandIds = new Set();
 
 function invalidateProcurementDemandQueue() {
+    markMainPageDirty('orders.po');
     procurementDemandCache=[];
     procurementDemandCursor=null;
     procurementDemandHasMore=true;
