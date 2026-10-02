@@ -10421,6 +10421,145 @@ function purchaseHistoryItemReceiptProgress(po, itemIndex = 0) {
     return { status:'UNKNOWN', label:'已建立', orderedQty:0, receivedQty:0, remainingQty:0, percent:0 };
 }
 
+
+function purchaseTimelineDateLabel(value='') {
+    const raw=String(value||'').trim();
+    if(!raw)return '—';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw;
+    const date=new Date(raw);
+    return Number.isNaN(date.getTime())?raw:date.toLocaleString('zh-TW',{hour12:false});
+}
+
+function purchaseTimelineSourceLabel(sourceType='') {
+    return sourceType==='STOCK_REPLENISHMENT'?'備庫採購':sourceType==='SALES_ORDER'?'客戶訂單採購':'採購';
+}
+
+window.closePurchaseOrderTimeline = function() {
+    document.getElementById('purchaseTimelineOverlay')?.classList.remove('active');
+};
+
+window.openPurchaseOrderTimeline = async function(poId) {
+    if(!canAccessPage('orders.po')||!poId)return;
+    const overlay=document.getElementById('purchaseTimelineOverlay');
+    const title=document.getElementById('purchaseTimelineTitle');
+    const summary=document.getElementById('purchaseTimelineSummary');
+    const supplyBody=document.getElementById('purchaseTimelineSupplyBody');
+    const eventsBody=document.getElementById('purchaseTimelineEvents');
+    const status=document.getElementById('purchaseTimelineStatus');
+    if(!overlay||!summary||!supplyBody||!eventsBody)return;
+    overlay.classList.add('active');
+    if(title)title.textContent='訂購單追蹤';
+    if(status)status.textContent='載入採購歷程中…';
+    summary.innerHTML='';
+    supplyBody.innerHTML='<tr><td colspan="6" style="color:#888;">載入中…</td></tr>';
+    eventsBody.innerHTML='';
+
+    try{
+        let po=poListCache.find(row=>row.id===poId)||poHistorySearchResults.find(row=>row.id===poId)||null;
+        if(!po){
+            const snap=await firestoreReadWithTimeout(db.collection('purchaseOrders').doc(poId).get(),'訂購單追蹤');
+            if(!snap.exists)throw new Error('找不到這張訂購單。');
+            po={id:snap.id,...snap.data()};
+        }
+
+        const supplyIds=[...new Set((Array.isArray(po.supplyOrderIds)?po.supplyOrderIds:[]).map(String).filter(Boolean))];
+        const supplyPromise=supplyIds.length?readDocumentsByIds('supplyOrders',supplyIds):Promise.resolve([]);
+        const receiptPromise=firestoreReadWithTimeout(
+            db.collection('receipts').where('purchaseDocumentId','==',po.id).get(),
+            '訂購單到貨歷程'
+        );
+        const communicationPromise=canCreatePurchaseOrderCapability()
+            ? firestoreReadWithTimeout(
+                db.collection('purchaseOrderCommunications').where('purchaseOrderId','==',po.id).get(),
+                '訂購單聯絡歷程'
+            )
+            : Promise.resolve(null);
+
+        const [supplies,receiptSnapshot,communicationSnapshot]=await Promise.all([
+            supplyPromise,receiptPromise,communicationPromise
+        ]);
+        const receipts=receiptSnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+        const communications=communicationSnapshot
+            ? communicationSnapshot.docs.map(doc=>({id:doc.id,...doc.data()}))
+            : [];
+
+        if(title)title.textContent=`訂購單追蹤｜${po.poNo||po.id}`;
+        const contact=purchaseOrderSupplierContact(po);
+        summary.innerHTML=`
+            <strong>${escapeHtml(po.vendorName||contact.supplierName||'')}</strong>
+            <span style="margin-left:12px;color:#667584;">訂購：${escapeHtml(po.poDate||'—')}</span>
+            <span style="margin-left:12px;color:#667584;">預計到貨：${escapeHtml(po.expectedDate||po.scheduleDate||'—')}</span>
+            ${contact.email?`<span style="margin-left:12px;color:#667584;">Email：${escapeHtml(contact.email)}</span>`:''}
+        `;
+
+        supplyBody.innerHTML=supplies.length?supplies.map(supply=>{
+            const progress=globalThis.YushinSupply?.receiptProgress(supply)||{
+                orderedQty:Number(supply.qty||0),
+                receivedQty:Number(supply.receivedQty||0),
+                remainingQty:Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0)),
+                label:String(supply.status||'')
+            };
+            return `<tr>
+                <td>${escapeHtml(supply.itemCode||supply.itemName||'')}</td>
+                <td>${escapeHtml(purchaseTimelineSourceLabel(supply.sourceType))}</td>
+                <td>${Number(progress.orderedQty||0)}</td>
+                <td>${Number(progress.receivedQty||0)}</td>
+                <td>${Number(progress.remainingQty||0)}</td>
+                <td>${escapeHtml(progress.label||'')}</td>
+            </tr>`;
+        }).join(''):'<tr><td colspan="6" style="color:#888;">沒有供應品項紀錄。</td></tr>';
+
+        const events=[];
+        const createdAt=po.createdAt||po.poDate||'';
+        events.push({
+            time:createdAt,
+            type:'ORDER',
+            title:'建立訂購單',
+            detail:`${po.poNo||po.id}｜${po.vendorName||''}｜${(purchaseItemsFromSavedPo(po)||[]).length} 個品項`
+        });
+        receipts.forEach(receipt=>{
+            events.push({
+                time:receipt.createdAt||receipt.receiptDate||'',
+                type:'RECEIPT',
+                title:`到貨 +${Number(receipt.qty||0)}`,
+                detail:[receipt.itemCode||receipt.itemName||'',receipt.lotNo?('批號 '+receipt.lotNo):'',receipt.receiptDate||''].filter(Boolean).join('｜')
+            });
+        });
+        communications.forEach(event=>{
+            const channel=event.channel==='WEB_SHARE'?'開啟分享':'準備郵件';
+            events.push({
+                time:event.preparedAt||event.createdAt||'',
+                type:'COMMUNICATION',
+                title:channel,
+                detail:[event.recipientEmail||'',event.createdBy||'','系統僅記錄已準備，不代表已寄達'].filter(Boolean).join('｜')
+            });
+        });
+        if(String(po.status||'').toUpperCase()==='CANCELLED'){
+            events.push({
+                time:po.cancelledAt||po.updatedAt||'',
+                type:'CANCELLED',
+                title:'取消未到貨',
+                detail:po.cancelReason||po.cancellationReason||'訂購單已取消'
+            });
+        }
+        events.sort((a,b)=>(Date.parse(b.time)||0)-(Date.parse(a.time)||0));
+        eventsBody.innerHTML=events.map(event=>`
+            <div style="padding:10px 12px;border-left:3px solid #d0d7de;margin:0 0 10px 4px;background:#fff;">
+                <div style="display:flex;justify-content:space-between;gap:12px;">
+                    <strong>${escapeHtml(event.title)}</strong>
+                    <span style="font-size:12px;color:#667584;white-space:nowrap;">${escapeHtml(purchaseTimelineDateLabel(event.time))}</span>
+                </div>
+                <div style="font-size:12px;color:#667584;margin-top:4px;line-height:1.5;">${escapeHtml(event.detail||'')}</div>
+            </div>
+        `).join('');
+        if(status)status.textContent=`${supplies.length} 個供應品項｜${receipts.length} 筆到貨${canCreatePurchaseOrderCapability()?`｜${communications.length} 筆聯絡紀錄`:''}`;
+    }catch(err){
+        console.error('訂購單追蹤載入失敗：',err);
+        if(status)status.textContent='載入失敗：'+(err?.message||err);
+        supplyBody.innerHTML='<tr><td colspan="6" style="color:#b42318;">載入失敗，請重試。</td></tr>';
+    }
+};
+
 function purchaseOrderSearchTokens(po={}) {
     const values=[
         po.poNo,po.vendorName,po.supplierName,po.supplierEmail,po.buyerName,po.company,po.poDate,
@@ -10781,6 +10920,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                     <div class="po-list-action-row">
                         <button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">載入</button>
                         <button type="button" class="btn-small btn-secondary" onclick="exportPurchaseOrderFromHistory('${escapeAttr(po.id)}')">PDF</button>
+                        <button type="button" class="btn-small btn-secondary" onclick="openPurchaseOrderTimeline('${escapeAttr(po.id)}')">追蹤</button>
                         ${supplierContact.email?`<button type="button" class="btn-small btn-secondary" onclick="emailPurchaseOrder('${escapeAttr(po.id)}')">郵件</button>`:''}
                         <details class="po-more-menu">
                             <summary class="btn-small btn-secondary">更多</summary>
