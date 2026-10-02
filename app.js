@@ -4073,20 +4073,100 @@ function quoteBrandRestrictionText(brand) {
 
 // 估價單允許報帳／虛擬品項，因此廠牌可留白，也可用「其他」自由輸入。
 // 正式 Brand Master 廠牌若有限定公司，仍顯示在清單中，但錯誤公司抬頭下不可選。
-function quoteBrandOptions(selectedBrand) {
-    const selectedRaw = String(selectedBrand || '').trim();
-    const selected = resolveBrandName(selectedRaw);
-    const brands = getCompanySelectableBrands(currentCompany);
-    const selectedOption = selected && brands.includes(selected) ? selected : (selectedRaw ? '其他' : '');
-    return ['<option value="">未指定廠牌</option>']
-        .concat(brands.map(brand => {
-            const allowed = isCompanyBrandAllowed(currentCompany, brand);
-            const restriction = allowed ? '' : quoteBrandRestrictionText(brand);
-            return `<option value="${escapeAttr(brand)}"${brand === selectedOption ? ' selected' : ''}${allowed ? '' : ' disabled'}>${escapeHtml(brand)}${restriction ? '（' + escapeHtml(restriction) + '）' : ''}</option>`;
-        }))
-        .concat(`<option value="其他"${selectedOption === '其他' ? ' selected' : ''}>其他（自行輸入）</option>`)
-        .join('');
+const QUOTE_RECENT_BRANDS_STORAGE_KEY = 'quote_recent_brands_v1';
+
+function quoteRecentBrandNames() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(QUOTE_RECENT_BRANDS_STORAGE_KEY) || '[]');
+        return Array.isArray(saved)
+            ? saved.map(value => resolveBrandName(value)).filter(Boolean).slice(0, 8)
+            : [];
+    } catch (_) {
+        return [];
+    }
 }
+
+function rememberQuoteBrand(brand) {
+    const name = resolveBrandName(brand);
+    if (!name) return;
+    const key = normalizeBrandLookupKey(name);
+    const recent = quoteRecentBrandNames().filter(value => normalizeBrandLookupKey(value) !== key);
+    localStorage.setItem(QUOTE_RECENT_BRANDS_STORAGE_KEY, JSON.stringify([name, ...recent].slice(0, 8)));
+}
+
+function quoteBrandSuggestions(query = '') {
+    const raw = String(query || '').normalize('NFKC').trim();
+    const needle = raw.toLocaleLowerCase();
+    const all = getCompanySelectableBrands(currentCompany);
+    const preferred = dedupeBrandsCaseInsensitive([
+        ...quoteRecentBrandNames(),
+        ...keyStatisticBrands.map(resolveBrandName).filter(Boolean)
+    ]);
+
+    const source = needle
+        ? all.filter(brand => String(brand || '').normalize('NFKC').toLocaleLowerCase().includes(needle))
+        : preferred.filter(brand => all.some(item => normalizeBrandLookupKey(item) === normalizeBrandLookupKey(brand)));
+
+    const fallback = !needle && !source.length ? all.slice(0, 6) : source;
+    return dedupeBrandsCaseInsensitive(fallback).slice(0, 10).map(brand => ({
+        brand,
+        allowed: isCompanyBrandAllowed(currentCompany, brand),
+        restriction: quoteBrandRestrictionText(brand)
+    }));
+}
+
+function renderQuoteBrandSuggestions(input) {
+    const row = input?.closest?.('tr');
+    const container = row?.querySelector('.quote-brand-suggestions');
+    if (!container) return;
+
+    const suggestions = quoteBrandSuggestions(input.value);
+    container.replaceChildren();
+    if (!suggestions.length) {
+        container.hidden = true;
+        return;
+    }
+
+    suggestions.forEach(item => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'quote-brand-suggestion' + (item.allowed ? '' : ' restricted');
+        button.disabled = !item.allowed;
+        button.textContent = item.brand + (item.restriction ? `（${item.restriction}）` : '');
+        button.addEventListener('pointerdown', event => {
+            event.preventDefault();
+            if (!item.allowed) return;
+            input.value = item.brand;
+            rememberQuoteBrand(item.brand);
+            container.hidden = true;
+            onQuoteBrandSelectChange(input);
+            saveQuoteDraft();
+        });
+        container.appendChild(button);
+    });
+    container.hidden = false;
+}
+
+window.onQuoteBrandSearchInput = function(input) {
+    renderQuoteBrandSuggestions(input);
+    onQuoteBrandSelectChange(input);
+};
+
+window.finalizeQuoteBrandInput = function(input) {
+    const row = input?.closest?.('tr');
+    if (!row) return;
+    const brand = quoteRowBrandValue(row);
+    if (brand) {
+        input.value = brand;
+        rememberQuoteBrand(brand);
+    }
+    onQuoteBrandSelectChange(input);
+    setTimeout(() => {
+        const container = row.querySelector('.quote-brand-suggestions');
+        if (container) container.hidden = true;
+    }, 120);
+    saveQuoteDraft();
+};
 
 function populateBrandSelect(select, placeholderText, includeMaintenance = false) {
     if (!select) return;
@@ -4117,6 +4197,13 @@ function populateBrandSelect(select, placeholderText, includeMaintenance = false
 function selectBrandInDropdown(select, brandName) {
     if (!select || !brandName) return;
     const canonical = resolveBrandName(brandName);
+
+    if (select.matches?.('.item-brand') && select.tagName === 'INPUT') {
+        select.value = canonical || brandName;
+        onQuoteBrandSelectChange(select);
+        return;
+    }
+
     const isMain = [...select.options].some(o => o.value === canonical);
     select.value = isMain ? canonical : '其他';
     const otherInput = select.id === 'orderBrand' ? document.getElementById('orderBrandOther')
@@ -4134,39 +4221,28 @@ function populateOrderBrandDropdown() {
 }
 
 function populateQuoteBrandDropdowns() {
-    document.querySelectorAll('#quoteItems .item-brand').forEach(select => {
-        const row = select.closest('tr');
-        const currentValue = select.value === '其他'
-            ? row?.querySelector('.item-brand-other')?.value || '其他'
-            : select.value;
-        select.innerHTML = quoteBrandOptions(currentValue);
-        const canonical = resolveBrandName(currentValue);
-        const isMain = [...select.options].some(option => option.value === canonical);
-        select.value = isMain ? canonical : (currentValue ? '其他' : '');
-        const otherInput = row?.querySelector('.item-brand-other');
-        if (otherInput) {
-            otherInput.value = !isMain && currentValue !== '其他' ? currentValue : '';
-            otherInput.style.display = select.value === '其他' ? '' : 'none';
-        }
+    document.querySelectorAll('#quoteItems .item-brand').forEach(input => {
+        const currentValue = quoteRowBrandValue(input.closest('tr'));
+        input.value = currentValue || '';
+        onQuoteBrandSelectChange(input);
     });
 }
 
 function quoteRowBrandValue(row) {
-    const select = row.querySelector('.item-brand');
-    if (!select) return '';
-    const raw = select.value !== '其他'
-        ? select.value.trim()
-        : (row.querySelector('.item-brand-other')?.value || '').trim();
-    return resolveBrandName(raw);
+    const input = row?.querySelector('.item-brand');
+    if (!input) return '';
+    return resolveBrandName(String(input.value || '').trim());
 }
 
-window.onQuoteBrandSelectChange = function(select) {
-    const row = select.closest('tr');
-    const otherInput = row?.querySelector('.item-brand-other');
-    if (!otherInput) return;
-    const isOther = select.value === '其他';
-    otherInput.style.display = isOther ? '' : 'none';
-    if (!isOther) otherInput.value = '';
+window.onQuoteBrandSelectChange = function(input) {
+    const row = input?.closest?.('tr');
+    const hint = row?.querySelector('.quote-brand-restriction');
+    if (!hint) return;
+    const brand = quoteRowBrandValue(row);
+    const restriction = brand ? quoteBrandRestrictionText(brand) : '';
+    const allowed = !brand || isCompanyBrandAllowed(currentCompany, brand);
+    hint.textContent = restriction ? (allowed ? restriction : `${restriction}，目前公司抬頭不可使用`) : '';
+    hint.classList.toggle('blocked', !!brand && !allowed);
 };
 
 function populateEquipmentBrandDropdown() {
@@ -4396,8 +4472,11 @@ window.addQuoteRow = function(itemData = {}) {
                 <div class="item-row-pair">
                     <div class="item-brand-field">
                         <label>廠牌：</label>
-                        <select class="item-brand" onchange="onQuoteBrandSelectChange(this)">${quoteBrandOptions(itemData.brand)}</select>
-                        <input type="text" class="item-brand-other" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                        <div class="quote-brand-search">
+                            <input type="text" class="item-brand" value="${escapeAttr(resolveBrandName(itemData.brand || ''))}" placeholder="搜尋或輸入廠牌" autocomplete="off" onfocus="onQuoteBrandSearchInput(this)" oninput="onQuoteBrandSearchInput(this)" onblur="finalizeQuoteBrandInput(this)">
+                            <div class="quote-brand-suggestions" hidden></div>
+                            <small class="quote-brand-restriction"></small>
+                        </div>
                         <input type="hidden" class="item-product-line" value="${escapeAttr(itemData.productLine || '')}">
                         <input type="hidden" class="item-product-type" value="${itemData.productType || ''}">
                         <input type="hidden" class="item-product-id" value="${itemData.productId || ''}">
@@ -4435,8 +4514,6 @@ window.addQuoteRow = function(itemData = {}) {
     if (extraDetails && (hasExtraData || activeQuoteOptionalFields.size)) extraDetails.open = true;
     const customButton = tr.querySelector('.quote-add-custom-field');
     (Array.isArray(itemData.customFields) ? itemData.customFields : []).forEach(field => addQuoteCustomField(customButton, field));
-    if (itemData.brand && tr.querySelector('.item-brand').value === '其他')
-        tr.querySelector('.item-brand-other').value = itemData.brand;
     onQuoteBrandSelectChange(tr.querySelector('.item-brand'));
     calculateTotals();
 };
@@ -4703,10 +4780,7 @@ function currentQuoteOutputValidation() {
     if (!document.getElementById('salesName').value) return '請先從下拉選單選擇負責業務。';
     const rows = [...document.querySelectorAll('#quoteItems tr')];
     if (!rows.some(row => (row.querySelector('.item-cn')?.value || row.querySelector('.item-en')?.value || row.querySelector('.item-model')?.value).trim())) return '請至少填寫一個品項。';
-    if (rows.some(row => row.querySelector('.item-brand')?.value === '其他' && !quoteRowBrandValue(row))) return '已選擇「其他」廠牌，請輸入廠牌名稱。';
     const hasRestrictedBrand = rows.some(row => {
-        const select = row.querySelector('.item-brand');
-        if (!select || select.value === '其他') return false;
         const brand = quoteRowBrandValue(row);
         return brand && !isCompanyBrandAllowed(currentCompany, brand);
     });
@@ -14584,9 +14658,27 @@ function renderOtherStatisticBrands() {
     const container = document.getElementById('otherStatisticBrands');
     if (!container) return;
     const lookup = statisticBrandAliasLookup();
-    const others = rawBrandsWithOrderCounts().filter(item => !lookup.has(normalizeStatisticBrandKey(item.name)))
+    const allOthers = rawBrandsWithOrderCounts().filter(item => !lookup.has(normalizeStatisticBrandKey(item.name)))
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-Hant'));
-    container.innerHTML = others.length ? others.map(item => `<div class="stat-brand-other-row"><span>${escapeHtml(item.name)} <small style="color:#777;">${item.count} 筆訂單</small></span><button type="button" class="btn-small" onclick="promoteStatisticBrand('${escapeAttr(item.name)}')">獨立統計</button></div>`).join('') : '<div style="color:#888;font-size:13px;padding:8px 0;">目前沒有其他廠牌。</div>';
+    const query = String(document.getElementById('otherStatisticBrandSearch')?.value || '').normalize('NFKC').trim().toLocaleLowerCase();
+    const count = document.getElementById('otherStatisticBrandCount');
+    if (count) count.textContent = `共 ${allOthers.length} 個其他廠牌`;
+
+    if (!query) {
+        container.innerHTML = allOthers.length
+            ? '<div class="stat-brand-search-hint">輸入廠牌名稱搜尋；未搜尋時不展開完整清單。</div>'
+            : '<div class="stat-brand-search-hint">目前沒有其他廠牌。</div>';
+        return;
+    }
+
+    const matches = allOthers.filter(item =>
+        String(item.name || '').normalize('NFKC').toLocaleLowerCase().includes(query)
+    );
+    const visible = matches.slice(0, 20);
+    container.innerHTML = visible.length ? visible.map(item => `<div class="stat-brand-other-row"><span>${escapeHtml(item.name)} <small style="color:#777;">${item.count} 筆訂單</small></span><button type="button" class="btn-small" onclick="promoteStatisticBrand('${escapeAttr(item.name)}')">獨立統計</button></div>`).join('') : '<div class="stat-brand-search-hint">找不到符合的廠牌。</div>';
+    if (matches.length > visible.length) {
+        container.insertAdjacentHTML('beforeend', `<div class="stat-brand-search-hint">另有 ${matches.length - visible.length} 個符合結果，請輸入更多字縮小範圍。</div>`);
+    }
 }
 
 window.promoteStatisticBrand = function(brand) {

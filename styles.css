@@ -312,6 +312,41 @@ input[type="number"] {
     margin-left: 44px !important;
 }
 
+.quote-brand-search { position:relative; flex:1; min-width:0; }
+.quote-brand-search .item-brand { width:100%; box-sizing:border-box; }
+.quote-brand-suggestions {
+    position:absolute;
+    z-index:80;
+    left:0;
+    right:0;
+    top:calc(100% + 3px);
+    max-height:240px;
+    overflow-y:auto;
+    padding:4px;
+    border:1px solid #b9c7d6;
+    border-radius:6px;
+    background:#fff;
+    box-shadow:0 8px 20px rgba(0,0,0,.16);
+}
+.quote-brand-suggestion {
+    display:block;
+    width:100%;
+    margin:0;
+    padding:9px 10px;
+    border:0;
+    border-radius:4px;
+    background:#fff;
+    color:#222;
+    text-align:left;
+    font-size:14px;
+}
+.quote-brand-suggestion:hover,
+.quote-brand-suggestion:focus { background:#edf4fb; }
+.quote-brand-suggestion.restricted,
+.quote-brand-suggestion:disabled { color:#888; background:#f5f5f5; }
+.quote-brand-restriction { display:block; min-height:14px; margin-top:3px; color:#666; font-size:10px; }
+.quote-brand-restriction.blocked { color:#b3261e; font-weight:700; }
+
 .footer-note { font-size: 10.5px; color: #333; line-height: 1.1; margin-bottom: 4px; }
 .footer-note input[type="number"] { text-align: center; }
 .bottom-layout { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
@@ -840,6 +875,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .stat-brand-other-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 4px; border-bottom:1px solid #eee; font-size:13px; }
 .stat-brand-add { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .stat-brand-add input { min-width:220px; padding:7px 9px; border:1px solid #bbb; border-radius:4px; }
+.stat-brand-search-tools { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.stat-brand-search-tools input { min-width:0; flex:1; padding:8px 9px; border:1px solid #bbb; border-radius:4px; }
+.stat-brand-search-tools small { color:#777; white-space:nowrap; }
+.stat-brand-search-hint { color:#888; font-size:13px; padding:8px 0; }
+
 @media (max-width: 700px) { .sales-stat-cards { grid-template-columns:1fr; } }
 @media (max-width: 700px) { .stat-brand-manager { grid-template-columns:1fr; } }
 

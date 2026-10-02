@@ -4461,6 +4461,16 @@ test('Brand Master drives brand dropdowns while statistics grouping stays indepe
 });
 
 
+test('other statistic brands stay collapsed until searched', () => {
+    assert.match(indexSource, /id="otherStatisticBrandSearch"/);
+    assert.match(indexSource, /id="otherStatisticBrandCount"/);
+    const start=appSource.indexOf('function renderOtherStatisticBrands()');
+    const end=appSource.indexOf('\nwindow.promoteStatisticBrand',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/未搜尋時不展開完整清單/);
+    assert.match(source,/slice\(0, 20\)/);
+});
+
 test('brand settings can sync missing brands from Product Master without changing business settings', () => {
     assert.match(indexSource, /<strong>廠牌設定<\/strong>/);
     assert.match(indexSource, /Product Import 的新廠牌會自動加入 Brand Master/);
@@ -4477,9 +4487,12 @@ test('brand settings can sync missing brands from Product Master without changin
     assert.match(source,/既有獨立統計與報價公司限制未變更/);
 });
 
-test('quote brands support virtual items and enforce company-specific restrictions', () => {
-    assert.match(appSource, /<option value="">未指定廠牌<\/option>/);
-    assert.match(appSource, /其他（自行輸入）/);
+test('quote brands use searchable free-text suggestions and keep company restrictions', () => {
+    assert.match(appSource, /QUOTE_RECENT_BRANDS_STORAGE_KEY/);
+    assert.match(appSource, /function quoteBrandSuggestions/);
+    assert.match(appSource, /window\.onQuoteBrandSearchInput/);
+    assert.match(appSource, /placeholder="搜尋或輸入廠牌"/);
+    assert.match(appSource, /quote-brand-suggestions/);
     assert.match(appSource, /function quoteBrandRestrictionText/);
     assert.match(appSource, /hasRestrictedBrand/);
     assert.match(indexSource, /<strong>報價公司限制<\/strong>/);
