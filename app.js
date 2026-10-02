@@ -11829,7 +11829,8 @@ function paginatePoPdfDocument(stage, source) {
     return pages.map(entry => entry.page);
 }
 
-async function printSavedPoDocument(poNo, vendorName, options={}) {
+async function printSavedPoDocument(poNo, vendorName) {
+    const options=arguments[2]||{};
     let stage = null;
     const button = document.getElementById('printPurchaseOrderBtn');
     const download = options.download !== false;
