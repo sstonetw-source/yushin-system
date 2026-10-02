@@ -1952,3 +1952,28 @@ test('purchase flows persist one procurement demand reference through supply and
     assert.match(app, /demandId:existingSupply\?\.demandId\|\|demandId\|\|''/);
     assert.match(app, /demandId:item\.demandId\|\|globalThis\.YushinProcurementDemand\?\.demandIdForSource/);
 });
+
+test('Supplier Master lives in purchasing workspace as a single master-data surface', () => {
+    assert.match(html,/id="purchase-tab-suppliers"/);
+    assert.match(html,/id="purchaseSupplierPanel"/);
+    assert.equal((html.match(/id="supplierMasterBody"/g)||[]).length,1);
+    assert.equal((html.match(/id="supplierMappingBody"/g)||[]).length,1);
+});
+
+test('Supplier Master uses purchasing capability instead of admin-only writes', () => {
+    const saveStart=app.indexOf('window.saveSupplierMaster = async function');
+    const saveEnd=app.indexOf('\nwindow.disableSupplierMaster',saveStart);
+    const mappingStart=app.indexOf('window.saveSupplierMapping = async function');
+    const mappingEnd=app.indexOf('\nwindow.disableSupplierMapping',mappingStart);
+    assert.match(app.slice(saveStart,saveEnd),/canCreatePurchaseOrderCapability\(\)/);
+    assert.match(app.slice(mappingStart,mappingEnd),/canCreatePurchaseOrderCapability\(\)/);
+});
+
+test('purchasing Supplier tab is a master-data view', () => {
+    const start=app.indexOf('window.switchPurchasingView = function');
+    const end=app.indexOf('\nasync function loadPurchasingDispatchOrders',start);
+    const source=app.slice(start,end);
+    assert.match(source,/purchaseSupplierPanel/);
+    assert.match(source,/loadSupplierWarehouseMasters\(false\)/);
+    assert.match(source,/purchaseFilterToolbar/);
+});
