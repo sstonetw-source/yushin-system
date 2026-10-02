@@ -10646,8 +10646,15 @@ async function loadPurchaseHistorySupplyProjection(poRows = [], reset = false) {
     rows.forEach(row => purchaseHistorySupplyCache.set(row.id, row));
 }
 
+function isPurchaseTerminalStatus(status) {
+    return ['CANCELLED','CLOSED'].includes(String(status || '').toUpperCase());
+}
+
 function purchaseOrderDocumentStatusLabel(po = {}) {
-    return String(po.status || '').toUpperCase() === 'CANCELLED' ? '已取消' : '已下單';
+    const status=String(po.status || '').toUpperCase();
+    if(status==='CANCELLED')return '已取消';
+    if(status==='CLOSED')return '已結案';
+    return '已下單';
 }
 
 function purchaseHistoryItemReceiptProgress(po, itemIndex = 0) {
