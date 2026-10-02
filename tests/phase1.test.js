@@ -224,6 +224,7 @@ test('multi-brand sales statistics split delivery and returns by item without du
         normalizedOrderStatus:() => 'normal',
         orderQuantity:line => Number(line.qty || 0),
         orderUnitSalesAmount:line => line.totalPrice / line.qty,
+        orderUnitCostForStats:() => null,
         dateInStatsRange:(date, start, end) => !!date && date >= start && date <= end,
         localDateString:() => '2026-09-29'
     });

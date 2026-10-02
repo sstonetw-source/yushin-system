@@ -6,7 +6,7 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where } = require('firebase/firestore');
+const { collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where, writeBatch } = require('firebase/firestore');
 
 let env;
 const projectId = 'demo-yushin';
@@ -196,7 +196,7 @@ test('self-order is restricted to the responsible business owner and becomes imm
 test('business owner can perform only scoped fulfillment stock updates', async () => {
   await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1' });
   await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { reserved:3 }));
-  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { safetyStock:4 }));
+  await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { safetyStock:4 }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { productId:'hijack' }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { unitCost:1 }));
   await assertSucceeds(updateDoc(doc(db('wh1'), 'inventory/p1'), { reserved:3 }));
@@ -452,29 +452,61 @@ test('purchaser may update reservation retry metadata but not commercial fields'
   }));
 });
 
-test('purchaser and warehouse may persist direct-ship delivery summary only within workflow fields', async () => {
+test('direct-ship delivery summary requires the matching supply update in the same atomic write', async () => {
   const seedOrder = {
     ownerUid:'sales1', salesCode:'S01', customerName:'A',
     items:[{ itemId:'i1', qty:2, receivedQty:0, deliveredQty:0 }],
     deliveryRecords:[], deliveredQty:0, isDelivered:false
   };
+  const seedSupply = {
+    type:'PURCHASING_PO',
+    orderId:'', itemId:'i1', ownerUid:'sales1', salesCode:'S01', salesName:'Sales',
+    customerName:'A', company:'yushin', productId:'p1', productKey:'p1',
+    itemCode:'A', itemName:'Product', brand:'Brand', productLine:'',
+    fulfillmentType:'DIRECT_SHIP', warehouseId:'', orderDate:'2026-09-21',
+    createdAt:'2026-09-21T00:00:00Z', createdByUid:'buyer1', createdBy:'Buyer', createdByRole:'purchaser',
+    qty:2, receivedQty:0, incomingRegisteredQty:0, cancelledQty:0, status:'ORDERED'
+  };
+
   await seed('orders/direct-buyer', seedOrder);
   await seed('orders/direct-warehouse', seedOrder);
+  await seed('supplyOrders/direct-supply-buyer', { ...seedSupply, orderId:'direct-buyer' });
+  await seed('supplyOrders/direct-supply-warehouse', { ...seedSupply, orderId:'direct-warehouse' });
 
-  const directFields = {
+  const buildOrderFields = supplyId => ({
     items:[{ itemId:'i1', qty:2, receivedQty:2, deliveredQty:2 }],
     itemCount:1,
     orderSchemaVersion:2,
-    deliveryRecords:[{ id:'r1', itemId:'i1', qty:2 }],
+    deliveryRecords:[{
+      id:'r1', itemId:'i1', qty:2,
+      sourceType:'DIRECT_SHIP_RECEIPT', sourceId:supplyId
+    }],
     deliveredQty:2,
     isDelivered:true,
     workCategories:['billing'],
     workCategoryUpdatedAt:'2026-09-21T00:00:00Z',
     updatedAt:'2026-09-21T00:00:00Z'
+  });
+  const supplyFields = {
+    receivedQty:2,
+    status:'RECEIVED',
+    updatedAt:'2026-09-21T00:00:00Z'
   };
 
-  await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/direct-buyer'), directFields));
-  await assertSucceeds(updateDoc(doc(db('wh1'), 'orders/direct-warehouse'), directFields));
+  const buyerDb=db('buyer1');
+  const buyerBatch=writeBatch(buyerDb);
+  buyerBatch.update(doc(buyerDb,'orders/direct-buyer'),buildOrderFields('direct-supply-buyer'));
+  buyerBatch.update(doc(buyerDb,'supplyOrders/direct-supply-buyer'),supplyFields);
+  await assertSucceeds(buyerBatch.commit());
+
+  const warehouseDb=db('wh1');
+  const warehouseBatch=writeBatch(warehouseDb);
+  warehouseBatch.update(doc(warehouseDb,'orders/direct-warehouse'),buildOrderFields('direct-supply-warehouse'));
+  warehouseBatch.update(doc(warehouseDb,'supplyOrders/direct-supply-warehouse'),supplyFields);
+  await assertSucceeds(warehouseBatch.commit());
+
+  await seed('orders/direct-standalone', seedOrder);
+  await assertFails(updateDoc(doc(db('wh1'), 'orders/direct-standalone'), buildOrderFields('missing-supply')));
   await assertFails(updateDoc(doc(db('wh1'), 'orders/direct-warehouse'), {
     invoiceTitle:'Changed'
   }));

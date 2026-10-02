@@ -879,6 +879,7 @@ test('cancelled orders keep actual delivered sales but no pending sales', () => 
         normalizedOrderStatus:()=> 'cancelled',
         orderQuantity:()=>10,
         orderUnitSalesAmount:()=>100,
+        orderUnitCostForStats:order=>Number(order.costPrice),
         savedDeliveryRecords:()=>[{date:'2026-09-01',qty:4}],
         savedReturnRecords:()=>[],
         localDateString:()=> '2026-09-30',
