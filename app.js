@@ -7975,6 +7975,39 @@ async function persistOrderProcurementDemands(orderId, order, items = []) {
     if(writes)await batch.commit();
 }
 
+async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStatus) {
+    if(!globalThis.YushinProcurementDemand?.cancelDemand)return;
+    const items=normalizedOrderItems(order);
+    if(lifecycleStatus==='cancelled'){
+        const refs=items.map((item,index)=>{
+            const itemId=String(item.itemId||`item-${index+1}`);
+            const demandId=globalThis.YushinProcurementDemand.demandIdForSource({
+                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
+            });
+            return {item,ref:procurementDemandRef(demandId)};
+        }).filter(row=>row.ref);
+        const snapshots=await Promise.all(refs.map(row=>row.ref.get()));
+        const batch=db.batch();
+        const now=new Date().toISOString();
+        let writes=0;
+        snapshots.forEach((snapshot,index)=>{
+            if(!snapshot.exists)return;
+            const current=snapshot.data();
+            const cancelled=globalThis.YushinProcurementDemand.cancelDemand(current);
+            const doc=procurementDemandDocument({...current,...cancelled},{
+                createdAt:current.createdAt||now,
+                updatedAt:now
+            });
+            batch.set(refs[index].ref,doc,{merge:true});
+            writes++;
+        });
+        if(writes)await batch.commit();
+    }else{
+        await persistOrderProcurementDemands(orderId,order,items);
+    }
+    invalidateProcurementDemandQueue();
+}
+
 async function reserveInventoryForNewOrder(orderId, order) {
     if(!warehouseMasterCache.length)await loadWarehouseMaster();
     const items=normalizedOrderItems(order);
@@ -13621,6 +13654,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     transaction.update(db.collection('orders').doc(orderId),{
         items:nextItems,updatedAt:now
     });
+    return {items:nextItems,totalReserved,totalShortage};
 }
 
 window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
@@ -13668,8 +13702,11 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
                 by: actor,
                 at: new Date().toISOString()
             };
-            await adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor);
+            const reservationLifecycle=await adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor);
             const updates = {
+                items:reservationLifecycle?.items||order.items||[],
+                itemCount:(reservationLifecycle?.items||normalizedOrderItems(order)).length,
+                orderSchemaVersion:2,
                 status: nextStatus === 'cancelled' ? BUSINESS_STATUS.CANCELLED : BUSINESS_STATUS.ACTIVE,
                 orderStatus: nextStatus,
                 orderStatusDate: date,
@@ -13681,6 +13718,11 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
         });
+        try{
+            await syncOrderProcurementDemandLifecycle(orderId,{id:orderId,...savedOrder},nextStatus);
+        }catch(demandErr){
+            console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
+        }
         normalizedOrderItems(savedOrder).forEach(item=>{
             const productKey=inventoryProductKey(item);
             const warehouseId=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||savedOrder.warehouseId||'');
@@ -14487,11 +14529,15 @@ window.saveOrderLifecycleStatus = async function() {
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
             const liveOrder = snapshot.data();
             const livePrevious = { status: normalizedOrderStatus(liveOrder), date: liveOrder.orderStatusDate || '', reason: liveOrder.orderStatusReason || '' };
+            let reservationLifecycle=null;
             if (livePrevious.status !== nextStatus) {
-                await adjustInventoryReservationForLifecycle(transaction, order.id, liveOrder, nextStatus, actor);
+                reservationLifecycle=await adjustInventoryReservationForLifecycle(transaction, order.id, liveOrder, nextStatus, actor);
             }
             const liveHistory = { action: nextStatus === 'normal' && livePrevious.status !== 'normal' ? 'restore' : 'status_change', before: livePrevious, after: { status: nextStatus, date, reason }, by: actor, at };
             const updates = {
+                items:reservationLifecycle?.items||liveOrder.items||[],
+                itemCount:(reservationLifecycle?.items||normalizedOrderItems(liveOrder)).length,
+                orderSchemaVersion:2,
                 status: nextStatus === 'cancelled' ? BUSINESS_STATUS.CANCELLED : BUSINESS_STATUS.ACTIVE,
                 orderStatus: nextStatus, orderStatusDate: date, orderStatusReason: reason,
                 orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(liveHistory), updatedAt: at
@@ -14500,6 +14546,11 @@ window.saveOrderLifecycleStatus = async function() {
             transaction.update(ref, updates);
             savedOrder = { ...liveOrder, ...updates, orderLifecycleHistory: [...(liveOrder.orderLifecycleHistory || []), liveHistory] };
         });
+        try{
+            await syncOrderProcurementDemandLifecycle(order.id,{id:order.id,...savedOrder},nextStatus);
+        }catch(demandErr){
+            console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
+        }
         const index = ordersCache.findIndex(item => item.id === order.id);
         if (index >= 0) ordersCache[index] = { id: order.id, ...savedOrder };
         renderDeliveryModal();
