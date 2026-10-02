@@ -23,10 +23,16 @@
     const supplierId=String(x.supplierId||'').trim();
     const supplierKey=supplierId?('id:'+supplierId):('name:'+supplierName.normalize('NFKC').toLocaleLowerCase());
 
+    const brand=String(x.brand||'未指定廠牌').trim()||'未指定廠牌';
+    const date=String(x.orderDate||x.createdAt||'').slice(0,10);
+    const month=/^\d{4}-\d{2}/.test(date)?date.slice(0,7):'未指定月份';
     return {
       record:x,
       supplier:supplierName,
       supplierKey,
+      brand,
+      date,
+      month,
       documentKey,
       method:x.method,
       sourceType:x.sourceType,
@@ -39,64 +45,75 @@
       incomingAmount:incomingQty*unitCost,
       stockAmount:isStockReplenishment?effectiveOrderedQty*unitCost:0,
       customerOrderAmount:isStockReplenishment?0:effectiveOrderedQty*unitCost,
+      missingUnitCost:effectiveOrderedQty>0&&unitCost<=0,
       isStockReplenishment
     };
   }
 
-  function summarize(records=[]){
-    const rows=(records||[]).map(projectSupply).filter(row=>row.effectiveOrderedQty>0||row.receivedQty>0);
-    const totals={
-      lineCount:rows.length,
-      documentCount:new Set(rows.map(row=>row.documentKey).filter(Boolean)).size,
+  function newMetric(){
+    return {
+      documents:new Set(),
+      lineCount:0,
       orderedAmount:0,
       receivedAmount:0,
       incomingAmount:0,
       stockAmount:0,
-      customerOrderAmount:0
+      customerOrderAmount:0,
+      missingUnitCostCount:0
     };
-    const suppliers=new Map();
+  }
 
+  function addMetric(metric,row){
+    if(row.documentKey)metric.documents.add(row.documentKey);
+    metric.lineCount++;
+    metric.orderedAmount+=row.orderedAmount;
+    metric.receivedAmount+=row.receivedAmount;
+    metric.incomingAmount+=row.incomingAmount;
+    metric.stockAmount+=row.stockAmount;
+    metric.customerOrderAmount+=row.customerOrderAmount;
+    if(row.missingUnitCost)metric.missingUnitCostCount++;
+  }
+
+  function finalizeMetric(metric){
+    return {
+      documentCount:metric.documents.size,
+      lineCount:metric.lineCount,
+      orderedAmount:metric.orderedAmount,
+      receivedAmount:metric.receivedAmount,
+      incomingAmount:metric.incomingAmount,
+      stockAmount:metric.stockAmount,
+      customerOrderAmount:metric.customerOrderAmount,
+      missingUnitCostCount:metric.missingUnitCostCount
+    };
+  }
+
+  function grouped(rows,keyOf,labelKey,sortMode='amount'){
+    const groups=new Map();
     for(const row of rows){
-      totals.orderedAmount+=row.orderedAmount;
-      totals.receivedAmount+=row.receivedAmount;
-      totals.incomingAmount+=row.incomingAmount;
-      totals.stockAmount+=row.stockAmount;
-      totals.customerOrderAmount+=row.customerOrderAmount;
-
-      if(!suppliers.has(row.supplierKey)){
-        suppliers.set(row.supplierKey,{
-          supplier:row.supplier,
-          documents:new Set(),
-          lineCount:0,
-          orderedAmount:0,
-          receivedAmount:0,
-          incomingAmount:0,
-          stockAmount:0,
-          customerOrderAmount:0
-        });
-      }
-      const bucket=suppliers.get(row.supplierKey);
-      if(row.documentKey)bucket.documents.add(row.documentKey);
-      bucket.lineCount++;
-      bucket.orderedAmount+=row.orderedAmount;
-      bucket.receivedAmount+=row.receivedAmount;
-      bucket.incomingAmount+=row.incomingAmount;
-      bucket.stockAmount+=row.stockAmount;
-      bucket.customerOrderAmount+=row.customerOrderAmount;
+      const key=String(keyOf(row)||'未指定').trim()||'未指定';
+      if(!groups.has(key))groups.set(key,newMetric());
+      addMetric(groups.get(key),row);
     }
+    const result=[...groups.entries()].map(([name,metric])=>({[labelKey]:name,...finalizeMetric(metric)}));
+    if(sortMode==='month')return result.sort((a,b)=>String(b[labelKey]).localeCompare(String(a[labelKey])));
+    return result.sort((a,b)=>b.orderedAmount-a.orderedAmount||String(a[labelKey]).localeCompare(String(b[labelKey]),'zh-Hant'));
+  }
 
-    const bySupplier=[...suppliers.values()].map(bucket=>({
-      supplier:bucket.supplier,
-      documentCount:bucket.documents.size,
-      lineCount:bucket.lineCount,
-      orderedAmount:bucket.orderedAmount,
-      receivedAmount:bucket.receivedAmount,
-      incomingAmount:bucket.incomingAmount,
-      stockAmount:bucket.stockAmount,
-      customerOrderAmount:bucket.customerOrderAmount
-    })).sort((a,b)=>b.orderedAmount-a.orderedAmount||a.supplier.localeCompare(b.supplier,'zh-Hant'));
-
-    return {rows,totals,bySupplier};
+  function summarize(records=[]){
+    const rows=(records||[]).map(projectSupply).filter(row=>row.effectiveOrderedQty>0||row.receivedQty>0);
+    const totalMetric=newMetric();
+    rows.forEach(row=>addMetric(totalMetric,row));
+    const bySupplier=grouped(rows,row=>row.supplierKey,'supplierKey').map(group=>{
+      const sample=rows.find(row=>row.supplierKey===group.supplierKey);
+      return {...group,supplier:sample?.supplier||group.supplierKey};
+    });
+    return {
+      rows,
+      totals:finalizeMetric(totalMetric),
+      bySupplier,
+      byBrand:grouped(rows,row=>row.brand,'brand'),
+      byMonth:grouped(rows,row=>row.month,'month','month')
+    };
   }
 
   return {projectSupply,summarize};
