@@ -25,32 +25,7 @@
     return a===null||b===null?null:Math.max(0,(b-a)/86400000);
   }
 
-  function receiptsBySupply(records=[]){
-    const map=new Map();
-    for(const receipt of records||[]){
-      const key=String(receipt?.supplyOrderId||'').trim();
-      if(!key)continue;
-      if(!map.has(key))map.set(key,[]);
-      map.get(key).push(receipt);
-    }
-    for(const rows of map.values()){
-      rows.sort((a,b)=>String(a.createdAt||a.receiptDate||'').localeCompare(String(b.createdAt||b.receiptDate||'')));
-    }
-    return map;
-  }
-
-  function completionReceiptAt(receipts=[],targetQty=0){
-    const target=n(targetQty);
-    if(!(target>0))return '';
-    let total=0;
-    for(const receipt of receipts){
-      total+=n(receipt?.qty);
-      if(total>=target)return String(receipt?.receiptDate||receipt?.createdAt||'');
-    }
-    return '';
-  }
-
-  function projectSupply(record={},receipts=[],nowValue=''){
+  function projectSupply(record={},nowValue=''){
     if(!supply)throw new Error('Supply core is required.');
     const x=supply.normalize(record);
     const unitCost=n(x.unitCost);
@@ -69,13 +44,7 @@
     const brand=String(x.brand||'未指定廠牌').trim()||'未指定廠牌';
     const date=String(x.orderDate||x.createdAt||'').slice(0,10);
     const month=/^\d{4}-\d{2}/.test(date)?date.slice(0,7):'未指定月份';
-    const completionAt=!terminal&&effectiveOrderedQty>0
-      ? completionReceiptAt(receipts,effectiveOrderedQty)
-      : '';
-    const leadTimeDays=completionAt?dayDiff(x.orderDate||x.createdAt,completionAt):null;
     const expectedDate=String(x.expectedDate||x.scheduleDate||'').slice(0,10);
-    const completionDate=String(completionAt||'').slice(0,10);
-    const onTime=expectedDate&&completionDate ? completionDate<=expectedDate : null;
     const agingAt=nowValue||new Date().toISOString();
     const agingDate=dateOnly(agingAt);
     const openAgeDays=incomingQty>0?dayDiff(x.orderDate||x.createdAt,agingAt):null;
@@ -102,10 +71,7 @@
       stockAmount:isStockReplenishment?effectiveOrderedQty*unitCost:0,
       customerOrderAmount:isStockReplenishment?0:effectiveOrderedQty*unitCost,
       missingUnitCost:effectiveOrderedQty>0&&unitCost<=0,
-      completionAt,
-      leadTimeDays,
       expectedDate,
-      onTime,
       openAgeDays,
       late,
       lateDays,
@@ -127,10 +93,6 @@
       stockAmount:0,
       customerOrderAmount:0,
       missingUnitCostCount:0,
-      leadTimeDaysTotal:0,
-      leadTimeCount:0,
-      onTimeCount:0,
-      onTimeEligibleCount:0,
       openAgeDaysTotal:0,
       openAgeCount:0,
       maxOpenAgeDays:0,
@@ -154,14 +116,6 @@
     metric.stockAmount+=row.stockAmount;
     metric.customerOrderAmount+=row.customerOrderAmount;
     if(row.missingUnitCost)metric.missingUnitCostCount++;
-    if(Number.isFinite(row.leadTimeDays)){
-      metric.leadTimeDaysTotal+=row.leadTimeDays;
-      metric.leadTimeCount++;
-    }
-    if(row.onTime!==null){
-      metric.onTimeEligibleCount++;
-      if(row.onTime)metric.onTimeCount++;
-    }
     if(Number.isFinite(row.openAgeDays)){
       metric.openAgeDaysTotal+=row.openAgeDays;
       metric.openAgeCount++;
@@ -185,18 +139,12 @@
       orderedQty:metric.orderedQty,
       receivedQty:metric.receivedQty,
       incomingQty:metric.incomingQty,
-      serviceLevel:metric.orderedQty?(metric.receivedQty/metric.orderedQty)*100:null,
       orderedAmount:metric.orderedAmount,
       receivedAmount:metric.receivedAmount,
       incomingAmount:metric.incomingAmount,
       stockAmount:metric.stockAmount,
       customerOrderAmount:metric.customerOrderAmount,
       missingUnitCostCount:metric.missingUnitCostCount,
-      leadTimeCount:metric.leadTimeCount,
-      avgLeadTimeDays:metric.leadTimeCount?metric.leadTimeDaysTotal/metric.leadTimeCount:null,
-      onTimeCount:metric.onTimeCount,
-      onTimeEligibleCount:metric.onTimeEligibleCount,
-      onTimeRate:metric.onTimeEligibleCount?(metric.onTimeCount/metric.onTimeEligibleCount)*100:null,
       openAgeCount:metric.openAgeCount,
       avgOpenAgeDays:metric.openAgeCount?metric.openAgeDaysTotal/metric.openAgeCount:null,
       maxOpenAgeDays:metric.openAgeCount?metric.maxOpenAgeDays:null,
@@ -280,9 +228,8 @@
   }
 
   function summarize(records=[],receiptRecords=[],options={}){
-    const receiptMap=receiptsBySupply(receiptRecords);
     const nowValue=options.now||new Date().toISOString();
-    const rows=(records||[]).map(record=>projectSupply(record,receiptMap.get(String(record?.id||''))||[],nowValue))
+    const rows=(records||[]).map(record=>projectSupply(record,nowValue))
       .filter(row=>row.effectiveOrderedQty>0||row.receivedQty>0);
     const totalMetric=newMetric();
     rows.forEach(row=>addMetric(totalMetric,row));
