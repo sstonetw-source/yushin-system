@@ -122,3 +122,14 @@ test('purchase expected date handles month rollover with calendar days',()=>{
   assert.equal(supplier.addCalendarDays('2026-10-30',5),'2026-11-04');
   assert.equal(supplier.addCalendarDays('not-a-date',5),'');
 });
+
+
+test('item expected arrival date follows the selected supplier mapping',()=>{
+  const mappings=[
+    {productId:'P1',supplierId:'S1',priority:1,leadTimeDays:3},
+    {productId:'P1',supplierId:'S2',priority:1,leadTimeDays:9}
+  ];
+  assert.equal(supplier.itemExpectedArrivalDate({productId:'P1'},mappings,'2026-10-02','S1'),'2026-10-05');
+  assert.equal(supplier.itemExpectedArrivalDate({productId:'P1'},mappings,'2026-10-02','S2'),'2026-10-11');
+  assert.equal(supplier.itemExpectedArrivalDate({productId:'P2'},mappings,'2026-10-02','S1'),'');
+});
