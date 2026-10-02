@@ -101,3 +101,38 @@ test('supplier id groups name variations into one supplier',()=>{
   assert.equal(result.bySupplier[0].lineCount,2);
   assert.equal(result.bySupplier[0].orderedAmount,300);
 });
+
+test('supplier lead time is derived from immutable receipt events',()=>{
+  const records=[
+    {
+      id:'S1',supplierId:'SUP1',supplier:'A',
+      method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1',sourceItemId:'I1',
+      qty:10,receivedQty:10,status:'RECEIVED',unitCost:100,orderDate:'2026-10-01'
+    },
+    {
+      id:'S2',supplierId:'SUP1',supplier:'A',
+      method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',
+      qty:5,receivedQty:5,status:'RECEIVED',unitCost:100,orderDate:'2026-10-01'
+    }
+  ];
+  const receipts=[
+    {supplyOrderId:'S1',qty:4,createdAt:'2026-10-03T10:00:00Z'},
+    {supplyOrderId:'S1',qty:6,createdAt:'2026-10-05T10:00:00Z'},
+    {supplyOrderId:'S2',qty:5,createdAt:'2026-10-03T00:00:00Z'}
+  ];
+  const result=analytics.summarize(records,receipts);
+  const supplier=result.bySupplier[0];
+  assert.equal(supplier.leadTimeCount,2);
+  assert.equal(Number(supplier.avgLeadTimeDays.toFixed(1)),3.2);
+  assert.equal(result.totals.leadTimeCount,2);
+});
+
+test('partial receipts do not count as complete lead time until target quantity is reached',()=>{
+  const result=analytics.summarize([
+    {id:'S1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:10,receivedQty:4,status:'PARTIAL_RECEIPT',orderDate:'2026-10-01'}
+  ],[
+    {supplyOrderId:'S1',qty:4,createdAt:'2026-10-02T00:00:00Z'}
+  ]);
+  assert.equal(result.totals.leadTimeCount,0);
+  assert.equal(result.totals.avgLeadTimeDays,null);
+});
