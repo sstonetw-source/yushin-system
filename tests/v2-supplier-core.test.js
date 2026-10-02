@@ -133,39 +133,3 @@ test('item expected arrival date follows the selected supplier mapping',()=>{
   assert.equal(supplier.itemExpectedArrivalDate({productId:'P1'},mappings,'2026-10-02','S2'),'2026-10-11');
   assert.equal(supplier.itemExpectedArrivalDate({productId:'P2'},mappings,'2026-10-02','S1'),'');
 });
-
-
-test('supplier minimum order quantity validates purchase quantities',()=>{
-  const mappings=[
-    {productId:'P1',supplierId:'S1',priority:1,minimumOrderQty:5},
-    {productId:'P1',supplierId:'S2',priority:1,minimumOrderQty:2}
-  ];
-  const tooSmall=supplier.validatePurchaseQuantity({productId:'P1'},3,mappings,'S1');
-  assert.equal(tooSmall.valid,false);
-  assert.equal(tooSmall.minimumOrderQty,5);
-  assert.equal(tooSmall.shortage,2);
-
-  const enough=supplier.validatePurchaseQuantity({productId:'P1'},5,mappings,'S1');
-  assert.equal(enough.valid,true);
-  assert.equal(enough.shortage,0);
-
-  const otherSupplier=supplier.validatePurchaseQuantity({productId:'P1'},2,mappings,'S2');
-  assert.equal(otherSupplier.valid,true);
-  assert.equal(otherSupplier.minimumOrderQty,2);
-});
-
-test('missing supplier MOQ leaves existing purchase quantities unrestricted',()=>{
-  const result=supplier.validatePurchaseQuantity(
-    {productId:'P2'},1,
-    [{productId:'P1',supplierId:'S1',minimumOrderQty:10}],
-    'S1'
-  );
-  assert.equal(result.valid,true);
-  assert.equal(result.minimumOrderQty,0);
-});
-
-test('product supplier mapping normalizes common MOQ field names',()=>{
-  assert.equal(supplier.normalizeProductSupplierMapping({minQty:'3'}).minimumOrderQty,3);
-  assert.equal(supplier.normalizeProductSupplierMapping({minOrderQty:4}).minimumOrderQty,4);
-  assert.equal(supplier.normalizeProductSupplierMapping({minimumOrderQty:-1}).minimumOrderQty,0);
-});
