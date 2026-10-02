@@ -1217,7 +1217,9 @@ test('direct-ship replacement receipts preserve cumulative gross delivery events
     const end=app.indexOf('window.openSupplyReceipt',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/const delivered=Number\(item\.deliveredQty\|\|0\)\+qty/);
+    assert.match(source,/const delivered=Number\(item\.deliveredQty\|\|0\)\+demandReceiptQty/);
+    assert.match(source,/if\(receiptPlan\.excessReceiptQty>0\)/);
+    assert.match(source,/const demandReceiptQty=receiptPlan\.demandReceiptQty/);
     assert.doesNotMatch(source,/const delivered=Math\.min\(Number\(\(item\.orderedQty \?\? item\.qty\)/);
     assert.match(source,/grossDelivered-returned/);
 });
@@ -2060,7 +2062,7 @@ test('purchase flows persist procurement demand through order and receipt transa
     assert.match(app, /demandId:demandProjection\.demandId\|\|''/);
     assert.match(app, /tx\.set\(demandRef,demandDoc,\{merge:true\}\)/);
     assert.match(app, /transaction\.set\(demandRef,demandDoc,\{merge:true\}\)/);
-    assert.equal((app.match(/updateDemandReceipt\(qty\)/g)||[]).length,2);
+    assert.equal((app.match(/updateDemandReceipt\(receiptPlan\.demandReceiptQty\)/g)||[]).length,2);
     assert.match(app, /YushinProcurementDemand\.applyReceipt\(baseDemand,receiptQty\)/);
 });
 
@@ -2202,7 +2204,8 @@ test('item-level PO schedule dates flow into supply records while manual header 
             }
         },
         productSupplierMappingCache:[],
-        poSupplierPartNoForItem:()=> ''
+        poSupplierPartNoForItem:()=> '',
+        poMinimumOrderQtyForItem:()=> 0
     });
 
     const automatic=helper(
@@ -2278,7 +2281,7 @@ test('formal PO snapshots supplier part numbers and keeps internal product ident
     assert.match(renderSource,/poSupplierPartNoForItem/);
 
     const printStart=app.indexOf('window.printPurchaseOrder = async function()');
-    const printEnd=app.indexOf('\nwindow.openDirectStockPurchase',printStart);
+    const printEnd=app.indexOf('\n// 「製作下一張估價單」',printStart);
     const printSource=app.slice(printStart,printEnd);
     assert.match(printSource,/supplierPartNo:item\.supplierPartNo\|\|''/);
     assert.match(printSource,/items: scheduledPoItems\.map/);
