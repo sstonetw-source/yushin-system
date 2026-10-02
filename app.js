@@ -8413,6 +8413,7 @@ window.saveSelfOrder = async function() {
         if(index>=0)ordersCache[index]=committedOrder;else ordersCache.unshift(committedOrder);
         syncOrderIntoPurchasingCaches(committedOrder, { render:false });
         writeAppDataCache('orders', ordersCache);
+        invalidateProcurementDemandQueue();
         closeSelfOrderModal();
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
@@ -10358,6 +10359,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             else supplyReceivingCache.unshift(savedSupply);
         }
         writeAppDataCache('orders', ordersCache);
+        invalidateProcurementDemandQueue();
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
             switchPurchasingView('receiving', document.getElementById('purchase-card-receiving'));
@@ -13141,6 +13143,7 @@ window.printPurchaseOrder = async function() {
         updatePoSaveStatus('正在確認並儲存訂購單…');
         await commitPromise;
         poCommitted = true;
+        invalidateProcurementDemandQueue();
         if (button) button.innerText = '同步在途庫存中…';
 
         // The PO + source-order linkage above is the authoritative commit.
