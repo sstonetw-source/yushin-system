@@ -11694,10 +11694,53 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const receiptSnap=await tx.get(receiptRef);
         if(!supplySnap.exists)throw new Error('找不到供應紀錄。');
         const supply=supplySnap.data();
-        if (!globalThis.YushinSupply?.normalize || !globalThis.YushinReceiving?.buildReceiptSnapshot) {
-            throw new Error('Supply／Receiving core 未載入，無法建立可追溯的到貨紀錄。');
+        if (!globalThis.YushinSupply?.normalize || !globalThis.YushinReceiving?.buildReceiptSnapshot
+            || !globalThis.YushinProcurementDemand?.applyReceipt) {
+            throw new Error('Supply／Receiving／Procurement Demand core 未載入，無法建立可追溯的到貨紀錄。');
         }
+        const demandRef=procurementDemandRef(supply.demandId||'');
+        const demandSnap=demandRef?await tx.get(demandRef):null;
         const procurement=globalThis.YushinSupply.normalize({...supply,id:supplyId});
+        const updateDemandReceipt=(receiptQty)=>{
+            if(!demandRef)return;
+            const fallbackRequested=Math.max(
+                Number(supply.qty||0),
+                Number(supply.receivedQty||0)+Number(receiptQty||0)
+            );
+            const baseDemand=demandSnap?.exists
+                ? demandSnap.data()
+                : globalThis.YushinProcurementDemand.normalizeDemand({
+                    demandId:supply.demandId||'',
+                    sourceType:supply.sourceType||(supply.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT'),
+                    sourceId:supply.sourceId||supply.orderId||'',
+                    sourceItemId:supply.sourceItemId||supply.itemId||'',
+                    requestedQty:fallbackRequested,
+                    orderedQty:Math.max(fallbackRequested,Number(supply.qty||0)),
+                    receivedQty:Number(supply.receivedQty||0),
+                    scheduleDate:supply.scheduleDate||supply.expectedDate||''
+                });
+            const receiptDemandPlan=globalThis.YushinProcurementDemand.applyReceipt(baseDemand,receiptQty);
+            if(receiptDemandPlan.appliedQty!==Number(receiptQty||0)){
+                throw new Error('採購需求收貨數量已變更，請重新整理後再試。');
+            }
+            const demandDoc=procurementDemandDocument(receiptDemandPlan.demand,{
+                productId:supply.productId||'',
+                productKey:supply.productKey||'',
+                itemCode:supply.itemCode||'',
+                itemName:supply.itemName||'',
+                brand:supply.brand||'',
+                fulfillmentType:supply.fulfillmentType||'WAREHOUSE',
+                warehouseId:(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(supply.warehouseId||''),
+                ownerUid:supply.ownerUid||'',
+                salesCode:supply.salesCode||'',
+                salesName:supply.salesName||'',
+                scheduleDate:supply.scheduleDate||supply.expectedDate||''
+            },{
+                createdAt:baseDemand.createdAt||supply.createdAt||now,
+                updatedAt:now
+            });
+            tx.set(demandRef,demandDoc,{merge:true});
+        };
         const buildReceipt=(event={})=>globalThis.YushinReceiving.buildReceiptSnapshot(procurement,{
             supplyOrderId:supplyId,
             receiptDate:localDateString(),
@@ -11764,6 +11807,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
             const receivedQty=receiptPlan.record.receivedQty;
             tx.update(supplyRef,{receivedQty,status:receiptPlan.record.status,updatedAt:now});
+            updateDemandReceipt(qty);
             tx.set(receiptRef,buildReceipt({
                 receiptId:operationKey,
                 operationId:operationKey,
@@ -11864,6 +11908,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             }
         }));
         tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
+        updateDemandReceipt(qty);
         tx.update(supplyRef,{
             receivedQty:receiptPlan.record.receivedQty,
             incomingRegisteredQty:receiptPlan.record.incomingRegisteredQty,
