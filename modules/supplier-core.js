@@ -111,6 +111,46 @@
     };
   }
 
+  function normalizeProductSupplierMapping(record={}){
+    const priorityNumber=Number(record.priority??record.sequence??1);
+    const leadTimeNumber=Number(record.leadTimeDays??record.delay??0);
+    return {
+      ...record,
+      mappingId:text(record.mappingId||record.id),
+      productId:text(record.productId),
+      itemCode:text(record.itemCode||record.productCode),
+      supplierId:text(record.supplierId||record.partnerId),
+      supplierPartNo:text(record.supplierPartNo||record.supplierPartNumber||record.vendorProductCode),
+      priority:Number.isFinite(priorityNumber)&&priorityNumber>0?Math.floor(priorityNumber):1,
+      leadTimeDays:Number.isFinite(leadTimeNumber)&&leadTimeNumber>=0?Math.floor(leadTimeNumber):0,
+      active:record.active!==false
+    };
+  }
+
+  function validateProductSupplierMapping(record={}){
+    const mapping=normalizeProductSupplierMapping(record);
+    const errors=[];
+    if(!mapping.productId&&!mapping.itemCode)errors.push('product');
+    if(!mapping.supplierId)errors.push('supplierId');
+    return {valid:errors.length===0,errors,mapping};
+  }
+
+  function productSupplierMatches(mapping={},product={}){
+    const x=normalizeProductSupplierMapping(mapping);
+    if(!x.active)return false;
+    const productId=text(product.productId||product.id);
+    const itemCode=text(product.itemCode||product.model||product.productCode).toLocaleLowerCase();
+    if(productId&&x.productId&&x.productId===productId)return true;
+    return !!itemCode&&!!x.itemCode&&x.itemCode.toLocaleLowerCase()===itemCode;
+  }
+
+  function selectProductSupplierMapping(mappings=[],product={}){
+    return (mappings||[])
+      .filter(mapping=>productSupplierMatches(mapping,product))
+      .map(normalizeProductSupplierMapping)
+      .sort((a,b)=>a.priority-b.priority||a.supplierId.localeCompare(b.supplierId))[0]||null;
+  }
+
   function communicationEvent(po={},contact={},input={}){
     const channel=text(input.channel||'MAILTO').toUpperCase();
     const preparedAt=text(input.preparedAt||input.createdAt);
@@ -141,6 +181,10 @@
     documentSnapshot,
     snapshotForPurchaseOrder,
     purchaseOrderContact,
+    normalizeProductSupplierMapping,
+    validateProductSupplierMapping,
+    productSupplierMatches,
+    selectProductSupplierMapping,
     communicationEvent
   };
 });
