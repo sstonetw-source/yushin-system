@@ -91,3 +91,22 @@ test('dispatchState is the single source for pending and shippable quantities',(
   assert.equal(f.pendingDispatchQty({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1}),2);
   assert.equal(f.shippableQty({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1}),2);
 });
+
+
+test('dispatchState keeps a later live reservation even when a lightweight snapshot omits ordered quantity',()=>{
+  const state=f.dispatchState({
+    reservedQty:5,
+    dispatchPreparedQty:5,
+    deliveredQty:5
+  });
+  assert.equal(state.pending,5);
+  assert.equal(state.shippable,0);
+
+  const ready=f.dispatchState({
+    reservedQty:5,
+    dispatchPreparedQty:10,
+    deliveredQty:5
+  });
+  assert.equal(ready.pending,0);
+  assert.equal(ready.shippable,5);
+});
