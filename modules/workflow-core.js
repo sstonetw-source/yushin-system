@@ -71,7 +71,7 @@
     const inTransitQty=Math.max(0,supplyOrderedQty-receivedQty);
     const requiredSupplyQty=fulfillmentType==='DIRECT_SHIP'
       ? orderedQty+returnedQty
-      : shortageQty+inTransitQty;
+      : shortageQty;
     const remainingToOrderQty=fulfillmentType==='DIRECT_SHIP'
       ? Math.max(0,requiredSupplyQty-supplyOrderedQty)
       : Math.max(0,shortageQty-inTransitQty);
