@@ -11491,7 +11491,7 @@ async function registerPurchaseIncoming(poId, poRecord) {
 }
 
 async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
-    let result={cancelledQty:0,orderId:'',productKey:'',warehouseId:''};
+    let result={cancelledQty:0,orderId:'',productKey:'',warehouseId:'',demandId:''};
     await db.runTransaction(async tx => {
         const supplyRef=db.collection('supplyOrders').doc(supplyId);
         const supplySnap=await tx.get(supplyRef);
@@ -11513,7 +11513,8 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
             cancelledQty:existingCancelled?Math.max(0,Number(supply.cancelledQty||remaining)):0,
             orderId:String(supply.orderId||''),
             productKey,
-            warehouseId
+            warehouseId,
+            demandId:String(supply.demandId||'')
         };
         if(existingCancelled||remaining<=0)return;
 
@@ -11524,10 +11525,15 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
             ? db.collection('inventory').doc(encodeURIComponent(productKey)):null;
         const whRef=!directShip&&registeredIncoming>0&&productKey&&warehouseId
             ? db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
+        const demandId=String(supply.demandId||'').trim();
+        const demandRef=demandId?procurementDemandRef(demandId):null;
 
+        // Read every linked document before the first write. This mirrors ERPNext's
+        // status-updater model: the demand document is updated from the PO line change.
         const orderSnap=orderRef?await tx.get(orderRef):null;
         const invSnap=invRef?await tx.get(invRef):null;
         const whSnap=whRef?await tx.get(whRef):null;
+        const demandSnap=demandRef?await tx.get(demandRef):null;
         if(!directShip&&registeredIncoming>0&&(!productKey||!warehouseId||!invSnap?.exists||!whSnap?.exists)){
             throw new Error(`供應紀錄 ${supplyId} 的在途庫存資料不完整，無法安全取消。`);
         }
@@ -11550,6 +11556,18 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
                 items,itemCount:items.length,orderSchemaVersion:2,
                 ...orderWorkIndexFields(nextOrder),updatedAt:now
             });
+        }
+
+        if(demandRef&&demandSnap?.exists){
+            if(!globalThis.YushinProcurementDemand?.applySupplyCancellation){
+                throw new Error('Procurement Demand core 未載入，無法重新開啟採購需求。');
+            }
+            const demandPlan=globalThis.YushinProcurementDemand.applySupplyCancellation(demandSnap.data()||{},supply);
+            const demandDoc=procurementDemandDocument(demandPlan.demand,{},{
+                createdAt:demandSnap.data()?.createdAt||now,
+                updatedAt:now
+            });
+            tx.set(demandRef,demandDoc,{merge:true});
         }
 
         if(invRef&&whRef){
@@ -11583,9 +11601,10 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
             incomingRegisteredQty:0,
             updatedAt:now
         });
-        result={cancelledQty:remaining,orderId:String(supply.orderId||''),productKey,warehouseId};
+        result={cancelledQty:remaining,orderId:String(supply.orderId||''),productKey,warehouseId,demandId};
     });
     if(result.productKey&&result.warehouseId)invalidateWarehouseStockCache(result.productKey,result.warehouseId);
+    if(result.demandId)invalidateProcurementDemandQueue();
     return result;
 }
 
