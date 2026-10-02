@@ -1243,16 +1243,31 @@
             </div>
 
             <div class="panel" style="margin-top:16px;">
-                <strong>供應商與廠牌對應</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">設定「哪個廠牌／產品線向哪家公司下單」。建立訂購單時會自動帶入抬頭；產品線留白即為該廠牌預設供應商。</p>
+                <strong>供應商主檔</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">供應商只建立一次；訂購單抬頭與 Email 集中維護。廠牌與供應商的關係在下方另外設定。</p>
+                <input id="supplierMasterEditingId" type="hidden">
                 <div class="form-grid">
                     <div><label>供應商名稱</label><input id="supplierMasterName" type="text" placeholder="例如：台灣某某股份有限公司"></div>
                     <div><label>訂購單抬頭</label><input id="supplierMasterHeader" type="text" placeholder="不填則同供應商名稱"></div>
                     <div><label>訂購 Email</label><input id="supplierMasterEmail" type="email" placeholder="例如：orders@supplier.com"></div>
+                </div>
+                <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" onclick="saveSupplierMaster()">💾 儲存供應商</button>
+                    <button type="button" class="btn-secondary" onclick="clearSupplierMasterEditor()">清除</button>
+                </div>
+                <div id="supplierMasterStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
+                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>供應商</th><th>訂購單抬頭</th><th>訂購 Email</th><th>對應數</th><th>操作</th></tr></thead><tbody id="supplierMasterBody"></tbody></table></div>
+
+                <hr style="border:0;border-top:1px solid #e5e7eb;margin:20px 0;">
+                <strong>廠牌 → 供應商對應</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">指定「這個廠牌／產品線向哪個既有供應商下單」。產品線留白＝該廠牌預設供應商。</p>
+                <datalist id="supplierMasterSuggestions"></datalist>
+                <div class="form-grid">
                     <div><label>廠牌</label><input id="supplierMappingBrand" type="text" list="poBrandList"></div>
                     <div><label>產品線（選填）</label><input id="supplierMappingLine" type="text" placeholder="留白＝廠牌預設"></div>
+                    <div><label>供應商</label><input id="supplierMappingSupplier" type="text" list="supplierMasterSuggestions" placeholder="請選擇已建立的供應商"></div>
                 </div>
-                <div style="margin-top:8px;"><button type="button" onclick="saveSupplierMapping()">💾 儲存供應商對應</button></div>
+                <div style="margin-top:8px;"><button type="button" onclick="saveSupplierMapping()">💾 儲存對應</button></div>
                 <div id="supplierMappingStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
                 <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>訂購單抬頭</th><th>訂購 Email</th><th>操作</th></tr></thead><tbody id="supplierMappingBody"></tbody></table></div>
             </div>
