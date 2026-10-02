@@ -11080,6 +11080,10 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const internalNo = existingSupply?.internalNo || `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(-8).toUpperCase()}`;
             const alreadyOrdered = Math.max(0, Number(item.supplyOrderedQty || 0));
             const now = new Date().toISOString();
+            const identity = brandIdentityForRecord(existingSupply || item);
+            const canonicalBrand = identity.brand || resolveBrandName(existingSupply?.brand || item.brand || '');
+            const canonicalBrandId = identity.brandId || existingSupply?.brandId || item.brandId || brandIdForName(canonicalBrand);
+            const productId = String(existingSupply?.productId || item.productId || '').trim();
             const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demand,qty);
             if(qty>0&&demandOrderPlan.appliedQty!==qty)throw new Error('採購需求數量已變更，請重新整理後再試。');
             const demandRef=procurementDemandRef(demandId);
@@ -11115,10 +11119,6 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const registeredIncomingQty = Math.max(0, Number(existingSupply?.incomingRegisteredQty || 0));
             const targetIncomingQty = directShip ? 0 : supplyProjection.remainingQty;
             const incomingDelta = targetIncomingQty - registeredIncomingQty;
-            const identity = brandIdentityForRecord(existingSupply || item);
-            const canonicalBrand = identity.brand || resolveBrandName(existingSupply?.brand || item.brand || '');
-            const canonicalBrandId = identity.brandId || existingSupply?.brandId || item.brandId || brandIdForName(canonicalBrand);
-            const productId = String(existingSupply?.productId || item.productId || '').trim();
 
             let invRef=null, whRef=null, invSnap=null, whSnap=null;
             if (!directShip && incomingDelta !== 0) {
