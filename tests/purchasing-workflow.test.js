@@ -591,7 +591,7 @@ test('manual ordered action records supply and source item only once after an un
         normalizedOrderStatus:()=> 'normal',
         normalizedOrderItems:record=>record.items,orderWorkIndexFields:()=>({workCategories:['arrival']}),
         ordersCache:[],supplyReceivingCache:[],purchasingView:'ordering',
-        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},renderOrdersList:()=>{},
+        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:(view,tab)=>switched.push([view,tab]),alert:()=>{}
     });
     vm.runInContext(source,context);
@@ -652,7 +652,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
         poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-09-30',
         normalizedOrderStatus:()=> 'normal',normalizedOrderItems:record=>record.items,
         orderWorkIndexFields:()=>({workCategories:['arrival']}),ordersCache:[],supplyReceivingCache:[],
-        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},renderOrdersList:()=>{},
+        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:()=>{},alert:()=>{}
     });
     vm.runInContext(source,context);
@@ -1714,7 +1714,7 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         buildInventorySearchTokens:()=>['p1'],
         invalidateWarehouseStockCache:()=>{},
         ordersCache:[],supplyReceivingCache:[],
-        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},renderOrdersList:()=>{},
+        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:()=>{},alert:()=>{}
     });
     vm.runInContext(source,context);
