@@ -4258,10 +4258,11 @@ test('cancelled or closed supply is terminal and cannot be received again', () =
     const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
     const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
     const stateSource=rulesSource.slice(stateStart,stateEnd);
-    assert.match(stateSource,/resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
+    assert.match(stateSource,/previousStatus != 'CANCELLED'/);
     assert.match(stateSource,/previousStatus != 'CLOSED'/);
-    assert.match(stateSource,/receivedQty', 0\) >= resource\.data\.get\('receivedQty', 0\)/);
-    assert.match(stateSource,/cancelledQty', 0\) <= \([\s\S]*?qty'[\s\S]*?- request\.resource\.data\.get\('receivedQty'/);
+    assert.match(stateSource,/receivedQty >= resource\.data\.get\('receivedQty', 0\)/);
+    assert.match(stateSource,/cancelledQty <= \(qty - receivedQty\)/);
+    assert.match(stateSource,/closedQty <= \(qty - receivedQty\)/);
 
     const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
     const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
@@ -4325,18 +4326,20 @@ test('supply status must match operational quantities', () => {
     const source=rulesSource.slice(stateStart,stateEnd);
     assert.ok(stateStart>=0&&stateEnd>stateStart);
 
-    assert.match(source,/status', 'ORDERED'\) == 'ORDERED'[\s\S]*?receivedQty', 0\) == 0[\s\S]*?cancelledQty', 0\) == 0/);
-    assert.match(source,/status', 'ORDERED'\) == 'PARTIAL_RECEIPT'[\s\S]*?receivedQty', 0\) > 0[\s\S]*?receivedQty', 0\) < request\.resource\.data\.get\('qty'/);
-    assert.match(source,/status', 'ORDERED'\) == 'RECEIVED'[\s\S]*?receivedQty', 0\) == request\.resource\.data\.get\('qty'/);
+    assert.match(source,/nextStatus == 'ORDERED'[\s\S]*?receivedQty == 0[\s\S]*?cancelledQty == 0[\s\S]*?closedQty == 0/);
+    assert.match(source,/nextStatus == 'PARTIAL_RECEIPT'[\s\S]*?receivedQty > 0[\s\S]*?receivedQty < qty/);
+    assert.match(source,/nextStatus == 'RECEIVED'[\s\S]*?receivedQty == qty/);
     assert.match(source,/nextStatus == 'CANCELLED'[\s\S]*?cancelledQty == qty - receivedQty/);
     assert.match(source,/nextStatus == 'CLOSED'[\s\S]*?receivedQty > 0[\s\S]*?closedQty == qty - receivedQty/);
     assert.match(source,/incomingQty == 0/);
     assert.match(source,/cancelReason', ''\) != ''/);
     assert.match(source,/cancelledByUid', ''\) == request\.auth\.uid/);
+    assert.match(source,/closeReason', ''\) != ''/);
+    assert.match(source,/closedByUid', ''\) == request\.auth\.uid/);
 });
 
 
-test('receipt retry stays idempotent after outstanding supply is cancelled', () => {
+test('receipt retry stays idempotent after outstanding supply is cancelled or closed', () => {
     const start=appSource.indexOf('async function receiveSupplyOrderRecord');
     const end=appSource.indexOf('\nwindow.openSupplyReceipt',start);
     const source=appSource.slice(start,end);
@@ -4347,6 +4350,7 @@ test('receipt retry stays idempotent after outstanding supply is cancelled', () 
     assert.match(source,/alreadyProcessed=true/);
     assert.match(source,/processedReceipt=receipt/);
     assert.match(source,/此供應紀錄已取消，不能再確認到貨/);
+    assert.match(source,/此供應紀錄已結案，不能再確認到貨/);
 });
 
 
