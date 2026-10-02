@@ -2122,3 +2122,43 @@ test('lead-time PO date controls preserve manual overrides and recompute automat
     assert.match(app, /window\.removePoItem = function[\s\S]*?autoFillPoExpectedDate\(poItems\)/);
     assert.match(app, /window\.onDirectPoCodeChange = async function[\s\S]*?autoFillPoExpectedDate\(poItems\)/);
 });
+
+
+test('receiving due info ranks overdue work ahead of today, future, and unscheduled rows', () => {
+    const start = app.indexOf('function receivingDueInfo');
+    const end = app.indexOf('\n\nfunction receivingDueHtml', start);
+    assert.ok(start >= 0 && end > start);
+    const source = app.slice(start, end);
+    const dueInfo = vm.runInNewContext(`${source}\nreceivingDueInfo`, {
+        localDateString:()=> '2026-10-05'
+    });
+
+    const overdue = dueInfo([{expectedDate:'2026-10-01'}], '2026-10-05');
+    const today = dueInfo([{expectedDate:'2026-10-05'}], '2026-10-05');
+    const future = dueInfo([{expectedDate:'2026-10-08'}], '2026-10-05');
+    const unscheduled = dueInfo([{}], '2026-10-05');
+    const splitSupply = dueInfo([
+        {expectedDate:'2026-10-10'},
+        {scheduleDate:'2026-10-02'}
+    ], '2026-10-05');
+
+    assert.deepEqual(JSON.parse(JSON.stringify(overdue)), {
+        expectedDate:'2026-10-01', status:'late', daysLate:4, sortRank:0
+    });
+    assert.equal(today.status, 'today');
+    assert.equal(today.sortRank, 1);
+    assert.equal(future.status, 'upcoming');
+    assert.equal(future.sortRank, 2);
+    assert.equal(unscheduled.status, 'unscheduled');
+    assert.equal(unscheduled.sortRank, 3);
+    assert.equal(splitSupply.expectedDate, '2026-10-02');
+    assert.equal(splitSupply.daysLate, 3);
+
+    const renderStart = app.indexOf('function renderPurchasingReceivingWorkList');
+    const renderEnd = app.indexOf('\nwindow.renderPoList = function', renderStart);
+    const renderSource = app.slice(renderStart, renderEnd);
+    assert.match(renderSource, /receivingDueHtml\(due\)/);
+    assert.match(renderSource, /receivingDueRank/);
+    assert.match(renderSource, /sortedRows = Array\.from\(fragment\.childNodes\)\.sort/);
+    assert.match(renderSource, /逾期 \$\{overdueCount\} 筆已置頂/);
+});
