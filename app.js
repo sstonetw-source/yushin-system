@@ -7398,10 +7398,10 @@ function inventoryRefFor(record) {
     return key ? db.collection('inventory').doc(encodeURIComponent(key)) : null;
 }
 function inventoryNumbers(data = {}) {
-    if (!window.YushinInventory?.normalizeStock) {
+    if (!globalThis.YushinInventory?.normalizeStock) {
         throw new Error('Inventory core 未載入，無法計算庫存狀態。');
     }
-    return window.YushinInventory.normalizeStock(data);
+    return globalThis.YushinInventory.normalizeStock(data);
 }
 function inventoryMovementRecord(type, qty, orderId, productKey, actor, extra = {}) {
     return { type, qty: Number(qty || 0), productKey, sourceType: DOCUMENT_TYPES.ORDER, sourceId: orderId, createdAt: new Date().toISOString(), createdBy: actor, ...extra };
@@ -7742,10 +7742,10 @@ function itemDispatchState(order, item) {
         ? Math.max(0, Number(item.returnedQty || 0))
         : savedReturnRecords(order).filter(r => ((!r.itemId && singleItem) || r.itemId === item.itemId))
             .reduce((sum, r) => sum + Number(r.qty || 0), 0);
-    if (!window.YushinFulfillment?.dispatchState) {
+    if (!globalThis.YushinFulfillment?.dispatchState) {
         throw new Error('Fulfillment core 未載入，無法計算出貨狀態。');
     }
-    return window.YushinFulfillment.dispatchState({
+    return globalThis.YushinFulfillment.dispatchState({
         ...item,
         orderedQty: item.orderedQty ?? item.qty,
         deliveredQty: grossDelivered,
@@ -12531,7 +12531,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         const lotQuery=await transaction.get(db.collection('inventoryLots').where('productKey','==',productKey).where('warehouseId','==',warehouseId));
         const lotDocs=lotQuery.docs.map(doc=>({id:doc.id,...doc.data()})).filter(l=>Number(l.remainingQty||0)>0);
         if(!lotDocs.length)throw new Error('此庫存尚未建立批次成本資料，請先完成入庫／期初庫存批次建檔後再送貨。');
-        const allocation=window.YushinInventory.allocateLots(lotDocs.map(lot=>({...lot,unitCost:0})),deltaQty);
+        const allocation=globalThis.YushinInventory.allocateLots(lotDocs.map(lot=>({...lot,unitCost:0})),deltaQty);
         lotAllocations=allocation.allocations;cogs=allocation.totalCost;
         lotAllocations.forEach(row=>{
             const lot=lotDocs.find(x=>x.id===row.lotId);
@@ -12540,7 +12540,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     } else {
         const restoreQty=Math.abs(deltaQty);
         const sourceRecords=Array.isArray(reversalRecords)&&reversalRecords.length?reversalRecords:savedDeliveryRecords(order);
-        const reversal=window.YushinInventory.reverseLotAllocations(sourceRecords,restoreQty);
+        const reversal=globalThis.YushinInventory.reverseLotAllocations(sourceRecords,restoreQty);
         lotAllocations=reversal.allocations.map(row=>({...row,qty:-row.qty,cost:-row.cost}));
         for(const row of reversal.allocations){
             const lotRef=db.collection('inventoryLots').doc(row.lotId);
@@ -12586,8 +12586,8 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const now=new Date().toISOString();
     let lotAllocations=[],cogs=0;
     if(deltaQty>0){
-        const available=window.YushinInventory.availableReturnAllocations(savedDeliveryRecords(order),savedReturnRecords(order));
-        const plan=window.YushinInventory.reverseLotAllocations([{qty:available.reduce((sum,row)=>sum+Number(row.qty||0),0),lotAllocations:available}],deltaQty);
+        const available=globalThis.YushinInventory.availableReturnAllocations(savedDeliveryRecords(order),savedReturnRecords(order));
+        const plan=globalThis.YushinInventory.reverseLotAllocations([{qty:available.reduce((sum,row)=>sum+Number(row.qty||0),0),lotAllocations:available}],deltaQty);
         lotAllocations=plan.allocations;cogs=plan.totalCost;
         for(const row of lotAllocations){
             const lotRef=db.collection('inventoryLots').doc(row.lotId);
@@ -12596,7 +12596,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
             transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)+row.qty,updatedAt:now});
         }
     }else{
-        const plan=window.YushinInventory.reverseLotAllocations(previousReturnRecord?[previousReturnRecord]:[],Math.abs(deltaQty));
+        const plan=globalThis.YushinInventory.reverseLotAllocations(previousReturnRecord?[previousReturnRecord]:[],Math.abs(deltaQty));
         lotAllocations=plan.allocations.map(row=>({...row,qty:-row.qty,cost:-row.cost}));cogs=-plan.totalCost;
         for(const row of plan.allocations){
             const lotRef=db.collection('inventoryLots').doc(row.lotId);
