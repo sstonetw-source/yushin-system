@@ -126,6 +126,10 @@ service cloud.firestore {
 
     function sameSupplyIdentity() {
       return request.resource.data.get('type', '') == resource.data.get('type', '')
+        && request.resource.data.get('method', '') == resource.data.get('method', '')
+        && request.resource.data.get('sourceType', '') == resource.data.get('sourceType', '')
+        && request.resource.data.get('sourceId', '') == resource.data.get('sourceId', '')
+        && request.resource.data.get('sourceItemId', '') == resource.data.get('sourceItemId', '')
         && request.resource.data.get('internalNo', '') == resource.data.get('internalNo', '')
         && request.resource.data.get('purchaseDocumentId', '') == resource.data.get('purchaseDocumentId', '')
         && request.resource.data.get('purchaseDocumentNo', '') == resource.data.get('purchaseDocumentNo', '')
