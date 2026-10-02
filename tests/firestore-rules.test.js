@@ -206,31 +206,25 @@ test('business owner can change only remaining quantity on an inventory lot', as
   await assertFails(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), { remainingQty:-1 }));
 });
 
-test('business users can see visible non-agency cost but not agency or legacy hidden costs', async () => {
-  await seed('products/p1', { authorizationType:'NON_AUTHORIZED' });
-  await seed('products/p2', { authorizationType:'AUTHORIZED' });
+test('business users cannot read Product Master standard costs', async () => {
   await seed('productCosts/p1', { productId:'p1', salesVisible:true, standardCost:100 });
-  await seed('productCosts/p2', { productId:'p2', salesVisible:true, standardCost:200 });
-  await seed('productCosts/legacy', { productId:'p1', salesVisible:true, standardCost:300 });
-  await assertSucceeds(getDoc(doc(db('sales2'), 'productCosts/p1')));
-  await assertFails(getDoc(doc(db('sales1'), 'productCosts/p2')));
-  await assertFails(getDoc(doc(db('sales1'), 'productCosts/legacy')));
+  await seed('productCosts/p2', { productId:'p2', salesVisible:false, standardCost:200 });
+  await assertFails(getDoc(doc(db('sales1'), 'productCosts/p1')));
+  await assertFails(getDoc(doc(db('sales2'), 'productCosts/p2')));
+  await assertSucceeds(getDoc(doc(db('buyer1'), 'productCosts/p1')));
   await assertSucceeds(getDoc(doc(db('buyer1'), 'productCosts/p2')));
 });
 
-test('sales may create a temporary product and own non-agency cost, but cannot alter existing master products', async () => {
-  const product = { productId:'p3', status:'TEMPORARY', active:true, source:'QUICK_CREATE', createdBy:'sales1', updatedBy:'sales1', authorizationType:'NON_AUTHORIZED', listPrice:0, nameEn:'Test product', specification:'10 tests' };
+test('sales may create a temporary product but cannot create or modify Product Master cost', async () => {
+  const product = { productId:'p3', status:'TEMPORARY', active:true, source:'QUICK_CREATE', createdBy:'sales1', updatedBy:'sales1', listPrice:0, nameEn:'Test product', specification:'10 tests' };
   await assertSucceeds(setDoc(doc(db('sales1'), 'products/p3'), product));
   await assertFails(updateDoc(doc(db('sales1'), 'products/p3'), { listPrice:1 }));
   await assertFails(setDoc(doc(db('sales2'), 'products/p4'), { ...product, productId:'p4' }));
   await assertFails(setDoc(doc(db('sales1'), 'products/p5'), { ...product, productId:'p5', source:'PRICE_LIST' }));
   await assertFails(setDoc(doc(db('sales1'), 'products/p6'), { ...product, productId:'p6', active:false }));
-  const cost = { productId:'p3', productLineId:'Roche', standardCost:100, salesVisible:true, source:'quick_create', updatedAt:'2026-09-23', updatedBy:'sales1' };
-  await assertSucceeds(setDoc(doc(db('sales1'), 'productCosts/p3'), cost));
-  await assertFails(setDoc(doc(db('sales2'), 'productCosts/p3'), { ...cost, updatedBy:'sales2' }));
-  await assertFails(setDoc(doc(db('sales1'), 'productCosts/p3'), { ...cost, standardCost:101, salesVisible:false }));
-  await assertSucceeds(updateDoc(doc(db('sales1'), 'productCosts/p3'), { standardCost:102 }));
-  await assertFails(updateDoc(doc(db('sales1'), 'productCosts/p3'), { salesVisible:false }));
+  const cost = { productId:'p3', productLineId:'Roche', standardCost:100, salesVisible:false, source:'quick_create', updatedAt:'2026-09-23', updatedBy:'sales1' };
+  await assertFails(setDoc(doc(db('sales1'), 'productCosts/p3'), cost));
+  await assertSucceeds(setDoc(doc(db('buyer1'), 'productCosts/p3'), cost));
   await assertFails(setDoc(doc(db('sales1'), 'priceHistory/p3'), { productId:'p3', unitCost:1 }));
 });
 

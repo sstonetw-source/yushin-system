@@ -1474,9 +1474,12 @@ test('Product Master v2 uses targeted server lookup instead of a 500-row overlay
     assert.doesNotMatch(appSource, /collection\('products'\)\.limit\(500\)/);
 });
 
-test('Product Master v2 keeps authorization separate from the legacy productType category', () => {
-    assert.match(appSource, /authorizationTypeForProduct/);
-    assert.match(appSource, /authorizationType/);
+test('Product Master no longer uses an agency attribute for cost visibility', () => {
+    const editorStart = appSource.indexOf('function ensureProductMasterEditor');
+    const editorEnd = appSource.indexOf('\nfunction populateProductMasterEditor', editorStart);
+    const editorSource = appSource.slice(editorStart, editorEnd);
+    assert.doesNotMatch(editorSource, /pmEditAuthorization|代理屬性/);
+    assert.doesNotMatch(appSource, /authorizationTypeForProduct/);
     assert.match(appSource, /productType: data\.productType \|\| data\.category \|\| ''/);
 });
 
@@ -1490,29 +1493,30 @@ test('quick product creation is temporary, duplicate-safe and can be used from q
     assert.match(appSource, /showQuickProductButton\(input, 'order'\)/);
 });
 
-test('sales cost visibility depends on authorizationType and secure productCosts', () => {
-    assert.match(appSource, /function loadVisibleProductCost/);
-    assert.match(appSource, /hasBusinessCapability\(\) && authType === 'AUTHORIZED'/);
-    assert.match(appSource, /db\.collection\('productCosts'\)\.doc\(productId\)/);
-    assert.match(appSource, /salesVisible !== true/);
-    assert.match(appSource, /applyOrderProductCost/);
+test('standard product costs are restricted to purchaser/admin', () => {
+    const start = appSource.indexOf('async function loadVisibleProductCost');
+    const end = appSource.indexOf('\nfunction setOrderCostFieldForProduct', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /currentUserRole !== 'admin' && currentUserRole !== 'purchaser'/);
+    assert.match(source, /db\.collection\('productCosts'\)\.doc\(productId\)/);
+    assert.doesNotMatch(source, /salesVisible|authorizationType/);
 });
 
-test('sales can enter transaction cost only for non-authorized products', () => {
+test('sales self-order uses manual transaction cost independent of brand agency status', () => {
     const start = appSource.indexOf('window.saveNewOrder');
     const end = appSource.indexOf('function loadOrdersFromCloud', start);
     const source = appSource.slice(start, end);
-    assert.match(source, /authorizationTypeForProduct\(selectedProduct\) === 'NON_AUTHORIZED'/);
-    assert.match(source, /NON_AUTHORIZED/);
+    assert.match(source, /firstItem\.procurementType === 'SALES_SELF_ORDER'/);
+    assert.match(source, /business_manual_transaction_cost/);
+    assert.doesNotMatch(source, /NON_AUTHORIZED|authorizationTypeForProduct/);
 });
 
-test('Firestore rules use fixed roles and protect authorized product costs', () => {
-    assert.match(rulesSource, /match \/productCosts\/\{id\}/);
-    assert.match(rulesSource, /visibleNonAuthorizedCost\(id, resource\.data\)/);
+test('Firestore rules keep Product Master standard costs purchaser/admin only', () => {
+    assert.match(rulesSource, /match \/productCosts\/\{id\}[\s\S]*?allow read: if admin\(\) \|\| purchaser\(\)/);
+    assert.match(rulesSource, /allow create, update: if admin\(\) \|\| purchaser\(\)/);
     assert.match(rulesSource, /match \/productLines\/\{id\}/);
-    assert.match(rulesSource, /ownTemporaryNonAuthorizedCost\(id, request\.resource\.data\)/);
+    assert.doesNotMatch(rulesSource, /visibleNonAuthorizedCost|ownTemporaryNonAuthorizedCost/);
     assert.doesNotMatch(rulesSource, /assignedProductLine|productLineIds/);
-    assert.match(rulesSource, /allow update: if admin\(\) \|\| purchaser\(\)/);
 });
 
 
@@ -3843,6 +3847,7 @@ test('Product Import is incremental, splits standard cost securely, and never re
     const syncSource=appSource.slice(syncStart,syncEnd);
     assert.match(syncSource,/db\.collection\('products'\)/);
     assert.match(syncSource,/db\.collection\('productCosts'\)/);
+    assert.match(syncSource,/salesVisible: false/);
     assert.match(syncSource,/PRODUCT_MASTER_IMPORT_FIELDS/);
     assert.match(syncSource,/commitMigrationBatch\(operations, 200\)/);
     assert.doesNotMatch(syncSource,/\.delete\(/);

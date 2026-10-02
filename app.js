@@ -1753,12 +1753,6 @@ function ensureProductMasterEditor() {
             <option value="Accessory"></option><option value="Service"></option>
           </datalist>
           <div><label>建議售價（含稅）</label><input id="pmEditListPrice" type="number" min="0" step="0.01"></div>
-          <div><label>代理屬性</label>
-            <select id="pmEditAuthorization">
-              <option value="AUTHORIZED">代理產品</option>
-              <option value="NON_AUTHORIZED">非代理產品</option>
-            </select>
-          </div>
           <div><label>狀態</label>
             <select id="pmEditStatus"><option value="ACTIVE">啟用</option><option value="INACTIVE">停用</option></select>
           </div>
@@ -1801,9 +1795,6 @@ function populateProductMasterEditor(product = {}, options = {}) {
     document.getElementById('pmEditProductLine').value = product.productLine || '';
     document.getElementById('pmEditProductType').value = product.productType || product.category || '';
     document.getElementById('pmEditListPrice').value = product.listPrice ?? product.price ?? '';
-    const inferredAuthorization = product.authorizationType
-        || (isBrandAuthorizedForCurrentCompany(product.brandName || product.brand || options.brand || '') ? 'AUTHORIZED' : 'NON_AUTHORIZED');
-    document.getElementById('pmEditAuthorization').value = inferredAuthorization;
     document.getElementById('pmEditStatus').value = product.status === 'INACTIVE' || product.active === false ? 'INACTIVE' : 'ACTIVE';
     document.getElementById('pmEditInventoryTracked').checked = product.inventoryTracked === true;
     document.getElementById('pmEditLotTracked').checked = product.lotTracked === true;
@@ -1904,7 +1895,6 @@ window.saveProductMasterEditor = async function() {
         productType: normalizeProductTypeValue(document.getElementById('pmEditProductType').value || ''),
         category: normalizeProductTypeValue(document.getElementById('pmEditProductType').value || ''),
         listPrice: Number(document.getElementById('pmEditListPrice').value || 0),
-        authorizationType: document.getElementById('pmEditAuthorization').value || 'NON_AUTHORIZED',
         inventoryTracked: document.getElementById('pmEditInventoryTracked').checked,
         lotTracked: document.getElementById('pmEditLotTracked').checked,
         expiryTracked: document.getElementById('pmEditExpiryTracked').checked,
@@ -1953,7 +1943,6 @@ function productManagementSource(product) {
         qty: 1,
         productLine: product.productLine || '',
         productType: product.productType || product.category || '',
-        authorizationType: product.authorizationType || '',
         productMasterMatched: true
     };
 }
@@ -6765,7 +6754,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
         const secureCost = await loadVisibleProductCost(match);
         unitPrice = secureCost !== null && Number.isFinite(secureCost)
             ? secureCost
-            : (authorizationTypeForProduct(match) === 'NON_AUTHORIZED' ? Number(match.cost || 0) : 0);
+            : Number(match.cost || 0);
     }
     poDirectStockMode = true;
     poEditingId = null;
@@ -10754,7 +10743,7 @@ function purchaseItemsFromOrder(order) {
             const productId = savedProductId || priceMatch?.productId || (priceMatch ? stableProductId(priceMatch) : '');
             const secureCost = productId ? purchaseCostCache.get(productId) : null;
             if (secureCost !== undefined && secureCost !== null) cost = Number(secureCost);
-            else if (priceMatch && authorizationTypeForProduct(priceMatch) !== 'AUTHORIZED') {
+            else if (priceMatch) {
                 cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
             }
         }
@@ -10856,7 +10845,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
             brand: resolveBrandName(match.brand || ''),
             unitPrice: secureCost !== null && Number.isFinite(secureCost)
                 ? secureCost
-                : (authorizationTypeForProduct(match) === 'NON_AUTHORIZED' ? Number(match.cost || 0) : 0),
+                : Number(match.cost || 0),
             supplier: match.supplier || '',
             productLine: match.productLine || '',
             fulfillmentType: poItems[idx].fulfillmentType || 'WAREHOUSE',
@@ -12956,14 +12945,6 @@ window.deleteReturnRecord = async function(recordId) {
 window.updateOrderField = function(orderId, field, value) {
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
-    if (field === 'costPrice') {
-        const product = findPriceItemForOrder(o);
-        if (product && authorizationTypeForProduct(product) === 'AUTHORIZED') {
-            alert('代理產品成本請在採購單維護；不會寫入業務可讀的訂單文件。');
-            renderOrdersList();
-            return;
-        }
-    }
     const previousValue = o ? o[field] : undefined;
     if (String(previousValue ?? '') === String(value ?? '')) return;
     const labels = { costPrice: '修改單位成本', transactionType: '修改交易方式', invoiceTitle: '修改發票抬頭', remarks: '修改備註' };
@@ -13168,7 +13149,7 @@ function normalizeNewOrderItem(item = {}) {
         brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
         productId:match?.productId||item.productId||stableProductId(match||item),productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
         productMasterMatched:!!match || item.productMasterMatched === true,
-        authorizationType:match?authorizationTypeForProduct(match):(item.authorizationType||''),supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
+        supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
         warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' ? String(item.warehouseId||'') : ''
     };
@@ -13504,15 +13485,13 @@ window.saveNewOrder = function() {
         isBilled: false,
         invoiceDate: ''
     };
-    const costInputVal = document.getElementById('orderCostPrice').value;
-    const selectedProduct = findPriceItemForOrder(data);
-    const nonAuthorizedCostAllowed = selectedProduct
-        && authorizationTypeForProduct(selectedProduct) === 'NON_AUTHORIZED';
-    if (nonAuthorizedCostAllowed && costInputVal !== '') {
-        data.costPrice = parseFloat(costInputVal);
+    if (firstItem.procurementType === 'SALES_SELF_ORDER'
+        && firstItem.costPrice !== undefined && firstItem.costPrice !== null
+        && String(firstItem.costPrice).trim() !== '') {
+        data.costPrice = Number(firstItem.costPrice);
         data.costSource = hasBusinessCapability()
-            ? 'business_manual_or_visible_non_authorized'
-            : 'non_authorized_transaction_cost';
+            ? 'business_manual_transaction_cost'
+            : 'manual_transaction_cost';
     }
 
     if (!data.orderDate || !data.itemName) {
@@ -13532,7 +13511,6 @@ window.saveNewOrder = function() {
     const priceMatch = findPriceItemForOrder(data);
     data.productLine = firstItem.productLine || (priceMatch && priceMatch.productLine) || '';
     data.productType = (priceMatch && priceMatch.productType) || '';
-    data.authorizationType = priceMatch ? authorizationTypeForProduct(priceMatch) : '';
     if (priceMatch) {
         data.productId = priceMatch.productId || stableProductId(priceMatch);
         data.supplier = priceMatch.supplier || '';
@@ -15065,7 +15043,6 @@ function normalizeProductMasterItem(item) {
         unit: String(item.unit || item.uom || '').trim(),
         productLine: String(item.productLine || '').trim(),
         productType: normalizeProductTypeValue(item.productType || item.category || ''),
-        authorizationType: String(item.authorizationType || '').trim().toUpperCase(),
         source: String(item.source || '').trim().toUpperCase(),
         status: status || (active ? 'ACTIVE' : 'INACTIVE'),
         inventoryTracked: !!item.inventoryTracked,
@@ -15084,25 +15061,12 @@ function brandMasterEntryForName(value) {
     return getUnifiedBrandEntries(true).find(entry => normalizeBrandLookupKey(entry.name) === key) || null;
 }
 
-function isBrandAuthorizedForCurrentCompany(value) {
-    const brand = resolveBrandName(value);
-    if (!brand) return false;
-    const company = currentCompany || 'yushin';
-    const entry = brandMasterEntryForName(brand);
-    if (entry && Array.isArray(entry.companies) && entry.companies.includes(company)) return true;
-    return (companyAgencyBrands[company] || []).some(name => normalizeBrandLookupKey(name) === normalizeBrandLookupKey(brand));
-}
 
-function authorizationTypeForProduct(item) {
-    const saved = String(item?.authorizationType || '').trim().toUpperCase();
-    if (saved === 'AUTHORIZED' || saved === 'NON_AUTHORIZED') return saved;
-    return isBrandAuthorizedForCurrentCompany(item?.brand || item?.brandName || '') ? 'AUTHORIZED' : 'NON_AUTHORIZED';
-}
 
 function safeEmbeddedOrderCost(item, rawCost) {
-    if (!item || authorizationTypeForProduct(item) === 'AUTHORIZED') return '';
-    const cost = Number(rawCost);
-    return Number.isFinite(cost) && cost >= 0 ? cost : '';
+    // 公司價格表／Product Master 的成本永遠不寫入業務可讀的訂單。
+    // 業務自行調貨的成本只由該筆訂單手動輸入。
+    return '';
 }
 
 async function findProductForPurchaseItem(item) {
@@ -15159,7 +15123,6 @@ function productMasterDocToPriceItem(doc) {
         nameEn: data.nameEn || '',
         productLine: data.productLine || '',
         productType: data.productType || data.category || '',
-        authorizationType: data.authorizationType || '',
         spec: data.specification || data.spec || '',
         unit: data.unit || data.uom || '',
         price: data.listPrice ?? data.price ?? 0,
@@ -15178,8 +15141,7 @@ const visibleProductCostCache = new Map();
 async function loadVisibleProductCost(item) {
     const productId = item?.productId || stableProductId(item || {});
     if (!productId) return null;
-    const authType = authorizationTypeForProduct(item);
-    if (hasBusinessCapability() && authType === 'AUTHORIZED') return null;
+    if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser') return null;
     const cacheKey = `${currentUserRole || ''}||${productId}`;
     if (visibleProductCostCache.has(cacheKey)) return visibleProductCostCache.get(cacheKey);
     try {
@@ -15191,12 +15153,7 @@ async function loadVisibleProductCost(item) {
             visibleProductCostCache.set(cacheKey, null);
             return null;
         }
-        const data = doc.data() || {};
-        if (hasBusinessCapability() && data.salesVisible !== true) {
-            visibleProductCostCache.set(cacheKey, null);
-            return null;
-        }
-        const value = data.standardCost;
+        const value = (doc.data() || {}).standardCost;
         const cost = value === undefined || value === null || String(value).trim() === '' ? null : Number(value);
         visibleProductCostCache.set(cacheKey, cost);
         return cost;
@@ -15224,22 +15181,20 @@ async function applyOrderProductCost(item) {
     setOrderCostFieldForProduct(item);
     const input = document.getElementById('orderCostPrice');
     if (!input || document.getElementById('orderProcurementType')?.value !== 'SALES_SELF_ORDER') return;
-    const allowed = currentUserRole === 'admin' || currentUserRole === 'purchaser'
-        || (hasBusinessCapability() && authorizationTypeForProduct(item) === 'NON_AUTHORIZED');
-    if (!allowed) {
-        input.value = '';
+
+    const privileged = currentUserRole === 'admin' || currentUserRole === 'purchaser';
+    if (!privileged) {
+        // 業務／工程師自行調貨時，成本由本人輸入本次交易成本；
+        // 不從 Product Master、價格表或 productCosts 自動帶入。
         return;
     }
+
     const secureCost = await loadVisibleProductCost(item);
     if (secureCost !== null && Number.isFinite(secureCost)) {
         input.value = secureCost;
         return;
     }
-    // 過渡期：正式 productCosts 尚未補齊前，採購/管理員可沿用舊價目表成本；
-    // 業務只允許沿用非代理產品的舊成本。
-    const privileged = currentUserRole === 'admin' || currentUserRole === 'purchaser';
-    const legacyAllowed = privileged || authorizationTypeForProduct(item) === 'NON_AUTHORIZED';
-    if (legacyAllowed && item.cost !== undefined && item.cost !== null && String(item.cost).trim() !== '') {
+    if (item?.cost !== undefined && item?.cost !== null && String(item.cost).trim() !== '') {
         input.value = item.cost;
     } else {
         input.value = '';
@@ -15285,8 +15240,6 @@ function ensureQuickProductModal() {
           <div><label>規格</label><input id="quickProductSpec" type="text" autocomplete="off"></div>
           <div><label>建議售價（選填）</label><input id="quickProductPrice" type="number" min="0"></div>
           <input id="quickProductLine" type="hidden">
-          <input id="quickProductAuthorization" type="hidden">
-          <input id="quickProductCost" type="hidden">
         </div>
         <div style="margin-top:14px;text-align:right;">
           <button type="button" id="saveQuickProductBtn" onclick="saveQuickProduct()">儲存並帶入</button>
@@ -15300,7 +15253,7 @@ function ensureQuickProductModal() {
     return overlay;
 }
 
-const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Line', 'Authorization', 'Price', 'Cost'];
+const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Line', 'Price'];
 function quickProductDraftKey() {
     return currentUser?.uid ? `quick-product-draft:${currentUser.uid}` : '';
 }
@@ -15320,13 +15273,7 @@ function clearQuickProductDraft() {
     if (key) localStorage.removeItem(key);
 }
 
-window.updateQuickProductCostVisibility = function() {
-    const type = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
-    if (type === 'AUTHORIZED') {
-        const input = document.getElementById('quickProductCost');
-        if (input) input.value = '';
-    }
-};
+
 
 window.openQuickProductCreate = function(mode, input) {
     const overlay = ensureQuickProductModal();
@@ -15353,11 +15300,6 @@ window.openQuickProductCreate = function(mode, input) {
     document.getElementById('quickProductPrice').value = mode === 'quote'
         ? (input.closest('tr')?.querySelector('.inc-price')?.value || '')
         : (document.getElementById('orderUnitPrice')?.value || '');
-    document.getElementById('quickProductCost').value = mode === 'order'
-        ? (document.getElementById('orderCostPrice')?.value || '')
-        : '';
-    document.getElementById('quickProductAuthorization').value =
-        isBrandAuthorizedForCurrentCompany(currentBrand) ? 'AUTHORIZED' : 'NON_AUTHORIZED';
     const draft = readQuickProductDraft();
     // Resume only the same product; another item's form must not inherit stale values.
     if (draft && normalizeItemCodeLoose(draft.Code) === normalizeItemCodeLoose(input.value.trim())
@@ -15367,7 +15309,6 @@ window.openQuickProductCreate = function(mode, input) {
             if (node) node.value = draft[field] || '';
         });
     }
-    updateQuickProductCostVisibility();
     overlay.classList.add('active');
 };
 
@@ -15385,9 +15326,7 @@ window.saveQuickProduct = async function() {
     const productNameEn = String(document.getElementById('quickProductNameEn')?.value || '').trim();
     const specification = String(document.getElementById('quickProductSpec')?.value || '').trim();
     const productLine = String(document.getElementById('quickProductLine')?.value || '').trim();
-    const authorizationType = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
     const priceRaw = document.getElementById('quickProductPrice')?.value ?? '';
-    const costRaw = document.getElementById('quickProductCost')?.value ?? '';
     if (!brand || !code || !productName) {
         alert('請填寫廠牌、貨號與品名。');
         return;
@@ -15443,7 +15382,6 @@ window.saveQuickProduct = async function() {
         category: '',
         productType: '',
         supplier: '',
-        authorizationType,
         listPrice: Number(priceRaw) || 0,
         status: 'TEMPORARY',
         active: true,
@@ -16613,7 +16551,6 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
         inventoryTracked: !!normalized.inventoryTracked,
         lotTracked: !!normalized.lotTracked,
         expiryTracked: !!normalized.expiryTracked,
-        authorizationType: authorizationTypeForProduct(normalized),
         status,
         active: status === 'ACTIVE',
         source: String(normalized.source || source || 'PRODUCT_MASTER').toUpperCase(),
@@ -17032,7 +16969,7 @@ function setPriceUploadProgress(percent, status, keepVisible = true) {
 const PRODUCT_MASTER_IMPORT_FIELDS = [
     'productId','brandId','brandName','manufacturerPartNo','normalizedPartNo','productName','nameEn',
     'productLine','productLineId','category','productType','specification','unit','listPrice',
-    'inventoryTracked','lotTracked','expiryTracked','authorizationType','status','active','source'
+    'inventoryTracked','lotTracked','expiryTracked','status','active','source'
 ];
 
 function productImportValueEqual(field, currentValue, nextValue) {
@@ -17100,7 +17037,7 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
                 productId: product.productId,
                 productLineId: product.productLineId || product.productLine || '',
                 standardCost,
-                salesVisible: product.authorizationType === 'NON_AUTHORIZED'
+                salesVisible: false
             };
             const changedCost = {};
             Object.keys(nextCost).forEach(field => {
@@ -17458,7 +17395,7 @@ window.handleProductCostExcelUpload = async function(input) {
                 productId,
                 productLineId: product.productLineId || product.productLine || '',
                 standardCost: cost,
-                salesVisible: (product.authorizationType || 'NON_AUTHORIZED') === 'NON_AUTHORIZED',
+                salesVisible: false,
                 source: 'COST_UPDATE',
                 updatedAt: now,
                 updatedBy: currentUser?.uid || ''
