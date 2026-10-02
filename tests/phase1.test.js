@@ -268,7 +268,9 @@ test('purchase document history shows document age while arrival work uses suppl
     assert.match(appSource, /return waitingDaysFromDate\(po\.poDate\)/);
     assert.match(appSource, /primaryStatus==='arrival'\?waitingDaysFromDate\(item\.orderedAt\)/);
     assert.match(appSource, /data-th="建立天數"/);
-    assert.match(appSource, /data-th="文件狀態"[\s\S]{0,120}已建立/);
+    assert.match(appSource, /function purchaseHistoryItemReceiptProgress/);
+    assert.match(appSource, /YushinSupply\.receiptProgress/);
+    assert.match(appSource, /data-th="文件狀態"[\s\S]{0,120}receiptProgress\.label/);
 });
 
 test('main navigation exposes focused order and purchasing workspaces', () => {
