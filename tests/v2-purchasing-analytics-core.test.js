@@ -17,11 +17,11 @@ test('ordered supply separates received and incoming amounts',()=>{
   assert.equal(x.isStockReplenishment,false);
 });
 
-test('cancelled unreceived remainder is excluded from effective purchasing',()=>{
+test('closed unreceived remainder is excluded from effective purchasing',()=>{
   const x=analytics.projectSupply({
     id:'S1',method:'PURCHASING_PO',sourceType:'SALES_ORDER',
     sourceId:'O1',sourceItemId:'I1',qty:10,receivedQty:4,
-    status:'CANCELLED',unitCost:100,supplier:'Supplier A',internalNo:'PO1'
+    status:'CLOSED',unitCost:100,supplier:'Supplier A',internalNo:'PO1'
   });
   assert.equal(x.effectiveOrderedQty,4);
   assert.equal(x.orderedAmount,400);
