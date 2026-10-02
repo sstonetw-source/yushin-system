@@ -72,3 +72,38 @@ test('demand id follows ERP-style source references',()=>{
   });
   assert.equal(stock.demandId,'STOCK_REPLENISHMENT:product-ABC');
 });
+
+test('persistent demand document tracks ERP material request facts',()=>{
+  const doc=d.demandDocument({
+    demandId:'SALES_ORDER:o1:i1',sourceType:'SALES_ORDER',sourceId:'o1',sourceItemId:'i1',
+    itemCode:'ABC',requestedQty:10,orderedQty:4,receivedQty:2,scheduleDate:'2026-10-15',
+    ownerUid:'sales1',salesCode:'S01'
+  },{createdAt:'2026-10-02T00:00:00Z',updatedAt:'2026-10-02T00:00:00Z'});
+  assert.equal(doc.remainingToOrderQty,6);
+  assert.equal(doc.remainingToReceiveQty,2);
+  assert.equal(doc.status,d.STATUSES.PARTIALLY_RECEIVED);
+  assert.equal(doc.perOrdered,40);
+  assert.equal(doc.perReceived,20);
+});
+
+test('purchase order increments only remaining demand',()=>{
+  const result=d.applyOrder({requestedQty:10,orderedQty:7,receivedQty:0},9);
+  assert.equal(result.appliedQty,3);
+  assert.equal(result.demand.orderedQty,10);
+  assert.equal(result.demand.remainingToOrderQty,0);
+  assert.equal(result.demand.status,d.STATUSES.ORDERED);
+});
+
+test('purchase receipt increments only ordered remainder',()=>{
+  const result=d.applyReceipt({requestedQty:10,orderedQty:8,receivedQty:3},9);
+  assert.equal(result.appliedQty,5);
+  assert.equal(result.demand.receivedQty,8);
+  assert.equal(result.demand.remainingToReceiveQty,0);
+  assert.equal(result.demand.status,d.STATUSES.PARTIALLY_RECEIVED);
+});
+
+test('demand can reopen when requested quantity increases',()=>{
+  const reopened=d.reconcileRequestedQty({requestedQty:10,orderedQty:10,receivedQty:10},12);
+  assert.equal(reopened.remainingToOrderQty,2);
+  assert.equal(reopened.status,d.STATUSES.PARTIALLY_RECEIVED);
+});
