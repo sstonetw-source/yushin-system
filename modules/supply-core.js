@@ -76,10 +76,25 @@
     return normalize(record).sourceType===SOURCES.STOCK_REPLENISHMENT?'備庫採購':'客戶訂單採購';
   }
 
+  function receiptProgress(record={}){
+    const x=normalize(record);
+    const orderedQty=n(x.qty);
+    const receivedQty=Math.min(orderedQty,n(x.receivedQty));
+    const remainingQty=x.status==='CANCELLED'?0:Math.max(0,orderedQty-receivedQty);
+    let label='待到貨 '+receivedQty+'/'+orderedQty;
+    if(x.status==='CANCELLED'){
+      label=receivedQty>0?'部分到貨 '+receivedQty+'/'+orderedQty+'・其餘取消':'未到貨已取消';
+    }else if(x.status==='RECEIVED'){
+      label='已到貨 '+receivedQty+'/'+orderedQty;
+    }else if(x.status==='PARTIAL_RECEIPT'){
+      label='部分到貨 '+receivedQty+'/'+orderedQty;
+    }
+    return {status:x.status,orderedQty,receivedQty,remainingQty,percent:orderedQty>0?Math.min(100,(receivedQty/orderedQty)*100):0,label};
+  }
   return {
     METHODS,SOURCES,
     // TYPES 暫時只作程式內同義名稱，資料上不再把補庫當 type。
     TYPES:METHODS,
-    normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,demandLabel
+    normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,demandLabel,receiptProgress
   };
 });
