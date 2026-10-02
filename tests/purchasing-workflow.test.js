@@ -212,7 +212,8 @@ test('PO PDF export starts from the user action without browser print', () => {
     assert.match(source, /createPoPdfStage\(\)/);
     assert.match(source, /paginatePoPdfDocument/);
     assert.match(source, /addDocumentPagesToPdf/);
-    assert.match(source, /pdf\.save\(poPdfFileName\(poNo, vendorName\)\)/);
+    assert.match(source, /const fileName=poPdfFileName\(poNo, vendorName\)/);
+    assert.match(source, /pdf\.save\(fileName\)/);
     assert.doesNotMatch(source, /window\.print\(/);
 });
 
@@ -1753,7 +1754,7 @@ test('purchase order PDF renderer can return a blob without downloading', () => 
 });
 
 test('supplier master stores one canonical email field and PO snapshots supplierEmail', () => {
-    assert.match(app,/email:supplierEmail/);
+    assert.match(app,/email:savedSupplierEmail/);
     assert.match(app,/supplierEmail:normalizeSupplierEmail\(supplierContact\?\.email\|\|''\)/);
     assert.doesNotMatch(app,/poVendorEmail|purchaseEmail|vendorEmail/);
 });
