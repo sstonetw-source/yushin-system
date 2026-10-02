@@ -7687,7 +7687,10 @@ function purchaseProgressInfo(order) {
         if(!direct) allDirect=false;
         const dispatch=itemDispatchState(order,item);
         const returnedQty=direct?dispatch.returned:Number(item.returnedQty??dispatch.returned??0);
-        const quantities=window.YushinWorkflow?.procurementQuantities({
+        if (!globalThis.YushinWorkflow?.procurementQuantities) {
+            throw new Error('Workflow core 未載入，無法計算採購進度。');
+        }
+        const quantities=globalThis.YushinWorkflow.procurementQuantities({
             orderedQty:item.orderedQty??item.qty,
             fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
             reservedQty:item.reservedQty,
@@ -7698,11 +7701,9 @@ function purchaseProgressInfo(order) {
             effectiveDeliveredQty:dispatch.delivered,
             returnedQty
         });
-        const ordered=Math.max(0,Number(item.supplyOrderedQty||0));
-        const received=Math.max(0,Number(item.receivedQty||0));
-        pending+=quantities?quantities.remainingToOrderQty:remainingProcurementQty(order,item);
-        inTransit+=quantities?quantities.inTransitQty:Math.max(0,ordered-received);
-        everOrdered+=ordered;
+        pending+=quantities.remainingToOrderQty;
+        inTransit+=quantities.inTransitQty;
+        everOrdered+=quantities.supplyOrderedQty;
     });
     if(pending>0&&inTransit>0)return {state:'partial',label:`待採購 ${pending}／在途 ${inTransit}`};
     if(pending>0)return {state:'pending',label:`待採購 ${pending}`};
@@ -8893,10 +8894,9 @@ function standaloneReceivingSupplyMetrics(filters = purchaseFilterContext()) {
         // 公司備庫沒有客戶訂單，不應被業務篩選隱藏；日期與廠牌篩選仍照常套用。
         if (supply.orderId) return;
         if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
-        const status = String(supply.status || '').toUpperCase();
-        if (!['ORDERED', 'PARTIAL_RECEIPT'].includes(status)) return;
-        const receiving = window.YushinReceiving?.normalizeSupply(supply);
-        const remaining = receiving ? receiving.remainingQty : 0;
+        const receiving = globalThis.YushinReceiving?.normalizeSupply(supply);
+        if (!receiving || !['ORDERED', 'PARTIAL_RECEIPT'].includes(receiving.status)) return;
+        const remaining = receiving.remainingQty;
         if (!(remaining > 0)) return;
         if (!purchaseLineMatchesFilters(supply.orderDate || supply.createdAt, '', supply.brand, {
             ...filters,
@@ -9434,13 +9434,19 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const alreadyOrdered = Math.max(0, Number(item.supplyOrderedQty || 0));
             const now = new Date().toISOString();
             const previousSupplyQty = Math.max(0, Number(existingSupply?.qty || 0));
-            const receivedQty = Math.max(0, Number(existingSupply?.receivedQty || 0));
             const nextSupplyQty = previousSupplyQty + Math.max(0, Number(qty || 0));
             const nextOrdered = alreadyOrdered + Math.max(0, Number(qty || 0));
-            const nextSupplyStatus = receivedQty >= nextSupplyQty && nextSupplyQty > 0
-                ? 'RECEIVED' : receivedQty > 0 ? 'PARTIAL_RECEIPT' : 'ORDERED';
+            if (!globalThis.YushinReceiving?.normalizeSupply) {
+                throw new Error('Receiving core 未載入，無法計算待到貨狀態。');
+            }
+            const supplyProjection = globalThis.YushinReceiving.normalizeSupply({
+                ...(existingSupply || {}),
+                qty: nextSupplyQty
+            });
+            const receivedQty = supplyProjection.receivedQty;
+            const nextSupplyStatus = supplyProjection.status;
             const registeredIncomingQty = Math.max(0, Number(existingSupply?.incomingRegisteredQty || 0));
-            const targetIncomingQty = directShip ? 0 : Math.max(0, nextSupplyQty - receivedQty);
+            const targetIncomingQty = directShip ? 0 : supplyProjection.remainingQty;
             const incomingDelta = targetIncomingQty - registeredIncomingQty;
 
             let invRef=null, whRef=null, invSnap=null, whSnap=null;
@@ -10416,10 +10422,16 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
         const supplySnap=await tx.get(supplyRef);
         if(!supplySnap.exists)throw new Error(`找不到供應紀錄 ${supplyId}`);
         const supply=supplySnap.data()||{};
-        const ordered=Math.max(0,Number(supply.qty||0));
-        const received=Math.min(ordered,Math.max(0,Number(supply.receivedQty||0)));
-        const remaining=Math.max(0,ordered-received);
-        const existingCancelled=String(supply.status||'').toUpperCase()==='CANCELLED';
+        if (!globalThis.YushinReceiving?.normalizeSupply) {
+            throw new Error('Receiving core 未載入，無法計算取消數量。');
+        }
+        const supplyProjection=globalThis.YushinReceiving.normalizeSupply(supply);
+        const ordered=supplyProjection.qty;
+        const received=supplyProjection.receivedQty;
+        const existingCancelled=supplyProjection.status==='CANCELLED';
+        const remaining=existingCancelled
+            ? Math.max(0,ordered-received)
+            : supplyProjection.remainingQty;
         const productKey=String(supply.productKey||supply.productId||'').trim();
         const warehouseId=String(supply.warehouseId||'').trim();
         result={
