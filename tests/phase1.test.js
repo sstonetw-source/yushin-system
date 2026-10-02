@@ -2986,7 +2986,7 @@ test('purchase history skips hidden work-card calculations', () => {
     const switchStart=appSource.indexOf('window.switchPurchasingView = function');
     const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
     const switchSource=appSource.slice(switchStart,switchEnd);
-    assert.match(switchSource,/const workflowView = !\['history', 'analytics'\]\.includes\(view\)/);
+    assert.match(switchSource,/const workflowView = !\['history', 'analytics', 'suppliers'\]\.includes\(view\)/);
     assert.match(switchSource,/const normalizedItemsByOrder = workflowView[\s\S]*?: null/);
     assert.match(switchSource,/if \(workflowView\) renderPurchasingWorkCards/);
 });
