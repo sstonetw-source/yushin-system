@@ -7966,7 +7966,8 @@ async function persistOrderProcurementDemands(orderId, order, items = []) {
             ownerUid:order.ownerUid||currentUser?.uid||'',
             salesCode:order.salesCode||currentUserCode||'',
             salesName:order.salesName||currentUserName||'',
-            scheduleDate:item.scheduleDate||order.expectedDate||''
+            // Demand keeps its own required-by date; supplier ETA belongs to supplyOrders.
+            scheduleDate:demand.scheduleDate||item.requiredByDate||item.scheduleDate||order.requiredByDate||order.expectedDate||''
         },{
             createdAt:order.createdAt||now,
             updatedAt:now
@@ -9376,7 +9377,10 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
         inTransitQty:quantities.inTransitQty,
         requiredSupplyQty:quantities.requiredSupplyQty,
         supplyOrderedQty:quantities.supplyOrderedQty,
-        receivedQty:quantities.receivedQty
+        receivedQty:quantities.receivedQty,
+        // Material Request / demand date: when the business needs the item.
+        // Keep this separate from supplier ETA stored on supplyOrders.
+        scheduleDate:item.requiredByDate||item.scheduleDate||order.requiredByDate||order.expectedDate||''
     });
     if (!demand) throw new Error('Procurement Demand core 未載入，無法計算採購需求。');
     return demand;
@@ -13297,7 +13301,9 @@ window.printPurchaseOrder = async function() {
                         requestedQty:Number(item.demandRequestedQty??item.qty??0),
                         orderedQty:Number(item.demandOrderedQty||0),
                         receivedQty:Number(item.demandReceivedQty||0),
-                        scheduleDate:item.scheduleDate||poRecord.expectedDate||''
+                        // Stock replenishment has no customer required-by date by default.
+                        // item.scheduleDate here is supplier ETA and must not become demand timing.
+                        scheduleDate:String(item.demandScheduleDate||item.requiredByDate||'').trim()
                     });
                 }
                 const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demandProjection,Number(item.qty||0));
@@ -13317,7 +13323,14 @@ window.printPurchaseOrder = async function() {
                     ownerUid:item.ownerUid||sourceOrderForDemand?.ownerUid||'',
                     salesCode:item.salesCode||sourceOrderForDemand?.salesCode||'',
                     salesName:item.salesName||sourceOrderForDemand?.salesName||'',
-                    scheduleDate:item.scheduleDate||poRecord.expectedDate||''
+                    // Preserve Material Request required-by timing. Do not overwrite it
+                    // with this PO line's vendor delivery estimate.
+                    scheduleDate:demandProjection.scheduleDate
+                        ||sourceItemForDemand?.requiredByDate
+                        ||sourceItemForDemand?.scheduleDate
+                        ||sourceOrderForDemand?.requiredByDate
+                        ||sourceOrderForDemand?.expectedDate
+                        ||''
                 },{
                     createdAt:sourceOrderForDemand?.createdAt||poRecord.createdAt,
                     updatedAt:poRecord.createdAt
