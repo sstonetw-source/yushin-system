@@ -5093,6 +5093,7 @@ function renderQuoteBrandSuggestions(input) {
             event.preventDefault();
             if (!item.allowed) return;
             input.value = item.brand;
+            invalidateQuoteProductIdentityIfBrandChanged(input);
             rememberQuoteBrand(item.brand);
             container.hidden = true;
             onQuoteBrandSelectChange(input);
@@ -5103,7 +5104,25 @@ function renderQuoteBrandSuggestions(input) {
     container.hidden = false;
 }
 
+function invalidateQuoteProductIdentityIfBrandChanged(input) {
+    const row = input?.closest?.('tr');
+    if (!row) return;
+    const productIdInput = row.querySelector('.item-product-id');
+    const productId = String(productIdInput?.value || '').trim();
+    if (!productId) return;
+    const linkedProduct = priceList.find(item => (item.productId || stableProductId(item)) === productId);
+    const currentBrand = quoteRowBrandValue(row);
+    const linkedBrand = resolveBrandName(linkedProduct?.brand || '');
+    if (linkedProduct && normalizeBrandLookupKey(currentBrand) === normalizeBrandLookupKey(linkedBrand)) return;
+    if (productIdInput) productIdInput.value = '';
+    const productLine = row.querySelector('.item-product-line');
+    const productType = row.querySelector('.item-product-type');
+    if (productLine) productLine.value = '';
+    if (productType) productType.value = '';
+}
+
 window.onQuoteBrandSearchInput = function(input) {
+    invalidateQuoteProductIdentityIfBrandChanged(input);
     renderQuoteBrandSuggestions(input);
     onQuoteBrandSelectChange(input);
 };
@@ -5242,19 +5261,32 @@ function getBrandFieldValue(selectId, otherInputId) {
 }
 
 // 新增訂單與估價單共用同一套 Product Master 貨號比對；第一次開啟也會等待價格表完成載入，不需手動重新整理。
-window.onOrderItemCodeChange = async function(input) {
-    const value = input.value.trim();
-    if (!value) return;
-    const match = await findProductByCode(value);
-    if (!match) {
-        input.dataset.autofillStatus = 'not-found';
+function clearOrderProductMatch(input) {
+    if (input) {
+        input.dataset.autofillStatus = '';
         input.dataset.productLine = '';
         input.dataset.productType = '';
         input.dataset.productMasterMatched = '0';
-        const hiddenProductLine = document.getElementById('orderProductLine');
-        if (hiddenProductLine) hiddenProductLine.value = '';
-        window._orderModalProductId = '';
-        setOrderCostFieldForProduct(null);
+    }
+    const hiddenProductLine = document.getElementById('orderProductLine');
+    if (hiddenProductLine) hiddenProductLine.value = '';
+    window._orderModalProductId = '';
+    setOrderCostFieldForProduct(null);
+}
+
+window.onOrderItemCodeChange = async function(input) {
+    const value = input.value.trim();
+    if (!value) {
+        clearOrderProductMatch(input);
+        clearQuickProductButton(input);
+        return;
+    }
+    const match = await findProductByCode(value);
+    // 使用者可能在查詢尚未完成時繼續改貨號；舊查詢不可覆蓋新的輸入。
+    if (input.value.trim() !== value) return;
+    if (!match) {
+        clearOrderProductMatch(input);
+        input.dataset.autofillStatus = 'not-found';
         showQuickProductButton(input, 'order');
         return;
     }
@@ -5295,6 +5327,11 @@ window.onOrderItemCodeChange = async function(input) {
 let orderItemCodeTimer = null;
 window.onOrderItemCodeInput = function(input) {
     clearTimeout(orderItemCodeTimer);
+    // 貨號一改就先撤銷上一個 Product Master 身分，避免使用者在 180ms 查詢完成前儲存到舊 productId。
+    clearOrderProductMatch(input);
+    clearQuickProductButton(input);
+    const value = input.value.trim();
+    if (!value) return;
     orderItemCodeTimer = setTimeout(() => onOrderItemCodeChange(input), 180);
 };
 
@@ -8166,10 +8203,19 @@ window.removeInventoryAdjustmentRow = function(idx) {
 };
 
 window.onInventoryAdjustmentCode = async function(idx, value) {
-    const match = await findProductByCode(value);
-    inventoryAdjustmentRows[idx].itemCode = String(value||'').trim();
+    if (!inventoryAdjustmentRows[idx]) return;
+    const requestedCode = String(value||'').trim();
+    inventoryAdjustmentRows[idx] = {
+        ...inventoryAdjustmentRows[idx],
+        itemCode: requestedCode,
+        itemName: '',
+        brand: '',
+        productId: ''
+    };
+    const match = requestedCode ? await findProductByCode(requestedCode) : null;
+    if (!inventoryAdjustmentRows[idx] || String(inventoryAdjustmentRows[idx].itemCode||'').trim() !== requestedCode) return;
     if (match) {
-        inventoryAdjustmentRows[idx].itemCode = match.model || value;
+        inventoryAdjustmentRows[idx].itemCode = match.model || requestedCode;
         inventoryAdjustmentRows[idx].itemName = match.nameCn || match.nameEn || '';
         inventoryAdjustmentRows[idx].brand = resolveBrandName(match.brand || '');
         inventoryAdjustmentRows[idx].productId = match.productId || stableProductId(match);
@@ -13342,13 +13388,26 @@ window.addDirectPoItem = function() {
 
 window.onDirectPoCodeChange = async function(idx, value) {
     if (!poItems[idx]) return;
-    const match = await findProductByCode(value);
-    poItems[idx].itemCode = String(value || '').trim();
+    const requestedCode = String(value || '').trim();
+    poItems[idx] = {
+        ...poItems[idx],
+        itemCode: requestedCode,
+        itemName: '',
+        productId: '',
+        brand: '',
+        unitPrice: 0,
+        supplier: '',
+        productLine: ''
+    };
+    poAllItems = poItems;
+    const match = requestedCode ? await findProductByCode(requestedCode) : null;
+    if (!poItems[idx] || String(poItems[idx].itemCode || '').trim() !== requestedCode) return;
     if (match) {
         const secureCost = await loadVisibleProductCost(match);
+        if (!poItems[idx] || String(poItems[idx].itemCode || '').trim() !== requestedCode) return;
         poItems[idx] = {
             ...poItems[idx],
-            itemCode: match.model || value,
+            itemCode: match.model || requestedCode,
             itemName: match.nameCn || match.nameEn || '',
             productId: match.productId || stableProductId(match),
             brand: resolveBrandName(match.brand || ''),
@@ -13364,7 +13423,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
             match.brand,
             match.productLine,
             match.productId || stableProductId(match),
-            match.model || value
+            match.model || requestedCode
         );
         if (!document.getElementById('poVendorName').value && mappedSupplier) {
             document.getElementById('poVendorName').value = mappedSupplier.purchaseHeaderName || mappedSupplier.supplierName || '';
@@ -13915,6 +13974,20 @@ window.printPurchaseOrder = async function() {
     if (poDirectStockMode && poItems.some(item => !String(item.warehouseId || defaultWarehouse()?.id || '').trim())) {
         alert('新增庫存採購單必須指定入庫倉庫，請先建立或選擇倉庫。');
         return;
+    }
+    if (poDirectStockMode) {
+        const unmatchedStockItems = poItems.filter(item => {
+            const productId = String(item.productId || '').trim();
+            const match = findPriceItemForOrder({ itemCode:item.itemCode || '', brand:item.brand || '' });
+            if (!productId || !match) return true;
+            const matchedProductId = String(match.productId || stableProductId(match) || '').trim();
+            return matchedProductId !== productId
+                || normalizeBrandLookupKey(match.brand || '') !== normalizeBrandLookupKey(item.brand || '');
+        });
+        if (unmatchedStockItems.length) {
+            alert('庫存採購的每個品項都必須對應 Product Master。請重新選擇有效貨號後再建立訂購單。');
+            return;
+        }
     }
     if (poItems.some(item => (item.fulfillmentType || 'WAREHOUSE') !== 'DIRECT_SHIP' && !String(item.warehouseId || defaultWarehouse()?.id || '').trim())) {
         alert('入庫品項必須有倉庫，請先在倉庫管理建立預設倉庫。');

@@ -132,6 +132,30 @@ test('product management uses complete paginated keyword search without exposing
     assert.match(appSource, /window\.addProductManagementToOrder/);
 });
 
+test('product identity handoffs clear stale hidden state before saving', () => {
+    const orderInputStart = appSource.indexOf('window.onOrderItemCodeInput = function(input)');
+    const orderInputEnd = appSource.indexOf('\n};', orderInputStart) + 3;
+    const orderInput = appSource.slice(orderInputStart, orderInputEnd);
+    assert.match(orderInput, /clearOrderProductMatch\(input\)/);
+    assert.match(appSource, /if \(input\.value\.trim\(\) !== value\) return/);
+
+    const directPoStart = appSource.indexOf('window.onDirectPoCodeChange = async function');
+    const directPoEnd = appSource.indexOf('\n};', directPoStart) + 3;
+    const directPo = appSource.slice(directPoStart, directPoEnd);
+    assert.match(directPo, /productId: ''/);
+    assert.match(directPo, /String\(poItems\[idx\]\.itemCode \|\| ''\)\.trim\(\) !== requestedCode/);
+    assert.match(appSource, /庫存採購的每個品項都必須對應 Product Master/);
+
+    const inventoryStart = appSource.indexOf('window.onInventoryAdjustmentCode = async function');
+    const inventoryEnd = appSource.indexOf('\n};', inventoryStart) + 3;
+    const inventoryCode = appSource.slice(inventoryStart, inventoryEnd);
+    assert.match(inventoryCode, /productId: ''/);
+    assert.match(inventoryCode, /String\(inventoryAdjustmentRows\[idx\]\.itemCode\|\|''\)\.trim\(\) !== requestedCode/);
+
+    assert.match(appSource, /function invalidateQuoteProductIdentityIfBrandChanged\(input\)/);
+    assert.match(appSource, /invalidateQuoteProductIdentityIfBrandChanged\(input\);\n    renderQuoteBrandSuggestions/);
+});
+
 test('inventory product lookup debounces server search', () => {
     assert.match(indexSource, /id="businessProductSearch"[^>]+oninput="queueBusinessProductSearch\(\)"/);
     assert.match(appSource, /businessProductSearchTimer=scheduleListSearch\(businessProductSearchTimer,\(\)=>searchBusinessProducts\(\)\)/);
