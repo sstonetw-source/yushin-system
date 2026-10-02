@@ -9235,6 +9235,7 @@ let procurementDemandCursor = null;
 let procurementDemandHasMore = true;
 let procurementDemandLoaded = false;
 let procurementDemandSourceOrderCache = new Map();
+const selectedPendingPurchaseDemandIds = new Set();
 
 function invalidateProcurementDemandQueue() {
     procurementDemandCache=[];
@@ -9242,6 +9243,7 @@ function invalidateProcurementDemandQueue() {
     procurementDemandHasMore=true;
     procurementDemandLoaded=false;
     procurementDemandSourceOrderCache=new Map();
+    selectedPendingPurchaseDemandIds.clear();
     purchasingViewLoaded?.delete?.('ordering');
 }
 let pendingPurchaseError = '';
@@ -10087,6 +10089,28 @@ function syncCommittedPurchaseOrderSources(orders) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 }
 
+function updatePendingPurchaseBatchButton() {
+    const button=document.getElementById('purchasePendingBatchPoBtn');
+    if(!button)return;
+    const count=selectedPendingPurchaseDemandIds.size;
+    button.disabled=count<2;
+    button.textContent=count ? `合併產生訂購單（${count}）` : '合併產生訂購單';
+}
+
+function clearPendingPurchaseSelection() {
+    selectedPendingPurchaseDemandIds.clear();
+    document.querySelectorAll('.pending-purchase-batch-select').forEach(input=>{ input.checked=false; });
+    updatePendingPurchaseBatchButton();
+}
+
+window.togglePendingPurchaseSelection = function(demandId, checked) {
+    const id=String(demandId||'');
+    if(!id)return;
+    if(checked)selectedPendingPurchaseDemandIds.add(id);
+    else selectedPendingPurchaseDemandIds.delete(id);
+    updatePendingPurchaseBatchButton();
+};
+
 function renderPendingPurchaseOrders() {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
@@ -10094,6 +10118,7 @@ function renderPendingPurchaseOrders() {
     const fragment = document.createDocumentFragment();
     const filters = purchaseFilterContext();
     let shown = 0;
+    const visibleSelectableIds=new Set();
 
     const rows=[...procurementDemandCache]
         .filter(demand=>Number(demand.remainingToOrderQty||0)>0)
@@ -10116,12 +10141,17 @@ function renderPendingPurchaseOrders() {
         const statusLabel=globalThis.YushinProcurementDemand?.statusLabel(demand.status)||'待採購';
         let customer=order?.customerName||order?.customer||'';
         let actionHtml='';
+        const selfOrder=!!order&&(item.procurementType||order.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER';
+        const batchSelectable=sourceType==='SALES_ORDER'&&!!order&&!selfOrder;
+        if(batchSelectable)visibleSelectableIds.add(String(demand.id||''));
+        const selectionHtml=batchSelectable
+            ? `<input type="checkbox" class="pending-purchase-batch-select" aria-label="選取合併採購" ${selectedPendingPurchaseDemandIds.has(String(demand.id||''))?'checked':''} onchange="togglePendingPurchaseSelection('${escapeAttr(demand.id||'')}',this.checked)">`
+            : '';
 
         if(sourceType==='STOCK_REPLENISHMENT'){
             customer='備庫';
             actionHtml=`<button type="button" class="btn-small btn-secondary" onclick="openInventoryReplenishment('${escapeAttr(demand.sourceId||demand.productKey||demand.productId||'')}')">產生訂購單</button>`;
         }else if(order){
-            const selfOrder=(item.procurementType||order.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER';
             actionHtml=selfOrder
                 ? (canBusinessSelfOrder(order)
                     ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(demand.sourceItemId||item.itemId||'')}')">登記自行訂貨</button>`
@@ -10132,12 +10162,16 @@ function renderPendingPurchaseOrders() {
         }
 
         const row=document.createElement('tr');
-        row.innerHTML=`<td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項">${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
+        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項">${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
         fragment.appendChild(row);
         shown++;
     }
 
+    for(const id of [...selectedPendingPurchaseDemandIds]){
+        if(!visibleSelectableIds.has(id))selectedPendingPurchaseDemandIds.delete(id);
+    }
     body.appendChild(fragment);
+    updatePendingPurchaseBatchButton();
     const status=document.getElementById('purchasePendingStatus');
     if(status)status.textContent=pendingPurchaseLoading
         ? '載入中…'
@@ -10160,6 +10194,8 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         procurementDemandHasMore=true;
         procurementDemandLoaded=false;
         procurementDemandSourceOrderCache=new Map();
+        selectedPendingPurchaseDemandIds.clear();
+        updatePendingPurchaseBatchButton();
     }
     renderPendingPurchaseOrders();
     try{
@@ -10485,6 +10521,93 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         updatePoSaveStatus('這張訂購單尚未建立。確認品項、廠商與單價後，即可列印 / 存為 PDF 並自動同步雲端。');
     } catch (err) { alert('無法開啟訂購單：' + err.message); }
     finally { if (button) { button.disabled = false; button.textContent = '產生訂購單'; } }
+};
+
+window.openSelectedPurchaseDraft = async function() {
+    if(!canCreatePurchaseOrderCapability()||!canAccessPage('orders.po'))return;
+    const button=document.getElementById('purchasePendingBatchPoBtn');
+    const selectedIds=[...selectedPendingPurchaseDemandIds];
+    if(selectedIds.length<2){
+        alert('請至少勾選 2 筆待採購需求。');
+        return;
+    }
+    if(button){button.disabled=true;button.textContent='整理中…';}
+    try{
+        const selectedDemands=procurementDemandCache.filter(demand=>
+            selectedPendingPurchaseDemandIds.has(String(demand.id||''))
+            && Number(demand.remainingToOrderQty||0)>0
+        );
+        if(selectedDemands.length!==selectedIds.length)throw new Error('部分待採購需求已更新，請按「更新」後重新勾選。');
+
+        const rows=selectedDemands.map(demand=>{
+            if(String(demand.sourceType||'')!=='SALES_ORDER')throw new Error('目前批次合併只支援客戶訂單採購。');
+            const order=procurementDemandSourceOrderCache.get(String(demand.sourceId||''));
+            if(!order||normalizedOrderStatus(order)!=='normal')throw new Error('部分來源訂單已取消、作廢或尚未載入。');
+            const item=pendingPurchaseLines(order).find(line=>String(line.itemId||'')===String(demand.sourceItemId||''));
+            if(!item)throw new Error('部分勾選品項已無待採購數量，請更新後重試。');
+            return {demand,order,item};
+        });
+        const initialItems=rows.map(row=>row.item);
+        await Promise.all([
+            loadSupplierWarehouseMasters(),
+            preloadPurchaseCostsForItems(initialItems)
+        ]);
+
+        const refreshedRows=rows.map(row=>{
+            const item=pendingPurchaseLines(row.order).find(line=>String(line.itemId||'')===String(row.demand.sourceItemId||''));
+            if(!item)throw new Error('部分勾選品項已無待採購數量，請更新後重試。');
+            return {...row,item};
+        });
+        const items=refreshedRows.map(row=>row.item);
+        const selectedOrders=[...new Map(refreshedRows.map(row=>[row.order.id,row.order])).values()];
+
+        if(items.some(item=>String(item.fulfillmentType||'WAREHOUSE').toUpperCase()==='DIRECT_SHIP')){
+            throw new Error('原廠直送需依客戶地址分開處理，目前不合併成同一張訂購單。');
+        }
+        const warehouseIds=new Set(items.map(item=>String(item.warehouseId||defaultWarehouse()?.id||'').trim()));
+        if(warehouseIds.has(''))throw new Error('部分品項尚未指定入庫倉庫，請先完成倉庫設定。');
+        if(warehouseIds.size!==1)throw new Error('不同入庫倉庫的需求不能合併成同一張訂購單。');
+
+        const companies=[...new Set(selectedOrders.map(order=>String(order.company||'').trim()).filter(Boolean))];
+        if(companies.length>1)throw new Error('不同公司的來源訂單不能合併成同一張訂購單。');
+
+        const resolvedSuppliers=items.map(item=>supplierForProduct(
+            item.brand,item.productLine,item.productId,item.itemCode
+        ));
+        if(resolvedSuppliers.some(supplier=>!supplier)){
+            const missing=items.filter((item,index)=>!resolvedSuppliers[index]).map(item=>item.itemCode||item.itemName||'未命名品項');
+            throw new Error('以下品項尚未設定供應來源：'+missing.join('、'));
+        }
+        const supplierIds=new Set(resolvedSuppliers.map(supplier=>String(supplier.id||supplier.supplierId||'').trim()).filter(Boolean));
+        if(supplierIds.size!==1)throw new Error('勾選品項屬於不同供應商，請分開建立訂購單。');
+        const supplier=resolvedSuppliers[0];
+        const supplierHeader=supplier.purchaseHeaderName||supplier.supplierName||'';
+        if(!supplierHeader)throw new Error('供應商主檔缺少訂購單抬頭。');
+
+        poDirectStockMode=false;
+        poEditingId=null;
+        poIncomingSyncPending=false;
+        poItems=items;
+        poAllItems=items;
+        populatePoVendorSuggestions();
+        document.getElementById('poVendorName').value=supplierHeader;
+        document.getElementById('poBuyerName').innerText=currentUserName||currentUser?.email||'';
+        document.getElementById('poDate').value=localDateString();
+        clearPoExpectedDate();
+        await autoFillPoSupplier(items);
+        const targetCompany=companies[0]||bestPurchaseOrderCompany(selectedOrders,items,currentCompany);
+        switchPoCompany(targetCompany,null,true);
+        generatePoNo();
+        renderPoItemsTable();
+        updatePoModeUI();
+        updatePoSaveStatus(`已合併 ${items.length} 筆待採購需求；請確認數量、成本與預計到貨日後匯出 PDF。`);
+        document.getElementById('poModalOverlay').classList.add('active');
+        clearPendingPurchaseSelection();
+    }catch(err){
+        alert('無法合併建立訂購單：'+(err?.message||err));
+    }finally{
+        updatePendingPurchaseBatchButton();
+    }
 };
 
 // 「採購訂單」列出所有已經產生過的訂購單紀錄（不分是誰產生的，只要是採購／管理員都看得到全部）
