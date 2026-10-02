@@ -681,6 +681,10 @@ function updateReadonlyNotice() {
     notice.style.display = 'block';
     if (pageKey === 'orders.po' && currentUserRole === 'warehouse' && canReceiveInventoryCapability()) {
         notice.innerText = '📦 倉管模式：可以確認到貨與入庫；建立採購單、補庫採購與打單仍由採購或管理員處理。';
+    } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
+        notice.innerText = '產品主檔權限：採購可新增、編輯與停用 Product Master；永久刪除僅限管理員。';
+    } else if (pageKey === 'products' && hasBusinessCapability()) {
+        notice.innerText = 'Product Master 僅可查看；您可以把產品加入估價單或建立訂單，但不能修改、停用或刪除產品主檔。';
     } else {
         notice.innerText = '🔒 此分頁目前為「僅可查看」，您可以瀏覽與搜尋，但不能新增、修改或刪除資料。';
     }
@@ -1355,6 +1359,11 @@ function canManagePendingProductMaster() {
     return currentUserRole === 'admin' || currentUserRole === 'purchaser';
 }
 
+function canDeleteProductMaster() {
+    // 管理員切成其他角色視角時也不能誤觸永久刪除。
+    return trueUserRole === 'admin' && currentUserRole === 'admin';
+}
+
 function updatePendingProductMasterButton() {
     const allowed = canManagePendingProductMaster();
     const tools = document.getElementById('productManagementTools');
@@ -1745,8 +1754,11 @@ function productManagementRow(product) {
     const status = product.status || (product.active === false ? 'INACTIVE' : 'ACTIVE');
     const inactive = status === 'INACTIVE' || product.active === false;
     const selected = !!productId && productManagementSelection.has(productId);
+    const canQuote = !inactive && canEditPage('quote.create');
+    const canOrder = !inactive && canEditPage('orders.list');
+    const canDelete = !!productId && canDeleteProductMaster();
     return `<tr class="${selected ? 'is-selected' : ''}${inactive ? ' is-inactive' : ''}">
-      <td data-th="選取" class="no-print product-management-select-cell"><input type="checkbox" ${selected ? 'checked' : ''} ${productId && !inactive ? '' : 'disabled'} aria-label="選取 ${escapeAttr(product.productName || product.nameCn || product.nameEn || product.manufacturerPartNo || product.sku || '產品')}" onchange="toggleProductManagementSelection('${escapeAttr(productId)}', this.checked)"></td>
+      <td data-th="選取" class="no-print product-management-select-cell"><input type="checkbox" ${selected ? 'checked' : ''} ${productId && !inactive && (canQuote || canOrder) ? '' : 'disabled'} aria-label="選取 ${escapeAttr(product.productName || product.nameCn || product.nameEn || product.manufacturerPartNo || product.sku || '產品')}" onchange="toggleProductManagementSelection('${escapeAttr(productId)}', this.checked)"></td>
       <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
       <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
       <td data-th="廠牌">${escapeHtml(product.brandName || product.brand || '')}</td>
@@ -1756,12 +1768,13 @@ function productManagementRow(product) {
       <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
       <td data-th="狀態">${inactive ? '停用' : escapeHtml(status === 'TEMPORARY' ? '待補主檔' : '啟用')}</td>
       <td data-th="操作" class="no-print product-management-actions">
-        ${!inactive && canAccessPage('quote.create') ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
-        ${!inactive && canAccessPage('orders.list') ? `<button type="button" class="btn-small btn-secondary" onclick="addProductManagementToOrder('${escapeAttr(productId)}')">建立訂單</button>` : ''}
+        ${canQuote ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote('${escapeAttr(productId)}')">加入估價單</button>` : ''}
+        ${canOrder ? `<button type="button" class="btn-small btn-secondary" onclick="addProductManagementToOrder('${escapeAttr(productId)}')">建立訂單</button>` : ''}
         ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="openProductMasterEditor('${escapeAttr(productId)}')">編輯</button>` : ''}
         ${canManagePendingProductMaster() ? (inactive
             ? `<button type="button" class="btn-small" onclick="setProductMasterActive('${escapeAttr(productId)}', true)">重新啟用</button>`
             : `<button type="button" class="btn-small btn-danger" onclick="setProductMasterActive('${escapeAttr(productId)}', false)">停用</button>`) : ''}
+        ${canDelete ? `<button type="button" class="btn-small btn-danger" onclick="deleteProductMaster('${escapeAttr(productId)}')">刪除</button>` : ''}
       </td>
     </tr>`;
 }
@@ -2172,6 +2185,116 @@ window.setProductMasterActive = async function(productId, active) {
     } catch (err) {
         console.error('更新 Product Master 狀態失敗：', err);
         alert('更新產品狀態失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, state);
+    }
+};
+
+async function productMasterOperationalBlockers(productId) {
+    const id = String(productId || '').trim();
+    if (!id) return ['缺少產品識別碼'];
+
+    const [inventorySnap, warehouseSnap, reservationSnap, demandSnap, supplySnap, lotSnap] = await Promise.all([
+        firestoreReadWithTimeout(db.collection('inventory').doc(encodeURIComponent(id)).get(), '檢查產品庫存'),
+        firestoreReadWithTimeout(db.collection('warehouseStocks').where('productKey', '==', id).limit(100).get(), '檢查分倉庫存'),
+        firestoreReadWithTimeout(db.collection('inventoryReservations').where('productKey', '==', id).limit(100).get(), '檢查庫存占用'),
+        firestoreReadWithTimeout(db.collection('procurementDemands').where('productId', '==', id).limit(100).get(), '檢查採購需求'),
+        firestoreReadWithTimeout(db.collection('supplyOrders').where('productId', '==', id).limit(100).get(), '檢查在途供應'),
+        firestoreReadWithTimeout(db.collection('inventoryLots').where('productId', '==', id).limit(100).get(), '檢查批號庫存')
+    ]);
+
+    const blockers = [];
+    const inventory = inventorySnap.exists ? (inventorySnap.data() || {}) : {};
+    if (Number(inventory.onHand || 0) > 0 || Number(inventory.reserved || 0) > 0 || Number(inventory.incoming || 0) > 0) {
+        blockers.push('仍有庫存／占用／在途數量');
+    }
+
+    if (warehouseSnap.docs.some(doc => {
+        const data = doc.data() || {};
+        return Number(data.onHand || 0) > 0 || Number(data.reserved || 0) > 0 || Number(data.incoming || 0) > 0;
+    })) blockers.push('仍有分倉庫存');
+
+    if (reservationSnap.docs.some(doc => {
+        const data = doc.data() || {};
+        return String(data.status || 'active').toLowerCase() === 'active' && Number(data.quantity || 0) > 0;
+    })) blockers.push('仍有有效訂單占用');
+
+    if (demandSnap.docs.some(doc => {
+        const data = doc.data() || {};
+        return String(data.status || '').toUpperCase() !== 'CANCELLED'
+            && (Number(data.remainingToOrderQty || 0) > 0 || Number(data.remainingToReceiveQty || 0) > 0);
+    })) blockers.push('仍有未完成採購需求');
+
+    if (supplySnap.docs.some(doc => {
+        const data = doc.data() || {};
+        const status = String(data.status || '').toUpperCase();
+        return !['CANCELLED', 'CLOSED', 'RECEIVED'].includes(status)
+            && Math.max(0, Number(data.qty || 0) - Number(data.receivedQty || 0)) > 0;
+    })) blockers.push('仍有未完成訂貨／在途供應');
+
+    if (lotSnap.docs.some(doc => Number((doc.data() || {}).remainingQty || 0) > 0)) {
+        blockers.push('仍有可用批號庫存');
+    }
+
+    return [...new Set(blockers)];
+}
+
+window.deleteProductMaster = async function(productId) {
+    if (!canDeleteProductMaster()) {
+        alert('只有管理員可以永久刪除 Product Master。');
+        return;
+    }
+
+    const id = String(productId || '').trim();
+    if (!id) return;
+    let product = productManagementResults.find(item => (item.productId || item.id) === id);
+    if (!product) {
+        const snap = await firestoreReadWithTimeout(db.collection('products').doc(id).get(), '讀取 Product Master');
+        if (snap.exists) product = { id:snap.id, ...snap.data() };
+    }
+    if (!product) {
+        alert('找不到這筆 Product Master，可能已經被刪除。');
+        return;
+    }
+
+    const brand = product.brandName || product.brand || '';
+    const code = product.manufacturerPartNo || product.sku || '';
+    const name = product.productName || product.nameCn || product.nameEn || '';
+    if (!confirm(`確定永久刪除「${brand} / ${code} ${name}」？\n\n系統會先檢查庫存、占用、採購需求與在途供應；有未完成關聯時不允許刪除。歷史估價單／訂單與價格歷史不會被刪除。`)) return;
+
+    const button = actionButtonFromEventOrSelector();
+    const state = beginActionButton(button, '檢查中…');
+    if (button && !state) return;
+
+    try {
+        const blockers = await productMasterOperationalBlockers(id);
+        if (blockers.length) {
+            alert('目前不能刪除這筆 Product Master：\n• ' + blockers.join('\n• ') + '\n\n請先完成或取消相關庫存／採購流程；若只是不要再使用此品項，請改用「停用」。');
+            return;
+        }
+
+        if (button) button.textContent = '刪除中…';
+        const batch = db.batch();
+        batch.delete(db.collection('products').doc(id));
+        // 標準成本與 Product Master 同生命週期；實際採購價格與歷史價格紀錄保留。
+        batch.delete(db.collection('productCosts').doc(id));
+        await batch.commit();
+
+        productManagementSelection.delete(id);
+        productManagementResults = productManagementResults.filter(item => (item.productId || item.id) !== id);
+        priceList = priceList.filter(item => (item.productId || stableProductId(item)) !== id);
+        [...visibleProductCostCache.keys()].forEach(key => {
+            if (String(key).endsWith(`||${id}`)) visibleProductCostCache.delete(key);
+        });
+        refreshPriceDatalists();
+        renderProductManagementResults();
+
+        const statusEl = document.getElementById('productManagementSearchStatus');
+        if (statusEl) statusEl.textContent = `已永久刪除 Product Master：${brand} / ${code}；歷史估價單、訂單與價格歷史保留。`;
+        showActionFeedback('Product Master 已刪除。');
+    } catch (err) {
+        console.error('刪除 Product Master 失敗：', err);
+        alert('刪除 Product Master 失敗：' + (err?.message || err));
     } finally {
         endActionButton(button, state);
     }

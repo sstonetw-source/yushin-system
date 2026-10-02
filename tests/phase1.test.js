@@ -4545,24 +4545,35 @@ test('admin can remove a pending product reminder without deleting source docume
     assert.match(clearSource,/仍會保持不再出現在待補清單/);
 });
 
-test('Product Master management has clear edit and soft-disable controls', () => {
+test('Product Master management keeps disable and adds guarded admin-only permanent delete', () => {
     assert.match(indexSource, /Product Master 管理/);
     assert.match(indexSource, /id="productManagementShowInactive"/);
-    assert.match(indexSource, /錯誤品項請按「停用」/);
+    assert.match(indexSource, /永久刪除僅限管理員/);
     const rowStart=appSource.indexOf('function productManagementRow(product)');
     const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);
     assert.match(rowSource,/openProductMasterEditor/);
     assert.match(rowSource,/setProductMasterActive/);
-    assert.match(rowSource,/重新啟用/);
-    assert.match(rowSource,/停用/);
+    assert.match(rowSource,/deleteProductMaster/);
+    assert.match(rowSource,/canDeleteProductMaster/);
+    assert.match(rowSource,/canEditPage\('quote\.create'\)/);
+    assert.match(rowSource,/canEditPage\('orders\.list'\)/);
 
     const toggleStart=appSource.indexOf('window.setProductMasterActive = async function');
-    const toggleEnd=appSource.indexOf('\nwindow.openPendingProductMasterEditor',toggleStart);
+    const toggleEnd=appSource.indexOf('\nasync function productMasterOperationalBlockers',toggleStart);
     const toggleSource=appSource.slice(toggleStart,toggleEnd);
     assert.match(toggleSource,/status: active \? 'ACTIVE' : 'INACTIVE'/);
     assert.match(toggleSource,/歷史單據與關聯資料會保留/);
-    assert.doesNotMatch(toggleSource,/db\.collection\('products'\)\.doc\([^)]*\)\.delete\(/);
+    assert.doesNotMatch(toggleSource,/batch\.delete|\.delete\(/);
+
+    const deleteStart=appSource.indexOf('window.deleteProductMaster = async function(productId)');
+    const deleteEnd=appSource.indexOf('\nwindow.openPendingProductMasterEditor',deleteStart);
+    const deleteSource=appSource.slice(deleteStart,deleteEnd);
+    assert.match(appSource,/function canDeleteProductMaster\(\)[\s\S]*?trueUserRole === 'admin' && currentUserRole === 'admin'/);
+    assert.match(deleteSource,/productMasterOperationalBlockers\(id\)/);
+    assert.match(deleteSource,/batch\.delete\(db\.collection\('products'\)\.doc\(id\)\)/);
+    assert.match(deleteSource,/batch\.delete\(db\.collection\('productCosts'\)\.doc\(id\)\)/);
+    assert.match(deleteSource,/歷史估價單、訂單與價格歷史保留/);
 });
 
 test('product management can batch-select products into one quote or one order', () => {
@@ -4574,6 +4585,18 @@ test('product management can batch-select products into one quote or one order',
     assert.match(appSource, /products\.forEach\(product => addQuoteRow\(productManagementSource\(product\)\)\)/);
     assert.match(appSource, /newOrderDraftItems = sources\.slice\(1\)\.map\(normalizeNewOrderItem\)/);
     assert.match(appSource, /saveOrderDraft\(\);\s*clearProductManagementSelection\(\);/);
+});
+
+test('sales can use Product Master for quote and order while Product Master itself stays read-only', () => {
+    assert.match(appSource, /sales: Object\.freeze\(\{[^}]*'quote\.create':'edit'[^}]*products:'view'[^}]*'orders\.list':'edit'/);
+    const rowStart=appSource.indexOf('function productManagementRow(product)');
+    const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
+    const rowSource=appSource.slice(rowStart,rowEnd);
+    assert.match(rowSource,/canQuote = !inactive && canEditPage\('quote\.create'\)/);
+    assert.match(rowSource,/canOrder = !inactive && canEditPage\('orders\.list'\)/);
+    assert.match(rowSource,/加入估價單/);
+    assert.match(rowSource,/建立訂單/);
+    assert.match(appSource,/Product Master 僅可查看；您可以把產品加入估價單或建立訂單/);
 });
 
 

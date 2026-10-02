@@ -522,14 +522,14 @@ service cloud.firestore {
       allow read: if active();
       allow create: if admin() || purchaser() || businessTemporaryProduct(id, request.resource.data);
       allow update: if admin() || purchaser();
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     // 公司標準產品成本只提供採購／管理員；業務自行調貨成本存在自己的訂單交易中。
     match /productCosts/{id} {
       allow read: if admin() || purchaser();
       allow create, update: if admin() || purchaser();
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     match /priceHistory/{id} {

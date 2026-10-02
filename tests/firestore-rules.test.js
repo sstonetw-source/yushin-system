@@ -6,7 +6,7 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where, writeBatch } = require('firebase/firestore');
+const { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where, writeBatch } = require('firebase/firestore');
 
 let env;
 const projectId = 'demo-yushin';
@@ -231,6 +231,24 @@ test('sales may create a temporary product but cannot create or modify Product M
   await assertFails(setDoc(doc(db('sales1'), 'productCosts/p3'), cost));
   await assertSucceeds(setDoc(doc(db('buyer1'), 'productCosts/p3'), cost));
   await assertFails(setDoc(doc(db('sales1'), 'priceHistory/p3'), { productId:'p3', unitCost:1 }));
+});
+
+test('only admin can permanently delete Product Master and its standard cost', async () => {
+  const product = { productId:'delete-admin', brandName:'Roche', manufacturerPartNo:'DEL-1', productName:'Delete test', status:'ACTIVE', active:true };
+  await seed('products/delete-admin', product);
+  await seed('products/delete-sales', { ...product, productId:'delete-sales' });
+  await seed('products/delete-buyer', { ...product, productId:'delete-buyer' });
+  await seed('productCosts/delete-admin', { productId:'delete-admin', standardCost:100 });
+  await seed('productCosts/delete-sales', { productId:'delete-sales', standardCost:100 });
+  await seed('productCosts/delete-buyer', { productId:'delete-buyer', standardCost:100 });
+
+  await assertFails(deleteDoc(doc(db('sales1'), 'products/delete-sales')));
+  await assertFails(deleteDoc(doc(db('buyer1'), 'products/delete-buyer')));
+  await assertSucceeds(deleteDoc(doc(db('admin'), 'products/delete-admin')));
+
+  await assertFails(deleteDoc(doc(db('sales1'), 'productCosts/delete-sales')));
+  await assertFails(deleteDoc(doc(db('buyer1'), 'productCosts/delete-buyer')));
+  await assertSucceeds(deleteDoc(doc(db('admin'), 'productCosts/delete-admin')));
 });
 
 test('only purchaser/admin can create dispatch paperwork record', async () => {

@@ -97,7 +97,7 @@
         <div class="section-header no-print">
             <div>
                 <h2>產品</h2>
-                <div class="section-subtitle">可直接依廠牌瀏覽 Product Master，也可搜尋完整資料庫；管理員／採購可編輯或停用錯誤品項。</div>
+                <div class="section-subtitle">可直接依廠牌瀏覽 Product Master，也可搜尋完整資料庫；業務可加入估價單／建立訂單，管理員可永久刪除錯誤主檔。</div>
             </div>
 
 
@@ -108,7 +108,7 @@
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
         </div>
-        <div class="product-search-note">搜尋會查完整 Product Master，不受目前畫面載入筆數限制。管理員／採購的搜尋結果會提供「編輯／停用」操作。</div>
+        <div class="product-search-note">搜尋會查完整 Product Master，不受目前畫面載入筆數限制。業務可直接「加入估價單／建立訂單」；管理員／採購可編輯或停用，永久刪除僅限管理員。</div>
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
 
         <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
@@ -119,7 +119,7 @@
                 <button type="button" id="ignoredPendingProductBtn" class="btn-secondary" style="display:none;" onclick="openIgnoredPendingProducts()">已移除待補</button>
                 <label id="productManagementInactiveWrap" class="product-management-toggle" style="display:none;"><input type="checkbox" id="productManagementShowInactive" onchange="if(productBrandBrowseCurrent){reloadCurrentProductBrand();}else if(document.getElementById('productManagementSearch').value.trim().length>=2){searchProductManagement();}"> 顯示已停用</label>
             </div>
-            <div class="product-management-tools-note">搜尋產品後可直接按「編輯」修改主檔；錯誤品項請按「停用」。停用不刪除歷史關聯，且不再提供估價／訂單選用；需要復原時勾選「顯示已停用」後重新啟用。</div>
+            <div class="product-management-tools-note">搜尋產品後可直接按「編輯」修改主檔；一般錯誤請優先「停用」。管理員另可永久刪除確定建錯的 Product Master；刪除前會先檢查庫存、占用、採購需求與在途供應，歷史估價單／訂單仍保留。</div>
 
             <details id="productBatchMaintenance" class="product-import-details" style="display:none;">
                 <summary>批次匯入</summary>
@@ -1553,6 +1553,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261002-43"></script>
+    <script src="app.js?v=20261002-44"></script>
 </body>
 </html>
