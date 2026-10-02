@@ -1403,7 +1403,7 @@ test('phase 20 core workflow contracts are all represented in regression coverag
 });
 
 
-test('forecast quote-origin keeps line-item snapshots for later order splitting', () => {
+test('forecast quote-origin keeps line-item snapshots for later multi-item order creation', () => {
     const start = appSource.indexOf('window.createForecastFromQuote');
     const end = appSource.indexOf('window.markQuoteAsDeal', start);
     const s = appSource.slice(start, end);
@@ -1413,16 +1413,25 @@ test('forecast quote-origin keeps line-item snapshots for later order splitting'
     assert.match(s, /subtotal:\s*parseMoney\(item\.subtotal\)/);
 });
 
-test('forecast to order supports one-item prefill and multi-item split', () => {
+test('forecast to order supports one-item prefill and one multi-item internal order', () => {
     assert.match(appSource, /async function forecastOrderItems/);
     assert.match(appSource, /function forecastItemToOrderSource/);
     assert.match(appSource, /async function createForecastOrdersDirectly/);
     const start = appSource.indexOf('window.createOrderFromForecast');
     const end = appSource.indexOf('估價單系統', start);
-    const s = appSource.slice(start, end);
-    assert.match(s, /items\.length === 1/);
-    assert.match(s, /openOrderModal\(forecastItemToOrderSource/);
-    assert.match(s, /createForecastOrdersDirectly\(forecast, items\)/);
+    const source = appSource.slice(start, end);
+    assert.match(source, /items\.length === 1/);
+    assert.match(source, /openOrderModal\(forecastItemToOrderSource/);
+    assert.match(source, /將建立 1 張多品項訂單/);
+    assert.match(source, /createForecastOrdersDirectly\(forecast, items\)/);
+
+    const directStart=appSource.indexOf('async function createForecastOrdersDirectly');
+    const directEnd=appSource.indexOf('\nwindow.createOrderFromForecast',directStart);
+    const directSource=appSource.slice(directStart,directEnd);
+    assert.match(directSource,/items:normalizedItems/);
+    assert.match(directSource,/itemCount:normalizedItems\.length/);
+    assert.match(directSource,/const orderRef=db\.collection\('orders'\)\.doc\(\)/);
+    assert.doesNotMatch(directSource,/normalizedItems\.forEach\([^]*?db\.collection\('orders'\)\.doc\(\)/);
 });
 
 test('order modal accepts Forecast source data and uses the actual source-link fields', () => {
@@ -3767,10 +3776,12 @@ test('equipment data scope agrees with engineer all-company access', () => {
 });
 
 
-test('multi-item Forecast conversion tracks inventory reservation outcome', () => {
+test('multi-item Forecast conversion tracks inventory reservation outcome on one order', () => {
     const start=appSource.indexOf('async function createForecastOrdersDirectly');
     const end=appSource.indexOf('\nwindow.createOrderFromForecast',start);
     const source=appSource.slice(start,end);
+    assert.match(source,/items:normalizedItems/);
+    assert.match(source,/itemCount:normalizedItems\.length/);
     assert.match(source,/inventoryReservationStatus:'pending'/);
     assert.match(source,/inventoryReservationStatus:'completed'/);
     assert.match(source,/inventoryReservationStatus:'failed'/);
@@ -4614,22 +4625,23 @@ test('Product Master and Product Import use active Brand Master brands', () => {
 });
 
 
-test('direct orders enforce company brand restrictions after Product Master matching', () => {
+test('internal orders keep company only as source metadata and do not restrict brands', () => {
     const start=appSource.indexOf('window.saveNewOrder = function()');
     const end=appSource.indexOf('\n};',start)+3;
     const source=appSource.slice(start,end);
-    assert.match(source,/const orderCompany=window\._orderModalQuoteContext\?\.company\|\|currentCompany\|\|'yushin'/);
-    assert.match(source,/isCompanyBrandAllowed\(orderCompany,item\.brand\)/);
-    assert.match(source,/不能使用目前公司抬頭建立訂單/);
+    assert.match(source,/company: window\._orderModalQuoteContext\?\.company \|\| ''/);
+    assert.doesNotMatch(source,/isCompanyBrandAllowed\(/);
+    assert.doesNotMatch(source,/不能使用目前公司抬頭建立訂單/);
 });
 
-test('Forecast direct order conversion cannot bypass Product Master or company restrictions', () => {
+test('Forecast direct order conversion still requires Product Master but ignores company-brand restrictions', () => {
     const start=appSource.indexOf('async function createForecastOrdersDirectly');
-    const end=appSource.indexOf('\nasync function',start+20);
+    const end=appSource.indexOf('\nwindow.createOrderFromForecast',start);
     const source=appSource.slice(start,end);
     assert.match(source,/productMasterMatched!==true/);
     assert.match(source,/尚未對應 Product Master/);
-    assert.match(source,/isCompanyBrandAllowed\(currentCompany\|\|'yushin',item\.brand\)/);
+    assert.match(source,/company:forecast\.company\|\|''/);
+    assert.doesNotMatch(source,/isCompanyBrandAllowed\(/);
 });
 
 test('quick Product Master creation keeps list price optional', () => {
