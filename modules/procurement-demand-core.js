@@ -219,6 +219,76 @@
     };
   }
 
+  function demandDate(value){
+    const raw=String(value||'').slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(raw))return '';
+    const [year,month,day]=raw.split('-').map(Number);
+    const date=new Date(Date.UTC(year,month-1,day));
+    return date.getUTCFullYear()===year&&date.getUTCMonth()===month-1&&date.getUTCDate()===day?raw:'';
+  }
+
+  function deliveryPlanRisk(record={},supplies=[]){
+    const demand=normalizeDemand(record);
+    const requiredDate=demandDate(demand.scheduleDate);
+    const neededQty=n(demand.remainingToReceiveQty);
+    if(!(neededQty>0))return {
+      status:'complete',requiredDate,plannedDate:'',delayDays:0,
+      neededQty:0,coveredQty:0,missingQty:0
+    };
+    if(!requiredDate)return {
+      status:'no_required_date',requiredDate:'',plannedDate:'',delayDays:0,
+      neededQty,coveredQty:0,missingQty:0
+    };
+
+    const demandId=String(demand.demandId||'');
+    const rows=(supplies||[]).map(supply=>{
+      if(demandId&&String(supply?.demandId||'')&&String(supply.demandId)!==demandId)return null;
+      const qty=n(supply?.qty);
+      const received=Math.min(qty,n(supply?.receivedQty));
+      const terminal=['CANCELLED','CLOSED'].includes(String(supply?.status||'').toUpperCase());
+      const remaining=terminal?0:Math.max(0,qty-received);
+      if(!(remaining>0))return null;
+      return {
+        remaining,
+        expectedDate:demandDate(supply?.expectedDate||supply?.scheduleDate||'')
+      };
+    }).filter(Boolean);
+
+    const coveredQty=rows.reduce((sum,row)=>sum+row.remaining,0);
+    if(coveredQty+1e-9<neededQty)return {
+      status:'uncovered',requiredDate,plannedDate:'',delayDays:0,
+      neededQty,coveredQty,missingQty:Math.max(0,neededQty-coveredQty)
+    };
+
+    rows.sort((a,b)=>{
+      if(!a.expectedDate&&!b.expectedDate)return 0;
+      if(!a.expectedDate)return 1;
+      if(!b.expectedDate)return -1;
+      return a.expectedDate.localeCompare(b.expectedDate);
+    });
+    let cumulative=0,plannedDate='';
+    for(const row of rows){
+      cumulative+=row.remaining;
+      if(cumulative+1e-9>=neededQty){
+        plannedDate=row.expectedDate;
+        break;
+      }
+    }
+    if(!plannedDate)return {
+      status:'unscheduled',requiredDate,plannedDate:'',delayDays:0,
+      neededQty,coveredQty,missingQty:0
+    };
+
+    const requiredTime=Date.parse(requiredDate+'T00:00:00Z');
+    const plannedTime=Date.parse(plannedDate+'T00:00:00Z');
+    const delayDays=Math.max(0,Math.round((plannedTime-requiredTime)/86400000));
+    return {
+      status:plannedDate>requiredDate?'at_risk':'on_time',
+      requiredDate,plannedDate,delayDays,
+      neededQty,coveredQty,missingQty:0
+    };
+  }
+
   function cancelDemand(record={}){
     const current=normalizeDemand(record);
     return normalizeDemand({...current,cancelled:true,status:STATUSES.CANCELLED});
@@ -238,6 +308,6 @@
   return {
     SOURCES,STATUSES,demandIdForSource,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel,
     demandDocument,applyOrder,applyReceipt,supplyContribution,reconcileLinkedSupplies,applySupplyCancellation,
-    reconcileRequestedQty,cancelDemand,reopenDemand
+    deliveryPlanRisk,reconcileRequestedQty,cancelDemand,reopenDemand
   };
 });
