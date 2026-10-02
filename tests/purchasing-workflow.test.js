@@ -1061,6 +1061,7 @@ test('normalized order items derive fulfillment from delivery and return records
         window:{YushinFulfillment:fulfillment},
         normalizeHistoryItemCode:value=>String(value||'').toLowerCase(),
         resolveBrandName:value=>value||'',
+        brandIdentityForRecord:item=>({brand:String(item?.brand||''),brandId:String(item?.brandId||'')}),
         parseMoney:value=>Number(value||0)
     });
     vm.runInContext(source,context);
