@@ -4187,6 +4187,7 @@ window.saveSupplierMaster = async function() {
         const supplierId=editingId||stableMasterId('sup',supplierName);
         const previous=supplierMasterCache.find(item=>(item.id||item.supplierId)===supplierId);
         const now=new Date().toISOString();
+        const terminalStatus=received>0?'CLOSED':'CANCELLED';
         await db.collection('suppliers').doc(supplierId).set({
             supplierId,
             supplierName,
@@ -11585,7 +11586,7 @@ async function registerPurchaseIncoming(poId, poRecord) {
 }
 
 async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
-    let result={cancelledQty:0,orderId:'',productKey:'',warehouseId:'',demandId:''};
+    let result={cancelledQty:0,receivedQty:0,terminalStatus:'',orderId:'',productKey:'',warehouseId:'',demandId:''};
     await db.runTransaction(async tx => {
         const supplyRef=db.collection('supplyOrders').doc(supplyId);
         const supplySnap=await tx.get(supplyRef);
@@ -11597,20 +11598,22 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
         const supplyProjection=globalThis.YushinReceiving.normalizeSupply(supply);
         const ordered=supplyProjection.qty;
         const received=supplyProjection.receivedQty;
-        const existingCancelled=supplyProjection.status==='CANCELLED';
-        const remaining=existingCancelled
+        const existingTerminal=isPurchaseTerminalStatus(supplyProjection.status);
+        const remaining=existingTerminal
             ? Math.max(0,ordered-received)
             : supplyProjection.remainingQty;
         const productKey=String(supply.productKey||supply.productId||'').trim();
         const warehouseId=String(supply.warehouseId||'').trim();
         result={
-            cancelledQty:existingCancelled?Math.max(0,Number(supply.cancelledQty||remaining)):0,
+            cancelledQty:existingTerminal?Math.max(0,Number(supply.cancelledQty||supply.closedQty||remaining)):0,
+            receivedQty:received,
+            terminalStatus:existingTerminal?supplyProjection.status:'',
             orderId:String(supply.orderId||''),
             productKey,
             warehouseId,
             demandId:String(supply.demandId||'')
         };
-        if(existingCancelled||remaining<=0)return;
+        if(existingTerminal||remaining<=0)return;
 
         const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
         const registeredIncoming=Math.max(0,Number(supply.incomingRegisteredQty||0));
@@ -11670,7 +11673,7 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
             tx.update(invRef,{incoming:Math.max(0,inv.incoming-registeredIncoming),updatedAt:now});
             tx.update(whRef,{incoming:Math.max(0,wh.incoming-registeredIncoming),updatedAt:now});
             tx.set(db.collection('inventoryMovements').doc(),{
-                type:'purchase_incoming_cancel',
+                type:terminalStatus==='CLOSED'?'purchase_incoming_close':'purchase_incoming_cancel',
                 qty:-registeredIncoming,
                 productKey,warehouseId,
                 fulfillmentType:'WAREHOUSE',
@@ -11686,16 +11689,18 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
         }
 
         tx.update(supplyRef,{
-            status:'CANCELLED',
-            cancelledQty:remaining,
-            cancelReason:reason,
-            cancelledAt:now,
-            cancelledByUid:currentUser?.uid||'',
-            cancelledBy:currentUserName||currentUser?.email||'',
+            status:terminalStatus,
+            ...(terminalStatus==='CLOSED'?{
+                closedQty:remaining,closeReason:reason,closedAt:now,
+                closedByUid:currentUser?.uid||'',closedBy:currentUserName||currentUser?.email||''
+            }:{
+                cancelledQty:remaining,cancelReason:reason,cancelledAt:now,
+                cancelledByUid:currentUser?.uid||'',cancelledBy:currentUserName||currentUser?.email||''
+            }),
             incomingRegisteredQty:0,
             updatedAt:now
         });
-        result={cancelledQty:remaining,orderId:String(supply.orderId||''),productKey,warehouseId,demandId};
+        result={cancelledQty:remaining,receivedQty:received,terminalStatus,orderId:String(supply.orderId||''),productKey,warehouseId,demandId};
     });
     if(result.productKey&&result.warehouseId)invalidateWarehouseStockCache(result.productKey,result.warehouseId);
     if(result.demandId)invalidateProcurementDemandQueue();
