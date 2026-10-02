@@ -796,8 +796,8 @@ test('receiving card counts standalone stock replenishment and does not hide it 
     const cardsEnd=app.indexOf('\nfunction purchasingCompletedRows',cardsStart);
     const cards=app.slice(cardsStart,cardsEnd);
     assert.match(cards,/const standaloneReceiving = standaloneReceivingSupplyMetrics\(filters\)/);
-    assert.match(cards,/metrics\[category\]\.count \+ extraCount/);
-    assert.match(cards,/metrics\[category\]\.amount \+ extraAmount/);
+    assert.match(cards,/baseCount \+ extraCount/);
+    assert.match(cards,/baseAmount \+ extraAmount/);
 });
 
 test('formal purchase order commit immediately hydrates the receiving supply cache', () => {
