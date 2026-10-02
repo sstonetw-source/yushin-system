@@ -107,7 +107,10 @@
     return normalizeDemand({
       ...input,
       sourceType:SOURCES.STOCK_REPLENISHMENT,
-      requestedQty:Math.max(0,safetyStock-availableQty),
+      // Keep cumulative demand at least as large as supplier commitments.
+      // This mirrors ERP status-updater semantics and prevents MOQ/over-order
+      // commitments from making requestedQty smaller than orderedQty.
+      requestedQty:Math.max(incomingQty,Math.max(0,safetyStock-availableQty)),
       orderedQty:incomingQty,
       receivedQty:0
     });
