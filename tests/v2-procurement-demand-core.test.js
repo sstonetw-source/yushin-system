@@ -45,6 +45,16 @@ test('stock replenishment does not duplicate an incoming order that already cove
   assert.equal(demand.status,d.STATUSES.ORDERED);
 });
 
+test('stock replenishment keeps cumulative demand above supplier commitments',()=>{
+  const demand=d.fromStockReplenishment({safetyStock:20,available:5,incoming:25});
+  assert.equal(demand.requestedQty,25);
+  assert.equal(demand.orderedQty,25);
+  assert.equal(demand.remainingToOrderQty,0);
+  assert.equal(demand.remainingToReceiveQty,25);
+  assert.equal(demand.perOrdered,100);
+  assert.equal(demand.status,d.STATUSES.ORDERED);
+});
+
 test('ERP-style demand statuses include partial order partial receipt and received',()=>{
   assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:0}).status,d.STATUSES.PENDING);
   assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:4}).status,d.STATUSES.PARTIALLY_ORDERED);
