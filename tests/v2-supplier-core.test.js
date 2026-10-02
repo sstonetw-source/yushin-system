@@ -94,3 +94,31 @@ test('vendor lead time suggests an expected arrival date without timezone drift'
   assert.equal(supplier.expectedArrivalDate('2026-10-30',3),'2026-11-02');
   assert.equal(supplier.expectedArrivalDate('',3),'');
 });
+
+
+test('purchase expected date uses the longest explicit lead time for the selected supplier',()=>{
+  const expected=supplier.purchaseExpectedDate([
+    {productId:'P1',itemCode:'A-1'},
+    {productId:'P2',itemCode:'A-2'}
+  ],[
+    {productId:'P1',supplierId:'S1',priority:1,leadTimeDays:3},
+    {productId:'P2',supplierId:'S1',priority:1,leadTimeDays:7}
+  ],'2026-10-02','S1');
+  assert.equal(expected,'2026-10-09');
+});
+
+test('purchase expected date stays blank when any item lacks selected supplier lead time',()=>{
+  const expected=supplier.purchaseExpectedDate([
+    {productId:'P1'},
+    {productId:'P2'}
+  ],[
+    {productId:'P1',supplierId:'S1',priority:1,leadTimeDays:3},
+    {productId:'P2',supplierId:'S2',priority:1,leadTimeDays:5}
+  ],'2026-10-02','S1');
+  assert.equal(expected,'');
+});
+
+test('purchase expected date handles month rollover with calendar days',()=>{
+  assert.equal(supplier.addCalendarDays('2026-10-30',5),'2026-11-04');
+  assert.equal(supplier.addCalendarDays('not-a-date',5),'');
+});
