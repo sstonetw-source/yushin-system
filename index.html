@@ -883,7 +883,7 @@
                 <button type="button" id="purchasePoRefreshBtn" class="btn-secondary" onclick="loadMyPurchaseOrders()">↻ 更新</button>
             </div>
             <table>
-                <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
+                <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>預計到貨</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="poListBody"></tbody>
             </table>
             <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何訂購單。</div>
@@ -1124,7 +1124,10 @@
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
                     <div><label>訂購日期：</label><input type="date" id="poDate"></div>
                 </div>
-                <div style="margin:4px 0;"><label>單號：</label><span id="poNo"></span></div>
+                <div class="meta-row-three">
+                    <div><label>預計到貨日：</label><input type="date" id="poExpectedDate"></div>
+                    <div style="grid-column:span 2;"><label>單號：</label><span id="poNo"></span></div>
+                </div>
 
                 <div class="no-print" style="margin:8px 0;">
                     <button type="button" id="poAddStockItemBtn" class="btn-secondary" style="display:none;" onclick="addDirectPoItem()">＋ 新增備貨品項</button>
