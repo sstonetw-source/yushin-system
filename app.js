@@ -11095,6 +11095,35 @@ function receivingDueHtml(info = {}) {
     return '<div style="margin-top:4px;font-size:11px;color:#8a8f98;">預計到貨日未設定</div>';
 }
 
+function receivingPlanRiskInfo(order = {}, item = {}, supplies = []) {
+    if (!globalThis.YushinProcurementDemand?.deliveryPlanRisk) {
+        return { status:'unavailable', sortRank:4 };
+    }
+    const demand = procurementDemandForOrderItem(order, item);
+    const risk = globalThis.YushinProcurementDemand.deliveryPlanRisk(demand, supplies);
+    const sortRank = risk.status === 'at_risk'
+        ? 0
+        : risk.status === 'uncovered'
+            ? 1
+            : risk.status === 'unscheduled'
+                ? 2
+                : 3;
+    return { ...risk, sortRank };
+}
+
+function receivingPlanRiskHtml(info = {}) {
+    if (info.status === 'at_risk') {
+        return `<div style="margin-top:4px;"><span style="display:inline-block;padding:2px 7px;border-radius:999px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;font-size:11px;font-weight:700;">交期風險・預計晚需求 ${Number(info.delayDays || 0)} 天</span><span style="margin-left:6px;font-size:11px;color:#667584;">需求 ${escapeHtml(info.requiredDate || '')}</span></div>`;
+    }
+    if (info.status === 'uncovered') {
+        return `<div style="margin-top:4px;font-size:11px;color:#9a3412;font-weight:600;">採購計畫尚缺 ${Number(info.missingQty || 0)}｜需求 ${escapeHtml(info.requiredDate || '')}</div>`;
+    }
+    if (info.status === 'unscheduled') {
+        return `<div style="margin-top:4px;font-size:11px;color:#9a6700;font-weight:600;">交期未完整排定｜需求 ${escapeHtml(info.requiredDate || '')}</div>`;
+    }
+    return '';
+}
+
 
 function buildReceivingEvidenceIndex() {
     const index = new Map();
@@ -11171,6 +11200,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     let evidenceCount = 0;
     let standaloneSupplyCount = 0;
     let overdueCount = 0;
+    let planRiskCount = 0;
     const representedSupplyIds = new Set();
     const evidenceIndex = buildReceivingEvidenceIndex();
     const supplyById = new Map(supplyReceivingCache.map(supply => [supply.id, supply]));
@@ -11191,8 +11221,11 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             evidence.forEach(entry => representedSupplyIds.add(entry.id));
             evidenceCount += evidence.length;
             if (!evidence.length) missingEvidence++;
-            const due = receivingDueInfo(evidence.map(entry => supplyById.get(entry.id)).filter(Boolean));
+            const evidenceSupplies = evidence.map(entry => supplyById.get(entry.id)).filter(Boolean);
+            const due = receivingDueInfo(evidenceSupplies);
+            const planRisk = receivingPlanRiskInfo(order, item, evidenceSupplies);
             if (due.status === 'late') overdueCount++;
+            if (planRisk.status === 'at_risk') planRiskCount++;
 
             const actionHtml = !canReceiveInventoryCapability()
                 ? '<span class="order-progress-badge">唯讀</span>'
@@ -11211,9 +11244,10 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                 <td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td>
                 <td data-th="負責業務">${escapeHtml(order.salesName || '')}</td>
                 <td data-th="待到貨品項">${escapeHtml(item.itemCode || item.itemName || item.itemId || '未命名品項')} × ${progress.target}</td>
-                <td data-th="到貨進度">${progress.received > 0 ? `部分到貨 ${progress.received}/${progress.target}` : `待到貨 0/${progress.target}`}${receivingDueHtml(due)}</td>
+                <td data-th="到貨進度">${progress.received > 0 ? `部分到貨 ${progress.received}/${progress.target}` : `待到貨 0/${progress.target}`}${receivingDueHtml(due)}${receivingPlanRiskHtml(planRisk)}</td>
                 <td data-th="操作" class="no-print">${actionHtml}</td>`;
             tr.dataset.receivingDueRank = String(due.sortRank);
+            tr.dataset.receivingPlanRiskRank = String(planRisk.sortRank ?? 4);
             tr.dataset.receivingExpectedDate = due.expectedDate || '';
             tr.dataset.receivingOrderDate = order.orderDate || '';
             fragment.appendChild(tr);
@@ -11275,6 +11309,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${escapeHtml(supplyProgress.label)}${receivingDueHtml(due)}</td>
             <td data-th="操作" class="no-print">${actionHtml}</td>`;
         tr.dataset.receivingDueRank = String(due.sortRank);
+        tr.dataset.receivingPlanRiskRank = '4';
         tr.dataset.receivingExpectedDate = due.expectedDate || '';
         tr.dataset.receivingOrderDate = date || '';
         fragment.appendChild(tr);
@@ -11284,6 +11319,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     const sortedRows = Array.from(fragment.childNodes).sort((a, b) => {
         const rankDiff = Number(a.dataset.receivingDueRank || 3) - Number(b.dataset.receivingDueRank || 3);
         if (rankDiff) return rankDiff;
+        const planRiskDiff = Number(a.dataset.receivingPlanRiskRank || 4) - Number(b.dataset.receivingPlanRiskRank || 4);
+        if (planRiskDiff) return planRiskDiff;
         const aExpected = a.dataset.receivingExpectedDate || '9999-12-31';
         const bExpected = b.dataset.receivingExpectedDate || '9999-12-31';
         const expectedDiff = aExpected.localeCompare(bExpected);
@@ -11303,6 +11340,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         else {
             const parts = [`待到貨 ${workCount} 個訂單品項`];
             if (overdueCount) parts.push(`逾期 ${overdueCount} 筆已置頂`);
+            if (planRiskCount) parts.push(`另有 ${planRiskCount} 筆預計晚於需求日`);
             if (standaloneSupplyCount) parts.push(`另有 ${standaloneSupplyCount} 筆庫存補貨／非正常訂單供應`);
             if (evidenceCount > workCount) parts.push(`其中 ${evidenceCount - workCount} 筆為分批／多張採購來源，已合併在同一品項顯示`);
             if (missingEvidence) parts.push(`${missingEvidence} 個品項尚未找到可操作的採購紀錄`);
