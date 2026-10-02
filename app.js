@@ -17064,6 +17064,9 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
         const product = productMasterRecordFromItem(item, 'PRODUCT_IMPORT');
         product.status = item.active === false ? 'INACTIVE' : 'ACTIVE';
         product.active = product.status === 'ACTIVE';
+        // 建議售價是選填欄位：匯入既有產品時留白代表「不變更」，
+        // 新產品留白則不建立 listPrice，避免把未知價格寫成 0。
+        if (item.listPriceProvided !== true) delete product.listPrice;
 
         const existingProduct = existingProducts.get(product.productId);
         let productPatch = null;
@@ -17072,6 +17075,7 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
         } else {
             const changed = {};
             PRODUCT_MASTER_IMPORT_FIELDS.forEach(field => {
+                if (field === 'listPrice' && item.listPriceProvided !== true) return;
                 if (!productImportValueEqual(field, existingProduct[field], product[field])) changed[field] = product[field];
             });
             if (Object.keys(changed).length) productPatch = { ...changed, updatedAt:now, updatedBy };
@@ -17547,8 +17551,9 @@ window.handlePriceExcelUpload = async function(input) {
                     const expiryTracked = yes(getField(row, ['效期管理', 'Expiry Tracked', 'Expiry']));
 
                     const priceRaw = getField(row, ['建議售價（含稅）', '建議售價', '含稅單價', '單價', '價格']);
-                    const price = priceRaw === '' ? 0 : Number(String(priceRaw).replace(/,/g, '').trim());
-                    if (!Number.isFinite(price) || price < 0) throw new Error(`貨號「${model}」的建議售價格式不正確。`);
+                    const listPriceProvided = String(priceRaw ?? '').trim() !== '';
+                    const price = listPriceProvided ? Number(String(priceRaw).replace(/,/g, '').trim()) : null;
+                    if (listPriceProvided && (!Number.isFinite(price) || price < 0)) throw new Error(`貨號「${model}」的建議售價格式不正確。`);
 
                     const standardCostRaw = getField(row, ['標準成本（含稅）', '標準成本', '含稅成本', '成本', '進貨成本']);
                     const standardCostProvided = String(standardCostRaw ?? '').trim() !== '';
@@ -17559,7 +17564,7 @@ window.handlePriceExcelUpload = async function(input) {
                         nameCn, nameEn, model, brand, productType, productLine, spec, unit,
                         inventoryTracked, lotTracked, expiryTracked,
                         active: activeRaw ? !['0','false','no','n','否','停用'].includes(activeRaw) : true,
-                        price, standardCost, standardCostProvided, source:'PRODUCT_IMPORT'
+                        price, listPriceProvided, standardCost, standardCostProvided, source:'PRODUCT_IMPORT'
                     };
                     const importProductId = stableProductId(importedItem);
                     if (seenProductIds.has(importProductId)) throw new Error(`貨號「${model}」在檔案中重複出現。每個廠牌／貨號請只保留一列。`);
@@ -17608,8 +17613,17 @@ window.handlePriceExcelUpload = async function(input) {
                 const visibleImported = normalizedImported.map(productItemWithoutCost);
 
                 // 以 productId 增量合併本機快取。只上傳幾筆時，不可把同廠牌其他產品從目前畫面暫時移除。
+                // 建議售價留白時，雲端與本機快取都保留既有售價，避免畫面暫時變成 0／空白。
                 const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
-                visibleImported.forEach(item => merged.set(item.productId || stableProductId(item), item));
+                visibleImported.forEach(item => {
+                    const id = item.productId || stableProductId(item);
+                    const previous = merged.get(id);
+                    if (item.listPriceProvided !== true && previous) {
+                        merged.set(id, { ...previous, ...item, price:previous.price });
+                    } else {
+                        merged.set(id, item);
+                    }
+                });
                 priceList = [...merged.values()];
 
                 const lineCount = new Set(items.map(item => item.productLine || '')).size;
