@@ -4455,7 +4455,7 @@ test('Brand Master drives brand dropdowns while statistics grouping stays indepe
     assert.match(appSource, /Brand Master 是一般廠牌選單的正式來源/);
     assert.match(appSource, /brandMasterCache\.filter\(master => master\?\.name && master\.active !== false\)/);
     assert.match(appSource, /getUnifiedBrandEntries\(false\)\.forEach\(entry =>/);
-    assert.match(indexSource, /廠牌與進銷存統計/);
+    assert.match(indexSource, /<strong>廠牌設定<\/strong>/);
     assert.match(indexSource, /其他廠牌（合併計算）/);
     assert.match(indexSource, /id="newStatisticBrandIndependent"/);
 });
