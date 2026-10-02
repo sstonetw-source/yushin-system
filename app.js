@@ -9388,11 +9388,12 @@ function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime
 function renderPurchasingAnalytics() {
     const status = document.getElementById('purchaseAnalyticsStatus');
     const supplierBody = document.getElementById('purchaseAnalyticsSupplierBody');
+    const sourceBody = document.getElementById('purchaseAnalyticsSourceBody');
     const brandBody = document.getElementById('purchaseAnalyticsBrandBody');
     const monthBody = document.getElementById('purchaseAnalyticsMonthBody');
     if (!supplierBody) return;
     const filters = purchaseFilterContext();
-    const { totals, bySupplier, byBrand, byMonth } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
+    const { totals, bySupplier, bySource, byBrand, byMonth } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
     const setMoney = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = formatStatsMoney(value);
@@ -9423,6 +9424,7 @@ function renderPurchasingAnalytics() {
         '目前篩選期間沒有採購資料。',
         true
     );
+    if (sourceBody) sourceBody.innerHTML = purchasingAnalyticsRowsHtml(bySource, 'source', '目前沒有需求來源採購資料。');
     if (brandBody) brandBody.innerHTML = purchasingAnalyticsRowsHtml(byBrand, 'brand', '目前沒有廠牌採購資料。');
     if (monthBody) monthBody.innerHTML = purchasingAnalyticsRowsHtml(byMonth, 'month', '目前沒有月份採購資料。');
 
