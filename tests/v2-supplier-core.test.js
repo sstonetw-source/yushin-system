@@ -87,3 +87,10 @@ test('product supplier relation requires product identity and supplier',()=>{
   assert.deepEqual(supplier.validateProductSupplierMapping({supplierId:'S1'}).errors,['product']);
   assert.deepEqual(supplier.validateProductSupplierMapping({productId:'P1'}).errors,['supplierId']);
 });
+
+
+test('vendor lead time suggests an expected arrival date without timezone drift',()=>{
+  assert.equal(supplier.expectedArrivalDate('2026-10-02',{leadTimeDays:10}),'2026-10-12');
+  assert.equal(supplier.expectedArrivalDate('2026-10-30',3),'2026-11-02');
+  assert.equal(supplier.expectedArrivalDate('',3),'');
+});

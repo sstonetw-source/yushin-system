@@ -16,6 +16,33 @@
     return !email||/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
+  function dateOnly(value){
+    const raw=text(value);
+    const match=raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(!match)return '';
+    const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+    const date=new Date(Date.UTC(year,month-1,day));
+    if(Number.isNaN(date.getTime()))return '';
+    const iso=date.toISOString().slice(0,10);
+    return iso===`${match[1]}-${match[2]}-${match[3]}`?iso:'';
+  }
+
+  function addCalendarDays(dateValue,days=0){
+    const base=dateOnly(dateValue);
+    if(!base)return '';
+    const rawDays=Number(days);
+    const count=Number.isFinite(rawDays)?Math.max(0,Math.floor(rawDays)):0;
+    const [year,month,day]=base.split('-').map(Number);
+    return new Date(Date.UTC(year,month-1,day+count)).toISOString().slice(0,10);
+  }
+
+  function expectedArrivalDate(orderDate,mappingOrDays=0){
+    const days=mappingOrDays&&typeof mappingOrDays==='object'
+      ? normalizeProductSupplierMapping(mappingOrDays).leadTimeDays
+      : mappingOrDays;
+    return addCalendarDays(orderDate,days);
+  }
+
   function normalizeSupplier(record={}){
     const supplierName=text(record.supplierName||record.name);
     return {
@@ -173,6 +200,8 @@
   return {
     normalizeEmail,
     isValidEmail,
+    addCalendarDays,
+    expectedArrivalDate,
     normalizeSupplier,
     validateSupplier,
     supplierKey,

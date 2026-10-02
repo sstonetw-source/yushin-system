@@ -14,6 +14,12 @@
     return Number.isFinite(time)?time:null;
   }
 
+  function dateOnly(value){
+    const time=timeOf(value);
+    if(time===null)return '';
+    return new Date(time).toISOString().slice(0,10);
+  }
+
   function dayDiff(start,end){
     const a=timeOf(start),b=timeOf(end);
     return a===null||b===null?null:Math.max(0,(b-a)/86400000);
@@ -70,7 +76,10 @@
     const completionDate=String(completionAt||'').slice(0,10);
     const onTime=expectedDate&&completionDate ? completionDate<=expectedDate : null;
     const agingAt=nowValue||new Date().toISOString();
+    const agingDate=dateOnly(agingAt);
     const openAgeDays=incomingQty>0?dayDiff(x.orderDate||x.createdAt,agingAt):null;
+    const late=!!(incomingQty>0&&expectedDate&&agingDate&&agingDate>expectedDate);
+    const lateDays=late?dayDiff(expectedDate,agingDate):0;
     return {
       record:x,
       supplier:supplierName,
@@ -97,6 +106,9 @@
       expectedDate,
       onTime,
       openAgeDays,
+      late,
+      lateDays,
+      lateAmount:late?incomingAmount:0,
       isStockReplenishment
     };
   }
@@ -117,7 +129,12 @@
       onTimeEligibleCount:0,
       openAgeDaysTotal:0,
       openAgeCount:0,
-      maxOpenAgeDays:0
+      maxOpenAgeDays:0,
+      lateDocuments:new Set(),
+      lateLineCount:0,
+      lateAmount:0,
+      lateDaysTotal:0,
+      maxLateDays:0
     };
   }
 
@@ -143,6 +160,15 @@
       metric.openAgeCount++;
       metric.maxOpenAgeDays=Math.max(metric.maxOpenAgeDays,row.openAgeDays);
     }
+    if(row.late){
+      if(row.documentKey)metric.lateDocuments.add(row.documentKey);
+      metric.lateLineCount++;
+      metric.lateAmount+=row.lateAmount;
+      if(Number.isFinite(row.lateDays)){
+        metric.lateDaysTotal+=row.lateDays;
+        metric.maxLateDays=Math.max(metric.maxLateDays,row.lateDays);
+      }
+    }
   }
 
   function finalizeMetric(metric){
@@ -162,7 +188,12 @@
       onTimeRate:metric.onTimeEligibleCount?(metric.onTimeCount/metric.onTimeEligibleCount)*100:null,
       openAgeCount:metric.openAgeCount,
       avgOpenAgeDays:metric.openAgeCount?metric.openAgeDaysTotal/metric.openAgeCount:null,
-      maxOpenAgeDays:metric.openAgeCount?metric.maxOpenAgeDays:null
+      maxOpenAgeDays:metric.openAgeCount?metric.maxOpenAgeDays:null,
+      lateDocumentCount:metric.lateDocuments.size,
+      lateLineCount:metric.lateLineCount,
+      lateAmount:metric.lateAmount,
+      avgLateDays:metric.lateLineCount?metric.lateDaysTotal/metric.lateLineCount:null,
+      maxLateDays:metric.lateLineCount?metric.maxLateDays:null
     };
   }
 

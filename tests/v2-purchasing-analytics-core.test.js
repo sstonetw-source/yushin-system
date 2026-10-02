@@ -167,3 +167,15 @@ test('on-time delivery counts only completed supplies with an expected date',()=
   assert.equal(result.totals.onTimeRate,50);
   assert.equal(result.bySupplier[0].onTimeRate,50);
 });
+
+test('late incoming purchase is surfaced by count amount and days overdue',()=>{
+  const result=analytics.summarize([
+    {id:'S1',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:10,receivedQty:4,status:'PARTIAL_RECEIPT',unitCost:100,orderDate:'2026-10-01',expectedDate:'2026-10-05',purchaseDocumentId:'PO1'},
+    {id:'S2',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:0,status:'ORDERED',unitCost:100,orderDate:'2026-10-01',expectedDate:'2026-10-12',purchaseDocumentId:'PO2'}
+  ],[],{now:'2026-10-10T15:00:00Z'});
+  assert.equal(result.totals.lateDocumentCount,1);
+  assert.equal(result.totals.lateLineCount,1);
+  assert.equal(result.totals.lateAmount,600);
+  assert.equal(result.totals.maxLateDays,5);
+  assert.equal(result.bySupplier[0].lateLineCount,1);
+});

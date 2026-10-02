@@ -7489,11 +7489,11 @@ window.openInventoryReplenishment = async function(inventoryId) {
     poAllItems = poItems;
     populatePoVendorSuggestions();
     document.getElementById('poVendorName').value = '';
-    await autoFillPoSupplier(poItems);
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
     const poExpectedDateInput=document.getElementById('poExpectedDate');
     if(poExpectedDateInput)poExpectedDateInput.value='';
+    await autoFillPoSupplier(poItems);
     switchPoCompany(currentCompany || 'yushin', null, true);
     generatePoNo();
     updatePoModeUI();
@@ -9649,6 +9649,7 @@ function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime
             ${row.leadTimeCount ? '完整到貨平均 '+Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '完整到貨：－'}
             <div style="font-size:11px;color:#667584;margin-top:3px;">${row.onTimeEligibleCount ? '準時到貨 '+Number(row.onTimeRate||0).toFixed(0)+'%（'+row.onTimeCount+'/'+row.onTimeEligibleCount+'）' : '準時率：尚無預計到貨樣本'}</div>
             <div style="font-size:11px;color:#667584;margin-top:3px;">${row.openAgeCount ? '目前在途 '+row.openAgeCount+' 筆｜平均 '+Number(row.avgOpenAgeDays||0).toFixed(1)+' 天｜最久 '+Number(row.maxOpenAgeDays||0).toFixed(1)+' 天' : '目前無在途'}</div>
+            <div style="font-size:11px;margin-top:3px;${row.lateLineCount?'color:#b42318;':'color:#667584;'}">${row.lateLineCount ? '逾期待到貨 '+row.lateLineCount+' 筆｜'+formatStatsMoney(row.lateAmount)+'｜最久 '+Number(row.maxLateDays||0).toFixed(0)+' 天' : '逾期待到貨：0'}</div>
         </td>`
         : '';
     return rows.length ? rows.map(row => `<tr>
@@ -9688,9 +9689,14 @@ function renderPurchasingAnalytics() {
         ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆）${totals.onTimeEligibleCount ? '｜準時 '+Number(totals.onTimeRate||0).toFixed(0)+'%（'+totals.onTimeCount+'/'+totals.onTimeEligibleCount+'）' : ''}`
         : (totals.receivedAmount ? '已有部分到貨，尚無完整到貨交期樣本' : '期間內尚無已到貨金額');
     const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
-    if (incomingDetail) incomingDetail.textContent = totals.openAgeCount
-        ? `目前在途 ${totals.openAgeCount} 筆｜平均等待 ${Number(totals.avgOpenAgeDays||0).toFixed(1)} 天｜最久 ${Number(totals.maxOpenAgeDays||0).toFixed(1)} 天`
-        : '目前沒有在途採購';
+    if (incomingDetail) {
+        const lateText=totals.lateLineCount
+            ? `｜逾期 ${totals.lateLineCount} 筆 ${formatStatsMoney(totals.lateAmount)}｜最久逾期 ${Number(totals.maxLateDays||0).toFixed(0)} 天`
+            : '';
+        incomingDetail.textContent = totals.openAgeCount
+            ? `目前在途 ${totals.openAgeCount} 筆｜平均等待 ${Number(totals.avgOpenAgeDays||0).toFixed(1)} 天｜最久 ${Number(totals.maxOpenAgeDays||0).toFixed(1)} 天${lateText}`
+            : '目前沒有在途採購';
+    }
     const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
     if (mixDetail) {
         const stockShare = totals.orderedAmount > 0 ? (totals.stockAmount / totals.orderedAmount) * 100 : 0;
@@ -12614,7 +12620,8 @@ function updatePoModeUI() {
 
 async function autoFillPoSupplier(items) {
     await loadSupplierWarehouseMasters();
-    const resolved = (items || []).map(item => supplierForProduct(
+    const rows=items||[];
+    const resolved = rows.map(item => supplierForProduct(
         item.brand,
         item.productLine,
         item.productId,
@@ -12627,6 +12634,26 @@ async function autoFillPoSupplier(items) {
     const header = supplier.purchaseHeaderName || supplier.supplierName || '';
     const input = document.getElementById('poVendorName');
     if (input && header) input.value = header;
+
+    // Odoo-style vendor lead time: only auto-fill when every selected item has
+    // an item-specific supplier lead time for the same supplier. User input always wins.
+    const expectedInput=document.getElementById('poExpectedDate');
+    const poDate=String(document.getElementById('poDate')?.value||'').trim();
+    const leadTimes=resolved.map(item=>{
+        const mapping=item.productSupplierMapping;
+        if(!mapping)return null;
+        const days=Number(mapping.leadTimeDays);
+        return Number.isFinite(days)&&days>=0?Math.floor(days):null;
+    });
+    if(expectedInput&&!expectedInput.value&&poDate
+        &&resolved.length===rows.length
+        &&leadTimes.length===rows.length
+        &&leadTimes.every(days=>days!==null)
+        &&globalThis.YushinSupplier?.expectedArrivalDate){
+        const expected=globalThis.YushinSupplier.expectedArrivalDate(poDate,Math.max(...leadTimes));
+        if(expected)expectedInput.value=expected;
+    }
+
     window.updatePoSupplierEmailHint?.();
     return header;
 }
