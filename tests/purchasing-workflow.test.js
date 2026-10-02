@@ -2106,3 +2106,18 @@ test('supplier cannot be disabled while product supplier relations still referen
     assert.match(source,/productSupplierMappingCache\.filter\(mapping=>mapping\.supplierId===id\)/);
     assert.match(source,/activeMappings\.length\|\|activeProductMappings\.length/);
 });
+
+test('lead-time PO date controls preserve manual overrides and recompute automatic dates', () => {
+    const start = app.indexOf('window.autoFillPoExpectedDate = function');
+    const end = app.indexOf('\nasync function autoFillPoSupplier', start);
+    const source = app.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    assert.match(source, /expectedDateSource==='manual'/);
+    assert.match(source, /YushinSupplier\.purchaseExpectedDate/);
+    assert.match(source, /expectedDateSource='lead-time'/);
+    assert.match(html, /id="poVendorName"[^>]+onchange="updatePoSupplierEmailHint\(\); autoFillPoExpectedDate\(\)"/);
+    assert.match(html, /id="poDate"[^>]+onchange="autoFillPoExpectedDate\(\)"/);
+    assert.match(html, /id="poExpectedDate"[^>]+onchange="markPoExpectedDateManual\(\)"/);
+    assert.match(app, /window\.removePoItem = function[\s\S]*?autoFillPoExpectedDate\(poItems\)/);
+    assert.match(app, /window\.onDirectPoCodeChange = async function[\s\S]*?autoFillPoExpectedDate\(poItems\)/);
+});
