@@ -599,7 +599,7 @@ test('document number generation reads only the newest matching document', () =>
     const poGenerator = appSource.slice(poStart, poEnd);
     assert.match(poGenerator, /orderBy\('poNo', 'desc'\)/);
     assert.match(poGenerator, /limit\(1\)/);
-    assert.match(appSource, /findPriceItemByCodeValue\(value\)/);
+    assert.match(appSource, /function findPriceItemByCodeValue\(value, preferredBrand = ''\)/);
 });
 
 test('sales statistics uses a bounded cached query and ignores stale roles', () => {
@@ -1630,7 +1630,7 @@ test('order item-code autofill waits for Product Master and fills sale/cost fiel
     const start = appSource.indexOf('window.onOrderItemCodeChange');
     const end = appSource.indexOf('window.saveToStorage', start);
     const s = appSource.slice(start, end);
-    assert.match(s, /await findProductByCode/);
+    assert.match(s, /await findProductsByCode/);
     assert.doesNotMatch(s, /await ensurePriceListLoaded/);
     assert.match(s, /orderItemName/);
     assert.match(s, /orderUnitPrice/);
