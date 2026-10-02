@@ -418,6 +418,58 @@ test('retrying a partly reserved order does not reserve the same stock twice', a
     assert.equal(reserveMovements,1);
 });
 
+
+test('moving an order reservation between warehouses releases the old stock before reserving the new stock', async () => {
+    const start=appSource.indexOf('async function reserveSingleOrderItem(');
+    const end=appSource.indexOf('async function reserveInventoryForNewOrder(',start);
+    const rows=new Map([
+        ['inventory/P-1',{onHand:15,reserved:4}],
+        ['warehouseStocks/W-1__P-1',{onHand:5,reserved:4}],
+        ['warehouseStocks/W-2__P-1',{onHand:10,reserved:0}],
+        ['inventoryReservations/ORDER-1__item-1',{quantity:4,productKey:'P-1',warehouseId:'W-1'}]
+    ]);
+    const movements=[];
+    let sequence=0;
+    const db={collection:name=>({doc:id=>({id:`${name}/${id||'MOV-'+(++sequence)}`})}),runTransaction:async callback=>{
+        const writes=[];
+        const result=await callback({
+            get:async ref=>({exists:rows.has(ref.id),data:()=>rows.get(ref.id)}),
+            update:(ref,patch)=>writes.push(()=>rows.set(ref.id,{...rows.get(ref.id),...patch})),
+            set:(ref,patch)=>writes.push(()=>{
+                if(ref.id.startsWith('inventoryMovements/'))movements.push(patch);
+                rows.set(ref.id,{...rows.get(ref.id),...patch});
+            })
+        });
+        writes.forEach(write=>write());
+        return result;
+    }};
+    const context=vm.createContext({
+        db,currentUserName:'Staff',currentUser:{uid:'USER-1'},
+        inventoryProductKey:()=> 'P-1',defaultWarehouse:()=>({id:'W-1'}),
+        inventoryRefFor:()=>db.collection('inventory').doc('P-1'),
+        warehouseStockDocId:(warehouse,key)=>`${warehouse}__${key}`,
+        inventoryNumbers:row=>({onHand:row.onHand||0,reserved:row.reserved||0,available:Math.max(0,(row.onHand||0)-(row.reserved||0)),incoming:row.incoming||0}),
+        inventoryMovementRecord:(type,quantity,orderId,productKey,actor,extra)=>({type,quantity,orderId,productKey,actor,...extra}),
+        salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{},
+        YushinReservation:reservation
+    });
+    vm.runInContext(appSource.slice(start,end),context);
+    const order={customerName:'Customer',orderDate:'2026-10-02',salesCode:'S1'};
+    const item={itemId:'item-1',qty:4,fulfillmentType:'WAREHOUSE',warehouseId:'W-2'};
+    const result=await context.reserveSingleOrderItem('ORDER-1',order,item,0);
+
+    assert.equal(result.reservedQty,4);
+    assert.equal(result.shortageQty,0);
+    assert.equal(rows.get('inventory/P-1').reserved,4,'aggregate reserved quantity must not drift');
+    assert.equal(rows.get('warehouseStocks/W-1__P-1').reserved,0);
+    assert.equal(rows.get('warehouseStocks/W-2__P-1').reserved,4);
+    assert.equal(rows.get('inventoryReservations/ORDER-1__item-1').warehouseId,'W-2');
+    assert.deepEqual(movements.map(row=>[row.type,row.quantity,row.warehouseId]),[
+        ['release',-4,'W-1'],
+        ['reserve',4,'W-2']
+    ]);
+});
+
 test('role changes cannot leave an older in-flight page in the cache', () => {
     assert.match(appSource, /const requestedRole = currentUserRole;/);
     assert.match(appSource, /requestedRole !== currentUserRole/);
