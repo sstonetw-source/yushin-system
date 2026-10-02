@@ -9671,15 +9671,28 @@ function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime
     </tr>`).join('') : `<tr><td colspan="${includeLeadTime?9:8}" style="color:#888;">${emptyLabel}</td></tr>`;
 }
 
+function purchasingAnalyticsAgingRowsHtml(rows = []) {
+    return (rows||[]).map(row => `<tr>
+        <td>${escapeHtml(row.label||'')}</td>
+        <td>${Number(row.documentCount||0).toLocaleString()}</td>
+        <td>${Number(row.lineCount||0).toLocaleString()}</td>
+        <td>${Number(row.incomingQty||0).toLocaleString()}</td>
+        <td>${formatStatsMoney(row.incomingAmount)}</td>
+        <td style="${row.lateLineCount?'color:#b42318;font-weight:600;':''}">${Number(row.lateLineCount||0).toLocaleString()}</td>
+        <td>${row.maxOpenAgeDays===null||row.maxOpenAgeDays===undefined?'－':Number(row.maxOpenAgeDays||0).toFixed(1)+' 天'}</td>
+    </tr>`).join('');
+}
+
 function renderPurchasingAnalytics() {
     const status = document.getElementById('purchaseAnalyticsStatus');
     const supplierBody = document.getElementById('purchaseAnalyticsSupplierBody');
     const sourceBody = document.getElementById('purchaseAnalyticsSourceBody');
     const brandBody = document.getElementById('purchaseAnalyticsBrandBody');
     const monthBody = document.getElementById('purchaseAnalyticsMonthBody');
+    const agingBody = document.getElementById('purchaseAnalyticsAgingBody');
     if (!supplierBody) return;
     const filters = purchaseFilterContext();
-    const { totals, bySupplier, bySource, byBrand, byMonth } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
+    const { totals, bySupplier, bySource, byBrand, byMonth, agingBuckets = [] } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
     const setMoney = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = formatStatsMoney(value);
@@ -9704,8 +9717,12 @@ function renderPurchasingAnalytics() {
         const lateText=totals.lateLineCount
             ? `｜逾期 ${totals.lateLineCount} 筆 ${formatStatsMoney(totals.lateAmount)}｜最久逾期 ${Number(totals.maxLateDays||0).toFixed(0)} 天`
             : '';
+        const oldestAging=agingBuckets.find(row=>row.key==='31_plus');
+        const oldestText=oldestAging?.lineCount
+            ? `｜31+ 天 ${oldestAging.lineCount} 筆 ${formatStatsMoney(oldestAging.incomingAmount)}`
+            : '';
         incomingDetail.textContent = totals.openAgeCount
-            ? `目前在途 ${totals.openAgeCount} 筆｜平均等待 ${Number(totals.avgOpenAgeDays||0).toFixed(1)} 天｜最久 ${Number(totals.maxOpenAgeDays||0).toFixed(1)} 天${lateText}`
+            ? `目前在途 ${totals.openAgeCount} 筆｜平均等待 ${Number(totals.avgOpenAgeDays||0).toFixed(1)} 天｜最久 ${Number(totals.maxOpenAgeDays||0).toFixed(1)} 天${lateText}${oldestText}`
             : '目前沒有在途採購';
     }
     const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
@@ -9723,6 +9740,7 @@ function renderPurchasingAnalytics() {
     if (sourceBody) sourceBody.innerHTML = purchasingAnalyticsRowsHtml(bySource, 'source', '目前沒有需求來源採購資料。');
     if (brandBody) brandBody.innerHTML = purchasingAnalyticsRowsHtml(byBrand, 'brand', '目前沒有廠牌採購資料。');
     if (monthBody) monthBody.innerHTML = purchasingAnalyticsRowsHtml(byMonth, 'month', '目前沒有月份採購資料。');
+    if (agingBody) agingBody.innerHTML = purchasingAnalyticsAgingRowsHtml(agingBuckets);
 
     if (status && !purchasingAnalyticsLoading) {
         const range = [filters.start, filters.end].filter(Boolean).join(' ～ ') || '全部期間';
