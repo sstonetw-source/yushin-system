@@ -888,12 +888,14 @@ test('phase 5 order creation reserves only available stock and records shortage'
     const start=appSource.indexOf('async function reserveSingleOrderItem');
     const end=appSource.indexOf('async function reserveInventoryForNewOrder',start);
     const s=appSource.slice(start,end);
-    assert.match(s,/Math\.min\(additionalNeeded,warehouse\.available\)/);
-    assert.doesNotMatch(s,/Math\.min\(additionalNeeded,warehouse\.available,aggregate\.available\)/);
-    assert.match(s,/reservedQty/);
-    assert.match(s,/shortageQty/);
-    assert.doesNotMatch(s,/inventoryReservedQty:reservable/);
-    assert.doesNotMatch(s,/inventoryShortageQty:shortage/);
+    assert.match(s,/globalThis\.YushinReservation\?\.planReservation/);
+    assert.match(s,/globalThis\.YushinReservation\.planReservation/);
+    assert.match(s,/plan\.additionalReserveQty/);
+    assert.match(s,/plan\.releaseQty/);
+    assert.match(s,/oldProductKey/);
+    assert.match(s,/oldWarehouseId/);
+    assert.doesNotMatch(s,/const preservedQty=/);
+    assert.doesNotMatch(s,/const additionalReservable=/);
     assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
 });
 
