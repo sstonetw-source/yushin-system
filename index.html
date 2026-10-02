@@ -1147,14 +1147,19 @@
 
         <div id="admin-agencies" class="admin-panel" style="display:none;">
             <div class="panel">
-                <strong>廠牌與進銷存統計</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">Brand Master 中啟用的正式廠牌會出現在一般廠牌選單；「獨立統計」只決定進銷存報表是否單獨列出。未設為獨立統計的廠牌會合併計入「其他廠牌」，但原始訂單仍保留真正廠牌名稱。維修維持固定獨立統計。</p>
+                <strong>廠牌設定</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">Product Import 的新廠牌會自動加入 Brand Master，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修固定獨立統計。</p>
+                <div class="toolbar no-print" style="margin:10px 0 4px;">
+                    <button type="button" id="syncBrandsFromProductsBtn" class="btn-secondary" onclick="syncBrandsFromProductMaster()">↻ 從 Product Master 同步廠牌</button>
+                    <span style="font-size:12px;color:#777;">用於補齊既有 Product Master 中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span>
+                </div>
+                <div id="syncBrandsFromProductsStatus" style="font-size:12px;color:#666;margin:4px 0 10px;"></div>
                 <div class="stat-brand-manager">
                     <div><h4>獨立統計廠牌</h4><div id="keyStatisticBrands"></div></div>
                     <div><h4>其他廠牌（合併計算）</h4><div id="otherStatisticBrands"></div></div>
                 </div>
                 <div class="stat-brand-add">
-                    <input type="text" id="newStatisticBrandName" placeholder="新增廠牌名稱">
+                    <input type="text" id="newStatisticBrandName" placeholder="手動新增廠牌（沒有 Product Master 時使用）">
                     <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="newStatisticBrandIndependent"> 獨立統計</label>
                     <button type="button" class="btn-secondary" onclick="addStatisticBrand()">＋ 新增廠牌</button>
                 </div>
@@ -1414,6 +1419,6 @@
     <script src="modules/supply-core.js?v=20261001-6"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261002-10"></script>
+    <script src="app.js?v=20261002-11"></script>
 </body>
 </html>

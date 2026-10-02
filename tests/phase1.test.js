@@ -4461,6 +4461,22 @@ test('Brand Master drives brand dropdowns while statistics grouping stays indepe
 });
 
 
+test('brand settings can sync missing brands from Product Master without changing business settings', () => {
+    assert.match(indexSource, /<strong>廠牌設定<\/strong>/);
+    assert.match(indexSource, /Product Import 的新廠牌會自動加入 Brand Master/);
+    assert.match(indexSource, /id="syncBrandsFromProductsBtn"/);
+    assert.match(indexSource, /從 Product Master 同步廠牌/);
+    const start=appSource.indexOf('window.syncBrandsFromProductMaster = async function()');
+    const end=appSource.indexOf('\nwindow.saveKeyStatisticBrands',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/collection\('products'\)/);
+    assert.match(source,/orderBy\(firebase\.firestore\.FieldPath\.documentId\(\)\)/);
+    assert.match(source,/const pageSize = 300/);
+    assert.match(source,/filter\(name => !brandMasterEntryForName\(name\)\)/);
+    assert.match(source,/upsertBrandMaster\(missing\[i\], \{ active:true \}\)/);
+    assert.match(source,/既有獨立統計與報價公司限制未變更/);
+});
+
 test('quote brands support virtual items and enforce company-specific restrictions', () => {
     assert.match(appSource, /<option value="">未指定廠牌<\/option>/);
     assert.match(appSource, /其他（自行輸入）/);

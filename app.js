@@ -14638,6 +14638,69 @@ window.addStatisticBrand = function() {
     renderKeyStatisticBrands();
 };
 
+window.syncBrandsFromProductMaster = async function() {
+    if (currentUserRole !== 'admin') return;
+    const button = document.getElementById('syncBrandsFromProductsBtn');
+    const status = document.getElementById('syncBrandsFromProductsStatus');
+    const buttonState = beginActionButton(button, '同步中…');
+    if (button && !buttonState) return;
+
+    try {
+        await loadBrandMaster();
+        const brands = new Map();
+        let cursor = null;
+        let scanned = 0;
+        const pageSize = 300;
+
+        while (true) {
+            let query = db.collection('products')
+                .orderBy(firebase.firestore.FieldPath.documentId())
+                .limit(pageSize);
+            if (cursor) query = query.startAfter(cursor);
+            const snapshot = await firestoreReadWithTimeout(query.get(), 'Product Master 廠牌同步');
+            if (snapshot.empty) break;
+
+            snapshot.docs.forEach(doc => {
+                const data = doc.data() || {};
+                const name = String(data.brandName || data.brand || '').trim();
+                const key = normalizeBrandLookupKey(name);
+                if (!key || ['其他', '其他廠牌', '維修'].some(skip => normalizeBrandLookupKey(skip) === key)) return;
+                if (!brands.has(key)) brands.set(key, name);
+            });
+
+            scanned += snapshot.size;
+            if (status) status.textContent = `正在掃描 Product Master：已讀取 ${scanned} 筆，找到 ${brands.size} 個廠牌…`;
+            cursor = snapshot.docs[snapshot.docs.length - 1];
+            if (snapshot.size < pageSize) break;
+            await Promise.resolve();
+        }
+
+        const missing = [...brands.values()].filter(name => !brandMasterEntryForName(name));
+        for (let i = 0; i < missing.length; i++) {
+            if (status) status.textContent = `正在補齊 Brand Master：${i + 1}/${missing.length} ${missing[i]}`;
+            await upsertBrandMaster(missing[i], { active:true });
+        }
+
+        populateQuoteBrandDropdowns();
+        populateOrderBrandDropdown();
+        populateEquipmentBrandDropdown();
+        if (typeof populateForecastBrandDropdown === 'function')
+            populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+        renderKeyStatisticBrands();
+        renderCompanyAgencyBrandSettings();
+
+        const message = `同步完成：掃描 ${scanned} 筆產品，辨識 ${brands.size} 個廠牌，新增 ${missing.length} 個 Brand Master；既有獨立統計與報價公司限制未變更。`;
+        if (status) status.textContent = message;
+        showActionFeedback(message);
+    } catch (err) {
+        console.error('從 Product Master 同步廠牌失敗：', err);
+        if (status) status.textContent = '同步失敗：' + (err?.message || err);
+        alert('同步廠牌失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, buttonState);
+    }
+};
+
 window.saveKeyStatisticBrands = async function() {
     if (currentUserRole !== 'admin') return;
     const selected = normalizeThermoBrandList(keyStatisticBrands).filter(brand => normalizeStatisticBrandKey(brand) !== normalizeStatisticBrandKey('維修'));
