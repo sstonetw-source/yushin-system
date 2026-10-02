@@ -58,6 +58,7 @@
     const effectiveOrderedQty=terminal?x.receivedQty:x.qty;
     const receivedQty=Math.min(effectiveOrderedQty,x.receivedQty);
     const incomingQty=terminal?0:x.remainingQty;
+    const incomingAmount=incomingQty*unitCost;
     const isStockReplenishment=x.sourceType===supply.SOURCES.STOCK_REPLENISHMENT;
     const sourceLabel=isStockReplenishment?'備庫採購':'客戶訂單採購';
     const documentKey=String(x.purchaseDocumentId||x.purchaseDocumentNo||x.internalNo||x.id||'').trim();
@@ -97,7 +98,7 @@
       incomingQty,
       orderedAmount:effectiveOrderedQty*unitCost,
       receivedAmount:receivedQty*unitCost,
-      incomingAmount:incomingQty*unitCost,
+      incomingAmount,
       stockAmount:isStockReplenishment?effectiveOrderedQty*unitCost:0,
       customerOrderAmount:isStockReplenishment?0:effectiveOrderedQty*unitCost,
       missingUnitCost:effectiveOrderedQty>0&&unitCost<=0,
