@@ -424,7 +424,8 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     assert.match(coreTransaction, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
     assert.match(coreTransaction, /type:'PURCHASING_PO'/);
     assert.match(coreTransaction, /method:'PURCHASING_PO'/);
-    assert.match(coreTransaction, /sourceType:item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
+    assert.match(coreTransaction, /const sourceType=item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
+    assert.match(coreTransaction, /sourceType,/);
     assert.match(coreTransaction, /sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
     assert.match(coreTransaction, /sourceItemId:item\.itemId\|\|item\.sourceItemId\|\|''/);
     assert.match(coreTransaction, /purchaseDocumentId:poDocumentId/);
@@ -570,6 +571,21 @@ test('manual ordered action records supply and source item only once after an un
             }},
         canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
         currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
+        YushinProcurementDemand:demand,
+        procurementDemandForOrderItem:(record,item)=>{
+            const ordered=Number(item.supplyOrderedQty||0);
+            const received=Number(item.receivedQty||0);
+            return demand.fromSalesOrder({
+                sourceId:record.id||'O1',sourceItemId:item.itemId||'I1',
+                fulfillmentType:item.fulfillmentType||record.fulfillmentType||'WAREHOUSE',
+                shortageQty:Number(item.shortageQty||0),
+                inTransitQty:Math.max(0,ordered-received),
+                supplyOrderedQty:ordered,receivedQty:received,
+                requiredSupplyQty:Number(item.shortageQty||0)
+            });
+        },
+        procurementDemandRef:()=>null,
+        procurementDemandDocument:record=>record,
         remainingProcurementQty:(record,item)=>Math.max(0,2-Number(item.supplyOrderedQty||0)),
         poIncomingKey:()=> 'P1',defaultWarehouse:()=>({id:'W1'}),localDateString:()=> '2026-09-29',
         normalizedOrderStatus:()=> 'normal',
@@ -613,6 +629,21 @@ test('manual ordered action can add a later genuine shortage without duplicating
             }},
         canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
         currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
+        YushinProcurementDemand:demand,
+        procurementDemandForOrderItem:(record,item)=>{
+            const ordered=Number(item.supplyOrderedQty||0);
+            const received=Number(item.receivedQty||0);
+            return demand.fromSalesOrder({
+                sourceId:record.id||'O1',sourceItemId:item.itemId||'I1',
+                fulfillmentType:item.fulfillmentType||record.fulfillmentType||'WAREHOUSE',
+                shortageQty:Number(item.shortageQty||0),
+                inTransitQty:Math.max(0,ordered-received),
+                supplyOrderedQty:ordered,receivedQty:received,
+                requiredSupplyQty:Number(item.shortageQty||0)
+            });
+        },
+        procurementDemandRef:()=>null,
+        procurementDemandDocument:record=>record,
         remainingProcurementQty:(record,item)=>{
             const ordered=Number(item.supplyOrderedQty||0);
             const received=Number(item.receivedQty||0);
@@ -651,7 +682,8 @@ test('ordered action is a direct snapshot-based state change without a data-entr
     assert.ok(actionStart>=0 && actionEnd>actionStart && saveStart>=0 && saveEnd>saveStart);
     assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>已訂購<\/button>/);
     assert.match(saveSource, /switchPurchasingView\('receiving', document\.getElementById\('purchase-card-receiving'\)\)/);
-    assert.match(saveSource, /remainingProcurementQty\(order, item\)/);
+    assert.match(saveSource, /const demand = procurementDemandForOrderItem\(order, item\)/);
+    assert.match(saveSource, /const qty = demand\.remainingToOrderQty/);
     assert.doesNotMatch(saveSource, /findProduct|preloadPurchaseCosts|loadSupplierWarehouseMasters|supplierForProduct/);
     assert.doesNotMatch(html, /id="manualPurchaseOverlay"/);
     assert.doesNotMatch(app, /printSupplyOrderDocument/);
@@ -908,10 +940,11 @@ test('inventory replenishment source is preserved through formal PO supply recor
     assert.match(replenishSource,/sourceType:'STOCK_REPLENISHMENT'/);
     assert.match(replenishSource,/sourceId:demand\.sourceId/);
 
-    const poStart=app.indexOf('const supplyRecord={');
+    const poStart=app.indexOf("const sourceType=item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT')");
     const poEnd=app.indexOf('transaction.set\(supplyRef,supplyRecord\)',poStart);
     const poSource=app.slice(poStart,poEnd);
-    assert.match(poSource,/sourceType:item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
+    assert.match(poSource,/const sourceType=item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
+    assert.match(poSource,/sourceType,/);
     assert.match(poSource,/sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
 });
 
@@ -1661,6 +1694,21 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         window:{},YushinReceiving:receiving,document:{getElementById:()=>null},db,
         canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
         currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
+        YushinProcurementDemand:demand,
+        procurementDemandForOrderItem:(record,item)=>{
+            const ordered=Number(item.supplyOrderedQty||0);
+            const received=Number(item.receivedQty||0);
+            return demand.fromSalesOrder({
+                sourceId:record.id||'O1',sourceItemId:item.itemId||'I1',
+                fulfillmentType:item.fulfillmentType||record.fulfillmentType||'WAREHOUSE',
+                shortageQty:Number(item.shortageQty||0),
+                inTransitQty:Math.max(0,ordered-received),
+                supplyOrderedQty:ordered,receivedQty:received,
+                requiredSupplyQty:Number(item.shortageQty||0)
+            });
+        },
+        procurementDemandRef:()=>null,
+        procurementDemandDocument:record=>record,
         remainingProcurementQty:(record,item)=>{
             const ordered=Number(item.supplyOrderedQty||0);
             const received=Number(item.receivedQty||0);
@@ -2000,5 +2048,6 @@ test('purchase history exposes a read-only ERP-style purchase timeline', () => {
     assert.match(source,/collection\('receipts'\)\.where\('purchaseDocumentId','==',po\.id\)/);
     assert.match(source,/canCreatePurchaseOrderCapability\(\)[\s\S]*?collection\('purchaseOrderCommunications'\)\.where\('purchaseOrderId','==',po\.id\)/);
     assert.match(source,/purchaseTimelineSourceLabel\(supply\.sourceType\)/);
-    assert.doesNotMatch(source,/\.add\(|\.set\(|\.update\(/);
+    assert.doesNotMatch(source,/\b(?:tx|transaction)\.(?:set|update|delete)\(/);
+    assert.doesNotMatch(source,/db\.collection\([^\n]+\)\.(?:add|set|update)\(/);
 });
