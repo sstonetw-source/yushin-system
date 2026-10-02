@@ -35,16 +35,21 @@
     else if(requestedQty>0&&orderedQty>=requestedQty)status=STATUSES.ORDERED;
     else if(orderedQty>0)status=STATUSES.PARTIALLY_ORDERED;
 
+    const perOrdered=requestedQty>0?Math.min(100,(orderedQty/requestedQty)*100):0;
+    const perReceived=requestedQty>0?Math.min(100,(receivedQty/requestedQty)*100):0;
     return {
       ...record,
       sourceType:Object.values(SOURCES).includes(record.sourceType)?record.sourceType:SOURCES.SALES_ORDER,
       sourceId:String(record.sourceId||''),
       sourceItemId:String(record.sourceItemId||''),
+      scheduleDate:String(record.scheduleDate||record.expectedDate||record.needByDate||''),
       requestedQty,
       orderedQty,
       receivedQty,
       remainingToOrderQty,
       remainingToReceiveQty,
+      perOrdered,
+      perReceived,
       status
     };
   }
