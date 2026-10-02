@@ -2116,7 +2116,7 @@ test('lead-time PO date controls preserve manual overrides and recompute automat
     assert.match(source, /expectedDateSource==='manual'/);
     assert.match(source, /YushinSupplier\.purchaseExpectedDate/);
     assert.match(source, /expectedDateSource='lead-time'/);
-    assert.match(html, /id="poVendorName"[^>]+onchange="updatePoSupplierEmailHint\(\); autoFillPoExpectedDate\(\)"/);
+    assert.match(html, /id="poVendorName"[^>]+onchange="updatePoSupplierEmailHint\(\); autoFillPoExpectedDate\(\); renderPoItemsTable\(\)"/);
     assert.match(html, /id="poDate"[^>]+onchange="autoFillPoExpectedDate\(\)"/);
     assert.match(html, /id="poExpectedDate"[^>]+onchange="markPoExpectedDateManual\(\)"/);
     assert.match(app, /window\.removePoItem = function[\s\S]*?autoFillPoExpectedDate\(poItems\)/);
@@ -2176,7 +2176,8 @@ test('item-level PO schedule dates flow into supply records while manual header 
                     item.itemCode==='A' ? '2026-10-05' : '2026-10-09'
             }
         },
-        productSupplierMappingCache:[]
+        productSupplierMappingCache:[],
+        poSupplierPartNoForItem:()=> ''
     });
 
     const automatic=helper(
