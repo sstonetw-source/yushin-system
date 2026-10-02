@@ -277,6 +277,7 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     assert.match(appSource,/SAFETY_STOCK:'SAFETY_STOCK'/);
     assert.match(appSource,/ORDER_ONLY:'ORDER_ONLY'/);
     assert.match(appSource,/window\.setInventoryStockPolicy=async function/);
+    assert.match(appSource,/inventoryCache\.find\(x=>x\.id===inventoryId\)\|\|inventorySearchResults\.find\(x=>x\.id===inventoryId\)/);
     assert.match(appSource,/stockPolicy:next/);
 
     const replenishStart=appSource.indexOf('window.openInventoryReplenishment');
