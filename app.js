@@ -1235,6 +1235,7 @@ window.switchViewRole = function(role) {
     procurementDemandCache = [];
     procurementDemandCursor = null;
     procurementDemandHasMore = true;
+    procurementDemandLoaded = false;
     procurementDemandSourceOrderCache = new Map();
     pendingPurchaseCursor = null;
     pendingPurchaseHasMore = true;
@@ -9176,7 +9177,17 @@ let pendingPurchaseCache = [];
 let procurementDemandCache = [];
 let procurementDemandCursor = null;
 let procurementDemandHasMore = true;
+let procurementDemandLoaded = false;
 let procurementDemandSourceOrderCache = new Map();
+
+function invalidateProcurementDemandQueue() {
+    procurementDemandCache=[];
+    procurementDemandCursor=null;
+    procurementDemandHasMore=true;
+    procurementDemandLoaded=false;
+    procurementDemandSourceOrderCache=new Map();
+    purchasingViewLoaded?.delete?.('ordering');
+}
 let pendingPurchaseError = '';
 let purchasingDispatchCache = [];
 let purchasingDispatchCursor = null;
@@ -9438,14 +9449,33 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         lifecycleMap
     );
     const standaloneReceiving = standaloneReceivingSupplyMetrics(filters);
+    const demandOrderingRows=procurementDemandLoaded ? procurementDemandCache.filter(demand=>{
+        if(!(Number(demand.remainingToOrderQty||0)>0))return false;
+        const order=demand.sourceType==='SALES_ORDER'
+            ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
+            : null;
+        if(order&&normalizedOrderStatus(order)!=='normal')return false;
+        const date=order?.orderDate||String(demand.createdAt||'').slice(0,10);
+        return purchaseLineMatchesFilters(date,demand.salesName||order?.salesName||'',demand.brand||'',filters);
+    }) : null;
+    const demandOrderingAmount=demandOrderingRows ? demandOrderingRows.reduce((sum,demand)=>{
+        const order=demand.sourceType==='SALES_ORDER'
+            ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
+            : null;
+        const item=order ? normalizedOrderItems(order).find(row=>String(row.itemId||'')===String(demand.sourceItemId||'')) : null;
+        return sum + Number(item?.unitPrice||item?.salesPrice||0)*Number(demand.remainingToOrderQty||0);
+    },0) : 0;
 
     definitions.forEach(([category, countId, amountId]) => {
         const count = document.getElementById(countId);
         const amount = document.getElementById(amountId);
+        const useDemand=category==='ordering'&&demandOrderingRows;
+        const baseCount=useDemand?demandOrderingRows.length:metrics[category].count;
+        const baseAmount=useDemand?demandOrderingAmount:metrics[category].amount;
         const extraCount = category === 'arrival' ? standaloneReceiving.count : 0;
         const extraAmount = category === 'arrival' ? standaloneReceiving.amount : 0;
-        if (count) count.textContent = `${metrics[category].count + extraCount} 筆`;
-        if (amount) amount.textContent = formatStatsMoney(metrics[category].amount + extraAmount);
+        if (count) count.textContent = `${baseCount + extraCount} 筆`;
+        if (amount) amount.textContent = formatStatsMoney(baseAmount + extraAmount);
     });
     // 圖卡統計已載入資料中的全部已完成品項；50 筆限制只套在下方明細顯示，
     // 避免使用者按「載入更多」時圖卡數字跟著人為跳動。
@@ -10003,6 +10033,7 @@ function renderPendingPurchaseOrders() {
         const order=sourceType==='SALES_ORDER'
             ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
             : null;
+        if(order&&normalizedOrderStatus(order)!=='normal')continue;
         const sourceItems=order ? normalizedOrderItems(order) : [];
         const item=sourceItems.find(row=>String(row.itemId||'')===String(demand.sourceItemId||'')) || {};
         const date=order?.orderDate || String(demand.createdAt||'').slice(0,10);
@@ -10056,6 +10087,7 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
         procurementDemandCache=[];
         procurementDemandCursor=null;
         procurementDemandHasMore=true;
+        procurementDemandLoaded=false;
         procurementDemandSourceOrderCache=new Map();
     }
     renderPendingPurchaseOrders();
@@ -10083,12 +10115,14 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
             sourceOrders.forEach(order=>procurementDemandSourceOrderCache.set(order.id,order));
         }
         pendingPurchaseHasMore=procurementDemandHasMore;
+        procurementDemandLoaded=true;
     }catch(err){
         pendingPurchaseError=`待採購需求讀取失敗，請重試：${String(err?.message||err).slice(0,160)}`;
     }finally{
         pendingPurchaseLoading=false;
         if(refreshButton){refreshButton.disabled=false;refreshButton.textContent='↻ 更新';}
         renderPendingPurchaseOrders();
+        renderPurchasingWorkCards();
     }
 };
 
