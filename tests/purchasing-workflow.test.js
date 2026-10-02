@@ -424,8 +424,8 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     assert.match(coreTransaction, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
     assert.match(coreTransaction, /type:'PURCHASING_PO'/);
     assert.match(coreTransaction, /method:'PURCHASING_PO'/);
-    assert.match(coreTransaction, /sourceType:item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'/);
-    assert.match(coreTransaction, /sourceId:item\.orderId\|\|''/);
+    assert.match(coreTransaction, /sourceType:item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
+    assert.match(coreTransaction, /sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
     assert.match(coreTransaction, /sourceItemId:item\.itemId\|\|''/);
     assert.match(coreTransaction, /purchaseDocumentId:poDocumentId/);
     assert.match(coreTransaction, /poRecord\.supplyOrderIds=supplyOrderIds/);
@@ -1393,6 +1393,8 @@ test('purchase cancellation releases incoming and returns outstanding quantity t
 
 test('acceptance flow keeps inventory and work states aligned through procurement to completion', () => {
     const fulfillment=require('../modules/fulfillment-core.js');
+    const reservation=require('../modules/reservation-core.js');
+    const receiving=require('../modules/receiving-core.js');
     const workflow=require('../modules/workflow-core.js');
 
     const displayCategory=(item,isBilled=false)=>{
@@ -1413,7 +1415,11 @@ test('acceptance flow keeps inventory and work states aligned through procuremen
     };
 
     let inventory={onHand:4,reserved:0,incoming:0};
-    let item=fulfillment.reserveFromAvailable({orderedQty:10,fulfillmentType:'WAREHOUSE'},4);
+    const initialReservation=reservation.planReservation({requestedQty:10,existingQty:0,sameStock:true,availableQty:4});
+    let item=fulfillment.normalizeItem({
+        orderedQty:10,fulfillmentType:'WAREHOUSE',
+        reservedQty:initialReservation.reservedQty,shortageQty:initialReservation.shortageQty
+    });
     inventory.reserved=item.reservedQty;
     assert.deepEqual(
         {onHand:inventory.onHand,reserved:inventory.reserved,incoming:inventory.incoming,category:displayCategory(item)},
@@ -1425,14 +1431,14 @@ test('acceptance flow keeps inventory and work states aligned through procuremen
     assert.equal(displayCategory(item),'arrival');
     assert.deepEqual(inventory,{onHand:4,reserved:4,incoming:6});
 
-    item=fulfillment.applyReceipt(item,2);
+    item=receiving.applyReceiptToOrderItem(item,2).item;
     inventory.onHand+=2;
     inventory.incoming-=2;
     inventory.reserved=item.reservedQty;
     assert.equal(displayCategory(item),'arrival');
     assert.deepEqual(inventory,{onHand:6,reserved:6,incoming:4});
 
-    item=fulfillment.applyReceipt(item,4);
+    item=receiving.applyReceiptToOrderItem(item,4).item;
     inventory.onHand+=4;
     inventory.incoming-=4;
     inventory.reserved=item.reservedQty;
@@ -1453,6 +1459,8 @@ test('acceptance flow keeps inventory and work states aligned through procuremen
 
 test('acceptance flow handles partial receipt cancellation and return replacement without stock drift', () => {
     const fulfillment=require('../modules/fulfillment-core.js');
+    const reservation=require('../modules/reservation-core.js');
+    const receiving=require('../modules/receiving-core.js');
     const workflow=require('../modules/workflow-core.js');
 
     const displayCategory=(item,isBilled=false)=>{
@@ -1479,11 +1487,15 @@ test('acceptance flow handles partial receipt cancellation and return replacemen
     };
 
     let inventory={onHand:4,reserved:0,incoming:0};
-    let item=fulfillment.reserveFromAvailable({orderedQty:10,fulfillmentType:'WAREHOUSE'},4);
+    const initialReservation=reservation.planReservation({requestedQty:10,existingQty:0,sameStock:true,availableQty:4});
+    let item=fulfillment.normalizeItem({
+        orderedQty:10,fulfillmentType:'WAREHOUSE',
+        reservedQty:initialReservation.reservedQty,shortageQty:initialReservation.shortageQty
+    });
     inventory.reserved=item.reservedQty;
     item=fulfillment.normalizeItem({...item,supplyOrderedQty:6});
     inventory.incoming=6;
-    item=fulfillment.applyReceipt(item,2);
+    item=receiving.applyReceiptToOrderItem(item,2).item;
     inventory.onHand+=2;
     inventory.incoming-=2;
     inventory.reserved=item.reservedQty;
