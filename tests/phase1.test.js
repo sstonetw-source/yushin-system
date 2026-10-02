@@ -249,7 +249,8 @@ test('purchaser order form assigns a salesperson while preserving creator identi
 
 test('low-stock inventory can hand off to formal replenishment purchase flow without duplicating incoming stock', () => {
     assert.match(appSource, /openInventoryReplenishment/);
-    assert.match(appSource, /stockPolicy==='SAFETY_STOCK' && safetyStock>0 && n\.available<=safetyStock && n\.available\+n\.incoming<safetyStock && canEditPage\('orders\.po'\)/);
+    assert.match(appSource, /const plan=inventoryReplenishmentPlan\(x,n\)/);
+    assert.match(appSource, /plan\.needsReplenishment && canEditPage\('orders\.po'\)/);
     const start=appSource.indexOf('window.openInventoryReplenishment');
     const end=appSource.indexOf('\nwindow.setInventorySafetyStock',start);
     const source=appSource.slice(start,end);
@@ -295,7 +296,8 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     const renderSource=appSource.slice(renderStart,renderEnd);
     assert.match(renderSource,/inventoryStockPolicyControl\(x\)/);
     assert.match(renderSource,/policyFilter && stockPolicy!==policyFilter/);
-    assert.match(renderSource,/stockPolicy==='SAFETY_STOCK' && safetyStock>0/);
+    assert.match(renderSource,/const plan=inventoryReplenishmentPlan\(x,n\)/);
+    assert.match(renderSource,/if\(stateFilter==='low' && !plan\.needsReplenishment\)return/);
 });
 
 

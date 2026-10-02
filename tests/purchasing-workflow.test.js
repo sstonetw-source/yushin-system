@@ -452,7 +452,7 @@ test('supply receipt synchronizes received quantity back to the source order ite
     assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
     assert.match(source,/const next=receiptPlan\.item/);
     assert.match(source,/reserveQty=receiptPlan\.reservedDelta/);
-    assert.match(source,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
+    assert.match(source,/items\[itemIndex\]=\{[\s\S]*?\.\.\.next,[\s\S]*?reservedQty:next\.reservedQty,[\s\S]*?receiptEvents:\[/);
     assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
     assert.match(source,/globalThis\.YushinSupply\.applyReceipt\(procurement,qty\)/);
     assert.match(source,/globalThis\.YushinReceiving\.buildReceiptSnapshot/);
@@ -468,7 +468,7 @@ test('self-order receipt uses receiving core receivedQty without adding it twice
 
 
 test('self-order receipt keeps reservation from fulfillment core without adding reserveQty twice',()=>{
-    assert.match(app,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
+    assert.match(app,/items\[itemIndex\]=\{[\s\S]*?\.\.\.next,[\s\S]*?reservedQty:next\.reservedQty,[\s\S]*?receiptEvents:\[/);
     assert.doesNotMatch(app,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty,inventoryReservedQty:/);
     assert.doesNotMatch(app,/reservedQty:Number\(item\.reservedQty\?\?item\.inventoryReservedQty\?\?0\)\+reserveQty/);
     assert.match(app,/reserved:inv\.reserved\+reserveQty/);
@@ -765,7 +765,8 @@ test('cancelled warehouse source still receives into free stock while direct shi
     assert.match(warehouseSource,/sourceOrderStatus=normalizedOrderStatus\(order\)/);
     assert.match(warehouseSource,/if\(sourceOrderStatus==='normal'\)\{/);
     assert.match(warehouseSource,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:0\},qty\)/);
-    assert.match(warehouseSource,/items\[itemIndex\]=\{\.\.\.item,receivedQty:receiptPlan\.item\.receivedQty\}/);
+    assert.match(warehouseSource,/items\[itemIndex\]=\{[\s\S]*?\.\.\.item,[\s\S]*?receivedQty:receiptPlan\.item\.receivedQty,[\s\S]*?receiptEvents:\[/);
+    assert.match(warehouseSource,/sourceOrderStatus:'cancelled'/);
     assert.match(warehouseSource,/orderWorkIndexFields\(nextOrder\)/);
     assert.doesNotMatch(warehouseSource,/來源訂單已取消，不能繼續確認到貨/);
     assert.match(source,/buildReceipt\(\{[\s\S]*?productKey,[\s\S]*?warehouseId,[\s\S]*?extra:\{[\s\S]*?sourceOrderStatus/);
