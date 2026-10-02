@@ -1977,3 +1977,23 @@ test('purchasing Supplier tab is a master-data view', () => {
     assert.match(source,/loadSupplierWarehouseMasters\(false\)/);
     assert.match(source,/purchaseFilterToolbar/);
 });
+
+test('purchase history exposes a read-only ERP-style purchase timeline', () => {
+    assert.match(html,/id="purchaseTimelineOverlay"/);
+    assert.match(html,/id="purchaseTimelineSupplyBody"/);
+    assert.match(html,/id="purchaseTimelineEvents"/);
+    const renderStart=app.indexOf('window.renderPoList = function');
+    const renderEnd=app.indexOf('\n// 把「採購訂單」',renderStart);
+    const renderSource=app.slice(renderStart,renderEnd);
+    assert.match(renderSource,/openPurchaseOrderTimeline/);
+
+    const start=app.indexOf('window.openPurchaseOrderTimeline = async function');
+    const end=app.indexOf('\nfunction purchaseOrderSearchTokens',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/readDocumentsByIds\('supplyOrders',supplyIds\)/);
+    assert.match(source,/collection\('receipts'\)\.where\('purchaseDocumentId','==',po\.id\)/);
+    assert.match(source,/canCreatePurchaseOrderCapability\(\)[\s\S]*?collection\('purchaseOrderCommunications'\)\.where\('purchaseOrderId','==',po\.id\)/);
+    assert.match(source,/purchaseTimelineSourceLabel\(supply\.sourceType\)/);
+    assert.doesNotMatch(source,/\.add\(|\.set\(|\.update\(/);
+});
