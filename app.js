@@ -8665,7 +8665,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
                 {
                     reason:'reservation_reconcile',warehouseId:oldWarehouseId||warehouseId,itemId,
                     fulfillmentType:'WAREHOUSE',ownerUid:order.ownerUid||currentUser?.uid||'',
-                    salesCode:order.salesCode||currentUserCode||''
+                    salesCode:order.salesCode||salesCodeForName(order.salesName)||''
                 }
             ));
         }
@@ -8675,7 +8675,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
                 {
                     warehouseId,itemId,fulfillmentType:'WAREHOUSE',
                     ownerUid:order.ownerUid||currentUser?.uid||'',
-                    salesCode:order.salesCode||currentUserCode||''
+                    salesCode:order.salesCode||salesCodeForName(order.salesName)||''
                 }
             ));
         }

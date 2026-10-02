@@ -727,7 +727,11 @@ service cloud.firestore {
     }
 
     match /inventoryReservations/{id} {
-      allow read: if admin() || purchaser() || warehouse()
+      // Reservation transactions first read their deterministic ID so retries remain idempotent.
+      // A missing document contains no business data; existing documents stay owner-scoped.
+      allow get: if admin() || purchaser() || warehouse()
+        || (businessOwner() && (resource == null || owns(resource.data)));
+      allow list: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
       allow create: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(request.resource.data));

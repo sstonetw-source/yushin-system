@@ -632,6 +632,29 @@ test('business owner may update own reservation without changing ownership', asy
 });
 
 
+test('business owner may probe missing reservation slot but cannot read another owner reservation', async () => {
+  await assertSucceeds(getDoc(doc(db('sales1'), 'inventoryReservations/missing-order__item-1')));
+
+  await seed('inventoryReservations/private-sales2', {
+    ownerUid:'sales2', salesCode:'S02', orderId:'o2', itemId:'i1',
+    productKey:'p1', quantity:1, shortageQty:0, status:'active'
+  });
+  await assertFails(getDoc(doc(db('sales1'), 'inventoryReservations/private-sales2')));
+});
+
+
+test('business owner may create own reservation movement but cannot forge another owner', async () => {
+  await assertSucceeds(setDoc(doc(db('sales1'), 'inventoryMovements/reserve-own'), {
+    type:'reserve', qty:1, productKey:'p1', sourceType:'ORDER', sourceId:'o1',
+    ownerUid:'sales1', salesCode:'S01'
+  }));
+  await assertFails(setDoc(doc(db('sales1'), 'inventoryMovements/reserve-other'), {
+    type:'reserve', qty:1, productKey:'p1', sourceType:'ORDER', sourceId:'o2',
+    ownerUid:'sales2', salesCode:'S02'
+  }));
+});
+
+
 test('engineer assisted quote remains creator-scoped', async () => {
   await seed('users/eng2', { role:'engineer', active:true, salesCode:'E02' });
   await seed('quotes/engineer-assisted-scope', {

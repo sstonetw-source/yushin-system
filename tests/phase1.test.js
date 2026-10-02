@@ -5099,5 +5099,5 @@ test('new order inventory reservation writes explicit ownership metadata', () =>
     const end = appSource.indexOf('function orderReservationSummary', start);
     const source = appSource.slice(start, end);
     assert.match(source, /ownerUid:order\.ownerUid\|\|currentUser\?\.uid\|\|''/);
-    assert.match(source, /salesCode:order\.salesCode\|\|currentUserCode\|\|''/);
+    assert.match(source, /salesCode:order\.salesCode\|\|salesCodeForName\(order\.salesName\)\|\|''/);
 });
