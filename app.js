@@ -10826,7 +10826,7 @@ window.openPurchaseOrderTimeline = async function(poId) {
 function purchaseOrderSearchTokens(po={}) {
     const values=[
         po.poNo,po.vendorName,po.supplierName,po.supplierEmail,po.buyerName,po.company,po.poDate,
-        ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId]):[])
+        ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.supplierPartNo,item.itemName,item.brand,item.orderNo,item.orderId]):[])
     ];
     const tokens=new Set();
     for(const raw of values){
@@ -10849,7 +10849,7 @@ function purchaseOrderHistoryMatches(po, keyword) {
     if(!needle)return true;
     const values=[
         po.poNo,po.vendorName,po.buyerName,po.company,po.poDate,
-        ...purchaseItemsFromSavedPo(po).flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId])
+        ...purchaseItemsFromSavedPo(po).flatMap(item=>[item.itemCode,item.supplierPartNo,item.itemName,item.brand,item.orderNo,item.orderId])
     ];
     return values.some(value=>normalizeFullHistorySearchValue(value).includes(needle));
 }
@@ -11355,6 +11355,7 @@ window.copySavedPurchaseOrderAsNew = async function(poId) {
         orderId: '',
         itemId: '',
         orderItemIndex: 0,
+        supplierPartNo: '',
         supplyOrderId: '',
         purchaseDocumentNo: '',
         purchaseDocumentNos: []
@@ -12726,6 +12727,23 @@ window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = 
     return expected;
 };
 
+function productSupplierMappingForPoItem(item = {}, supplierId = '') {
+    const selectedSupplierId=String(supplierId||'').trim();
+    if(!selectedSupplierId || !globalThis.YushinSupplier?.selectProductSupplierMapping)return null;
+    const candidates=productSupplierMappingCache.filter(mapping =>
+        String(mapping.supplierId||'').trim()===selectedSupplierId
+    );
+    return globalThis.YushinSupplier.selectProductSupplierMapping(candidates,item)||null;
+}
+
+function poSupplierPartNoForItem(item = {}, supplierId = '') {
+    const snapshot=String(item?.supplierPartNo||'').trim();
+    // Reprints must keep the original vendor code even if master data later changes.
+    if(poEditingId && snapshot)return snapshot;
+    const mapping=productSupplierMappingForPoItem(item,supplierId);
+    return String(mapping?.supplierPartNo||'').trim();
+}
+
 function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', headerExpectedDate = '', expectedDateSource = '') {
     const manualHeader = expectedDateSource === 'manual'
         || (!!headerExpectedDate && expectedDateSource !== 'lead-time');
@@ -12741,7 +12759,8 @@ function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', h
                 supplierId
             );
         }
-        return { ...item, scheduleDate };
+        const supplierPartNo=poSupplierPartNoForItem(item,supplierId);
+        return { ...item, scheduleDate, supplierPartNo };
     });
 }
 
@@ -12889,13 +12908,19 @@ window.generatePoNo = async function() {
 function renderPoItemsTable() {
     const tbody = document.getElementById('poItemsBody');
     tbody.innerHTML = '';
+    const selectedSupplier=supplierForVendorName(document.getElementById('poVendorName')?.value||'');
+    const selectedSupplierId=selectedSupplier?.id||selectedSupplier?.supplierId||'';
     poItems.forEach((item, idx) => {
         const missingPrice = !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) <= 0;
+        const supplierPartNo=poSupplierPartNoForItem(item,selectedSupplierId);
+        const supplierPartNoHtml=supplierPartNo
+            ? `<small style="display:block;margin-top:3px;color:#667584;font-size:10px;">供應商貨號：${escapeHtml(supplierPartNo)}</small>`
+            : '';
         const tr = document.createElement('tr');
         if (poDirectStockMode) {
             tr.innerHTML = `
                 <td style="border:1px solid #999;padding:4px;"><input type="text" value="${escapeAttr(item.itemName||'')}" placeholder="品名" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'itemName',this.value)"></td>
-                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)">${supplierPartNoHtml}</td>
                 <td style="border:1px solid #999;padding:4px;"><input type="text" list="poBrandList" value="${escapeAttr(item.brand||'')}" placeholder="廠牌" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'brand',this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.0001" step="any" value="${item.qty||1}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx},'qty',this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" min="0" step="0.01" value="${missingPrice?'':item.unitPrice}" placeholder="未稅進貨單價" class="${missingPrice?'po-missing-price':''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx},'unitPrice',this.value)"></td>
@@ -12905,7 +12930,7 @@ function renderPoItemsTable() {
         } else {
             tr.innerHTML = `
                 <td style="border:1px solid #999;padding:4px;"><input type="text" value="${escapeAttr(item.itemName||'')}" placeholder="品名" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'itemName',this.value)"></td>
-                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)"></td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)">${supplierPartNoHtml}</td>
                 <td style="border:1px solid #999;padding:4px;"><input type="text" list="poBrandList" value="${escapeAttr(item.brand||'')}" placeholder="廠牌" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'brand',this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" step="1" value="${item.qty}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'qty', this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.01" step="0.01" value="${missingPrice ? '' : item.unitPrice}" placeholder="請填進貨單價" class="${missingPrice ? 'po-missing-price' : ''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'unitPrice', this.value)">${missingPrice ? '<small class="po-missing-price-hint">缺少成本</small>' : ''}</td>
@@ -13367,6 +13392,7 @@ window.printPurchaseOrder = async function() {
                     productId:item.productId||'',
                     productKey:poIncomingKey(item),
                     itemCode:item.itemCode||'',
+                    supplierPartNo:item.supplierPartNo||'',
                     itemName:item.itemName||'',
                     brand:resolveBrandName(item.brand||''),
                     qty:Number(item.qty||0),
