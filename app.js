@@ -3968,6 +3968,43 @@ function supplierForProduct(brand, productLine = '') {
     return supplierMasterCache.find(item => item.id === mapping.supplierId || item.supplierId === mapping.supplierId) || null;
 }
 
+function normalizeSupplierEmail(value='') {
+    return String(value || '').trim().toLocaleLowerCase();
+}
+
+function supplierForVendorName(vendorName='') {
+    const key=String(vendorName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+    if(!key)return null;
+    return supplierMasterCache.find(item=>{
+        const supplierName=String(item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+        const header=String(item.purchaseHeaderName||item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+        return supplierName===key||header===key;
+    })||null;
+}
+
+function purchaseOrderSupplierContact(po={}) {
+    const live = supplierMasterCache.find(item =>
+        (po.supplierId && (item.id===po.supplierId || item.supplierId===po.supplierId))
+    ) || supplierForVendorName(po.vendorName || po.supplierName || '');
+    return {
+        supplierId: live?.id || live?.supplierId || po.supplierId || '',
+        supplierName: live?.supplierName || po.supplierName || po.vendorName || '',
+        purchaseHeaderName: live?.purchaseHeaderName || po.vendorName || po.supplierName || '',
+        email: normalizeSupplierEmail(live?.email || po.supplierEmail || '')
+    };
+}
+
+window.updatePoSupplierEmailHint = function(po=null) {
+    const hint=document.getElementById('poSupplierEmailHint');
+    if(!hint)return;
+    const contact=po
+        ? purchaseOrderSupplierContact(po)
+        : purchaseOrderSupplierContact({vendorName:document.getElementById('poVendorName')?.value||''});
+    hint.textContent=contact.email ? `Email：${contact.email}` : '尚未設定供應商 Email';
+    hint.style.color=contact.email ? '#555' : '#9a6700';
+};
+
+
 function renderSupplierMappingAdmin() {
     const body = document.getElementById('supplierMappingBody');
     if (!body) return;
@@ -3978,9 +4015,10 @@ function renderSupplierMappingAdmin() {
             <td>${escapeHtml(mapping.productLine || '預設')}</td>
             <td>${escapeHtml(supplier.supplierName || mapping.supplierName || '')}</td>
             <td>${escapeHtml(supplier.purchaseHeaderName || supplier.supplierName || '')}</td>
+            <td>${escapeHtml(supplier.email || '')}</td>
             <td><button type="button" class="btn-small btn-danger" onclick="disableSupplierMapping('${escapeAttr(mapping.id)}')">停用</button></td>
         </tr>`;
-    }).join('') : '<tr><td colspan="5" style="color:#888;">尚未設定供應商對應。</td></tr>';
+    }).join('') : '<tr><td colspan="6" style="color:#888;">尚未設定供應商對應。</td></tr>';
 }
 
 function renderWarehouseMasterAdmin() {
@@ -4001,6 +4039,7 @@ window.saveSupplierMapping = async function() {
     if(button && !buttonState)return;
     const supplierName = String(document.getElementById('supplierMasterName')?.value || '').trim();
     const purchaseHeaderName = String(document.getElementById('supplierMasterHeader')?.value || '').trim() || supplierName;
+    const supplierEmail = normalizeSupplierEmail(document.getElementById('supplierMasterEmail')?.value || '');
     const brandName = resolveBrandName(document.getElementById('supplierMappingBrand')?.value || '');
     const productLine = String(document.getElementById('supplierMappingLine')?.value || '').trim();
     const status = document.getElementById('supplierMappingStatus');
@@ -4008,12 +4047,16 @@ window.saveSupplierMapping = async function() {
         if (status) status.innerText = '請至少填寫供應商名稱與廠牌。';
         return;
     }
+    if (supplierEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplierEmail)) {
+        if (status) status.innerText = '供應商 Email 格式不正確。';
+        return;
+    }
     try {
         const supplierId = stableMasterId('sup', supplierName);
         const mappingId = stableMasterId('bsm', brandName + '|' + (productLine || 'default'));
         const now = new Date().toISOString();
         const batch = db.batch();
-        batch.set(db.collection('suppliers').doc(supplierId), { supplierId, supplierName, purchaseHeaderName, active:true, updatedAt:now }, { merge:true });
+        batch.set(db.collection('suppliers').doc(supplierId), { supplierId, supplierName, purchaseHeaderName, email:supplierEmail, active:true, updatedAt:now }, { merge:true });
         batch.set(db.collection('brandSupplierMappings').doc(mappingId), {
             mappingId, brandName, productLine, supplierId, isDefault:!productLine, active:true, updatedAt:now
         }, { merge:true });
@@ -9800,7 +9843,7 @@ function poWaitingDays(po) {
 
 function purchaseOrderSearchTokens(po={}) {
     const values=[
-        po.poNo,po.vendorName,po.buyerName,po.company,po.poDate,
+        po.poNo,po.vendorName,po.supplierName,po.supplierEmail,po.buyerName,po.company,po.poDate,
         ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId]):[])
     ];
     const tokens=new Set();
@@ -10207,6 +10250,7 @@ window.reprintPurchaseOrder = async function(poId) {
     switchPoCompany(po.company || 'yushin', null, true);
 
     document.getElementById('poVendorName').value = po.vendorName || '';
+    window.updatePoSupplierEmailHint?.(po);
     document.getElementById('poBuyerName').innerText = po.buyerName || '';
     document.getElementById('poDate').value = po.poDate || '';
     document.getElementById('poNo').innerText = po.poNo || '';
@@ -10267,6 +10311,7 @@ window.copySavedPurchaseOrderAsNew = async function(poId) {
     populatePoVendorSuggestions();
     switchPoCompany(po.company || 'yushin', null, true);
     document.getElementById('poVendorName').value = po.vendorName || '';
+    window.updatePoSupplierEmailHint?.({vendorName:po.vendorName,supplierId:po.supplierId,supplierEmail:po.supplierEmail});
     document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
     document.getElementById('poDate').value = localDateString();
     await generatePoNo();
@@ -11296,6 +11341,7 @@ function updatePoModeUI() {
     const existingBanner = document.getElementById('poExistingBanner');
     const existingNumber = document.getElementById('poExistingNumber');
     const copyBtn = document.getElementById('poCopyAsNewBtn');
+    const emailBtn = document.getElementById('emailPurchaseOrderBtn');
     if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
 
     const viewingExisting = !!poEditingId;
@@ -11307,6 +11353,9 @@ function updatePoModeUI() {
     const savedPo = viewingExisting ? poListCache.find(po => po.id === poEditingId) : null;
     const canCopySafely = !!savedPo && (savedPo.purchaseType === 'stock' || purchaseItemsFromSavedPo(savedPo).every(item => !item.orderId));
     if (copyBtn) copyBtn.style.display = canCopySafely ? '' : 'none';
+    const supplierContact = savedPo ? purchaseOrderSupplierContact(savedPo) : purchaseOrderSupplierContact({vendorName:document.getElementById('poVendorName')?.value||''});
+    if (emailBtn) emailBtn.style.display = viewingExisting && supplierContact.email ? '' : 'none';
+    window.updatePoSupplierEmailHint?.(savedPo || null);
 
     if (addBtn) addBtn.style.display = !viewingExisting && poDirectStockMode ? '' : 'none';
     if (hint) hint.textContent = viewingExisting
@@ -11328,6 +11377,7 @@ async function autoFillPoSupplier(items) {
     const header = supplier.purchaseHeaderName || supplier.supplierName || '';
     const input = document.getElementById('poVendorName');
     if (input && header) input.value = header;
+    window.updatePoSupplierEmailHint?.();
     return header;
 }
 
@@ -11335,12 +11385,14 @@ function populatePoVendorSuggestions() {
     const list = document.getElementById('poVendorSuggestions');
     if (!list) return;
     const vendorsByKey = new Map();
-    poListCache.forEach(po => {
-        const name = String(po.vendorName || '').trim();
-        if (!name) return;
-        const key = name.normalize('NFKC').replace(/\s+/g, ' ').toLocaleLowerCase();
-        if (!vendorsByKey.has(key)) vendorsByKey.set(key, name);
-    });
+    const addVendor = name => {
+        const value=String(name||'').trim();
+        if(!value)return;
+        const key=value.normalize('NFKC').replace(/\s+/g,' ').toLocaleLowerCase();
+        if(!vendorsByKey.has(key))vendorsByKey.set(key,value);
+    };
+    supplierMasterCache.forEach(supplier=>addVendor(supplier.purchaseHeaderName||supplier.supplierName));
+    poListCache.forEach(po=>addVendor(po.vendorName));
     list.innerHTML = '';
     [...vendorsByKey.values()]
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
@@ -11762,10 +11814,14 @@ window.printPurchaseOrder = async function() {
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
     const poNetTotal = poItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.unitPrice || 0)), 0);
+    const supplierContact = supplierForVendorName(vendorName);
     const poRecord = {
         poNo,
         company: poCurrentCompany,
         vendorName,
+        supplierId:supplierContact?.id||supplierContact?.supplierId||'',
+        supplierName:supplierContact?.supplierName||vendorName,
+        supplierEmail:normalizeSupplierEmail(supplierContact?.email||''),
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
@@ -11826,7 +11882,9 @@ window.printPurchaseOrder = async function() {
                     qty:Number(item.qty||0),
                     receivedQty:0,
                     incomingRegisteredQty:0,
-                    supplier:vendorName,
+                    supplier:poRecord.supplierName||vendorName,
+                    supplierId:poRecord.supplierId||'',
+                    supplierEmail:poRecord.supplierEmail||'',
                     unitCost:Number(item.unitPrice||0),
                     orderDate:poRecord.poDate,
                     fulfillmentType:item.fulfillmentType||'WAREHOUSE',
