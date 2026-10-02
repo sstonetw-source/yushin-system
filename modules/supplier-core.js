@@ -114,6 +114,7 @@
   function normalizeProductSupplierMapping(record={}){
     const priorityNumber=Number(record.priority??record.sequence??1);
     const leadTimeNumber=Number(record.leadTimeDays??record.delay??0);
+    const minimumOrderQtyNumber=Number(record.minimumOrderQty??record.minOrderQty??record.minQty??0);
     return {
       ...record,
       mappingId:text(record.mappingId||record.id),
@@ -123,6 +124,7 @@
       supplierPartNo:text(record.supplierPartNo||record.supplierPartNumber||record.vendorProductCode),
       priority:Number.isFinite(priorityNumber)&&priorityNumber>0?Math.floor(priorityNumber):1,
       leadTimeDays:Number.isFinite(leadTimeNumber)&&leadTimeNumber>=0?Math.floor(leadTimeNumber):0,
+      minimumOrderQty:Number.isFinite(minimumOrderQtyNumber)&&minimumOrderQtyNumber>0?minimumOrderQtyNumber:0,
       active:record.active!==false
     };
   }
@@ -149,6 +151,31 @@
       .filter(mapping=>productSupplierMatches(mapping,product))
       .map(normalizeProductSupplierMapping)
       .sort((a,b)=>a.priority-b.priority||a.supplierId.localeCompare(b.supplierId))[0]||null;
+  }
+
+  function minimumOrderRule(item={},mappings=[],supplierId=''){
+    const requiredSupplierId=text(supplierId);
+    const candidates=requiredSupplierId
+      ? (mappings||[]).filter(mapping=>normalizeProductSupplierMapping(mapping).supplierId===requiredSupplierId)
+      : (mappings||[]);
+    const mapping=selectProductSupplierMapping(candidates,item||{});
+    const minimumOrderQty=Number(mapping?.minimumOrderQty||0);
+    return {
+      mapping,
+      minimumOrderQty:Number.isFinite(minimumOrderQty)&&minimumOrderQty>0?minimumOrderQty:0
+    };
+  }
+
+  function validatePurchaseQuantity(item={},qty=0,mappings=[],supplierId=''){
+    const quantityNumber=Number(qty);
+    const quantity=Number.isFinite(quantityNumber)?Math.max(0,quantityNumber):0;
+    const rule=minimumOrderRule(item,mappings,supplierId);
+    return {
+      ...rule,
+      quantity,
+      valid:!(rule.minimumOrderQty>0)||quantity>=rule.minimumOrderQty,
+      shortage:rule.minimumOrderQty>0?Math.max(0,rule.minimumOrderQty-quantity):0
+    };
   }
 
   function parseBusinessDate(value){
@@ -235,6 +262,8 @@
     validateProductSupplierMapping,
     productSupplierMatches,
     selectProductSupplierMapping,
+    minimumOrderRule,
+    validatePurchaseQuantity,
     parseBusinessDate,
     addCalendarDays,
     expectedArrivalDate,
