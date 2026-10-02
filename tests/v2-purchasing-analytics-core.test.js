@@ -41,6 +41,10 @@ test('stock replenishment is separated from customer-order purchasing by sourceT
   assert.equal(result.totals.incomingAmount,500);
   assert.equal(result.totals.documentCount,2);
   assert.equal(result.totals.lineCount,2);
+  assert.deepEqual(result.bySource.map(row=>[row.source,row.orderedAmount]),[
+    ['客戶訂單採購',600],
+    ['備庫採購',500]
+  ]);
 });
 
 test('supplier summary groups by supplier id and sorts by spend',()=>{
