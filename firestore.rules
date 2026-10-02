@@ -483,6 +483,14 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Odoo/ERPNext-style item-supplier relationship. Supplier routing belongs
+    // to purchasing master data, not to Product Master itself.
+    match /productSupplierMappings/{id} {
+      allow read: if active();
+      allow create, update: if canPurchase();
+      allow delete: if false;
+    }
+
     match /warehouses/{id} {
       allow read: if active();
       allow create, update: if admin();
