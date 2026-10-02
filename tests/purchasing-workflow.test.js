@@ -1902,7 +1902,7 @@ test('procurement analytics is limited to purchaser and admin capability', () =>
 
     const switchStart=app.indexOf('window.switchPurchasingView = function');
     const switchEnd=app.indexOf('\nwindow.changePurchasePeriod',switchStart);
-    assert.match(app.slice(switchStart,switchEnd),/view === 'analytics' && !canCreatePurchaseOrderCapability\(\)/);
+    assert.match(app.slice(switchStart,switchEnd),/\(view === 'analytics' \|\| view === 'suppliers'\) && !canCreatePurchaseOrderCapability\(\)/);
     assert.match(app,/purchaseAnalysisTab\.style\.display = canCreatePurchaseOrderCapability\(\) \? '' : 'none'/);
 });
 
