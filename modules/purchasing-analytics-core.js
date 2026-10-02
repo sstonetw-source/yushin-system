@@ -208,6 +208,65 @@
     };
   }
 
+  const AGING_BUCKETS=Object.freeze([
+    {key:'0_7',label:'0–7 天',minDays:0,maxDays:7},
+    {key:'8_14',label:'8–14 天',minDays:8,maxDays:14},
+    {key:'15_30',label:'15–30 天',minDays:15,maxDays:30},
+    {key:'31_plus',label:'31+ 天',minDays:31,maxDays:null}
+  ]);
+
+  function agingBucketForDays(days){
+    if(!Number.isFinite(days)||days<0)return null;
+    if(days<8)return AGING_BUCKETS[0];
+    if(days<15)return AGING_BUCKETS[1];
+    if(days<31)return AGING_BUCKETS[2];
+    return AGING_BUCKETS[3];
+  }
+
+  function buildAgingBuckets(rows=[]){
+    const buckets=new Map(AGING_BUCKETS.map(bucket=>[bucket.key,{
+      ...bucket,
+      documents:new Set(),
+      lineCount:0,
+      incomingQty:0,
+      incomingAmount:0,
+      lateLineCount:0,
+      lateAmount:0,
+      maxOpenAgeDays:0
+    }]));
+    for(const row of rows||[]){
+      if(!(n(row?.incomingQty)>0)||!Number.isFinite(row?.openAgeDays))continue;
+      const definition=agingBucketForDays(row.openAgeDays);
+      if(!definition)continue;
+      const bucket=buckets.get(definition.key);
+      if(row.documentKey)bucket.documents.add(row.documentKey);
+      bucket.lineCount++;
+      bucket.incomingQty+=n(row.incomingQty);
+      bucket.incomingAmount+=n(row.incomingAmount);
+      bucket.maxOpenAgeDays=Math.max(bucket.maxOpenAgeDays,Number(row.openAgeDays)||0);
+      if(row.late){
+        bucket.lateLineCount++;
+        bucket.lateAmount+=n(row.lateAmount);
+      }
+    }
+    return AGING_BUCKETS.map(definition=>{
+      const bucket=buckets.get(definition.key);
+      return {
+        key:bucket.key,
+        label:bucket.label,
+        minDays:bucket.minDays,
+        maxDays:bucket.maxDays,
+        documentCount:bucket.documents.size,
+        lineCount:bucket.lineCount,
+        incomingQty:bucket.incomingQty,
+        incomingAmount:bucket.incomingAmount,
+        lateLineCount:bucket.lateLineCount,
+        lateAmount:bucket.lateAmount,
+        maxOpenAgeDays:bucket.lineCount?bucket.maxOpenAgeDays:null
+      };
+    });
+  }
+
   function grouped(rows,keyOf,labelKey,sortMode='amount'){
     const groups=new Map();
     for(const row of rows){
@@ -237,9 +296,10 @@
       bySupplier,
       bySource:grouped(rows,row=>row.sourceLabel,'source'),
       byBrand:grouped(rows,row=>row.brand,'brand'),
-      byMonth:grouped(rows,row=>row.month,'month','month')
+      byMonth:grouped(rows,row=>row.month,'month','month'),
+      agingBuckets:buildAgingBuckets(rows)
     };
   }
 
-  return {projectSupply,summarize};
+  return {AGING_BUCKETS,agingBucketForDays,buildAgingBuckets,projectSupply,summarize};
 });
