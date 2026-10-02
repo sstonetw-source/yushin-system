@@ -314,7 +314,6 @@ let brandMasterCache = [];
 let brandMasterLoadPromise = null;
 let supplierMasterCache = [];
 let supplierMappingCache = [];
-let productSupplierMappingCache = [];
 let warehouseMasterCache = [];
 let supplierWarehouseLoadPromise = null;
 let purchaseCostCache = new Map();
@@ -3949,60 +3948,41 @@ async function loadSupplierWarehouseMasters(force = false) {
     supplierWarehouseLoadPromise = Promise.all([
         readCollectionInBatches('suppliers'),
         readCollectionInBatches('brandSupplierMappings'),
-        readCollectionInBatches('productSupplierMappings'),
         loadWarehouseMaster(force)
-    ]).then(([suppliers, mappings, productMappings]) => {
+    ]).then(([suppliers, mappings]) => {
         supplierMasterCache = suppliers.filter(item => item.active !== false);
         supplierMappingCache = mappings.filter(item => item.active !== false);
-        productSupplierMappingCache = productMappings.filter(item => item.active !== false);
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
-        productSupplierMappingCache.sort((a,b)=>Number(a.priority||1)-Number(b.priority||1));
         renderSupplierMasterAdmin();
         renderSupplierMappingAdmin();
-        renderProductSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
         return {
             suppliers:supplierMasterCache,
             mappings:supplierMappingCache,
-            productMappings:productSupplierMappingCache,
             warehouses:warehouseMasterCache
         };
     }).catch(err => {
         supplierWarehouseLoadPromise = null;
         console.warn('讀取供應商／倉庫主檔失敗：', err);
-        // 已有快取時繼續使用，避免短暫斷線讓下拉選單突然變空。
         return {
             suppliers:supplierMasterCache,
             mappings:supplierMappingCache,
-            productMappings:productSupplierMappingCache,
             warehouses:warehouseMasterCache
         };
     });
     return supplierWarehouseLoadPromise;
 }
 
-function supplierForProduct(brand, productLine = '', productId = '', itemCode = '') {
-    // Odoo / ERPNext-style: item-specific supplier relation wins.
-    const productMapping = globalThis.YushinSupplier?.selectProductSupplierMapping(
-        productSupplierMappingCache,
-        { productId, itemCode }
-    );
-    if (productMapping) {
-        const supplier = supplierMasterCache.find(item =>
-            item.id === productMapping.supplierId || item.supplierId === productMapping.supplierId
-        );
-        if (supplier) return { ...supplier, productSupplierMapping:productMapping };
-    }
-
-    // Brand / product-line mapping remains the default fallback for broad catalog routing.
+function supplierForProduct(brand, productLine = '') {
     const brandKey = normalizeBrandLookupKey(resolveBrandName(brand));
     const lineKey = String(productLine || '').normalize('NFKC').trim().toLocaleLowerCase();
     const candidates = supplierMappingCache.filter(item =>
         normalizeBrandLookupKey(item.brandName || item.brand || '') === brandKey
     );
     const lineMatch = candidates.find(item => String(item.productLine || '').normalize('NFKC').trim().toLocaleLowerCase() === lineKey && lineKey);
-    const fallback = candidates.find(item => !String(item.productLine || '').trim() && item.isDefault !== false) || candidates.find(item => !String(item.productLine || '').trim());
+    const fallback = candidates.find(item => !String(item.productLine || '').trim() && item.isDefault !== false)
+        || candidates.find(item => !String(item.productLine || '').trim());
     const mapping = lineMatch || fallback || null;
     if (!mapping) return null;
     const supplier = supplierMasterCache.find(item => item.id === mapping.supplierId || item.supplierId === mapping.supplierId) || null;
@@ -4076,17 +4056,19 @@ function renderSupplierMasterAdmin() {
     body.innerHTML=supplierMasterCache.length?supplierMasterCache.map(supplier=>{
         const supplierId=supplier.id||supplier.supplierId||'';
         const mappingCount=supplierMappingCache.filter(mapping=>mapping.supplierId===supplierId).length;
+        const leadTimeDays=Math.max(0,Number(supplier.leadTimeDays||0));
         return `<tr>
             <td>${escapeHtml(supplier.supplierName||'')}</td>
             <td>${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</td>
             <td>${escapeHtml(supplier.email||'')}</td>
+            <td>${leadTimeDays?leadTimeDays+' 天':'－'}</td>
             <td>${mappingCount}</td>
             <td>
                 <button type="button" class="btn-small btn-secondary" onclick="loadSupplierMasterToEditor('${escapeAttr(supplierId)}')">編輯</button>
                 <button type="button" class="btn-small btn-danger" onclick="disableSupplierMaster('${escapeAttr(supplierId)}')">停用</button>
             </td>
         </tr>`;
-    }).join(''):'<tr><td colspan="5" style="color:#888;">尚未建立供應商。</td></tr>';
+    }).join(''):'<tr><td colspan="6" style="color:#888;">尚未建立供應商。</td></tr>';
 }
 
 function renderSupplierMappingAdmin() {
@@ -4105,25 +4087,6 @@ function renderSupplierMappingAdmin() {
     }).join('') : '<tr><td colspan="6" style="color:#888;">尚未設定供應商對應。</td></tr>';
 }
 
-function renderProductSupplierMappingAdmin() {
-    const body=document.getElementById('productSupplierMappingBody');
-    if(!body)return;
-    body.innerHTML=productSupplierMappingCache.length?productSupplierMappingCache.map(mapping=>{
-        const supplier=supplierMasterCache.find(item =>
-            item.id===mapping.supplierId || item.supplierId===mapping.supplierId
-        )||{};
-        const leadTime=Math.max(0,Number(mapping.leadTimeDays||0));
-        return `<tr>
-            <td>${escapeHtml(mapping.itemCode||mapping.productId||'')}</td>
-            <td>${escapeHtml(supplier.supplierName||'找不到供應商')}</td>
-            <td>${escapeHtml(mapping.supplierPartNo||'')}</td>
-            <td>${Math.max(1,Number(mapping.priority||1))}</td>
-            <td>${leadTime?leadTime+' 天':'－'}</td>
-            <td><button type="button" class="btn-small btn-danger" onclick="disableProductSupplierMapping('${escapeAttr(mapping.id||mapping.mappingId||'')}')">停用</button></td>
-        </tr>`;
-    }).join(''):'<tr><td colspan="6" style="color:#888;">尚未設定產品指定供應來源；系統會使用廠牌／產品線預設。</td></tr>';
-}
-
 function renderWarehouseMasterAdmin() {
     const body = document.getElementById('warehouseMasterBody');
     if (!body) return;
@@ -4140,10 +4103,12 @@ window.clearSupplierMasterEditor = function() {
     const name=document.getElementById('supplierMasterName');
     const header=document.getElementById('supplierMasterHeader');
     const email=document.getElementById('supplierMasterEmail');
+    const leadTime=document.getElementById('supplierMasterLeadTime');
     if(editing)editing.value='';
     if(name)name.value='';
     if(header)header.value='';
     if(email)email.value='';
+    if(leadTime)leadTime.value='0';
 };
 
 window.loadSupplierMasterToEditor = function(id) {
@@ -4153,6 +4118,8 @@ window.loadSupplierMasterToEditor = function(id) {
     document.getElementById('supplierMasterName').value=supplier.supplierName||'';
     document.getElementById('supplierMasterHeader').value=supplier.purchaseHeaderName||supplier.supplierName||'';
     document.getElementById('supplierMasterEmail').value=supplier.email||'';
+    const leadTime=document.getElementById('supplierMasterLeadTime');
+    if(leadTime)leadTime.value=String(Math.max(0,Number(supplier.leadTimeDays||0)));
     const status=document.getElementById('supplierMasterStatus');
     if(status)status.innerText='正在編輯：'+(supplier.supplierName||id);
 };
@@ -4166,6 +4133,7 @@ window.saveSupplierMaster = async function() {
     const supplierName=String(document.getElementById('supplierMasterName')?.value||'').trim();
     const purchaseHeaderName=String(document.getElementById('supplierMasterHeader')?.value||'').trim()||supplierName;
     const supplierEmail=normalizeSupplierEmail(document.getElementById('supplierMasterEmail')?.value||'');
+    const supplierLeadTime=Math.max(0,Math.floor(Number(document.getElementById('supplierMasterLeadTime')?.value||0)));
     const status=document.getElementById('supplierMasterStatus');
     if(!supplierName){
         if(status)status.innerText='請輸入供應商名稱。';
@@ -4192,6 +4160,7 @@ window.saveSupplierMaster = async function() {
             supplierName,
             purchaseHeaderName,
             email:supplierEmail,
+            leadTimeDays:supplierLeadTime,
             active:true,
             createdAt:previous?.createdAt||now,
             updatedAt:now
@@ -4211,9 +4180,8 @@ window.disableSupplierMaster = async function(id) {
     if(!canCreatePurchaseOrderCapability()||!id)return;
     const status=document.getElementById('supplierMasterStatus');
     const activeMappings=supplierMappingCache.filter(mapping=>mapping.supplierId===id);
-    const activeProductMappings=productSupplierMappingCache.filter(mapping=>mapping.supplierId===id);
-    if(activeMappings.length||activeProductMappings.length){
-        if(status)status.innerText=`這個供應商仍有 ${activeMappings.length} 個廠牌／產品線對應、${activeProductMappings.length} 個產品供應來源，請先停用或改綁這些對應。`;
+    if(activeMappings.length){
+        if(status)status.innerText=`這個供應商仍有 ${activeMappings.length} 個廠牌／產品線對應，請先停用或改綁這些對應。`;
         return;
     }
     await db.collection('suppliers').doc(id).set({active:false,updatedAt:new Date().toISOString()},{merge:true});
@@ -4274,67 +4242,6 @@ window.disableSupplierMapping = async function(id) {
     if (!canCreatePurchaseOrderCapability() || !id) return;
     await db.collection('brandSupplierMappings').doc(id).set({ active:false, updatedAt:new Date().toISOString() }, { merge:true });
     supplierWarehouseLoadPromise = null;
-    await loadSupplierWarehouseMasters(true);
-};
-
-window.saveProductSupplierMapping = async function() {
-    if(!canCreatePurchaseOrderCapability())return;
-    const status=document.getElementById('productSupplierMappingStatus');
-    const itemCode=String(document.getElementById('productSupplierItemCode')?.value||'').trim();
-    const supplierSelection=String(document.getElementById('productSupplierSupplier')?.value||'').trim();
-    const supplierPartNo=String(document.getElementById('productSupplierPartNo')?.value||'').trim();
-    const priority=Math.max(1,Math.floor(Number(document.getElementById('productSupplierPriority')?.value||1)));
-    const leadTimeDays=Math.max(0,Math.floor(Number(document.getElementById('productSupplierLeadTime')?.value||0)));
-    if(!itemCode){if(status)status.innerText='請輸入產品貨號。';return;}
-    const normalized=supplierSelection.normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
-    const supplier=supplierMasterCache.find(item=>{
-        const supplierId=item.id||item.supplierId||'';
-        return supplierId===supplierSelection
-            || String(item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalized
-            || String(item.purchaseHeaderName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalized;
-    });
-    if(!supplier){if(status)status.innerText='請選擇已建立的供應商主檔。';return;}
-    try{
-        if(status)status.innerText='正在確認 Product Master…';
-        const product=await findProductByCode(itemCode);
-        if(!product)throw new Error('找不到這個 Product Master 貨號，請先到「產品」確認。');
-        const productId=product.productId||stableProductId(product);
-        const supplierId=supplier.id||supplier.supplierId||'';
-        const validation=globalThis.YushinSupplier?.validateProductSupplierMapping({
-            productId,itemCode:product.model||itemCode,supplierId,supplierPartNo,priority,leadTimeDays
-        });
-        if(!validation?.valid)throw new Error('產品供應來源資料不完整：'+(validation?.errors||[]).join(', '));
-        const mappingId=stableMasterId('psm',productId+'|'+supplierId);
-        const previous=productSupplierMappingCache.find(item=>(item.id||item.mappingId)===mappingId);
-        const now=new Date().toISOString();
-        await db.collection('productSupplierMappings').doc(mappingId).set({
-            ...validation.mapping,
-            mappingId,
-            productName:product.nameCn||product.nameEn||'',
-            active:true,
-            createdAt:previous?.createdAt||now,
-            updatedAt:now
-        },{merge:true});
-        supplierWarehouseLoadPromise=null;
-        await loadSupplierWarehouseMasters(true);
-        const ids=['productSupplierItemCode','productSupplierSupplier','productSupplierPartNo'];
-        ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-        const priorityInput=document.getElementById('productSupplierPriority');
-        const leadInput=document.getElementById('productSupplierLeadTime');
-        if(priorityInput)priorityInput.value='1';
-        if(leadInput)leadInput.value='0';
-        if(status)status.innerText='產品供應來源已儲存。';
-    }catch(err){
-        if(status)status.innerText='儲存失敗：'+(err?.message||err);
-    }
-};
-
-window.disableProductSupplierMapping = async function(id) {
-    if(!canCreatePurchaseOrderCapability()||!id)return;
-    await db.collection('productSupplierMappings').doc(id).set({
-        active:false,updatedAt:new Date().toISOString()
-    },{merge:true});
-    supplierWarehouseLoadPromise=null;
     await loadSupplierWarehouseMasters(true);
 };
 
@@ -9648,16 +9555,7 @@ function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = pu
     return globalThis.YushinPurchasingAnalytics.summarize(filtered,purchasingAnalyticsReceiptRows);
 }
 
-function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime = false) {
-    const leadTimeCell = row => includeLeadTime
-        ? `<td>
-            ${row.leadTimeCount ? '完整到貨平均 '+Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '完整到貨：－'}
-            <div style="font-size:11px;color:#667584;margin-top:3px;">${row.serviceLevel !== null ? '數量到貨率 '+Number(row.serviceLevel||0).toFixed(0)+'%（'+Number(row.receivedQty||0).toLocaleString()+'/'+Number(row.orderedQty||0).toLocaleString()+'）' : '數量到貨率：－'}</div>
-            <div style="font-size:11px;color:#667584;margin-top:3px;">${row.onTimeEligibleCount ? '準時到貨 '+Number(row.onTimeRate||0).toFixed(0)+'%（'+row.onTimeCount+'/'+row.onTimeEligibleCount+'）' : '準時率：尚無預計到貨樣本'}</div>
-            <div style="font-size:11px;color:#667584;margin-top:3px;">${row.openAgeCount ? '目前在途 '+row.openAgeCount+' 筆｜平均 '+Number(row.avgOpenAgeDays||0).toFixed(1)+' 天｜最久 '+Number(row.maxOpenAgeDays||0).toFixed(1)+' 天' : '目前無在途'}</div>
-            <div style="font-size:11px;margin-top:3px;${row.lateLineCount?'color:#b42318;':'color:#667584;'}">${row.lateLineCount ? '逾期待到貨 '+row.lateLineCount+' 筆｜'+formatStatsMoney(row.lateAmount)+'｜最久 '+Number(row.maxLateDays||0).toFixed(0)+' 天' : '逾期待到貨：0'}</div>
-        </td>`
-        : '';
+function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel) {
     return rows.length ? rows.map(row => `<tr>
         <td>${escapeHtml(row[labelKey] || '')}</td>
         <td>${row.documentCount}</td>
@@ -9665,10 +9563,9 @@ function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime
         <td>${formatStatsMoney(row.orderedAmount)}</td>
         <td>${formatStatsMoney(row.receivedAmount)}</td>
         <td>${formatStatsMoney(row.incomingAmount)}</td>
-        ${leadTimeCell(row)}
         <td>${formatStatsMoney(row.stockAmount)}</td>
         <td>${formatStatsMoney(row.customerOrderAmount)}</td>
-    </tr>`).join('') : `<tr><td colspan="${includeLeadTime?9:8}" style="color:#888;">${emptyLabel}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="8" style="color:#888;">${emptyLabel}</td></tr>`;
 }
 
 function purchasingAnalyticsAgingRowsHtml(rows = []) {
@@ -9705,12 +9602,9 @@ function renderPurchasingAnalytics() {
     if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.documentCount} 張採購單`;
     const receivedDetail = document.getElementById('purchaseAnalyticsReceivedDetail');
     if (receivedDetail) {
-        const serviceLevelText = totals.serviceLevel !== null
-            ? `｜數量到貨率 ${Number(totals.serviceLevel||0).toFixed(0)}%（${Number(totals.receivedQty||0).toLocaleString()}/${Number(totals.orderedQty||0).toLocaleString()}）`
-            : '';
-        receivedDetail.textContent = totals.leadTimeCount
-            ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆）${totals.onTimeEligibleCount ? '｜準時 '+Number(totals.onTimeRate||0).toFixed(0)+'%（'+totals.onTimeCount+'/'+totals.onTimeEligibleCount+'）' : ''}${serviceLevelText}`
-            : (totals.receivedAmount ? `已有部分到貨，尚無完整到貨交期樣本${serviceLevelText}` : `期間內尚無已到貨金額${serviceLevelText}`);
+        receivedDetail.textContent = totals.receivedAmount
+            ? '實際已收數量 × 進貨單價'
+            : '期間內尚無已到貨金額';
     }
     const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
     if (incomingDetail) {
@@ -9734,8 +9628,7 @@ function renderPurchasingAnalytics() {
     supplierBody.innerHTML = purchasingAnalyticsRowsHtml(
         bySupplier.map(row=>({...row,label:row.supplier})),
         'label',
-        '目前篩選期間沒有採購資料。',
-        true
+        '目前篩選期間沒有採購資料。'
     );
     if (sourceBody) sourceBody.innerHTML = purchasingAnalyticsRowsHtml(bySource, 'source', '目前沒有需求來源採購資料。');
     if (brandBody) brandBody.innerHTML = purchasingAnalyticsRowsHtml(byBrand, 'brand', '目前沒有廠牌採購資料。');
@@ -10967,7 +10860,7 @@ window.openPurchaseOrderTimeline = async function(poId) {
 function purchaseOrderSearchTokens(po={}) {
     const values=[
         po.poNo,po.vendorName,po.supplierName,po.supplierEmail,po.buyerName,po.company,po.poDate,
-        ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.supplierPartNo,item.itemName,item.brand,item.orderNo,item.orderId]):[])
+        ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId]):[])
     ];
     const tokens=new Set();
     for(const raw of values){
@@ -10990,7 +10883,7 @@ function purchaseOrderHistoryMatches(po, keyword) {
     if(!needle)return true;
     const values=[
         po.poNo,po.vendorName,po.buyerName,po.company,po.poDate,
-        ...purchaseItemsFromSavedPo(po).flatMap(item=>[item.itemCode,item.supplierPartNo,item.itemName,item.brand,item.orderNo,item.orderId])
+        ...purchaseItemsFromSavedPo(po).flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId])
     ];
     return values.some(value=>normalizeFullHistorySearchValue(value).includes(needle));
 }
@@ -11534,7 +11427,6 @@ window.copySavedPurchaseOrderAsNew = async function(poId) {
         orderId: '',
         itemId: '',
         orderItemIndex: 0,
-        supplierPartNo: '',
         supplyOrderId: '',
         purchaseDocumentNo: '',
         purchaseDocumentNos: []
@@ -12888,12 +12780,14 @@ window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = 
     const vendorName=String(document.getElementById('poVendorName')?.value||'').trim();
     const liveSupplier=supplierForVendorName(vendorName);
     const supplierId=String(preferredSupplierId||liveSupplier?.id||liveSupplier?.supplierId||'').trim();
+    const supplier=supplierMasterCache.find(item =>
+        String(item.id||item.supplierId||'')===supplierId
+    )||liveSupplier||null;
     const orderDate=String(document.getElementById('poDate')?.value||'').trim();
     const expected=globalThis.YushinSupplier.purchaseExpectedDate(
         items||[],
-        productSupplierMappingCache,
-        orderDate,
-        supplierId
+        supplier||0,
+        orderDate
     );
 
     if(expected){
@@ -12906,40 +12800,20 @@ window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = 
     return expected;
 };
 
-function productSupplierMappingForPoItem(item = {}, supplierId = '') {
-    const selectedSupplierId=String(supplierId||'').trim();
-    if(!selectedSupplierId || !globalThis.YushinSupplier?.selectProductSupplierMapping)return null;
-    const candidates=productSupplierMappingCache.filter(mapping =>
-        String(mapping.supplierId||'').trim()===selectedSupplierId
-    );
-    return globalThis.YushinSupplier.selectProductSupplierMapping(candidates,item)||null;
-}
-
-function poSupplierPartNoForItem(item = {}, supplierId = '') {
-    const snapshot=String(item?.supplierPartNo||'').trim();
-    // Reprints must keep the original vendor code even if master data later changes.
-    if(poEditingId && snapshot)return snapshot;
-    const mapping=productSupplierMappingForPoItem(item,supplierId);
-    return String(mapping?.supplierPartNo||'').trim();
-}
-
 function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', headerExpectedDate = '', expectedDateSource = '') {
     const manualHeader = expectedDateSource === 'manual'
         || (!!headerExpectedDate && expectedDateSource !== 'lead-time');
+    const supplier=supplierMasterCache.find(item =>
+        String(item.id||item.supplierId||'')===String(supplierId||'')
+    )||null;
     return (items || []).map(item => {
         let scheduleDate = '';
         if (manualHeader) {
             scheduleDate = headerExpectedDate || '';
-        } else if (supplierId && globalThis.YushinSupplier?.itemExpectedArrivalDate) {
-            scheduleDate = globalThis.YushinSupplier.itemExpectedArrivalDate(
-                item,
-                productSupplierMappingCache,
-                orderDate,
-                supplierId
-            );
+        } else if (supplier && globalThis.YushinSupplier?.itemExpectedArrivalDate) {
+            scheduleDate = globalThis.YushinSupplier.itemExpectedArrivalDate(item,supplier,orderDate);
         }
-        const supplierPartNo=poSupplierPartNoForItem(item,supplierId);
-        return { ...item, scheduleDate, supplierPartNo };
+        return { ...item, scheduleDate };
     });
 }
 
@@ -13087,19 +12961,13 @@ window.generatePoNo = async function() {
 function renderPoItemsTable() {
     const tbody = document.getElementById('poItemsBody');
     tbody.innerHTML = '';
-    const selectedSupplier=supplierForVendorName(document.getElementById('poVendorName')?.value||'');
-    const selectedSupplierId=selectedSupplier?.id||selectedSupplier?.supplierId||'';
     poItems.forEach((item, idx) => {
         const missingPrice = !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) <= 0;
-        const supplierPartNo=poSupplierPartNoForItem(item,selectedSupplierId);
-        const supplierPartNoHtml=supplierPartNo
-            ? `<small style="display:block;margin-top:3px;color:#667584;font-size:10px;">供應商貨號：${escapeHtml(supplierPartNo)}</small>`
-            : '';
         const tr = document.createElement('tr');
         if (poDirectStockMode) {
             tr.innerHTML = `
                 <td style="border:1px solid #999;padding:4px;"><input type="text" value="${escapeAttr(item.itemName||'')}" placeholder="品名" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'itemName',this.value)"></td>
-                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)">${supplierPartNoHtml}</td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="text" list="poBrandList" value="${escapeAttr(item.brand||'')}" placeholder="廠牌" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'brand',this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.0001" step="any" value="${item.qty||1}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx},'qty',this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" min="0" step="0.01" value="${missingPrice?'':item.unitPrice}" placeholder="未稅進貨單價" class="${missingPrice?'po-missing-price':''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx},'unitPrice',this.value)"></td>
@@ -13109,7 +12977,7 @@ function renderPoItemsTable() {
         } else {
             tr.innerHTML = `
                 <td style="border:1px solid #999;padding:4px;"><input type="text" value="${escapeAttr(item.itemName||'')}" placeholder="品名" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'itemName',this.value)"></td>
-                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)">${supplierPartNoHtml}</td>
+                <td style="border:1px solid #999;padding:4px;"><input type="text" list="priceModelList" value="${escapeAttr(item.itemCode||'')}" placeholder="貨號" style="width:100%;box-sizing:border-box;" onchange="onDirectPoCodeChange(${idx},this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="text" list="poBrandList" value="${escapeAttr(item.brand||'')}" placeholder="廠牌" style="width:100%;box-sizing:border-box;" onchange="updateDirectPoText(${idx},'brand',this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" step="1" value="${item.qty}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'qty', this.value)"></td>
                 <td style="border:1px solid #999;padding:4px;"><input type="number" min="0.01" step="0.01" value="${missingPrice ? '' : item.unitPrice}" placeholder="請填進貨單價" class="${missingPrice ? 'po-missing-price' : ''}" style="width:100%;box-sizing:border-box;" onchange="updatePoItem(${idx}, 'unitPrice', this.value)">${missingPrice ? '<small class="po-missing-price-hint">缺少成本</small>' : ''}</td>
@@ -13571,7 +13439,6 @@ window.printPurchaseOrder = async function() {
                     productId:item.productId||'',
                     productKey:poIncomingKey(item),
                     itemCode:item.itemCode||'',
-                    supplierPartNo:item.supplierPartNo||'',
                     itemName:item.itemName||'',
                     brand:resolveBrandName(item.brand||''),
                     qty:Number(item.qty||0),
