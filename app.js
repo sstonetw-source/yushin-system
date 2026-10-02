@@ -7439,6 +7439,25 @@ window.openInventoryReplenishment = async function(inventoryId) {
         return;
     }
     const suggestedQty = demand.remainingToOrderQty;
+
+    // ERP Material Request first: persist the replenishment need before opening a PO.
+    // Closing the PO modal must never make a real replenishment requirement disappear.
+    const demandRef=procurementDemandRef(demand.demandId);
+    if(demandRef){
+        const now=new Date().toISOString();
+        const demandDoc=procurementDemandDocument(demand,{
+            productId:item.productId||item.productKey||'',
+            productKey:item.productKey||item.productId||'',
+            itemCode:item.itemCode||'',
+            itemName:item.itemName||'',
+            brand:item.brand||'',
+            fulfillmentType:'WAREHOUSE',
+            warehouseId:defaultWarehouse()?.id||''
+        },{createdAt:item.createdAt||now,updatedAt:now});
+        await demandRef.set(demandDoc,{merge:true});
+        invalidateProcurementDemandQueue();
+    }
+
     const match = await findProductByCode(item.itemCode || '');
     let unitPrice = 0;
     if (match) {
