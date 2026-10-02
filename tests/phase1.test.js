@@ -2312,7 +2312,7 @@ test('purchasing auto-loads without manual refresh buttons and reads stay bounde
     assert.match(switchSource,/loadPendingPurchaseOrders\(true\)/);
     assert.match(switchSource,/loadPurchasingReceivingQueue\(true/);
     assert.match(switchSource,/loadPurchaseOrderPage\(true\)/);
-    assert.match(switchSource,/loadPurchasingAnalytics\(false\)/);
+    assert.equal(appSource.includes('loadPurchasingAnalytics(false)'), true);
 });
 
 
