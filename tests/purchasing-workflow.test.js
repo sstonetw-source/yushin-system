@@ -1731,3 +1731,29 @@ test('quick purchase outstanding cancellation reuses safe supply cancellation', 
     assert.match(cancelSource,/refreshAffectedOrderCaches\(\[result\.orderId\]\)/);
     assert.match(cancelSource,/purchaseCancellationInProgress\.delete\(actionKey\)/);
 });
+
+test('purchase order email/share uses supplier master email and generated PDF blob', () => {
+    assert.match(app, /function purchaseOrderSupplierContact\(po=\{\}\)/);
+    assert.match(app, /email:\s*normalizeSupplierEmail\(live\?\.email \|\| po\.supplierEmail \|\| ''\)/);
+    assert.match(app, /window\.emailPurchaseOrder = async function\(poId\)/);
+    assert.match(app, /printSavedPoDocument\(po\.poNo,po\.vendorName,\{download:false\}\)/);
+    assert.match(app, /navigator\.canShare\(\{files:\[file\]\}\)/);
+    assert.match(app, /mailto:\$\{contact\.email\}/);
+    assert.match(app, /lastShareType:shared\?'WEB_SHARE':'MAILTO'/);
+});
+
+test('purchase order PDF renderer can return a blob without downloading', () => {
+    const start=app.indexOf('async function printSavedPoDocument(poNo, vendorName)');
+    const end=app.indexOf('\n\nwindow.printPurchaseOrder',start);
+    const source=app.slice(start,end);
+    assert.match(source,/const download = options\.download !== false/);
+    assert.match(source,/const blob=pdf\.output\('blob'\)/);
+    assert.match(source,/if\(download\)/);
+    assert.match(source,/return \{blob,fileName\}/);
+});
+
+test('supplier master stores one canonical email field and PO snapshots supplierEmail', () => {
+    assert.match(app,/email:supplierEmail/);
+    assert.match(app,/supplierEmail:normalizeSupplierEmail\(supplierContact\?\.email\|\|''\)/);
+    assert.doesNotMatch(app,/poVendorEmail|purchaseEmail|vendorEmail/);
+});
