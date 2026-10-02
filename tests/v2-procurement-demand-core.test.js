@@ -59,3 +59,16 @@ test('tracks ERP ordered and received percentages and schedule date',()=>{
   assert.equal(demand.perReceived,30);
   assert.equal(demand.scheduleDate,'2026-10-15');
 });
+
+test('demand id follows ERP-style source references',()=>{
+  const sales=d.fromSalesOrder({
+    sourceId:'SO-100',sourceItemId:'item-2',fulfillmentType:'WAREHOUSE',
+    shortageQty:3,inTransitQty:0
+  });
+  assert.equal(sales.demandId,'SALES_ORDER:SO-100:item-2');
+
+  const stock=d.fromStockReplenishment({
+    sourceId:'product-ABC',safetyStock:10,available:2,incoming:0
+  });
+  assert.equal(stock.demandId,'STOCK_REPLENISHMENT:product-ABC');
+});
