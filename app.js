@@ -39,6 +39,9 @@ if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
+const cloudFunctions = APP_ENVIRONMENT === 'production' && typeof firebase.app().functions === 'function'
+    ? firebase.app().functions('asia-east1')
+    : null;
 // 這套系統在部分實際使用網路環境持續出現 Firestore WebChannel transport error。
 // Firebase 官方提供 forceLongPolling 用於避開 Proxy／防毒／網路設備對長連線的相容性問題。
 // 必須在任何 Firestore 讀寫前設定；不要同時啟用 autoDetectLongPolling。
@@ -11306,6 +11309,29 @@ window.exportPurchaseOrderFromHistory = async function(poId) {
     }
 };
 
+async function purchaseOrderPdfBase64(blob) {
+    if(!blob || typeof blob.arrayBuffer !== 'function') throw new Error('訂購單 PDF 無法讀取。');
+    const bytes=new Uint8Array(await blob.arrayBuffer());
+    let binary='';
+    const chunkSize=0x8000;
+    for(let offset=0;offset<bytes.length;offset+=chunkSize){
+        binary+=String.fromCharCode(...bytes.subarray(offset,offset+chunkSize));
+    }
+    return btoa(binary);
+}
+
+async function sendPurchaseOrderEmailViaBackend(po,attachment) {
+    if(!cloudFunctions) throw Object.assign(new Error('後端寄信尚未啟用。'),{code:'functions/not-configured'});
+    const callable=cloudFunctions.httpsCallable('sendPurchaseOrderEmail');
+    const pdfBase64=await purchaseOrderPdfBase64(attachment.blob);
+    const response=await callable({
+        purchaseOrderId:po.id,
+        pdfBase64,
+        fileName:attachment.fileName
+    });
+    return response?.data||{};
+}
+
 window.emailPurchaseOrder = async function(poId) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const button=actionButtonFromEventOrSelector();
@@ -11343,6 +11369,32 @@ window.emailPurchaseOrder = async function(poId) {
 
 ${company.title||''}
 採購人員：${po.buyerName||currentUserName||''}`;
+
+        if(cloudFunctions){
+            updatePoSaveStatus(`正在寄送 ${po.poNo||''} 至 ${contact.email}…`);
+            try{
+                const sent=await sendPurchaseOrderEmailViaBackend(po,attachment);
+                const sentAt=new Date().toISOString();
+                Object.assign(po,{
+                    lastShareAt:sentAt,
+                    lastShareType:'SMTP',
+                    lastShareEmail:sent.recipientEmail||contact.email,
+                    lastCommunicationState:'SENT',
+                    lastEmailSentAt:sentAt,
+                    lastEmailMessageId:sent.messageId||''
+                });
+                updatePoSaveStatus(`✓ 已寄出至 ${sent.recipientEmail||contact.email}${sent.messageId?'｜'+sent.messageId:''}`);
+                renderPoList();
+                return;
+            }catch(sendErr){
+                const code=String(sendErr?.code||'');
+                const reason=String(sendErr?.details?.reason||'');
+                const canFallback=reason==='SMTP_NOT_CONFIGURED'||code==='functions/not-found'||code==='functions/unimplemented';
+                if(!canFallback)throw sendErr;
+                console.warn('後端寄信尚未就緒，改用本機郵件草稿：',sendErr);
+                updatePoSaveStatus('後端寄信尚未設定，改用下載 PDF＋郵件草稿。');
+            }
+        }
 
         const canShareFile=typeof File==='function'&&navigator.share&&navigator.canShare;
         let shared=false;
