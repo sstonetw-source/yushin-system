@@ -24,7 +24,8 @@
     const unitCost=n(record.unitCost);
     const orderId=String(record.orderId||'').trim();
     const type=String(record.type||'').toUpperCase();
-    const stockPurchase=type==='STOCK_REPLENISHMENT'||!orderId;
+    const sourceType=String(record.sourceType||'').toUpperCase();
+    const stockPurchase=sourceType==='STOCK_REPLENISHMENT'||type==='STOCK_REPLENISHMENT'||!orderId;
     const supplierName=String(record.supplier||record.supplierName||'未設定供應商').trim()||'未設定供應商';
     const supplierId=String(record.supplierId||'').trim();
     const supplierKey=supplierId?('id:'+supplierId):('name:'+normalizeKey(supplierName));
