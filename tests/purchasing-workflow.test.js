@@ -550,7 +550,7 @@ test('manual ordered action records supply and source item only once after an un
     const page={classList:{contains:()=>true}},card={};
     const switched=[];
     const context = vm.createContext({
-        window:{},document:{getElementById:id=>id==='purchasing-system'?page:id==='purchase-card-receiving'?card:null},
+        window:{},YushinReceiving:receiving,document:{getElementById:id=>id==='purchasing-system'?page:id==='purchase-card-receiving'?card:null},
         db:{collection:name=>({doc:()=> name==='orders' ? orderRef : supplyRef}),
             async runTransaction(callback){
                 await callback({
@@ -593,7 +593,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
     const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
     const button={disabled:false,textContent:'已訂購',isConnected:false};
     const context = vm.createContext({
-        window:{},document:{getElementById:()=>null},
+        window:{},YushinReceiving:receiving,document:{getElementById:()=>null},
         db:{collection:name=>({doc:()=> name==='orders' ? orderRef : supplyRef}),
             async runTransaction(callback){
                 await callback({
@@ -749,6 +749,7 @@ test('receiving card counts standalone stock replenishment and does not hide it 
         ],
         purchaseFilterContext:()=>({start:'',end:'',selectedSales:'Sales A',selectedBrand:'',selectableBrands:['Beckman']}),
         purchaseLineMatchesFilters:(date,sales,brand,filters)=>{seenFilters=filters;return true;},
+        YushinReceiving:receiving,
         window:{YushinReceiving:receiving}
     });
     vm.runInContext(source,context);
@@ -1316,7 +1317,8 @@ test('purchase cancellation releases incoming and returns outstanding quantity t
     const end=app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/const remaining=Math\.max\(0,ordered-received\)/);
+    assert.match(source,/globalThis\.YushinReceiving\.normalizeSupply\(supply\)/);
+    assert.match(source,/supplyProjection\.remainingQty/);
     assert.match(source,/supplyOrderedQty:Math\.max\(receivedForItem,currentSupplyOrdered-remaining\)/);
     assert.match(source,/incoming:Math\.max\(0,inv\.incoming-registeredIncoming\)/);
     assert.match(source,/incoming:Math\.max\(0,wh\.incoming-registeredIncoming\)/);
@@ -1593,7 +1595,7 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         }
     };
     const context=vm.createContext({
-        window:{},document:{getElementById:()=>null},db,
+        window:{},YushinReceiving:receiving,document:{getElementById:()=>null},db,
         canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
         currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
         remainingProcurementQty:(record,item)=>{
@@ -1647,7 +1649,8 @@ test('quick ordered action writes incoming inside the same transaction', () => {
     const start=app.indexOf('window.markPurchaseItemOrdered = async function');
     const end=app.indexOf('\nwindow.openOrderPurchaseDraft',start);
     const source=app.slice(start,end);
-    assert.match(source,/const targetIncomingQty = directShip \? 0 : Math\.max\(0, nextSupplyQty - receivedQty\)/);
+    assert.match(source,/globalThis\.YushinReceiving\.normalizeSupply/);
+    assert.match(source,/const targetIncomingQty = directShip \? 0 : supplyProjection\.remainingQty/);
     assert.match(source,/const incomingDelta = targetIncomingQty - registeredIncomingQty/);
     assert.match(source,/collection\('inventory'\)/);
     assert.match(source,/collection\('warehouseStocks'\)/);
