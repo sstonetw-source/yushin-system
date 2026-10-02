@@ -12971,7 +12971,7 @@ window.saveDeliveryRecord = async function() {
                     updates.deliveryRecords=records;
                 } else if(previous){
                     const reversed=(inventoryResult.lotAllocations||[]).map(row=>({...row,qty:Math.abs(Number(row.qty||0))}));
-                    record.lotAllocations=window.YushinSupply.allocationsAfterReversal(previous.lotAllocations||[],reversed);
+                    record.lotAllocations=window.YushinInventory.allocationsAfterReversal(previous.lotAllocations||[],reversed);
                     record.cogs=record.lotAllocations.reduce((sum,row)=>sum+Number(row.cost??(Number(row.qty||0)*Number(row.unitCost||0))),0);
                     const recordIndex=records.findIndex(r=>r.id===record.id);
                     if(recordIndex>=0)records[recordIndex]=record;
@@ -13292,7 +13292,7 @@ window.saveReturnRecord = async function() {
                     record.lotAllocations=[...(previous?.lotAllocations||[]),...(inventoryResult.lotAllocations||[])];
                 }else if(previous){
                     const reversed=(inventoryResult.lotAllocations||[]).map(row=>({...row,qty:Math.abs(Number(row.qty||0))}));
-                    record.lotAllocations=window.YushinSupply.allocationsAfterReversal(previous.lotAllocations||[],reversed);
+                    record.lotAllocations=window.YushinInventory.allocationsAfterReversal(previous.lotAllocations||[],reversed);
                 }
                 record.cogs=record.lotAllocations.reduce((sum,row)=>sum+Number(row.cost??(Number(row.qty||0)*Number(row.unitCost||0))),0);
                 if(existingIndex>=0)records[existingIndex]=record;else records[records.length-1]=record;
