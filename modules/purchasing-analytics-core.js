@@ -1,68 +1,98 @@
 (function(root,factory){
-  const receiving=typeof module==='object'&&module.exports
-    ? require('./receiving-core.js')
-    : (root&&root.YushinReceiving);
+  const receiving=typeof module==='object'&&module.exports?require('./receiving-core.js'):(root&&root.YushinReceiving);
   const api=factory(receiving);
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinPurchasingAnalytics=api;
 })(typeof globalThis!=='undefined'?globalThis:this,function(receiving){
-  function n(value){const x=Number(value);return Number.isFinite(x)?Math.max(0,x):0;}
+  function n(value){
+    const number=Number(value);
+    return Number.isFinite(number)?Math.max(0,number):0;
+  }
+
   function projectSupply(record={}){
-    if(!receiving?.normalizeSupply)throw new Error('Receiving core is required.');
+    if(!receiving)throw new Error('Receiving core is required.');
     const supply=receiving.normalizeSupply(record);
-    const cancelled=supply.status==='CANCELLED';
-    const effectiveOrderedQty=cancelled?supply.receivedQty:supply.qty;
-    const receivedQty=Math.min(supply.receivedQty,effectiveOrderedQty);
-    const incomingQty=cancelled?0:supply.remainingQty;
     const unitCost=n(record.unitCost);
-    const stockPurchase=!String(record.orderId||'').trim();
+    const cancelled=supply.status==='CANCELLED';
+    // 取消後尚未到貨的數量不再算有效採購；已實際到貨仍保留歷史金額。
+    const effectiveOrderedQty=cancelled?supply.receivedQty:supply.qty;
+    const receivedQty=Math.min(effectiveOrderedQty,supply.receivedQty);
+    const incomingQty=cancelled?0:supply.remainingQty;
+    const isStockReplenishment=record.type==='STOCK_REPLENISHMENT'||(!String(record.orderId||'').trim()&&record.type!=='SALES_SELF_ORDER');
+    const documentKey=String(record.purchaseDocumentId||record.purchaseDocumentNo||record.internalNo||record.id||'').trim();
+    const supplier=String(record.supplier||record.supplierName||'未指定供應商').trim()||'未指定供應商';
     return {
-      ...record,
-      status:supply.status,
+      record,
+      supplier,
+      documentKey,
+      unitCost,
       effectiveOrderedQty,
       receivedQty,
       incomingQty,
-      unitCost,
       orderedAmount:effectiveOrderedQty*unitCost,
       receivedAmount:receivedQty*unitCost,
       incomingAmount:incomingQty*unitCost,
-      stockPurchase,
-      customerPurchase:!stockPurchase,
-      supplier:String(record.supplier||record.supplierName||record.vendorName||'未指定供應商').trim()||'未指定供應商',
-      purchaseDocumentKey:String(record.purchaseDocumentId||record.purchaseDocumentNo||record.internalNo||record.id||'').trim()
+      stockAmount:isStockReplenishment?effectiveOrderedQty*unitCost:0,
+      customerOrderAmount:isStockReplenishment?0:effectiveOrderedQty*unitCost,
+      isStockReplenishment
     };
   }
+
   function summarize(records=[]){
-    const rows=records.map(projectSupply);
-    const totals={itemCount:0,purchaseOrderCount:0,orderedAmount:0,receivedAmount:0,incomingAmount:0,stockAmount:0,customerAmount:0};
-    const purchaseDocuments=new Set();
+    const rows=(records||[]).map(projectSupply).filter(row=>row.effectiveOrderedQty>0||row.receivedQty>0);
+    const totals={
+      lineCount:rows.length,
+      documentCount:new Set(rows.map(row=>row.documentKey).filter(Boolean)).size,
+      orderedAmount:0,
+      receivedAmount:0,
+      incomingAmount:0,
+      stockAmount:0,
+      customerOrderAmount:0
+    };
     const suppliers=new Map();
+
     for(const row of rows){
-      totals.itemCount+=1;
       totals.orderedAmount+=row.orderedAmount;
       totals.receivedAmount+=row.receivedAmount;
       totals.incomingAmount+=row.incomingAmount;
-      if(row.stockPurchase)totals.stockAmount+=row.orderedAmount;
-      else totals.customerAmount+=row.orderedAmount;
-      if(row.purchaseDocumentKey)purchaseDocuments.add(row.purchaseDocumentKey);
+      totals.stockAmount+=row.stockAmount;
+      totals.customerOrderAmount+=row.customerOrderAmount;
+
       if(!suppliers.has(row.supplier)){
-        suppliers.set(row.supplier,{supplier:row.supplier,itemCount:0,purchaseOrderCount:0,orderedAmount:0,receivedAmount:0,incomingAmount:0,stockAmount:0,customerAmount:0,_documents:new Set()});
+        suppliers.set(row.supplier,{
+          supplier:row.supplier,
+          documents:new Set(),
+          lineCount:0,
+          orderedAmount:0,
+          receivedAmount:0,
+          incomingAmount:0,
+          stockAmount:0,
+          customerOrderAmount:0
+        });
       }
-      const group=suppliers.get(row.supplier);
-      group.itemCount+=1;
-      group.orderedAmount+=row.orderedAmount;
-      group.receivedAmount+=row.receivedAmount;
-      group.incomingAmount+=row.incomingAmount;
-      if(row.stockPurchase)group.stockAmount+=row.orderedAmount;
-      else group.customerAmount+=row.orderedAmount;
-      if(row.purchaseDocumentKey)group._documents.add(row.purchaseDocumentKey);
+      const bucket=suppliers.get(row.supplier);
+      if(row.documentKey)bucket.documents.add(row.documentKey);
+      bucket.lineCount++;
+      bucket.orderedAmount+=row.orderedAmount;
+      bucket.receivedAmount+=row.receivedAmount;
+      bucket.incomingAmount+=row.incomingAmount;
+      bucket.stockAmount+=row.stockAmount;
+      bucket.customerOrderAmount+=row.customerOrderAmount;
     }
-    totals.purchaseOrderCount=purchaseDocuments.size;
-    const supplierRows=[...suppliers.values()].map(group=>{
-      const {_documents,...rest}=group;
-      return {...rest,purchaseOrderCount:_documents.size};
-    }).sort((a,b)=>b.orderedAmount-a.orderedAmount||a.supplier.localeCompare(b.supplier));
-    return {rows,totals,suppliers:supplierRows};
+
+    const bySupplier=[...suppliers.values()].map(bucket=>({
+      supplier:bucket.supplier,
+      documentCount:bucket.documents.size,
+      lineCount:bucket.lineCount,
+      orderedAmount:bucket.orderedAmount,
+      receivedAmount:bucket.receivedAmount,
+      incomingAmount:bucket.incomingAmount,
+      stockAmount:bucket.stockAmount,
+      customerOrderAmount:bucket.customerOrderAmount
+    })).sort((a,b)=>b.orderedAmount-a.orderedAmount||a.supplier.localeCompare(b.supplier,'zh-Hant'));
+
+    return {rows,totals,bySupplier};
   }
+
   return {projectSupply,summarize};
 });
