@@ -10926,6 +10926,43 @@ function receivingEvidenceEntry(supply) {
     };
 }
 
+function receivingDueInfo(supplies = [], today = localDateString()) {
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').slice(0,10))
+        ? String(value || '').slice(0,10)
+        : '';
+    const expectedDates = (supplies || [])
+        .map(supply => validDate(supply?.expectedDate || supply?.scheduleDate || ''))
+        .filter(Boolean)
+        .sort();
+    const expectedDate = expectedDates[0] || '';
+    const todayDate = validDate(today) || localDateString();
+    if (!expectedDate) return { expectedDate:'', status:'unscheduled', daysLate:0, sortRank:3 };
+    if (expectedDate < todayDate) {
+        const expectedTime = Date.parse(expectedDate + 'T00:00:00Z');
+        const todayTime = Date.parse(todayDate + 'T00:00:00Z');
+        const daysLate = Number.isFinite(expectedTime) && Number.isFinite(todayTime)
+            ? Math.max(1, Math.floor((todayTime - expectedTime) / 86400000))
+            : 1;
+        return { expectedDate, status:'late', daysLate, sortRank:0 };
+    }
+    if (expectedDate === todayDate) return { expectedDate, status:'today', daysLate:0, sortRank:1 };
+    return { expectedDate, status:'upcoming', daysLate:0, sortRank:2 };
+}
+
+function receivingDueHtml(info = {}) {
+    if (info.status === 'late') {
+        return `<div style="margin-top:4px;"><span style="display:inline-block;padding:2px 7px;border-radius:999px;background:#fff1f0;border:1px solid #f4c7c3;color:#b42318;font-size:11px;font-weight:700;">逾期 ${Number(info.daysLate || 0)} 天</span><span style="margin-left:6px;font-size:11px;color:#667584;">預計 ${escapeHtml(info.expectedDate || '')}</span></div>`;
+    }
+    if (info.status === 'today') {
+        return `<div style="margin-top:4px;font-size:11px;color:#9a6700;font-weight:600;">今天預計到貨 ${escapeHtml(info.expectedDate || '')}</div>`;
+    }
+    if (info.status === 'upcoming') {
+        return `<div style="margin-top:4px;font-size:11px;color:#667584;">預計到貨 ${escapeHtml(info.expectedDate || '')}</div>`;
+    }
+    return '<div style="margin-top:4px;font-size:11px;color:#8a8f98;">預計到貨日未設定</div>';
+}
+
+
 function buildReceivingEvidenceIndex() {
     const index = new Map();
     const add = (key, entry) => {
@@ -11000,6 +11037,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     let missingEvidence = 0;
     let evidenceCount = 0;
     let standaloneSupplyCount = 0;
+    let overdueCount = 0;
     const representedSupplyIds = new Set();
     const evidenceIndex = buildReceivingEvidenceIndex();
     const supplyById = new Map(supplyReceivingCache.map(supply => [supply.id, supply]));
@@ -11020,6 +11058,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             evidence.forEach(entry => representedSupplyIds.add(entry.id));
             evidenceCount += evidence.length;
             if (!evidence.length) missingEvidence++;
+            const due = receivingDueInfo(evidence.map(entry => supplyById.get(entry.id)).filter(Boolean));
+            if (due.status === 'late') overdueCount++;
 
             const actionHtml = !canReceiveInventoryCapability()
                 ? '<span class="order-progress-badge">唯讀</span>'
@@ -11038,8 +11078,11 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                 <td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td>
                 <td data-th="負責業務">${escapeHtml(order.salesName || '')}</td>
                 <td data-th="待到貨品項">${escapeHtml(item.itemCode || item.itemName || item.itemId || '未命名品項')} × ${progress.target}</td>
-                <td data-th="到貨進度">${progress.received > 0 ? `部分到貨 ${progress.received}/${progress.target}` : `待到貨 0/${progress.target}`}</td>
+                <td data-th="到貨進度">${progress.received > 0 ? `部分到貨 ${progress.received}/${progress.target}` : `待到貨 0/${progress.target}`}${receivingDueHtml(due)}</td>
                 <td data-th="操作" class="no-print">${actionHtml}</td>`;
+            tr.dataset.receivingDueRank = String(due.sortRank);
+            tr.dataset.receivingExpectedDate = due.expectedDate || '';
+            tr.dataset.receivingOrderDate = order.orderDate || '';
             fragment.appendChild(tr);
         });
     });
@@ -11088,19 +11131,33 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                 : sourceOrder
                     ? '待到貨'
                     : '供應紀錄';
+        const due = receivingDueInfo([supply]);
+        if (due.status === 'late') overdueCount++;
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td data-th="訂單日期">${escapeHtml(date)}</td>
             <td data-th="客戶">${escapeHtml(customerLabel)}</td>
             <td data-th="負責業務">${escapeHtml(salesName)}</td>
             <td data-th="待到貨品項">${escapeHtml(supply.itemCode || supply.itemName || supply.id)} × ${ordered}</td>
-            <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${escapeHtml(supplyProgress.label)}</td>
+            <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${escapeHtml(supplyProgress.label)}${receivingDueHtml(due)}</td>
             <td data-th="操作" class="no-print">${actionHtml}</td>`;
+        tr.dataset.receivingDueRank = String(due.sortRank);
+        tr.dataset.receivingExpectedDate = due.expectedDate || '';
+        tr.dataset.receivingOrderDate = date || '';
         fragment.appendChild(tr);
         standaloneSupplyCount++;
     });
 
-    tbody.appendChild(fragment);
+    const sortedRows = Array.from(fragment.childNodes).sort((a, b) => {
+        const rankDiff = Number(a.dataset.receivingDueRank || 3) - Number(b.dataset.receivingDueRank || 3);
+        if (rankDiff) return rankDiff;
+        const aExpected = a.dataset.receivingExpectedDate || '9999-12-31';
+        const bExpected = b.dataset.receivingExpectedDate || '9999-12-31';
+        const expectedDiff = aExpected.localeCompare(bExpected);
+        if (expectedDiff) return expectedDiff;
+        return String(b.dataset.receivingOrderDate || '').localeCompare(String(a.dataset.receivingOrderDate || ''));
+    });
+    sortedRows.forEach(row => tbody.appendChild(row));
 
     const totalRows = workCount + standaloneSupplyCount;
     if (emptyHint) {
@@ -11111,6 +11168,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         if (!purchasingReceivingReady) status.textContent = `待到貨工作 ${workCount} 個；採購資料載入中…`;
         else {
             const parts = [`待到貨 ${workCount} 個訂單品項`];
+            if (overdueCount) parts.push(`逾期 ${overdueCount} 筆已置頂`);
             if (standaloneSupplyCount) parts.push(`另有 ${standaloneSupplyCount} 筆庫存補貨／非正常訂單供應`);
             if (evidenceCount > workCount) parts.push(`其中 ${evidenceCount - workCount} 筆為分批／多張採購來源，已合併在同一品項顯示`);
             if (missingEvidence) parts.push(`${missingEvidence} 個品項尚未找到可操作的採購紀錄`);
