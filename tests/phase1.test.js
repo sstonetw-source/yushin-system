@@ -4611,7 +4611,9 @@ test('Product Master can browse products by Brand Master in 50-row pages', () =>
     assert.match(indexSource, /依廠牌瀏覽 Product Master/);
     assert.match(appSource, /PRODUCT_BRAND_BROWSE_PAGE_SIZE = 50/);
     assert.match(appSource, /window\.browseProductMasterBrand = async function/);
-    assert.match(appSource, /collection\('products'\)[\s\S]*?where\('brandName', '==', brand\)[\s\S]*?limit\(PRODUCT_BRAND_BROWSE_PAGE_SIZE\)/);
+    assert.match(appSource, /storedBrandNames = dedupeBrandsCaseInsensitive/);
+    assert.match(appSource, /where\('brandName', storedBrandNames\.length > 1 \? 'in' : '=='/);
+    assert.match(appSource, /limit\(PRODUCT_BRAND_BROWSE_PAGE_SIZE\)/);
     assert.match(appSource, /productBrandBrowseHasMore/);
 
     const browseStart=appSource.indexOf('window.browseProductMasterBrand = async function(brand)');
@@ -4740,7 +4742,9 @@ test('product navigation uses the short product label', () => {
 
 
 test('Brand Master drives brand dropdowns while statistics grouping stays independent', () => {
-    assert.match(appSource, /Brand Master 是一般廠牌選單的正式來源/);
+    assert.match(appSource, /Brand Master 的「標準名稱」是全系統唯一廠牌名稱/);
+    assert.match(appSource, /function defaultCanonicalBrandName\(value\)/);
+    assert.match(indexSource, /廠牌標準名稱與別名/);
     assert.match(appSource, /brandMasterCache\.filter\(master => master\?\.name && master\.active !== false\)/);
     assert.match(appSource, /getUnifiedBrandEntries\(false\)\.forEach\(entry =>/);
     assert.match(indexSource, /<strong>廠牌設定<\/strong>/);
