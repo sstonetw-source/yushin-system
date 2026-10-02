@@ -1280,7 +1280,7 @@
                 <button type="button" id="ignoredPendingProductBtn" class="btn-secondary" style="display:none;" onclick="openIgnoredPendingProducts()">已移除待補</button>
                 <label id="productManagementInactiveWrap" class="product-management-toggle" style="display:none;"><input type="checkbox" id="productManagementShowInactive" onchange="if(productBrandBrowseCurrent){reloadCurrentProductBrand();}else if(document.getElementById('productManagementSearch').value.trim().length>=2){searchProductManagement();}"> 顯示已停用</label>
             </div>
-            <div class="product-management-tools-note">正式產品以 Product ID 管理；相同貨號若跨不同廠牌，系統會要求先確認廠牌，不會猜錯產品。搜尋產品後可直接按「編輯」修改主檔；一般錯誤請優先「停用」。</div>
+            <div class="product-management-tools-note">正式產品以 Product ID 管理；相同貨號若跨不同廠牌，系統會要求先確認廠牌，不會猜錯產品。搜尋產品後可直接按「編輯」修改主檔；一般錯誤請優先「停用」，永久刪除僅限管理員。</div>
 
             <details id="productBatchMaintenance" class="product-import-details" style="display:none;">
                 <summary>批次匯入</summary>

@@ -4198,15 +4198,21 @@ test('mobile order list stays card based', () => {
 });
 
 
-test('Product Management mobile layout prevents horizontal overflow and keeps tools secondary', () => {
+test('Product page stays mobile-safe while Product Management lives in admin', () => {
     const productStart=indexSource.indexOf('id="product-system"');
     const forecastStart=indexSource.indexOf('<!-- ============ Forecast 系統 ============ -->',productStart);
     const productSource=indexSource.slice(productStart,forecastStart);
+    const adminProductStart=indexSource.indexOf('id="admin-products"');
+    const adminAgencyStart=indexSource.indexOf('id="admin-agencies"',adminProductStart);
+    const adminProductSource=indexSource.slice(adminProductStart,adminAgencyStart);
     assert.ok(productStart>=0&&forecastStart>productStart);
-    assert.ok(productSource.indexOf('id="productManagementSearch"') < productSource.indexOf('id="productManagementTools"'));
-    assert.match(productSource,/新增產品/);
-    assert.match(productSource,/待補產品/);
-    assert.match(productSource,/id="priceUploadProgress"/);
+    assert.match(productSource,/id="productManagementSearch"/);
+    assert.doesNotMatch(productSource,/id="productManagementTools"/);
+    assert.ok(adminProductStart>=0&&adminAgencyStart>adminProductStart);
+    assert.match(adminProductSource,/id="productManagementTools"/);
+    assert.match(adminProductSource,/新增產品/);
+    assert.match(adminProductSource,/待補產品/);
+    assert.match(adminProductSource,/id="priceUploadProgress"/);
 
     assert.match(cssSource,/#product-system\s*\{[\s\S]*?overflow-x:hidden/);
     assert.match(cssSource,/@media screen and \(max-width: 640px\)[\s\S]*?#product-system[\s\S]*?max-width:100%[\s\S]*?overflow-x:hidden/);
@@ -4669,6 +4675,11 @@ test('Product Master can browse products by Brand Master in 50-row pages', () =>
     assert.match(appSource, /where\('brandName', storedBrandNames\.length > 1 \? 'in' : '=='/);
     assert.match(appSource, /limit\(PRODUCT_BRAND_BROWSE_PAGE_SIZE\)/);
     assert.match(appSource, /productBrandBrowseHasMore/);
+    assert.match(indexSource, /只列出「獨立統計」廠牌；其他廠牌收在「其他」/);
+    assert.match(indexSource, /entry\.isKeyBrand === true/);
+    assert.match(indexSource, /otherProductBrandsExpanded/);
+    assert.match(indexSource, /independent\.map\(entry => button\(entry\)\)/);
+    assert.match(indexSource, /others\.map\(entry => button\(entry\)\)/);
 
     const browseStart=appSource.indexOf('window.browseProductMasterBrand = async function(brand)');
     const browseEnd=appSource.indexOf('\nwindow.reloadCurrentProductBrand',browseStart);
@@ -4705,8 +4716,10 @@ test('admin can remove a pending product reminder without deleting source docume
     assert.match(clearSource,/仍會保持不再出現在待補清單/);
 });
 
-test('Product Master management keeps disable and adds guarded admin-only permanent delete', () => {
-    assert.match(indexSource, /Product Master 管理/);
+test('Product Management is admin-only while guarded permanent delete remains available', () => {
+    assert.match(indexSource, /id="admin-sub-products"/);
+    assert.match(indexSource, /id="admin-products"/);
+    assert.match(indexSource, /product-management-tools-title">產品管理/);
     assert.match(indexSource, /id="productManagementShowInactive"/);
     assert.match(indexSource, /永久刪除僅限管理員/);
     const rowStart=appSource.indexOf('function productManagementRow(product)');
