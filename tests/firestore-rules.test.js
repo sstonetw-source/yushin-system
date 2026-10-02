@@ -611,3 +611,35 @@ test('purchase communication timeline is purchaser-only and immutable', async ()
   await assertSucceeds(getDoc(doc(db('buyer1'),'purchaseOrderCommunications/c1')));
   await assertFails(getDoc(doc(db('sales1'),'purchaseOrderCommunications/c1')));
 });
+
+test('procurement demand permissions follow ERP ownership', async () => {
+  const base={
+    demandId:'SALES_ORDER:o1:i1',sourceType:'SALES_ORDER',sourceId:'o1',sourceItemId:'i1',
+    ownerUid:'sales1',salesCode:'S01',requestedQty:5,orderedQty:0,receivedQty:0,
+    remainingToOrderQty:5,remainingToReceiveQty:0,perOrdered:0,perReceived:0,status:'PENDING',
+    createdAt:'2026-10-02T00:00:00Z',updatedAt:'2026-10-02T00:00:00Z'
+  };
+  await assertSucceeds(setDoc(doc(db('sales1'),'procurementDemands/SALES_ORDER:o1:i1'),base));
+  await assertFails(getDoc(doc(db('sales2'),'procurementDemands/SALES_ORDER:o1:i1')));
+  await assertSucceeds(getDoc(doc(db('buyer1'),'procurementDemands/SALES_ORDER:o1:i1')));
+
+  await assertSucceeds(updateDoc(doc(db('sales1'),'procurementDemands/SALES_ORDER:o1:i1'),{
+    orderedQty:2,remainingToOrderQty:3,remainingToReceiveQty:2,perOrdered:40,status:'PARTIALLY_ORDERED',
+    updatedAt:'2026-10-02T01:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('sales1'),'procurementDemands/SALES_ORDER:o1:i1'),{
+    receivedQty:1
+  }));
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'procurementDemands/SALES_ORDER:o1:i1'),{
+    receivedQty:1,remainingToReceiveQty:1,perReceived:20,status:'PARTIALLY_RECEIVED',
+    updatedAt:'2026-10-02T02:00:00Z'
+  }));
+
+  await assertFails(setDoc(doc(db('sales1'),'procurementDemands/STOCK_REPLENISHMENT:p1'),{
+    ...base,demandId:'STOCK_REPLENISHMENT:p1',sourceType:'STOCK_REPLENISHMENT',sourceId:'p1',sourceItemId:''
+  }));
+  await assertSucceeds(setDoc(doc(db('buyer1'),'procurementDemands/STOCK_REPLENISHMENT:p1'),{
+    ...base,demandId:'STOCK_REPLENISHMENT:p1',sourceType:'STOCK_REPLENISHMENT',sourceId:'p1',sourceItemId:'',
+    ownerUid:'',salesCode:''
+  }));
+});
