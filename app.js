@@ -9140,11 +9140,10 @@ function purchasingAnalyticsRowMatches(supply, filters = purchaseFilterContext()
         && (!businessDate || (filters.start && businessDate < filters.start) || (filters.end && businessDate > filters.end))) return false;
     if (filters.selectedSales) {
         const code=String(supply.salesCode||'').trim();
-        const resolvedName=stripPhoneSuffix(
-            supply.salesName
-            || salesList.find(person=>code&&String(person.code||'').trim()===code)?.name
-            || ''
-        );
+        const codeOwner=code
+            ? salesList.find(person=>String(person.code||'').trim()===code)
+            : null;
+        const resolvedName=stripPhoneSuffix(codeOwner?.name||supply.salesName||'');
         if (resolvedName !== filters.selectedSales) return false;
     }
     if (filters.selectedBrand
