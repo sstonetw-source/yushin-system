@@ -40,3 +40,55 @@ test('warehouse receipt increases cumulative received quantity and reserves reop
   assert.equal(result.item.reservedQty,2);
   assert.equal(result.item.shortageQty,0);
 });
+
+test('purchase receipt snapshot preserves ERP traceability without exposing protected cost',()=>{
+  const receipt=receiving.buildReceiptSnapshot({
+    id:'S1',
+    method:'PURCHASING_PO',
+    type:'PURCHASING_PO',
+    sourceType:'SALES_ORDER',
+    sourceId:'O1',
+    sourceItemId:'I1',
+    orderId:'O1',
+    itemId:'I1',
+    purchaseDocumentId:'PO-DOC-1',
+    purchaseDocumentNo:'PO-2026-001',
+    internalNo:'PO-2026-001',
+    supplierId:'SUP1',
+    supplier:'供應商 A',
+    productId:'P1',
+    productKey:'P1',
+    itemCode:'A-100',
+    itemName:'產品 A',
+    brand:'Brand A',
+    ownerUid:'U1',
+    salesCode:'S01',
+    qty:10,
+    receivedQty:4,
+    unitCost:999,
+    fulfillmentType:'WAREHOUSE',
+    warehouseId:'W1'
+  },{
+    receiptId:'R1',
+    operationId:'R1',
+    supplyOrderId:'S1',
+    qty:3,
+    cumulativeReceivedQty:7,
+    receiptDate:'2026-10-02',
+    createdAt:'2026-10-02T12:00:00.000Z',
+    createdBy:'採購',
+    extra:{lotNo:'LOT-1'}
+  });
+  assert.equal(receipt.method,'PURCHASING_PO');
+  assert.equal(receipt.demandSourceType,'SALES_ORDER');
+  assert.equal(receipt.sourceId,'O1');
+  assert.equal(receipt.sourceItemId,'I1');
+  assert.equal(receipt.purchaseDocumentNo,'PO-2026-001');
+  assert.equal(receipt.supplierId,'SUP1');
+  assert.equal(receipt.productId,'P1');
+  assert.equal(receipt.orderedQty,10);
+  assert.equal(receipt.qty,3);
+  assert.equal(receipt.cumulativeReceivedQty,7);
+  assert.equal(receipt.lotNo,'LOT-1');
+  assert.equal(Object.prototype.hasOwnProperty.call(receipt,'unitCost'),false);
+});
