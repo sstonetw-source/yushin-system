@@ -157,53 +157,78 @@ service cloud.firestore {
     }
 
     function validSupplyOperationalState() {
-      return resource.data.get('status', 'ORDERED') != 'CANCELLED'
-        && request.resource.data.get('qty', 0) is number
-        && request.resource.data.get('receivedQty', 0) is number
-        && request.resource.data.get('incomingRegisteredQty', 0) is number
-        && request.resource.data.get('cancelledQty', 0) is number
-        && request.resource.data.get('qty', 0) >= resource.data.get('qty', 0)
-        && request.resource.data.get('receivedQty', 0) >= resource.data.get('receivedQty', 0)
-        && request.resource.data.get('receivedQty', 0) <= request.resource.data.get('qty', 0)
-        && request.resource.data.get('incomingRegisteredQty', 0) >= 0
-        && request.resource.data.get('incomingRegisteredQty', 0) <= (
-          request.resource.data.get('qty', 0) - request.resource.data.get('receivedQty', 0)
-        )
+      let previousStatus = resource.data.get('status', 'ORDERED');
+      let nextStatus = request.resource.data.get('status', 'ORDERED');
+      let qty = request.resource.data.get('qty', 0);
+      let receivedQty = request.resource.data.get('receivedQty', 0);
+      let cancelledQty = request.resource.data.get('cancelledQty', 0);
+      let closedQty = request.resource.data.get('closedQty', 0);
+      let incomingQty = request.resource.data.get('incomingRegisteredQty', 0);
+      return previousStatus != 'CANCELLED'
+        && previousStatus != 'CLOSED'
+        && qty is number
+        && receivedQty is number
+        && incomingQty is number
+        && cancelledQty is number
+        && closedQty is number
+        && qty >= resource.data.get('qty', 0)
+        && receivedQty >= resource.data.get('receivedQty', 0)
+        && receivedQty <= qty
+        && incomingQty >= 0
+        && incomingQty <= (qty - receivedQty)
         && (
           request.resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
-          || request.resource.data.get('incomingRegisteredQty', 0) == 0
+          || incomingQty == 0
         )
-        && request.resource.data.get('cancelledQty', 0) >= 0
-        && request.resource.data.get('cancelledQty', 0) <= (
-          request.resource.data.get('qty', 0) - request.resource.data.get('receivedQty', 0)
-        )
+        && cancelledQty >= 0
+        && cancelledQty <= (qty - receivedQty)
+        && closedQty >= 0
+        && closedQty <= (qty - receivedQty)
         && (
           (
-            request.resource.data.get('status', 'ORDERED') == 'ORDERED'
-            && request.resource.data.get('receivedQty', 0) == 0
-            && request.resource.data.get('cancelledQty', 0) == 0
+            nextStatus == 'ORDERED'
+            && receivedQty == 0
+            && cancelledQty == 0
+            && closedQty == 0
           )
           || (
-            request.resource.data.get('status', 'ORDERED') == 'PARTIAL_RECEIPT'
-            && request.resource.data.get('receivedQty', 0) > 0
-            && request.resource.data.get('receivedQty', 0) < request.resource.data.get('qty', 0)
-            && request.resource.data.get('cancelledQty', 0) == 0
+            nextStatus == 'PARTIAL_RECEIPT'
+            && receivedQty > 0
+            && receivedQty < qty
+            && cancelledQty == 0
+            && closedQty == 0
           )
           || (
-            request.resource.data.get('status', 'ORDERED') == 'RECEIVED'
-            && request.resource.data.get('qty', 0) > 0
-            && request.resource.data.get('receivedQty', 0) == request.resource.data.get('qty', 0)
-            && request.resource.data.get('cancelledQty', 0) == 0
+            nextStatus == 'RECEIVED'
+            && qty > 0
+            && receivedQty == qty
+            && cancelledQty == 0
+            && closedQty == 0
           )
           || (
-            request.resource.data.get('status', 'ORDERED') == 'CANCELLED'
-            && request.resource.data.get('qty', 0) > request.resource.data.get('receivedQty', 0)
-            && request.resource.data.get('cancelledQty', 0)
-              == request.resource.data.get('qty', 0) - request.resource.data.get('receivedQty', 0)
-            && request.resource.data.get('incomingRegisteredQty', 0) == 0
+            nextStatus == 'CANCELLED'
+            && qty > receivedQty
+            && qty == resource.data.get('qty', 0)
+            && receivedQty == resource.data.get('receivedQty', 0)
+            && cancelledQty == qty - receivedQty
+            && closedQty == 0
+            && incomingQty == 0
             && request.resource.data.get('cancelReason', '') != ''
             && request.resource.data.get('cancelledAt', '') != ''
             && request.resource.data.get('cancelledByUid', '') == request.auth.uid
+          )
+          || (
+            nextStatus == 'CLOSED'
+            && receivedQty > 0
+            && receivedQty < qty
+            && qty == resource.data.get('qty', 0)
+            && receivedQty == resource.data.get('receivedQty', 0)
+            && closedQty == qty - receivedQty
+            && cancelledQty == 0
+            && incomingQty == 0
+            && request.resource.data.get('closeReason', '') != ''
+            && request.resource.data.get('closedAt', '') != ''
+            && request.resource.data.get('closedByUid', '') == request.auth.uid
           )
         );
     }
@@ -217,6 +242,7 @@ service cloud.firestore {
       return directShipReceiver()
         && resource.data.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
         && resource.data.get('status', 'ORDERED') != 'CANCELLED'
+        && resource.data.get('status', 'ORDERED') != 'CLOSED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'receivedQty', 'status', 'updatedAt'
         ])
@@ -225,6 +251,7 @@ service cloud.firestore {
         && nextReceived <= qty
         && resource.data.get('incomingRegisteredQty', 0) == 0
         && resource.data.get('cancelledQty', 0) == 0
+        && resource.data.get('closedQty', 0) == 0
         && (
           (nextReceived < qty && request.resource.data.get('status', '') == 'PARTIAL_RECEIPT')
           || (nextReceived == qty && request.resource.data.get('status', '') == 'RECEIVED')
@@ -232,8 +259,7 @@ service cloud.firestore {
     }
 
     function purchaserSupplyOperationalUpdate() {
-      // affectedKeys 的白名單已禁止修改任何供應紀錄身分欄位；
-      // 不再逐欄重複比對同一批 identity，降低 Firestore Rules 表達式用量。
+      // Supply identity is immutable; purchasing may only change operational progress.
       return purchaser()
         && validSupplyOperationalState()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -242,6 +268,7 @@ service cloud.firestore {
           'status', 'supplier', 'unitCost',
           'lastOrderedAt', 'orderEvents',
           'cancelledQty', 'cancelReason', 'cancelledAt', 'cancelledByUid', 'cancelledBy',
+          'closedQty', 'closeReason', 'closedAt', 'closedByUid', 'closedBy',
           'updatedAt'
         ]);
     }
@@ -250,6 +277,7 @@ service cloud.firestore {
       return warehouse()
         && validSupplyOperationalState()
         && request.resource.data.get('status', 'ORDERED') != 'CANCELLED'
+        && request.resource.data.get('status', 'ORDERED') != 'CLOSED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'receivedQty', 'incomingRegisteredQty', 'status', 'updatedAt'
         ]);
