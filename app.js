@@ -1774,10 +1774,234 @@ function productManagementRow(product) {
         ${canManagePendingProductMaster() ? (inactive
             ? `<button type="button" class="btn-small" onclick="setProductMasterActive('${escapeAttr(productId)}', true)">重新啟用</button>`
             : `<button type="button" class="btn-small btn-danger" onclick="setProductMasterActive('${escapeAttr(productId)}', false)">停用</button>`) : ''}
+        ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="openProduct360('${escapeAttr(productId)}')">360°</button>` : ''}
         ${canDelete ? `<button type="button" class="btn-small btn-danger" onclick="deleteProductMaster('${escapeAttr(productId)}')">刪除</button>` : ''}
       </td>
     </tr>`;
 }
+
+
+let product360LoadGeneration = 0;
+
+function closeProduct360() {
+    product360LoadGeneration++;
+    document.getElementById('product360Overlay')?.classList.remove('active');
+}
+window.closeProduct360 = closeProduct360;
+
+function product360LocalCommercialRecords(collectionName, productId) {
+    const sources = collectionName === 'quotes'
+        ? [...(myQuotesCache || []), ...(quoteHistorySearchResults || [])]
+        : [...(ordersCache || []), ...(orderHistorySearchResults || [])];
+    const rows = new Map();
+    sources.forEach(record => {
+        if (!productRecordContainsProduct(record, productId)) return;
+        if ((currentUserRole === 'sales' || currentUserRole === 'engineer')
+            && !belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode)) return;
+        const id = collectionName === 'quotes'
+            ? String(record.quoteNo || record.id || '')
+            : String(record.id || record.orderNo || '');
+        if (id) rows.set(id, record);
+    });
+    return [...rows.values()];
+}
+
+async function product360CommercialRecords(collectionName, productId) {
+    if (collectionName === 'quotes' && currentUserRole === 'warehouse') return [];
+    const local = product360LocalCommercialRecords(collectionName, productId);
+    let remote = [];
+    try {
+        let query = null;
+        const canReadAll = currentUserRole === 'admin'
+            || currentUserRole === 'purchaser'
+            || (collectionName === 'orders' && currentUserRole === 'warehouse');
+        if (canReadAll) {
+            query = db.collection(collectionName).where('productIds', 'array-contains', productId).limit(12);
+        } else if ((currentUserRole === 'sales' || currentUserRole === 'engineer') && currentUser?.uid) {
+            // 商務角色只查自己的近期文件，再在瀏覽器內篩出此產品；
+            // 避免 array-contains + ownerUid 產生額外 composite index，也符合 Firestore ownership rules。
+            query = db.collection(collectionName).where('ownerUid', '==', currentUser.uid).limit(50);
+        }
+        if (query) {
+            const snap = await firestoreReadWithTimeout(query.get(), collectionName === 'quotes' ? '產品近期估價' : '產品近期訂單');
+            remote = snap.docs.map(doc => ({ id:doc.id, ...doc.data() }))
+                .filter(record => productRecordContainsProduct(record, productId));
+        }
+    } catch (err) {
+        console.warn('Product 360 近期交易讀取失敗：', collectionName, err);
+    }
+
+    const merged = new Map();
+    [...remote, ...local].forEach(record => {
+        const id = collectionName === 'quotes'
+            ? String(record.quoteNo || record.id || '')
+            : String(record.id || record.orderNo || '');
+        if (id) merged.set(id, record);
+    });
+    const dateField = collectionName === 'quotes' ? 'quoteDate' : 'orderDate';
+    return [...merged.values()]
+        .sort((a,b) => String(b[dateField] || b.createdAt || '').localeCompare(String(a[dateField] || a.createdAt || '')))
+        .slice(0, 6);
+}
+
+function product360TransactionRows(records, kind, productId) {
+    if (!records.length) return '<div class="product-360-empty">目前沒有可顯示的近期紀錄。</div>';
+    return records.map(record => {
+        const item = (record.items || []).find(row => String(row?.productId || '').trim() === productId) || record;
+        const ref = kind === 'quote' ? (record.quoteNo || record.id || '') : (record.orderNo || record.id || '');
+        const date = kind === 'quote' ? (record.quoteDate || '') : (record.orderDate || '');
+        const customer = kind === 'quote'
+            ? (record.ordererName || record.clientName || '')
+            : (record.customerName || '');
+        const qty = Number(item.qty || item.orderedQty || 0);
+        const amount = kind === 'quote'
+            ? Number(String(item.subtotal || item.price || 0).replace(/,/g, ''))
+            : Number(item.totalPrice || (Number(item.unitPrice || 0) * qty) || 0);
+        return `<div class="product-360-transaction">
+            <div><strong>${escapeHtml(ref || '未編號')}</strong><span>${escapeHtml(date)}</span></div>
+            <div>${escapeHtml(customer || '未填客戶')}${qty ? ` · 數量 ${qty}` : ''}${amount ? ` · NT$ ${amount.toLocaleString()}` : ''}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderProduct360(product, inventory, warehouseDocs, demands, quotes, orders) {
+    const content = document.getElementById('product360Content');
+    const title = document.getElementById('product360Title');
+    if (!content) return;
+
+    const id = String(product.productId || product.id || '');
+    const brand = product.brandName || product.brand || '';
+    const code = product.manufacturerPartNo || product.sku || '';
+    const name = product.productName || product.nameCn || product.nameEn || '';
+    if (title) title.textContent = `${brand || 'Product Master'} · ${code || name}`;
+
+    const warehouseRows = warehouseDocs.map(row => {
+        const n = inventoryNumbers(row);
+        const master = warehouseMasterCache.find(item => item.id === row.warehouseId);
+        return { ...n, warehouseName:master?.warehouseName || row.warehouseName || row.warehouseId || '倉庫' };
+    });
+    const hasWarehouseFacts = warehouseRows.length > 0;
+    const aggregate = inventoryNumbers(inventory || {});
+    const stock = hasWarehouseFacts ? {
+        onHand:warehouseRows.reduce((sum,row)=>sum+row.onHand,0),
+        reserved:warehouseRows.reduce((sum,row)=>sum+row.reserved,0),
+        incoming:warehouseRows.reduce((sum,row)=>sum+row.incoming,0)
+    } : aggregate;
+    stock.available = Math.max(0, stock.onHand - stock.reserved);
+    const safetyStock = Math.max(0, Number(inventory?.safetyStock || 0));
+
+    const activeDemands = (demands || []).filter(row => String(row.status || '').toUpperCase() !== 'CANCELLED');
+    const pendingPurchase = activeDemands.reduce((sum,row)=>sum+Math.max(0,Number(row.remainingToOrderQty||0)),0);
+    const pendingReceive = activeDemands.reduce((sum,row)=>sum+Math.max(0,Number(row.remainingToReceiveQty||0)),0);
+    const demandVisible = ['admin','purchaser','warehouse'].includes(currentUserRole);
+
+    const warehouseHtml = warehouseRows.length
+        ? warehouseRows.map(row => `<div class="product-360-warehouse"><strong>${escapeHtml(row.warehouseName)}</strong><span>現有 ${row.onHand}　占用 ${row.reserved}　可用 ${row.available}　在途 ${row.incoming}</span></div>`).join('')
+        : '<div class="product-360-empty">目前沒有分倉庫存。</div>';
+
+    const quickActions = [
+        canEditPage('quote.create') && product.active !== false && product.status !== 'INACTIVE'
+            ? `<button type="button" onclick="closeProduct360();addProductManagementToQuote('${escapeAttr(id)}')">加入估價單</button>` : '',
+        canEditPage('orders.list') && product.active !== false && product.status !== 'INACTIVE'
+            ? `<button type="button" class="btn-secondary" onclick="closeProduct360();addProductManagementToOrder('${escapeAttr(id)}')">建立訂單</button>` : ''
+    ].filter(Boolean).join('');
+
+    content.innerHTML = `
+      <div class="product-360-actions">${quickActions}</div>
+      <div class="product-360-grid">
+        <section class="product-360-card">
+          <h4>基本資料</h4>
+          <dl>
+            <div><dt>廠牌</dt><dd>${escapeHtml(brand || '－')}</dd></div>
+            <div><dt>貨號</dt><dd>${escapeHtml(code || '－')}</dd></div>
+            <div><dt>品名</dt><dd>${escapeHtml(name || '－')}</dd></div>
+            <div><dt>產品線</dt><dd>${escapeHtml(product.productLine || '未分類')}</dd></div>
+            <div><dt>類型</dt><dd>${escapeHtml(product.productType || product.category || '未分類')}</dd></div>
+            <div><dt>規格</dt><dd>${escapeHtml(product.specification || product.spec || '－')}</dd></div>
+            <div><dt>建議售價</dt><dd>${Number(product.listPrice ?? product.price ?? 0) ? 'NT$ ' + Number(product.listPrice ?? product.price ?? 0).toLocaleString() : '－'}</dd></div>
+            <div><dt>追蹤</dt><dd>${product.inventoryTracked ? '庫存' : '不管庫存'}／${product.lotTracked ? '批號' : '無批號'}／${product.expiryTracked ? '效期' : '無效期'}</dd></div>
+          </dl>
+        </section>
+        <section class="product-360-card">
+          <h4>庫存狀況</h4>
+          <div class="product-360-metrics">
+            <div><span>現有</span><strong>${stock.onHand}</strong></div>
+            <div><span>占用</span><strong>${stock.reserved}</strong></div>
+            <div><span>可用</span><strong>${stock.available}</strong></div>
+            <div><span>在途</span><strong>${stock.incoming}</strong></div>
+            <div><span>安全庫存</span><strong>${safetyStock}</strong></div>
+          </div>
+          <div class="product-360-warehouse-list">${warehouseHtml}</div>
+        </section>
+        <section class="product-360-card">
+          <h4>採購狀況</h4>
+          ${demandVisible ? `<div class="product-360-metrics">
+              <div><span>待採購</span><strong>${pendingPurchase}</strong></div>
+              <div><span>需求待到貨</span><strong>${pendingReceive}</strong></div>
+              <div><span>庫存在途</span><strong>${stock.incoming}</strong></div>
+            </div>`
+            : `<div class="product-360-metrics"><div><span>庫存在途</span><strong>${stock.incoming}</strong></div></div>
+               <div class="product-360-empty">待採購需求明細由採購／管理員查看。</div>`}
+        </section>
+        <section class="product-360-card product-360-card-wide">
+          <h4>最近交易</h4>
+          <div class="product-360-history-grid">
+            <div><h5>估價單</h5>${product360TransactionRows(quotes,'quote',id)}</div>
+            <div><h5>訂單</h5>${product360TransactionRows(orders,'order',id)}</div>
+          </div>
+        </section>
+      </div>`;
+}
+
+window.openProduct360 = async function(productId) {
+    if (!canAccessPage('products')) return;
+    const generation = ++product360LoadGeneration;
+    const overlay = document.getElementById('product360Overlay');
+    const content = document.getElementById('product360Content');
+    const title = document.getElementById('product360Title');
+    if (!overlay || !content) return;
+    overlay.classList.add('active');
+    if (title) title.textContent = 'Product 360°';
+    content.innerHTML = '<div class="product-360-loading">正在整理產品、庫存與近期交易…</div>';
+
+    try {
+        const id = String(productId || '').trim();
+        let product = productManagementResults.find(item => String(item.productId || item.id || '') === id);
+        if (!product) {
+            const snap = await firestoreReadWithTimeout(db.collection('products').doc(id).get(), 'Product 360 主檔');
+            if (snap.exists) product = { id:snap.id, ...snap.data() };
+        }
+        if (!product) throw new Error('找不到這筆 Product Master。');
+
+        const demandPromise = ['admin','purchaser','warehouse'].includes(currentUserRole)
+            ? firestoreReadWithTimeout(db.collection('procurementDemands').where('productId','==',id).limit(100).get(), 'Product 360 採購需求')
+                .then(snap => snap.docs.map(doc => ({ id:doc.id, ...doc.data() })))
+            : Promise.resolve([]);
+
+        const [inventorySnap, warehouseSnap, demands, quotes, orders] = await Promise.all([
+            firestoreReadWithTimeout(db.collection('inventory').doc(encodeURIComponent(id)).get(), 'Product 360 庫存'),
+            firestoreReadWithTimeout(db.collection('warehouseStocks').where('productKey','==',id).limit(50).get(), 'Product 360 分倉庫存'),
+            demandPromise,
+            product360CommercialRecords('quotes', id),
+            product360CommercialRecords('orders', id),
+            loadWarehouseMaster().catch(() => warehouseMasterCache)
+        ]).then(values => [values[0],values[1],values[2],values[3],values[4]]);
+
+        if (generation !== product360LoadGeneration) return;
+        renderProduct360(
+            product,
+            inventorySnap.exists ? inventorySnap.data() : {},
+            warehouseSnap.docs.map(doc => ({ id:doc.id, ...doc.data() })),
+            demands,
+            quotes,
+            orders
+        );
+    } catch (err) {
+        if (generation !== product360LoadGeneration) return;
+        console.error('Product 360 載入失敗：', err);
+        content.innerHTML = `<div class="product-360-error">Product 360 載入失敗：${escapeHtml(err?.message || String(err))}</div>`;
+    }
+};
 
 function updateProductManagementSelectionBar() {
     const bar = document.getElementById('productManagementSelectionBar');
@@ -1833,6 +2057,20 @@ function clearProductManagementSelection() {
 
 function selectedProductManagementProducts() {
     return [...productManagementSelection.values()];
+}
+
+function productIdsFromItems(items = []) {
+    return [...new Set((Array.isArray(items) ? items : [])
+        .map(item => String(item?.productId || '').trim())
+        .filter(Boolean))];
+}
+
+function productRecordContainsProduct(record, productId) {
+    const id = String(productId || '').trim();
+    if (!id || !record) return false;
+    if (String(record.productId || '').trim() === id) return true;
+    if (Array.isArray(record.productIds) && record.productIds.some(value => String(value || '').trim() === id)) return true;
+    return Array.isArray(record.items) && record.items.some(item => String(item?.productId || '').trim() === id);
 }
 
 function updateProductManagementMoreButton() {
@@ -3581,6 +3819,7 @@ async function createForecastOrdersDirectly(forecast, items) {
         unitPrice:Number(firstItem.unitPrice||0),
         totalPrice,
         items:normalizedItems,
+        productIds:productIdsFromItems(normalizedItems),
         itemCount:normalizedItems.length,
         orderSchemaVersion:2,
         productMasterMatched:true,
@@ -5523,6 +5762,7 @@ function collectCurrentQuoteRecord() {
             subtotal: row.querySelector('.subtotal-inc').value
         });
     });
+    record.productIds = productIdsFromItems(record.items);
     record.productMasterMatched = record.items.length > 0 && record.items.every(item => item.productMasterMatched === true);
     return record;
 }
@@ -8219,6 +8459,7 @@ function normalizedOrderItems(order) {
 function ensureOrderItemCompatibility(order) {
     const items = normalizedOrderItems(order);
     order.items = items;
+    order.productIds = productIdsFromItems(items);
     order.orderSchemaVersion = 2;
     order.itemCount = items.length;
     return order;

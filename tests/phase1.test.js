@@ -4599,6 +4599,34 @@ test('sales can use Product Master for quote and order while Product Master itse
     assert.match(appSource,/Product Master 僅可查看；您可以把產品加入估價單或建立訂單/);
 });
 
+test('Product 360 shows stock procurement and recent commercial activity without full database scans', () => {
+    assert.match(indexSource,/id="product360Overlay"/);
+    assert.match(indexSource,/Product 360°/);
+    const rowStart=appSource.indexOf('function productManagementRow(product)');
+    const rowEnd=appSource.indexOf('\nlet product360LoadGeneration',rowStart);
+    const rowSource=appSource.slice(rowStart,rowEnd);
+    assert.match(rowSource,/openProduct360/);
+    const start=appSource.indexOf('window.openProduct360 = async function(productId)');
+    const end=appSource.indexOf('\nfunction updateProductManagementSelectionBar',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/collection\('inventory'\)\.doc\(encodeURIComponent\(id\)\)/);
+    assert.match(source,/collection\('warehouseStocks'\)\.where\('productKey','==',id\)\.limit\(50\)/);
+    assert.match(source,/collection\('procurementDemands'\)\.where\('productId','==',id\)\.limit\(100\)/);
+    assert.match(appSource,/where\('productIds', 'array-contains', productId\)\.limit\(12\)/);
+    assert.match(appSource,/where\('ownerUid', '==', currentUser\.uid\)\.limit\(50\)/);
+    assert.doesNotMatch(source,/collection\('quotes'\)\.get\(\)|collection\('orders'\)\.get\(\)/);
+});
+
+test('new quotes and orders persist productIds for fast Product 360 lookup', () => {
+    const quoteStart=appSource.indexOf('function collectCurrentQuoteRecord()');
+    const quoteEnd=appSource.indexOf('\nfunction comparisonBaseTotal',quoteStart);
+    assert.match(appSource.slice(quoteStart,quoteEnd),/record\.productIds = productIdsFromItems\(record\.items\)/);
+    const orderStart=appSource.indexOf('function ensureOrderItemCompatibility(order)');
+    const orderEnd=appSource.indexOf('\nfunction orderQuantity',orderStart);
+    assert.match(appSource.slice(orderStart,orderEnd),/order\.productIds = productIdsFromItems\(items\)/);
+    assert.match(appSource,/items:normalizedItems,\s*productIds:productIdsFromItems\(normalizedItems\)/);
+});
+
 
 test('product navigation uses the short product label', () => {
     assert.match(indexSource, /data-main-nav="products"[\s\S]*?<\/svg>產品<\/div>/);

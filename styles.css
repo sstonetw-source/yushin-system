@@ -2542,3 +2542,42 @@ html[data-app-environment="preview"] body { border-top: 0; }
     .product-ignored-row { align-items: stretch; flex-direction: column; }
     .product-ignored-row button { width: 100%; min-height: 40px; }
 }
+
+
+/* Product 360° */
+.product-360-modal{width:min(1040px,94vw);max-height:90vh;overflow:auto}
+.product-360-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
+.product-360-header h3{margin:0 0 4px}
+.product-360-header p{margin:0;color:#666;font-size:13px}
+.product-360-content{min-height:160px}
+.product-360-loading,.product-360-error,.product-360-empty{padding:12px;color:#666}
+.product-360-error{color:#b42318}
+.product-360-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.product-360-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.product-360-card{border:1px solid #e6e8ec;border-radius:12px;padding:14px;background:#fff;min-width:0}
+.product-360-card-wide{grid-column:1/-1}
+.product-360-card h4{margin:0 0 12px;font-size:15px}
+.product-360-card h5{margin:0 0 8px;font-size:13px}
+.product-360-card dl{margin:0;display:grid;gap:8px}
+.product-360-card dl>div{display:grid;grid-template-columns:90px 1fr;gap:10px}
+.product-360-card dt{color:#777}
+.product-360-card dd{margin:0;word-break:break-word}
+.product-360-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.product-360-metrics>div{background:#f7f8fa;border-radius:10px;padding:10px}
+.product-360-metrics span{display:block;color:#777;font-size:12px;margin-bottom:4px}
+.product-360-metrics strong{font-size:20px}
+.product-360-warehouse-list{display:grid;gap:6px;margin-top:10px}
+.product-360-warehouse{display:flex;justify-content:space-between;gap:12px;padding-top:7px;border-top:1px solid #eee;font-size:12px}
+.product-360-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.product-360-transaction{border-top:1px solid #eee;padding:8px 0;font-size:12px}
+.product-360-transaction:first-of-type{border-top:0}
+.product-360-transaction>div:first-child{display:flex;justify-content:space-between;gap:8px}
+.product-360-transaction>div:last-child{margin-top:3px;color:#666}
+@media(max-width:720px){
+  .product-360-modal{width:96vw;max-height:92vh}
+  .product-360-grid,.product-360-history-grid{grid-template-columns:1fr}
+  .product-360-card-wide{grid-column:auto}
+  .product-360-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .product-360-warehouse{display:block}
+  .product-360-warehouse span{display:block;margin-top:3px}
+}
