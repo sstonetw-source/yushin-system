@@ -4450,6 +4450,27 @@ test('admin exposes the loaded application asset version', () => {
 });
 
 
+test('Product Master can browse products by Brand Master in 50-row pages', () => {
+    assert.match(indexSource, /id="productBrandBrowser"/);
+    assert.match(indexSource, /依廠牌瀏覽 Product Master/);
+    assert.match(appSource, /PRODUCT_BRAND_BROWSE_PAGE_SIZE = 50/);
+    assert.match(appSource, /window\.browseProductMasterBrand = async function/);
+    assert.match(appSource, /collection\('products'\)[\s\S]*?where\('brandName', '==', brand\)[\s\S]*?limit\(PRODUCT_BRAND_BROWSE_PAGE_SIZE\)/);
+    assert.match(appSource, /productBrandBrowseHasMore/);
+});
+
+test('admin can remove a pending product reminder without deleting source documents and restore it later', () => {
+    assert.match(indexSource, /id="ignoredPendingProductBtn"/);
+    const start=appSource.indexOf('window.ignorePendingProductMaster = async function');
+    const end=appSource.indexOf('\nwindow.openIgnoredPendingProducts', start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/settings'\)\.doc\('productMasterPending'\)/);
+    assert.match(source,/只會移除待補提醒，不會刪除原估價單、訂單或其他歷史資料/);
+    assert.doesNotMatch(source,/collection\('quotes'\).*\.delete\(/);
+    assert.doesNotMatch(source,/collection\('orders'\).*\.delete\(/);
+    assert.match(appSource,/window\.restoreIgnoredPendingProduct = async function/);
+});
+
 test('Product Master management has clear edit and soft-disable controls', () => {
     assert.match(indexSource, /Product Master 管理/);
     assert.match(indexSource, /id="productManagementShowInactive"/);

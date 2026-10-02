@@ -850,6 +850,7 @@ function initializePageData(mainKey, options = {}) {
     if (mainKey === 'products') {
         clearProductManagementSearch({ preserveInput: true });
         updatePendingProductMasterButton();
+        ensureProductBrandBrowserLoaded();
     }
     if (mainKey === 'orders.list') {
         // 訂單列表本身不需要完整 Product Master。先載 50 筆訂單，避免 iPhone 每次進頁
@@ -1324,7 +1325,13 @@ let productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
 
 let pendingProductMasterLoading = false;
 let pendingProductMasterRows = [];
+let pendingProductMasterIgnoredItems = [];
 let productBatchMaintenanceInProgress = false;
+let productManagementSourceMode = 'none';
+let productBrandBrowseCurrent = '';
+let productBrandBrowseCursor = null;
+let productBrandBrowseHasMore = false;
+const PRODUCT_BRAND_BROWSE_PAGE_SIZE = 50;
 
 function setProductBatchMaintenanceBusy(busy) {
     productBatchMaintenanceInProgress = !!busy;
@@ -1341,15 +1348,119 @@ function updatePendingProductMasterButton() {
     const allowed = canManagePendingProductMaster();
     const tools = document.getElementById('productManagementTools');
     const pendingButton = document.getElementById('pendingProductMasterBtn');
+    const ignoredPendingButton = document.getElementById('ignoredPendingProductBtn');
     const createButton = document.getElementById('createProductMasterBtn');
     const inactiveWrap = document.getElementById('productManagementInactiveWrap');
     const batchMaintenance = document.getElementById('productBatchMaintenance');
     if (tools) tools.style.display = allowed ? '' : 'none';
     if (pendingButton) pendingButton.style.display = allowed ? '' : 'none';
+    if (ignoredPendingButton) ignoredPendingButton.style.display = (trueUserRole === 'admin' && currentUserRole === 'admin') ? '' : 'none';
     if (createButton) createButton.style.display = allowed ? '' : 'none';
     if (inactiveWrap) inactiveWrap.style.display = allowed ? '' : 'none';
     if (batchMaintenance) batchMaintenance.style.display = allowed ? '' : 'none';
 }
+
+function productBrandBrowserEntries() {
+    const query = String(document.getElementById('productBrandBrowserSearch')?.value || '').normalize('NFKC').trim().toLocaleLowerCase();
+    return getUnifiedBrandEntries(false)
+        .filter(entry => entry?.name && entry.active !== false)
+        .filter(entry => !query || [entry.name, ...(entry.aliases || [])].some(name =>
+            String(name || '').normalize('NFKC').toLocaleLowerCase().includes(query)
+        ))
+        .sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
+}
+
+window.renderProductBrandBrowser = function() {
+    const container = document.getElementById('productBrandBrowserList');
+    if (!container) return;
+    const entries = productBrandBrowserEntries();
+    if (!entries.length) {
+        container.innerHTML = '<span class="product-brand-browser-empty">找不到符合的廠牌。</span>';
+        return;
+    }
+    container.innerHTML = entries.map(entry => {
+        const active = normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(productBrandBrowseCurrent);
+        return `<button type="button" class="product-brand-button${active ? ' active' : ''}" onclick="browseProductMasterBrand('${escapeAttr(entry.name)}')">${escapeHtml(entry.name)}</button>`;
+    }).join('');
+};
+
+async function ensureProductBrandBrowserLoaded() {
+    try {
+        await loadBrandMaster();
+        renderProductBrandBrowser();
+    } catch (err) {
+        console.warn('Product Master 廠牌瀏覽載入失敗：', err);
+        const container = document.getElementById('productBrandBrowserList');
+        if (container) container.innerHTML = '<span class="product-brand-browser-empty">廠牌載入失敗，請稍後再試。</span>';
+    }
+}
+
+async function fetchProductBrandBrowsePage(reset = false) {
+    const brand = productBrandBrowseCurrent;
+    if (!brand) return;
+    const status = document.getElementById('productManagementSearchStatus');
+    if (reset) {
+        productBrandBrowseCursor = null;
+        productBrandBrowseHasMore = false;
+        productManagementResults = [];
+        productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
+    }
+
+    let query = db.collection('products')
+        .where('brandName', '==', brand)
+        .orderBy(firebase.firestore.FieldPath.documentId())
+        .limit(PRODUCT_BRAND_BROWSE_PAGE_SIZE);
+    if (productBrandBrowseCursor) query = query.startAfter(productBrandBrowseCursor);
+    if (status) status.textContent = `正在讀取 ${brand} Product Master…`;
+
+    const snapshot = await firestoreReadWithTimeout(query.get(), `Product Master－${brand}`);
+    const showInactive = canManagePendingProductMaster()
+        && document.getElementById('productManagementShowInactive')?.checked === true;
+    const nextRows = snapshot.docs.map(doc => ({ id:doc.id, ...doc.data() }))
+        .filter(row => showInactive || (row.status !== 'INACTIVE' && row.active !== false));
+    const existing = new Map(productManagementResults.map(row => [row.id || row.productId, row]));
+    nextRows.forEach(row => existing.set(row.id || row.productId, row));
+    productManagementResults = [...existing.values()]
+        .sort((a,b) => String(a.manufacturerPartNo || '').localeCompare(String(b.manufacturerPartNo || ''), 'zh-Hant'));
+
+    productBrandBrowseCursor = snapshot.docs[snapshot.docs.length - 1] || productBrandBrowseCursor;
+    productBrandBrowseHasMore = snapshot.size === PRODUCT_BRAND_BROWSE_PAGE_SIZE;
+    productManagementSourceMode = 'brand';
+    renderProductManagementResults();
+    if (status) status.textContent = productBrandBrowseHasMore
+        ? `${brand}：目前已載入 ${productManagementResults.length} 筆，可再載入更多。`
+        : `${brand}：共載入 ${productManagementResults.length} 筆啟用產品。`;
+}
+
+window.browseProductMasterBrand = async function(brand) {
+    if (!canAccessPage('products')) return;
+    productBrandBrowseCurrent = resolveBrandName(brand);
+    productManagementSourceMode = 'brand';
+    pendingProductMasterRows = [];
+    productManagementSourceMode = 'search';
+    productBrandBrowseCurrent = '';
+    productBrandBrowseCursor = null;
+    productBrandBrowseHasMore = false;
+    renderProductBrandBrowser();
+    const input = document.getElementById('productManagementSearch');
+    if (input) input.value = '';
+    renderProductBrandBrowser();
+    try {
+        await fetchProductBrandBrowsePage(true);
+    } catch (err) {
+        console.error('依廠牌讀取 Product Master 失敗：', err);
+        productManagementResults = [];
+        productBrandBrowseHasMore = false;
+        renderProductManagementResults();
+        const status = document.getElementById('productManagementSearchStatus');
+        if (status) status.textContent = '廠牌產品讀取失敗，請稍後再試。';
+    }
+};
+
+window.reloadCurrentProductBrand = function() {
+    if (!productBrandBrowseCurrent) return;
+    browseProductMasterBrand(productBrandBrowseCurrent);
+};
 
 function pendingProductKey(item = {}) {
     const brand = normalizeBrandLookupKey(item.brand || '');
@@ -1396,6 +1507,7 @@ function renderPendingProductMasterRows() {
         body.innerHTML = '<tr><td colspan="7" class="empty-hint">目前沒有待補 Product Master 的近期品項。</td></tr>';
         return;
     }
+    const canIgnore = trueUserRole === 'admin' && currentUserRole === 'admin';
     body.innerHTML = pendingProductMasterRows.map((row,index) => `<tr>
         <td data-th="貨號">${escapeHtml(row.itemCode || '－')}</td>
         <td data-th="品名">${escapeHtml(row.itemName || '－')}</td>
@@ -1403,9 +1515,109 @@ function renderPendingProductMasterRows() {
         <td data-th="來源">${escapeHtml(row.sources.join('、'))}</td>
         <td data-th="最近使用">${escapeHtml(row.latestDate || '－')}</td>
         <td data-th="次數">${row.count}</td>
-        <td data-th="操作" class="no-print">${canManagePendingProductMaster() ? `<button type="button" class="btn-small" onclick="openPendingProductMasterEditor(${index})">補主檔</button>` : ''}</td>
+        <td data-th="操作" class="no-print product-pending-actions">
+            ${canManagePendingProductMaster() ? `<button type="button" class="btn-small" onclick="openPendingProductMasterEditor(${index})">補主檔</button>` : ''}
+            ${canIgnore ? `<button type="button" class="btn-small btn-secondary" onclick="ignorePendingProductMaster(${index})">移除待補</button>` : ''}
+        </td>
     </tr>`).join('');
 }
+
+async function loadIgnoredPendingProducts() {
+    const snap = await firestoreReadWithTimeout(
+        db.collection('settings').doc('productMasterPending').get(),
+        '已移除待補產品'
+    );
+    const rows = snap.exists && Array.isArray(snap.data()?.ignoredItems) ? snap.data().ignoredItems : [];
+    pendingProductMasterIgnoredItems = rows.filter(item => item?.key);
+    return pendingProductMasterIgnoredItems;
+}
+
+function ignoredPendingProductKeys() {
+    return new Set((pendingProductMasterIgnoredItems || []).map(item => String(item.key || '')));
+}
+
+window.ignorePendingProductMaster = async function(index) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const row = pendingProductMasterRows[index];
+    if (!row) return;
+    const key = row.key || pendingProductKey(row);
+    const label = [row.brand, row.itemCode, row.itemName].filter(Boolean).join(' / ');
+    if (!confirm(`從「待補產品」移除「${label || '此品項'}」？\n\n只會移除待補提醒，不會刪除原估價單、訂單或其他歷史資料。`)) return;
+    try {
+        await loadIgnoredPendingProducts();
+        const now = new Date().toISOString();
+        const next = pendingProductMasterIgnoredItems
+            .filter(item => item.key !== key)
+            .concat([{ key, brand:row.brand || '', itemCode:row.itemCode || '', itemName:row.itemName || '', ignoredAt:now }])
+            .slice(-500);
+        await db.collection('settings').doc('productMasterPending').set({
+            ignoredItems: next,
+            updatedAt: now,
+            updatedBy: currentUser?.uid || ''
+        }, { merge:true });
+        pendingProductMasterIgnoredItems = next;
+        pendingProductMasterRows.splice(index, 1);
+        renderPendingProductMasterRows();
+        const status = document.getElementById('productManagementSearchStatus');
+        if (status) status.textContent = '已從待補清單移除；來源估價單／訂單未變更。';
+    } catch (err) {
+        console.error('移除待補產品失敗：', err);
+        alert('移除待補產品失敗：' + (err?.message || err));
+    }
+};
+
+window.openIgnoredPendingProducts = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    try {
+        await loadIgnoredPendingProducts();
+        let overlay = document.getElementById('ignoredPendingProductOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'ignoredPendingProductOverlay';
+            overlay.className = 'eq-modal-overlay no-print';
+            overlay.innerHTML = `
+                <div class="eq-modal-box" style="max-width:760px;">
+                    <div class="product-ignored-head"><h3>已移除待補產品</h3><button type="button" class="btn-secondary" onclick="closeIgnoredPendingProducts()">✕ 關閉</button></div>
+                    <p class="product-ignored-note">這裡只是待補提醒的忽略清單，不會刪除來源估價單或訂單。可隨時恢復。</p>
+                    <div id="ignoredPendingProductList"></div>
+                </div>`;
+            overlay.addEventListener('click', event => { if (event.target === overlay) closeIgnoredPendingProducts(); });
+            document.body.appendChild(overlay);
+        }
+        const list = document.getElementById('ignoredPendingProductList');
+        list.innerHTML = pendingProductMasterIgnoredItems.length
+            ? pendingProductMasterIgnoredItems.slice().reverse().map(item => `
+                <div class="product-ignored-row">
+                    <div><strong>${escapeHtml(item.brand || '未指定廠牌')} / ${escapeHtml(item.itemCode || '無貨號')}</strong><span>${escapeHtml(item.itemName || '')}</span></div>
+                    <button type="button" class="btn-small" onclick="restoreIgnoredPendingProduct('${escapeAttr(item.key)}')">恢復待補</button>
+                </div>`).join('')
+            : '<div class="empty-hint">目前沒有已移除的待補產品。</div>';
+        overlay.classList.add('active');
+    } catch (err) {
+        alert('讀取已移除待補產品失敗：' + (err?.message || err));
+    }
+};
+
+window.closeIgnoredPendingProducts = function() {
+    document.getElementById('ignoredPendingProductOverlay')?.classList.remove('active');
+};
+
+window.restoreIgnoredPendingProduct = async function(key) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    await loadIgnoredPendingProducts();
+    const next = pendingProductMasterIgnoredItems.filter(item => item.key !== key);
+    try {
+        await db.collection('settings').doc('productMasterPending').set({
+            ignoredItems: next,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser?.uid || ''
+        }, { merge:true });
+        pendingProductMasterIgnoredItems = next;
+        await openIgnoredPendingProducts();
+    } catch (err) {
+        alert('恢復待補產品失敗：' + (err?.message || err));
+    }
+};
 
 window.loadPendingProductMaster = async function() {
     if (!canManagePendingProductMaster() || pendingProductMasterLoading) return;
@@ -1415,6 +1627,8 @@ window.loadPendingProductMaster = async function() {
     if (button) { button.disabled = true; button.textContent = '讀取中…'; }
     if (status) status.textContent = '正在讀取近期待補品項…';
     try {
+        await loadIgnoredPendingProducts();
+        const ignoredKeys = ignoredPendingProductKeys();
         // 只有主動按下才查；兩個集合各最多 50 張，不掃描全部歷史資料。
         const [quoteSnap, orderSnap] = await Promise.all([
             firestoreReadWithTimeout(
@@ -1448,6 +1662,7 @@ window.loadPendingProductMaster = async function() {
             });
         }
         rows = rows.filter(row => {
+            if (ignoredKeys.has(row.key)) return false;
             const code = normalizeItemCodeLoose(row.itemCode);
             if (!code) return true;
             return !existingKeys.has(`${normalizeBrandLookupKey(row.brand || '')}::${code}`);
@@ -1457,6 +1672,7 @@ window.loadPendingProductMaster = async function() {
         rows.forEach(row => {
             const key = row.key || `${row.sourceType}::${row.reference}::${row.itemCode}::${row.itemName}`;
             const current = grouped.get(key) || {
+                key,
                 itemCode:row.itemCode, itemName:row.itemName, brand:row.brand,
                 latestDate:'', count:0, sources:[]
             };
@@ -1574,6 +1790,16 @@ function updateProductManagementMoreButton() {
     const row = document.getElementById('productManagementMoreRow');
     const button = document.getElementById('productManagementMoreBtn');
     if (!row || !button) return;
+
+    if (productManagementSourceMode === 'brand') {
+        row.style.display = productBrandBrowseHasMore ? '' : 'none';
+        button.disabled = productManagementSearchInProgress;
+        button.textContent = productBrandBrowseHasMore
+            ? `載入更多 ${productBrandBrowseCurrent}（目前 ${productManagementResults.length} 筆）`
+            : '載入更多結果';
+        return;
+    }
+
     const visible = Math.min(productManagementVisibleLimit, productManagementResults.length);
     const hasMore = productManagementResults.length > visible;
     row.style.display = hasMore ? '' : 'none';
@@ -1595,7 +1821,18 @@ function renderProductManagementResults() {
     updateProductManagementSelectionBar();
 }
 
-window.loadMoreProductManagementResults = function() {
+window.loadMoreProductManagementResults = async function() {
+    if (productManagementSourceMode === 'brand') {
+        if (!productBrandBrowseHasMore) return;
+        try { await fetchProductBrandBrowsePage(false); }
+        catch (err) {
+            console.error('載入更多廠牌產品失敗：', err);
+            const status = document.getElementById('productManagementSearchStatus');
+            if (status) status.textContent = '載入更多產品失敗，請稍後再試。';
+        }
+        return;
+    }
+
     productManagementVisibleLimit += PRODUCT_MANAGEMENT_RENDER_STEP;
     renderProductManagementResults();
     const status = document.getElementById('productManagementSearchStatus');
@@ -1613,7 +1850,12 @@ window.clearProductManagementSearch = function(options = {}) {
     productManagementSearchInProgress = false;
     productManagementResults = [];
     productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
+    productManagementSourceMode = 'none';
+    productBrandBrowseCurrent = '';
+    productBrandBrowseCursor = null;
+    productBrandBrowseHasMore = false;
     pendingProductMasterRows = [];
+    renderProductBrandBrowser();
     setProductManagementTableMode('products');
     const input = document.getElementById('productManagementSearch');
     const status = document.getElementById('productManagementSearchStatus');
@@ -1621,7 +1863,7 @@ window.clearProductManagementSearch = function(options = {}) {
     const button = document.getElementById('productManagementSearchBtn');
     if (input && !options.preserveInput) input.value = '';
     if (status) status.textContent = '';
-    if (body) body.innerHTML = '<tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="10" class="empty-hint">選擇上方廠牌查看產品，或輸入貨號／品名搜尋。</td></tr>';
     if (button) { button.disabled = false; button.textContent = '搜尋產品'; }
 };
 

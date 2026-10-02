@@ -2477,3 +2477,68 @@ html[data-app-environment="preview"] body { border-top: 0; }
         border-radius: 10px;
     }
 }
+
+/* ===== 2026-10-02：Product Master 依廠牌瀏覽／待補清理 ===== */
+.product-brand-browser {
+    margin: 14px 0;
+    padding: 12px;
+    border: 1px solid #d7e1ec;
+    border-radius: 10px;
+    background: #fafcfe;
+}
+.product-brand-browser-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 10px;
+}
+.product-brand-browser-head > div { min-width: 0; }
+.product-brand-browser-head strong { display: block; color: #173a63; font-size: 14px; }
+.product-brand-browser-head span { display: block; margin-top: 3px; color: #66727d; font-size: 12px; }
+.product-brand-browser-head input {
+    width: min(260px, 38vw);
+    min-height: 38px;
+    padding: 7px 10px;
+    border: 1px solid #bdcad8;
+    border-radius: 7px;
+    box-sizing: border-box;
+}
+.product-brand-browser-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.product-brand-button {
+    min-height: 38px;
+    padding: 7px 12px;
+    border: 1px solid #b9c9d9;
+    border-radius: 999px;
+    background: #fff;
+    color: #24435f;
+    font-size: 13px;
+}
+.product-brand-button.active { border-color: #003366; background: #003366; color: #fff; }
+.product-brand-browser-empty { color: #7b8792; font-size: 13px; }
+.product-pending-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.product-ignored-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.product-ignored-head h3 { margin: 0; }
+.product-ignored-note { color: #66727d; font-size: 12px; line-height: 1.55; }
+.product-ignored-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #e7ebef;
+}
+.product-ignored-row > div { min-width: 0; }
+.product-ignored-row strong,
+.product-ignored-row span { display: block; overflow-wrap: anywhere; }
+.product-ignored-row span { margin-top: 3px; color: #697783; font-size: 12px; }
+
+@media screen and (max-width: 640px) {
+    .product-brand-browser { padding: 10px; }
+    .product-brand-browser-head { align-items: stretch; flex-direction: column; gap: 8px; }
+    .product-brand-browser-head input { width: 100%; min-height: 44px; }
+    .product-brand-browser-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .product-brand-button { width: 100%; min-width: 0; min-height: 44px; border-radius: 8px; }
+    .product-ignored-row { align-items: stretch; flex-direction: column; }
+    .product-ignored-row button { width: 100%; min-height: 40px; }
+}

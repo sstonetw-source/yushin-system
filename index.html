@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261002-4">
+        <link rel="stylesheet" href="styles.css?v=20261002-5">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -96,7 +96,7 @@
         <div class="section-header no-print">
             <div>
                 <h2>產品</h2>
-                <div class="section-subtitle">搜尋完整 Product Master；管理員／採購可直接編輯或停用錯誤品項，一般業務不顯示受保護的標準成本。</div>
+                <div class="section-subtitle">可直接依廠牌瀏覽 Product Master，也可搜尋完整資料庫；管理員／採購可編輯或停用錯誤品項。</div>
             </div>
 
 
@@ -115,7 +115,8 @@
             <div class="product-management-tools-actions">
                 <button type="button" id="createProductMasterBtn" class="btn-secondary" style="display:none;" onclick="openNewProductMasterEditor()">＋ 新增產品</button>
                 <button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補產品</button>
-                <label id="productManagementInactiveWrap" class="product-management-toggle" style="display:none;"><input type="checkbox" id="productManagementShowInactive" onchange="if(document.getElementById('productManagementSearch').value.trim().length>=2) searchProductManagement();"> 顯示已停用</label>
+                <button type="button" id="ignoredPendingProductBtn" class="btn-secondary" style="display:none;" onclick="openIgnoredPendingProducts()">已移除待補</button>
+                <label id="productManagementInactiveWrap" class="product-management-toggle" style="display:none;"><input type="checkbox" id="productManagementShowInactive" onchange="if(productBrandBrowseCurrent){reloadCurrentProductBrand();}else if(document.getElementById('productManagementSearch').value.trim().length>=2){searchProductManagement();}"> 顯示已停用</label>
             </div>
             <div class="product-management-tools-note">搜尋產品後可直接按「編輯」修改主檔；錯誤品項請按「停用」。停用不刪除歷史關聯，且不再提供估價／訂單選用；需要復原時勾選「顯示已停用」後重新啟用。</div>
 
@@ -145,6 +146,20 @@
                 </div>
             </details>
         </section>
+
+        <section id="productBrandBrowser" class="product-brand-browser no-print" aria-label="依廠牌瀏覽 Product Master">
+            <div class="product-brand-browser-head">
+                <div>
+                    <strong>依廠牌瀏覽 Product Master</strong>
+                    <span>先選廠牌，再查看已建立的產品；每次只載入 50 筆。</span>
+                </div>
+                <input type="search" id="productBrandBrowserSearch" placeholder="搜尋廠牌" oninput="renderProductBrandBrowser()">
+            </div>
+            <div id="productBrandBrowserList" class="product-brand-browser-list">
+                <span class="product-brand-browser-empty">正在載入廠牌…</span>
+            </div>
+        </section>
+
         <div id="productManagementSelectionBar" class="product-selection-bar no-print" hidden>
             <div class="product-selection-summary">
                 <strong id="productManagementSelectionCount">已選 0 項</strong>
@@ -160,7 +175,7 @@
         <div class="table-wrap product-results-wrap">
             <table class="product-management-table">
                 <thead id="productManagementHead" data-mode="products"><tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)" disabled></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
-                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">輸入貨號或品名開始搜尋。</td></tr></tbody>
+                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">選擇上方廠牌查看產品，或輸入貨號／品名搜尋。</td></tr></tbody>
             </table>
         </div>
         <div id="productManagementMoreRow" class="product-load-more-row no-print" style="display:none;">
@@ -1433,6 +1448,6 @@
     <script src="modules/supply-core.js?v=20261001-6"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261002-14"></script>
+    <script src="app.js?v=20261002-15"></script>
 </body>
 </html>
