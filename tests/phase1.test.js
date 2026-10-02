@@ -1660,7 +1660,11 @@ test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership c
 test('V2 formal purchase documents create authoritative supply lines', () => {
     assert.match(appSource, /function formalSupplyOrderId/);
     assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
-    assert.match(appSource, /type:item\.orderId\?'PURCHASING_PO':'STOCK_REPLENISHMENT'/);
+    assert.match(appSource, /type:'PURCHASING_PO'/);
+    assert.match(appSource, /method:'PURCHASING_PO'/);
+    assert.match(appSource, /sourceType:item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'/);
+    assert.match(appSource, /sourceId:item\.orderId\|\|''/);
+    assert.match(appSource, /sourceItemId:item\.itemId\|\|''/);
     assert.match(appSource, /purchaseDocumentId:poDocumentId/);
     assert.match(appSource, /purchaseDocumentNo:poNo/);
     assert.match(appSource, /poRecord\.supplyOrderIds=supplyOrderIds/);
@@ -2973,8 +2977,9 @@ test('purchase history skips hidden work-card calculations', () => {
     const switchStart=appSource.indexOf('window.switchPurchasingView = function');
     const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
     const switchSource=appSource.slice(switchStart,switchEnd);
-    assert.match(switchSource,/const normalizedItemsByOrder = view === 'history'[\s\S]*?\? null/);
-    assert.match(switchSource,/if \(view !== 'history'\) renderPurchasingWorkCards/);
+    assert.match(switchSource,/const workflowView = !\['history', 'analytics'\]\.includes\(view\)/);
+    assert.match(switchSource,/const normalizedItemsByOrder = workflowView[\s\S]*?: null/);
+    assert.match(switchSource,/if \(workflowView\) renderPurchasingWorkCards/);
 });
 
 
@@ -3615,7 +3620,7 @@ test('purchasing detail queues reuse lifecycle snapshots', () => {
     const switchStart=appSource.indexOf('window.switchPurchasingView = function');
     const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
     const switchSource=appSource.slice(switchStart,switchEnd);
-    assert.match(switchSource,/const lifecyclesByOrder = view === 'history'/);
+    assert.match(switchSource,/const lifecyclesByOrder = workflowView[\s\S]*?purchasingLifecycleSnapshot\(normalizedItemsByOrder\)[\s\S]*?: null/);
     assert.match(switchSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
     assert.match(switchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
     assert.match(switchSource,/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
