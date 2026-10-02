@@ -9650,6 +9650,7 @@ function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime
     const leadTimeCell = row => includeLeadTime
         ? `<td>
             ${row.leadTimeCount ? '完整到貨平均 '+Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '完整到貨：－'}
+            <div style="font-size:11px;color:#667584;margin-top:3px;">${row.serviceLevel !== null ? '數量到貨率 '+Number(row.serviceLevel||0).toFixed(0)+'%（'+Number(row.receivedQty||0).toLocaleString()+'/'+Number(row.orderedQty||0).toLocaleString()+'）' : '數量到貨率：－'}</div>
             <div style="font-size:11px;color:#667584;margin-top:3px;">${row.onTimeEligibleCount ? '準時到貨 '+Number(row.onTimeRate||0).toFixed(0)+'%（'+row.onTimeCount+'/'+row.onTimeEligibleCount+'）' : '準時率：尚無預計到貨樣本'}</div>
             <div style="font-size:11px;color:#667584;margin-top:3px;">${row.openAgeCount ? '目前在途 '+row.openAgeCount+' 筆｜平均 '+Number(row.avgOpenAgeDays||0).toFixed(1)+' 天｜最久 '+Number(row.maxOpenAgeDays||0).toFixed(1)+' 天' : '目前無在途'}</div>
             <div style="font-size:11px;margin-top:3px;${row.lateLineCount?'color:#b42318;':'color:#667584;'}">${row.lateLineCount ? '逾期待到貨 '+row.lateLineCount+' 筆｜'+formatStatsMoney(row.lateAmount)+'｜最久 '+Number(row.maxLateDays||0).toFixed(0)+' 天' : '逾期待到貨：0'}</div>
@@ -9688,9 +9689,14 @@ function renderPurchasingAnalytics() {
     const orderedDetail = document.getElementById('purchaseAnalyticsOrderedDetail');
     if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.documentCount} 張採購單`;
     const receivedDetail = document.getElementById('purchaseAnalyticsReceivedDetail');
-    if (receivedDetail) receivedDetail.textContent = totals.leadTimeCount
-        ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆）${totals.onTimeEligibleCount ? '｜準時 '+Number(totals.onTimeRate||0).toFixed(0)+'%（'+totals.onTimeCount+'/'+totals.onTimeEligibleCount+'）' : ''}`
-        : (totals.receivedAmount ? '已有部分到貨，尚無完整到貨交期樣本' : '期間內尚無已到貨金額');
+    if (receivedDetail) {
+        const serviceLevelText = totals.serviceLevel !== null
+            ? `｜數量到貨率 ${Number(totals.serviceLevel||0).toFixed(0)}%（${Number(totals.receivedQty||0).toLocaleString()}/${Number(totals.orderedQty||0).toLocaleString()}）`
+            : '';
+        receivedDetail.textContent = totals.leadTimeCount
+            ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆）${totals.onTimeEligibleCount ? '｜準時 '+Number(totals.onTimeRate||0).toFixed(0)+'%（'+totals.onTimeCount+'/'+totals.onTimeEligibleCount+'）' : ''}${serviceLevelText}`
+            : (totals.receivedAmount ? `已有部分到貨，尚無完整到貨交期樣本${serviceLevelText}` : `期間內尚無已到貨金額${serviceLevelText}`);
+    }
     const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
     if (incomingDetail) {
         const lateText=totals.lateLineCount
