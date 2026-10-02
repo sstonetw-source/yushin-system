@@ -4,37 +4,82 @@
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinSupply=api;
 })(typeof globalThis!=='undefined'?globalThis:this,function(receiving){
-  const TYPES=Object.freeze({PURCHASING_PO:'PURCHASING_PO',PURCHASING_MANUAL:'PURCHASING_MANUAL',SALES_SELF_ORDER:'SALES_SELF_ORDER',STOCK_REPLENISHMENT:'STOCK_REPLENISHMENT'});
+  // ERPNext-style split:
+  // method = how we place the supplier order
+  // sourceType = why the demand exists
+  const METHODS=Object.freeze({
+    PURCHASING_PO:'PURCHASING_PO',
+    PURCHASING_MANUAL:'PURCHASING_MANUAL',
+    SALES_SELF_ORDER:'SALES_SELF_ORDER'
+  });
+  const SOURCES=Object.freeze({
+    SALES_ORDER:'SALES_ORDER',
+    STOCK_REPLENISHMENT:'STOCK_REPLENISHMENT'
+  });
+
   function n(v){const x=Number(v);return Number.isFinite(x)?Math.max(0,x):0;}
+
   function normalize(record={}){
-    const type=Object.values(TYPES).includes(record.type)?record.type:TYPES.PURCHASING_PO;
     if(!receiving)throw new Error('Receiving core is required.');
-    return {...receiving.normalizeSupply(record),type};
+    const method=Object.values(METHODS).includes(record.method)
+      ? record.method
+      : Object.values(METHODS).includes(record.type)
+        ? record.type
+        : METHODS.PURCHASING_PO;
+    const sourceType=Object.values(SOURCES).includes(record.sourceType)
+      ? record.sourceType
+      : String(record.orderId||record.sourceId||'').trim()
+        ? SOURCES.SALES_ORDER
+        : SOURCES.STOCK_REPLENISHMENT;
+    return {
+      ...receiving.normalizeSupply(record),
+      method,
+      type:method,
+      sourceType,
+      sourceId:String(record.sourceId||record.orderId||''),
+      sourceItemId:String(record.sourceItemId||record.itemId||'')
+    };
   }
+
   function validate(record={}){
     const x=normalize(record),errors=[];
     if(x.qty<=0)errors.push('qty');
     if(!String(x.supplierId||x.supplier||'').trim())errors.push('supplier');
-    if(x.type===TYPES.SALES_SELF_ORDER&&n(x.unitCost)<=0)errors.push('unitCost');
-    if(x.type!==TYPES.STOCK_REPLENISHMENT&&!String(x.orderId||'').trim())errors.push('orderId');
-    if(x.type!==TYPES.STOCK_REPLENISHMENT&&!String(x.itemId||'').trim())errors.push('itemId');
+    if(x.method===METHODS.SALES_SELF_ORDER&&n(x.unitCost)<=0)errors.push('unitCost');
+    if(x.sourceType===SOURCES.SALES_ORDER){
+      if(!String(x.sourceId||'').trim())errors.push('sourceId');
+      if(!String(x.sourceItemId||'').trim())errors.push('sourceItemId');
+    }
     return {valid:errors.length===0,errors,record:x};
   }
+
   function applyReceipt(record,qty){
     if(!receiving)throw new Error('Receiving core is required.');
-    const result=receiving.applyReceipt(normalize(record),qty);
-    return {...result,record:{...result.record,type:normalize(record).type}};
+    const current=normalize(record);
+    const result=receiving.applyReceipt(current,qty);
+    return {...result,record:{...result.record,method:current.method,type:current.method,sourceType:current.sourceType,sourceId:current.sourceId,sourceItemId:current.sourceItemId}};
   }
+
   function createsCustomerDispatch(record){
     const x=normalize(record);
-    return x.type!==TYPES.STOCK_REPLENISHMENT&&!!x.orderId&&!!x.itemId;
+    return x.sourceType===SOURCES.SALES_ORDER&&!!x.sourceId&&!!x.sourceItemId;
   }
-  function canCreate(role,type){
+
+  function canCreate(role,method){
     if(role==='admin')return true;
-    if(type===TYPES.PURCHASING_PO||type===TYPES.PURCHASING_MANUAL||type===TYPES.STOCK_REPLENISHMENT)return role==='purchaser';
-    if(type===TYPES.SALES_SELF_ORDER)return role==='sales'||role==='engineer';
+    if(method===METHODS.PURCHASING_PO||method===METHODS.PURCHASING_MANUAL)return role==='purchaser';
+    if(method===METHODS.SALES_SELF_ORDER)return role==='sales'||role==='engineer';
     return false;
   }
-  return {TYPES,normalize,validate,applyReceipt,createsCustomerDispatch,canCreate};
 
+  function demandLabel(record){
+    return normalize(record).sourceType===SOURCES.STOCK_REPLENISHMENT?'備庫採購':'客戶訂單採購';
+  }
+
+  return {
+    METHODS,SOURCES,
+    // TYPES 暫時只作程式內同義名稱，資料上不再把補庫當 type。
+    TYPES:METHODS,
+    normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,demandLabel
+  };
 });
