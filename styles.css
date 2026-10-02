@@ -45,7 +45,8 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 .eq-modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.45);
     display: none; align-items: flex-start; justify-content: center;
-    z-index: 500; padding: 30px 15px; overflow-y: auto; box-sizing: border-box;
+    /* Modal must stay above the mobile sticky main navigation (z-index: 1200). */
+    z-index: 3000; padding: 30px 15px; overflow-y: auto; box-sizing: border-box;
 }
 .eq-modal-overlay.active { display: flex; }
 .eq-modal-box {
