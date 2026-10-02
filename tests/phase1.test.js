@@ -4169,7 +4169,9 @@ test('supply rule tightening still covers current quick-order receipt and cancel
     const cancelStart=appSource.indexOf('async function cancelOutstandingSupplyRecord');
     const cancelEnd=appSource.indexOf('\nwindow.cancelPurchaseOrderOutstanding',cancelStart);
     const cancelSource=appSource.slice(cancelStart,cancelEnd);
-    assert.match(cancelSource,/status:'CANCELLED'/);
+    assert.match(cancelSource,/const terminalStatus=received>0\?'CLOSED':'CANCELLED'/);
+    assert.match(cancelSource,/status:terminalStatus/);
+    assert.match(cancelSource,/closedQty:remaining/);
     assert.match(cancelSource,/cancelledQty:remaining/);
     assert.match(cancelSource,/incomingRegisteredQty:0/);
 
@@ -4245,16 +4247,19 @@ test('direct ship receipt transaction writes the supply delta required by securi
 });
 
 
-test('cancelled supply is terminal and cannot be received again', () => {
+test('cancelled or closed supply is terminal and cannot be received again', () => {
     const receiveStart=appSource.indexOf('async function receiveSupplyOrderRecord');
     const receiveEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiveStart);
     const receiveSource=appSource.slice(receiveStart,receiveEnd);
-    assert.match(receiveSource,/supply\.status[\s\S]*?'CANCELLED'[\s\S]*?不能再確認到貨/);
+    assert.match(receiveSource,/isPurchaseTerminalStatus\(supply\.status\)/);
+    assert.match(receiveSource,/已結案，不能再確認到貨/);
+    assert.match(receiveSource,/已取消，不能再確認到貨/);
 
     const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
     const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
     const stateSource=rulesSource.slice(stateStart,stateEnd);
     assert.match(stateSource,/resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
+    assert.match(stateSource,/previousStatus != 'CLOSED'/);
     assert.match(stateSource,/receivedQty', 0\) >= resource\.data\.get\('receivedQty', 0\)/);
     assert.match(stateSource,/cancelledQty', 0\) <= \([\s\S]*?qty'[\s\S]*?- request\.resource\.data\.get\('receivedQty'/);
 
@@ -4262,6 +4267,7 @@ test('cancelled supply is terminal and cannot be received again', () => {
     const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
     const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
     assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
+    assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CLOSED'/);
 });
 
 
@@ -4304,7 +4310,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate()',purchaserStart);
     const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
     assert.match(purchaserSource,/affectedKeys\(\)\.hasOnly/);
-    ['qty','receivedQty','incomingRegisteredQty','incomingRegisteredAt','status','supplier','unitCost','lastOrderedAt','orderEvents','cancelledQty','cancelReason','cancelledAt','cancelledByUid','cancelledBy','updatedAt'].forEach(field => {
+    ['qty','receivedQty','incomingRegisteredQty','incomingRegisteredAt','status','supplier','unitCost','lastOrderedAt','orderEvents','cancelledQty','cancelReason','cancelledAt','cancelledByUid','cancelledBy','closedQty','closeReason','closedAt','closedByUid','closedBy','updatedAt'].forEach(field => {
         assert.match(purchaserSource,new RegExp("'"+field+"'"));
     });
     assert.doesNotMatch(purchaserSource,/'createdByUid'/);
@@ -4322,8 +4328,9 @@ test('supply status must match operational quantities', () => {
     assert.match(source,/status', 'ORDERED'\) == 'ORDERED'[\s\S]*?receivedQty', 0\) == 0[\s\S]*?cancelledQty', 0\) == 0/);
     assert.match(source,/status', 'ORDERED'\) == 'PARTIAL_RECEIPT'[\s\S]*?receivedQty', 0\) > 0[\s\S]*?receivedQty', 0\) < request\.resource\.data\.get\('qty'/);
     assert.match(source,/status', 'ORDERED'\) == 'RECEIVED'[\s\S]*?receivedQty', 0\) == request\.resource\.data\.get\('qty'/);
-    assert.match(source,/status', 'ORDERED'\) == 'CANCELLED'[\s\S]*?cancelledQty', 0\)[\s\S]*?== request\.resource\.data\.get\('qty'[\s\S]*?- request\.resource\.data\.get\('receivedQty'/);
-    assert.match(source,/incomingRegisteredQty', 0\) == 0/);
+    assert.match(source,/nextStatus == 'CANCELLED'[\s\S]*?cancelledQty == qty - receivedQty/);
+    assert.match(source,/nextStatus == 'CLOSED'[\s\S]*?receivedQty > 0[\s\S]*?closedQty == qty - receivedQty/);
+    assert.match(source,/incomingQty == 0/);
     assert.match(source,/cancelReason', ''\) != ''/);
     assert.match(source,/cancelledByUid', ''\) == request\.auth\.uid/);
 });
@@ -4334,9 +4341,9 @@ test('receipt retry stays idempotent after outstanding supply is cancelled', () 
     const end=appSource.indexOf('\nwindow.openSupplyReceipt',start);
     const source=appSource.slice(start,end);
     const receiptGuard=source.indexOf('if(receiptSnap.exists)');
-    const cancelledGuard=source.indexOf("String(supply.status || '').toUpperCase() === 'CANCELLED'");
+    const terminalGuard=source.indexOf('if (isPurchaseTerminalStatus(supply.status))');
     assert.ok(receiptGuard>=0);
-    assert.ok(cancelledGuard>receiptGuard);
+    assert.ok(terminalGuard>receiptGuard);
     assert.match(source,/alreadyProcessed=true/);
     assert.match(source,/processedReceipt=receipt/);
     assert.match(source,/此供應紀錄已取消，不能再確認到貨/);
@@ -4418,6 +4425,7 @@ test('cancelled warehouse supply is excluded from incoming inventory value', () 
     assert.ok(start>=0&&end>start);
 
     const context=vm.createContext({
+        isPurchaseTerminalStatus:status=>['CANCELLED','CLOSED'].includes(String(status||'').toUpperCase()),
         inventoryAnalysisReceipts:[],
         inventoryAnalysisLotCosts:new Map(),
         inventoryAnalysisDirectShipSupplyOrders:[],
@@ -4434,7 +4442,7 @@ test('cancelled warehouse supply is excluded from incoming inventory value', () 
     vm.runInContext(source,context);
     const totals=context.inventoryAnalysisTotals('2026-10-01','2026-10-31');
     assert.equal(totals.incoming,300);
-    assert.match(source,/status \|\| ''\)\.toUpperCase\(\) !== 'CANCELLED'/);
+    assert.match(source,/!isPurchaseTerminalStatus\(supply\.status\)/);
 });
 
 
