@@ -8017,6 +8017,7 @@ window.saveSelfOrder = async function() {
             const record={
                 type:'SALES_SELF_ORDER',internalNo,status:'ORDERED',orderId,itemId,
                 ownerUid:order.ownerUid||currentUser?.uid||'',salesCode:order.salesCode||currentUserCode||'',
+                salesName:order.salesName||currentUserName||'',
                 customerName:order.customerName||'',productId:item.productId||'',productKey:inventoryProductKey(item),
                 itemCode:item.itemCode||'',itemName:item.itemName||'',brand:item.brand||'',
                 qty,receivedQty:0,supplier,unitCost,orderDate,notes,
@@ -8822,6 +8823,9 @@ let purchasingDispatchHasMore = true;
 let purchasingDispatchLoading = false;
 let purchasingDispatchError = '';
 let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
+let purchasingAnalyticsRows = [];
+let purchasingAnalyticsLoading = false;
+let purchasingAnalyticsLoadedRangeKey = '';
 
 const purchasingViewLoaded = new Set();
 
@@ -9124,8 +9128,161 @@ window.loadMorePurchasingCompleted = async function() {
     renderPurchasingCompletedOrders(loadedRows);
 };
 
+function purchasingAnalyticsRangeKey(filters = purchaseFilterContext()) {
+    return JSON.stringify([filters.start || '', filters.end || '']);
+}
+
+function purchasingAnalyticsProjection(supply = {}) {
+    if (!globalThis.YushinReceiving?.normalizeSupply) {
+        throw new Error('Receiving core 未載入，無法計算採購分析。');
+    }
+    const receiving = globalThis.YushinReceiving.normalizeSupply(supply);
+    const cancelled = receiving.status === 'CANCELLED';
+    const effectiveOrderedQty = cancelled ? receiving.receivedQty : receiving.qty;
+    const receivedQty = Math.min(effectiveOrderedQty, receiving.receivedQty);
+    const incomingQty = cancelled ? 0 : receiving.remainingQty;
+    const unitCost = Math.max(0, Number(supply.unitCost || 0));
+    const stockPurchase = supply.type === 'STOCK_REPLENISHMENT' || !String(supply.orderId || '').trim();
+    return {
+        effectiveOrderedQty,
+        receivedQty,
+        incomingQty,
+        unitCost,
+        orderedAmount: effectiveOrderedQty * unitCost,
+        receivedAmount: receivedQty * unitCost,
+        incomingAmount: incomingQty * unitCost,
+        stockPurchase,
+        customerPurchase: !stockPurchase
+    };
+}
+
+function purchasingAnalyticsRowMatches(supply, filters = purchaseFilterContext()) {
+    const businessDate = normalizeBusinessDate(supply.orderDate || supply.createdAt);
+    if ((filters.start || filters.end)
+        && (!businessDate || (filters.start && businessDate < filters.start) || (filters.end && businessDate > filters.end))) return false;
+    if (filters.selectedSales && stripPhoneSuffix(supply.salesName || '') !== filters.selectedSales) return false;
+    if (filters.selectedBrand
+        && orderBrandFilterValue(supply.brand || '', filters.selectableBrands) !== filters.selectedBrand) return false;
+    return true;
+}
+
+function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = purchaseFilterContext()) {
+    const totals = {
+        lineCount:0, purchaseDocuments:new Set(),
+        orderedAmount:0, receivedAmount:0, incomingAmount:0,
+        stockAmount:0, customerAmount:0
+    };
+    const suppliers = new Map();
+    (rows || []).filter(row => purchasingAnalyticsRowMatches(row, filters)).forEach(supply => {
+        const projection = purchasingAnalyticsProjection(supply);
+        if (projection.effectiveOrderedQty <= 0 && projection.receivedQty <= 0) return;
+        totals.lineCount++;
+        const documentId = String(supply.purchaseDocumentId || supply.purchaseDocumentNo || supply.internalNo || supply.id || '').trim();
+        if (documentId) totals.purchaseDocuments.add(documentId);
+        totals.orderedAmount += projection.orderedAmount;
+        totals.receivedAmount += projection.receivedAmount;
+        totals.incomingAmount += projection.incomingAmount;
+        if (projection.stockPurchase) totals.stockAmount += projection.orderedAmount;
+        else totals.customerAmount += projection.orderedAmount;
+
+        const supplierKey = String(supply.supplierId || supply.supplier || '未設定供應商').trim() || '未設定供應商';
+        if (!suppliers.has(supplierKey)) {
+            suppliers.set(supplierKey, {
+                supplierName:String(supply.supplier || '未設定供應商').trim() || '未設定供應商',
+                lineCount:0, purchaseDocuments:new Set(),
+                orderedAmount:0, receivedAmount:0, incomingAmount:0,
+                stockAmount:0, customerAmount:0
+            });
+        }
+        const group = suppliers.get(supplierKey);
+        group.lineCount++;
+        if (documentId) group.purchaseDocuments.add(documentId);
+        group.orderedAmount += projection.orderedAmount;
+        group.receivedAmount += projection.receivedAmount;
+        group.incomingAmount += projection.incomingAmount;
+        if (projection.stockPurchase) group.stockAmount += projection.orderedAmount;
+        else group.customerAmount += projection.orderedAmount;
+    });
+    return { totals, suppliers:[...suppliers.values()].sort((a,b) => b.orderedAmount - a.orderedAmount) };
+}
+
+function renderPurchasingAnalytics() {
+    const status = document.getElementById('purchaseAnalyticsStatus');
+    const body = document.getElementById('purchaseAnalyticsSupplierBody');
+    if (!body) return;
+    const filters = purchaseFilterContext();
+    const { totals, suppliers } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
+    const setMoney = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = formatStatsMoney(value);
+    };
+    setMoney('purchaseAnalyticsOrdered', totals.orderedAmount);
+    setMoney('purchaseAnalyticsReceived', totals.receivedAmount);
+    setMoney('purchaseAnalyticsIncoming', totals.incomingAmount);
+    setMoney('purchaseAnalyticsStock', totals.stockAmount);
+    const orderedDetail = document.getElementById('purchaseAnalyticsOrderedDetail');
+    if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.purchaseDocuments.size} 張採購單`;
+    const receivedDetail = document.getElementById('purchaseAnalyticsReceivedDetail');
+    if (receivedDetail) receivedDetail.textContent = totals.receivedAmount ? '依實際已到貨數量計算' : '期間內尚無已到貨金額';
+    const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
+    if (incomingDetail) incomingDetail.textContent = totals.incomingAmount ? '已下單、尚未到貨' : '目前沒有在途金額';
+    const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
+    if (mixDetail) mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerAmount)}`;
+
+    body.innerHTML = suppliers.length ? suppliers.map(row => `<tr>
+        <td>${escapeHtml(row.supplierName)}</td>
+        <td>${row.purchaseDocuments.size}</td>
+        <td>${row.lineCount}</td>
+        <td>${formatStatsMoney(row.orderedAmount)}</td>
+        <td>${formatStatsMoney(row.receivedAmount)}</td>
+        <td>${formatStatsMoney(row.incomingAmount)}</td>
+        <td>${formatStatsMoney(row.stockAmount)}</td>
+        <td>${formatStatsMoney(row.customerAmount)}</td>
+    </tr>`).join('') : '<tr><td colspan="8" style="color:#888;">目前篩選期間沒有採購資料。</td></tr>';
+    if (status && !purchasingAnalyticsLoading) {
+        const range = [filters.start, filters.end].filter(Boolean).join(' ～ ') || '全部期間';
+        status.textContent = `${range}｜${totals.lineCount} 筆品項｜${totals.purchaseDocuments.size} 張採購單`;
+    }
+}
+
+window.loadPurchasingAnalytics = async function(force = false) {
+    if (!canAccessPage('orders.po') || purchasingAnalyticsLoading) return purchasingAnalyticsRows;
+    const filters = purchaseFilterContext();
+    const rangeKey = purchasingAnalyticsRangeKey(filters);
+    if (!force && purchasingAnalyticsLoadedRangeKey === rangeKey) {
+        renderPurchasingAnalytics();
+        return purchasingAnalyticsRows;
+    }
+    const status = document.getElementById('purchaseAnalyticsStatus');
+    const button = document.getElementById('purchaseAnalyticsRefreshBtn');
+    purchasingAnalyticsLoading = true;
+    if (status) status.textContent = '載入採購分析中…';
+    if (button) { button.disabled = true; button.textContent = '更新中…'; }
+    try {
+        let query = db.collection('supplyOrders');
+        if (filters.start) query = query.where('orderDate', '>=', filters.start);
+        if (filters.end) query = query.where('orderDate', '<=', filters.end);
+        query = query.orderBy('orderDate', 'desc');
+        purchasingAnalyticsRows = await readQueryInBatches(query);
+        purchasingAnalyticsLoadedRangeKey = rangeKey;
+        return purchasingAnalyticsRows;
+    } catch (err) {
+        console.error('採購分析讀取失敗：', err);
+        if (status) status.textContent = '採購分析讀取失敗：' + (err?.message || err);
+        throw err;
+    } finally {
+        purchasingAnalyticsLoading = false;
+        if (button) { button.disabled = false; button.textContent = '↻ 更新分析'; }
+        renderPurchasingAnalytics();
+    }
+};
+
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
+    if (purchasingView === 'analytics') {
+        renderPurchasingAnalytics();
+        return;
+    }
     if (purchasingView === 'history') {
         // 全部訂購單不顯示工作卡；直接畫正式訂購單歷史，
         // 不需要為了被隱藏的卡片掃描整批 ordersCache。
@@ -9157,47 +9314,55 @@ window.changePurchasePeriod = function(value) {
         if (start && !start.value) start.value = `${new Date().getFullYear()}-01-01`;
         if (end && !end.value) end.value = dateOnlyFromTimestamp(new Date().toISOString());
     }
-    renderPurchasingView();
+    if (purchasingView === 'analytics') loadPurchasingAnalytics(false).catch(()=>{});
+    else renderPurchasingView();
 };
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history'].includes(view)) return;
+    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history', 'analytics'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     const previousPurchasingView = purchasingView;
     purchasingView = view;
     if (view === 'completed' && previousPurchasingView !== 'completed') purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
     populatePurchasingFilters();
-    const filters = view === 'history' ? null : purchaseFilterContext();
-    const normalizedItemsByOrder = view === 'history'
-        ? null
-        : new Map(ordersCache.map(order => [order.id, normalizedOrderItems(order)]));
-    const dispatchStatesByOrder = view === 'history'
-        ? null
-        : purchasingDispatchStateSnapshot(normalizedItemsByOrder);
-    const lifecyclesByOrder = view === 'history'
-        ? null
-        : purchasingLifecycleSnapshot(normalizedItemsByOrder);
+    const workflowView = !['history', 'analytics'].includes(view);
+    const filters = workflowView ? purchaseFilterContext() : null;
+    const normalizedItemsByOrder = workflowView
+        ? new Map(ordersCache.map(order => [order.id, normalizedOrderItems(order)]))
+        : null;
+    const dispatchStatesByOrder = workflowView
+        ? purchasingDispatchStateSnapshot(normalizedItemsByOrder)
+        : null;
+    const lifecyclesByOrder = workflowView
+        ? purchasingLifecycleSnapshot(normalizedItemsByOrder)
+        : null;
     const completedRows = view === 'completed'
         ? purchasingCompletedRows(filters, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder)
         : null;
-    if (view !== 'history') renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder);
+    if (workflowView) renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder);
     const orderingTab = document.getElementById('purchase-card-ordering');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
-    document.getElementById('purchase-tab-work')?.classList.toggle('active', view !== 'history');
+    document.getElementById('purchase-tab-work')?.classList.toggle('active', workflowView);
     document.getElementById('purchase-tab-history')?.classList.toggle('active', view === 'history');
+    document.getElementById('purchase-tab-analysis')?.classList.toggle('active', view === 'analytics');
     const cards = document.getElementById('purchaseWorkCards');
-    if (cards) cards.style.display = view === 'history' ? 'none' : '';
+    if (cards) cards.style.display = workflowView ? '' : 'none';
     const pendingPanel=document.getElementById('purchasePendingPanel');
     const poPanel=document.getElementById('poListPanel');
     const dispatchPanel=document.getElementById('purchaseDispatchPanel');
     const completedPanel=document.getElementById('purchaseCompletedPanel');
+    const analyticsPanel=document.getElementById('purchaseAnalyticsPanel');
     if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
     if(poPanel)poPanel.style.display=(view==='receiving'||view==='history')?'':'none';
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
-    if (view === 'ordering') {
+    if(analyticsPanel)analyticsPanel.style.display=view==='analytics'?'':'none';
+    if (view === 'analytics') {
+        renderPurchasingAnalytics();
+        loadPurchasingAnalytics(false).catch(err => console.error('採購分析首次載入失敗：', err));
+    } else if (view === 'ordering') {
         renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
@@ -12035,6 +12200,7 @@ window.printPurchaseOrder = async function() {
                     orderItemIndex:Number(item.orderItemIndex||0),
                     ownerUid:item.ownerUid||'',
                     salesCode:item.salesCode||'',
+                    salesName:item.salesName||'',
                     productId:item.productId||'',
                     productKey:poIncomingKey(item),
                     itemCode:item.itemCode||'',
