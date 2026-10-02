@@ -31,6 +31,7 @@ service cloud.firestore {
     function engineer() { return role() == 'engineer'; }
     function purchaser() { return role() == 'purchaser'; }
     function warehouse() { return role() == 'warehouse'; }
+    function directShipReceiver() { return role() in ['purchaser', 'warehouse']; }
 
     // Sales and engineers own their own commercial and fulfillment records.
     function businessOwner() {
@@ -203,6 +204,29 @@ service cloud.firestore {
         );
     }
 
+    // Direct-ship receiving is a narrow hot path used in the same atomic batch as
+    // the order delivery summary. Keep it intentionally small so the combined
+    // Firestore Rules evaluation stays below the platform expression limit.
+    function directShipSupplyReceiptUpdate() {
+      let nextReceived = request.resource.data.get('receivedQty', 0);
+      let qty = resource.data.get('qty', 0);
+      return directShipReceiver()
+        && resource.data.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+        && resource.data.get('status', 'ORDERED') != 'CANCELLED'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'receivedQty', 'status', 'updatedAt'
+        ])
+        && nextReceived is number
+        && nextReceived > resource.data.get('receivedQty', 0)
+        && nextReceived <= qty
+        && resource.data.get('incomingRegisteredQty', 0) == 0
+        && resource.data.get('cancelledQty', 0) == 0
+        && (
+          (nextReceived < qty && request.resource.data.get('status', '') == 'PARTIAL_RECEIPT')
+          || (nextReceived == qty && request.resource.data.get('status', '') == 'RECEIVED')
+        );
+    }
+
     function purchaserSupplyOperationalUpdate() {
       // affectedKeys 的白名單已禁止修改任何供應紀錄身分欄位；
       // 不再逐欄重複比對同一批 identity，降低 Firestore Rules 表達式用量。
@@ -246,9 +270,7 @@ service cloud.firestore {
     function directShipReceiptOrderUpdate(orderId) {
       let beforeRecords = resource.data.get('deliveryRecords', []);
       let afterRecords = request.resource.data.get('deliveryRecords', []);
-      // 先確認確實只新增一筆直送紀錄，再讀取最後一筆與其 supplyOrders 證據。
-      // 這可避免一般訂單更新在 deliveryRecords 為空時發生索引越界。
-      return (purchaser() || warehouse())
+      return directShipReceiver()
         && afterRecords.size() == beforeRecords.size() + 1
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
@@ -266,18 +288,16 @@ service cloud.firestore {
       let supplyPath = /databases/$(database)/documents/supplyOrders/$(supplyId);
       let supplyBefore = get(supplyPath).data;
       let supplyAfter = getAfter(supplyPath).data;
-      return afterRecords[0:beforeRecords.size()] == beforeRecords
+      return afterRecords.hasAll(beforeRecords)
+        && !beforeRecords.hasAny([newRecord])
         && newRecord.get('sourceType', '') == 'DIRECT_SHIP_RECEIPT'
         && newRecord.get('qty', 0) is number
         && newRecord.get('qty', 0) > 0
         && supplyBefore.get('orderId', '') == orderId
-        && supplyAfter.get('orderId', '') == orderId
         && supplyBefore.get('itemId', '') == newRecord.get('itemId', '')
-        && supplyAfter.get('itemId', '') == newRecord.get('itemId', '')
         && supplyBefore.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
-        && supplyAfter.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
         && supplyAfter.get('receivedQty', 0) == supplyBefore.get('receivedQty', 0) + newRecord.get('qty', 0)
-        && supplyAfter.get('receivedQty', 0) <= supplyAfter.get('qty', 0);
+        && supplyAfter.get('receivedQty', 0) <= supplyBefore.get('qty', 0);
     }
 
     function purchaserOrderWorkflowUpdate() {
@@ -544,6 +564,7 @@ service cloud.firestore {
       // or receiving roles may mutate quantities/status; this prevents direct API edits
       // from bypassing procurement and receipt workflows.
       allow update: if admin()
+        || directShipSupplyReceiptUpdate()
         || purchaserSupplyOperationalUpdate()
         || warehouseSupplyOperationalUpdate();
       allow delete: if admin();
