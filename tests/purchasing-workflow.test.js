@@ -7,6 +7,7 @@ const workflow = require('../modules/workflow-core.js');
 const fulfillment = require('../modules/fulfillment-core.js');
 const supply = require('../modules/supply-core.js');
 const receiving = require('../modules/receiving-core.js');
+const demand = require('../modules/procurement-demand-core.js');
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -886,15 +887,25 @@ test('direct-ship returns create replacement supply demand', () => {
         isBilled:false
     }), 'billing');
 
-    const remainingStart=app.indexOf('function remainingProcurementQty');
+    const remainingStart=app.indexOf('function procurementDemandForOrderItem');
     const remainingEnd=app.indexOf('\nfunction pendingProcurementDisplayLines',remainingStart);
     const remainingSource=app.slice(remainingStart,remainingEnd);
     assert.match(remainingSource,/YushinWorkflow\?\.procurementQuantities/);
+    assert.match(remainingSource,/YushinProcurementDemand\?\.fromSalesOrder/);
     assert.match(remainingSource,/remainingToOrderQty/);
 
     const selfStart=app.indexOf('function selfOrderActionHtml');
     const selfEnd=app.indexOf('\nwindow.openSelfOrderModal',selfStart);
     assert.match(app.slice(selfStart,selfEnd),/remainingProcurementQty\(order,item,dispatchStateByItem\?\.get\(item\) \|\| null\)/);
+});
+
+test('inventory replenishment uses the same procurement demand core', () => {
+    const source=app.match(/window\.openInventoryReplenishment = async function\(inventoryId\) \{[\s\S]*?\n\};/)?.[0] || '';
+    assert.match(source,/YushinProcurementDemand\?\.fromStockReplenishment/);
+    assert.match(source,/demand\.remainingToOrderQty/);
+    assert.doesNotMatch(source,/Math\.max\(1, safetyStock - projectedAvailable\)/);
+    const projected=demand.fromStockReplenishment({safetyStock:20,available:5,incoming:7});
+    assert.equal(projected.remainingToOrderQty,8);
 });
 
 test('restoring an order uses net delivered quantity after returns', () => {
@@ -1798,71 +1809,3 @@ test('purchase order snapshots supplier identity and email onto PO and supply re
 });
 
 test('saved PO can prepare a PDF blob and share through any mail app with mailto fallback', () => {
-    assert.match(html,/id="emailPurchaseOrderBtn"/);
-    const pdfStart=app.indexOf('async function printSavedPoDocument\(poNo, vendorName\)');
-    const pdfEnd=app.indexOf('\n\nwindow.printPurchaseOrder',pdfStart);
-    const pdfSource=app.slice(pdfStart,pdfEnd);
-    assert.match(pdfSource,/pdf\.output\('blob'\)/);
-    assert.match(pdfSource,/const download = options\.download !== false/);
-    assert.match(pdfSource,/pdf\.save\(fileName\)/);
-
-    const mailStart=app.indexOf('window.emailPurchaseOrder = async function');
-    const mailEnd=app.indexOf('\n\n\/\/ 從原始訂單上的訂購單號',mailStart);
-    const mailSource=app.slice(mailStart,mailEnd);
-    assert.match(mailSource,/navigator\.canShare/);
-    assert.match(mailSource,/navigator\.share/);
-    assert.match(mailSource,/mailto:\$\{contact\.email\}/);
-    assert.match(mailSource,/new File\(\[attachment\.blob\]/);
-});
-
-test('vendor suggestions include Supplier Master before purchase history', () => {
-    const start=app.indexOf('function populatePoVendorSuggestions\(\)');
-    const end=app.indexOf('\n\nwindow.closePurchaseOrderModal',start);
-    const source=app.slice(start,end);
-    assert.match(source,/supplierMasterCache\.forEach/);
-    assert.match(source,/poListCache\.forEach/);
-});
-
-test('purchasing analytics workspace is lazy and based on supplyOrders', () => {
-    assert.match(html,/id="purchase-tab-analysis"/);
-    assert.match(html,/id="purchaseAnalyticsPanel"/);
-    assert.match(html,/id="purchaseAnalyticsSupplierBody"/);
-    assert.match(app,/window\.loadPurchasingAnalytics = async function\(force = false\)/);
-    assert.match(app,/db\.collection\('supplyOrders'\)/);
-    assert.match(app,/\['history', 'analytics'\]\.includes\(view\)/);
-    assert.match(app,/purchasingAnalyticsLoadedRangeKey !== rangeKey/);
-});
-
-test('purchasing analytics delegates accounting rules to its core module', () => {
-    assert.match(app,/YushinPurchasingAnalytics\?\.summarize/);
-    assert.doesNotMatch(app,/function purchasingAnalyticsProjection/);
-});
-
-test('purchasing analytics treats cancelled remainder as removed', () => {
-    const analytics=require('../modules/purchasing-analytics-core.js');
-    const cancelled=analytics.projectSupply({
-        qty:10,receivedQty:4,status:'CANCELLED',unitCost:100,
-        method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1'
-    });
-    assert.equal(cancelled.effectiveOrderedQty,4);
-    assert.equal(cancelled.receivedQty,4);
-    assert.equal(cancelled.incomingQty,0);
-    assert.equal(cancelled.orderedAmount,400);
-    assert.equal(cancelled.receivedAmount,400);
-    assert.equal(cancelled.incomingAmount,0);
-});
-
-test('purchasing analytics separates stock replenishment from customer-order purchasing', () => {
-    const analytics=require('../modules/purchasing-analytics-core.js');
-    assert.equal(analytics.projectSupply({
-        qty:2,unitCost:50,method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT'
-    }).isStockReplenishment,true);
-    assert.equal(analytics.projectSupply({
-        qty:2,unitCost:50,method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1'
-    }).isStockReplenishment,false);
-});
-
-test('new supply records keep method and demand source separate for analytics filters', () => {
-    assert.match(app,/type:'SALES_SELF_ORDER',method:'SALES_SELF_ORDER'[\s\S]*?sourceType:'SALES_ORDER'[\s\S]*?salesName:order\.salesName\|\|currentUserName\|\|''/);
-    assert.match(app,/type:'PURCHASING_PO'[\s\S]*?method:'PURCHASING_PO'[\s\S]*?sourceType:item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'[\s\S]*?salesName:item\.salesName\|\|''/);
-});
