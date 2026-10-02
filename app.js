@@ -3973,7 +3973,10 @@ function supplierForProduct(brand, productLine = '') {
 }
 
 function normalizeSupplierEmail(value='') {
-    return String(value || '').trim().toLocaleLowerCase();
+    if (!globalThis.YushinSupplier?.normalizeEmail) {
+        throw new Error('Supplier core 未載入，無法處理供應商 Email。');
+    }
+    return globalThis.YushinSupplier.normalizeEmail(value);
 }
 
 function supplierForVendorName(vendorName='') {
@@ -3987,15 +3990,30 @@ function supplierForVendorName(vendorName='') {
 }
 
 function purchaseOrderSupplierContact(po={}) {
-    const live = supplierMasterCache.find(item =>
-        (po.supplierId && (item.id===po.supplierId || item.supplierId===po.supplierId))
-    ) || supplierForVendorName(po.vendorName || po.supplierName || '');
-    return {
-        supplierId: live?.id || live?.supplierId || po.supplierId || '',
-        supplierName: live?.supplierName || po.supplierName || po.vendorName || '',
-        purchaseHeaderName: live?.purchaseHeaderName || po.vendorName || po.supplierName || '',
-        email: normalizeSupplierEmail(live?.email || po.supplierEmail || '')
-    };
+    if (!globalThis.YushinSupplier?.purchaseOrderContact) {
+        throw new Error('Supplier core 未載入，無法解析訂購單供應商。');
+    }
+    return globalThis.YushinSupplier.purchaseOrderContact(po,supplierMasterCache);
+}
+
+async function recordPurchaseOrderCommunication(po,contact,channel) {
+    if (!globalThis.YushinSupplier?.communicationEvent) {
+        throw new Error('Supplier core 未載入，無法記錄訂購單聯絡事件。');
+    }
+    const now=new Date().toISOString();
+    const event=globalThis.YushinSupplier.communicationEvent(po,contact,{
+        channel,
+        preparedAt:now,
+        createdByUid:currentUser?.uid||'',
+        createdBy:currentUserName||currentUser?.email||''
+    });
+    await db.collection('purchaseOrderCommunications').add(event);
+    await db.collection('purchaseOrders').doc(po.id).set({
+        lastShareAt:now,
+        lastShareType:channel,
+        lastShareEmail:contact.email,
+        lastCommunicationState:event.state
+    },{merge:true});
 }
 
 window.updatePoSupplierEmailHint = function(po=null) {
@@ -10848,6 +10866,7 @@ ${company.title||''}
             }
         }
 
+        let mailtoUrl='';
         if(!shared){
             const url=URL.createObjectURL(attachment.blob);
             const link=document.createElement('a');
@@ -10857,15 +10876,17 @@ ${company.title||''}
             link.click();
             link.remove();
             setTimeout(()=>URL.revokeObjectURL(url),30000);
-            window.location.href=`mailto:${contact.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body+'\\n\\nPDF 已下載，請將 '+attachment.fileName+' 加入附件。')}`;
-            updatePoSaveStatus(`✓ PDF 已下載並開啟郵件草稿：${contact.email}`);
+            mailtoUrl=`mailto:${contact.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body+'\\n\\nPDF 已下載，請將 '+attachment.fileName+' 加入附件。')}`;
         }
 
-        db.collection('purchaseOrders').doc(po.id).set({
-            lastShareAt:new Date().toISOString(),
-            lastShareType:shared?'WEB_SHARE':'MAILTO',
-            lastShareEmail:contact.email
-        },{merge:true}).catch(err=>console.warn('更新訂購單寄送紀錄失敗：',err));
+        const communicationChannel=shared?'WEB_SHARE':'MAILTO';
+        await recordPurchaseOrderCommunication(po,contact,communicationChannel);
+        if(mailtoUrl){
+            window.location.href=mailtoUrl;
+            updatePoSaveStatus(`✓ PDF 已下載並開啟郵件草稿：${contact.email}（系統僅記錄已準備，無法確認實際寄出）`);
+        }else{
+            updatePoSaveStatus(`✓ 已完成分享流程：${contact.email}（系統不宣稱已寄出）`);
+        }
     }catch(err){
         console.error('準備訂購單郵件失敗：',err);
         updatePoSaveStatus('準備訂購單郵件失敗：'+(err?.message||err),true);
@@ -12401,13 +12422,21 @@ window.printPurchaseOrder = async function() {
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
     const poNetTotal = poItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.unitPrice || 0)), 0);
     const supplierContact = supplierForVendorName(vendorName);
+    if (!globalThis.YushinSupplier?.snapshotForPurchaseOrder) {
+        throw new Error('Supplier core 未載入，無法建立供應商快照。');
+    }
+    const supplierSnapshot=globalThis.YushinSupplier.snapshotForPurchaseOrder(
+        supplierContact||{},
+        {supplierName:vendorName,purchaseHeaderName:vendorName}
+    );
     const poRecord = {
         poNo,
         company: poCurrentCompany,
-        vendorName,
-        supplierId:supplierContact?.id||supplierContact?.supplierId||'',
-        supplierName:supplierContact?.supplierName||vendorName,
-        supplierEmail:normalizeSupplierEmail(supplierContact?.email||''),
+        vendorName:supplierSnapshot.purchaseHeaderName||vendorName,
+        supplierId:supplierSnapshot.supplierId||'',
+        supplierName:supplierSnapshot.supplierName||vendorName,
+        supplierEmail:supplierSnapshot.email||'',
+        supplierSnapshot,
         buyerName: document.getElementById('poBuyerName').innerText || currentUserName || '',
         poDate: document.getElementById('poDate').value,
         expectedDate: document.getElementById('poExpectedDate')?.value || '',
