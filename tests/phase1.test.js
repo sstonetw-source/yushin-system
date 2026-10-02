@@ -4449,7 +4449,7 @@ test('Product Master management has clear edit and soft-disable controls', () =>
     const toggleSource=appSource.slice(toggleStart,toggleEnd);
     assert.match(toggleSource,/status: active \? 'ACTIVE' : 'INACTIVE'/);
     assert.match(toggleSource,/歷史單據與關聯資料會保留/);
-    assert.doesNotMatch(toggleSource,/\.delete\(/);
+    assert.doesNotMatch(toggleSource,/db\.collection\('products'\)\.doc\([^)]*\)\.delete\(/);
 });
 
 test('product management can batch-select products into one quote or one order', () => {

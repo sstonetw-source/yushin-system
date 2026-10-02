@@ -98,6 +98,17 @@
                 <div class="section-subtitle">搜尋完整 Product Master；管理員／採購可直接編輯或停用錯誤品項，一般業務不顯示受保護的標準成本。</div>
             </div>
 
+
+        </div>
+
+        <div class="toolbar no-print product-search-toolbar">
+            <input id="productManagementSearch" type="search" placeholder="搜尋貨號、中文品名或英文品名" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
+            <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋</button>
+            <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
+        </div>
+        <div class="product-search-note">搜尋會查完整 Product Master，不受目前畫面載入筆數限制。管理員／採購的搜尋結果會提供「編輯／停用」操作。</div>
+        <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
+
         <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
             <div class="product-management-tools-title">Product Master 管理</div>
             <div class="product-management-tools-actions">
@@ -133,15 +144,6 @@
                 </div>
             </details>
         </section>
-        </div>
-
-        <div class="toolbar no-print product-search-toolbar">
-            <input id="productManagementSearch" type="search" placeholder="搜尋貨號、中文品名或英文品名" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
-            <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋</button>
-            <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
-        </div>
-        <div class="product-search-note">搜尋會查完整 Product Master，不受目前畫面載入筆數限制。管理員／採購的搜尋結果會提供「編輯／停用」操作。</div>
-        <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
         <div id="productManagementSelectionBar" class="product-selection-bar no-print" hidden>
             <div class="product-selection-summary">
                 <strong id="productManagementSelectionCount">已選 0 項</strong>
