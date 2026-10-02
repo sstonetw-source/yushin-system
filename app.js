@@ -10260,6 +10260,10 @@ async function loadPurchaseHistorySupplyProjection(poRows = [], reset = false) {
     rows.forEach(row => purchaseHistorySupplyCache.set(row.id, row));
 }
 
+function purchaseOrderDocumentStatusLabel(po = {}) {
+    return String(po.status || '').toUpperCase() === 'CANCELLED' ? '已取消' : '已下單';
+}
+
 function purchaseHistoryItemReceiptProgress(po, itemIndex = 0) {
     const supplyId = Array.isArray(po?.supplyOrderIds) ? String(po.supplyOrderIds[itemIndex] || '') : '';
     const supply = supplyId ? purchaseHistorySupplyCache.get(supplyId) : null;
@@ -10585,7 +10589,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         return;
     }
     const head = document.getElementById('poListHeadRow');
-    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>預計到貨</th><th>等待天數</th><th>品項</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>預計到貨</th><th>等待天數</th><th>品項</th><th>總計金額</th><th>文件狀態</th><th>到貨進度</th><th class="no-print">操作</th>';
     const tbody = document.getElementById('poListBody');
     const searchInput = document.getElementById('poListSearch');
     if (!tbody || !searchInput) return;
@@ -10626,7 +10630,8 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="建立天數">${escapeHtml(poWaitingDays(po)||'—')}</td>
                 <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
-                <td data-th="文件狀態">${escapeHtml(receiptProgress.label)}</td>
+                <td data-th="文件狀態">${escapeHtml(purchaseOrderDocumentStatusLabel(po))}</td>
+                <td data-th="到貨進度">${escapeHtml(receiptProgress.label)}</td>
                 <td data-th="操作" class="no-print">${itemIndex===0?`
                     <div class="po-list-action-row">
                         <button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">載入</button>
