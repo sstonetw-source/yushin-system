@@ -1779,21 +1779,40 @@ test('purchase order PDF renderer can return a blob without downloading', () => 
     assert.match(source,/return \{blob,fileName\}/);
 });
 
-test('supplier master stores one canonical email field and PO snapshots supplierEmail', () => {
-    assert.match(app,/email:savedSupplierEmail/);
+test('supplier master owns canonical contact fields and PO snapshots supplierEmail', () => {
+    assert.match(html,/id="supplierMasterEmail"/);
+    assert.match(html,/id="supplierMasterBody"/);
+    const start=app.indexOf('window.saveSupplierMaster = async function');
+    const end=app.indexOf('\nwindow.disableSupplierMaster',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/db\.collection\('suppliers'\)\.doc\(supplierId\)/);
+    assert.match(source,/email:supplierEmail/);
     assert.match(app,/supplierEmail:normalizeSupplierEmail\(supplierContact\?\.email\|\|''\)/);
     assert.doesNotMatch(app,/poVendorEmail|purchaseEmail|vendorEmail/);
 });
 
-test('supplier master stores email and preserves it across brand mappings', () => {
-    assert.match(html,/id="supplierMasterEmail"/);
-    assert.match(html,/<th>Email<\/th>/);
+test('brand supplier mapping references an existing supplier without rewriting Supplier Master', () => {
+    assert.match(html,/id="supplierMappingSupplier"/);
+    assert.match(html,/id="supplierMasterSuggestions"/);
     const start=app.indexOf('window.saveSupplierMapping = async function');
     const end=app.indexOf('\nwindow.disableSupplierMapping',start);
     const source=app.slice(start,end);
-    assert.match(source,/supplierMasterEmail/);
-    assert.match(source,/savedSupplierEmail=supplierEmail\|\|normalizeSupplierEmail\(existingSupplier\?\.email\|\|''\)/);
-    assert.match(source,/email:savedSupplierEmail/);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/supplierMappingSupplier/);
+    assert.match(source,/db\.collection\('brandSupplierMappings'\)\.doc\(mappingId\)/);
+    assert.doesNotMatch(source,/db\.collection\('suppliers'\)/);
+    assert.doesNotMatch(source,/supplierMasterEmail/);
+});
+
+test('supplier master cannot be disabled while active mappings still reference it', () => {
+    const start=app.indexOf('window.disableSupplierMaster = async function');
+    const end=app.indexOf('\nwindow.saveSupplierMapping',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/supplierMappingCache\.filter\(mapping=>mapping\.supplierId===id\)/);
+    assert.match(source,/if\(activeMappings\.length\)/);
+    assert.match(source,/active:false/);
 });
 
 test('purchase order snapshots supplier identity and email onto PO and supply records', () => {
