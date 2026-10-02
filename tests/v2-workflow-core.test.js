@@ -226,6 +226,7 @@ test('workflow projection reopens demand after a return and clears it after repl
   const returned=w.projectItem({
     orderedQty:10,
     deliveredQty:10,
+    effectiveDeliveredQty:8,
     returnedQty:2,
     reservedQty:0,
     supplyOrderedQty:10,
@@ -237,6 +238,7 @@ test('workflow projection reopens demand after a return and clears it after repl
   const replaced=w.projectItem({
     orderedQty:10,
     deliveredQty:10,
+    effectiveDeliveredQty:8,
     returnedQty:2,
     reservedQty:2,
     supplyOrderedQty:12,

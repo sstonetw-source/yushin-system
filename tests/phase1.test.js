@@ -3123,7 +3123,7 @@ test('item dispatch state avoids renormalizing the whole order', () => {
     const source=appSource.slice(start,end);
     assert.match(source,/const singleItem = Array\.isArray\(order\?\.items\) && order\.items\.length === 1/);
     assert.doesNotMatch(source,/normalizedOrderItems\(order\)/);
-    assert.match(source,/!r\.itemId&&singleItem/);
+    assert.match(source,/!r\.itemId\s*&&\s*singleItem/);
 });
 
 

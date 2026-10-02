@@ -277,7 +277,8 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
         savedDeliveryRecords:order=>order.deliveryRecords||[],
         savedReturnRecords:()=>[],
         orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
-        YushinWorkflow:workflow,YushinFulfillment:fulfillment
+        YushinWorkflow:workflow,YushinFulfillment:fulfillment,
+        window:{YushinFulfillment:fulfillment}
     });
     vm.runInContext(source,ctx);
     const order={items:[{itemId:'I1',qty:3,orderedQty:3,shortageQty:0,
@@ -308,7 +309,8 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:()=>[],savedReturnRecords:()=>[],
         orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
-        YushinWorkflow:workflow,YushinFulfillment:fulfillment
+        YushinWorkflow:workflow,YushinFulfillment:fulfillment,
+        window:{YushinFulfillment:fulfillment}
     });
     vm.runInContext(source,context);
     const order={items:[{itemId:'I1',qty:10,orderedQty:10,shortageQty:5,
@@ -1027,7 +1029,8 @@ test('dispatch readiness uses live reservation and supports later receipt batche
     const context=vm.createContext({
         normalizedOrderItems:order=>order.items||[],
         savedDeliveryRecords:order=>order.deliveryRecords||[],
-        savedReturnRecords:order=>order.returnRecords||[]
+        savedReturnRecords:order=>order.returnRecords||[],
+        window:{YushinFulfillment:fulfillment}
     });
     vm.runInContext(source,context);
     const item={itemId:'I1',reservedQty:5,dispatchPreparedQty:5};
