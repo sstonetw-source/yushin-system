@@ -9161,7 +9161,6 @@ let purchasingDispatchLoading = false;
 let purchasingDispatchError = '';
 let purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
 let purchasingAnalyticsRows = [];
-let purchasingAnalyticsReceiptRows = [];
 let purchasingAnalyticsLoading = false;
 let purchasingAnalyticsLoadedRangeKey = '';
 
@@ -9552,7 +9551,7 @@ function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = pu
         throw new Error('Purchasing analytics core 未載入，無法計算採購分析。');
     }
     const filtered=(rows||[]).filter(row=>purchasingAnalyticsRowMatches(row,filters));
-    return globalThis.YushinPurchasingAnalytics.summarize(filtered,purchasingAnalyticsReceiptRows);
+    return globalThis.YushinPurchasingAnalytics.summarize(filtered);
 }
 
 function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel) {
@@ -9661,17 +9660,8 @@ window.loadPurchasingAnalytics = async function(force = false) {
         if (filters.end) query = query.where('orderDate', '<=', filters.end);
         query = query.orderBy('orderDate', 'desc');
 
-        let receiptQuery = db.collection('receipts');
-        if (filters.start) receiptQuery = receiptQuery.where('supplyOrderDate', '>=', filters.start);
-        if (filters.end) receiptQuery = receiptQuery.where('supplyOrderDate', '<=', filters.end);
-        receiptQuery = receiptQuery.orderBy('supplyOrderDate', 'desc');
-
-        const [supplyRows,receiptRows] = await Promise.all([
-            readQueryInBatches(query),
-            readQueryInBatches(receiptQuery)
-        ]);
+        const supplyRows = await readQueryInBatches(query);
         purchasingAnalyticsRows = supplyRows;
-        purchasingAnalyticsReceiptRows = receiptRows;
         purchasingAnalyticsLoadedRangeKey = rangeKey;
         return purchasingAnalyticsRows;
     } catch (err) {
