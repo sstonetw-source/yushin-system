@@ -2273,24 +2273,11 @@ test('equipment full-history search scans every indexed match with progress feed
 });
 
 
-test('order and equipment refresh buttons provide immediate loading feedback', () => {
-    assert.match(indexSource, /id="orderRefreshBtn"[^>]*>↻ 更新<\/button>/);
-    assert.match(indexSource, /id="equipmentRefreshBtn"[^>]*>↻ 更新<\/button>/);
-    const orderStart=appSource.indexOf('function updateOrderLoadMoreButton');
-    const orderEnd=appSource.indexOf('\n}',orderStart)+2;
-    const orderSource=appSource.slice(orderStart,orderEnd);
-    assert.match(orderSource,/orderRefreshBtn/);
-    assert.match(orderSource,/refreshButton\.disabled = orderPageLoading/);
-    assert.match(orderSource,/更新中…/);
-
-    const equipmentStart=appSource.indexOf('window.loadEquipmentFromCloud = function');
-    const equipmentEnd=appSource.indexOf('window.loadMoreEquipment',equipmentStart);
-    const equipmentSource=appSource.slice(equipmentStart,equipmentEnd);
-    assert.match(equipmentSource,/equipmentRefreshBtn/);
-    assert.match(equipmentSource,/refreshButton\.disabled = true/);
-    assert.match(equipmentSource,/firestoreReadWithTimeout\(query\.get\(\), '儀器清單'\)/);
-    assert.match(equipmentSource,/firestore-read-timeout/);
-    assert.match(equipmentSource,/refreshButton\.textContent = '↻ 更新'/);
+test('order list has no manual refresh while equipment refresh stays explicit', () => {
+    assert.equal(indexSource.includes('id="orderRefreshBtn"'), false);
+    assert.equal(indexSource.includes('id="equipmentRefreshBtn"'), true);
+    assert.equal(appSource.includes("if (mainKey === 'orders.list')"), true);
+    assert.equal(appSource.includes('loadOrdersFromCloud();'), true);
 });
 
 
