@@ -1809,4 +1809,3 @@ test('purchase order snapshots supplier identity and email onto PO and supply re
     assert.match(supplySource,/supplierEmail:poRecord\.supplierEmail\|\|''/);
 });
 
-test('saved PO can prepare a PDF blob and share through any mail app with mailto fallback', () => {
