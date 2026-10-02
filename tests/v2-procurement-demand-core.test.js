@@ -170,3 +170,55 @@ test('reconcileLinkedSupplies mirrors ERP status updater across active and cance
   assert.equal(reconciled.remainingToReceiveQty,3);
   assert.equal(reconciled.status,d.STATUSES.PARTIALLY_RECEIVED);
 });
+
+test('delivery plan risk uses enough incoming quantity, not simply the latest PO',()=>{
+  const demand=d.normalizeDemand({
+    demandId:'SALES_ORDER:o1:i1',
+    requestedQty:10,orderedQty:10,receivedQty:2,
+    scheduleDate:'2026-10-10'
+  });
+  const risk=d.deliveryPlanRisk(demand,[
+    {demandId:demand.demandId,qty:5,receivedQty:2,status:'PARTIAL_RECEIPT',expectedDate:'2026-10-05'},
+    {demandId:demand.demandId,qty:5,receivedQty:0,status:'ORDERED',expectedDate:'2026-10-12'}
+  ]);
+  assert.equal(risk.status,'at_risk');
+  assert.equal(risk.requiredDate,'2026-10-10');
+  assert.equal(risk.plannedDate,'2026-10-12');
+  assert.equal(risk.delayDays,2);
+  assert.equal(risk.neededQty,8);
+  assert.equal(risk.coveredQty,8);
+});
+
+test('extra late supply does not create a false delivery risk when earlier supply covers demand',()=>{
+  const demand=d.normalizeDemand({
+    demandId:'SALES_ORDER:o1:i1',
+    requestedQty:5,orderedQty:5,receivedQty:0,
+    scheduleDate:'2026-10-10'
+  });
+  const risk=d.deliveryPlanRisk(demand,[
+    {demandId:demand.demandId,qty:5,receivedQty:0,status:'ORDERED',expectedDate:'2026-10-08'},
+    {demandId:demand.demandId,qty:5,receivedQty:0,status:'ORDERED',expectedDate:'2026-10-20'}
+  ]);
+  assert.equal(risk.status,'on_time');
+  assert.equal(risk.plannedDate,'2026-10-08');
+  assert.equal(risk.delayDays,0);
+});
+
+test('delivery plan risk distinguishes uncovered and unscheduled incoming quantities',()=>{
+  const demand=d.normalizeDemand({
+    demandId:'SALES_ORDER:o1:i1',
+    requestedQty:8,orderedQty:8,receivedQty:0,
+    scheduleDate:'2026-10-10'
+  });
+  const uncovered=d.deliveryPlanRisk(demand,[
+    {demandId:demand.demandId,qty:5,status:'ORDERED',expectedDate:'2026-10-08'}
+  ]);
+  assert.equal(uncovered.status,'uncovered');
+  assert.equal(uncovered.missingQty,3);
+
+  const unscheduled=d.deliveryPlanRisk(demand,[
+    {demandId:demand.demandId,qty:3,status:'ORDERED',expectedDate:'2026-10-08'},
+    {demandId:demand.demandId,qty:5,status:'ORDERED'}
+  ]);
+  assert.equal(unscheduled.status,'unscheduled');
+});
