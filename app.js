@@ -18398,7 +18398,7 @@ function ensureQuickProductModal() {
     return panel;
 }
 
-const QUICK_PRODUCT_FIELDS =const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Line', 'Price'];
+const QUICK_PRODUCT_FIELDS = ['Brand', 'Code', 'Name', 'NameEn', 'Spec', 'Line', 'Price'];
 function quickProductDraftKey() {
     return currentUser?.uid ? `quick-product-draft:${currentUser.uid}` : '';
 }

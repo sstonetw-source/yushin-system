@@ -1720,6 +1720,7 @@ test('quick product editor expands inline without covering the source field', ()
     const openSource = appSource.slice(openStart, openEnd);
     assert.match(openSource, /insertAdjacentElement\('afterend', panel\)/);
     assert.match(cssSource, /\.quick-product-inline-panel/);
+    assert.doesNotMatch(appSource, /const QUICK_PRODUCT_FIELDS =const QUICK_PRODUCT_FIELDS/);
 });
 
 test('new product ids canonicalize brand aliases before composing identity', () => {
