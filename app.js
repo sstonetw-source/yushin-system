@@ -3945,6 +3945,7 @@ async function loadSupplierWarehouseMasters(force = false) {
         supplierMasterCache = suppliers.filter(item => item.active !== false);
         supplierMappingCache = mappings.filter(item => item.active !== false);
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
+        renderSupplierMasterAdmin();
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
@@ -4008,6 +4009,31 @@ window.updatePoSupplierEmailHint = function(po=null) {
 };
 
 
+function renderSupplierMasterAdmin() {
+    const body=document.getElementById('supplierMasterBody');
+    const suggestions=document.getElementById('supplierMasterSuggestions');
+    if(suggestions){
+        suggestions.innerHTML=supplierMasterCache.map(supplier =>
+            `<option value="${escapeAttr(supplier.supplierName||'')}">${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</option>`
+        ).join('');
+    }
+    if(!body)return;
+    body.innerHTML=supplierMasterCache.length?supplierMasterCache.map(supplier=>{
+        const supplierId=supplier.id||supplier.supplierId||'';
+        const mappingCount=supplierMappingCache.filter(mapping=>mapping.supplierId===supplierId).length;
+        return `<tr>
+            <td>${escapeHtml(supplier.supplierName||'')}</td>
+            <td>${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</td>
+            <td>${escapeHtml(supplier.email||'')}</td>
+            <td>${mappingCount}</td>
+            <td>
+                <button type="button" class="btn-small btn-secondary" onclick="loadSupplierMasterToEditor('${escapeAttr(supplierId)}')">編輯</button>
+                <button type="button" class="btn-small btn-danger" onclick="disableSupplierMaster('${escapeAttr(supplierId)}')">停用</button>
+            </td>
+        </tr>`;
+    }).join(''):'<tr><td colspan="5" style="color:#888;">尚未建立供應商。</td></tr>';
+}
+
 function renderSupplierMappingAdmin() {
     const body = document.getElementById('supplierMappingBody');
     if (!body) return;
@@ -4016,7 +4042,7 @@ function renderSupplierMappingAdmin() {
         return `<tr>
             <td>${escapeHtml(mapping.brandName || '')}</td>
             <td>${escapeHtml(mapping.productLine || '預設')}</td>
-            <td>${escapeHtml(supplier.supplierName || mapping.supplierName || '')}</td>
+            <td>${escapeHtml(supplier.supplierName || '找不到供應商')}</td>
             <td>${escapeHtml(supplier.purchaseHeaderName || supplier.supplierName || '')}</td>
             <td>${escapeHtml(supplier.email || '')}</td>
             <td><button type="button" class="btn-small btn-danger" onclick="disableSupplierMapping('${escapeAttr(mapping.id)}')">停用</button></td>
@@ -4035,43 +4061,136 @@ function renderWarehouseMasterAdmin() {
     </tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚未建立倉庫。</td></tr>';
 }
 
+window.clearSupplierMasterEditor = function() {
+    const editing=document.getElementById('supplierMasterEditingId');
+    const name=document.getElementById('supplierMasterName');
+    const header=document.getElementById('supplierMasterHeader');
+    const email=document.getElementById('supplierMasterEmail');
+    if(editing)editing.value='';
+    if(name)name.value='';
+    if(header)header.value='';
+    if(email)email.value='';
+};
+
+window.loadSupplierMasterToEditor = function(id) {
+    const supplier=supplierMasterCache.find(item=>(item.id||item.supplierId)===id);
+    if(!supplier)return;
+    document.getElementById('supplierMasterEditingId').value=id;
+    document.getElementById('supplierMasterName').value=supplier.supplierName||'';
+    document.getElementById('supplierMasterHeader').value=supplier.purchaseHeaderName||supplier.supplierName||'';
+    document.getElementById('supplierMasterEmail').value=supplier.email||'';
+    const status=document.getElementById('supplierMasterStatus');
+    if(status)status.innerText='正在編輯：'+(supplier.supplierName||id);
+};
+
+window.saveSupplierMaster = async function() {
+    if(trueUserRole!=='admin')return;
+    const button=actionButtonFromEventOrSelector('[onclick="saveSupplierMaster()"]');
+    const buttonState=beginActionButton(button,'儲存中…');
+    if(button&&!buttonState)return;
+    const editingId=String(document.getElementById('supplierMasterEditingId')?.value||'').trim();
+    const supplierName=String(document.getElementById('supplierMasterName')?.value||'').trim();
+    const purchaseHeaderName=String(document.getElementById('supplierMasterHeader')?.value||'').trim()||supplierName;
+    const supplierEmail=normalizeSupplierEmail(document.getElementById('supplierMasterEmail')?.value||'');
+    const status=document.getElementById('supplierMasterStatus');
+    if(!supplierName){
+        if(status)status.innerText='請輸入供應商名稱。';
+        endActionButton(button,buttonState);
+        return;
+    }
+    if(supplierEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplierEmail)){
+        if(status)status.innerText='供應商 Email 格式不正確。';
+        endActionButton(button,buttonState);
+        return;
+    }
+    try{
+        const duplicate=supplierMasterCache.find(item=>{
+            const id=item.id||item.supplierId||'';
+            if(editingId&&id===editingId)return false;
+            return String(item.supplierName||'').normalize('NFKC').trim().toLocaleLowerCase()===supplierName.normalize('NFKC').trim().toLocaleLowerCase();
+        });
+        if(duplicate)throw new Error('已存在同名供應商，請直接編輯既有主檔。');
+        const supplierId=editingId||stableMasterId('sup',supplierName);
+        const previous=supplierMasterCache.find(item=>(item.id||item.supplierId)===supplierId);
+        const now=new Date().toISOString();
+        await db.collection('suppliers').doc(supplierId).set({
+            supplierId,
+            supplierName,
+            purchaseHeaderName,
+            email:supplierEmail,
+            active:true,
+            createdAt:previous?.createdAt||now,
+            updatedAt:now
+        },{merge:true});
+        supplierWarehouseLoadPromise=null;
+        await loadSupplierWarehouseMasters(true);
+        window.clearSupplierMasterEditor();
+        if(status)status.innerText='供應商主檔已儲存。';
+    }catch(err){
+        if(status)status.innerText='儲存失敗：'+(err?.message||err);
+    }finally{
+        endActionButton(button,buttonState);
+    }
+};
+
+window.disableSupplierMaster = async function(id) {
+    if(trueUserRole!=='admin'||!id)return;
+    const status=document.getElementById('supplierMasterStatus');
+    const activeMappings=supplierMappingCache.filter(mapping=>mapping.supplierId===id);
+    if(activeMappings.length){
+        if(status)status.innerText=`這個供應商仍有 ${activeMappings.length} 個廠牌／產品線對應，請先停用或改綁這些對應。`;
+        return;
+    }
+    await db.collection('suppliers').doc(id).set({active:false,updatedAt:new Date().toISOString()},{merge:true});
+    supplierWarehouseLoadPromise=null;
+    await loadSupplierWarehouseMasters(true);
+    if(String(document.getElementById('supplierMasterEditingId')?.value||'')===id)window.clearSupplierMasterEditor();
+    if(status)status.innerText='供應商已停用。';
+};
+
 window.saveSupplierMapping = async function() {
-    if (trueUserRole !== 'admin') return;
+    if(trueUserRole!=='admin')return;
     const button=actionButtonFromEventOrSelector('[onclick="saveSupplierMapping()"]');
     const buttonState=beginActionButton(button,'儲存中…');
-    if(button && !buttonState)return;
-    const supplierName = String(document.getElementById('supplierMasterName')?.value || '').trim();
-    const purchaseHeaderName = String(document.getElementById('supplierMasterHeader')?.value || '').trim() || supplierName;
-    const supplierEmail = normalizeSupplierEmail(document.getElementById('supplierMasterEmail')?.value || '');
-    const brandName = resolveBrandName(document.getElementById('supplierMappingBrand')?.value || '');
-    const productLine = String(document.getElementById('supplierMappingLine')?.value || '').trim();
-    const status = document.getElementById('supplierMappingStatus');
-    if (!supplierName || !brandName) {
-        if (status) status.innerText = '請至少填寫供應商名稱與廠牌。';
+    if(button&&!buttonState)return;
+    const brandName=resolveBrandName(document.getElementById('supplierMappingBrand')?.value||'');
+    const productLine=String(document.getElementById('supplierMappingLine')?.value||'').trim();
+    const supplierSelection=String(document.getElementById('supplierMappingSupplier')?.value||'').trim();
+    const status=document.getElementById('supplierMappingStatus');
+    const supplier=supplierMasterCache.find(item=>{
+        const supplierId=item.id||item.supplierId||'';
+        const normalized=supplierSelection.normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+        return supplierId===supplierSelection
+            || String(item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalized
+            || String(item.purchaseHeaderName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalized;
+    });
+    if(!brandName||!supplier){
+        if(status)status.innerText=!brandName?'請選擇廠牌。':'請選擇已建立的供應商主檔。';
+        endActionButton(button,buttonState);
         return;
     }
-    if (supplierEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplierEmail)) {
-        if (status) status.innerText = '供應商 Email 格式不正確。';
-        return;
-    }
-    try {
-        const supplierId = stableMasterId('sup', supplierName);
-        const mappingId = stableMasterId('bsm', brandName + '|' + (productLine || 'default'));
-        const existingSupplier=supplierMasterCache.find(item=>item.id===supplierId||item.supplierId===supplierId);
-        const savedSupplierEmail=supplierEmail||normalizeSupplierEmail(existingSupplier?.email||'');
-        const now = new Date().toISOString();
-        const batch = db.batch();
-        batch.set(db.collection('suppliers').doc(supplierId), { supplierId, supplierName, purchaseHeaderName, email:savedSupplierEmail, active:true, updatedAt:now }, { merge:true });
-        batch.set(db.collection('brandSupplierMappings').doc(mappingId), {
-            mappingId, brandName, productLine, supplierId, isDefault:!productLine, active:true, updatedAt:now
-        }, { merge:true });
-        await batch.commit();
-        supplierWarehouseLoadPromise = null;
+    try{
+        const supplierId=supplier.id||supplier.supplierId;
+        const mappingId=stableMasterId('bsm',brandName+'|'+(productLine||'default'));
+        await db.collection('brandSupplierMappings').doc(mappingId).set({
+            mappingId,
+            brandName,
+            productLine,
+            supplierId,
+            isDefault:!productLine,
+            active:true,
+            updatedAt:new Date().toISOString()
+        },{merge:true});
+        supplierWarehouseLoadPromise=null;
         await loadSupplierWarehouseMasters(true);
-        if (status) status.innerText = '供應商對應已儲存。';
-    } catch (err) {
-        if (status) status.innerText = '儲存失敗：' + err.message;
-    } finally {
+        const supplierInput=document.getElementById('supplierMappingSupplier');
+        const lineInput=document.getElementById('supplierMappingLine');
+        if(supplierInput)supplierInput.value='';
+        if(lineInput)lineInput.value='';
+        if(status)status.innerText='廠牌與供應商對應已儲存。';
+    }catch(err){
+        if(status)status.innerText='儲存失敗：'+(err?.message||err);
+    }finally{
         endActionButton(button,buttonState);
     }
 };
