@@ -3,6 +3,7 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const reservation = require('../modules/reservation-core.js');
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
@@ -395,7 +396,7 @@ test('retrying a partly reserved order does not reserve the same stock twice', a
         return result;
     }};
     const context=vm.createContext({
-        db,currentUserName:'Staff',currentUser:{uid:'USER-1'},
+        db,YushinReservation:reservation,currentUserName:'Staff',currentUser:{uid:'USER-1'},
         inventoryProductKey:()=> 'P-1',defaultWarehouse:()=>({id:'W-1'}),
         inventoryRefFor:()=>db.collection('inventory').doc('P-1'),
         warehouseStockDocId:()=> 'W-1__P-1',
@@ -1172,8 +1173,11 @@ test('unknown order items do not create inventory before purchase receipt', () =
     const start = appSource.indexOf('async function reserveSingleOrderItem');
     const end = appSource.indexOf('async function reserveInventoryForNewOrder', start);
     const s = appSource.slice(start, end);
-    assert.match(s, /warehouseSnap\?\.exists/);
-    assert.match(s, /const shortage\s*=\s*Math\.max\(0,\s*requested\s*-\s*reservable\)/);
+    const missingProductReturn=s.indexOf('if(!productKey)return');
+    const transactionStart=s.indexOf('await db.runTransaction');
+    assert.ok(missingProductReturn>=0 && transactionStart>missingProductReturn);
+    assert.match(s.slice(missingProductReturn,transactionStart), /reservationError:'missing_product_master'/);
+    assert.match(s,/globalThis\.YushinReservation\.planReservation/);
     assert.doesNotMatch(s, /tx\.set\(warehouseRef[\s\S]*?onHand/);
 });
 
