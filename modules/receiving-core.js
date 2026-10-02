@@ -82,5 +82,46 @@
     return normalizeSupply(record).remainingQty;
   }
 
-  return {STATUSES,normalizeSupply,applyReceipt,applyReceiptToOrderItem,pendingQty};
+  // Purchase Receipt snapshot: an immutable receipt event should remain understandable
+  // even if the supplier order or customer order changes later. Cost is intentionally
+  // excluded; protected inventoryLotCosts remains the source for cost accounting.
+  function buildReceiptSnapshot(supply={},event={}){
+    const receiptQty=n(event.qty);
+    const cumulativeReceivedQty=n(event.cumulativeReceivedQty??supply.receivedQty);
+    return {
+      receiptId:String(event.receiptId||event.operationId||''),
+      operationId:String(event.operationId||event.receiptId||''),
+      supplyOrderId:String(event.supplyOrderId||supply.id||''),
+      documentSourceType:'SUPPLY_ORDER',
+      method:String(supply.method||supply.type||''),
+      demandSourceType:String(supply.sourceType||''),
+      sourceId:String(supply.sourceId||supply.orderId||''),
+      sourceItemId:String(supply.sourceItemId||supply.itemId||''),
+      orderId:String(supply.orderId||supply.sourceId||''),
+      itemId:String(supply.itemId||supply.sourceItemId||''),
+      purchaseDocumentId:String(supply.purchaseDocumentId||''),
+      purchaseDocumentNo:String(supply.purchaseDocumentNo||''),
+      supplyInternalNo:String(supply.internalNo||''),
+      supplierId:String(supply.supplierId||''),
+      supplier:String(supply.supplier||supply.supplierName||''),
+      productId:String(supply.productId||''),
+      productKey:String(event.productKey??supply.productKey??''),
+      itemCode:String(supply.itemCode||''),
+      itemName:String(supply.itemName||''),
+      brand:String(supply.brand||''),
+      ownerUid:String(supply.ownerUid||''),
+      salesCode:String(supply.salesCode||''),
+      orderedQty:n(supply.qty),
+      qty:receiptQty,
+      cumulativeReceivedQty,
+      fulfillmentType:String(event.fulfillmentType||supply.fulfillmentType||'WAREHOUSE'),
+      warehouseId:String(event.warehouseId??supply.warehouseId??''),
+      receiptDate:String(event.receiptDate||''),
+      createdAt:String(event.createdAt||''),
+      createdBy:String(event.createdBy||''),
+      ...(event.extra&&typeof event.extra==='object'?event.extra:{})
+    };
+  }
+
+  return {STATUSES,normalizeSupply,applyReceipt,applyReceiptToOrderItem,pendingQty,buildReceiptSnapshot};
 });
