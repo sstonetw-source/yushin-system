@@ -1809,3 +1809,42 @@ test('vendor suggestions include Supplier Master before purchase history', () =>
     assert.match(source,/supplierMasterCache\.forEach/);
     assert.match(source,/poListCache\.forEach/);
 });
+
+test('purchasing analytics workspace is lazy and based on supplyOrders', () => {
+    assert.match(html,/id="purchase-tab-analysis"/);
+    assert.match(html,/id="purchaseAnalyticsPanel"/);
+    assert.match(html,/id="purchaseAnalyticsSupplierBody"/);
+    assert.match(app,/window\.loadPurchasingAnalytics = async function\(force = false\)/);
+    assert.match(app,/db\.collection\('supplyOrders'\)/);
+    assert.match(app,/\['history', 'analytics'\]\.includes\(view\)/);
+    assert.match(app,/purchasingAnalyticsLoadedRangeKey !== rangeKey/);
+});
+
+test('purchasing analytics treats cancelled remainder as removed', () => {
+    const start=app.indexOf('function purchasingAnalyticsProjection(supply = {})');
+    const end=app.indexOf('\n\nfunction purchasingAnalyticsRowMatches',start);
+    assert.ok(start>=0&&end>start);
+    const context=vm.createContext({YushinReceiving:require('../modules/receiving-core.js')});
+    const projection=vm.runInContext(`${app.slice(start,end)}\npurchasingAnalyticsProjection`,context);
+    const cancelled=projection({qty:10,receivedQty:4,status:'CANCELLED',unitCost:100,type:'PURCHASING_PO',orderId:'O1'});
+    assert.equal(cancelled.effectiveOrderedQty,4);
+    assert.equal(cancelled.receivedQty,4);
+    assert.equal(cancelled.incomingQty,0);
+    assert.equal(cancelled.orderedAmount,400);
+    assert.equal(cancelled.receivedAmount,400);
+    assert.equal(cancelled.incomingAmount,0);
+});
+
+test('purchasing analytics separates stock replenishment from customer-order purchasing', () => {
+    const start=app.indexOf('function purchasingAnalyticsProjection(supply = {})');
+    const end=app.indexOf('\n\nfunction purchasingAnalyticsRowMatches',start);
+    const context=vm.createContext({YushinReceiving:require('../modules/receiving-core.js')});
+    const projection=vm.runInContext(`${app.slice(start,end)}\npurchasingAnalyticsProjection`,context);
+    assert.equal(projection({qty:2,unitCost:50,type:'STOCK_REPLENISHMENT'}).stockPurchase,true);
+    assert.equal(projection({qty:2,unitCost:50,type:'PURCHASING_PO',orderId:'O1'}).customerPurchase,true);
+});
+
+test('new supply records retain sales identity for purchasing analytics filters', () => {
+    assert.match(app,/type:'SALES_SELF_ORDER'[\s\S]*?salesName:order\.salesName\|\|currentUserName\|\|''/);
+    assert.match(app,/type:item\.orderId\?'PURCHASING_PO':'STOCK_REPLENISHMENT'[\s\S]*?salesName:item\.salesName\|\|''/);
+});
