@@ -311,6 +311,7 @@ let brandMasterCache = [];
 let brandMasterLoadPromise = null;
 let supplierMasterCache = [];
 let supplierMappingCache = [];
+let productSupplierMappingCache = [];
 let warehouseMasterCache = [];
 let supplierWarehouseLoadPromise = null;
 let purchaseCostCache = new Map();
@@ -3940,26 +3941,52 @@ async function loadSupplierWarehouseMasters(force = false) {
     supplierWarehouseLoadPromise = Promise.all([
         readCollectionInBatches('suppliers'),
         readCollectionInBatches('brandSupplierMappings'),
+        readCollectionInBatches('productSupplierMappings'),
         loadWarehouseMaster(force)
-    ]).then(([suppliers, mappings]) => {
+    ]).then(([suppliers, mappings, productMappings]) => {
         supplierMasterCache = suppliers.filter(item => item.active !== false);
         supplierMappingCache = mappings.filter(item => item.active !== false);
+        productSupplierMappingCache = productMappings.filter(item => item.active !== false);
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
+        productSupplierMappingCache.sort((a,b)=>Number(a.priority||1)-Number(b.priority||1));
         renderSupplierMasterAdmin();
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
-        return { suppliers:supplierMasterCache, mappings:supplierMappingCache, warehouses:warehouseMasterCache };
+        return {
+            suppliers:supplierMasterCache,
+            mappings:supplierMappingCache,
+            productMappings:productSupplierMappingCache,
+            warehouses:warehouseMasterCache
+        };
     }).catch(err => {
         supplierWarehouseLoadPromise = null;
         console.warn('讀取供應商／倉庫主檔失敗：', err);
         // 已有快取時繼續使用，避免短暫斷線讓下拉選單突然變空。
-        return { suppliers:supplierMasterCache, mappings:supplierMappingCache, warehouses:warehouseMasterCache };
+        return {
+            suppliers:supplierMasterCache,
+            mappings:supplierMappingCache,
+            productMappings:productSupplierMappingCache,
+            warehouses:warehouseMasterCache
+        };
     });
     return supplierWarehouseLoadPromise;
 }
 
-function supplierForProduct(brand, productLine = '') {
+function supplierForProduct(brand, productLine = '', productId = '', itemCode = '') {
+    // Odoo / ERPNext-style: item-specific supplier relation wins.
+    const productMapping = globalThis.YushinSupplier?.selectProductSupplierMapping(
+        productSupplierMappingCache,
+        { productId, itemCode }
+    );
+    if (productMapping) {
+        const supplier = supplierMasterCache.find(item =>
+            item.id === productMapping.supplierId || item.supplierId === productMapping.supplierId
+        );
+        if (supplier) return { ...supplier, productSupplierMapping:productMapping };
+    }
+
+    // Brand / product-line mapping remains the default fallback for broad catalog routing.
     const brandKey = normalizeBrandLookupKey(resolveBrandName(brand));
     const lineKey = String(productLine || '').normalize('NFKC').trim().toLocaleLowerCase();
     const candidates = supplierMappingCache.filter(item =>
@@ -3969,7 +3996,8 @@ function supplierForProduct(brand, productLine = '') {
     const fallback = candidates.find(item => !String(item.productLine || '').trim() && item.isDefault !== false) || candidates.find(item => !String(item.productLine || '').trim());
     const mapping = lineMatch || fallback || null;
     if (!mapping) return null;
-    return supplierMasterCache.find(item => item.id === mapping.supplierId || item.supplierId === mapping.supplierId) || null;
+    const supplier = supplierMasterCache.find(item => item.id === mapping.supplierId || item.supplierId === mapping.supplierId) || null;
+    return supplier ? { ...supplier, brandSupplierMapping:mapping } : null;
 }
 
 function normalizeSupplierEmail(value='') {
@@ -11989,7 +12017,12 @@ window.onDirectPoCodeChange = async function(idx, value) {
             fulfillmentType: poItems[idx].fulfillmentType || 'WAREHOUSE',
             warehouseId: poItems[idx].warehouseId || defaultWarehouse()?.id || ''
         };
-        const mappedSupplier = supplierForProduct(match.brand, match.productLine);
+        const mappedSupplier = supplierForProduct(
+            match.brand,
+            match.productLine,
+            match.productId || stableProductId(match),
+            match.model || value
+        );
         if (!document.getElementById('poVendorName').value && mappedSupplier) {
             document.getElementById('poVendorName').value = mappedSupplier.purchaseHeaderName || mappedSupplier.supplierName || '';
             window.updatePoSupplierEmailHint?.();
@@ -12044,7 +12077,12 @@ function updatePoModeUI() {
 
 async function autoFillPoSupplier(items) {
     await loadSupplierWarehouseMasters();
-    const resolved = (items || []).map(item => supplierForProduct(item.brand, item.productLine)).filter(Boolean);
+    const resolved = (items || []).map(item => supplierForProduct(
+        item.brand,
+        item.productLine,
+        item.productId,
+        item.itemCode
+    )).filter(Boolean);
     if (!resolved.length) return '';
     const ids = [...new Set(resolved.map(item => item.id || item.supplierId))];
     if (ids.length !== 1) return '';
