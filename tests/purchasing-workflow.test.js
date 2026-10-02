@@ -1902,11 +1902,14 @@ test('procurement analytics is limited to purchaser and admin capability', () =>
     assert.match(app,/purchaseAnalysisTab\.style\.display = canCreatePurchaseOrderCapability\(\) \? '' : 'none'/);
 });
 
-test('purchase history header remains aligned with expected receipt date and receipt progress', () => {
+test('purchase history separates PO document status from receipt progress', () => {
     const start=app.indexOf('window.renderPoList = function');
     const end=app.indexOf('\nasync function purchaseIncomingSyncPending',start);
     const source=app.slice(start,end);
     assert.match(source,/預計到貨/);
-    assert.match(source,/到貨進度/);
+    assert.match(source,/<th>文件狀態<\/th><th>到貨進度<\/th>/);
+    assert.match(source,/purchaseOrderDocumentStatusLabel\(po\)/);
     assert.match(source,/purchaseHistoryItemReceiptProgress\(po,itemIndex\)/);
+    assert.match(source,/data-th="文件狀態"/);
+    assert.match(source,/data-th="到貨進度"/);
 });
