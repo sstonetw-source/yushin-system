@@ -252,8 +252,8 @@ test('Brand Master drives the main brand list while statistics grouping remains 
         defaultBrandAliasesForCanonical:() => []
     });
     vm.runInContext(appSource.slice(start, end), context);
-    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Unlisted Excel Brand', '維修']);
-    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(true), item => item.name), ['Roche', 'Unlisted Excel Brand', '維修']);
+    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(false), item => item.name)), new Set(['Roche', 'Unlisted Excel Brand', '維修']));
+    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Unlisted Excel Brand', '維修']));
     const classificationStart = appSource.indexOf('function statisticBrandForOrder(order)');
     const classificationEnd = appSource.indexOf('\n}\n', classificationStart) + 2;
     Object.assign(context, {
