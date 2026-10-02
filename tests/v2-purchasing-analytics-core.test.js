@@ -136,3 +136,14 @@ test('partial receipts do not count as complete lead time until target quantity 
   assert.equal(result.totals.leadTimeCount,0);
   assert.equal(result.totals.avgLeadTimeDays,null);
 });
+test('open purchasing aging counts only still-incoming supply',()=>{
+  const result=analytics.summarize([
+    {id:'S1',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:10,receivedQty:4,status:'PARTIAL_RECEIPT',unitCost:100,orderDate:'2026-10-01'},
+    {id:'S2',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:5,status:'RECEIVED',unitCost:100,orderDate:'2026-09-20'},
+    {id:'S3',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:8,receivedQty:0,status:'CANCELLED',unitCost:100,orderDate:'2026-09-01'}
+  ],[],{now:'2026-10-10T00:00:00Z'});
+  assert.equal(result.totals.openAgeCount,1);
+  assert.equal(result.totals.avgOpenAgeDays,9);
+  assert.equal(result.totals.maxOpenAgeDays,9);
+  assert.equal(result.bySupplier[0].openAgeCount,1);
+});
