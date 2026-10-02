@@ -757,7 +757,8 @@ test('receiving card counts standalone stock replenishment and does not hide it 
         purchaseFilterContext:()=>({start:'',end:'',selectedSales:'Sales A',selectedBrand:'',selectableBrands:['Beckman']}),
         purchaseLineMatchesFilters:(date,sales,brand,filters)=>{seenFilters=filters;return true;},
         YushinReceiving:receiving,
-        window:{YushinReceiving:receiving}
+        YushinSupply:supply,
+        window:{YushinReceiving:receiving,YushinSupply:supply}
     });
     vm.runInContext(source,context);
     const result=context.standaloneReceivingSupplyMetrics();
