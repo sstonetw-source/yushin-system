@@ -1987,6 +1987,17 @@ test('purchase order email contact is delegated to supplier core', () => {
     assert.match(source,/YushinSupplier\.purchaseOrderContact\(po,supplierMasterCache\)/);
 });
 
+test('system audit reconciles procurement demand from linked supply records', () => {
+    const start=app.indexOf('window.runSystemDataAudit = async function');
+    const end=app.indexOf('\nwindow.previewInventoryCostMigration',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/const suppliesByDemand = new Map\(\)/);
+    assert.match(source,/YushinProcurementDemand\?\.reconcileLinkedSupplies/);
+    assert.match(source,/reconcileLinkedSupplies\(demand,linkedSupplies\)/);
+    assert.match(source,/採購需求與供應紀錄不同步/);
+});
+
 test('purchase flows persist procurement demand through order and receipt transactions', () => {
     assert.match(app, /collection\('procurementDemands'\)/);
     assert.match(app, /demandId:demand\.demandId\s*\|\|\s*''/);
