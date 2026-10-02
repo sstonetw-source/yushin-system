@@ -876,7 +876,8 @@ test('phase 4 forecast permission is integrated into the common permission syste
 
 test('phase 5 inventory uses on-hand reserved available incoming and transaction-backed movements', () => {
     assert.match(appSource, /function inventoryNumbers\(data = \{\}\)/);
-    assert.match(appSource, /available: onHand - reserved/);
+    assert.match(appSource, /window\.YushinInventory\?\.normalizeStock/);
+    assert.match(appSource, /return window\.YushinInventory\.normalizeStock\(data\)/);
     assert.match(appSource, /incoming/);
     assert.match(appSource, /collection\('inventoryMovements'\)/);
     assert.match(appSource, /inventoryMovementRecord\([\s\S]*?'reserve'/);
