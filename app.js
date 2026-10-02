@@ -7167,12 +7167,23 @@ window.openInventoryReplenishment = async function(inventoryId) {
     await loadSupplierWarehouseMasters();
     const stock = warehouseStockTotals(item.productKey||item.productId||'');
     const safetyStock = Math.max(0, Number(item.safetyStock || 0));
+    if (!(safetyStock > 0)) {
+        alert('請先設定安全庫存，再建立補庫採購。');
+        return;
+    }
+    const demand = globalThis.YushinProcurementDemand?.fromStockReplenishment({
+        sourceId:item.id || item.productKey || item.productId || '',
+        safetyStock,
+        available:stock.available,
+        incoming:stock.incoming
+    });
+    if (!demand) throw new Error('Procurement Demand core 未載入，無法計算補庫需求。');
     const projectedAvailable = stock.available + stock.incoming;
-    if (safetyStock > 0 && projectedAvailable >= safetyStock) {
+    if (!(demand.remainingToOrderQty > 0)) {
         alert(`目前可用 ${stock.available}、在途 ${stock.incoming}；既有在途到貨後已可達安全庫存 ${safetyStock}，不需重複建立補庫採購。`);
         return;
     }
-    const suggestedQty = Math.max(1, safetyStock - projectedAvailable);
+    const suggestedQty = demand.remainingToOrderQty;
     const match = await findProductByCode(item.itemCode || '');
     let unitPrice = 0;
     if (match) {
@@ -7201,7 +7212,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
     generatePoNo();
     updatePoModeUI();
     const hint = document.getElementById('poModeHint');
-    if (hint) hint.textContent = `安全庫存補貨：目前可用 ${stock.available}，在途 ${stock.incoming}，到貨後預估可用 ${projectedAvailable}，安全庫存 ${safetyStock}，建議採購 ${suggestedQty}。`;
+    if (hint) hint.textContent = `安全庫存補貨：${globalThis.YushinProcurementDemand.statusLabel(demand.status)}。目前可用 ${stock.available}，在途 ${stock.incoming}，到貨後預估可用 ${projectedAvailable}，安全庫存 ${safetyStock}，本次仍需採購 ${suggestedQty}。`;
     document.getElementById('poModalOverlay').classList.add('active');
 };
 
@@ -8926,12 +8937,13 @@ function purchaseLineMatchesFilters(date, salesName, brand, context = null) {
     return !filters.selectedBrand || orderBrandFilterValue(brand, filters.selectableBrands) === filters.selectedBrand;
 }
 
-function remainingProcurementQty(order, item, dispatchOverride = null) {
+function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
     const dispatch = dispatchOverride || itemDispatchState(order,item);
-    const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
-    const quantities = window.YushinWorkflow?.procurementQuantities({
+    const fulfillmentType = item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE';
+    const directShip = fulfillmentType === 'DIRECT_SHIP';
+    const quantities = globalThis.YushinWorkflow?.procurementQuantities({
         orderedQty:item.orderedQty ?? item.qty,
-        fulfillmentType:item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
+        fulfillmentType,
         reservedQty:item.reservedQty,
         shortageQty:item.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
@@ -8941,7 +8953,22 @@ function remainingProcurementQty(order, item, dispatchOverride = null) {
         returnedQty:directShip ? dispatch.returned : Number(item.returnedQty ?? dispatch.returned ?? 0)
     });
     if (!quantities) throw new Error('Workflow core 未載入，無法計算採購需求。');
-    return quantities.remainingToOrderQty;
+    const demand = globalThis.YushinProcurementDemand?.fromSalesOrder({
+        sourceId:order.id || '',
+        sourceItemId:item.itemId || '',
+        fulfillmentType,
+        shortageQty:quantities.requiredSupplyQty,
+        inTransitQty:quantities.inTransitQty,
+        requiredSupplyQty:quantities.requiredSupplyQty,
+        supplyOrderedQty:quantities.supplyOrderedQty,
+        receivedQty:quantities.receivedQty
+    });
+    if (!demand) throw new Error('Procurement Demand core 未載入，無法計算採購需求。');
+    return demand;
+}
+
+function remainingProcurementQty(order, item, dispatchOverride = null) {
+    return procurementDemandForOrderItem(order,item,dispatchOverride).remainingToOrderQty;
 }
 
 function purchasingLifecycleSnapshot(normalizedItemsByOrder, sourceOrders = ordersCache) {
