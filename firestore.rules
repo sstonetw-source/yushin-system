@@ -385,6 +385,27 @@ service cloud.firestore {
       return data.onHand >= 0 && data.reserved >= 0;
     }
 
+    function validInventoryStockPolicy(data) {
+      let policy = data.get('stockPolicy', 'ORDER_ONLY');
+      let safetyStock = data.get('safetyStock', 0);
+      return policy in ['NO_STOCK', 'SAFETY_STOCK', 'ORDER_ONLY']
+        && safetyStock is number
+        && safetyStock >= 0;
+    }
+
+    function warehouseInventoryPlanningDefaults(data) {
+      return data.get('stockPolicy', 'ORDER_ONLY') == 'ORDER_ONLY'
+        && data.get('safetyStock', 0) == 0;
+    }
+
+    function warehouseKeepsInventoryPlanning() {
+      return warehouse()
+        && request.resource.data.get('stockPolicy', 'ORDER_ONLY')
+          == resource.data.get('stockPolicy', 'ORDER_ONLY')
+        && request.resource.data.get('safetyStock', 0)
+          == resource.data.get('safetyStock', 0);
+    }
+
     // Client-side delivery/reservation transactions need narrowly-scoped stock writes.
     // Business owners cannot alter product identity, cost, incoming quantities or master data.
     function businessInventoryOperationalUpdate() {
@@ -664,12 +685,24 @@ service cloud.firestore {
 
     match /inventory/{id} {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
+      // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
+      // warehouse keeps those fields unchanged while performing physical stock work.
       allow get: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
       allow list: if canReceiveInventory() && !('unitCost' in resource.data) && !('cost' in resource.data);
-      allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data)
+      allow create: if (
+          ((admin() || purchaser()) && validInventoryStockPolicy(request.resource.data))
+          || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
+        )
+        && nonNegativeInventory(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
-      allow update: if ((canReceiveInventory() && nonNegativeInventory(request.resource.data))
-          || businessInventoryOperationalUpdate())
+      allow update: if (
+          ((admin() || purchaser()) && nonNegativeInventory(request.resource.data)
+            && validInventoryStockPolicy(request.resource.data))
+          || (warehouse() && nonNegativeInventory(request.resource.data)
+            && validInventoryStockPolicy(request.resource.data)
+            && warehouseKeepsInventoryPlanning())
+          || businessInventoryOperationalUpdate()
+        )
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }

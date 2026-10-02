@@ -202,6 +202,34 @@ test('business owner can perform only scoped fulfillment stock updates', async (
   await assertSucceeds(updateDoc(doc(db('wh1'), 'inventory/p1'), { reserved:3 }));
 });
 
+test('inventory planning policy is admin or purchaser managed while warehouse keeps it unchanged', async () => {
+  await seed('inventory/policy-buyer', { onHand:10, reserved:0, incoming:0, productId:'p1', stockPolicy:'ORDER_ONLY', safetyStock:0 });
+  await seed('inventory/policy-admin', { onHand:10, reserved:0, incoming:0, productId:'p1', stockPolicy:'ORDER_ONLY', safetyStock:0 });
+  await seed('inventory/policy-warehouse', { onHand:10, reserved:0, incoming:0, productId:'p1', stockPolicy:'SAFETY_STOCK', safetyStock:5 });
+
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'inventory/policy-buyer'), {
+    stockPolicy:'SAFETY_STOCK', safetyStock:6
+  }));
+  await assertSucceeds(updateDoc(doc(db('admin'), 'inventory/policy-admin'), {
+    stockPolicy:'NO_STOCK'
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'inventory/policy-warehouse'), {
+    stockPolicy:'ORDER_ONLY'
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'inventory/policy-warehouse'), {
+    safetyStock:1
+  }));
+  await assertSucceeds(updateDoc(doc(db('wh1'), 'inventory/policy-warehouse'), {
+    onHand:9, updatedAt:'2026-10-02T09:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('sales1'), 'inventory/policy-buyer'), {
+    stockPolicy:'NO_STOCK'
+  }));
+  await assertFails(updateDoc(doc(db('buyer1'), 'inventory/policy-buyer'), {
+    stockPolicy:'INVALID'
+  }));
+});
+
 test('business owner can change only remaining quantity on an inventory lot', async () => {
   await seed('inventoryLots/lot1', { productId:'p1', remainingQty:5 });
   await assertSucceeds(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), {

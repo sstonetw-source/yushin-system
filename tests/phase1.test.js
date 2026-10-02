@@ -279,6 +279,10 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     assert.match(appSource,/window\.setInventoryStockPolicy=async function/);
     assert.match(appSource,/inventoryCache\.find\(x=>x\.id===inventoryId\)\|\|inventorySearchResults\.find\(x=>x\.id===inventoryId\)/);
     assert.match(appSource,/stockPolicy:next/);
+    assert.match(appSource,/function canManageInventoryStockPolicy\(\)[\s\S]*?currentUserRole === 'admin' \|\| currentUserRole === 'purchaser'/);
+    assert.match(appSource,/if\(!canManageInventoryStockPolicy\(\)\)return escapeHtml\(inventoryStockPolicyLabel\(policy\)\)/);
+    assert.match(appSource,/只有管理員或採購可以調整庫存策略/);
+    assert.match(appSource,/只有管理員或採購可以設定安全庫存/);
 
     const replenishStart=appSource.indexOf('window.openInventoryReplenishment');
     const replenishEnd=appSource.indexOf('\nwindow.setInventoryStockPolicy',replenishStart);
