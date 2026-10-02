@@ -140,6 +140,36 @@ test('partial receipts do not count as complete lead time until target quantity 
   assert.equal(result.totals.leadTimeCount,0);
   assert.equal(result.totals.avgLeadTimeDays,null);
 });
+test('open purchasing aging buckets expose stuck quantity and amount',()=>{
+  const result=analytics.summarize([
+    {id:'S1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:2,receivedQty:0,status:'ORDERED',unitCost:100,orderDate:'2026-10-08',purchaseDocumentId:'PO1'},
+    {id:'S2',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:3,receivedQty:1,status:'PARTIAL_RECEIPT',unitCost:200,orderDate:'2026-09-25',expectedDate:'2026-10-05',purchaseDocumentId:'PO2'},
+    {id:'S3',supplier:'B',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:4,receivedQty:0,status:'ORDERED',unitCost:50,orderDate:'2026-09-01',expectedDate:'2026-09-20',purchaseDocumentId:'PO3'},
+    {id:'S4',supplier:'B',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:5,status:'RECEIVED',unitCost:50,orderDate:'2026-08-01',purchaseDocumentId:'PO4'}
+  ],[],{now:'2026-10-10T12:00:00Z'});
+
+  assert.deepEqual(result.agingBuckets.map(row=>row.label),['0–7 天','8–14 天','15–30 天','31+ 天']);
+  const first=result.agingBuckets[0];
+  assert.equal(first.lineCount,1);
+  assert.equal(first.documentCount,1);
+  assert.equal(first.incomingQty,2);
+  assert.equal(first.incomingAmount,200);
+
+  const mid=result.agingBuckets[2];
+  assert.equal(mid.lineCount,1);
+  assert.equal(mid.incomingQty,2);
+  assert.equal(mid.incomingAmount,400);
+  assert.equal(mid.lateLineCount,1);
+  assert.equal(mid.lateAmount,400);
+
+  const oldest=result.agingBuckets[3];
+  assert.equal(oldest.lineCount,1);
+  assert.equal(oldest.incomingQty,4);
+  assert.equal(oldest.incomingAmount,200);
+  assert.equal(oldest.lateLineCount,1);
+  assert.ok(oldest.maxOpenAgeDays>=39);
+});
+
 test('open purchasing aging counts only still-incoming supply',()=>{
   const result=analytics.summarize([
     {id:'S1',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:10,receivedQty:4,status:'PARTIAL_RECEIPT',unitCost:100,orderDate:'2026-10-01'},
