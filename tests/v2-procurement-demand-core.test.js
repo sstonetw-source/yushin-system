@@ -52,3 +52,10 @@ test('ERP-style demand statuses include partial order partial receipt and receiv
   assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:10,receivedQty:4}).status,d.STATUSES.PARTIALLY_RECEIVED);
   assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:10,receivedQty:10}).status,d.STATUSES.RECEIVED);
 });
+
+test('tracks ERP ordered and received percentages and schedule date',()=>{
+  const demand=d.normalizeDemand({requestedQty:10,orderedQty:6,receivedQty:3,expectedDate:'2026-10-15'});
+  assert.equal(demand.perOrdered,60);
+  assert.equal(demand.perReceived,30);
+  assert.equal(demand.scheduleDate,'2026-10-15');
+});
