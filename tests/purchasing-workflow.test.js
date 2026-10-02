@@ -452,7 +452,8 @@ test('supply receipt synchronizes received quantity back to the source order ite
     assert.match(source,/reserveQty=receiptPlan\.reservedDelta/);
     assert.match(source,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
     assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
-    assert.match(source,/window\.YushinReceiving\.applyReceipt\(supply,qty\)/);
+    assert.match(source,/globalThis\.YushinSupply\.applyReceipt\(procurement,qty\)/);
+    assert.match(source,/globalThis\.YushinReceiving\.buildReceiptSnapshot/);
 });
 
 
@@ -738,7 +739,7 @@ test('cancelled warehouse source still receives into free stock while direct shi
     assert.match(warehouseSource,/items\[itemIndex\]=\{\.\.\.item,receivedQty:receiptPlan\.item\.receivedQty\}/);
     assert.match(warehouseSource,/orderWorkIndexFields\(nextOrder\)/);
     assert.doesNotMatch(warehouseSource,/來源訂單已取消，不能繼續確認到貨/);
-    assert.match(source,/orderId:supply\.orderId\|\|'',itemId:supply\.itemId\|\|'',sourceOrderStatus,[\s\S]*?productKey,warehouseId,qty/);
+    assert.match(source,/buildReceipt\(\{[\s\S]*?productKey,[\s\S]*?warehouseId,[\s\S]*?extra:\{[\s\S]*?sourceOrderStatus/);
 });
 
 test('receiving card counts standalone stock replenishment and does not hide it by salesperson', () => {
