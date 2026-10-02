@@ -9968,10 +9968,9 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const itemIndex = items.findIndex(item => item.itemId === itemId);
             if (itemIndex < 0) throw new Error('找不到來源訂單品項。');
             const item = items[itemIndex];
-            const qty = remainingProcurementQty(order, item);
-            const demandId = globalThis.YushinProcurementDemand?.demandIdForSource({
-                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
-            }) || '';
+            const demand = procurementDemandForOrderItem(order, item);
+            const qty = demand.remainingToOrderQty;
+            const demandId = demand.demandId || '';
             const existingSupply = supplySnapshot.exists ? { id:supplyRef.id, ...supplySnapshot.data() } : null;
             if (!(qty > 0) && !existingSupply) throw new Error('此品項已無待採購數量，請重新整理。');
 
@@ -10001,6 +10000,25 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const internalNo = existingSupply?.internalNo || `MO-${orderDate.replace(/-/g, '')}-${supplyRef.id.slice(-8).toUpperCase()}`;
             const alreadyOrdered = Math.max(0, Number(item.supplyOrderedQty || 0));
             const now = new Date().toISOString();
+            const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demand,qty);
+            if(qty>0&&demandOrderPlan.appliedQty!==qty)throw new Error('採購需求數量已變更，請重新整理後再試。');
+            const demandRef=procurementDemandRef(demandId);
+            const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
+                productId:item.productId||'',
+                productKey,
+                itemCode:item.itemCode||'',
+                itemName:item.itemName||'',
+                brand:item.brand||'',
+                fulfillmentType,
+                warehouseId,
+                ownerUid:order.ownerUid||'',
+                salesCode:order.salesCode||'',
+                salesName:order.salesName||'',
+                scheduleDate:item.scheduleDate||order.expectedDate||''
+            },{
+                createdAt:order.createdAt||now,
+                updatedAt:now
+            });
             const previousSupplyQty = Math.max(0, Number(existingSupply?.qty || 0));
             const nextSupplyQty = previousSupplyQty + Math.max(0, Number(qty || 0));
             const nextOrdered = alreadyOrdered + Math.max(0, Number(qty || 0));
@@ -10113,6 +10131,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             }
 
             tx.set(supplyRef, (({id, ...record}) => record)(savedSupply));
+            if(demandRef)tx.set(demandRef,demandDoc,{merge:true});
             if (qty > 0) {
                 items[itemIndex] = {
                     ...item, supplyOrderedQty:nextOrdered,
