@@ -9388,7 +9388,10 @@ function renderPurchasingAnalytics() {
         ? `目前在途 ${totals.openAgeCount} 筆｜平均等待 ${Number(totals.avgOpenAgeDays||0).toFixed(1)} 天｜最久 ${Number(totals.maxOpenAgeDays||0).toFixed(1)} 天`
         : '目前沒有在途採購';
     const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
-    if (mixDetail) mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerOrderAmount)}`;
+    if (mixDetail) {
+        const stockShare = totals.orderedAmount > 0 ? (totals.stockAmount / totals.orderedAmount) * 100 : 0;
+        mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerOrderAmount)}｜備庫占比 ${stockShare.toFixed(0)}%`;
+    }
 
     supplierBody.innerHTML = purchasingAnalyticsRowsHtml(
         bySupplier.map(row=>({...row,label:row.supplier})),
