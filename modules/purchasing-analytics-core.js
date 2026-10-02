@@ -39,7 +39,7 @@
     let total=0;
     for(const receipt of receipts){
       total+=n(receipt?.qty);
-      if(total>=target)return String(receipt?.createdAt||receipt?.receiptDate||'');
+      if(total>=target)return String(receipt?.receiptDate||receipt?.createdAt||'');
     }
     return '';
   }
