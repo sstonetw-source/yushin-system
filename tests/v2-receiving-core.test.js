@@ -20,6 +20,14 @@ test('receipt is capped at the supply remainder',()=>{
   assert.equal(result.record.status,'RECEIVED');
 });
 
+test('closed partially received supply cannot receive more goods',()=>{
+  const result=receiving.applyReceipt({qty:10,receivedQty:4,status:'CLOSED'},2);
+  assert.equal(result.appliedQty,0);
+  assert.equal(result.record.receivedQty,4);
+  assert.equal(result.record.remainingQty,0);
+  assert.equal(result.record.status,'CLOSED');
+});
+
 test('cancelled supply cannot receive more goods',()=>{
   const result=receiving.applyReceipt({qty:10,receivedQty:4,status:'CANCELLED'},2);
   assert.equal(result.appliedQty,0);
