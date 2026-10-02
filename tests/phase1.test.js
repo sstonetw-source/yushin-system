@@ -4936,3 +4936,13 @@ test('data health surfaces failed inventory reservation synchronization', () => 
     assert.match(appSource,/訂單庫存同步失敗/);
     assert.match(appSource,/inventoryReservationError/);
 });
+
+
+test('Product 360 displays the same projected stock formula as inventory', () => {
+    const start=appSource.indexOf('function renderProduct360');
+    const end=appSource.indexOf('\n}\n\nwindow.openProduct360',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/stock\.projected = inventoryProjectedStock\(stock\)/);
+    assert.match(source,/預計庫存<\/span><strong>\$\{stock\.projected\}/);
+    assert.match(source,/預計 \$\{inventoryProjectedStock\(row\)\}/);
+});

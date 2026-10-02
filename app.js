@@ -1890,6 +1890,7 @@ function renderProduct360(product, inventory, warehouseDocs, demands, quotes, or
         incoming:warehouseRows.reduce((sum,row)=>sum+row.incoming,0)
     } : aggregate;
     stock.available = Math.max(0, stock.onHand - stock.reserved);
+    stock.projected = inventoryProjectedStock(stock);
     const safetyStock = Math.max(0, Number(inventory?.safetyStock || 0));
 
     const activeDemands = (demands || []).filter(row => String(row.status || '').toUpperCase() !== 'CANCELLED');
@@ -1898,7 +1899,7 @@ function renderProduct360(product, inventory, warehouseDocs, demands, quotes, or
     const demandVisible = ['admin','purchaser','warehouse'].includes(currentUserRole);
 
     const warehouseHtml = warehouseRows.length
-        ? warehouseRows.map(row => `<div class="product-360-warehouse"><strong>${escapeHtml(row.warehouseName)}</strong><span>現有 ${row.onHand}　占用 ${row.reserved}　可用 ${row.available}　在途 ${row.incoming}</span></div>`).join('')
+        ? warehouseRows.map(row => `<div class="product-360-warehouse"><strong>${escapeHtml(row.warehouseName)}</strong><span>現有 ${row.onHand}　占用 ${row.reserved}　可用 ${row.available}　在途 ${row.incoming}　預計 ${inventoryProjectedStock(row)}</span></div>`).join('')
         : '<div class="product-360-empty">目前沒有分倉庫存。</div>';
 
     const quickActions = [
@@ -1931,6 +1932,7 @@ function renderProduct360(product, inventory, warehouseDocs, demands, quotes, or
             <div><span>占用</span><strong>${stock.reserved}</strong></div>
             <div><span>可用</span><strong>${stock.available}</strong></div>
             <div><span>在途</span><strong>${stock.incoming}</strong></div>
+            <div><span>預計庫存</span><strong>${stock.projected}</strong></div>
             <div><span>安全庫存</span><strong>${safetyStock}</strong></div>
             <div><span>庫存策略</span><strong class="product-360-policy">${escapeHtml(inventoryStockPolicyLabel(inventoryStockPolicy(inventory || {})))}</strong></div>
           </div>
