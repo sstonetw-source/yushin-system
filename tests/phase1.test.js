@@ -260,7 +260,7 @@ test('purchase document history shows document age while arrival work uses suppl
     assert.match(appSource, /return waitingDaysFromDate\(po\.poDate\)/);
     assert.match(appSource, /primaryStatus==='arrival'\?waitingDaysFromDate\(item\.orderedAt\)/);
     assert.match(appSource, /data-th="建立天數"/);
-    assert.match(appSource, /data-th="文件狀態">已建立/);
+    assert.match(appSource, /data-th="文件狀態"[\s\S]{0,120}已建立/);
 });
 
 test('main navigation exposes focused order and purchasing workspaces', () => {
@@ -484,7 +484,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     let updatePayload;
     const context = {
         window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
-        canEditPage: () => true, normalizedOrderStatus: () => 'normal',
+        canManageOrderLifecycleCapability: () => true, canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => { throw new Error('billing must not depend on window.prompt'); }, alert: message => { throw new Error(message); },
         currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {}, writeAppDataCache: () => {},
@@ -519,7 +519,7 @@ test('failed billing write restores the previous state and unlocks the button', 
     let alertMessage = '';
     const context = {
         window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
-        canEditPage: () => true, normalizedOrderStatus: () => 'normal',
+        canManageOrderLifecycleCapability: () => true, canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => '2026-09-17', alert: message => { alertMessage = message; },
         currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {}, writeAppDataCache: () => {},
@@ -1172,14 +1172,16 @@ test('unknown order items do not create inventory before purchase receipt', () =
     assert.doesNotMatch(s, /tx\.set\(warehouseRef[\s\S]*?onHand/);
 });
 
-test('period semantics are shared across Forecast Quote Order and PO', () => {
+test('period semantics are shared across Quote Order and PO while Forecast uses status/history search', () => {
     assert.match(appSource, /function unifiedPeriodRange/);
     assert.match(appSource, /function dateInUnifiedPeriod/);
-    assert.match(appSource, /forecastPeriodFilter/);
+    assert.doesNotMatch(appSource, /forecastPeriodFilter/);
     assert.match(appSource, /myQuotePeriodFilter/);
     assert.match(appSource, /poPeriodFilter/);
     assert.match(appSource, /this-month/);
     assert.match(appSource, /this-quarter/);
+    assert.match(indexSource, /id="forecastStatusFilter"/);
+    assert.match(indexSource, /id="forecastSearch"/);
 });
 
 test('permission routing includes Product Forecast and Inventory workspaces', () => {
@@ -2015,20 +2017,14 @@ test('order and equipment refresh buttons provide immediate loading feedback', (
 });
 
 
-test('quote history refresh provides immediate feedback and bounded read timeout', () => {
-    assert.match(indexSource, /id="quoteHistoryRefreshBtn"[^>]*>↻ 更新<\/button>/);
-    const buttonStart=appSource.indexOf('function updateMyQuotesLoadMoreButton');
-    const buttonEnd=appSource.indexOf('\n}',buttonStart)+2;
-    const buttonSource=appSource.slice(buttonStart,buttonEnd);
-    assert.match(buttonSource,/quoteHistoryRefreshBtn/);
-    assert.match(buttonSource,/refreshButton\.disabled = myQuotesPageLoading/);
-    assert.match(buttonSource,/更新中…/);
-
+test('quote history pagination uses bounded read timeout without requiring a manual refresh button', () => {
+    assert.doesNotMatch(indexSource, /id="quoteHistoryRefreshBtn"/);
     const loadStart=appSource.indexOf('async function loadMyQuotesPage');
     const loadEnd=appSource.indexOf('window.loadMyQuotesFromCloud',loadStart);
     const loadSource=appSource.slice(loadStart,loadEnd);
     assert.match(loadSource,/firestoreReadWithTimeout\(query\.get\(\), '估價單'\)/);
     assert.match(loadSource,/firestore-read-timeout/);
+    assert.match(loadSource,/DEFAULT_LIST_LIMIT/);
 });
 
 
@@ -2882,7 +2878,7 @@ test('order list skips search-string work when no keyword and batches DOM insert
 test('high frequency lookup reads are bounded', () => {
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'Product Master'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('quotes'\)\.doc\(forecast\.sourceId\)\.get\(\)[\s\S]*?'Forecast 來源估價單'/);
-    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?orderBy\('quoteNo', 'desc'\)\.limit\(10\)\.get\(\)[\s\S]*?'最近客戶紀錄'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)[\s\S]*?\.limit\(20\)[\s\S]*?'Customer Master 客戶建議'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價偏好'/);
 });
 
@@ -3742,7 +3738,8 @@ test('equipment data scope agrees with engineer all-company access', () => {
     const start=appSource.indexOf('function canViewAllEquipment()');
     const end=appSource.indexOf('\nwindow.loadEquipmentFromCloud',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'engineer'/);
+    assert.match(source,/return canManageEquipmentCapability\(\)/);
+    assert.match(appSource,/function canManageEquipmentCapability\(role = currentUserRole\)[\s\S]*?role === 'admin' \|\| role === 'engineer'/);
     const ruleStart=rulesSource.indexOf('match /equipment/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /',ruleStart+10);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
@@ -4128,7 +4125,10 @@ test('supply order rules preserve identity and valid operational quantities', ()
     assert.match(stateSource,/incomingRegisteredQty', 0\) >= 0/);
     assert.match(stateSource,/incomingRegisteredQty', 0\) <= \([\s\S]*?qty', 0\) - request\.resource\.data\.get\('receivedQty', 0\)/);
     assert.match(stateSource,/fulfillmentType', 'WAREHOUSE'\) != 'DIRECT_SHIP'[\s\S]*?incomingRegisteredQty', 0\) == 0/);
-    assert.match(stateSource,/'ORDERED', 'PARTIAL_RECEIPT', 'RECEIVED', 'CANCELLED'/);
+    assert.match(stateSource,/== 'ORDERED'/);
+    assert.match(stateSource,/== 'PARTIAL_RECEIPT'/);
+    assert.match(stateSource,/== 'RECEIVED'/);
+    assert.match(stateSource,/== 'CANCELLED'/);
 
     const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
     const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
@@ -4394,7 +4394,7 @@ test('cancelled warehouse supply is excluded from incoming inventory value', () 
 
 test('self-order wording stays role-neutral for business owners', () => {
     const start=appSource.indexOf('function canBusinessSelfOrder');
-    const end=appSource.indexOf('\nfunction orderProgressInfo',start);
+    const end=appSource.indexOf('\nfunction selfOrderActionHtml',start);
     const source=appSource.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.doesNotMatch(source,/只有負責業務可自行訂貨/);

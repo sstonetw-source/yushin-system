@@ -99,8 +99,10 @@ test('a fully received partial PO leaves the remaining shortage available for a 
 });
 
 test('repeating an incoming-stock update does not count the same supply twice', async () => {
-    const source = app.match(/async function registerPurchaseIncoming\(poId, poRecord\) \{[\s\S]*?\n\}\n(?=\nlet poReceiptTargetId)/)?.[0];
-    assert.ok(source);
+    const start = app.indexOf('async function registerPurchaseIncoming(poId, poRecord)');
+    const end = app.indexOf('\nasync function cancelOutstandingSupplyRecord', start);
+    assert.ok(start >= 0 && end > start);
+    const source = app.slice(start, end);
     const docs = new Map([
         ['supplyOrders/S1',{productKey:'P1',productId:'P1',warehouseId:'W1',qty:3,incomingRegisteredQty:0,itemCode:'A',itemName:'產品',brand:'品牌',fulfillmentType:'WAREHOUSE'}],
         ['supplyOrders/S2',{productKey:'P2',productId:'P2',warehouseId:'W1',qty:2,incomingRegisteredQty:0,itemCode:'B',itemName:'產品二',brand:'品牌',fulfillmentType:'WAREHOUSE'}]
@@ -1095,7 +1097,8 @@ test('purchasing pending card and detail share the same item work-state engine',
     assert.match(app.slice(helperStart,helperEnd),/orderItemDisplayCategories\(order,item,lifecycle,dispatch\)/);
     assert.match(app.slice(displayStart,displayEnd),/orderItemWorkCategory\(order, item, lifecycle, dispatch\) !== 'ordering'/);
     assert.match(app.slice(detailStart,detailEnd),/pendingProcurementDisplayLines\([\s\S]*?normalizedItemsByOrder\?\.get\(order\.id\)/);
-    assert.match(app.slice(detailStart,detailEnd),/業務自行訂貨/);
+    assert.match(app.slice(detailStart,detailEnd),/自行訂貨/);
+    assert.doesNotMatch(app.slice(detailStart,detailEnd),/業務自行訂貨/);
     assert.match(app.slice(formalStart,formalEnd),/procurementType === 'PURCHASING_PO'/);
 });
 
@@ -1156,15 +1159,17 @@ test('formal PO draft opens from the loaded order before secure purchase metadat
 
 test('purchase cost preload preserves already resolved costs across repeated PO opens', () => {
     const helperStart=app.indexOf('async function preloadPurchaseCostsForItems(');
-    const helperEnd=app.indexOf('\nasync function preloadPurchaseCosts(orders)',helperStart);
+    const helperEnd=app.indexOf('\nfunction productMasterDocToPriceItem',helperStart);
     const helper=app.slice(helperStart,helperEnd);
-    const wrapperStart=app.indexOf('async function preloadPurchaseCosts(orders)');
-    const wrapperEnd=app.indexOf('\nfunction productMasterDocToPriceItem',wrapperStart);
-    const wrapper=app.slice(wrapperStart,wrapperEnd);
-    assert.ok(helperStart>=0&&helperEnd>helperStart&&wrapperStart>=0&&wrapperEnd>wrapperStart);
+    assert.ok(helperStart>=0&&helperEnd>helperStart);
     assert.doesNotMatch(helper, /purchaseCostCache = new Map\(\)/);
     assert.match(helper, /if \(purchaseCostCache\.has\(id\)\) return;/);
-    assert.match(wrapper,/preloadPurchaseCostsForItems\(purchaseItems\)/);
+
+    const draftStart=app.indexOf("window.openOrderPurchaseDraft = async function(orderId, itemId = '')");
+    const draftEnd=app.indexOf('\n// 「採購訂單」',draftStart);
+    const draft=app.slice(draftStart,draftEnd);
+    assert.ok(draftStart>=0&&draftEnd>draftStart);
+    assert.match(draft,/preloadPurchaseCostsForItems\(items\)/);
 });
 
 test('new PO cannot be saved until its number is ready', () => {
@@ -1486,7 +1491,7 @@ test('cancelled outstanding quantity becomes purchasable again', () => {
     assert.match(cancelSource,/supplyOrderedQty:Math\.max\(receivedForItem,currentSupplyOrdered-remaining\)/);
 
     const validateStart=app.indexOf('function assertPurchaseLinesAvailable');
-    const validateEnd=app.indexOf('\nfunction purchaseItemsFromSavedPo',validateStart);
+    const validateEnd=app.indexOf('\nfunction poPdfFileName',validateStart);
     const validateSource=app.slice(validateStart,validateEnd);
     assert.match(validateSource,/const remaining = remainingProcurementQty\(order, source\)/);
     assert.doesNotMatch(validateSource,/purchaseDocumentNos/);
