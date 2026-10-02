@@ -4203,8 +4203,9 @@ window.disableSupplierMaster = async function(id) {
     if(!canCreatePurchaseOrderCapability()||!id)return;
     const status=document.getElementById('supplierMasterStatus');
     const activeMappings=supplierMappingCache.filter(mapping=>mapping.supplierId===id);
-    if(activeMappings.length){
-        if(status)status.innerText=`這個供應商仍有 ${activeMappings.length} 個廠牌／產品線對應，請先停用或改綁這些對應。`;
+    const activeProductMappings=productSupplierMappingCache.filter(mapping=>mapping.supplierId===id);
+    if(activeMappings.length||activeProductMappings.length){
+        if(status)status.innerText=`這個供應商仍有 ${activeMappings.length} 個廠牌／產品線對應、${activeProductMappings.length} 個產品供應來源，請先停用或改綁這些對應。`;
         return;
     }
     await db.collection('suppliers').doc(id).set({active:false,updatedAt:new Date().toISOString()},{merge:true});
