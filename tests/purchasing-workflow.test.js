@@ -1947,10 +1947,15 @@ test('purchase order email contact is delegated to supplier core', () => {
     assert.match(source,/YushinSupplier\.purchaseOrderContact\(po,supplierMasterCache\)/);
 });
 
-test('purchase flows persist one procurement demand reference through supply and receipt', () => {
+test('purchase flows persist procurement demand through order and receipt transactions', () => {
+    assert.match(app, /collection\('procurementDemands'\)/);
     assert.match(app, /demandId:demand\.demandId\s*\|\|\s*''/);
     assert.match(app, /demandId:existingSupply\?\.demandId\|\|demandId\|\|''/);
-    assert.match(app, /demandId:item\.demandId\|\|globalThis\.YushinProcurementDemand\?\.demandIdForSource/);
+    assert.match(app, /demandId:demandProjection\.demandId\|\|''/);
+    assert.match(app, /tx\.set\(demandRef,demandDoc,\{merge:true\}\)/);
+    assert.match(app, /transaction\.set\(demandRef,demandDoc,\{merge:true\}\)/);
+    assert.equal((app.match(/updateDemandReceipt\(qty\)/g)||[]).length,2);
+    assert.match(app, /YushinProcurementDemand\.applyReceipt\(baseDemand,receiptQty\)/);
 });
 
 test('Supplier Master lives in purchasing workspace as a single master-data surface', () => {
