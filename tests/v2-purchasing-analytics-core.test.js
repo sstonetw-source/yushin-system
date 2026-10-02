@@ -147,3 +147,19 @@ test('open purchasing aging counts only still-incoming supply',()=>{
   assert.equal(result.totals.maxOpenAgeDays,9);
   assert.equal(result.bySupplier[0].openAgeCount,1);
 });
+
+test('on-time delivery counts only completed supplies with an expected date',()=>{
+  const result=analytics.summarize([
+    {id:'S1',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:5,status:'RECEIVED',orderDate:'2026-10-01',expectedDate:'2026-10-05'},
+    {id:'S2',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:5,status:'RECEIVED',orderDate:'2026-10-01',expectedDate:'2026-10-03'},
+    {id:'S3',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:2,status:'PARTIAL_RECEIPT',orderDate:'2026-10-01',expectedDate:'2026-10-02'}
+  ],[
+    {supplyOrderId:'S1',qty:5,createdAt:'2026-10-04T12:00:00Z'},
+    {supplyOrderId:'S2',qty:5,createdAt:'2026-10-04T12:00:00Z'},
+    {supplyOrderId:'S3',qty:2,createdAt:'2026-10-02T12:00:00Z'}
+  ]);
+  assert.equal(result.totals.onTimeEligibleCount,2);
+  assert.equal(result.totals.onTimeCount,1);
+  assert.equal(result.totals.onTimeRate,50);
+  assert.equal(result.bySupplier[0].onTimeRate,50);
+});
