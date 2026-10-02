@@ -16014,7 +16014,11 @@ window.openOrderModal = function(source = null) {
 
     if (source) {
         document.getElementById('orderCustomer').value = source.customerName || '';
-        document.getElementById('orderItemCode').value = source.itemCode || '';
+        const codeInput = document.getElementById('orderItemCode');
+        codeInput.value = source.itemCode || '';
+        codeInput.dataset.productLine = source.productLine || '';
+        codeInput.dataset.productType = source.productType || '';
+        codeInput.dataset.productMasterMatched = (source.productMasterMatched === true || !!source.productId) ? '1' : '0';
         document.getElementById('orderItemName').value = source.itemName || '';
         const nameEn=document.getElementById('orderItemNameEn');if(nameEn)nameEn.value=source.itemNameEn||source.nameEn||'';
         const spec=document.getElementById('orderSpec');if(spec)spec.value=source.spec||source.specification||'';
