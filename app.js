@@ -11055,11 +11055,12 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             if(qty>0&&demandOrderPlan.appliedQty!==qty)throw new Error('採購需求數量已變更，請重新整理後再試。');
             const demandRef=procurementDemandRef(demandId);
             const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
-                productId:item.productId||'',
+                productId,
                 productKey,
                 itemCode:item.itemCode||'',
                 itemName:item.itemName||'',
-                brand:item.brand||'',
+                brand:canonicalBrand,
+                brandId:canonicalBrandId,
                 fulfillmentType,
                 warehouseId,
                 ownerUid:order.ownerUid||'',
@@ -11085,6 +11086,10 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const registeredIncomingQty = Math.max(0, Number(existingSupply?.incomingRegisteredQty || 0));
             const targetIncomingQty = directShip ? 0 : supplyProjection.remainingQty;
             const incomingDelta = targetIncomingQty - registeredIncomingQty;
+            const identity = brandIdentityForRecord(existingSupply || item);
+            const canonicalBrand = identity.brand || resolveBrandName(existingSupply?.brand || item.brand || '');
+            const canonicalBrandId = identity.brandId || existingSupply?.brandId || item.brandId || brandIdForName(canonicalBrand);
+            const productId = String(existingSupply?.productId || item.productId || '').trim();
 
             let invRef=null, whRef=null, invSnap=null, whSnap=null;
             if (!directShip && incomingDelta !== 0) {
@@ -11118,11 +11123,12 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 salesName:existingSupply?.salesName||order.salesName||'',
                 customerName:existingSupply?.customerName||order.customerName||'',
                 company:existingSupply?.company||order.company||'yushin',
-                productId:existingSupply?.productId||item.productId||'',
+                productId,
                 productKey,
                 itemCode:existingSupply?.itemCode||item.itemCode||'',
                 itemName:existingSupply?.itemName||item.itemName||'',
-                brand:existingSupply?.brand||item.brand||'',
+                brand:canonicalBrand,
+                brandId:canonicalBrandId,
                 productLine:existingSupply?.productLine||item.productLine||'',
                 qty:nextSupplyQty,
                 receivedQty,
@@ -11146,14 +11152,23 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 const inv = inventoryNumbers(invSnap?.exists ? invSnap.data() : {});
                 const wh = inventoryNumbers(whSnap?.exists ? whSnap.data() : {});
                 if (invSnap?.exists) {
-                    tx.set(invRef, {incoming:Math.max(0,inv.incoming+incomingDelta),updatedAt:now}, {merge:true});
+                    tx.set(invRef, {
+                        productId,
+                        itemCode:existingSupply?.itemCode||item.itemCode||'',
+                        itemName:existingSupply?.itemName||item.itemName||'',
+                        brand:canonicalBrand,
+                        brandId:canonicalBrandId,
+                        incoming:Math.max(0,inv.incoming+incomingDelta),
+                        updatedAt:now
+                    }, {merge:true});
                 } else {
                     const nextInventory = {
                         productKey,
-                        productId:existingSupply?.productId||item.productId||'',
+                        productId,
                         itemCode:existingSupply?.itemCode||item.itemCode||'',
                         itemName:existingSupply?.itemName||item.itemName||'',
-                        brand:resolveBrandName(existingSupply?.brand||item.brand||''),
+                        brand:canonicalBrand,
+                        brandId:canonicalBrandId,
                         onHand:0, reserved:0,
                         incoming:Math.max(0,incomingDelta), lots:[], updatedAt:now
                     };
@@ -11162,15 +11177,17 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 }
                 tx.set(whRef,{
                     warehouseId,productKey,
-                    productId:existingSupply?.productId||item.productId||'',
+                    productId,
                     itemCode:existingSupply?.itemCode||item.itemCode||'',
                     itemName:existingSupply?.itemName||item.itemName||'',
-                    brand:resolveBrandName(existingSupply?.brand||item.brand||''),
+                    brand:canonicalBrand,
+                    brandId:canonicalBrandId,
                     onHand:wh.onHand,reserved:wh.reserved,
                     incoming:Math.max(0,wh.incoming+incomingDelta),updatedAt:now
                 },{merge:true});
                 tx.set(db.collection('inventoryMovements').doc(),{
-                    type:'purchase_incoming',qty:incomingDelta,productKey,warehouseId,
+                    type:'purchase_incoming',qty:incomingDelta,productKey,productId,warehouseId,
+                    brand:canonicalBrand,brandId:canonicalBrandId,
                     fulfillmentType:'WAREHOUSE',sourceType:'SUPPLY_ORDER',sourceId:supplyRef.id,
                     purchaseDocumentId:internalNo,createdAt:now,
                     createdBy:currentUserName||currentUser?.email||'',

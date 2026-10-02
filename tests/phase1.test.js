@@ -5074,3 +5074,15 @@ test('Product 360 displays the same projected stock formula as inventory', () =>
     assert.match(source,/預計庫存<\/span><strong>\$\{stock\.projected\}/);
     assert.match(source,/預計 \$\{inventoryProjectedStock\(row\)\}/);
 });
+
+
+test('quick purchase incoming keeps canonical product and brand identity across procurement and inventory', () => {
+    const start = appSource.indexOf('window.markPurchaseItemOrdered = async function');
+    const end = appSource.indexOf('window.openPurchaseOrderModal', start);
+    const source = appSource.slice(start, end > start ? end : start + 22000);
+    assert.match(source, /const identity = brandIdentityForRecord\(existingSupply \|\| item\)/);
+    assert.match(source, /const canonicalBrandId = identity\.brandId/);
+    assert.match(source, /brand:canonicalBrand,\s*brandId:canonicalBrandId/);
+    assert.match(source, /productId,\s*productKey/);
+    assert.match(source, /type:'purchase_incoming',qty:incomingDelta,productKey,productId,warehouseId/);
+});
