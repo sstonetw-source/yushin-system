@@ -4054,9 +4054,11 @@ window.saveSupplierMapping = async function() {
     try {
         const supplierId = stableMasterId('sup', supplierName);
         const mappingId = stableMasterId('bsm', brandName + '|' + (productLine || 'default'));
+        const existingSupplier=supplierMasterCache.find(item=>item.id===supplierId||item.supplierId===supplierId);
+        const savedSupplierEmail=supplierEmail||normalizeSupplierEmail(existingSupplier?.email||'');
         const now = new Date().toISOString();
         const batch = db.batch();
-        batch.set(db.collection('suppliers').doc(supplierId), { supplierId, supplierName, purchaseHeaderName, email:supplierEmail, active:true, updatedAt:now }, { merge:true });
+        batch.set(db.collection('suppliers').doc(supplierId), { supplierId, supplierName, purchaseHeaderName, email:savedSupplierEmail, active:true, updatedAt:now }, { merge:true });
         batch.set(db.collection('brandSupplierMappings').doc(mappingId), {
             mappingId, brandName, productLine, supplierId, isDefault:!productLine, active:true, updatedAt:now
         }, { merge:true });
