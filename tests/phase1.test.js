@@ -2185,15 +2185,17 @@ test('Forecast list queries have production composite indexes for every ownershi
 });
 
 
-test('new order drafts are per-user, restorable and cleared only after successful save', () => {
-  assert.match(appSource,/ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2'/);
-  assert.match(appSource,/currentUser\?\.uid \|\| 'anonymous'/);
-  assert.match(appSource,/function collectOrderDraft\(\)/);
-  assert.match(appSource,/window\.restoreSavedOrderDraft=function/);
-  assert.match(appSource,/window\.clearSavedOrderDraft=function/);
+test('new order modal has no manual draft UI or typing autosave, while save retry recovery remains', () => {
+  assert.doesNotMatch(indexSource,/orderDraftStatus|restoreOrderDraftBtn|clearOrderDraftBtn|恢復草稿|清除草稿/);
+  assert.doesNotMatch(appSource,/scheduleOrderDraftSave/);
+  assert.doesNotMatch(appSource,/新增訂單（已恢復草稿）/);
+  assert.match(appSource,/function saveOrderDraft\(\)/);
+  assert.match(appSource,/if\(localStorage\.getItem\(pendingOrderCreateKey\(\)\) && readOrderDraft\(\)\) restoreSavedOrderDraft\(\);/);
   const saveStart=appSource.indexOf('window.saveNewOrder');
   const saveEnd=appSource.indexOf('// 匯出指定日期區間',saveStart);
-  assert.match(appSource.slice(saveStart,saveEnd),/clearSavedOrderDraft\(\{ silent:true,clearPending:true \}\)/);
+  const saveFlow=appSource.slice(saveStart,saveEnd);
+  assert.match(saveFlow,/saveOrderDraft\(\);/);
+  assert.match(saveFlow,/clearSavedOrderDraft\(\{ silent:true,clearPending:true \}\)/);
 });
 
 test('admin storage exposes a read-only legacy-cost audit without an execution button', () => {

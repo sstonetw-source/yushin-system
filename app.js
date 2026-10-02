@@ -470,23 +470,6 @@ window.addEventListener('DOMContentLoaded', () => {
         quoteCreatePanel.addEventListener('change', scheduleDraftSave);
     }
 
-    // 新增訂單也採本機自動暫存。依 Firebase UID 分開儲存，避免共用電腦時
-    // 不同使用者看到彼此尚未送出的草稿。
-    const orderModal = document.getElementById('orderModalOverlay');
-    if (orderModal) {
-        let orderDraftSaveTimer = null;
-        const scheduleOrderDraftSave = event => {
-            if (restoringOrderDraft || !orderModal.classList.contains('active')) return;
-            if (event?.target?.closest('.order-draft-tools')) return;
-            clearTimeout(orderDraftSaveTimer);
-            orderDraftSaveTimer = setTimeout(saveOrderDraft, 400);
-        };
-        orderModal.addEventListener('input', scheduleOrderDraftSave);
-        orderModal.addEventListener('change', event => {
-            scheduleOrderDraftSave(event);
-            
-        });
-    }
 
     // 監控登入狀態：未登入顯示登入畫面，登入後依角色初始化系統
     firebase.auth().onAuthStateChanged(function(user) {
@@ -2745,7 +2728,6 @@ window.addProductManagementSelectionToOrder = function addProductManagementSelec
     renderNewOrderDraftItems();
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = `新增訂單（${sources.length} 個品項）`;
-    saveOrderDraft();
     clearProductManagementSelection();
 };
 
@@ -16162,34 +16144,16 @@ function readOrderDraft() {
     } catch (_) { return null; }
 }
 
-function updateOrderDraftStatus() {
-    const draft=readOrderDraft();
-    const status=document.getElementById('orderDraftStatus');
-    const restore=document.getElementById('restoreOrderDraftBtn');
-    const clear=document.getElementById('clearOrderDraftBtn');
-    if(status)status.innerText=localStorage.getItem(pendingOrderCreateKey())
-        ? '上一張訂單尚待確認；請恢復草稿並按儲存重試同一張訂單。'
-        : (draft?.savedAt?`草稿已暫存：${new Date(draft.savedAt).toLocaleString('zh-TW')}`:'尚無暫存草稿');
-    if(restore)restore.disabled=!draft;
-    if(clear)clear.disabled=!draft;
-}
-
 function saveOrderDraft() {
     if(restoringOrderDraft||!document.getElementById('orderModalOverlay')?.classList.contains('active'))return;
-    try { localStorage.setItem(orderDraftStorageKey(),JSON.stringify(collectOrderDraft())); updateOrderDraftStatus(); }
-    catch (err) { console.warn('暫存訂單草稿失敗：',err); }
+    try { localStorage.setItem(orderDraftStorageKey(),JSON.stringify(collectOrderDraft())); }
+    catch (err) { console.warn('保存訂單重試資料失敗：',err); }
 }
 
-window.clearSavedOrderDraft=function(options={}){
-    if(!options.clearPending && localStorage.getItem(pendingOrderCreateKey())){
-        alert('這張訂單的儲存狀態尚待確認；請先重試，避免遺失訂單草稿。');
-        return;
-    }
+function clearSavedOrderDraft(options={}) {
     localStorage.removeItem(orderDraftStorageKey());
     if(options.clearPending) localStorage.removeItem(pendingOrderCreateKey());
-    updateOrderDraftStatus();
-    if(!options.silent)alert('訂單草稿已清除。');
-};
+}
 
 function setOrderModalItem(item={}) {
     const normalized=normalizeNewOrderItem(item);
@@ -16218,8 +16182,8 @@ function setOrderModalItem(item={}) {
     refreshOrderWarehouseStock();
 }
 
-window.restoreSavedOrderDraft=function(){
-    const draft=readOrderDraft();if(!draft){updateOrderDraftStatus();return;}
+function restoreSavedOrderDraft(){
+    const draft=readOrderDraft();if(!draft)return;
     restoringOrderDraft=true;
     try {
         requestedOrderOwnerUid = draft.ownerUid || '';
@@ -16233,9 +16197,9 @@ window.restoreSavedOrderDraft=function(){
         const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';invoice.disabled=draft.transactionType!=='直';
         newOrderDraftItems=Array.isArray(draft.items)?draft.items.map(normalizeNewOrderItem):[];
         renderNewOrderDraftItems();
-        const title=document.getElementById('orderModalTitle');if(title)title.innerText='新增訂單（已恢復草稿）';
-    } finally { restoringOrderDraft=false;updateOrderDraftStatus(); }
-};
+        const title=document.getElementById('orderModalTitle');if(title)title.innerText='新增訂單（續傳未完成）';
+    } finally { restoringOrderDraft=false; }
+}
 
 function normalizeNewOrderItem(item = {}) {
     const match=findPriceItemForOrder(item);
@@ -16274,9 +16238,8 @@ window.editNewOrderDraftItem=function(index){
     if(current.itemName)newOrderDraftItems[index]=current;else newOrderDraftItems.splice(index,1);
     setOrderModalItem(item);
     renderNewOrderDraftItems();
-    saveOrderDraft();
 };
-window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();saveOrderDraft();};
+window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();};
 window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();
     if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
@@ -16286,7 +16249,7 @@ window.addCurrentOrderItemToDraft=function(){
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;
-    document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';saveOrderDraft();
+    document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
 };
 
 window.openOrderModal = function(source = null) {
@@ -16324,8 +16287,6 @@ window.openOrderModal = function(source = null) {
     onOrderFulfillmentChange();
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
-    updateOrderDraftStatus();
-
     window._orderModalSourceLink = source?.sourceType && source?.sourceId
         ? { sourceType: source.sourceType, sourceId: source.sourceId }
         : null;
@@ -16489,7 +16450,6 @@ window.copyOrderAsNew = function(orderId) {
     const invoiceInput = document.getElementById('orderInvoiceTitle');
     invoiceInput.value = source.invoiceTitle || '';
     invoiceInput.disabled = transactionType !== '直';
-    saveOrderDraft();
 };
 
 window.closeOrderModal = function(options = {}) {
@@ -18448,7 +18408,6 @@ window.onOrderProcurementTypeChange=function(){
     setOrderCostFieldForProduct(null);
     const hint=document.getElementById('orderWarehouseStockHint');
     if(hint&&document.getElementById('orderProcurementType')?.value!=='SALES_SELF_ORDER')hint.textContent='交由採購訂貨：業務只需確認售價，採購成本由採購流程處理。';
-    saveOrderDraft();
 };
 
 async function applyOrderProductCost(item) {

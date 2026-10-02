@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261002-8">
+        <link rel="stylesheet" href="styles.css?v=20261003-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1003,13 +1003,6 @@
     <div class="eq-modal-overlay no-print" id="orderModalOverlay" onclick="if(event.target===this) closeOrderModal()">
         <div class="eq-modal-box">
             <h3 id="orderModalTitle">新增訂單</h3>
-            <div class="order-quick-start">
-                <div class="order-draft-tools">
-                    <span id="orderDraftStatus">尚無暫存草稿</span>
-                    <button type="button" id="restoreOrderDraftBtn" class="btn-secondary" onclick="restoreSavedOrderDraft()" disabled>恢復草稿</button>
-                    <button type="button" id="clearOrderDraftBtn" class="btn-secondary" onclick="clearSavedOrderDraft()" disabled>清除草稿</button>
-                </div>
-            </div>
             <div class="form-grid">
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid"><option value="">請選擇負責業務</option></select></div>
@@ -1604,7 +1597,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261002-72"></script>
+    <script src="app.js?v=20261003-1"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
