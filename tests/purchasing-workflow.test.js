@@ -426,7 +426,7 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     assert.match(coreTransaction, /method:'PURCHASING_PO'/);
     assert.match(coreTransaction, /sourceType:item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
     assert.match(coreTransaction, /sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
-    assert.match(coreTransaction, /sourceItemId:item\.itemId\|\|''/);
+    assert.match(coreTransaction, /sourceItemId:item\.itemId\|\|item\.sourceItemId\|\|''/);
     assert.match(coreTransaction, /purchaseDocumentId:poDocumentId/);
     assert.match(coreTransaction, /poRecord\.supplyOrderIds=supplyOrderIds/);
     assert.match(coreTransaction, /supplyOrderedQty:cumulative/);
@@ -1949,6 +1949,6 @@ test('purchase order email contact is delegated to supplier core', () => {
 
 test('purchase flows persist one procurement demand reference through supply and receipt', () => {
     assert.match(app, /demandId:demand\.demandId\s*\|\|\s*''/);
-    assert.match(app, /demandId:existingSupply\?\.demandId\|\|demand\.demandId\|\|''/);
+    assert.match(app, /demandId:existingSupply\?\.demandId\|\|demandId\|\|''/);
     assert.match(app, /demandId:item\.demandId\|\|globalThis\.YushinProcurementDemand\?\.demandIdForSource/);
 });
