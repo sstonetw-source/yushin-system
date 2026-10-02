@@ -2367,7 +2367,7 @@ test('supplier MOQ settings are exposed and enforced before purchase order commi
     assert.match(saveSource,/最小訂購量必須是 0 以上數字/);
 
     const printStart=app.indexOf('window.printPurchaseOrder = async function()');
-    const printEnd=app.indexOf('\nwindow.openDirectStockPurchase',printStart);
+    const printEnd=app.indexOf('\n// 「製作下一張估價單」',printStart);
     const printSource=app.slice(printStart,printEnd);
     assert.ok(printStart>=0&&printEnd>printStart);
     assert.match(printSource,/validatePurchaseQuantity/);
