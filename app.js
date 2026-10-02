@@ -8887,6 +8887,28 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
     }).filter(Boolean);
 }
 
+function standaloneReceivingSupplyMetrics(filters = purchaseFilterContext()) {
+    const metrics = { count:0, amount:0 };
+    supplyReceivingCache.forEach(supply => {
+        // 公司備庫沒有客戶訂單，不應被業務篩選隱藏；日期與廠牌篩選仍照常套用。
+        if (supply.orderId) return;
+        if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
+        const status = String(supply.status || '').toUpperCase();
+        if (!['ORDERED', 'PARTIAL_RECEIPT'].includes(status)) return;
+        const ordered = Math.max(0, Number(supply.qty || 0));
+        const received = Math.max(0, Number(supply.receivedQty || 0));
+        const remaining = Math.max(0, ordered - received);
+        if (!(remaining > 0)) return;
+        if (!purchaseLineMatchesFilters(supply.orderDate || supply.createdAt, '', supply.brand, {
+            ...filters,
+            selectedSales:''
+        })) return;
+        metrics.count += 1;
+        metrics.amount += remaining * Math.max(0, Number(supply.unitCost || 0));
+    });
+    return metrics;
+}
+
 function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
     const definitions = [
         ['ordering', 'purchaseCountOrdering', 'purchaseAmountOrdering'],
@@ -8910,12 +8932,15 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         stateMap,
         lifecycleMap
     );
+    const standaloneReceiving = standaloneReceivingSupplyMetrics(filters);
 
     definitions.forEach(([category, countId, amountId]) => {
         const count = document.getElementById(countId);
         const amount = document.getElementById(amountId);
-        if (count) count.textContent = `${metrics[category].count} 筆`;
-        if (amount) amount.textContent = formatStatsMoney(metrics[category].amount);
+        const extraCount = category === 'arrival' ? standaloneReceiving.count : 0;
+        const extraAmount = category === 'arrival' ? standaloneReceiving.amount : 0;
+        if (count) count.textContent = `${metrics[category].count + extraCount} 筆`;
+        if (amount) amount.textContent = formatStatsMoney(metrics[category].amount + extraAmount);
     });
     // 圖卡統計已載入資料中的全部已完成品項；50 筆限制只套在下方明細顯示，
     // 避免使用者按「載入更多」時圖卡數字跟著人為跳動。
@@ -10012,7 +10037,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         const date = sourceOrder?.orderDate || supply.orderDate || '';
         const salesName = sourceOrder?.salesName || supply.salesName || supply.createdBy || '';
         const brand = supply.brand || '';
-        if (!purchaseLineMatchesFilters(date, salesName, brand, filters)) return;
+        const standaloneFilters = !supply.orderId ? { ...filters, selectedSales:'' } : filters;
+        if (!purchaseLineMatchesFilters(date, salesName, brand, standaloneFilters)) return;
 
         // 已取消訂單的原廠直送沒有倉庫可承接，因此只能顯示警示、不可確認到貨。
         const blockedDirectShip = directShip && sourceOrder && sourceStatus !== 'normal';
@@ -11749,8 +11775,10 @@ window.printPurchaseOrder = async function() {
     try {
         const poDocumentId = poNo;
         let committedSourceOrders = [];
+        let committedSupplyOrders = [];
         const commitPromise = db.runTransaction(async transaction => {
             committedSourceOrders = [];
+            committedSupplyOrders = [];
             const poRef = db.collection('purchaseOrders').doc(poDocumentId);
             const orderRefs = orderIds.map(orderId => db.collection('orders').doc(orderId));
             const poSnapshot = await transaction.get(poRef);
@@ -11765,7 +11793,7 @@ window.printPurchaseOrder = async function() {
                 const supplyId=formalSupplyOrderId(poDocumentId,itemIndex);
                 const supplyRef=db.collection('supplyOrders').doc(supplyId);
                 supplyOrderIds.push(supplyId);
-                transaction.set(supplyRef,{
+                const supplyRecord={
                     // 客戶訂單採購與公司備貨是兩種不同供應來源；purchaseOrders 只保存文件快照。
                     type:item.orderId?'PURCHASING_PO':'STOCK_REPLENISHMENT',
                     internalNo:poNo,
@@ -11795,7 +11823,9 @@ window.printPurchaseOrder = async function() {
                     createdByUid:currentUser?.uid||'',
                     createdBy:currentUserName||currentUser?.email||'',
                     createdByRole:currentUserRole
-                });
+                };
+                transaction.set(supplyRef,supplyRecord);
+                committedSupplyOrders.push({id:supplyId,...supplyRecord});
             });
             poRecord.supplyOrderIds=supplyOrderIds;
             transaction.set(poRef, poRecord);
@@ -11848,6 +11878,14 @@ window.printPurchaseOrder = async function() {
         // failure can retry the same PO idempotently instead of attempting to
         // create another PO with the same number.
         syncCommittedPurchaseOrderSources(committedSourceOrders);
+        // 正式 PO 已成功建立時，立即把供應紀錄放進待到貨快取。
+        // 避免使用者本工作階段曾開過待到貨後，新增備庫 PO 卻要手動更新才看得到。
+        if (committedSupplyOrders.length) {
+            const supplyMap = new Map(supplyReceivingCache.map(row => [row.id, row]));
+            committedSupplyOrders.forEach(row => supplyMap.set(row.id, row));
+            supplyReceivingCache = [...supplyMap.values()]
+                .sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
+        }
         const savedPo = { id: poDocumentId, ...poRecord };
         const cachedIndex = poListCache.findIndex(po => po.id === savedPo.id);
         if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;

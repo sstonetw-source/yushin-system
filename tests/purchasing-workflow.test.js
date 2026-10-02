@@ -721,6 +721,46 @@ test('cancelled warehouse source still receives into free stock while direct shi
     assert.match(source,/orderId:supply\.orderId\|\|'',itemId:supply\.itemId\|\|'',sourceOrderStatus,[\s\S]*?productKey,warehouseId,qty/);
 });
 
+test('receiving card counts standalone stock replenishment and does not hide it by salesperson', () => {
+    const start=app.indexOf('function standaloneReceivingSupplyMetrics');
+    const end=app.indexOf('\nfunction renderPurchasingWorkCards',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    let seenFilters=null;
+    const context=vm.createContext({
+        supplyReceivingCache:[
+            {id:'stock-1',type:'STOCK_REPLENISHMENT',status:'ORDERED',orderId:'',fulfillmentType:'WAREHOUSE',qty:10,receivedQty:2,unitCost:100,brand:'Beckman',orderDate:'2026-10-02'},
+            {id:'linked-1',type:'PURCHASING_PO',status:'ORDERED',orderId:'O1',fulfillmentType:'WAREHOUSE',qty:5,receivedQty:0,unitCost:200,brand:'Beckman',orderDate:'2026-10-02'},
+            {id:'done-1',type:'STOCK_REPLENISHMENT',status:'RECEIVED',orderId:'',fulfillmentType:'WAREHOUSE',qty:3,receivedQty:3,unitCost:300,brand:'Beckman',orderDate:'2026-10-02'}
+        ],
+        purchaseFilterContext:()=>({start:'',end:'',selectedSales:'Sales A',selectedBrand:'',selectableBrands:['Beckman']}),
+        purchaseLineMatchesFilters:(date,sales,brand,filters)=>{seenFilters=filters;return true;}
+    });
+    vm.runInContext(source,context);
+    const result=context.standaloneReceivingSupplyMetrics();
+    assert.deepEqual(JSON.parse(JSON.stringify(result)),{count:1,amount:800});
+    assert.equal(seenFilters.selectedSales,'');
+    const cardsStart=app.indexOf('function renderPurchasingWorkCards');
+    const cardsEnd=app.indexOf('\nfunction purchasingCompletedRows',cardsStart);
+    const cards=app.slice(cardsStart,cardsEnd);
+    assert.match(cards,/const standaloneReceiving = standaloneReceivingSupplyMetrics\(filters\)/);
+    assert.match(cards,/metrics\[category\]\.count \+ extraCount/);
+    assert.match(cards,/metrics\[category\]\.amount \+ extraAmount/);
+});
+
+test('formal purchase order commit immediately hydrates the receiving supply cache', () => {
+    const start=app.indexOf('window.printPurchaseOrder = async function');
+    const end=app.indexOf('\n// 「製作下一張估價單」',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/let committedSupplyOrders = \[\]/);
+    assert.match(source,/committedSupplyOrders = \[\]/);
+    assert.match(source,/committedSupplyOrders\.push\(\{id:supplyId,\.\.\.supplyRecord\}\)/);
+    assert.match(source,/const supplyMap = new Map\(supplyReceivingCache\.map/);
+    assert.match(source,/committedSupplyOrders\.forEach\(row => supplyMap\.set\(row\.id, row\)\)/);
+    assert.match(source,/supplyReceivingCache = \[\.\.\.supplyMap\.values\(\)\]/);
+});
+
 test('receiving queue keeps standalone stock and cancelled-order warehouse supplies visible', () => {
     const start=app.indexOf('function renderPurchasingReceivingWorkList(');
     const end=app.indexOf('\nwindow.renderPoList',start);
