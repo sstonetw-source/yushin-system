@@ -44,7 +44,7 @@
     return '';
   }
 
-  function projectSupply(record={},receipts=[]){
+  function projectSupply(record={},receipts=[],nowValue=''){
     if(!supply)throw new Error('Supply core is required.');
     const x=supply.normalize(record);
     const unitCost=n(x.unitCost);
@@ -65,6 +65,8 @@
       ? completionReceiptAt(receipts,effectiveOrderedQty)
       : '';
     const leadTimeDays=completionAt?dayDiff(x.orderDate||x.createdAt,completionAt):null;
+    const agingAt=nowValue||new Date().toISOString();
+    const openAgeDays=incomingQty>0?dayDiff(x.orderDate||x.createdAt,agingAt):null;
     return {
       record:x,
       supplier:supplierName,
@@ -87,6 +89,7 @@
       missingUnitCost:effectiveOrderedQty>0&&unitCost<=0,
       completionAt,
       leadTimeDays,
+      openAgeDays,
       isStockReplenishment
     };
   }
@@ -102,7 +105,10 @@
       customerOrderAmount:0,
       missingUnitCostCount:0,
       leadTimeDaysTotal:0,
-      leadTimeCount:0
+      leadTimeCount:0,
+      openAgeDaysTotal:0,
+      openAgeCount:0,
+      maxOpenAgeDays:0
     };
   }
 
@@ -119,6 +125,11 @@
       metric.leadTimeDaysTotal+=row.leadTimeDays;
       metric.leadTimeCount++;
     }
+    if(Number.isFinite(row.openAgeDays)){
+      metric.openAgeDaysTotal+=row.openAgeDays;
+      metric.openAgeCount++;
+      metric.maxOpenAgeDays=Math.max(metric.maxOpenAgeDays,row.openAgeDays);
+    }
   }
 
   function finalizeMetric(metric){
@@ -132,7 +143,10 @@
       customerOrderAmount:metric.customerOrderAmount,
       missingUnitCostCount:metric.missingUnitCostCount,
       leadTimeCount:metric.leadTimeCount,
-      avgLeadTimeDays:metric.leadTimeCount?metric.leadTimeDaysTotal/metric.leadTimeCount:null
+      avgLeadTimeDays:metric.leadTimeCount?metric.leadTimeDaysTotal/metric.leadTimeCount:null,
+      openAgeCount:metric.openAgeCount,
+      avgOpenAgeDays:metric.openAgeCount?metric.openAgeDaysTotal/metric.openAgeCount:null,
+      maxOpenAgeDays:metric.openAgeCount?metric.maxOpenAgeDays:null
     };
   }
 
@@ -148,9 +162,10 @@
     return result.sort((a,b)=>b.orderedAmount-a.orderedAmount||String(a[labelKey]).localeCompare(String(b[labelKey]),'zh-Hant'));
   }
 
-  function summarize(records=[],receiptRecords=[]){
+  function summarize(records=[],receiptRecords=[],options={}){
     const receiptMap=receiptsBySupply(receiptRecords);
-    const rows=(records||[]).map(record=>projectSupply(record,receiptMap.get(String(record?.id||''))||[]))
+    const nowValue=options.now||new Date().toISOString();
+    const rows=(records||[]).map(record=>projectSupply(record,receiptMap.get(String(record?.id||''))||[],nowValue))
       .filter(row=>row.effectiveOrderedQty>0||row.receivedQty>0);
     const totalMetric=newMetric();
     rows.forEach(row=>addMetric(totalMetric,row));
