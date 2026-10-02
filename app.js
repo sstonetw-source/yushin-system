@@ -4187,7 +4187,6 @@ window.saveSupplierMaster = async function() {
         const supplierId=editingId||stableMasterId('sup',supplierName);
         const previous=supplierMasterCache.find(item=>(item.id||item.supplierId)===supplierId);
         const now=new Date().toISOString();
-        const terminalStatus=received>0?'CLOSED':'CANCELLED';
         await db.collection('suppliers').doc(supplierId).set({
             supplierId,
             supplierName,
@@ -11636,6 +11635,7 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
         }
 
         const now=new Date().toISOString();
+        const terminalStatus=received>0?'CLOSED':'CANCELLED';
         if(orderSnap?.exists){
             const order=orderSnap.data();
             const items=normalizedOrderItems(order);
