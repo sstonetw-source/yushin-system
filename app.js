@@ -3387,51 +3387,78 @@ async function createForecastOrdersDirectly(forecast, items) {
     const orderDate = localDateString();
     const normalizedItems = items.map((item, index) => {
         const source = forecastItemToOrderSource(forecast, item);
-        return { ...normalizeNewOrderItem(source), itemId:'item-1', sourceItemIndex:index };
+        return { ...normalizeNewOrderItem(source), itemId:`item-${index + 1}`, sourceItemIndex:index };
     }).filter(item => item.itemName || item.itemCode);
     if (!normalizedItems.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
+
     const unmatchedItem=normalizedItems.find(item=>item.productMasterMatched!==true||!item.productId);
     if(unmatchedItem){
         throw new Error(`Forecast 品項「${unmatchedItem.itemName||unmatchedItem.itemCode||'未命名品項'}」尚未對應 Product Master，請先建立／對應產品後再轉訂單。`);
     }
-    const restrictedItem=normalizedItems.find(item=>item.brand&&!isCompanyBrandAllowed(currentCompany||'yushin',item.brand));
-    if(restrictedItem){
-        const restriction=quoteBrandRestrictionText(restrictedItem.brand);
-        throw new Error(`${restrictedItem.brand}${restriction ? '（'+restriction+'）' : ''} 不能使用目前公司抬頭建立訂單。`);
-    }
+
+    const firstItem=normalizedItems[0];
+    const totalPrice=normalizedItems.reduce((sum,item)=>sum+Number(item.totalPrice||0),0);
+    const orderRef=db.collection('orders').doc();
+    const orderData={
+        orderDate,
+        createdAt:now,
+        ...commercialCreatorFields(),
+        // 內部訂單不受公司／品牌限制；若來源估價單有公司，只保留作為來源紀錄。
+        company:forecast.company||'',
+        customerName:forecast.customerName||'',
+        customerId:forecast.customerId||customerIdForName(forecast.customerName||''),
+        brand:firstItem.brand||'',
+        itemCode:firstItem.itemCode||'',
+        itemCodeKey:normalizeHistoryItemCode(firstItem.itemCode||''),
+        itemName:firstItem.itemName||'',
+        productLine:firstItem.productLine||'',
+        productType:firstItem.productType||'',
+        procurementType:firstItem.procurementType||'PURCHASING_PO',
+        fulfillmentType:firstItem.fulfillmentType||'WAREHOUSE',
+        warehouseId:firstItem.warehouseId||'',
+        qty:Number(firstItem.qty||0),
+        unitPrice:Number(firstItem.unitPrice||0),
+        totalPrice,
+        items:normalizedItems,
+        itemCount:normalizedItems.length,
+        orderSchemaVersion:2,
+        productMasterMatched:true,
+        productId:firstItem.productId||'',
+        supplier:firstItem.supplier||'',
+        spec:firstItem.spec||'',
+        status:BUSINESS_STATUS.ACTIVE,
+        ...grossAmountMetadata(totalPrice),
+        transactionType:'',
+        invoiceTitle:'',
+        quoteNo:'',
+        ...linkedDocumentFields(
+            DOCUMENT_TYPES.FORECAST,
+            forecast.id,
+            [documentLink(DOCUMENT_TYPES.FORECAST,forecast.id,'source')]
+        ),
+        salesName:forecast.salesName||currentUserName||'',
+        salesCode:forecast.salesCode||currentUserCode||'',
+        ownerUid:forecast.ownerUid||currentUser?.uid||'',
+        isDelivered:false,
+        isBilled:false,
+        invoiceDate:'',
+        inventoryReservationStatus:'pending',
+        inventoryReservationError:'',
+        inventoryReservationUpdatedAt:now
+    };
+    orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
 
     const batch=db.batch();
-    const created=[];
-    normalizedItems.forEach((item,index)=>{
-        const orderRef=db.collection('orders').doc();
-        const totalPrice=Number(item.totalPrice||0);
-        const orderData={
-            orderDate,createdAt:now,...commercialCreatorFields(),company:currentCompany||'yushin',
-            customerName:forecast.customerName||'',
-            customerId:forecast.customerId||customerIdForName(forecast.customerName||''),
-            ...item,qty:item.qty,unitPrice:item.unitPrice,totalPrice,
-            items:[item],itemCount:1,orderSchemaVersion:2,
-            status:BUSINESS_STATUS.ACTIVE,...grossAmountMetadata(totalPrice),
-            transactionType:'',invoiceTitle:'',quoteNo:'',
-            ...linkedDocumentFields(DOCUMENT_TYPES.FORECAST,forecast.id,[documentLink(DOCUMENT_TYPES.FORECAST,forecast.id,'source')]),
-            sourceItemIndex:index,
-            salesName:forecast.salesName||currentUserName||'',
-            salesCode:forecast.salesCode||currentUserCode||'',
-            ownerUid:forecast.ownerUid||currentUser?.uid||'',
-            isDelivered:false,isBilled:false,invoiceDate:'',
-            inventoryReservationStatus:'pending',
-            inventoryReservationError:'',
-            inventoryReservationUpdatedAt:now
-        };
-        orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
-        batch.set(orderRef,orderData);
-        batch.set(db.collection('forecasts').doc(forecast.id),{
-            linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')),
-            updatedAt:now
-        },{merge:true});
-        created.push({id:orderRef.id,data:orderData});
-    });
+    batch.set(orderRef,orderData);
+    batch.set(db.collection('forecasts').doc(forecast.id),{
+        linkedDocuments:firebase.firestore.FieldValue.arrayUnion(
+            documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')
+        ),
+        updatedAt:now
+    },{merge:true});
     await batch.commit();
+
+    const created=[{id:orderRef.id,data:orderData}];
     const reservationResults = await Promise.all(created.map(async order => {
         try {
             await reserveInventoryForNewOrder(order.id, order.data);
@@ -3457,8 +3484,12 @@ async function createForecastOrdersDirectly(forecast, items) {
             return { id:order.id, status:'failed', error:updates.inventoryReservationError };
         }
     }));
-    ordersCache=[...created.map(order=>({id:order.id,...order.data})),...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))]
-        .sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
+
+    ordersCache=[
+        ...created.map(order=>({id:order.id,...order.data})),
+        ...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))
+    ].sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
+
     return {
         created,
         reservationFailures:reservationResults.filter(result=>result.status==='failed')
@@ -3482,15 +3513,15 @@ window.createOrderFromForecast = async function(id) {
             return;
         }
 
-        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將拆成 ${items.length} 筆獨立訂單。確定繼續？`)) return;
+        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
         const result = await createForecastOrdersDirectly(forecast, items);
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         if (result.reservationFailures.length) {
-            alert(`已建立 ${items.length} 筆訂單；其中 ${result.reservationFailures.length} 筆庫存占用未完成，訂單已標記為「庫存同步失敗」，請由管理員或採購在訂單頁重新同步，請勿重複建立訂單。`);
+            alert(`已建立 1 張含 ${items.length} 個品項的訂單；庫存占用未完成，訂單已標記為「庫存同步失敗」，請由管理員或採購在訂單頁重新同步，請勿重複建立訂單。`);
         } else {
-            alert(`已將 Forecast 的 ${items.length} 個品項建立為 ${items.length} 筆獨立訂單，庫存占用已同步。`);
+            alert(`已將 Forecast 的 ${items.length} 個品項建立為 1 張訂單，庫存占用已同步。`);
         }
         if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
             loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
@@ -6693,6 +6724,7 @@ window.createForecastFromQuote = async function(quoteNo) {
                 subtotal: parseMoney(item.subtotal)
             })),
             estimatedAmount: Number(String(q.grandTotal || '').replace(/,/g, '')) || 0,
+            company: q.company || '',
             stage,
             status,
             closedAt: status === 'active' ? null : now,
@@ -15509,13 +15541,6 @@ window.saveNewOrder = function() {
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
     if(items.some(item=>item.productMasterMatched!==true||!item.productId)){alert('正式訂單的每個品項都必須對應 Product Master。請先選擇既有產品，或用「快速新增產品」建立基本資料。');return;}
-    const orderCompany=window._orderModalQuoteContext?.company||currentCompany||'yushin';
-    const restrictedItem=items.find(item=>item.brand&&!isCompanyBrandAllowed(orderCompany,item.brand));
-    if(restrictedItem){
-        const restriction=quoteBrandRestrictionText(restrictedItem.brand);
-        alert(`${restrictedItem.brand}${restriction ? '（'+restriction+'）' : ''} 不能使用目前公司抬頭建立訂單，請更換公司或產品。`);
-        return;
-    }
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
     const assistedOwner = currentUserRole === 'purchaser'
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
@@ -15528,7 +15553,7 @@ window.saveNewOrder = function() {
         orderDate: document.getElementById('orderDateInput').value,
         createdAt: new Date().toISOString(),
         ...commercialCreatorFields(),
-        company: window._orderModalQuoteContext?.company || currentCompany || 'yushin',
+        company: window._orderModalQuoteContext?.company || '',
         customerName: document.getElementById('orderCustomer').value.trim(),
         customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
         brand: firstItem.brand,
