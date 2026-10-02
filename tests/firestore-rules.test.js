@@ -643,3 +643,21 @@ test('procurement demand permissions follow ERP ownership', async () => {
     ownerUid:'',salesCode:''
   }));
 });
+
+test('product supplier mappings are purchasing master data', async () => {
+  const mapping = {
+    mappingId:'psm-p-order-sup1',
+    productId:'p-order',
+    itemCode:'P-ORDER',
+    supplierId:'sup1',
+    supplierPartNo:'VENDOR-001',
+    priority:1,
+    leadTimeDays:5,
+    active:true
+  };
+  await assertSucceeds(setDoc(doc(db('buyer1'),'productSupplierMappings/psm-p-order-sup1'),mapping));
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'productSupplierMappings/psm-p-order-sup1'),{leadTimeDays:7}));
+  await assertSucceeds(getDoc(doc(db('sales1'),'productSupplierMappings/psm-p-order-sup1')));
+  await assertFails(setDoc(doc(db('sales1'),'productSupplierMappings/psm-sales'),{...mapping,mappingId:'psm-sales'}));
+  await assertFails(updateDoc(doc(db('sales1'),'productSupplierMappings/psm-p-order-sup1'),{priority:2}));
+});
