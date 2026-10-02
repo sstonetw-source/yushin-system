@@ -10037,8 +10037,12 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         const date = sourceOrder?.orderDate || supply.orderDate || '';
         const salesName = sourceOrder?.salesName || supply.salesName || supply.createdBy || '';
         const brand = supply.brand || '';
-        const standaloneFilters = !supply.orderId ? { ...filters, selectedSales:'' } : filters;
-        if (!purchaseLineMatchesFilters(date, salesName, brand, standaloneFilters)) return;
+        if (supply.orderId) {
+            if (!purchaseLineMatchesFilters(date, salesName, brand, filters)) return;
+        } else {
+            // 公司備庫沒有負責業務；業務篩選不應讓真實在途採購從待到貨消失。
+            if (!purchaseLineMatchesFilters(date, '', brand, { ...filters, selectedSales:'' })) return;
+        }
 
         // 已取消訂單的原廠直送沒有倉庫可承接，因此只能顯示警示、不可確認到貨。
         const blockedDirectShip = directShip && sourceOrder && sourceStatus !== 'normal';
