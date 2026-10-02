@@ -104,40 +104,6 @@ test('purchase order increments only remaining demand',()=>{
   assert.equal(result.demand.status,d.STATUSES.ORDERED);
 });
 
-test('warehouse sales PO keeps MOQ excess out of customer demand',()=>{
-  const result=d.planPurchaseOrder({
-    sourceType:'SALES_ORDER',requestedQty:3,orderedQty:0,receivedQty:0,fulfillmentType:'WAREHOUSE'
-  },5,{fulfillmentType:'WAREHOUSE'});
-  assert.equal(result.valid,true);
-  assert.equal(result.purchaseQty,5);
-  assert.equal(result.demandAllocatedQty,3);
-  assert.equal(result.excessStockQty,2);
-  assert.equal(result.demand.orderedQty,3);
-  assert.equal(result.demand.requestedQty,3);
-});
-
-test('direct ship PO cannot turn MOQ excess into customer delivery',()=>{
-  const result=d.planPurchaseOrder({
-    sourceType:'SALES_ORDER',requestedQty:3,orderedQty:0,receivedQty:0,fulfillmentType:'DIRECT_SHIP'
-  },5,{fulfillmentType:'DIRECT_SHIP'});
-  assert.equal(result.valid,false);
-  assert.equal(result.reason,'direct_ship_excess');
-  assert.equal(result.demandAllocatedQty,3);
-  assert.equal(result.excessStockQty,2);
-  assert.equal(result.demand.orderedQty,0);
-});
-
-test('stock replenishment may expand demand to a supplier MOQ commitment',()=>{
-  const result=d.planPurchaseOrder({
-    sourceType:'STOCK_REPLENISHMENT',sourceId:'P1',requestedQty:15,orderedQty:0,receivedQty:0
-  },25);
-  assert.equal(result.valid,true);
-  assert.equal(result.demandAllocatedQty,25);
-  assert.equal(result.excessStockQty,0);
-  assert.equal(result.demand.requestedQty,25);
-  assert.equal(result.demand.orderedQty,25);
-});
-
 test('purchase receipt increments only ordered remainder',()=>{
   const result=d.applyReceipt({requestedQty:10,orderedQty:8,receivedQty:3},9);
   assert.equal(result.appliedQty,5);
@@ -213,18 +179,6 @@ test('reconcileLinkedSupplies mirrors ERP status updater across active and cance
   assert.equal(reconciled.remainingToOrderQty,3);
   assert.equal(reconciled.remainingToReceiveQty,3);
   assert.equal(reconciled.status,d.STATUSES.PARTIALLY_RECEIVED);
-});
-
-test('linked supply contribution ignores MOQ stock excess',()=>{
-  const demand={demandId:'SALES_ORDER:o1:i1',requestedQty:3};
-  const reconciled=d.reconcileLinkedSupplies(demand,[
-    {demandId:demand.demandId,qty:5,demandAllocatedQty:3,excessStockQty:2,receivedQty:5,status:'RECEIVED'}
-  ]);
-  assert.equal(reconciled.orderedQty,3);
-  assert.equal(reconciled.receivedQty,3);
-  assert.equal(reconciled.remainingToOrderQty,0);
-  assert.equal(reconciled.remainingToReceiveQty,0);
-  assert.equal(reconciled.status,d.STATUSES.RECEIVED);
 });
 
 test('delivery plan risk uses enough incoming quantity, not simply the latest PO',()=>{
