@@ -948,11 +948,12 @@ test('phase 6 supply receipt decreases incoming and increases warehouse stock wi
     const end=appSource.indexOf('window.openSupplyReceipt',start);
     const s=appSource.slice(start,end);
     assert.match(s,/onHand:inv\.onHand\+qty/);
-    assert.match(s,/const incomingRelease=Math\.min\(qty,registeredIncoming\)/);
+    assert.match(s,/const receiptPlan=window\.YushinReceiving\.applyReceipt\(supply,qty\)/);
+    assert.match(s,/const incomingRelease=receiptPlan\.incomingReleaseQty/);
     assert.match(s,/incoming:Math\.max\(0,inv\.incoming-incomingRelease\)/);
     assert.match(s,/onHand:wh\.onHand\+qty/);
     assert.match(s,/incoming:Math\.max\(0,wh\.incoming-incomingRelease\)/);
-    assert.match(s,/incomingRegisteredQty:Math\.max\(0,registeredIncoming-incomingRelease\)/);
+    assert.match(s,/incomingRegisteredQty:receiptPlan\.record\.incomingRegisteredQty/);
     assert.match(s,/collection\('receipts'\)/);
     assert.doesNotMatch(s,/pendingInventoryItems/);
     assert.match(s,/supplyRef,\{receivedQty,status:/);
@@ -4175,9 +4176,9 @@ test('supply rule tightening still covers current quick-order receipt and cancel
     const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
     const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
     const receiptSource=appSource.slice(receiptStart,receiptEnd);
-    assert.match(receiptSource,/receivedQty/);
-    assert.match(receiptSource,/PARTIAL_RECEIPT/);
-    assert.match(receiptSource,/RECEIVED/);
+    assert.match(receiptSource,/YushinReceiving\.applyReceipt\(supply,qty\)/);
+    assert.match(receiptSource,/receiptPlan\.record\.receivedQty/);
+    assert.match(receiptSource,/receiptPlan\.record\.status/);
 });
 
 
@@ -4234,8 +4235,9 @@ test('direct ship receipt transaction writes the supply delta required by securi
     const directSource=receiptSource.slice(directStart,warehouseStart);
     assert.match(directSource,/deliveryRecord=\{[\s\S]*?sourceType:'DIRECT_SHIP_RECEIPT'[\s\S]*?sourceId:supplyId/);
     assert.match(directSource,/deliveryRecords=\[\.\.\.savedDeliveryRecords\(order\),deliveryRecord\]/);
-    assert.match(directSource,/const receivedQty=Number\(supply\.receivedQty\|\|0\)\+qty/);
-    assert.match(directSource,/tx\.update\(supplyRef,\{receivedQty,status:/);
+    assert.match(directSource,/const receiptPlan=window\.YushinReceiving\.applyReceipt\(supply,qty\)/);
+    assert.match(directSource,/const receivedQty=receiptPlan\.record\.receivedQty/);
+    assert.match(directSource,/tx\.update\(supplyRef,\{receivedQty,status:receiptPlan\.record\.status/);
     assert.match(directSource,/tx\.update\(orderRef,\{[\s\S]*?deliveryRecords,deliveredQty:grossDelivered,isDelivered:/);
 });
 

@@ -41,11 +41,19 @@
   function projectItem(input={}){
     const orderedQty=n(input.orderedQty??input.qty);
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
-    const grossDeliveredQty=n(input.deliveredQty);
     const returnedQty=n(input.returnedQty);
-    const effectiveDeliveredQty=hasNumber(input.effectiveDeliveredQty)
+    // itemWorkCategory 的 deliveredQty 歷來代表「退貨扣除後的有效送貨量」。
+    // app 若同時掌握 gross/effective 會明確傳 effectiveDeliveredQty；
+    // 這裡不可在 fallback 再扣一次 returnedQty，否則退貨補送完成仍會被判成未完成。
+    const hasExplicitEffective=hasNumber(input.effectiveDeliveredQty);
+    const effectiveDeliveredQty=hasExplicitEffective
       ? Math.min(orderedQty,n(input.effectiveDeliveredQty))
-      : Math.min(orderedQty,Math.max(0,grossDeliveredQty-returnedQty));
+      : Math.min(orderedQty,n(input.deliveredQty));
+    const grossDeliveredQty=hasNumber(input.grossDeliveredQty)
+      ? n(input.grossDeliveredQty)
+      : hasExplicitEffective
+        ? n(input.deliveredQty)
+        : n(input.deliveredQty)+returnedQty;
     const outstandingQty=Math.max(0,orderedQty-effectiveDeliveredQty);
 
     let reservedQty=0;

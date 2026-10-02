@@ -6,6 +6,7 @@ const path = require('node:path');
 const workflow = require('../modules/workflow-core.js');
 const fulfillment = require('../modules/fulfillment-core.js');
 const supply = require('../modules/supply-core.js');
+const receiving = require('../modules/receiving-core.js');
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -425,20 +426,23 @@ test('purchase receiving queue calculates progress from supply orders only',()=>
     assert.doesNotMatch(app,/poItemReceiptProgress/);
 });
 
-test('supply receipt synchronizes received quantity back to the source order item',()=>{
+test('supply receipt synchronizes received quantity back to the source order item through receiving core',()=>{
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
     const source=app.slice(start,end);
-    assert.match(source,/const next=window\.YushinFulfillment\.applyReceipt\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
+    assert.match(source,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
     assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
+    assert.match(source,/const next=receiptPlan\.item/);
+    assert.match(source,/reserveQty=receiptPlan\.reservedDelta/);
     assert.match(source,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
     assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
-    assert.match(source,/tx\.update\(supplyRef,\{receivedQty,status:/);
+    assert.match(source,/window\.YushinReceiving\.applyReceipt\(supply,qty\)/);
 });
 
 
-test('self-order receipt uses fulfillment core receivedQty without adding it twice',()=>{
-    assert.match(app,/const next=window\.YushinFulfillment\.applyReceipt\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
+test('self-order receipt uses receiving core receivedQty without adding it twice',()=>{
+    assert.match(app,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
+    assert.match(app,/const next=receiptPlan\.item/);
     assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存占用紀錄/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
 });
@@ -714,8 +718,8 @@ test('cancelled warehouse source still receives into free stock while direct shi
     const warehouseSource=source.slice(warehouseStart,registeredStart);
     assert.match(warehouseSource,/sourceOrderStatus=normalizedOrderStatus\(order\)/);
     assert.match(warehouseSource,/if\(sourceOrderStatus==='normal'\)\{/);
-    assert.match(warehouseSource,/const receivedForOrder=Math\.min\(qty,Math\.max\(0,orderedQty-currentReceived\)\)/);
-    assert.match(warehouseSource,/items\[itemIndex\]=\{\.\.\.item,receivedQty:currentReceived\+receivedForOrder\}/);
+    assert.match(warehouseSource,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:0\},qty\)/);
+    assert.match(warehouseSource,/items\[itemIndex\]=\{\.\.\.item,receivedQty:receiptPlan\.item\.receivedQty\}/);
     assert.match(warehouseSource,/orderWorkIndexFields\(nextOrder\)/);
     assert.doesNotMatch(warehouseSource,/來源訂單已取消，不能繼續確認到貨/);
     assert.match(source,/orderId:supply\.orderId\|\|'',itemId:supply\.itemId\|\|'',sourceOrderStatus,[\s\S]*?productKey,warehouseId,qty/);
@@ -734,7 +738,8 @@ test('receiving card counts standalone stock replenishment and does not hide it 
             {id:'done-1',type:'STOCK_REPLENISHMENT',status:'RECEIVED',orderId:'',fulfillmentType:'WAREHOUSE',qty:3,receivedQty:3,unitCost:300,brand:'Beckman',orderDate:'2026-10-02'}
         ],
         purchaseFilterContext:()=>({start:'',end:'',selectedSales:'Sales A',selectedBrand:'',selectableBrands:['Beckman']}),
-        purchaseLineMatchesFilters:(date,sales,brand,filters)=>{seenFilters=filters;return true;}
+        purchaseLineMatchesFilters:(date,sales,brand,filters)=>{seenFilters=filters;return true;},
+        window:{YushinReceiving:receiving}
     });
     vm.runInContext(source,context);
     const result=context.standaloneReceivingSupplyMetrics();
