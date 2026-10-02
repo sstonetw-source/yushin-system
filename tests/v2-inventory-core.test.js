@@ -21,6 +21,15 @@ test('allocateLots uses FEFO and preserves actual lot cost',()=>{
   assert.equal(result.totalCost,540);
 });
 
+test('allocateLots uses FIFO when expiry management is disabled',()=>{
+  const result=inventory.allocateLots([
+    {id:'new',expiryDate:'2027-01-01',receivedAt:'2026-02-01',remainingQty:10,unitCost:120},
+    {id:'old',expiryDate:'2028-01-01',receivedAt:'2026-01-01',remainingQty:10,unitCost:100}
+  ],12,false);
+  assert.deepEqual(result.allocations.map(x=>[x.lotId,x.qty]),[['old',10],['new',2]]);
+  assert.equal(result.totalCost,1240);
+});
+
 test('allocateLots falls back to FIFO when expiry is absent',()=>{
   const result=inventory.allocateLots([
     {id:'b',receivedAt:'2026-02-01',remainingQty:5,unitCost:20},
