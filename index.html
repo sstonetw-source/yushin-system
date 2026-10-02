@@ -869,10 +869,11 @@
         <div id="purchasePendingPanel">
             <div class="toolbar no-print">
                 <button type="button" id="purchasePendingRefreshBtn" class="btn-secondary" onclick="loadPendingPurchaseOrders(true)">↻ 更新</button>
+                <button type="button" id="purchasePendingBatchPoBtn" class="btn-secondary" onclick="openSelectedPurchaseDraft()" disabled>合併產生訂購單</button>
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
             <div class="table-wrap"><table>
-                <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待採購品項</th><th>操作</th></tr></thead>
+                <thead><tr><th class="no-print">合併</th><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待採購品項</th><th>操作</th></tr></thead>
                 <tbody id="purchasePendingBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -1556,6 +1557,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-5"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-10"></script>
-    <script src="app.js?v=20261002-33"></script>
+    <script src="app.js?v=20261002-34"></script>
 </body>
 </html>
