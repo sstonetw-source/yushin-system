@@ -54,6 +54,8 @@ test('purchase receipt snapshot preserves ERP traceability without exposing prot
     purchaseDocumentId:'PO-DOC-1',
     purchaseDocumentNo:'PO-2026-001',
     internalNo:'PO-2026-001',
+    orderDate:'2026-10-01',
+    createdAt:'2026-10-01T09:00:00.000Z',
     supplierId:'SUP1',
     supplier:'供應商 A',
     productId:'P1',
@@ -84,6 +86,8 @@ test('purchase receipt snapshot preserves ERP traceability without exposing prot
   assert.equal(receipt.sourceId,'O1');
   assert.equal(receipt.sourceItemId,'I1');
   assert.equal(receipt.purchaseDocumentNo,'PO-2026-001');
+  assert.equal(receipt.supplyOrderDate,'2026-10-01');
+  assert.equal(receipt.supplyCreatedAt,'2026-10-01T09:00:00.000Z');
   assert.equal(receipt.supplierId,'SUP1');
   assert.equal(receipt.productId,'P1');
   assert.equal(receipt.orderedQty,10);
