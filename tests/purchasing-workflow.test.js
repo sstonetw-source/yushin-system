@@ -1034,7 +1034,7 @@ test('dispatch readiness uses live reservation and supports later receipt batche
         window:{YushinFulfillment:fulfillment}
     });
     vm.runInContext(source,context);
-    const item={itemId:'I1',reservedQty:5,dispatchPreparedQty:5};
+    const item={itemId:'I1',orderedQty:10,qty:10,reservedQty:5,dispatchPreparedQty:5};
     const afterFirstShipment=context.itemDispatchState({items:[item],deliveryRecords:[{itemId:'I1',qty:5}]},item);
     assert.equal(afterFirstShipment.pending,5);
     assert.equal(afterFirstShipment.shippable,0);
