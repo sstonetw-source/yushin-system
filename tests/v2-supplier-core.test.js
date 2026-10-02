@@ -63,3 +63,27 @@ test('communication event records preparation, not verified sending',()=>{
   assert.equal(event.channel,'WEB_SHARE');
   assert.equal(event.recipientEmail,'orders@example.com');
 });
+
+test('product-specific supplier mapping outranks by priority',()=>{
+  const selected=supplier.selectProductSupplierMapping([
+    {productId:'P1',supplierId:'S2',priority:2,leadTimeDays:7},
+    {productId:'P1',supplierId:'S1',priority:1,supplierPartNo:'V-100',leadTimeDays:3},
+    {productId:'P2',supplierId:'S3',priority:1}
+  ],{productId:'P1',itemCode:'A-100'});
+  assert.equal(selected.supplierId,'S1');
+  assert.equal(selected.supplierPartNo,'V-100');
+  assert.equal(selected.leadTimeDays,3);
+});
+
+test('product supplier relation can match by item code when product id is unavailable',()=>{
+  const selected=supplier.selectProductSupplierMapping([
+    {itemCode:'ABC-1',supplierId:'S1',priority:1}
+  ],{itemCode:'abc-1'});
+  assert.equal(selected.supplierId,'S1');
+});
+
+test('product supplier relation requires product identity and supplier',()=>{
+  assert.equal(supplier.validateProductSupplierMapping({productId:'P1',supplierId:'S1'}).valid,true);
+  assert.deepEqual(supplier.validateProductSupplierMapping({supplierId:'S1'}).errors,['product']);
+  assert.deepEqual(supplier.validateProductSupplierMapping({productId:'P1'}).errors,['supplierId']);
+});
