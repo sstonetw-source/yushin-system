@@ -3951,6 +3951,7 @@ async function loadSupplierWarehouseMasters(force = false) {
         productSupplierMappingCache.sort((a,b)=>Number(a.priority||1)-Number(b.priority||1));
         renderSupplierMasterAdmin();
         renderSupplierMappingAdmin();
+        renderProductSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
         return {
@@ -4094,6 +4095,25 @@ function renderSupplierMappingAdmin() {
             <td><button type="button" class="btn-small btn-danger" onclick="disableSupplierMapping('${escapeAttr(mapping.id)}')">停用</button></td>
         </tr>`;
     }).join('') : '<tr><td colspan="6" style="color:#888;">尚未設定供應商對應。</td></tr>';
+}
+
+function renderProductSupplierMappingAdmin() {
+    const body=document.getElementById('productSupplierMappingBody');
+    if(!body)return;
+    body.innerHTML=productSupplierMappingCache.length?productSupplierMappingCache.map(mapping=>{
+        const supplier=supplierMasterCache.find(item =>
+            item.id===mapping.supplierId || item.supplierId===mapping.supplierId
+        )||{};
+        const leadTime=Math.max(0,Number(mapping.leadTimeDays||0));
+        return `<tr>
+            <td>${escapeHtml(mapping.itemCode||mapping.productId||'')}</td>
+            <td>${escapeHtml(supplier.supplierName||'找不到供應商')}</td>
+            <td>${escapeHtml(mapping.supplierPartNo||'')}</td>
+            <td>${Math.max(1,Number(mapping.priority||1))}</td>
+            <td>${leadTime?leadTime+' 天':'－'}</td>
+            <td><button type="button" class="btn-small btn-danger" onclick="disableProductSupplierMapping('${escapeAttr(mapping.id||mapping.mappingId||'')}')">停用</button></td>
+        </tr>`;
+    }).join(''):'<tr><td colspan="6" style="color:#888;">尚未設定產品指定供應來源；系統會使用廠牌／產品線預設。</td></tr>';
 }
 
 function renderWarehouseMasterAdmin() {
@@ -4245,6 +4265,67 @@ window.disableSupplierMapping = async function(id) {
     if (!canCreatePurchaseOrderCapability() || !id) return;
     await db.collection('brandSupplierMappings').doc(id).set({ active:false, updatedAt:new Date().toISOString() }, { merge:true });
     supplierWarehouseLoadPromise = null;
+    await loadSupplierWarehouseMasters(true);
+};
+
+window.saveProductSupplierMapping = async function() {
+    if(!canCreatePurchaseOrderCapability())return;
+    const status=document.getElementById('productSupplierMappingStatus');
+    const itemCode=String(document.getElementById('productSupplierItemCode')?.value||'').trim();
+    const supplierSelection=String(document.getElementById('productSupplierSupplier')?.value||'').trim();
+    const supplierPartNo=String(document.getElementById('productSupplierPartNo')?.value||'').trim();
+    const priority=Math.max(1,Math.floor(Number(document.getElementById('productSupplierPriority')?.value||1)));
+    const leadTimeDays=Math.max(0,Math.floor(Number(document.getElementById('productSupplierLeadTime')?.value||0)));
+    if(!itemCode){if(status)status.innerText='請輸入產品貨號。';return;}
+    const normalized=supplierSelection.normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+    const supplier=supplierMasterCache.find(item=>{
+        const supplierId=item.id||item.supplierId||'';
+        return supplierId===supplierSelection
+            || String(item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalized
+            || String(item.purchaseHeaderName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalized;
+    });
+    if(!supplier){if(status)status.innerText='請選擇已建立的供應商主檔。';return;}
+    try{
+        if(status)status.innerText='正在確認 Product Master…';
+        const product=await findProductByCode(itemCode);
+        if(!product)throw new Error('找不到這個 Product Master 貨號，請先到「產品」確認。');
+        const productId=product.productId||stableProductId(product);
+        const supplierId=supplier.id||supplier.supplierId||'';
+        const validation=globalThis.YushinSupplier?.validateProductSupplierMapping({
+            productId,itemCode:product.model||itemCode,supplierId,supplierPartNo,priority,leadTimeDays
+        });
+        if(!validation?.valid)throw new Error('產品供應來源資料不完整：'+(validation?.errors||[]).join(', '));
+        const mappingId=stableMasterId('psm',productId+'|'+supplierId);
+        const previous=productSupplierMappingCache.find(item=>(item.id||item.mappingId)===mappingId);
+        const now=new Date().toISOString();
+        await db.collection('productSupplierMappings').doc(mappingId).set({
+            ...validation.mapping,
+            mappingId,
+            productName:product.nameCn||product.nameEn||'',
+            active:true,
+            createdAt:previous?.createdAt||now,
+            updatedAt:now
+        },{merge:true});
+        supplierWarehouseLoadPromise=null;
+        await loadSupplierWarehouseMasters(true);
+        const ids=['productSupplierItemCode','productSupplierSupplier','productSupplierPartNo'];
+        ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+        const priorityInput=document.getElementById('productSupplierPriority');
+        const leadInput=document.getElementById('productSupplierLeadTime');
+        if(priorityInput)priorityInput.value='1';
+        if(leadInput)leadInput.value='0';
+        if(status)status.innerText='產品供應來源已儲存。';
+    }catch(err){
+        if(status)status.innerText='儲存失敗：'+(err?.message||err);
+    }
+};
+
+window.disableProductSupplierMapping = async function(id) {
+    if(!canCreatePurchaseOrderCapability()||!id)return;
+    await db.collection('productSupplierMappings').doc(id).set({
+        active:false,updatedAt:new Date().toISOString()
+    },{merge:true});
+    supplierWarehouseLoadPromise=null;
     await loadSupplierWarehouseMasters(true);
 };
 
@@ -9644,6 +9725,7 @@ window.switchPurchasingView = function(view, tab) {
     if (view === 'suppliers') {
         renderSupplierMasterAdmin();
         renderSupplierMappingAdmin();
+        renderProductSupplierMappingAdmin();
         if (!purchasingViewLoaded.has('suppliers')) {
             purchasingViewLoaded.add('suppliers');
             loadSupplierWarehouseMasters(false).catch(err => {
@@ -11088,7 +11170,7 @@ window.emailPurchaseOrder = async function(poId) {
 
         const contact=purchaseOrderSupplierContact(po);
         if(!contact.email){
-            alert('這個供應商尚未設定 Email。請先到管理員後台的「供應商與廠牌對應」補上 Email。');
+            alert('這個供應商尚未設定 Email。請到「採購 → 供應商」補上訂購 Email。');
             return;
         }
 
