@@ -69,3 +69,25 @@ test('return replacement dispatch remains cumulative beyond original order quant
   assert.equal(x.shortageQty,0);
   assert.equal(f.fulfillmentStatus(x),'全部送貨');
 });
+
+test('dispatchState is the single source for pending and shippable quantities',()=>{
+  const state=f.dispatchState({
+    orderedQty:10,
+    reservedQty:4,
+    dispatchPreparedQty:7,
+    deliveredQty:5,
+    returnedQty:1
+  });
+  assert.deepEqual(state,{
+    delivered:4,
+    grossDelivered:5,
+    returned:1,
+    reserved:4,
+    prepared:7,
+    preparedOutstanding:2,
+    shippable:2,
+    pending:2
+  });
+  assert.equal(f.pendingDispatchQty({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1}),2);
+  assert.equal(f.shippableQty({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1}),2);
+});
