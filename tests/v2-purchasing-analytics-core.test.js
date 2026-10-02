@@ -75,3 +75,29 @@ test('missing purchase unit cost is surfaced as a data-quality count',()=>{
   assert.equal(result.totals.missingUnitCostCount,1);
   assert.equal(result.byBrand[0].missingUnitCostCount,1);
 });
+
+test('ERP supply sourceType is authoritative for stock versus customer demand',()=>{
+  const stock=analytics.projectSupply({
+    method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',
+    qty:2,receivedQty:0,status:'ORDERED',unitCost:50,supplier:'A'
+  });
+  const customer=analytics.projectSupply({
+    method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1',sourceItemId:'I1',
+    qty:2,receivedQty:0,status:'ORDERED',unitCost:50,supplier:'A'
+  });
+  assert.equal(stock.isStockReplenishment,true);
+  assert.equal(customer.isStockReplenishment,false);
+  assert.equal(stock.stockAmount,100);
+  assert.equal(customer.customerOrderAmount,100);
+});
+
+test('supplier id groups name variations into one supplier',()=>{
+  const result=analytics.summarize([
+    {id:'S1',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',supplierId:'SUP1',supplier:'ABC Co.',qty:1,status:'ORDERED',unitCost:100,purchaseDocumentId:'P1'},
+    {id:'S2',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',supplierId:'SUP1',supplier:'ABC COMPANY',qty:2,status:'ORDERED',unitCost:100,purchaseDocumentId:'P1'}
+  ]);
+  assert.equal(result.bySupplier.length,1);
+  assert.equal(result.bySupplier[0].documentCount,1);
+  assert.equal(result.bySupplier[0].lineCount,2);
+  assert.equal(result.bySupplier[0].orderedAmount,300);
+});
