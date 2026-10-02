@@ -4495,3 +4495,40 @@ test('quick Product Master creation keeps list price optional', () => {
     assert.match(source,/if \(!brand \|\| !code \|\| !productName\)/);
     assert.doesNotMatch(source,/!brand \|\| !code \|\| !productName \|\| String\(priceRaw\)/);
 });
+
+
+test('quote quick Product Master creation is optional while formal orders require a real product id', () => {
+    assert.match(appSource, /建立 Product Master（選填）/);
+    const saveStart=appSource.indexOf('window.saveNewOrder = function()');
+    const saveEnd=appSource.indexOf('\nfunction loadOrdersFromCloud',saveStart);
+    const source=appSource.slice(saveStart,saveEnd);
+    assert.match(source, /item\.productMasterMatched!==true\|\|!item\.productId/);
+    assert.match(source, /productId: firstItem\.productId \|\| ''/);
+});
+
+test('self-order transaction cost is manual and standard cost is not auto-filled into an order', () => {
+    const start=appSource.indexOf('async function applyOrderProductCost');
+    const end=appSource.indexOf('\nfunction clearQuickProductButton',start);
+    const source=appSource.slice(start,end);
+    assert.match(source, /input\.value = ''/);
+    assert.doesNotMatch(source, /loadVisibleProductCost|item\.cost/);
+    assert.doesNotMatch(appSource, /safeEmbeddedOrderCost/);
+});
+
+test('protected Product Master costs drive sales statistics without being copied to formal orders', () => {
+    assert.match(appSource, /function orderUnitCostForStats/);
+    assert.match(appSource, /purchaseCostCache\.get\(productId\)/);
+    assert.match(appSource, /preloadSalesStatisticsProductCosts\(salesStatisticsOrders\)/);
+    const start=appSource.indexOf('window.saveMissingCostFromStats');
+    const end=appSource.indexOf('function escapeAttr',start);
+    const source=appSource.slice(start,end);
+    assert.match(source, /collection\('productCosts'\)\.doc\(resolvedProductId\)\.set/);
+    assert.match(source, /procurementType === 'SALES_SELF_ORDER'/);
+});
+
+test('order Firestore rules verify Product Master identity and embedded cost source', () => {
+    assert.match(rulesSource, /function validNewOrderProductMaster/);
+    assert.match(rulesSource, /exists\(productPath\(productId\)\)/);
+    assert.match(rulesSource, /function validOrderEmbeddedCost/);
+    assert.match(rulesSource, /function validCommercialOrderCostUpdate/);
+});

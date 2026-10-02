@@ -37,7 +37,12 @@ test.beforeEach(async () => {
   await seed('users/buyer1', { role:'purchaser', active:true, salesCode:'P01' });
   await seed('users/wh1', { role:'warehouse', active:true, salesCode:'W01' });
   await seed('users/off1', { role:'sales', active:false, salesCode:'OFF' });
+  await seed('products/p-order', { productId:'p-order', brandName:'Roche', manufacturerPartNo:'P-ORDER', productName:'Order product', status:'ACTIVE', active:true });
 });
+
+const validOrderProduct = {
+  productId:'p-order', productMasterMatched:true, procurementType:'PURCHASING_PO'
+};
 
 function db(uid) {
   return env.authenticatedContext(uid).firestore();
@@ -53,7 +58,7 @@ test('engineer owns and can edit own quote and order, but cannot access Forecast
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   };
   await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/q1'), quote));
-  await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...quote, orderDate:'2026-09-20' }));
+  await assertSucceeds(setDoc(doc(db('eng1'), 'orders/o1'), { ...validOrderProduct, ...quote, orderDate:'2026-09-20' }));
   await assertFails(setDoc(doc(db('eng1'), 'forecasts/f1'), quote));
   await seed('forecasts/f1', quote);
   await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/q1'), { quoteDate:'2026-09-21' }));
@@ -73,11 +78,11 @@ test('engineer may assist salesperson quotes but not salesperson orders; purchas
   await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/assisted-sales')));
   await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/assisted-sales'), { quoteDate:'2026-09-21' }));
   await assertFails(setDoc(doc(db('eng1'), 'quotes/wrong-sales-code'), { ...assistedQuote, salesCode:'S02' }));
-  await assertFails(setDoc(doc(db('eng1'), 'orders/assisted-sales'), {
+  await assertFails(setDoc(doc(db('eng1'), 'orders/assisted-sales'), { ...validOrderProduct,
     ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   }));
-  await assertFails(setDoc(doc(db('buyer1'), 'orders/bad-owner-code'), {
+  await assertFails(setDoc(doc(db('buyer1'), 'orders/bad-owner-code'), { ...validOrderProduct,
     ownerUid:'sales1', salesCode:'S02', orderDate:'2026-09-20',
     createdByUid:'buyer1', createdByName:'Buyer', createdByRole:'purchaser'
   }));
@@ -94,7 +99,7 @@ test('purchaser may create quotes for sales and engineers but not reassign comme
   await assertFails(setDoc(doc(db('buyer1'), 'quotes/wrong-engineer-code'), {
     ownerUid:'eng1', salesCode:'S01', quoteDate:'2026-09-20', ...createdBy
   }));
-  await assertFails(setDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {
+  await assertFails(setDoc(doc(db('buyer1'), 'orders/assisted-engineer'), { ...validOrderProduct,
     ownerUid:'eng1', salesCode:'E01', orderDate:'2026-09-20', ...createdBy
   }));
 });
@@ -148,22 +153,22 @@ test('five-role mutation matrix keeps master commercial purchase and receipt bou
   await assertSucceeds(setDoc(doc(db('wh1'), 'receipts/matrix-receipt'), {
     ownerUid:'sales1', salesCode:'S01', productKey:'p1', qty:2
   }));
-  await assertFails(setDoc(doc(db('wh1'), 'orders/matrix-warehouse-order'), {
+  await assertFails(setDoc(doc(db('wh1'), 'orders/matrix-warehouse-order'), { ...validOrderProduct,
     ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-23'
   }));
 });
 
 test('sales cannot create a commercial document owned by another salesperson', async () => {
-  await assertFails(setDoc(doc(db('sales1'), 'orders/o2'), {
+  await assertFails(setDoc(doc(db('sales1'), 'orders/o2'), { ...validOrderProduct,
     ownerUid:'sales2', salesCode:'S02', orderDate:'2026-09-20'
   }));
 });
 
 test('purchaser may assist create order only with a responsible owner', async () => {
-  await assertSucceeds(setDoc(doc(db('buyer1'), 'orders/o3'), {
+  await assertSucceeds(setDoc(doc(db('buyer1'), 'orders/o3'), { ...validOrderProduct,
     ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-20'
   }));
-  await assertFails(setDoc(doc(db('buyer1'), 'orders/o4'), {
+  await assertFails(setDoc(doc(db('buyer1'), 'orders/o4'), { ...validOrderProduct,
     ownerUid:'buyer1', salesCode:'P01', orderDate:'2026-09-20'
   }));
 });
@@ -518,4 +523,36 @@ test('engineer assisted quote remains creator-scoped', async () => {
   await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope')));
   await assertFails(getDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope')));
   await assertFails(updateDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope'), { quoteDate:'2026-09-22' }));
+});
+
+
+test('formal order creation requires a real Product Master and blocks embedded standard cost', async () => {
+  const base = {
+    ownerUid:'sales1', salesCode:'S01', orderDate:'2026-10-02',
+    createdByUid:'sales1', createdByName:'Sales', createdByRole:'sales'
+  };
+  await assertFails(setDoc(doc(db('sales1'), 'orders/no-product'), {
+    ...base, productMasterMatched:false, procurementType:'PURCHASING_PO'
+  }));
+  await assertFails(setDoc(doc(db('sales1'), 'orders/fake-product'), {
+    ...base, productMasterMatched:true, productId:'does-not-exist', procurementType:'PURCHASING_PO'
+  }));
+  await assertSucceeds(setDoc(doc(db('sales1'), 'orders/valid-product'), {
+    ...base, ...validOrderProduct
+  }));
+  await assertFails(setDoc(doc(db('sales1'), 'orders/standard-cost-leak'), {
+    ...base, ...validOrderProduct, costPrice:123
+  }));
+  await assertSucceeds(setDoc(doc(db('sales1'), 'orders/self-order-cost'), {
+    ...base, ...validOrderProduct, procurementType:'SALES_SELF_ORDER', costPrice:123, costSource:'business_manual_transaction_cost'
+  }));
+});
+
+test('sales cannot add cost to a formal purchasing order after creation', async () => {
+  await seed('orders/formal-cost-update', {
+    ownerUid:'sales1', salesCode:'S01', orderDate:'2026-10-02',
+    createdByUid:'sales1', createdByName:'Sales', createdByRole:'sales',
+    ...validOrderProduct
+  });
+  await assertFails(updateDoc(doc(db('sales1'), 'orders/formal-cost-update'), { costPrice:99 }));
 });

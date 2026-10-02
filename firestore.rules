@@ -315,7 +315,7 @@ service cloud.firestore {
           'productId', 'brandId', 'brandName', 'manufacturerPartNo',
           'normalizedPartNo', 'productName', 'nameEn', 'specification',
           'productLine', 'productLineId', 'category', 'productType', 'supplier',
-          'authorizationType', 'listPrice', 'status', 'active', 'source', 'createdAt',
+          'listPrice', 'status', 'active', 'source', 'createdAt',
           'createdBy', 'updatedAt', 'updatedBy'
         ]);
     }
@@ -477,13 +477,34 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    function validNewOrderProductMaster(data) {
+      let productId = data.get('productId', '');
+      return data.get('productMasterMatched', false) == true
+        && productId != ''
+        && exists(productPath(productId));
+    }
+
+    function validOrderEmbeddedCost(data) {
+      return !data.keys().hasAny(['costPrice'])
+        || data.get('procurementType', '') == 'SALES_SELF_ORDER';
+    }
+
+    function validCommercialOrderCostUpdate() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['costPrice', 'costSource'])
+        || request.resource.data.get('procurementType', '') == 'SALES_SELF_ORDER';
+    }
+
     match /orders/{id} {
       allow read: if admin() || purchaser() || warehouse() || owns(resource.data);
-      allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
+      allow create: if canCreateCommercialDoc()
+        && validOwnedCommercialCreate(request.resource.data)
+        && validNewOrderProductMaster(request.resource.data)
+        && validOrderEmbeddedCost(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if admin()
-        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data)
+          && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate())
         || purchaserOrderWorkflowUpdate()
         || warehouseOrderWorkflowUpdate()
         || directShipReceiptOrderUpdate(id);

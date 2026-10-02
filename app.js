@@ -3054,7 +3054,6 @@ function forecastItemToOrderSource(forecast, item) {
         qty,
         unitPrice,
         totalPrice,
-        costPrice: safeEmbeddedOrderCost(match, match?.cost),
         sourceType: DOCUMENT_TYPES.FORECAST,
         sourceId: forecast.id,
         productId: item.productId || match?.productId || '',
@@ -3074,7 +3073,7 @@ async function createForecastOrdersDirectly(forecast, items) {
         return { ...normalizeNewOrderItem(source), itemId:'item-1', sourceItemIndex:index };
     }).filter(item => item.itemName || item.itemCode);
     if (!normalizedItems.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
-    const unmatchedItem=normalizedItems.find(item=>item.productMasterMatched!==true);
+    const unmatchedItem=normalizedItems.find(item=>item.productMasterMatched!==true||!item.productId);
     if(unmatchedItem){
         throw new Error(`Forecast 品項「${unmatchedItem.itemName||unmatchedItem.itemCode||'未命名品項'}」尚未對應 Product Master，請先建立／對應產品後再轉訂單。`);
     }
@@ -12945,6 +12944,11 @@ window.deleteReturnRecord = async function(recordId) {
 window.updateOrderField = function(orderId, field, value) {
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
+    if (field === 'costPrice' && (o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') {
+        alert('公司標準成本請在採購／成本資料維護，不寫入業務可讀的訂單文件。');
+        renderOrdersList();
+        return;
+    }
     const previousValue = o ? o[field] : undefined;
     if (String(previousValue ?? '') === String(value ?? '')) return;
     const labels = { costPrice: '修改單位成本', transactionType: '修改交易方式', invoiceTitle: '修改發票抬頭', remarks: '修改備註' };
@@ -13116,7 +13120,6 @@ function setOrderModalItem(item={}) {
     populateOrderWarehouseOptions(normalized.warehouseId||'');
     onOrderFulfillmentChange();
     window._orderModalProductId=normalized.productId||'';
-    const product=findPriceItemForOrder(normalized);if(product)applyOrderProductCost(product);
     refreshOrderWarehouseStock();
 }
 
@@ -13180,7 +13183,7 @@ window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1
 window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();
     if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
-    if(item.productMasterMatched!==true){alert('正式訂單品項必須先對應 Product Master。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
+    if(item.productMasterMatched!==true||!item.productId){alert('正式訂單品項必須先對應 Product Master。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>(existing.productId&&item.productId&&existing.productId===item.productId)||(!existing.productId&&!item.productId&&normalizeHistoryItemCode(existing.itemCode)===normalizeHistoryItemCode(item.itemCode)));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
@@ -13439,7 +13442,7 @@ window.saveNewOrder = function() {
     const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])];
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
-    if(items.some(item=>item.productMasterMatched!==true)){alert('正式訂單的每個品項都必須對應 Product Master。請先選擇既有產品，或用「快速新增產品」建立基本資料。');return;}
+    if(items.some(item=>item.productMasterMatched!==true||!item.productId)){alert('正式訂單的每個品項都必須對應 Product Master。請先選擇既有產品，或用「快速新增產品」建立基本資料。');return;}
     const orderCompany=window._orderModalQuoteContext?.company||currentCompany||'yushin';
     const restrictedItem=items.find(item=>item.brand&&!isCompanyBrandAllowed(orderCompany,item.brand));
     if(restrictedItem){
@@ -13468,6 +13471,7 @@ window.saveNewOrder = function() {
         itemName: firstItem.itemName,
         productLine: firstItem.productLine || '',
         productType: '',
+        procurementType:firstItem.procurementType||'PURCHASING_PO',
         fulfillmentType:firstItem.fulfillmentType,warehouseId:firstItem.warehouseId||'',qty:firstItem.qty,unitPrice:firstItem.unitPrice,
         totalPrice:items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0),items,itemCount:items.length,orderSchemaVersion:2,
         productMasterMatched:items.length > 0 && items.every(item => item.productMasterMatched === true),
@@ -13477,7 +13481,7 @@ window.saveNewOrder = function() {
         invoiceTitle: document.getElementById('orderInvoiceTitle').value.trim(),
         quoteNo: window._orderModalQuoteContext?.quoteNo || '',
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
-        productId: window._orderModalProductId || '',
+        productId: firstItem.productId || '',
         salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || currentUserName || '',
         salesCode: assistedOwner?.code || window._orderModalQuoteContext?.salesCode || currentUserCode || '',
         ownerUid: assistedOwner?.uid || window._orderModalQuoteContext?.ownerUid || currentUser?.uid || '',
@@ -14711,6 +14715,13 @@ function salesStatisticsQueryWindow() {
     return { start, end };
 }
 
+async function preloadSalesStatisticsProductCosts(orders = []) {
+    const formalLines = (orders || []).flatMap(salesStatisticOrderLines)
+        .filter(order => (order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER');
+    if (!formalLines.length) return;
+    await preloadPurchaseCostsForItems(formalLines);
+}
+
 // 管理員銷售統計以「訂單」為準，避免把尚未成交的估價單也算進營收。
 window.loadSalesStatistics = function() {
     if (currentUserRole !== 'admin') return Promise.resolve();
@@ -14755,9 +14766,11 @@ window.loadSalesStatistics = function() {
             const currentQuarter = `q${Math.floor(new Date().getMonth() / 3) + 1}`;
             document.getElementById('salesStatsPeriod').value = currentQuarter;
             setSalesStatisticsPeriod(currentQuarter);
-        } else {
-            loadInventoryAnalysisSupport(start,end).then(()=>renderSalesStatistics());
         }
+        return Promise.all([
+            loadInventoryAnalysisSupport(start, end),
+            preloadSalesStatisticsProductCosts(salesStatisticsOrders)
+        ]).then(() => renderSalesStatistics());
     }).catch(err => {
         if (requestedRole !== currentUserRole) return;
         console.error('讀取銷售統計失敗：', err);
@@ -15063,13 +15076,7 @@ function brandMasterEntryForName(value) {
 
 
 
-function safeEmbeddedOrderCost(item, rawCost) {
-    // 公司價格表／Product Master 的成本永遠不寫入業務可讀的訂單。
-    // 業務自行調貨的成本只由該筆訂單手動輸入。
-    return '';
-}
-
-async function findProductForPurchaseItem(item) {
+async function findProductForPurchaseItem(item) {async function findProductForPurchaseItem(item) {
     const productId = String(item?.productId || '').trim();
     if (productId) {
         const cached = priceList.find(product => String(product.productId || '') === productId);
@@ -15181,24 +15188,8 @@ async function applyOrderProductCost(item) {
     setOrderCostFieldForProduct(item);
     const input = document.getElementById('orderCostPrice');
     if (!input || document.getElementById('orderProcurementType')?.value !== 'SALES_SELF_ORDER') return;
-
-    const privileged = currentUserRole === 'admin' || currentUserRole === 'purchaser';
-    if (!privileged) {
-        // 業務／工程師自行調貨時，成本由本人輸入本次交易成本；
-        // 不從 Product Master、價格表或 productCosts 自動帶入。
-        return;
-    }
-
-    const secureCost = await loadVisibleProductCost(item);
-    if (secureCost !== null && Number.isFinite(secureCost)) {
-        input.value = secureCost;
-        return;
-    }
-    if (item?.cost !== undefined && item?.cost !== null && String(item.cost).trim() !== '') {
-        input.value = item.cost;
-    } else {
-        input.value = '';
-    }
+    // 自行調貨成本是本次交易成本，必須由使用者自行輸入；不從公司價格表／productCosts 帶入。
+    input.value = '';
 }
 
 function clearQuickProductButton(input) {
@@ -15214,7 +15205,7 @@ function showQuickProductButton(input, mode) {
     button.className = 'btn-secondary quick-product-create-btn';
     button.style.marginTop = '4px';
     button.style.width = '100%';
-    button.textContent = '＋ 快速新增產品';
+    button.textContent = mode === 'quote' ? '＋ 建立 Product Master（選填）' : '＋ 建立產品後加入訂單';
     button.onclick = () => openQuickProductCreate(mode, input);
     input.parentElement.appendChild(button);
 }
@@ -15461,9 +15452,11 @@ function salesStatisticOrderLines(order) {
         ...order,
         items: [item], orderSchemaVersion: 2,
         itemId: item.itemId, itemCode: item.itemCode || '', itemName: item.itemName || '',
+        productId: item.productId || order.productId || '',
         brand: item.brand || '', productLine: item.productLine || '', productType: item.productType || '',
+        procurementType: item.procurementType || order.procurementType || 'PURCHASING_PO',
         qty: Number(item.qty || 0), unitPrice: Number(item.unitPrice || 0),
-        totalPrice: Number(item.totalPrice || 0), costPrice: item.costPrice,
+        totalPrice: Number(item.totalPrice || 0), costPrice: item.costPrice, costSource: item.costSource || order.costSource || '',
         deliveryRecords: savedDeliveryRecords(order).filter(row => row.itemId === item.itemId),
         returnRecords: savedReturnRecords(order).filter(row => row.itemId === item.itemId),
         isDelivered: false
@@ -15479,8 +15472,25 @@ function orderUnitSalesAmount(order) {
     return qty ? salesAmount(order) / qty : (parseFloat(order.unitPrice) || 0);
 }
 
+function orderStatsProductId(order) {
+    const saved = String(order?.productId || '').trim();
+    if (saved) return saved;
+    const match = findPriceItemForOrder(order || {});
+    return String(match?.productId || '').trim();
+}
+
+function orderUnitCostForStats(order) {
+    if ((order?.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER') {
+        const manual = Number(order.costPrice);
+        return Number.isFinite(manual) && manual >= 0 ? manual : null;
+    }
+    const productId = orderStatsProductId(order);
+    const standardCost = productId ? Number(purchaseCostCache.get(productId)) : NaN;
+    return Number.isFinite(standardCost) && standardCost >= 0 ? standardCost : null;
+}
+
 function orderHasCost(order) {
-    return order.costPrice !== undefined && order.costPrice !== null && String(order.costPrice).trim() !== '' && Number.isFinite(parseFloat(order.costPrice));
+    return orderUnitCostForStats(order) !== null;
 }
 
 function dateInStatsRange(date, start, end) {
@@ -15493,7 +15503,8 @@ function calculateOrderStatsContribution(order, start, end) {
     const totalQty = orderQuantity(order);
     if (!totalQty) return empty;
     const unitSales = orderUnitSalesAmount(order);
-    const unitCost = parseFloat(order.costPrice) || 0;
+    const resolvedUnitCost = orderUnitCostForStats(order);
+    const unitCost = resolvedUnitCost === null ? 0 : resolvedUnitCost;
     const cutoff = end || localDateString();
     let actualQty = 0;
     let deliveredByCutoff = 0;
@@ -15541,7 +15552,9 @@ function addSalesStatsContribution(metric, order, contribution) {
     metric.totalCost = metric.actualCost + metric.pendingCost;
     metric.profit = metric.totalSales - metric.totalCost;
     if (contribution.actualSales || contribution.pendingSales) metric.orderIds.add(order.id);
-    if (!orderHasCost(order) && (contribution.actualQty || contribution.pendingQty)) metric.missingCostIds.add(order.id);
+    if (!orderHasCost(order) && (contribution.actualQty || contribution.pendingQty)) {
+        metric.missingCostIds.add(`${order.id}:${orderStatsProductId(order) || order.itemId || 'unknown'}`);
+    }
     if (contribution.estimated) {
         metric.estimatedSales += contribution.estimatedSales;
         metric.estimatedIds.add(order.id);
@@ -15798,7 +15811,7 @@ function renderMissingCostOrders() {
             <td class="missing-cost-product"><strong>${escapeHtml(order.itemName || '－')}</strong><br><small>${escapeHtml(order.itemCode || '')}</small></td>
             <td>${escapeHtml(String(orderQuantity(order)))}</td>
             <td>${formatStatsMoney(salesAmount(order))}</td>
-            <td><input type="number" min="0" step="0.01" class="missing-cost-input" aria-label="${escapeAttr(order.itemName || '訂單')}單位成本" onchange="saveMissingCostFromStats('${escapeAttr(order.id)}', this)"><small class="missing-cost-save-state"></small></td>
+            <td><input type="number" min="0" step="0.01" class="missing-cost-input" aria-label="${escapeAttr(order.itemName || '訂單')}單位成本" onchange="saveMissingCostFromStats('${escapeAttr(order.id)}','${escapeAttr(order.itemId || '')}','${escapeAttr(orderStatsProductId(order))}','${escapeAttr(order.procurementType || 'PURCHASING_PO')}', this)"><small class="missing-cost-save-state"></small></td>
         </tr>
     `).join('') : '<tr><td colspan="8" style="color:#888;padding:18px;">目前篩選範圍內沒有缺少成本的訂單。</td></tr>';
 }
@@ -15812,7 +15825,7 @@ window.closeMissingCostOrders = function() {
     document.getElementById('missingCostOrdersOverlay')?.classList.remove('active');
 };
 
-window.saveMissingCostFromStats = async function(orderId, input) {
+window.saveMissingCostFromStats = async function(orderId, itemId, productId, procurementType, input) {
     if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser') {
         alert('只有採購或管理員可以補填成本。');
         renderMissingCostOrders();
@@ -15828,11 +15841,46 @@ window.saveMissingCostFromStats = async function(orderId, input) {
     input.disabled = true;
     if (state) state.innerText = '儲存中…';
     try {
-        await db.collection('orders').doc(orderId).update({ costPrice: cost });
-        const statsOrder = salesStatisticsOrders.find(order => order.id === orderId);
-        if (statsOrder) statsOrder.costPrice = cost;
-        const cachedOrder = ordersCache.find(order => order.id === orderId);
-        if (cachedOrder) cachedOrder.costPrice = cost;
+        if (procurementType === 'SALES_SELF_ORDER') {
+            const original = salesStatisticsOrders.find(order => order.id === orderId) || ordersCache.find(order => order.id === orderId);
+            if (!original) throw new Error('找不到原訂單。');
+            const updates = {
+                costPrice: cost,
+                costSource: 'manual_transaction_cost_correction',
+                updatedAt: new Date().toISOString()
+            };
+            if (Array.isArray(original.items) && original.items.length) {
+                updates.items = original.items.map((item, index) => {
+                    const sameItem = itemId ? item.itemId === itemId : index === 0;
+                    return sameItem ? { ...item, costPrice:cost, costSource:'manual_transaction_cost_correction' } : item;
+                });
+            }
+            await db.collection('orders').doc(orderId).set(updates, { merge:true });
+            const applyLocal = order => {
+                if (!order) return;
+                order.costPrice = cost;
+                order.costSource = 'manual_transaction_cost_correction';
+                if (updates.items) order.items = updates.items;
+            };
+            applyLocal(salesStatisticsOrders.find(order => order.id === orderId));
+            applyLocal(ordersCache.find(order => order.id === orderId));
+        } else {
+            const resolvedProductId = String(productId || '').trim();
+            if (!resolvedProductId) throw new Error('這筆訂單找不到 Product Master，無法安全寫入標準成本。');
+            const line = salesStatisticsOrders.flatMap(salesStatisticOrderLines)
+                .find(order => order.id === orderId && orderStatsProductId(order) === resolvedProductId);
+            await db.collection('productCosts').doc(resolvedProductId).set({
+                productId: resolvedProductId,
+                productLineId: line?.productLine || '',
+                standardCost: cost,
+                salesVisible: false,
+                source: 'STATS_COST_UPDATE',
+                updatedAt: new Date().toISOString(),
+                updatedBy: currentUser?.uid || ''
+            }, { merge:true });
+            purchaseCostCache.set(resolvedProductId, cost);
+            visibleProductCostCache.clear();
+        }
         renderSalesStatistics();
         renderMissingCostOrders();
     } catch (err) {
