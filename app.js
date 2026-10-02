@@ -9282,7 +9282,12 @@ window.loadPurchasingAnalytics = async function(force = false) {
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
     if (purchasingView === 'analytics') {
-        renderPurchasingAnalytics();
+        const rangeKey = purchasingAnalyticsRangeKey();
+        if (!purchasingAnalyticsLoading && purchasingAnalyticsLoadedRangeKey !== rangeKey) {
+            loadPurchasingAnalytics(false).catch(err => console.error('採購分析期間更新失敗：', err));
+        } else {
+            renderPurchasingAnalytics();
+        }
         return;
     }
     if (purchasingView === 'history') {
@@ -9316,8 +9321,7 @@ window.changePurchasePeriod = function(value) {
         if (start && !start.value) start.value = `${new Date().getFullYear()}-01-01`;
         if (end && !end.value) end.value = dateOnlyFromTimestamp(new Date().toISOString());
     }
-    if (purchasingView === 'analytics') loadPurchasingAnalytics(false).catch(()=>{});
-    else renderPurchasingView();
+    renderPurchasingView();
 };
 
 window.switchPurchasingView = function(view, tab) {
@@ -9362,8 +9366,7 @@ window.switchPurchasingView = function(view, tab) {
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
     if(analyticsPanel)analyticsPanel.style.display=view==='analytics'?'':'none';
     if (view === 'analytics') {
-        renderPurchasingAnalytics();
-        loadPurchasingAnalytics(false).catch(err => console.error('採購分析首次載入失敗：', err));
+        renderPurchasingView();
     } else if (view === 'ordering') {
         renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
         if (!purchasingViewLoaded.has('ordering')) {
