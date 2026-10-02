@@ -1398,21 +1398,22 @@ test('purchase cancellation releases incoming and returns outstanding quantity t
     assert.match(source,/tx\.set\(demandRef,demandDoc,\{merge:true\}\)/);
     assert.match(source,/incoming:Math\.max\(0,inv\.incoming-registeredIncoming\)/);
     assert.match(source,/incoming:Math\.max\(0,wh\.incoming-registeredIncoming\)/);
-    assert.match(source,/type:'purchase_incoming_cancel'/);
-    assert.match(source,/status:'CANCELLED'/);
+    assert.match(source,/const terminalStatus=received>0\?'CLOSED':'CANCELLED'/);
+    assert.match(source,/type:terminalStatus==='CLOSED'\?'purchase_incoming_close':'purchase_incoming_cancel'/);
+    assert.match(source,/status:terminalStatus/);
     assert.match(source,/incomingRegisteredQty:0/);
 
     const registerStart=app.indexOf('async function registerPurchaseIncoming');
     const registerEnd=app.indexOf('\nasync function cancelOutstandingSupplyRecord',registerStart);
     const registerSource=app.slice(registerStart,registerEnd);
-    assert.match(registerSource,/poRecord\?\.status[\s\S]*?'CANCELLED'/);
-    assert.match(registerSource,/supply\.status[\s\S]*?'CANCELLED'/);
+    assert.match(registerSource,/isPurchaseTerminalStatus\(poRecord\?\.status\)/);
+    assert.match(registerSource,/isPurchaseTerminalStatus\(supply\.status\)/);
 
     const pendingStart=app.indexOf('async function purchaseIncomingSyncPending');
     const pendingEnd=app.indexOf('\nwindow.reprintPurchaseOrder',pendingStart);
     const pendingSource=app.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/po\?\.status[\s\S]*?'CANCELLED'/);
-    assert.match(pendingSource,/supply\.status[\s\S]*?'CANCELLED'/);
+    assert.match(pendingSource,/isPurchaseTerminalStatus\(po\?\.status\)/);
+    assert.match(pendingSource,/isPurchaseTerminalStatus\(supply\.status\)/);
 });
 
 
@@ -1801,8 +1802,8 @@ test('quick manual cancellation reuses the same audited cancellation transaction
     assert.match(coreSource,/incoming:Math\.max\(0,inv\.incoming-registeredIncoming\)/);
     assert.match(coreSource,/incoming:Math\.max\(0,wh\.incoming-registeredIncoming\)/);
     assert.match(coreSource,/supplyOrderedQty:Math\.max\(receivedForItem,currentSupplyOrdered-remaining\)/);
-    assert.match(coreSource,/type:'purchase_incoming_cancel'/);
-    assert.match(coreSource,/status:'CANCELLED'/);
+    assert.match(coreSource,/type:terminalStatus==='CLOSED'\?'purchase_incoming_close':'purchase_incoming_cancel'/);
+    assert.match(coreSource,/status:terminalStatus/);
     assert.match(coreSource,/incomingRegisteredQty:0/);
 
     const formalStart=app.indexOf('window.cancelPurchaseOrderOutstanding = async function');
@@ -1818,7 +1819,7 @@ test('quick purchase outstanding cancellation reuses safe supply cancellation', 
     const actionSource=app.slice(actionStart,actionEnd);
     assert.ok(actionStart>=0&&actionEnd>actionStart);
     assert.match(actionSource,/supply\.type !== 'PURCHASING_MANUAL'/);
-    assert.match(actionSource,/status \|\| ''\)\.toUpperCase\(\) === 'CANCELLED'/);
+    assert.match(actionSource,/isPurchaseTerminalStatus\(supply\.status\)/);
     assert.match(actionSource,/const remaining = Math\.max\(0, Number\(supply\.qty \|\| 0\) - Number\(supply\.receivedQty \|\| 0\)\)/);
     assert.match(actionSource,/cancelManualSupplyOutstanding/);
 
@@ -1833,6 +1834,23 @@ test('quick purchase outstanding cancellation reuses safe supply cancellation', 
     assert.match(cancelSource,/supplyReceivingCache = supplyReceivingCache\.filter/);
     assert.match(cancelSource,/refreshAffectedOrderCaches\(\[result\.orderId\]\)/);
     assert.match(cancelSource,/purchaseCancellationInProgress\.delete\(actionKey\)/);
+});
+
+test('ERP close semantics distinguish partial receipt from zero-receipt cancellation', () => {
+    const coreStart=app.indexOf('async function cancelOutstandingSupplyRecord');
+    const coreEnd=app.indexOf('\nwindow.cancelManualSupplyOutstanding',coreStart);
+    const core=app.slice(coreStart,coreEnd);
+    assert.match(core,/const terminalStatus=received>0\?'CLOSED':'CANCELLED'/);
+    assert.match(core,/closedQty:remaining/);
+    assert.match(core,/cancelledQty:remaining/);
+
+    const poStart=app.indexOf('window.cancelPurchaseOrderOutstanding = async function');
+    const poEnd=app.indexOf('\nlet poReceiptTargetId',poStart);
+    const poSource=app.slice(poStart,poEnd);
+    assert.match(poSource,/let receivedQty=0/);
+    assert.match(poSource,/const documentStatus=receivedQty>0\?'CLOSED':'CANCELLED'/);
+    assert.match(poSource,/status:documentStatus/);
+    assert.match(app,/if\(status==='CLOSED'\)return '已結案'/);
 });
 
 test('purchase order email prefers secure callable SMTP and only falls back when backend is unavailable', () => {
