@@ -1130,6 +1130,16 @@ test('receipt modal close function exists and does not discard retry key', () =>
     assert.doesNotMatch(source,/clearReceiptOperationId/);
 });
 
+test('receiving persists immutable ERP receipt snapshots through receiving core', () => {
+    const start=app.indexOf('async function receiveSupplyOrderRecord');
+    const end=app.indexOf('window.openSupplyReceipt',start);
+    const source=app.slice(start,end);
+    assert.match(source,/YushinSupply\.normalize\(\{\.\.\.supply,id:supplyId\}\)/);
+    assert.match(source,/YushinReceiving\.buildReceiptSnapshot/);
+    assert.match(source,/demandSourceType/);
+    assert.doesNotMatch(source,/tx\.set\(receiptRef,\{receiptId:operationKey/);
+});
+
 test('warehouse receiving no longer mutates purchase-order receipt state', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
