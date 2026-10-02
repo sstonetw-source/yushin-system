@@ -9002,7 +9002,8 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
     return items.map((item, index) => {
         const dispatch = dispatchStateByItem?.get(item) || itemDispatchState(order, item);
         if (orderItemWorkCategory(order, item, lifecycle, dispatch) !== 'ordering') return null;
-        const qty = remainingProcurementQty(order, item, dispatch);
+        const demand = procurementDemandForOrderItem(order, item, dispatch);
+        const qty = demand.remainingToOrderQty;
         if (!(qty > 0)) return null;
         return {
             orderId: order.id,
@@ -9016,6 +9017,8 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
             supplier: item.supplier || '',
             warehouseId: item.warehouseId || '',
             qty,
+            demandStatus:demand.status,
+            demandStatusLabel:globalThis.YushinProcurementDemand?.statusLabel(demand.status) || '待採購',
             salesName: order.salesName || '',
             fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
             procurementType: item.procurementType || order.procurementType || 'PURCHASING_PO'
@@ -9578,7 +9581,7 @@ function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContex
                     : '<span class="order-progress-badge">自行訂貨・由訂單負責人處理</span>')
                 : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}',this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
             const row = document.createElement('tr');
-            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '自行訂貨' : '交由採購訂貨'}</div></td><td data-th="操作">${actionHtml}</td>`;
+            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '自行訂貨' : '交由採購訂貨'}・${escapeHtml(item.demandStatusLabel || '待採購')}</div></td><td data-th="操作">${actionHtml}</td>`;
             fragment.appendChild(row);
             shown++;
         }
