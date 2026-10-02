@@ -15076,7 +15076,7 @@ function brandMasterEntryForName(value) {
 
 
 
-async function findProductForPurchaseItem(item) {async function findProductForPurchaseItem(item) {
+async function findProductForPurchaseItem(item) {
     const productId = String(item?.productId || '').trim();
     if (productId) {
         const cached = priceList.find(product => String(product.productId || '') === productId);
