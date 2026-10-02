@@ -116,14 +116,14 @@ test('supplier lead time is derived from immutable receipt events',()=>{
     }
   ];
   const receipts=[
-    {supplyOrderId:'S1',qty:4,createdAt:'2026-10-03T10:00:00Z'},
-    {supplyOrderId:'S1',qty:6,createdAt:'2026-10-05T10:00:00Z'},
-    {supplyOrderId:'S2',qty:5,createdAt:'2026-10-03T00:00:00Z'}
+    {supplyOrderId:'S1',qty:4,receiptDate:'2026-10-03',createdAt:'2026-10-03T10:00:00Z'},
+    {supplyOrderId:'S1',qty:6,receiptDate:'2026-10-05',createdAt:'2026-10-05T10:00:00Z'},
+    {supplyOrderId:'S2',qty:5,receiptDate:'2026-10-03',createdAt:'2026-10-03T00:00:00Z'}
   ];
   const result=analytics.summarize(records,receipts);
   const supplier=result.bySupplier[0];
   assert.equal(supplier.leadTimeCount,2);
-  assert.equal(Number(supplier.avgLeadTimeDays.toFixed(1)),3.2);
+  assert.equal(Number(supplier.avgLeadTimeDays.toFixed(1)),3.0);
   assert.equal(result.totals.leadTimeCount,2);
 });
 
@@ -154,9 +154,9 @@ test('on-time delivery counts only completed supplies with an expected date',()=
     {id:'S2',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:5,status:'RECEIVED',orderDate:'2026-10-01',expectedDate:'2026-10-03'},
     {id:'S3',supplierId:'SUP1',supplier:'A',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:5,receivedQty:2,status:'PARTIAL_RECEIPT',orderDate:'2026-10-01',expectedDate:'2026-10-02'}
   ],[
-    {supplyOrderId:'S1',qty:5,createdAt:'2026-10-04T12:00:00Z'},
-    {supplyOrderId:'S2',qty:5,createdAt:'2026-10-04T12:00:00Z'},
-    {supplyOrderId:'S3',qty:2,createdAt:'2026-10-02T12:00:00Z'}
+    {supplyOrderId:'S1',qty:5,receiptDate:'2026-10-04',createdAt:'2026-10-03T16:30:00Z'},
+    {supplyOrderId:'S2',qty:5,receiptDate:'2026-10-04',createdAt:'2026-10-03T16:30:00Z'},
+    {supplyOrderId:'S3',qty:2,receiptDate:'2026-10-02',createdAt:'2026-10-01T16:30:00Z'}
   ]);
   assert.equal(result.totals.onTimeEligibleCount,2);
   assert.equal(result.totals.onTimeCount,1);
