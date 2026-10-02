@@ -177,6 +177,48 @@
     return normalizeDemand({...record,requestedQty:n(requestedQty)});
   }
 
+  // ERPNext status-updater equivalent: demand progress is derived from linked supplier commitments.
+  // A cancelled supply contributes only the quantity that was already physically received.
+  function supplyContribution(record={}){
+    const qty=n(record.qty);
+    const receivedQty=Math.min(qty,n(record.receivedQty));
+    const cancelled=String(record.status||'').toUpperCase()==='CANCELLED';
+    return {
+      orderedQty:cancelled?receivedQty:qty,
+      receivedQty
+    };
+  }
+
+  function reconcileLinkedSupplies(record={},supplies=[]){
+    const current=normalizeDemand(record);
+    const demandId=String(current.demandId||'');
+    let orderedQty=0,receivedQty=0;
+    for(const supply of supplies||[]){
+      if(demandId&&String(supply?.demandId||'')!==demandId)continue;
+      const contribution=supplyContribution(supply||{});
+      orderedQty+=contribution.orderedQty;
+      receivedQty+=contribution.receivedQty;
+    }
+    return normalizeDemand({
+      ...current,
+      orderedQty,
+      receivedQty:Math.min(orderedQty,receivedQty)
+    });
+  }
+
+  function applySupplyCancellation(record={},supply={}){
+    const current=normalizeDemand(record);
+    const activeSupply={...supply,status:String(supply.status||'').toUpperCase()==='CANCELLED'?'ORDERED':supply.status};
+    const before=supplyContribution(activeSupply);
+    const after=supplyContribution({...supply,status:'CANCELLED'});
+    const releasedQty=Math.max(0,before.orderedQty-after.orderedQty);
+    const orderedQty=Math.max(current.receivedQty,current.orderedQty-releasedQty);
+    return {
+      releasedQty,
+      demand:normalizeDemand({...current,orderedQty})
+    };
+  }
+
   function cancelDemand(record={}){
     const current=normalizeDemand(record);
     return normalizeDemand({...current,cancelled:true,status:STATUSES.CANCELLED});
@@ -195,6 +237,7 @@
 
   return {
     SOURCES,STATUSES,demandIdForSource,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel,
-    demandDocument,applyOrder,applyReceipt,reconcileRequestedQty,cancelDemand,reopenDemand
+    demandDocument,applyOrder,applyReceipt,supplyContribution,reconcileLinkedSupplies,applySupplyCancellation,
+    reconcileRequestedQty,cancelDemand,reopenDemand
   };
 });
