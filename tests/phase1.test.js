@@ -4509,6 +4509,15 @@ test('Product Master can browse products by Brand Master in 50-row pages', () =>
     assert.match(appSource, /window\.browseProductMasterBrand = async function/);
     assert.match(appSource, /collection\('products'\)[\s\S]*?where\('brandName', '==', brand\)[\s\S]*?limit\(PRODUCT_BRAND_BROWSE_PAGE_SIZE\)/);
     assert.match(appSource, /productBrandBrowseHasMore/);
+
+    const browseStart=appSource.indexOf('window.browseProductMasterBrand = async function(brand)');
+    const browseEnd=appSource.indexOf('\nwindow.reloadCurrentProductBrand',browseStart);
+    const browseSource=appSource.slice(browseStart,browseEnd);
+    assert.match(browseSource,/productBrandBrowseCurrent = resolveBrandName\(brand\)/);
+    assert.match(browseSource,/productManagementSourceMode = 'brand'/);
+    assert.doesNotMatch(browseSource,/productBrandBrowseCurrent = ''/);
+    assert.doesNotMatch(browseSource,/productManagementSourceMode = 'search'/);
+    assert.match(browseSource,/await fetchProductBrandBrowsePage\(true\)/);
 });
 
 test('admin can remove a pending product reminder without deleting source documents and restore it later', () => {
@@ -4521,6 +4530,19 @@ test('admin can remove a pending product reminder without deleting source docume
     assert.doesNotMatch(source,/collection\('quotes'\).*\.delete\(/);
     assert.doesNotMatch(source,/collection\('orders'\).*\.delete\(/);
     assert.match(appSource,/window\.restoreIgnoredPendingProduct = async function/);
+
+    const openStart=appSource.indexOf('window.openIgnoredPendingProducts = async function()');
+    const openEnd=appSource.indexOf('\nwindow.clearIgnoredPendingProducts',openStart);
+    const openSource=appSource.slice(openStart,openEnd);
+    assert.match(openSource,/filter\(item => item\.archived !== true\)/);
+    assert.match(openSource,/clearIgnoredPendingProducts\(\)/);
+
+    const clearStart=appSource.indexOf('window.clearIgnoredPendingProducts = async function()');
+    const clearEnd=appSource.indexOf('\nwindow.closeIgnoredPendingProducts',clearStart);
+    const clearSource=appSource.slice(clearStart,clearEnd);
+    assert.match(clearSource,/archived:true/);
+    assert.match(clearSource,/ignoredItems: next/);
+    assert.match(clearSource,/仍會保持不再出現在待補清單/);
 });
 
 test('Product Master management has clear edit and soft-disable controls', () => {
