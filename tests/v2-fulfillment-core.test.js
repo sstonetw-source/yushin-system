@@ -8,7 +8,7 @@ test('reserve 20 with 8 available => reserved 8 shortage 12', () => {
 });
 test('full availability reserves all',()=>{const x=f.reserveFromAvailable({orderedQty:20},20);assert.equal(x.reservedQty,20);assert.equal(x.shortageQty,0);});
 test('zero availability leaves full shortage',()=>{const x=f.reserveFromAvailable({orderedQty:20},0);assert.equal(x.reservedQty,0);assert.equal(x.shortageQty,20);});
-test('partial receipt fills reservation immediately',()=>{const x=f.applyReceipt({orderedQty:20,reservedQty:8,receivedQty:0},5);assert.equal(x.receivedQty,5);assert.equal(x.reservedQty,13);assert.equal(x.shortageQty,7);});
+test('fulfillment core does not own receiving',()=>{assert.equal(f.applyReceipt,undefined);});
 test('dispatch paperwork gates shippable quantity',()=>{let x=f.reserveFromAvailable({orderedQty:20},8);assert.equal(f.pendingDispatchQty(x),8);assert.equal(f.shippableQty(x),0);x=f.prepareDispatch(x,8);assert.equal(f.shippableQty(x),8);});
 
 test('dispatch state is the single source for pending and shippable quantities',()=>{
