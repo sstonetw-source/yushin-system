@@ -9883,8 +9883,10 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const itemIndex = items.findIndex(item => item.itemId === itemId);
             if (itemIndex < 0) throw new Error('找不到來源訂單品項。');
             const item = items[itemIndex];
-            const demand = procurementDemandForOrderItem(order, item);
-            const qty = demand.remainingToOrderQty;
+            const qty = remainingProcurementQty(order, item);
+            const demandId = globalThis.YushinProcurementDemand?.demandIdForSource({
+                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
+            }) || '';
             const existingSupply = supplySnapshot.exists ? { id:supplyRef.id, ...supplySnapshot.data() } : null;
             if (!(qty > 0) && !existingSupply) throw new Error('此品項已無待採購數量，請重新整理。');
 
@@ -9951,7 +9953,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 sourceType:'SALES_ORDER',
                 sourceId:orderId,
                 sourceItemId:itemId,
-                demandId:existingSupply?.demandId||demand.demandId||'',
+                demandId:existingSupply?.demandId||demandId||'',
                 internalNo,
                 status:nextSupplyStatus,
                 orderId:existingSupply?.orderId||orderId,
