@@ -11157,7 +11157,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         if (expectedDiff) return expectedDiff;
         return String(b.dataset.receivingOrderDate || '').localeCompare(String(a.dataset.receivingOrderDate || ''));
     });
-    sortedRows.forEach(row => tbody.appendChild(row));
+    sortedRows.forEach(row => fragment.appendChild(row));
+    tbody.appendChild(fragment);
 
     const totalRows = workCount + standaloneSupplyCount;
     if (emptyHint) {
