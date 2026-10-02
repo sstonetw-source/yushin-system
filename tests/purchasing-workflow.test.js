@@ -1897,7 +1897,7 @@ test('supplier master cannot be disabled while active mappings still reference i
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/supplierMappingCache\.filter\(mapping=>mapping\.supplierId===id\)/);
-    assert.match(source,/if\(activeMappings\.length\)/);
+    assert.match(source,/if\(activeMappings\.length\|\|activeProductMappings\.length\)/);
     assert.match(source,/active:false/);
 });
 
