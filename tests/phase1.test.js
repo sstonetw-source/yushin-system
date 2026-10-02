@@ -238,8 +238,12 @@ test('Brand Master drives the main brand list while statistics grouping remains 
     const start = appSource.indexOf('function getUnifiedBrandEntries(includeMaintenance = false)');
     const end = appSource.indexOf('\n}\n', start) + 2;
     const context = vm.createContext({
-        keyStatisticBrands:['Roche', 'Thermo'],
-        brandMasterCache:[{ id:'r', name:'Roche', aliases:['Roche Diagnostics'], active:true }, { id:'x', name:'Unlisted Excel Brand', active:true }],
+        keyStatisticBrands:['Roche', 'Thermo', '維修'],
+        brandMasterCache:[
+            { id:'r', name:'Roche', aliases:['Roche Diagnostics'], active:true },
+            { id:'x', name:'Unlisted Excel Brand', active:true },
+            { id:'m', name:'維修', aliases:[], active:true }
+        ],
         keyStatisticBrandAliases:{}, companyAgencyBrands:{ yushin:[], morningstar:[], 'MULTI-LIFE':[] },
         normalizeBrandLookupKey:value => String(value || '').trim().toLowerCase(),
         dedupeBrandsCaseInsensitive:values => [...new Set(values)],
@@ -248,12 +252,12 @@ test('Brand Master drives the main brand list while statistics grouping remains 
         defaultBrandAliasesForCanonical:() => []
     });
     vm.runInContext(appSource.slice(start, end), context);
-    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Unlisted Excel Brand']);
-    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Unlisted Excel Brand', '維修']));
+    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Unlisted Excel Brand', '維修']);
+    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(true), item => item.name), ['Roche', 'Unlisted Excel Brand', '維修']);
     const classificationStart = appSource.indexOf('function statisticBrandForOrder(order)');
     const classificationEnd = appSource.indexOf('\n}\n', classificationStart) + 2;
     Object.assign(context, {
-        statisticBrandAliasLookup:() => new Map([['roche', 'Roche'], ['thermo', 'Thermo']]),
+        statisticBrandAliasLookup:() => new Map([['roche', 'Roche'], ['thermo', 'Thermo'], ['維修', '維修']]),
         normalizeStatisticBrandKey:value => String(value || '').trim().toLowerCase(),
         brandIdentityForRecord:order => ({ brand:String(order?.brand || '').trim(), brandId:'' })
     });
@@ -262,6 +266,8 @@ test('Brand Master drives the main brand list while statistics grouping remains 
     assert.equal(context.statisticBrandForOrder({ brand:'Unlisted Excel Brand' }), '其他廠牌');
     assert.equal(context.statisticBrandForOrder({ brand:'' }), '其他廠牌');
     assert.equal(context.statisticBrandForOrder({ brand:'維修' }), '維修');
+    assert.doesNotMatch(appSource, /維修（固定）/);
+    assert.doesNotMatch(appSource, /canonicalName === '維修'/);
 });
 
 test('brand aliases collapse Beckman and Beckman Coulter into one canonical brand', () => {
