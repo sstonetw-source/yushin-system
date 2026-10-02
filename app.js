@@ -662,6 +662,8 @@ function applyPermissionVisibility() {
     if (adminTab) adminTab.style.display = trueUserRole === 'admin' && currentUserRole === 'admin' ? '' : 'none';
     const quoteListTab = document.getElementById('qsub-my');
     if (quoteListTab) quoteListTab.innerText = canViewAllData('quotes') ? '📋 全部估價單' : '📋 我的估價單';
+    const purchaseAnalysisTab = document.getElementById('purchase-tab-analysis');
+    if (purchaseAnalysisTab) purchaseAnalysisTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     populatePurchaserOrderFilters();
     updateReadonlyNotice();
 }
@@ -9283,7 +9285,7 @@ function renderPurchasingAnalytics() {
 }
 
 window.loadPurchasingAnalytics = async function(force = false) {
-    if (!canAccessPage('orders.po') || purchasingAnalyticsLoading) return purchasingAnalyticsRows;
+    if (!canCreatePurchaseOrderCapability() || purchasingAnalyticsLoading) return purchasingAnalyticsRows;
     const filters = purchaseFilterContext();
     const rangeKey = purchasingAnalyticsRangeKey(filters);
     if (!force && purchasingAnalyticsLoadedRangeKey === rangeKey) {
@@ -9374,6 +9376,7 @@ window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
     if (!['ordering', 'receiving', 'dispatch', 'completed', 'history', 'analytics'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
+    if (view === 'analytics' && !canCreatePurchaseOrderCapability()) return;
     const previousPurchasingView = purchasingView;
     purchasingView = view;
     if (view === 'completed' && previousPurchasingView !== 'completed') purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
