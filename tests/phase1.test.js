@@ -4918,3 +4918,21 @@ test('receipt event ids use the idempotent receipt operation key', () => {
     assert.match(source,/receiptEvents:[\s\S]*?id:operationKey/);
     assert.match(source,/if\(receiptSnap\.exists\)/);
 });
+
+
+test('business product search renders incoming and projected stock columns', () => {
+    assert.match(indexSource,/<th>可用<\/th><th>在途<\/th><th>預計<\/th>/);
+    const start=appSource.indexOf('body.innerHTML=products.map(product=>');
+    const end=appSource.indexOf('\n',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/const projected=inventoryProjectedStock\(n\)/);
+    assert.match(source,/\$\{n\.incoming\}/);
+    assert.match(source,/\$\{projected\}/);
+    assert.match(source,/colspan="9"/);
+});
+
+test('data health surfaces failed inventory reservation synchronization', () => {
+    assert.match(appSource,/inventoryReservationStatus\|\|''\)==='failed'/);
+    assert.match(appSource,/訂單庫存同步失敗/);
+    assert.match(appSource,/inventoryReservationError/);
+});

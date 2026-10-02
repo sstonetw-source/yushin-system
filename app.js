@@ -7604,7 +7604,7 @@ window.searchBusinessProducts=async function(){
        stockByProduct.set(key,{onHand:current.onHand+n.onHand,reserved:current.reserved+n.reserved,incoming:current.incoming+n.incoming});
      });
    }
-   body.innerHTML=products.map(product=>{const key=String(product.productId||product.id||'').trim();const rawStock=stockByProduct.get(key)||{};const n=inventoryNumbers(rawStock);return `<tr><td>${escapeHtml(product.manufacturerPartNo||'')}</td><td>${escapeHtml(product.productName||'')}</td><td>${escapeHtml(product.brandName||'')}</td><td>${Number(product.listPrice||0).toLocaleString()}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td></tr>`;}).join('')||'<tr><td colspan="7">查無結果</td></tr>';
+   body.innerHTML=products.map(product=>{const key=String(product.productId||product.id||'').trim();const rawStock=stockByProduct.get(key)||{};const n=inventoryNumbers(rawStock);const projected=inventoryProjectedStock(n);return `<tr><td>${escapeHtml(product.manufacturerPartNo||'')}</td><td>${escapeHtml(product.productName||'')}</td><td>${escapeHtml(product.brandName||'')}</td><td>${Number(product.listPrice||0).toLocaleString()}</td><td>${n.onHand}</td><td>${n.reserved}</td><td>${n.available}</td><td>${n.incoming}</td><td>${projected}</td></tr>`;}).join('')||'<tr><td colspan="9">查無結果</td></tr>';
    if(wrap)wrap.style.display='';if(status)status.textContent=`完成，共 ${products.length} 筆`;
  }catch(err){if(status)status.textContent='查詢失敗';alert('產品查詢失敗：'+err.message);}
  finally{if(input)input.disabled=false;}
@@ -19724,6 +19724,9 @@ window.runSystemDataAudit = async function() {
         };
 
         orders.forEach(order => {
+            if(String(order.inventoryReservationStatus||'')==='failed'){
+                issues.push({type:'訂單庫存同步失敗',detail:`${order.orderNo||order.id}｜${order.inventoryReservationError||'庫存占用未完成'}`});
+            }
             const orderItems=normalizedOrderItems(order);
             if(!orderItems.length&&!knownProduct(order))issues.push({ type:'訂單找不到 Product', detail:`${order.orderNo || order.id}｜${order.itemCode || order.productKey || ''}` });
             orderItems.forEach((item,index)=>{
