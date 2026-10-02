@@ -114,5 +114,61 @@
     }
   }
 
-  return {SOURCES,STATUSES,demandIdForSource,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel};
+  // Material Request-like persistent record. Quantities are the durable facts;
+  // status/percent/remaining fields are projections refreshed by normalizeDemand().
+  function demandDocument(record={},meta={}){
+    const demand=normalizeDemand(record);
+    if(!demand.demandId)throw new Error('採購需求缺少 demandId');
+    const now=String(meta.updatedAt||record.updatedAt||meta.createdAt||record.createdAt||'');
+    return {
+      demandId:demand.demandId,
+      sourceType:demand.sourceType,
+      sourceId:demand.sourceId,
+      sourceItemId:demand.sourceItemId,
+      productId:String(record.productId||''),
+      productKey:String(record.productKey||''),
+      itemCode:String(record.itemCode||''),
+      itemName:String(record.itemName||''),
+      brand:String(record.brand||''),
+      fulfillmentType:String(record.fulfillmentType||'WAREHOUSE'),
+      warehouseId:String(record.warehouseId||''),
+      ownerUid:String(record.ownerUid||''),
+      salesCode:String(record.salesCode||''),
+      salesName:String(record.salesName||''),
+      requestedQty:demand.requestedQty,
+      orderedQty:demand.orderedQty,
+      receivedQty:demand.receivedQty,
+      remainingToOrderQty:demand.remainingToOrderQty,
+      remainingToReceiveQty:demand.remainingToReceiveQty,
+      perOrdered:demand.perOrdered,
+      perReceived:demand.perReceived,
+      status:demand.status,
+      scheduleDate:demand.scheduleDate,
+      createdAt:String(record.createdAt||meta.createdAt||now),
+      updatedAt:now
+    };
+  }
+
+  function applyOrder(record={},qty=0){
+    const current=normalizeDemand(record);
+    const appliedQty=Math.min(n(qty),current.remainingToOrderQty);
+    const demand=normalizeDemand({...current,orderedQty:current.orderedQty+appliedQty});
+    return {appliedQty,demand};
+  }
+
+  function applyReceipt(record={},qty=0){
+    const current=normalizeDemand(record);
+    const appliedQty=Math.min(n(qty),current.remainingToReceiveQty);
+    const demand=normalizeDemand({...current,receivedQty:current.receivedQty+appliedQty});
+    return {appliedQty,demand};
+  }
+
+  function reconcileRequestedQty(record={},requestedQty=0){
+    return normalizeDemand({...record,requestedQty:n(requestedQty)});
+  }
+
+  return {
+    SOURCES,STATUSES,demandIdForSource,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel,
+    demandDocument,applyOrder,applyReceipt,reconcileRequestedQty
+  };
 });
