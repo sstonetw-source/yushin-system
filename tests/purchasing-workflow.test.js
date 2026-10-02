@@ -2051,3 +2051,26 @@ test('purchase history exposes a read-only ERP-style purchase timeline', () => {
     assert.doesNotMatch(source,/\b(?:tx|transaction)\.(?:set|update|delete)\(/);
     assert.doesNotMatch(source,/db\.collection\([^\n]+\)\.(?:add|set|update)\(/);
 });
+
+test('product supplier relation overrides brand fallback and is managed in purchasing', () => {
+    assert.match(html,/id="productSupplierMappingBody"/);
+    assert.match(html,/id="productSupplierItemCode"/);
+    assert.match(html,/id="productSupplierSupplier"/);
+    assert.match(app,/readCollectionInBatches\('productSupplierMappings'\)/);
+    assert.match(app,/selectProductSupplierMapping\(\s*productSupplierMappingCache/);
+    assert.match(app,/window\.saveProductSupplierMapping = async function/);
+    assert.match(app,/collection\('productSupplierMappings'\)\.doc\(mappingId\)/);
+    assert.match(app,/window\.disableProductSupplierMapping = async function/);
+    const resolverStart=app.indexOf("function supplierForProduct(");
+    const resolverEnd=app.indexOf("\nfunction normalizeSupplierEmail",resolverStart);
+    const source=app.slice(resolverStart,resolverEnd);
+    assert.ok(source.indexOf("selectProductSupplierMapping") < source.indexOf("supplierMappingCache.filter"));
+});
+
+test('supplier cannot be disabled while product supplier relations still reference it', () => {
+    const start=app.indexOf('window.disableSupplierMaster = async function');
+    const end=app.indexOf('\nwindow.saveSupplierMapping',start);
+    const source=app.slice(start,end);
+    assert.match(source,/productSupplierMappingCache\.filter\(mapping=>mapping\.supplierId===id\)/);
+    assert.match(source,/activeMappings\.length\|\|activeProductMappings\.length/);
+});
