@@ -187,6 +187,15 @@ test('procurement quantity stays open after a partial purchase is fully received
   }),'ordering');
 });
 
+test('warehouse required supply does not double count in-transit quantity',()=>{
+  const p=w.procurementQuantities({
+    orderedQty:10,shortageQty:7,supplyOrderedQty:4,receivedQty:0,fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(p.requiredSupplyQty,7);
+  assert.equal(p.inTransitQty,4);
+  assert.equal(p.remainingToOrderQty,3);
+});
+
 test('procurement quantity moves to arrival only when in-transit supply covers the live shortage',()=>{
   const partial=w.procurementQuantities({
     orderedQty:10,shortageQty:7,supplyOrderedQty:4,receivedQty:0,fulfillmentType:'WAREHOUSE'
