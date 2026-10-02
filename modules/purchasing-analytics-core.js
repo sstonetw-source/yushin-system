@@ -53,6 +53,7 @@
     const receivedQty=Math.min(effectiveOrderedQty,x.receivedQty);
     const incomingQty=cancelled?0:x.remainingQty;
     const isStockReplenishment=x.sourceType===supply.SOURCES.STOCK_REPLENISHMENT;
+    const sourceLabel=isStockReplenishment?'備庫採購':'客戶訂單採購';
     const documentKey=String(x.purchaseDocumentId||x.purchaseDocumentNo||x.internalNo||x.id||'').trim();
     const supplierName=String(x.supplier||x.supplierName||'未指定供應商').trim()||'未指定供應商';
     const supplierId=String(x.supplierId||'').trim();
@@ -80,6 +81,7 @@
       documentKey,
       method:x.method,
       sourceType:x.sourceType,
+      sourceLabel,
       unitCost,
       effectiveOrderedQty,
       receivedQty,
@@ -191,6 +193,7 @@
       rows,
       totals:finalizeMetric(totalMetric),
       bySupplier,
+      bySource:grouped(rows,row=>row.sourceLabel,'source'),
       byBrand:grouped(rows,row=>row.brand,'brand'),
       byMonth:grouped(rows,row=>row.month,'month','month')
     };
