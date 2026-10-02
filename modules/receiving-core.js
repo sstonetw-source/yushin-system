@@ -93,6 +93,7 @@
       operationId:String(event.operationId||event.receiptId||''),
       supplyOrderId:String(event.supplyOrderId||supply.id||''),
       documentSourceType:'SUPPLY_ORDER',
+      demandId:String(event.demandId||supply.demandId||''),
       method:String(supply.method||supply.type||''),
       demandSourceType:String(supply.sourceType||''),
       sourceId:String(supply.sourceId||supply.orderId||''),
