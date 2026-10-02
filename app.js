@@ -1232,6 +1232,10 @@ window.switchViewRole = function(role) {
     inventoryCursor = null;
     inventoryHasMore = true;
         pendingPurchaseCache = [];
+    procurementDemandCache = [];
+    procurementDemandCursor = null;
+    procurementDemandHasMore = true;
+    procurementDemandSourceOrderCache = new Map();
     pendingPurchaseCursor = null;
     pendingPurchaseHasMore = true;
     pendingPurchaseError = '';
@@ -9169,6 +9173,10 @@ let pendingPurchaseCursor = null;
 let pendingPurchaseHasMore = true;
 let pendingPurchaseLoading = false;
 let pendingPurchaseCache = [];
+let procurementDemandCache = [];
+let procurementDemandCursor = null;
+let procurementDemandHasMore = true;
+let procurementDemandSourceOrderCache = new Map();
 let pendingPurchaseError = '';
 let purchasingDispatchCache = [];
 let purchasingDispatchCursor = null;
@@ -9774,10 +9782,10 @@ window.switchPurchasingView = function(view, tab) {
     } else if (view === 'analytics') {
         renderPurchasingView();
     } else if (view === 'ordering') {
-        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
+        renderPendingPurchaseOrders();
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
-            loadPendingPurchaseOrders(true, { reuseOrders:true }).catch(err => {
+            loadPendingPurchaseOrders(true).catch(err => {
                 purchasingViewLoaded.delete('ordering');
                 console.error('待採購首次載入失敗：', err);
             });
@@ -9978,90 +9986,109 @@ function syncCommittedPurchaseOrderSources(orders) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 }
 
-function renderPendingPurchaseOrders(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
+function renderPendingPurchaseOrders() {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
     body.innerHTML = '';
     const fragment = document.createDocumentFragment();
+    const filters = purchaseFilterContext();
     let shown = 0;
-    const sourceOrders = ordersCache.length ? ordersCache : pendingPurchaseCache;
-    const filters = filterContext || purchaseFilterContext();
-    for (const order of sourceOrders) {
-        const items = pendingProcurementDisplayLines(
-            order,
-            normalizedItemsByOrder?.get(order.id),
-            dispatchStatesByOrder?.get(order.id),
-            lifecyclesByOrder?.get(order.id)
-        );
-        for (const item of items) {
-            if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) continue;
-            const selfOrder = item.procurementType === 'SALES_SELF_ORDER';
-            const actionHtml = selfOrder
+
+    const rows=[...procurementDemandCache]
+        .filter(demand=>Number(demand.remainingToOrderQty||0)>0)
+        .sort((a,b)=>String(a.scheduleDate||a.createdAt||'').localeCompare(String(b.scheduleDate||b.createdAt||'')));
+
+    for(const demand of rows){
+        const sourceType=String(demand.sourceType||'');
+        const order=sourceType==='SALES_ORDER'
+            ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
+            : null;
+        const sourceItems=order ? normalizedOrderItems(order) : [];
+        const item=sourceItems.find(row=>String(row.itemId||'')===String(demand.sourceItemId||'')) || {};
+        const date=order?.orderDate || String(demand.createdAt||'').slice(0,10);
+        const salesName=demand.salesName || order?.salesName || '';
+        const brand=demand.brand || item.brand || '';
+        if(!purchaseLineMatchesFilters(date,salesName,brand,filters))continue;
+
+        const qty=Math.max(0,Number(demand.remainingToOrderQty||0));
+        const statusLabel=globalThis.YushinProcurementDemand?.statusLabel(demand.status)||'待採購';
+        let customer=order?.customerName||order?.customer||'';
+        let actionHtml='';
+
+        if(sourceType==='STOCK_REPLENISHMENT'){
+            customer='備庫';
+            actionHtml=`<button type="button" class="btn-small btn-secondary" onclick="openInventoryReplenishment('${escapeAttr(demand.sourceId||demand.productKey||demand.productId||'')}')">產生訂購單</button>`;
+        }else if(order){
+            const selfOrder=(item.procurementType||order.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER';
+            actionHtml=selfOrder
                 ? (canBusinessSelfOrder(order)
-                    ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">登記自行訂貨</button>`
+                    ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal('${escapeAttr(order.id)}','${escapeAttr(demand.sourceItemId||item.itemId||'')}')">登記自行訂貨</button>`
                     : '<span class="order-progress-badge">自行訂貨・由訂單負責人處理</span>')
-                : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}',this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(item.itemId)}')">產生訂購單</button>`;
-            const row = document.createElement('tr');
-            row.innerHTML = `<td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="待採購品項">${escapeHtml(item.itemCode || item.itemName)} × ${Number(item.qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${selfOrder ? '自行訂貨' : '交由採購訂貨'}・${escapeHtml(item.demandStatusLabel || '待採購')}</div></td><td data-th="操作">${actionHtml}</td>`;
-            fragment.appendChild(row);
-            shown++;
+                : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered('${escapeAttr(order.id)}','${escapeAttr(demand.sourceItemId||item.itemId||'')}',this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft('${escapeAttr(order.id)}','${escapeAttr(demand.sourceItemId||item.itemId||'')}')">產生訂購單</button>`;
+        }else{
+            actionHtml='<span class="order-progress-badge">來源訂單待同步</span>';
         }
+
+        const row=document.createElement('tr');
+        row.innerHTML=`<td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項">${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
+        fragment.appendChild(row);
+        shown++;
     }
+
     body.appendChild(fragment);
-    const status = document.getElementById('purchasePendingStatus');
-    if (status) status.textContent = pendingPurchaseLoading ? '載入中…' : pendingPurchaseError || (shown ? `已顯示 ${shown} 筆待採購品項${pendingPurchaseHasMore ? '；較舊待辦請按載入更多' : ''}` : pendingPurchaseHasMore ? '這一頁沒有待採購品項；請按載入更多檢查較舊待辦' : '目前沒有待採購品項');
-    const more = document.getElementById('purchasePendingMoreBtn');
-    if (more) { more.style.display = pendingPurchaseHasMore ? '' : 'none'; more.disabled = pendingPurchaseLoading; }
+    const status=document.getElementById('purchasePendingStatus');
+    if(status)status.textContent=pendingPurchaseLoading
+        ? '載入中…'
+        : pendingPurchaseError || (shown
+            ? `已顯示 ${shown} 筆正式採購需求${procurementDemandHasMore?'；尚有更多需求可載入':''}`
+            : procurementDemandHasMore ? '目前這一批沒有符合篩選的需求，可載入更多' : '目前沒有待採購需求');
+    const more=document.getElementById('purchasePendingMoreBtn');
+    if(more){more.style.display=procurementDemandHasMore?'':'none';more.disabled=pendingPurchaseLoading;}
 }
 
-window.loadPendingPurchaseOrders = async function(reset = true, options = {}) {
+window.loadPendingPurchaseOrders = async function(reset = true) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po') || pendingPurchaseLoading) return;
-    // switchPurchasingView() 已用同一份 ordersCache 畫過一次；
-    // 若訂單資料已是最新，就不要再做第二輪 normalize / snapshot / render。
-    if (options.reuseOrders && purchasingOrdersReady) {
-        pendingPurchaseError = '';
-        pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        return ordersCache;
+    pendingPurchaseError='';
+    pendingPurchaseLoading=true;
+    const refreshButton=document.getElementById('purchasePendingRefreshBtn');
+    if(refreshButton&&reset){refreshButton.disabled=true;refreshButton.textContent='更新中…';}
+    if(reset){
+        procurementDemandCache=[];
+        procurementDemandCursor=null;
+        procurementDemandHasMore=true;
+        procurementDemandSourceOrderCache=new Map();
     }
-    pendingPurchaseError = '';
-    pendingPurchaseLoading = true;
-    let normalizedItemsByOrder = null;
-    let dispatchStatesByOrder = null;
-    let lifecyclesByOrder = null;
-    let filters = null;
-    const refreshButton = document.getElementById('purchasePendingRefreshBtn');
-    if (refreshButton && reset) { refreshButton.disabled = true; refreshButton.textContent = '更新中…'; }
-    if (options.reuseOrders) {
-        const status = document.getElementById('purchasePendingStatus');
-        if (status) status.textContent = '載入中…';
-    } else {
+    renderPendingPurchaseOrders();
+    try{
+        let query=db.collection('procurementDemands')
+            .where('remainingToOrderQty','>',0)
+            .orderBy('remainingToOrderQty','desc')
+            .limit(DEFAULT_LIST_LIMIT);
+        if(procurementDemandCursor)query=query.startAfter(procurementDemandCursor);
+        const snapshot=await firestoreReadWithTimeout(query.get(),'正式採購需求');
+        const fresh=snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+        procurementDemandCursor=snapshot.empty?null:snapshot.docs[snapshot.docs.length-1];
+        procurementDemandHasMore=snapshot.size===DEFAULT_LIST_LIMIT;
+
+        const byId=new Map((reset?[]:procurementDemandCache).map(row=>[row.id,row]));
+        fresh.forEach(row=>byId.set(row.id,row));
+        procurementDemandCache=[...byId.values()];
+
+        const sourceOrderIds=[...new Set(procurementDemandCache
+            .filter(row=>row.sourceType==='SALES_ORDER')
+            .map(row=>String(row.sourceId||'')).filter(Boolean))];
+        const missing=sourceOrderIds.filter(id=>!procurementDemandSourceOrderCache.has(id));
+        if(missing.length){
+            const sourceOrders=await readDocumentsByIds('orders',missing);
+            sourceOrders.forEach(order=>procurementDemandSourceOrderCache.set(order.id,order));
+        }
+        pendingPurchaseHasMore=procurementDemandHasMore;
+    }catch(err){
+        pendingPurchaseError=`待採購需求讀取失敗，請重試：${String(err?.message||err).slice(0,160)}`;
+    }finally{
+        pendingPurchaseLoading=false;
+        if(refreshButton){refreshButton.disabled=false;refreshButton.textContent='↻ 更新';}
         renderPendingPurchaseOrders();
-    }
-    try {
-        // 直接沿用訂單頁同一個分頁載入器與 ordersCache；同一時間不重複發 orders Query。
-        await refreshPurchasingOrderCache(reset, options);
-        normalizedItemsByOrder = new Map(
-            ordersCache.map(order => [order.id, normalizedOrderItems(order)])
-        );
-        dispatchStatesByOrder = purchasingDispatchStateSnapshot(normalizedItemsByOrder);
-        lifecyclesByOrder = purchasingLifecycleSnapshot(normalizedItemsByOrder);
-        filters = purchaseFilterContext();
-        pendingPurchaseCache = ordersCache.filter(order =>
-            pendingProcurementDisplayLines(
-                order,
-                normalizedItemsByOrder.get(order.id),
-                dispatchStatesByOrder.get(order.id),
-                lifecyclesByOrder.get(order.id)
-            ).length > 0
-        );
-        pendingPurchaseHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
-        renderPurchasingWorkCards(normalizedItemsByOrder, null, filters, dispatchStatesByOrder, lifecyclesByOrder);
-    } catch (err) {
-        pendingPurchaseError = `待採購清單讀取失敗，請重試：${String(err?.message || err).slice(0, 160)}`;
-    } finally {
-        pendingPurchaseLoading = false;
-        if (refreshButton) { refreshButton.disabled = false; refreshButton.textContent = '↻ 更新'; }
-        renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
     }
 };
 
