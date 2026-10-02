@@ -103,12 +103,14 @@ test('receipt progress derives ERP-style arrival labels',()=>{
   assert.equal(s.receiptProgress({qty:10,receivedQty:0,status:'ORDERED'}).label,'待到貨 0/10');
   assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'PARTIAL_RECEIPT'}).label,'部分到貨 4/10');
   assert.equal(s.receiptProgress({qty:10,receivedQty:10,status:'RECEIVED'}).label,'已到貨 10/10');
-  assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'CANCELLED'}).label,'部分到貨 4/10・其餘取消');
+  assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'CLOSED'}).label,'部分到貨 4/10・未到貨結案');
+  assert.equal(s.receiptProgress({qty:10,receivedQty:0,status:'CANCELLED'}).label,'未到貨已取消');
 });
 
 test('Odoo-style receipt status is derived from receipt events',()=>{
   assert.equal(s.receiptProgress({qty:10,receivedQty:0,status:'ORDERED'}).receiptStatus,'pending');
   assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'PARTIAL_RECEIPT'}).receiptStatus,'partial');
   assert.equal(s.receiptProgress({qty:10,receivedQty:10,status:'RECEIVED'}).receiptStatus,'full');
-  assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'CANCELLED'}).receiptStatus,'cancelled');
+  assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'CLOSED'}).receiptStatus,'closed');
+  assert.equal(s.receiptProgress({qty:10,receivedQty:0,status:'CANCELLED'}).receiptStatus,'cancelled');
 });
