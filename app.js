@@ -10222,13 +10222,14 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
     poRows.forEach(po => {
         // 全歷史搜尋已在資料層比對單號、廠商、採購人員與品項；歷史搜尋模式不可再用較窄欄位二次過濾。
         if (!poHistorySearchActive) {
-            const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.buyerName || ''}`.toLowerCase();
+            const searchable = `${po.poNo || ''} ${po.vendorName || ''} ${po.supplierName || ''} ${po.supplierEmail || ''} ${po.buyerName || ''}`.toLowerCase();
             if (keyword && !searchable.includes(keyword)) return;
         }
 
         const items = purchaseItemsFromSavedPo(po);
         const companyInfo = companyData[po.company];
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
+        const supplierContact = purchaseOrderSupplierContact(po);
 
         const poCancelled=String(po.status||'').toUpperCase()==='CANCELLED';
         items.forEach((item,itemIndex)=>{
@@ -10251,6 +10252,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                     <div class="po-list-action-row">
                         <button type="button" class="btn-small" onclick="reprintPurchaseOrder('${escapeAttr(po.id)}')">載入</button>
                         <button type="button" class="btn-small btn-secondary" onclick="exportPurchaseOrderFromHistory('${escapeAttr(po.id)}')">PDF</button>
+                        ${supplierContact.email?`<button type="button" class="btn-small btn-secondary" onclick="emailPurchaseOrder('${escapeAttr(po.id)}')">郵件</button>`:''}
                         <details class="po-more-menu">
                             <summary class="btn-small btn-secondary">更多</summary>
                             <div class="po-more-menu-popover">
@@ -10390,6 +10392,96 @@ window.exportPurchaseOrderFromHistory = async function(poId) {
         alert('重新匯出訂購單 PDF 失敗：' + (err?.message || err));
     } finally {
         endActionButton(button, buttonState);
+    }
+};
+
+window.emailPurchaseOrder = async function(poId) {
+    if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
+    const button=actionButtonFromEventOrSelector();
+    const buttonState=beginActionButton(button,'準備郵件…');
+    if(button && !buttonState)return;
+    try{
+        await loadSupplierWarehouseMasters();
+        let po=poListCache.find(row=>row.id===poId)||poHistorySearchResults.find(row=>row.id===poId);
+        if(!po){
+            const snap=await firestoreReadWithTimeout(db.collection('purchaseOrders').doc(poId).get(),'訂購單郵件');
+            if(!snap.exists)throw new Error('找不到這張訂購單。');
+            po={id:snap.id,...snap.data()};
+        }
+        if(!poListCache.some(row=>row.id===po.id))poListCache.push(po);
+
+        const contact=purchaseOrderSupplierContact(po);
+        if(!contact.email){
+            alert('這個供應商尚未設定 Email。請先到管理員後台的「供應商與廠牌對應」補上 Email。');
+            return;
+        }
+
+        await reprintPurchaseOrder(po.id);
+        if(poIncomingSyncPending){
+            updatePoSaveStatus('寄送前正在確認在途庫存同步…');
+            await registerPurchaseIncoming(po.id,po);
+            poIncomingSyncPending=false;
+        }
+
+        const attachment=await printSavedPoDocument(po.poNo,po.vendorName,{download:false});
+        const company=companyData[po.company]||companyData.yushin||{};
+        const subject=`訂購單 ${po.poNo||''}｜${company.title||'又鑫生物科技有限公司'}`;
+        const body=`${contact.supplierName||po.vendorName||'您好'} 您好：
+
+附件為訂購單 ${po.poNo||''}，請查收，謝謝。
+
+${company.title||''}
+採購人員：${po.buyerName||currentUserName||''}`;
+
+        const canShareFile=typeof File==='function'&&navigator.share&&navigator.canShare;
+        let shared=false;
+        if(canShareFile){
+            const file=new File([attachment.blob],attachment.fileName,{type:'application/pdf'});
+            if(navigator.canShare({files:[file]})){
+                try{
+                    try{await navigator.clipboard?.writeText(contact.email);}catch(_){}
+                    await navigator.share({
+                        title:subject,
+                        text:`收件人：${contact.email}\n\n${body}`,
+                        files:[file]
+                    });
+                    shared=true;
+                    updatePoSaveStatus(`✓ 已開啟分享；供應商 Email：${contact.email}`);
+                }catch(err){
+                    if(err?.name==='AbortError'){
+                        updatePoSaveStatus('已取消郵件／分享。');
+                        return;
+                    }
+                    console.warn('檔案分享不可用，改用郵件草稿：',err);
+                }
+            }
+        }
+
+        if(!shared){
+            const url=URL.createObjectURL(attachment.blob);
+            const link=document.createElement('a');
+            link.href=url;
+            link.download=attachment.fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(()=>URL.revokeObjectURL(url),30000);
+            window.location.href=`mailto:${contact.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body+'\\n\\nPDF 已下載，請將 '+attachment.fileName+' 加入附件。')}`;
+            updatePoSaveStatus(`✓ PDF 已下載並開啟郵件草稿：${contact.email}`);
+        }
+
+        db.collection('purchaseOrders').doc(po.id).set({
+            lastShareAt:new Date().toISOString(),
+            lastShareType:shared?'WEB_SHARE':'MAILTO',
+            lastShareEmail:contact.email
+        },{merge:true}).catch(err=>console.warn('更新訂購單寄送紀錄失敗：',err));
+    }catch(err){
+        console.error('準備訂購單郵件失敗：',err);
+        updatePoSaveStatus('準備訂購單郵件失敗：'+(err?.message||err),true);
+        alert('準備訂購單郵件失敗：'+(err?.message||err));
+    }finally{
+        endActionButton(button,buttonState);
+        updatePoSaveButton();
     }
 };
 
@@ -11737,9 +11829,10 @@ function paginatePoPdfDocument(stage, source) {
     return pages.map(entry => entry.page);
 }
 
-async function printSavedPoDocument(poNo, vendorName) {
+async function printSavedPoDocument(poNo, vendorName, options={}) {
     let stage = null;
     const button = document.getElementById('printPurchaseOrderBtn');
+    const download = options.download !== false;
     try {
         if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
             throw new Error('PDF 元件尚未載入');
@@ -11747,9 +11840,9 @@ async function printSavedPoDocument(poNo, vendorName) {
 
         if (button) {
             button.disabled = true;
-            button.innerText = '準備 PDF…';
+            button.innerText = download ? '準備 PDF…' : '準備附件…';
         }
-        updatePoSaveStatus('正在準備訂購單 PDF…');
+        updatePoSaveStatus(download ? '正在準備訂購單 PDF…' : '正在準備郵件附件…');
 
         const exportDom = createPoPdfStage();
         stage = exportDom.stage;
@@ -11770,9 +11863,16 @@ async function printSavedPoDocument(poNo, vendorName) {
             }
         });
 
-        if (button) button.innerText = '正在下載 PDF…';
-        pdf.save(poPdfFileName(poNo, vendorName));
-        updatePoSaveStatus('✓ 訂購單 PDF 已產生');
+        const fileName=poPdfFileName(poNo, vendorName);
+        const blob=pdf.output('blob');
+        if(download){
+            if (button) button.innerText = '正在下載 PDF…';
+            pdf.save(fileName);
+            updatePoSaveStatus('✓ 訂購單 PDF 已產生');
+        }else{
+            updatePoSaveStatus('✓ 訂購單 PDF 附件已準備');
+        }
+        return {blob,fileName};
     } finally {
         stage?.remove();
     }
@@ -11861,8 +11961,6 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const vendorName = document.getElementById('poVendorName').value.trim();
-    const vendorEmail = String(document.getElementById('poVendorEmail')?.value || '').trim();
-    const selectedSupplier = supplierForVendorName(vendorName);
     if (!vendorName) {
         alert('請填寫抬頭（要下單的廠商名稱）。');
         return;
@@ -12023,6 +12121,7 @@ window.printPurchaseOrder = async function() {
         else poListCache.unshift(savedPo);
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
+        updatePoModeUI();
         updatePoSaveStatus(`訂購單 ${poNo} 已同步雲端；正在產生 PDF，在途庫存稍後背景同步…`);
 
         // 核心 transaction 完成後才輸出 PDF，確保使用者拿到的正式文件一定有對應的系統紀錄。
