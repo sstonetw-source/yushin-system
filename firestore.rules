@@ -204,8 +204,9 @@ service cloud.firestore {
     }
 
     function purchaserSupplyOperationalUpdate() {
+      // affectedKeys 的白名單已禁止修改任何供應紀錄身分欄位；
+      // 不再逐欄重複比對同一批 identity，降低 Firestore Rules 表達式用量。
       return purchaser()
-        && sameSupplyIdentity()
         && validSupplyOperationalState()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'qty', 'receivedQty',
@@ -219,7 +220,6 @@ service cloud.firestore {
 
     function warehouseSupplyOperationalUpdate() {
       return warehouse()
-        && sameSupplyIdentity()
         && validSupplyOperationalState()
         && request.resource.data.get('status', 'ORDERED') != 'CANCELLED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -246,15 +246,27 @@ service cloud.firestore {
     function directShipReceiptOrderUpdate(orderId) {
       let beforeRecords = resource.data.get('deliveryRecords', []);
       let afterRecords = request.resource.data.get('deliveryRecords', []);
-      let newRecord = afterRecords[afterRecords.size() - 1];
+      // 先確認確實只新增一筆直送紀錄，再讀取最後一筆與其 supplyOrders 證據。
+      // 這可避免一般訂單更新在 deliveryRecords 為空時發生索引越界。
+      return (purchaser() || warehouse())
+        && afterRecords.size() == beforeRecords.size() + 1
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items', 'itemCount', 'orderSchemaVersion',
+          'deliveryRecords', 'deliveredQty', 'isDelivered',
+          'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+        ])
+        && directShipReceiptOrderEvidence(orderId);
+    }
+
+    function directShipReceiptOrderEvidence(orderId) {
+      let beforeRecords = resource.data.get('deliveryRecords', []);
+      let afterRecords = request.resource.data.get('deliveryRecords', []);
+      let newRecord = afterRecords[beforeRecords.size()];
       let supplyId = newRecord.get('sourceId', '');
       let supplyPath = /databases/$(database)/documents/supplyOrders/$(supplyId);
       let supplyBefore = get(supplyPath).data;
       let supplyAfter = getAfter(supplyPath).data;
-      return (purchaser() || warehouse())
-        && sameCommercialOwner()
-        && afterRecords.size() == beforeRecords.size() + 1
-        && afterRecords[0:beforeRecords.size()] == beforeRecords
+      return afterRecords[0:beforeRecords.size()] == beforeRecords
         && newRecord.get('sourceType', '') == 'DIRECT_SHIP_RECEIPT'
         && newRecord.get('qty', 0) is number
         && newRecord.get('qty', 0) > 0
@@ -265,12 +277,7 @@ service cloud.firestore {
         && supplyBefore.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
         && supplyAfter.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
         && supplyAfter.get('receivedQty', 0) == supplyBefore.get('receivedQty', 0) + newRecord.get('qty', 0)
-        && supplyAfter.get('receivedQty', 0) <= supplyAfter.get('qty', 0)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'items', 'itemCount', 'orderSchemaVersion',
-          'deliveryRecords', 'deliveredQty', 'isDelivered',
-          'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
-        ]);
+        && supplyAfter.get('receivedQty', 0) <= supplyAfter.get('qty', 0);
     }
 
     function purchaserOrderWorkflowUpdate() {
@@ -503,11 +510,11 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if admin()
+        || directShipReceiptOrderUpdate(id)
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data)
           && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate())
         || purchaserOrderWorkflowUpdate()
-        || warehouseOrderWorkflowUpdate()
-        || directShipReceiptOrderUpdate(id);
+        || warehouseOrderWorkflowUpdate();
       allow delete: if admin();
     }
 
