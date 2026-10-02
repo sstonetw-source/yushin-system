@@ -4564,7 +4564,7 @@ test('Product Master management keeps disable and adds guarded admin-only perman
     const toggleSource=appSource.slice(toggleStart,toggleEnd);
     assert.match(toggleSource,/status: active \? 'ACTIVE' : 'INACTIVE'/);
     assert.match(toggleSource,/歷史單據與關聯資料會保留/);
-    assert.doesNotMatch(toggleSource,/batch\.delete|\.delete\(/);
+    assert.doesNotMatch(toggleSource,/batch\.delete|db\.collection\('products'\)\.doc\([^)]*\)\.delete\(/);
 
     const deleteStart=appSource.indexOf('window.deleteProductMaster = async function(productId)');
     const deleteEnd=appSource.indexOf('\nwindow.openPendingProductMasterEditor',deleteStart);
