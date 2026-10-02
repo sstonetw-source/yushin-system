@@ -70,23 +70,31 @@
 
   function fromSalesOrder(input={}){
     const directShip=String(input.fulfillmentType||'WAREHOUSE').toUpperCase()==='DIRECT_SHIP';
+    const receivedQty=n(input.receivedQty);
+    const explicitOrdered=n(input.supplyOrderedQty);
+    const inferredOrdered=receivedQty+n(input.inTransitQty);
+    const orderedQty=Math.max(explicitOrdered,inferredOrdered);
     if(directShip){
       return normalizeDemand({
         ...input,
         sourceType:SOURCES.SALES_ORDER,
-        requestedQty:n(input.requiredSupplyQty),
-        orderedQty:n(input.supplyOrderedQty),
-        receivedQty:n(input.receivedQty)
+        // ERP Material Request semantics are cumulative: replacements after a
+        // return may legitimately raise total demand above the original order.
+        requestedQty:Math.max(n(input.requiredSupplyQty),orderedQty),
+        orderedQty,
+        receivedQty
       });
     }
     return normalizeDemand({
       ...input,
       sourceType:SOURCES.SALES_ORDER,
-      // Warehouse shortage is the live purchase demand. Open in-transit supply
-      // is already part of that shortage and must not be added a second time.
-      requestedQty:n(input.shortageQty),
-      orderedQty:n(input.inTransitQty),
-      receivedQty:0
+      // For warehouse fulfillment, received supply is already consumed history
+      // while shortageQty is the live uncovered requirement. Together they form
+      // the cumulative procurement need. Never let requestedQty fall below
+      // quantities already committed to suppliers.
+      requestedQty:Math.max(orderedQty,receivedQty+n(input.shortageQty)),
+      orderedQty,
+      receivedQty
     });
   }
 
