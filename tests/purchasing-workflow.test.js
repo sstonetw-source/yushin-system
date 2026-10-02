@@ -72,6 +72,21 @@ test('a PO cannot exceed the remaining need even when lines split the same item'
     assert.throws(() => validate(order, [{orderItemIndex:0,itemCode:'B',qty:1}]), /品項已變更/);
 });
 
+test('warehouse PO may exceed a sales shortage only when MOQ forces the excess', () => {
+    const order={items:[{
+        itemCode:'A',qty:8,shortageQty:3,supplyOrderedQty:0,receivedQty:0,fulfillmentType:'WAREHOUSE'
+    }]};
+    assert.doesNotThrow(()=>validate(order,[{
+        orderItemIndex:0,itemCode:'A',qty:5,minimumOrderQty:5,fulfillmentType:'WAREHOUSE'
+    }]));
+    assert.throws(()=>validate(order,[{
+        orderItemIndex:0,itemCode:'A',qty:5,minimumOrderQty:2,fulfillmentType:'WAREHOUSE'
+    }]),/待採購數量/);
+    assert.throws(()=>validate(order,[{
+        orderItemIndex:0,itemCode:'A',qty:5,minimumOrderQty:5,fulfillmentType:'DIRECT_SHIP'
+    }]),/待採購數量/);
+});
+
 test('PO may fill missing source identity when the stable item id still matches', () => {
     const order = { items:[{ itemId:'I1', itemCode:'', qty:3, shortageQty:3, supplyOrderedQty:0 }] };
     assert.doesNotThrow(() => validate(order, [{orderItemIndex:0,itemId:'I1',itemCode:'A-1',qty:1}]));
@@ -430,6 +445,12 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     assert.match(coreTransaction, /sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
     assert.match(coreTransaction, /sourceItemId:item\.itemId\|\|item\.sourceItemId\|\|''/);
     assert.match(coreTransaction, /purchaseDocumentId:poDocumentId/);
+    assert.match(coreTransaction, /planPurchaseOrder/);
+    assert.match(coreTransaction, /item\.demandAllocatedQty=demandOrderPlan\.demandAllocatedQty/);
+    assert.match(coreTransaction, /item\.excessStockQty=demandOrderPlan\.excessStockQty/);
+    assert.match(coreTransaction, /demandAllocatedQty:Number\(item\.demandAllocatedQty\?\?item\.qty\?\?0\)/);
+    assert.match(coreTransaction, /excessStockQty:Number\(item\.excessStockQty\|\|0\)/);
+    assert.match(coreTransaction, /Number\(line\.demandAllocatedQty\?\?line\.qty\?\?0\)/);
     assert.match(coreTransaction, /poRecord\.supplyOrderIds=supplyOrderIds/);
     assert.match(coreTransaction, /supplyOrderedQty:cumulative/);
     assert.doesNotMatch(coreTransaction, /purchaseOrderedQty:cumulative/);
@@ -444,24 +465,28 @@ test('purchase receiving queue calculates progress from supply orders only',()=>
     assert.doesNotMatch(app,/poItemReceiptProgress/);
 });
 
-test('supply receipt synchronizes received quantity back to the source order item through receiving core',()=>{
+test('supply receipt keeps MOQ excess out of the source order while receiving full physical stock',()=>{
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('window.openSupplyReceipt',start);
     const source=app.slice(start,end);
-    assert.match(source,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
+    assert.match(source,/const receiptPlan=globalThis\.YushinSupply\.applyReceipt\(procurement,qty\)/);
     assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
-    assert.match(source,/const next=receiptPlan\.item/);
-    assert.match(source,/reserveQty=receiptPlan\.reservedDelta/);
+    assert.match(source,/const orderReceiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\([\s\S]*?receiptPlan\.demandReceiptQty/);
+    assert.match(source,/const next=orderReceiptPlan\.item/);
+    assert.match(source,/reserveQty=orderReceiptPlan\.reservedDelta/);
     assert.match(source,/items\[itemIndex\]=\{\.\.\.next,reservedQty:next\.reservedQty\}/);
-    assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
-    assert.match(source,/globalThis\.YushinSupply\.applyReceipt\(procurement,qty\)/);
+    assert.match(source,/onHand:inv\.onHand\+qty,reserved:inv\.reserved\+reserveQty/);
+    assert.match(source,/autoAllocationQty=Math\.max\(0,Number\(qty\|\|0\)-reserveQty\)/);
+    assert.match(source,/updateDemandReceipt\(receiptPlan\.demandReceiptQty\)/);
+    assert.match(source,/demandReceiptQty:receiptPlan\.demandReceiptQty/);
+    assert.match(source,/excessReceiptQty:receiptPlan\.excessReceiptQty/);
     assert.match(source,/globalThis\.YushinReceiving\.buildReceiptSnapshot/);
 });
 
 
-test('self-order receipt uses receiving core receivedQty without adding it twice',()=>{
-    assert.match(app,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
-    assert.match(app,/const next=receiptPlan\.item/);
+test('source-order receipt uses only the demand-allocated portion',()=>{
+    assert.match(app,/const orderReceiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\([\s\S]*?receiptPlan\.demandReceiptQty/);
+    assert.match(app,/const next=orderReceiptPlan\.item/);
     assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存占用紀錄/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
 });
@@ -764,8 +789,8 @@ test('cancelled warehouse source still receives into free stock while direct shi
     const warehouseSource=source.slice(warehouseStart,registeredStart);
     assert.match(warehouseSource,/sourceOrderStatus=normalizedOrderStatus\(order\)/);
     assert.match(warehouseSource,/if\(sourceOrderStatus==='normal'\)\{/);
-    assert.match(warehouseSource,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:0\},qty\)/);
-    assert.match(warehouseSource,/items\[itemIndex\]=\{\.\.\.item,receivedQty:receiptPlan\.item\.receivedQty\}/);
+    assert.match(warehouseSource,/receivedQty:Number\(item\.receivedQty\|\|0\)\+Number\(receiptPlan\.demandReceiptQty\|\|0\)/);
+    assert.doesNotMatch(warehouseSource,/applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:0\}/);
     assert.match(warehouseSource,/orderWorkIndexFields\(nextOrder\)/);
     assert.doesNotMatch(warehouseSource,/來源訂單已取消，不能繼續確認到貨/);
     assert.match(source,/buildReceipt\(\{[\s\S]*?productKey,[\s\S]*?warehouseId,[\s\S]*?extra:\{[\s\S]*?sourceOrderStatus/);
@@ -2344,6 +2369,8 @@ test('supplier MOQ settings are exposed and enforced before purchase order commi
     assert.ok(printStart>=0&&printEnd>printStart);
     assert.match(printSource,/validatePurchaseQuantity/);
     assert.match(printSource,/以下品項低於此供應商的最小訂購量/);
+    assert.match(printSource,/planPurchaseOrder/);
+    assert.match(printSource,/原廠直送不可因 MOQ 超量下單/);
     assert.ok(
         printSource.indexOf('validatePurchaseQuantity') < printSource.indexOf('db.runTransaction'),
         'MOQ must be rejected before the PO transaction starts'
