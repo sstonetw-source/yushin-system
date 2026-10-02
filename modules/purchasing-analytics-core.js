@@ -65,6 +65,9 @@
       ? completionReceiptAt(receipts,effectiveOrderedQty)
       : '';
     const leadTimeDays=completionAt?dayDiff(x.orderDate||x.createdAt,completionAt):null;
+    const expectedDate=String(x.expectedDate||x.scheduleDate||'').slice(0,10);
+    const completionDate=String(completionAt||'').slice(0,10);
+    const onTime=expectedDate&&completionDate ? completionDate<=expectedDate : null;
     const agingAt=nowValue||new Date().toISOString();
     const openAgeDays=incomingQty>0?dayDiff(x.orderDate||x.createdAt,agingAt):null;
     return {
@@ -89,6 +92,8 @@
       missingUnitCost:effectiveOrderedQty>0&&unitCost<=0,
       completionAt,
       leadTimeDays,
+      expectedDate,
+      onTime,
       openAgeDays,
       isStockReplenishment
     };
@@ -106,6 +111,8 @@
       missingUnitCostCount:0,
       leadTimeDaysTotal:0,
       leadTimeCount:0,
+      onTimeCount:0,
+      onTimeEligibleCount:0,
       openAgeDaysTotal:0,
       openAgeCount:0,
       maxOpenAgeDays:0
@@ -124,6 +131,10 @@
     if(Number.isFinite(row.leadTimeDays)){
       metric.leadTimeDaysTotal+=row.leadTimeDays;
       metric.leadTimeCount++;
+    }
+    if(row.onTime!==null){
+      metric.onTimeEligibleCount++;
+      if(row.onTime)metric.onTimeCount++;
     }
     if(Number.isFinite(row.openAgeDays)){
       metric.openAgeDaysTotal+=row.openAgeDays;
@@ -144,6 +155,9 @@
       missingUnitCostCount:metric.missingUnitCostCount,
       leadTimeCount:metric.leadTimeCount,
       avgLeadTimeDays:metric.leadTimeCount?metric.leadTimeDaysTotal/metric.leadTimeCount:null,
+      onTimeCount:metric.onTimeCount,
+      onTimeEligibleCount:metric.onTimeEligibleCount,
+      onTimeRate:metric.onTimeEligibleCount?(metric.onTimeCount/metric.onTimeEligibleCount)*100:null,
       openAgeCount:metric.openAgeCount,
       avgOpenAgeDays:metric.openAgeCount?metric.openAgeDaysTotal/metric.openAgeCount:null,
       maxOpenAgeDays:metric.openAgeCount?metric.maxOpenAgeDays:null
