@@ -552,6 +552,19 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    // ERP-style communication timeline. Browser share/mailto can prove only that
+    // the handoff was prepared, not that an email was actually delivered.
+    match /purchaseOrderCommunications/{id} {
+      allow read: if admin() || purchaser();
+      allow create: if canPurchase()
+        && request.resource.data.get('purchaseOrderId', '') != ''
+        && request.resource.data.get('createdByUid', '') == request.auth.uid
+        && request.resource.data.get('state', '') == 'PREPARED'
+        && request.resource.data.get('verifiedSent', true) == false;
+      allow update: if false;
+      allow delete: if admin();
+    }
+
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser() || warehouse()
