@@ -1999,6 +1999,22 @@ test('purchasing analytics shows procurement mix instead of only raw totals', ()
     assert.match(source,/備庫占比/);
 });
 
+test('purchasing analytics exposes ERP-style open PO aging buckets', () => {
+    assert.match(html,/id="purchaseAnalyticsAgingBody"/);
+    assert.match(html,/在途採購帳齡/);
+    assert.match(html,/等待區間/);
+    assert.match(html,/未到貨數量/);
+
+    const start=app.indexOf('function purchasingAnalyticsAgingRowsHtml');
+    const end=app.indexOf('\nwindow.loadPurchasingAnalytics',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/agingBuckets = \[\]/);
+    assert.match(source,/oldestAging=agingBuckets\.find\(row=>row\.key==='31_plus'\)/);
+    assert.match(source,/31\+ 天/);
+    assert.match(source,/agingBody\.innerHTML = purchasingAnalyticsAgingRowsHtml\(agingBuckets\)/);
+});
+
 test('purchase order freezes supplier snapshot and records communication events', () => {
     assert.match(app, /snapshotForPurchaseOrder/);
     assert.match(app, /supplierSnapshot,/);
