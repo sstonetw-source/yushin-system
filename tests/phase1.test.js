@@ -245,7 +245,8 @@ test('Brand Master drives the main brand list while statistics grouping remains 
     const classificationEnd = appSource.indexOf('\n}\n', classificationStart) + 2;
     Object.assign(context, {
         statisticBrandAliasLookup:() => new Map([['roche', 'Roche'], ['thermo', 'Thermo']]),
-        normalizeStatisticBrandKey:value => String(value || '').trim().toLowerCase()
+        normalizeStatisticBrandKey:value => String(value || '').trim().toLowerCase(),
+        brandIdentityForRecord:order => ({ brand:String(order?.brand || '').trim(), brandId:'' })
     });
     vm.runInContext(appSource.slice(classificationStart, classificationEnd), context);
     assert.equal(context.statisticBrandForOrder({ brand:'Roche' }), 'Roche');
@@ -3558,6 +3559,7 @@ test('normalized order items index delivery records once per order', () => {
         Math,
         normalizeHistoryItemCode:value=>String(value||'').toUpperCase(),
         resolveBrandName:value=>value,
+        brandIdentityForRecord:item=>({brand:String(item?.brand||''),brandId:String(item?.brandId||'')}),
         parseMoney:value=>Number(value||0)
     });
     vm.runInContext(source,context);
