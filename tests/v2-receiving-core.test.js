@@ -101,7 +101,7 @@ test('purchase receipt snapshot preserves ERP traceability without exposing prot
 });
 
 test('receipt snapshot preserves procurement demand reference',()=>{
-  const snapshot=r.buildReceiptSnapshot({
+  const snapshot=receiving.buildReceiptSnapshot({
     id:'supply-1',
     demandId:'SALES_ORDER:SO-1:item-1',
     sourceType:'SALES_ORDER',
