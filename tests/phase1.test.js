@@ -4127,15 +4127,16 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
     const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
     const stateSource=rulesSource.slice(stateStart,stateEnd);
-    assert.match(stateSource,/request\.resource\.data\.get\('qty', 0\) >= resource\.data\.get\('qty', 0\)/);
-    assert.match(stateSource,/receivedQty', 0\) <= request\.resource\.data\.get\('qty', 0\)/);
-    assert.match(stateSource,/incomingRegisteredQty', 0\) >= 0/);
-    assert.match(stateSource,/incomingRegisteredQty', 0\) <= \([\s\S]*?qty', 0\) - request\.resource\.data\.get\('receivedQty', 0\)/);
-    assert.match(stateSource,/fulfillmentType', 'WAREHOUSE'\) != 'DIRECT_SHIP'[\s\S]*?incomingRegisteredQty', 0\) == 0/);
-    assert.match(stateSource,/== 'ORDERED'/);
-    assert.match(stateSource,/== 'PARTIAL_RECEIPT'/);
-    assert.match(stateSource,/== 'RECEIVED'/);
-    assert.match(stateSource,/== 'CANCELLED'/);
+    assert.match(stateSource,/qty >= resource\.data\.get\('qty', 0\)/);
+    assert.match(stateSource,/receivedQty <= qty/);
+    assert.match(stateSource,/incomingQty >= 0/);
+    assert.match(stateSource,/incomingQty <= \(qty - receivedQty\)/);
+    assert.match(stateSource,/fulfillmentType', 'WAREHOUSE'\) != 'DIRECT_SHIP'[\s\S]*?incomingQty == 0/);
+    assert.match(stateSource,/nextStatus == 'ORDERED'/);
+    assert.match(stateSource,/nextStatus == 'PARTIAL_RECEIPT'/);
+    assert.match(stateSource,/nextStatus == 'RECEIVED'/);
+    assert.match(stateSource,/nextStatus == 'CANCELLED'/);
+    assert.match(stateSource,/nextStatus == 'CLOSED'/);
 
     const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
     const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
