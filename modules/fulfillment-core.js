@@ -53,15 +53,25 @@
     return normalizeItem(receiving.applyReceiptToOrderItem(normalizeItem(item), qty).item);
   }
 
-  function pendingDispatchQty(item) {
+  function dispatchState(item) {
     const x = normalizeItem(item);
-    const alreadyPreparedNotDelivered = Math.max(0, x.dispatchPreparedQty - x.deliveredQty);
-    return Math.max(0, x.reservedQty - alreadyPreparedNotDelivered);
+    const grossDelivered = x.deliveredQty;
+    const returned = x.returnedQty;
+    const delivered = Math.max(0, grossDelivered - returned);
+    const reserved = x.reservedQty;
+    const prepared = x.dispatchPreparedQty;
+    const preparedOutstanding = Math.max(0, prepared - grossDelivered);
+    const shippable = Math.max(0, Math.min(reserved, preparedOutstanding));
+    const pending = Math.max(0, reserved - shippable);
+    return { delivered, grossDelivered, returned, reserved, prepared, preparedOutstanding, shippable, pending };
+  }
+
+  function pendingDispatchQty(item) {
+    return dispatchState(item).pending;
   }
 
   function shippableQty(item) {
-    const x = normalizeItem(item);
-    return Math.max(0, Math.min(x.dispatchPreparedQty - x.deliveredQty, x.reservedQty));
+    return dispatchState(item).shippable;
   }
 
   function prepareDispatch(item, qty) {
@@ -141,6 +151,7 @@
     normalizeItem,
     reserveFromAvailable,
     applyReceipt,
+    dispatchState,
     pendingDispatchQty,
     shippableQty,
     prepareDispatch,
