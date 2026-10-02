@@ -183,21 +183,22 @@
     return addCalendarDays(orderDate,days);
   }
 
-  function purchaseExpectedDate(items=[],mappings=[],orderDate='',supplierId=''){
+  function itemExpectedArrivalDate(item={},mappings=[],orderDate='',supplierId=''){
     const base=parseBusinessDate(orderDate);
     if(!base)return '';
     const requiredSupplierId=text(supplierId);
-    const leadTimes=[];
-    for(const item of items||[]){
-      const candidates=requiredSupplierId
-        ? (mappings||[]).filter(mapping=>normalizeProductSupplierMapping(mapping).supplierId===requiredSupplierId)
-        : (mappings||[]);
-      const mapping=selectProductSupplierMapping(candidates,item||{});
-      if(!mapping||!(Number(mapping.leadTimeDays)>0))return '';
-      leadTimes.push(Number(mapping.leadTimeDays));
-    }
-    if(!leadTimes.length)return '';
-    return addCalendarDays(base,Math.max(...leadTimes));
+    const candidates=requiredSupplierId
+      ? (mappings||[]).filter(mapping=>normalizeProductSupplierMapping(mapping).supplierId===requiredSupplierId)
+      : (mappings||[]);
+    const mapping=selectProductSupplierMapping(candidates,item||{});
+    if(!mapping||!(Number(mapping.leadTimeDays)>0))return '';
+    return addCalendarDays(base,mapping.leadTimeDays);
+  }
+
+  function purchaseExpectedDate(items=[],mappings=[],orderDate='',supplierId=''){
+    const dates=(items||[]).map(item=>itemExpectedArrivalDate(item,mappings,orderDate,supplierId));
+    if(!dates.length||dates.some(date=>!date))return '';
+    return dates.sort().at(-1)||'';
   }
 
   function communicationEvent(po={},contact={},input={}){
@@ -237,6 +238,7 @@
     parseBusinessDate,
     addCalendarDays,
     expectedArrivalDate,
+    itemExpectedArrivalDate,
     purchaseExpectedDate,
     communicationEvent
   };
