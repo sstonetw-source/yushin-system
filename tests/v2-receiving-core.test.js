@@ -99,3 +99,22 @@ test('purchase receipt snapshot preserves ERP traceability without exposing prot
   assert.equal(receipt.lotNo,'LOT-1');
   assert.equal(Object.prototype.hasOwnProperty.call(receipt,'unitCost'),false);
 });
+
+test('receipt snapshot preserves procurement demand reference',()=>{
+  const snapshot=r.buildReceiptSnapshot({
+    id:'supply-1',
+    demandId:'SALES_ORDER:SO-1:item-1',
+    sourceType:'SALES_ORDER',
+    sourceId:'SO-1',
+    sourceItemId:'item-1',
+    qty:5
+  },{
+    receiptId:'receipt-1',
+    qty:2,
+    cumulativeReceivedQty:2
+  });
+  assert.equal(snapshot.demandId,'SALES_ORDER:SO-1:item-1');
+  assert.equal(snapshot.supplyOrderId,'supply-1');
+  assert.equal(snapshot.sourceId,'SO-1');
+  assert.equal(snapshot.sourceItemId,'item-1');
+});
