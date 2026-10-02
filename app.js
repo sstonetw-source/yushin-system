@@ -7740,17 +7740,13 @@ function itemDispatchState(order, item) {
         ? Math.max(0,Number(item.returnedQty||0))
         : savedReturnRecords(order).filter(r=>((!r.itemId&&singleItem)||r.itemId===item.itemId))
             .reduce((sum,r)=>sum+Number(r.qty||0),0);
-    // 品項工作狀態使用有效送貨量。已送貨後若發生退貨，必須退出「已完成／待核銷」，
-    // 回到仍需補送的物流狀態；grossDelivered 保留給庫存與歷史追蹤。
-    const delivered=Math.max(0,grossDelivered-returned);
-    const reserved=Math.max(0,Number(item.reservedQty||0));
-    const prepared=Math.max(0,Number(item.dispatchPreparedQty||0));
-    // reservedQty 是「目前尚未出貨、仍被此訂單占用的數量」；dispatchPreparedQty / grossDelivered
-    // 則是累計量。兩者不能直接相減，否則第一批送完、第二批到貨後會漏掉新的待打單數量。
-    const preparedOutstanding=Math.max(0,prepared-grossDelivered);
-    const shippable=Math.max(0,Math.min(reserved,preparedOutstanding));
-    const pending=Math.max(0,reserved-shippable);
-    return { delivered, grossDelivered, returned, reserved, prepared, preparedOutstanding, shippable, pending };
+    const state=YushinFulfillment?.dispatchState({
+        ...item,
+        deliveredQty:grossDelivered,
+        returnedQty:returned
+    });
+    if(!state)throw new Error('Fulfillment core 未載入，無法計算出貨狀態。');
+    return state;
 }
 
 function orderContextActionState(order, normalizedItems = null, dispatchStateByItem = null) {
