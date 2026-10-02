@@ -4836,3 +4836,17 @@ test('order Firestore rules verify Product Master identity and embedded cost sou
     assert.match(rulesSource, /function validOrderEmbeddedCost/);
     assert.match(rulesSource, /function validCommercialOrderCostUpdate/);
 });
+
+test('inventory projected stock and replenishment center avoid duplicate replenishment against incoming stock', () => {
+    assert.match(appSource,/function inventoryProjectedStock\(stock = \{\}\)/);
+    assert.match(appSource,/return available\+incoming/);
+    assert.match(appSource,/function inventoryReplenishmentPlan\(item = \{\}, stock = \{\}\)/);
+    assert.match(appSource,/Math\.max\(0,safetyStock-projected\)/);
+    assert.match(appSource,/window\.loadInventoryReplenishmentCenter=loadInventoryReplenishmentCenter/);
+    assert.match(appSource,/where\('stockPolicy','==',INVENTORY_STOCK_POLICIES\.SAFETY_STOCK\)/);
+    assert.match(appSource,/inventoryReplenishmentCache\.find\(x => x\.id === inventoryId\)/);
+    assert.match(indexSource,/id="inventoryReplenishmentBody"/);
+    assert.match(indexSource,/預計庫存 = 可用庫存 \+ 在途/);
+    assert.match(indexSource,/<th>預計庫存<\/th>/);
+    assert.match(indexSource,/需補貨（預計庫存不足）/);
+});
