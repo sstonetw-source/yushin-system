@@ -1946,3 +1946,9 @@ test('purchase order email contact is delegated to supplier core', () => {
     assert.match(source,/YushinSupplier\?\.purchaseOrderContact/);
     assert.match(source,/YushinSupplier\.purchaseOrderContact\(po,supplierMasterCache\)/);
 });
+
+test('purchase flows persist one procurement demand reference through supply and receipt', () => {
+    assert.match(app, /demandId:demand\.demandId\s*\|\|\s*''/);
+    assert.match(app, /demandId:existingSupply\?\.demandId\|\|demand\.demandId\|\|''/);
+    assert.match(app, /demandId:item\.demandId\|\|globalThis\.YushinProcurementDemand\?\.demandIdForSource/);
+});
