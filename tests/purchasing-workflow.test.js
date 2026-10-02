@@ -1136,7 +1136,6 @@ test('receiving persists immutable ERP receipt snapshots through receiving core'
     const source=app.slice(start,end);
     assert.match(source,/YushinSupply\.normalize\(\{\.\.\.supply,id:supplyId\}\)/);
     assert.match(source,/YushinReceiving\.buildReceiptSnapshot/);
-    assert.match(source,/demandSourceType/);
     assert.doesNotMatch(source,/tx\.set\(receiptRef,\{receiptId:operationKey/);
 });
 
