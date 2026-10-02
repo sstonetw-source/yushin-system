@@ -10,6 +10,13 @@ test('full availability reserves all',()=>{const x=f.reserveFromAvailable({order
 test('zero availability leaves full shortage',()=>{const x=f.reserveFromAvailable({orderedQty:20},0);assert.equal(x.reservedQty,0);assert.equal(x.shortageQty,20);});
 test('partial receipt fills reservation immediately',()=>{const x=f.applyReceipt({orderedQty:20,reservedQty:8,receivedQty:0},5);assert.equal(x.receivedQty,5);assert.equal(x.reservedQty,13);assert.equal(x.shortageQty,7);});
 test('dispatch paperwork gates shippable quantity',()=>{let x=f.reserveFromAvailable({orderedQty:20},8);assert.equal(f.pendingDispatchQty(x),8);assert.equal(f.shippableQty(x),0);x=f.prepareDispatch(x,8);assert.equal(f.shippableQty(x),8);});
+
+test('dispatch state is the single source for pending and shippable quantities',()=>{
+  const state=f.dispatchState({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1});
+  assert.deepEqual(state,{delivered:4,grossDelivered:5,returned:1,reserved:4,prepared:7,preparedOutstanding:2,shippable:2,pending:2});
+  assert.equal(f.pendingDispatchQty({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1}),2);
+  assert.equal(f.shippableQty({orderedQty:10,reservedQty:4,dispatchPreparedQty:7,deliveredQty:5,returnedQty:1}),2);
+});
 test('dispatch cannot exceed reserved ready quantity',()=>{const x=f.prepareDispatch({orderedQty:20,reservedQty:8},99);assert.equal(x.dispatchPreparedQty,8);});
 test('physical delivery consumes only prepared/reserved qty',()=>{let x=f.prepareDispatch({orderedQty:20,reservedQty:8},8);x=f.deliver(x,5);assert.equal(x.deliveredQty,5);assert.equal(x.reservedQty,3);assert.equal(f.shippableQty(x),3);});
 test('source status derives from quantities',()=>{assert.equal(f.sourceStatus({orderedQty:20,reservedQty:20}),'有庫存');assert.equal(f.sourceStatus({orderedQty:20,reservedQty:8,supplyOrderedQty:12}),'已訂貨');assert.equal(f.sourceStatus({orderedQty:20,reservedQty:8}),'未訂貨');});
