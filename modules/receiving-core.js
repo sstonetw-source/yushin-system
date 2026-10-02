@@ -103,6 +103,8 @@
       purchaseDocumentNo:String(supply.purchaseDocumentNo||''),
       supplyInternalNo:String(supply.internalNo||''),
       supplyOrderDate:String(supply.orderDate||''),
+      expectedDate:String(supply.expectedDate||supply.scheduleDate||''),
+      scheduleDate:String(supply.scheduleDate||supply.expectedDate||''),
       supplyCreatedAt:String(supply.createdAt||''),
       supplierId:String(supply.supplierId||''),
       supplier:String(supply.supplier||supply.supplierName||''),
