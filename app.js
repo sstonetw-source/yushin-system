@@ -18477,12 +18477,13 @@ window.runSystemDataAudit = async function() {
     status.textContent = '讀取主檔與關聯資料中…';
     results.innerHTML = '';
     try {
-        const [products, users, warehouses, orders, purchaseOrders, supplyOrders, inventory, warehouseStocks, reservations] = await Promise.all([
+        const [products, users, warehouses, orders, purchaseOrders, procurementDemands, supplyOrders, inventory, warehouseStocks, reservations] = await Promise.all([
             readCollectionInBatches('products'),
             readCollectionInBatches('users'),
             readCollectionInBatches('warehouses'),
             readCollectionInBatches('orders'),
             readCollectionInBatches('purchaseOrders'),
+            readCollectionInBatches('procurementDemands'),
             readCollectionInBatches('supplyOrders'),
             readCollectionInBatches('inventory'),
             readCollectionInBatches('warehouseStocks'),
@@ -18529,6 +18530,32 @@ window.runSystemDataAudit = async function() {
         });
 
         const supplyIds = new Set(supplyOrders.map(row => String(row.id || '').trim()).filter(Boolean));
+        const orderById = new Map(orders.map(order => [String(order.id || '').trim(), order]));
+        const demandById = new Map(procurementDemands.map(demand => [String(demand.demandId || '').trim(), demand]).filter(([id]) => id));
+
+        procurementDemands.forEach(demand => {
+            const demandId=String(demand.demandId||'').trim();
+            const sourceType=String(demand.sourceType||'').trim();
+            const sourceId=String(demand.sourceId||'').trim();
+            const sourceItemId=String(demand.sourceItemId||'').trim();
+            const requested=Math.max(0,Number(demand.requestedQty||0));
+            const ordered=Math.max(0,Number(demand.orderedQty||0));
+            const received=Math.max(0,Number(demand.receivedQty||0));
+            if(!demandId)issues.push({ type:'採購需求缺少識別碼', detail:demand.id || '未知文件' });
+            if(received>ordered||ordered>requested){
+                issues.push({ type:'採購需求數量異常', detail:`${demandId || demand.id}｜需求 ${requested}／已訂 ${ordered}／已到 ${received}` });
+            }
+            if(sourceType==='SALES_ORDER'){
+                const sourceOrder=orderById.get(sourceId);
+                if(!sourceOrder){
+                    issues.push({ type:'採購需求來源訂單不存在', detail:`${demandId || demand.id}｜${sourceId || '未指定'}` });
+                }else if(sourceItemId&&!normalizedOrderItems(sourceOrder).some(item=>String(item.itemId||'')===sourceItemId)){
+                    issues.push({ type:'採購需求來源品項不存在', detail:`${demandId || demand.id}｜${sourceId}／${sourceItemId}` });
+                }
+            }else if(sourceType==='STOCK_REPLENISHMENT'&&!knownProduct(demand)){
+                issues.push({ type:'補庫需求找不到 Product', detail:`${demandId || demand.id}｜${demand.itemCode || demand.productKey || sourceId}` });
+            }
+        });
 
         purchaseOrders.forEach(po => {
             const itemOrderIds=[...new Set(purchaseItemsFromSavedPo(po).map(item=>String(item.orderId||'').trim()).filter(Boolean))];
@@ -18543,6 +18570,9 @@ window.runSystemDataAudit = async function() {
 
         supplyOrders.forEach(supply => {
             const sourceOrderId=String(supply.orderId||'').trim();
+            const demandId=String(supply.demandId||'').trim();
+            if(!demandId)issues.push({ type:'供應紀錄缺少採購需求', detail:`${supply.internalNo || supply.id}｜未記錄 demandId` });
+            else if(!demandById.has(demandId))issues.push({ type:'供應紀錄找不到採購需求', detail:`${supply.internalNo || supply.id}｜${demandId}` });
             if(sourceOrderId&&!orderIds.has(sourceOrderId))issues.push({ type:'供應紀錄來源訂單不存在', detail:`${supply.internalNo || supply.id}｜${sourceOrderId}` });
             if(!knownProduct(supply))issues.push({ type:'供應紀錄找不到 Product', detail:`${supply.internalNo || supply.id}｜${supply.itemCode || supply.productKey || ''}` });
             const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
@@ -18572,7 +18602,7 @@ window.runSystemDataAudit = async function() {
             if (!knownProduct(reservation)) issues.push({ type:'庫存占用找不到 Product', detail:`${reservation.orderNo || reservation.id}｜${reservation.productKey || reservation.itemCode || ''}` });
         });
 
-        const counts = `Product ${products.length}、人員 ${users.length}、訂單 ${orders.length}、訂購單文件 ${purchaseOrders.length}、供應紀錄 ${supplyOrders.length}、庫存索引 ${inventory.length}、分倉 ${warehouseStocks.length}、占用 ${reservations.length}`;
+        const counts = `Product ${products.length}、人員 ${users.length}、訂單 ${orders.length}、訂購單文件 ${purchaseOrders.length}、採購需求 ${procurementDemands.length}、供應紀錄 ${supplyOrders.length}、庫存索引 ${inventory.length}、分倉 ${warehouseStocks.length}、占用 ${reservations.length}`;
         status.textContent = issues.length ? `檢查完成：${counts}。發現 ${issues.length} 項需確認。` : `檢查完成：${counts}。未發現上述關聯異常。`;
         results.innerHTML = issues.length
             ? '<div class="table-wrap"><table><thead><tr><th>類型</th><th>內容</th></tr></thead><tbody>' + issues.slice(0,500).map(issue => `<tr><td>${escapeHtml(issue.type)}</td><td>${escapeHtml(issue.detail)}</td></tr>`).join('') + '</tbody></table></div>' + (issues.length > 500 ? `<div style="font-size:12px;color:#666;margin-top:6px;">畫面只顯示前 500 項，共 ${issues.length} 項。</div>` : '')
