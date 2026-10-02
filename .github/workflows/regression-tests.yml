@@ -28,4 +28,4 @@ jobs:
           node-version: '22'
 
       - name: Run pure Node regression tests
-        run: node --test tests/phase1.test.js tests/purchasing-workflow.test.js
+        run: node --test tests/phase1.test.js tests/purchasing-workflow.test.js tests/v2-receiving-core.test.js
