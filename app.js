@@ -11438,7 +11438,10 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             const itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
             if(itemIndex<0)throw new Error('找不到來源訂單品項。');
             const item=items[itemIndex];
-            const delivered=Math.min(Number((item.orderedQty ?? item.qty) || 0),Number(item.deliveredQty||0)+qty);
+            // Purchase Receipt / Delivery are cumulative ERP events. A replacement after a return
+            // can legitimately make gross delivered quantity exceed the original ordered quantity.
+            // Completion is decided from net delivered (gross - returns), not by truncating history.
+            const delivered=Number(item.deliveredQty||0)+qty;
             items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
             const deliveryRecord={
                 id:`direct-${operationKey}`,itemId:supply.itemId,date:localDateString(),qty,
