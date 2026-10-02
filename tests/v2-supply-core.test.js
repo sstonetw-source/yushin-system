@@ -99,3 +99,9 @@ test('supply core no longer owns inventory lot allocation',()=>{
   assert.equal(s.reverseLotAllocations,undefined);
   assert.equal(s.availableReturnAllocations,undefined);
 });
+test('receipt progress derives ERP-style arrival labels',()=>{
+  assert.equal(s.receiptProgress({qty:10,receivedQty:0,status:'ORDERED'}).label,'待到貨 0/10');
+  assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'PARTIAL_RECEIPT'}).label,'部分到貨 4/10');
+  assert.equal(s.receiptProgress({qty:10,receivedQty:10,status:'RECEIVED'}).label,'已到貨 10/10');
+  assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'CANCELLED'}).label,'部分到貨 4/10・其餘取消');
+});
