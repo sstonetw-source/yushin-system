@@ -9134,78 +9134,30 @@ function purchasingAnalyticsRangeKey(filters = purchaseFilterContext()) {
     return JSON.stringify([filters.start || '', filters.end || '']);
 }
 
-function purchasingAnalyticsProjection(supply = {}) {
-    if (!globalThis.YushinReceiving?.normalizeSupply) {
-        throw new Error('Receiving core 未載入，無法計算採購分析。');
-    }
-    const receiving = globalThis.YushinReceiving.normalizeSupply(supply);
-    const cancelled = receiving.status === 'CANCELLED';
-    const effectiveOrderedQty = cancelled ? receiving.receivedQty : receiving.qty;
-    const receivedQty = Math.min(effectiveOrderedQty, receiving.receivedQty);
-    const incomingQty = cancelled ? 0 : receiving.remainingQty;
-    const unitCost = Math.max(0, Number(supply.unitCost || 0));
-    const stockPurchase = supply.type === 'STOCK_REPLENISHMENT' || !String(supply.orderId || '').trim();
-    return {
-        effectiveOrderedQty,
-        receivedQty,
-        incomingQty,
-        unitCost,
-        orderedAmount: effectiveOrderedQty * unitCost,
-        receivedAmount: receivedQty * unitCost,
-        incomingAmount: incomingQty * unitCost,
-        stockPurchase,
-        customerPurchase: !stockPurchase
-    };
-}
-
 function purchasingAnalyticsRowMatches(supply, filters = purchaseFilterContext()) {
     const businessDate = normalizeBusinessDate(supply.orderDate || supply.createdAt);
     if ((filters.start || filters.end)
         && (!businessDate || (filters.start && businessDate < filters.start) || (filters.end && businessDate > filters.end))) return false;
-    if (filters.selectedSales && stripPhoneSuffix(supply.salesName || '') !== filters.selectedSales) return false;
+    if (filters.selectedSales) {
+        const code=String(supply.salesCode||'').trim();
+        const resolvedName=stripPhoneSuffix(
+            supply.salesName
+            || salesList.find(person=>code&&String(person.code||'').trim()===code)?.name
+            || ''
+        );
+        if (resolvedName !== filters.selectedSales) return false;
+    }
     if (filters.selectedBrand
         && orderBrandFilterValue(supply.brand || '', filters.selectableBrands) !== filters.selectedBrand) return false;
     return true;
 }
 
 function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = purchaseFilterContext()) {
-    const totals = {
-        lineCount:0, purchaseDocuments:new Set(),
-        orderedAmount:0, receivedAmount:0, incomingAmount:0,
-        stockAmount:0, customerAmount:0
-    };
-    const suppliers = new Map();
-    (rows || []).filter(row => purchasingAnalyticsRowMatches(row, filters)).forEach(supply => {
-        const projection = purchasingAnalyticsProjection(supply);
-        if (projection.effectiveOrderedQty <= 0 && projection.receivedQty <= 0) return;
-        totals.lineCount++;
-        const documentId = String(supply.purchaseDocumentId || supply.purchaseDocumentNo || supply.internalNo || supply.id || '').trim();
-        if (documentId) totals.purchaseDocuments.add(documentId);
-        totals.orderedAmount += projection.orderedAmount;
-        totals.receivedAmount += projection.receivedAmount;
-        totals.incomingAmount += projection.incomingAmount;
-        if (projection.stockPurchase) totals.stockAmount += projection.orderedAmount;
-        else totals.customerAmount += projection.orderedAmount;
-
-        const supplierKey = String(supply.supplierId || supply.supplier || '未設定供應商').trim() || '未設定供應商';
-        if (!suppliers.has(supplierKey)) {
-            suppliers.set(supplierKey, {
-                supplierName:String(supply.supplier || '未設定供應商').trim() || '未設定供應商',
-                lineCount:0, purchaseDocuments:new Set(),
-                orderedAmount:0, receivedAmount:0, incomingAmount:0,
-                stockAmount:0, customerAmount:0
-            });
-        }
-        const group = suppliers.get(supplierKey);
-        group.lineCount++;
-        if (documentId) group.purchaseDocuments.add(documentId);
-        group.orderedAmount += projection.orderedAmount;
-        group.receivedAmount += projection.receivedAmount;
-        group.incomingAmount += projection.incomingAmount;
-        if (projection.stockPurchase) group.stockAmount += projection.orderedAmount;
-        else group.customerAmount += projection.orderedAmount;
-    });
-    return { totals, suppliers:[...suppliers.values()].sort((a,b) => b.orderedAmount - a.orderedAmount) };
+    if (!globalThis.YushinPurchasingAnalytics?.summarize) {
+        throw new Error('Purchasing analytics core 未載入，無法計算採購分析。');
+    }
+    const filtered=(rows||[]).filter(row=>purchasingAnalyticsRowMatches(row,filters));
+    return globalThis.YushinPurchasingAnalytics.summarize(filtered);
 }
 
 function renderPurchasingAnalytics() {
@@ -9213,7 +9165,7 @@ function renderPurchasingAnalytics() {
     const body = document.getElementById('purchaseAnalyticsSupplierBody');
     if (!body) return;
     const filters = purchaseFilterContext();
-    const { totals, suppliers } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
+    const { totals, bySupplier } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
     const setMoney = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = formatStatsMoney(value);
@@ -9223,27 +9175,27 @@ function renderPurchasingAnalytics() {
     setMoney('purchaseAnalyticsIncoming', totals.incomingAmount);
     setMoney('purchaseAnalyticsStock', totals.stockAmount);
     const orderedDetail = document.getElementById('purchaseAnalyticsOrderedDetail');
-    if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.purchaseDocuments.size} 張採購單`;
+    if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.documentCount} 張採購單`;
     const receivedDetail = document.getElementById('purchaseAnalyticsReceivedDetail');
     if (receivedDetail) receivedDetail.textContent = totals.receivedAmount ? '依實際已到貨數量計算' : '期間內尚無已到貨金額';
     const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
     if (incomingDetail) incomingDetail.textContent = totals.incomingAmount ? '已下單、尚未到貨' : '目前沒有在途金額';
     const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
-    if (mixDetail) mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerAmount)}`;
+    if (mixDetail) mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerOrderAmount)}`;
 
-    body.innerHTML = suppliers.length ? suppliers.map(row => `<tr>
-        <td>${escapeHtml(row.supplierName)}</td>
-        <td>${row.purchaseDocuments.size}</td>
+    body.innerHTML = bySupplier.length ? bySupplier.map(row => `<tr>
+        <td>${escapeHtml(row.supplier)}</td>
+        <td>${row.documentCount}</td>
         <td>${row.lineCount}</td>
         <td>${formatStatsMoney(row.orderedAmount)}</td>
         <td>${formatStatsMoney(row.receivedAmount)}</td>
         <td>${formatStatsMoney(row.incomingAmount)}</td>
         <td>${formatStatsMoney(row.stockAmount)}</td>
-        <td>${formatStatsMoney(row.customerAmount)}</td>
+        <td>${formatStatsMoney(row.customerOrderAmount)}</td>
     </tr>`).join('') : '<tr><td colspan="8" style="color:#888;">目前篩選期間沒有採購資料。</td></tr>';
     if (status && !purchasingAnalyticsLoading) {
         const range = [filters.start, filters.end].filter(Boolean).join(' ～ ') || '全部期間';
-        status.textContent = `${range}｜${totals.lineCount} 筆品項｜${totals.purchaseDocuments.size} 張採購單`;
+        status.textContent = `${range}｜${totals.lineCount} 筆品項｜${totals.documentCount} 張採購單`;
     }
 }
 
