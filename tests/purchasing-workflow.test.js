@@ -2162,3 +2162,45 @@ test('receiving due info ranks overdue work ahead of today, future, and unschedu
     assert.match(renderSource, /sortedRows = Array\.from\(fragment\.childNodes\)\.sort/);
     assert.match(renderSource, /逾期 \$\{overdueCount\} 筆已置頂/);
 });
+
+
+test('item-level PO schedule dates flow into supply records while manual header dates stay authoritative', () => {
+    const helperStart = app.indexOf('function poItemsWithScheduleDates');
+    const helperEnd = app.indexOf('\n\nasync function autoFillPoSupplier', helperStart);
+    assert.ok(helperStart >= 0 && helperEnd > helperStart);
+    const helperSource = app.slice(helperStart, helperEnd);
+    const helper = vm.runInNewContext(`${helperSource}\npoItemsWithScheduleDates`, {
+        globalThis:{
+            YushinSupplier:{
+                itemExpectedArrivalDate:(item,mappings,orderDate,supplierId)=>
+                    item.itemCode==='A' ? '2026-10-05' : '2026-10-09'
+            }
+        },
+        productSupplierMappingCache:[]
+    });
+
+    const automatic=helper(
+        [{itemCode:'A'},{itemCode:'B'}],
+        'S1',
+        '2026-10-02',
+        '2026-10-09',
+        'lead-time'
+    );
+    assert.equal(automatic[0].scheduleDate,'2026-10-05');
+    assert.equal(automatic[1].scheduleDate,'2026-10-09');
+
+    const manual=helper(
+        [{itemCode:'A'},{itemCode:'B'}],
+        'S1',
+        '2026-10-02',
+        '2026-10-20',
+        'manual'
+    );
+    assert.equal(manual[0].scheduleDate,'2026-10-20');
+    assert.equal(manual[1].scheduleDate,'2026-10-20');
+
+    assert.match(app,/expectedDateSource,/);
+    assert.match(app,/items: scheduledPoItems\.map/);
+    assert.match(app,/expectedDate:item\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
+    assert.match(app,/scheduleDate:item\.scheduleDate\|\|poRecord\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
+});
