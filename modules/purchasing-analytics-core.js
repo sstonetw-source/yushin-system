@@ -48,10 +48,10 @@
     if(!supply)throw new Error('Supply core is required.');
     const x=supply.normalize(record);
     const unitCost=n(x.unitCost);
-    const cancelled=x.status==='CANCELLED';
-    const effectiveOrderedQty=cancelled?x.receivedQty:x.qty;
+    const terminal=['CANCELLED','CLOSED'].includes(x.status);
+    const effectiveOrderedQty=terminal?x.receivedQty:x.qty;
     const receivedQty=Math.min(effectiveOrderedQty,x.receivedQty);
-    const incomingQty=cancelled?0:x.remainingQty;
+    const incomingQty=terminal?0:x.remainingQty;
     const isStockReplenishment=x.sourceType===supply.SOURCES.STOCK_REPLENISHMENT;
     const sourceLabel=isStockReplenishment?'備庫採購':'客戶訂單採購';
     const documentKey=String(x.purchaseDocumentId||x.purchaseDocumentNo||x.internalNo||x.id||'').trim();
@@ -62,7 +62,7 @@
     const brand=String(x.brand||'未指定廠牌').trim()||'未指定廠牌';
     const date=String(x.orderDate||x.createdAt||'').slice(0,10);
     const month=/^\d{4}-\d{2}/.test(date)?date.slice(0,7):'未指定月份';
-    const completionAt=!cancelled&&effectiveOrderedQty>0
+    const completionAt=!terminal&&effectiveOrderedQty>0
       ? completionReceiptAt(receipts,effectiveOrderedQty)
       : '';
     const leadTimeDays=completionAt?dayDiff(x.orderDate||x.createdAt,completionAt):null;
