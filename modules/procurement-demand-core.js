@@ -182,9 +182,9 @@
   function supplyContribution(record={}){
     const qty=n(record.qty);
     const receivedQty=Math.min(qty,n(record.receivedQty));
-    const cancelled=String(record.status||'').toUpperCase()==='CANCELLED';
+    const terminal=['CANCELLED','CLOSED'].includes(String(record.status||'').toUpperCase());
     return {
-      orderedQty:cancelled?receivedQty:qty,
+      orderedQty:terminal?receivedQty:qty,
       receivedQty
     };
   }
@@ -208,7 +208,7 @@
 
   function applySupplyCancellation(record={},supply={}){
     const current=normalizeDemand(record);
-    const activeSupply={...supply,status:String(supply.status||'').toUpperCase()==='CANCELLED'?'ORDERED':supply.status};
+    const activeSupply={...supply,status:['CANCELLED','CLOSED'].includes(String(supply.status||'').toUpperCase())?'ORDERED':supply.status};
     const before=supplyContribution(activeSupply);
     const after=supplyContribution({...supply,status:'CANCELLED'});
     const releasedQty=Math.max(0,before.orderedQty-after.orderedQty);
