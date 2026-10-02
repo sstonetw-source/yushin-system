@@ -9218,7 +9218,11 @@ function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = pu
 
 function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime = false) {
     const leadTimeCell = row => includeLeadTime
-        ? `<td>${row.leadTimeCount ? '完整到貨平均 '+Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '完整到貨：－'}<div style="font-size:11px;color:#667584;margin-top:3px;">${row.openAgeCount ? '目前在途 '+row.openAgeCount+' 筆｜平均 '+Number(row.avgOpenAgeDays||0).toFixed(1)+' 天｜最久 '+Number(row.maxOpenAgeDays||0).toFixed(1)+' 天' : '目前無在途'}</div></td>`
+        ? `<td>
+            ${row.leadTimeCount ? '完整到貨平均 '+Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '完整到貨：－'}
+            <div style="font-size:11px;color:#667584;margin-top:3px;">${row.onTimeEligibleCount ? '準時到貨 '+Number(row.onTimeRate||0).toFixed(0)+'%（'+row.onTimeCount+'/'+row.onTimeEligibleCount+'）' : '準時率：尚無預計到貨樣本'}</div>
+            <div style="font-size:11px;color:#667584;margin-top:3px;">${row.openAgeCount ? '目前在途 '+row.openAgeCount+' 筆｜平均 '+Number(row.avgOpenAgeDays||0).toFixed(1)+' 天｜最久 '+Number(row.maxOpenAgeDays||0).toFixed(1)+' 天' : '目前無在途'}</div>
+        </td>`
         : '';
     return rows.length ? rows.map(row => `<tr>
         <td>${escapeHtml(row[labelKey] || '')}</td>
@@ -9253,7 +9257,7 @@ function renderPurchasingAnalytics() {
     if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.documentCount} 張採購單`;
     const receivedDetail = document.getElementById('purchaseAnalyticsReceivedDetail');
     if (receivedDetail) receivedDetail.textContent = totals.leadTimeCount
-        ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆品項）`
+        ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆）${totals.onTimeEligibleCount ? '｜準時 '+Number(totals.onTimeRate||0).toFixed(0)+'%（'+totals.onTimeCount+'/'+totals.onTimeEligibleCount+'）' : ''}`
         : (totals.receivedAmount ? '已有部分到貨，尚無完整到貨交期樣本' : '期間內尚無已到貨金額');
     const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
     if (incomingDetail) incomingDetail.textContent = totals.openAgeCount
