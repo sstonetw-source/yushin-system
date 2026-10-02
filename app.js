@@ -9159,12 +9159,27 @@ function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = pu
     return globalThis.YushinPurchasingAnalytics.summarize(filtered);
 }
 
+function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel) {
+    return rows.length ? rows.map(row => `<tr>
+        <td>${escapeHtml(row[labelKey] || '')}</td>
+        <td>${row.documentCount}</td>
+        <td>${row.lineCount}</td>
+        <td>${formatStatsMoney(row.orderedAmount)}</td>
+        <td>${formatStatsMoney(row.receivedAmount)}</td>
+        <td>${formatStatsMoney(row.incomingAmount)}</td>
+        <td>${formatStatsMoney(row.stockAmount)}</td>
+        <td>${formatStatsMoney(row.customerOrderAmount)}</td>
+    </tr>`).join('') : `<tr><td colspan="8" style="color:#888;">${emptyLabel}</td></tr>`;
+}
+
 function renderPurchasingAnalytics() {
     const status = document.getElementById('purchaseAnalyticsStatus');
-    const body = document.getElementById('purchaseAnalyticsSupplierBody');
-    if (!body) return;
+    const supplierBody = document.getElementById('purchaseAnalyticsSupplierBody');
+    const brandBody = document.getElementById('purchaseAnalyticsBrandBody');
+    const monthBody = document.getElementById('purchaseAnalyticsMonthBody');
+    if (!supplierBody) return;
     const filters = purchaseFilterContext();
-    const { totals, bySupplier } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
+    const { totals, bySupplier, byBrand, byMonth } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
     const setMoney = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = formatStatsMoney(value);
@@ -9182,19 +9197,18 @@ function renderPurchasingAnalytics() {
     const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
     if (mixDetail) mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerOrderAmount)}`;
 
-    body.innerHTML = bySupplier.length ? bySupplier.map(row => `<tr>
-        <td>${escapeHtml(row.supplier)}</td>
-        <td>${row.documentCount}</td>
-        <td>${row.lineCount}</td>
-        <td>${formatStatsMoney(row.orderedAmount)}</td>
-        <td>${formatStatsMoney(row.receivedAmount)}</td>
-        <td>${formatStatsMoney(row.incomingAmount)}</td>
-        <td>${formatStatsMoney(row.stockAmount)}</td>
-        <td>${formatStatsMoney(row.customerOrderAmount)}</td>
-    </tr>`).join('') : '<tr><td colspan="8" style="color:#888;">目前篩選期間沒有採購資料。</td></tr>';
+    supplierBody.innerHTML = purchasingAnalyticsRowsHtml(
+        bySupplier.map(row=>({...row,label:row.supplier})),
+        'label',
+        '目前篩選期間沒有採購資料。'
+    );
+    if (brandBody) brandBody.innerHTML = purchasingAnalyticsRowsHtml(byBrand, 'brand', '目前沒有廠牌採購資料。');
+    if (monthBody) monthBody.innerHTML = purchasingAnalyticsRowsHtml(byMonth, 'month', '目前沒有月份採購資料。');
+
     if (status && !purchasingAnalyticsLoading) {
         const range = [filters.start, filters.end].filter(Boolean).join(' ～ ') || '全部期間';
-        status.textContent = `${range}｜${totals.lineCount} 筆品項｜${totals.documentCount} 張採購單`;
+        const costWarning = totals.missingUnitCostCount ? `｜${totals.missingUnitCostCount} 筆進貨成本未填` : '';
+        status.textContent = `${range}｜${totals.lineCount} 筆品項｜${totals.documentCount} 張採購單${costWarning}`;
     }
 }
 
