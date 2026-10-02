@@ -107,3 +107,31 @@ test('demand can reopen when requested quantity increases',()=>{
   assert.equal(reopened.remainingToOrderQty,2);
   assert.equal(reopened.status,d.STATUSES.PARTIALLY_RECEIVED);
 });
+
+test('cancelled demand stops new ordering but preserves open supplier receipts',()=>{
+  const cancelled=d.cancelDemand({requestedQty:10,orderedQty:6,receivedQty:2});
+  assert.equal(cancelled.status,d.STATUSES.CANCELLED);
+  assert.equal(cancelled.remainingToOrderQty,0);
+  assert.equal(cancelled.remainingToReceiveQty,4);
+  const receipt=d.applyReceipt(cancelled,3);
+  assert.equal(receipt.appliedQty,3);
+  assert.equal(receipt.demand.receivedQty,5);
+  assert.equal(receipt.demand.status,d.STATUSES.CANCELLED);
+  assert.equal(receipt.demand.remainingToReceiveQty,1);
+});
+
+test('cancelled uncommitted demand disappears from purchasing queue',()=>{
+  const cancelled=d.cancelDemand({requestedQty:8,orderedQty:0,receivedQty:0});
+  assert.equal(cancelled.remainingToOrderQty,0);
+  assert.equal(cancelled.remainingToReceiveQty,0);
+  assert.equal(cancelled.status,d.STATUSES.CANCELLED);
+});
+
+test('reopened demand restores derived ordering state',()=>{
+  const cancelled=d.cancelDemand({requestedQty:8,orderedQty:3,receivedQty:1});
+  const reopened=d.reopenDemand(cancelled,10);
+  assert.equal(reopened.status,d.STATUSES.PARTIALLY_RECEIVED);
+  assert.equal(reopened.requestedQty,10);
+  assert.equal(reopened.remainingToOrderQty,7);
+  assert.equal(reopened.remainingToReceiveQty,2);
+});
