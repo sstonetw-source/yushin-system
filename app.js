@@ -19896,12 +19896,14 @@ async function confirmProductMasterImport(groups, errors = []) {
     const moreErrors = summary.errorCount - errorLines.length;
 
     const preview = [
-        '又鑫標準 Product Import 匯入前差異預覽',
+        '又鑫標準 Product Import 匯入預覽（差異預覽）',
         '',
         ...groupLines,
         '',
         `合計 ${summary.total} 筆：新增 ${summary.added}／更新 ${summary.updated}／不變 ${summary.unchanged}／錯誤 ${summary.errorCount}`,
         `停用標記 ${summary.inactive} 筆；${summary.costRows} 筆含標準成本。`,
+        '產品資料與建議售價寫入 products；標準成本寫入受保護的 productCosts。',
+        '實際採購價、歷史訂單與庫存批次成本不會被覆蓋。',
         changedLines.length ? '' : null,
         changedLines.length ? '變更明細：' : null,
         ...changedLines,
