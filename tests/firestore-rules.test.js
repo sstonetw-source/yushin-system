@@ -405,6 +405,46 @@ test('warehouse cannot mutate purchase-order snapshots; receiving state lives on
 });
 
 
+
+test('purchaser may close only a partially received supply and terminal supply cannot receive again', async () => {
+  await seed('supplyOrders/supply-close', {
+    type:'PURCHASING_PO', qty:5, receivedQty:2, incomingRegisteredQty:3,
+    status:'PARTIAL_RECEIPT', purchaseDocumentId:'po-close'
+  });
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'supplyOrders/supply-close'), {
+    status:'CLOSED',
+    closedQty:3,
+    closeReason:'供應商不再出貨',
+    closedAt:'2026-10-02T06:00:00Z',
+    closedByUid:'buyer1',
+    closedBy:'Buyer',
+    incomingRegisteredQty:0,
+    updatedAt:'2026-10-02T06:00:00Z'
+  }));
+  await assertFails(updateDoc(doc(db('wh1'), 'supplyOrders/supply-close'), {
+    receivedQty:3,
+    incomingRegisteredQty:0,
+    status:'PARTIAL_RECEIPT',
+    updatedAt:'2026-10-02T07:00:00Z'
+  }));
+
+  await seed('supplyOrders/supply-close-without-receipt', {
+    type:'PURCHASING_PO', qty:5, receivedQty:0, incomingRegisteredQty:5,
+    status:'ORDERED', purchaseDocumentId:'po-close-invalid'
+  });
+  await assertFails(updateDoc(doc(db('buyer1'), 'supplyOrders/supply-close-without-receipt'), {
+    status:'CLOSED',
+    closedQty:5,
+    closeReason:'不應使用結案',
+    closedAt:'2026-10-02T06:00:00Z',
+    closedByUid:'buyer1',
+    closedBy:'Buyer',
+    incomingRegisteredQty:0,
+    updatedAt:'2026-10-02T06:00:00Z'
+  }));
+});
+
+
 test('signed-in user can bootstrap-read own user profile', async () => {
   await assertSucceeds(getDoc(doc(db('sales1'), 'users/sales1')));
   await assertFails(getDoc(doc(db('unknown-user'), 'users/sales1')));
