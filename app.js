@@ -12276,9 +12276,10 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const procurement=globalThis.YushinSupply.normalize({...supply,id:supplyId});
         const updateDemandReceipt=(receiptQty)=>{
             if(!demandRef)return;
+            const fallbackDemandQty=Math.max(0,Number(supply.demandAllocatedQty??supply.qty??0));
             const fallbackRequested=Math.max(
-                Number(supply.qty||0),
-                Number(supply.receivedQty||0)+Number(receiptQty||0)
+                fallbackDemandQty,
+                Math.min(fallbackDemandQty,Number(supply.receivedQty||0)+Number(receiptQty||0))
             );
             const baseDemand=demandSnap?.exists
                 ? demandSnap.data()
@@ -12355,11 +12356,16 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             const itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
             if(itemIndex<0)throw new Error('找不到來源訂單品項。');
             const item=items[itemIndex];
+            const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
+            if(receiptPlan.excessReceiptQty>0){
+                throw new Error('原廠直送到貨數量超過客戶需求，請改由倉庫採購處理超額數量。');
+            }
+            const demandReceiptQty=receiptPlan.demandReceiptQty;
             // Purchase Receipt / Delivery are cumulative ERP events. A replacement after a return
             // can legitimately make gross delivered quantity exceed the original ordered quantity.
             // Completion is decided from net delivered (gross - returns), not by truncating history.
-            const delivered=Number(item.deliveredQty||0)+qty;
-            items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
+            const delivered=Number(item.deliveredQty||0)+demandReceiptQty;
+            items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+demandReceiptQty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+demandReceiptQty};
             const deliveryRecord={
                 id:`direct-${operationKey}`,itemId:supply.itemId,date:localDateString(),qty,
                 notes:'原廠直送到貨確認',createdBy:actor,createdAt:now,sourceType:'DIRECT_SHIP_RECEIPT',sourceId:supplyId
@@ -12379,14 +12385,15 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 deliveryRecords,deliveredQty:grossDelivered,isDelivered:nextOrder.isDelivered,
                 ...orderWorkIndexFields(nextOrder),updatedAt:now
             });
-            const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
             const receivedQty=receiptPlan.record.receivedQty;
             tx.update(supplyRef,{receivedQty,status:receiptPlan.record.status,updatedAt:now});
-            updateDemandReceipt(qty);
+            updateDemandReceipt(receiptPlan.demandReceiptQty);
             tx.set(receiptRef,buildReceipt({
                 receiptId:operationKey,
                 operationId:operationKey,
                 qty,
+                demandReceiptQty:receiptPlan.demandReceiptQty,
+                excessReceiptQty:receiptPlan.excessReceiptQty,
                 cumulativeReceivedQty:receivedQty,
                 fulfillmentType:'DIRECT_SHIP',
                 warehouseId:''
@@ -12404,6 +12411,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const whSnap=whRef?await tx.get(whRef):null;
         const inv=inventoryNumbers(invSnap.exists?invSnap.data():{});
         const wh=inventoryNumbers(whSnap?.exists?whSnap.data():{});
+        const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
         let order=null,items=[],itemIndex=-1,reserveQty=0;
         if(supply.orderId){
             const orderRef=db.collection('orders').doc(supply.orderId);
@@ -12422,9 +12430,12 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                         if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存占用紀錄，無法安全入庫。');
                         const reservation=reservationSnap.data();
                         const currentReserved=Math.max(0,Number(reservation.quantity||0));
-                        const receiptPlan=window.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:currentReserved},qty);
-                        const next=receiptPlan.item;
-                        reserveQty=receiptPlan.reservedDelta;
+                        const orderReceiptPlan=window.YushinReceiving.applyReceiptToOrderItem(
+                            {...item,reservedQty:currentReserved},
+                            receiptPlan.demandReceiptQty
+                        );
+                        const next=orderReceiptPlan.item;
+                        reserveQty=orderReceiptPlan.reservedDelta;
                         reservedForSource=reserveQty;
                         items[itemIndex]={...next,reservedQty:next.reservedQty};
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
@@ -12439,15 +12450,16 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                     }else{
                         // 取消中的來源訂單不重新占庫存，但仍同步實際到貨摘要。
                         // 這樣日後恢復訂單時，不會把已經到倉的數量再次誤判成在途採購。
-                        const receiptPlan=window.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:0},qty);
-                        items[itemIndex]={...item,receivedQty:receiptPlan.item.receivedQty};
+                        items[itemIndex]={
+                            ...item,
+                            receivedQty:Number(item.receivedQty||0)+Number(receiptPlan.demandReceiptQty||0)
+                        };
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
                         tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
                     }
                 }
             }
         }
-        const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
         const registeredIncoming=Math.max(0,Number(supply.incomingRegisteredQty||0));
         const incomingRelease=receiptPlan.incomingReleaseQty;
         const embeddedLots=[...(invSnap.exists?(invSnap.data().lots||[]):[])];
@@ -12468,6 +12480,8 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             receiptId:operationKey,
             operationId:operationKey,
             qty,
+            demandReceiptQty:receiptPlan.demandReceiptQty,
+            excessReceiptQty:receiptPlan.excessReceiptQty,
             cumulativeReceivedQty:receiptPlan.record.receivedQty,
             productKey,
             warehouseId,
@@ -12483,7 +12497,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             }
         }));
         tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
-        updateDemandReceipt(qty);
+        updateDemandReceipt(receiptPlan.demandReceiptQty);
         tx.update(supplyRef,{
             receivedQty:receiptPlan.record.receivedQty,
             incomingRegisteredQty:receiptPlan.record.incomingRegisteredQty,
@@ -13162,12 +13176,24 @@ function assertPurchaseLinesAvailable(order, lines) {
             || (sourceItemCode && lineItemCode && sourceItemCode !== lineItemCode)) {
             throw new Error('來源訂單品項已變更，請重新建立訂購單。');
         }
-        requestedByIndex.set(index, (requestedByIndex.get(index) || 0) + Number(line.qty || 0));
+        const current=requestedByIndex.get(index)||{qty:0,minimumOrderQty:0,directShip:false};
+        current.qty+=Number(line.qty||0);
+        current.minimumOrderQty=Math.max(current.minimumOrderQty,Math.max(0,Number(line.minimumOrderQty||0)));
+        current.directShip=current.directShip
+            || (line.fulfillmentType||source.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+        requestedByIndex.set(index,current);
     }
-    for (const [index, qty] of requestedByIndex) {
+    for (const [index, request] of requestedByIndex) {
         const source = sourceItems[index];
         const remaining = remainingProcurementQty(order, source);
-        if (!(qty > 0) || qty > remaining + 1e-9) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
+        if (!(request.qty > 0)) throw new Error('待採購數量已變更，請重新開啟來源訂單。');
+        if (request.qty > remaining + 1e-9) {
+            const moqExcessAllowed=!request.directShip
+                && remaining>0
+                && request.minimumOrderQty>remaining
+                && request.qty+1e-9>=request.minimumOrderQty;
+            if(!moqExcessAllowed)throw new Error('待採購數量已變更，請重新開啟來源訂單。');
+        }
     }
 }
 
@@ -13532,10 +13558,22 @@ window.printPurchaseOrder = async function() {
                         scheduleDate:String(item.demandScheduleDate||item.requiredByDate||'').trim()
                     });
                 }
-                const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demandProjection,Number(item.qty||0));
-                if(demandOrderPlan.appliedQty!==Number(item.qty||0)){
+                if(!globalThis.YushinProcurementDemand?.planPurchaseOrder){
+                    throw new Error('Procurement Demand core 未載入，無法安全分配採購需求。');
+                }
+                const demandOrderPlan=globalThis.YushinProcurementDemand.planPurchaseOrder(
+                    demandProjection,
+                    Number(item.qty||0),
+                    {fulfillmentType:item.fulfillmentType||sourceItemForDemand?.fulfillmentType||'WAREHOUSE'}
+                );
+                if(!demandOrderPlan.valid){
+                    if(demandOrderPlan.reason==='direct_ship_excess'){
+                        throw new Error('原廠直送不可因 MOQ 超量下單；請改為倉庫採購，讓超出客戶需求的數量入庫。');
+                    }
                     throw new Error('採購需求數量已變更，請重新整理後再建立訂購單。');
                 }
+                item.demandAllocatedQty=demandOrderPlan.demandAllocatedQty;
+                item.excessStockQty=demandOrderPlan.excessStockQty;
                 const demandRef=procurementDemandRef(demandProjection.demandId);
                 const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
                     productId:item.productId||sourceItemForDemand?.productId||'',
@@ -13591,6 +13629,8 @@ window.printPurchaseOrder = async function() {
                     itemName:item.itemName||'',
                     brand:resolveBrandName(item.brand||''),
                     qty:Number(item.qty||0),
+                    demandAllocatedQty:Number(item.demandAllocatedQty??item.qty??0),
+                    excessStockQty:Number(item.excessStockQty||0),
                     receivedQty:0,
                     incomingRegisteredQty:0,
                     supplier:poRecord.supplierName||vendorName,
@@ -13620,7 +13660,7 @@ window.printPurchaseOrder = async function() {
                     const orderedLines=poRecord.items.filter(item=>item.orderId===snapshot.id);
                     const nextItems=normalizedOrderItems(orderData).map((item,itemIndex)=>{
                         const matches=orderedLines.filter(line=>Number(line.orderItemIndex)===itemIndex);
-                        const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
+                        const orderedQty=matches.reduce((sum,line)=>sum+Number(line.demandAllocatedQty??line.qty??0),0);
                         const currentSupplyOrdered=Math.max(0,Number(item.supplyOrderedQty||0));
                         const cumulative=currentSupplyOrdered+orderedQty;
                         const identityLine=matches.find(line=>line.itemId&&item.itemId&&line.itemId===item.itemId)||matches[0];
