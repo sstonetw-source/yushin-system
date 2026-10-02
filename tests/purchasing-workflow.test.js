@@ -1835,6 +1835,17 @@ test('quick purchase outstanding cancellation reuses safe supply cancellation', 
     assert.match(cancelSource,/purchaseCancellationInProgress\.delete\(actionKey\)/);
 });
 
+test('purchase order email prefers secure callable SMTP and only falls back when backend is unavailable', () => {
+    assert.match(app,/firebase\.app\(\)\.functions\('asia-east1'\)/);
+    assert.match(app,/async function sendPurchaseOrderEmailViaBackend\(po,attachment\)/);
+    assert.match(app,/httpsCallable\('sendPurchaseOrderEmail'\)/);
+    assert.match(app,/purchaseOrderId:po\.id/);
+    assert.match(app,/lastCommunicationState:'SENT'/);
+    assert.match(app,/reason==='SMTP_NOT_CONFIGURED'/);
+    assert.match(app,/code==='functions\/not-found'/);
+    assert.match(app,/code==='functions\/unimplemented'/);
+});
+
 test('purchase order email/share uses supplier core contact and generated PDF blob', () => {
     assert.match(app, /function purchaseOrderSupplierContact\(po=\{\}\)/);
     assert.match(app, /YushinSupplier\.purchaseOrderContact\(po,supplierMasterCache\)/);
