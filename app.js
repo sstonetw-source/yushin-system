@@ -6711,6 +6711,8 @@ window.createForecastFromQuote = async function(quoteNo) {
             )
         };
 
+        record.searchTokens = buildFullHistorySearchTokens('forecast', record);
+
         const batch = db.batch();
 
         batch.set(ref, record);
@@ -6733,6 +6735,17 @@ window.createForecastFromQuote = async function(quoteNo) {
         });
 
         await batch.commit();
+
+        // Firestore 已成功後立即同步本機 Forecast 快取，不再等待重新整理或重查資料庫。
+        // 這和手動新增 Forecast 的做法一致，讓使用者切到 Forecast 頁面就能看到新案件。
+        forecastCache = [
+            { id: ref.id, ...record },
+            ...forecastCache.filter(item => item.id !== ref.id)
+        ].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+        writeAppDataCache('forecasts', forecastCache);
+        populateForecastBrandFilter();
+        populateForecastSalesFilter();
+        renderForecastList();
 
         alert('已從估價單建立 Forecast。');
     } catch (err) {
