@@ -928,6 +928,22 @@ test('phase 4 supports forecast manual edit, quote conversion, order conversion 
     assert.match(appSource, /FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.ORDER/);
 });
 
+test('quote-origin Forecast is hydrated into the current list without a page refresh', () => {
+    const start=appSource.indexOf('window.createForecastFromQuote = async function');
+    const end=appSource.indexOf('\nwindow.markQuoteAsDeal',start);
+    const source=appSource.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/await batch\.commit\(\)/);
+    assert.match(source,/forecastCache = \[/);
+    assert.match(source,/\.\.\.forecastCache\.filter\(item => item\.id !== ref\.id\)/);
+    assert.match(source,/writeAppDataCache\('forecasts', forecastCache\)/);
+    assert.match(source,/populateForecastBrandFilter\(\)/);
+    assert.match(source,/populateForecastSalesFilter\(\)/);
+    assert.match(source,/renderForecastList\(\)/);
+    assert.match(source,/record\.searchTokens = buildFullHistorySearchTokens\('forecast', record\)/);
+    assert.doesNotMatch(source,/await loadForecasts\(/);
+});
+
 test('phase 4 forecast permission is integrated into the common permission system', () => {
     assert.match(appSource, /key: 'forecast'/);
     assert.match(appSource, /'forecast-system':'forecast'/);
