@@ -1030,6 +1030,7 @@ test('dispatch readiness uses live reservation and supports later receipt batche
         normalizedOrderItems:order=>order.items||[],
         savedDeliveryRecords:order=>order.deliveryRecords||[],
         savedReturnRecords:order=>order.returnRecords||[],
+        YushinFulfillment:fulfillment,
         window:{YushinFulfillment:fulfillment}
     });
     vm.runInContext(source,context);
