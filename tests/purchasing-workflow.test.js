@@ -140,6 +140,7 @@ test('repeating an incoming-stock update does not count the same supply twice', 
         resolveBrandName:name=>name,
         buildInventorySearchTokens:row=>[String(row.itemCode||'').toLowerCase()],
         poIncomingKey:item=>item.productId,
+        isPurchaseTerminalStatus:status=>['CANCELLED','CLOSED'].includes(String(status||'').toUpperCase()),
         currentUserName:'採購',currentUser:null
     });
     const po={supplyOrderIds:['S1','S2'],items:[
