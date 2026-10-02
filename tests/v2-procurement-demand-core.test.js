@@ -135,3 +135,28 @@ test('reopened demand restores derived ordering state',()=>{
   assert.equal(reopened.remainingToOrderQty,7);
   assert.equal(reopened.remainingToReceiveQty,2);
 });
+
+test('linked supplier commitments reopen demand when an unreceived remainder is cancelled',()=>{
+  const current=d.normalizeDemand({demandId:'SALES_ORDER:o1:i1',requestedQty:10,orderedQty:10,receivedQty:4});
+  const result=d.applySupplyCancellation(current,{demandId:current.demandId,qty:10,receivedQty:4,status:'PARTIAL_RECEIPT'});
+  assert.equal(result.releasedQty,6);
+  assert.equal(result.demand.orderedQty,4);
+  assert.equal(result.demand.receivedQty,4);
+  assert.equal(result.demand.remainingToOrderQty,6);
+  assert.equal(result.demand.status,d.STATUSES.PARTIALLY_RECEIVED);
+});
+
+test('reconcileLinkedSupplies mirrors ERP status updater across active and cancelled supplies',()=>{
+  const demand={demandId:'SALES_ORDER:o1:i1',requestedQty:12};
+  const reconciled=d.reconcileLinkedSupplies(demand,[
+    {demandId:demand.demandId,qty:5,receivedQty:5,status:'RECEIVED'},
+    {demandId:demand.demandId,qty:4,receivedQty:1,status:'CANCELLED'},
+    {demandId:demand.demandId,qty:3,receivedQty:0,status:'ORDERED'},
+    {demandId:'SALES_ORDER:other:item',qty:99,receivedQty:99,status:'RECEIVED'}
+  ]);
+  assert.equal(reconciled.orderedQty,9);
+  assert.equal(reconciled.receivedQty,6);
+  assert.equal(reconciled.remainingToOrderQty,3);
+  assert.equal(reconciled.remainingToReceiveQty,3);
+  assert.equal(reconciled.status,d.STATUSES.PARTIALLY_RECEIVED);
+});
