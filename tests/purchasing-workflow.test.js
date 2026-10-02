@@ -1924,3 +1924,21 @@ test('purchasing analytics shows procurement mix instead of only raw totals', ()
     assert.match(source,/客戶訂單採購/);
     assert.match(source,/備庫占比/);
 });
+
+test('purchase order freezes supplier snapshot and records communication events', () => {
+    assert.match(app, /snapshotForPurchaseOrder/);
+    assert.match(app, /supplierSnapshot,/);
+    assert.match(app, /purchaseOrderCommunications/);
+    assert.match(app, /communicationEvent\(po,contact/);
+    assert.match(app, /lastCommunicationState:event\.state/);
+    assert.doesNotMatch(app, /verifiedSent:\s*true/);
+});
+
+test('purchase order email contact is delegated to supplier core', () => {
+    const start=app.indexOf('function purchaseOrderSupplierContact(po={})');
+    const end=app.indexOf('\nasync function recordPurchaseOrderCommunication',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/YushinSupplier\?\.purchaseOrderContact/);
+    assert.match(source,/YushinSupplier\.purchaseOrderContact\(po,supplierMasterCache\)/);
+});
