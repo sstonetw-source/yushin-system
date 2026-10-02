@@ -7491,8 +7491,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
     document.getElementById('poVendorName').value = '';
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
-    const poExpectedDateInput=document.getElementById('poExpectedDate');
-    if(poExpectedDateInput)poExpectedDateInput.value='';
+    clearPoExpectedDate();
     await autoFillPoSupplier(poItems);
     switchPoCompany(currentCompany || 'yushin', null, true);
     generatePoNo();
@@ -10449,8 +10448,7 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         document.getElementById('poVendorName').value = '';
         document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
         document.getElementById('poDate').value = localDateString();
-    const poExpectedDateInput=document.getElementById('poExpectedDate');
-    if(poExpectedDateInput)poExpectedDateInput.value='';
+    clearPoExpectedDate();
         switchPoCompany(bestPurchaseOrderCompany([order], items, order.company), null, true);
         generatePoNo();
         renderPoItemsTable();
@@ -11300,8 +11298,8 @@ window.copySavedPurchaseOrderAsNew = async function(poId) {
     window.updatePoSupplierEmailHint?.({vendorName:po.vendorName,supplierId:po.supplierId,supplierEmail:po.supplierEmail});
     document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
     document.getElementById('poDate').value = localDateString();
-    const poExpectedDateInput=document.getElementById('poExpectedDate');
-    if(poExpectedDateInput)poExpectedDateInput.value='';
+    clearPoExpectedDate();
+    window.autoFillPoExpectedDate(poItems);
     await generatePoNo();
     renderPoItemsTable();
     updatePoModeUI();
@@ -12503,8 +12501,7 @@ window.openDirectStockPurchase = async function() {
     document.getElementById('poVendorName').value = '';
     document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
     document.getElementById('poDate').value = localDateString();
-    const poExpectedDateInput=document.getElementById('poExpectedDate');
-    if(poExpectedDateInput)poExpectedDateInput.value='';
+    clearPoExpectedDate();
     switchPoCompany(currentCompany || 'yushin', null, true);
     generatePoNo();
     addDirectPoItem();
@@ -12536,6 +12533,7 @@ window.addDirectPoItem = function() {
     poDirectStockMode = true;
     poItems.push(emptyDirectPoItem());
     poAllItems = poItems;
+    window.autoFillPoExpectedDate(poItems);
     renderPoItemsTable();
     updatePoModeUI();
 };
@@ -12574,6 +12572,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
         }
     }
     poAllItems = poItems;
+    window.autoFillPoExpectedDate(poItems);
     renderPoItemsTable();
 };
 
@@ -12581,6 +12580,7 @@ window.updateDirectPoText = function(idx, field, value) {
     if (!poItems[idx]) return;
     poItems[idx][field] = field === 'brand' ? resolveBrandName(value) : String(value || '').trim();
     poAllItems = poItems;
+    window.autoFillPoExpectedDate(poItems);
 };
 
 function updatePoModeUI() {
@@ -12618,6 +12618,45 @@ function updatePoModeUI() {
 }
 
 
+function clearPoExpectedDate() {
+    const input=document.getElementById('poExpectedDate');
+    if(!input)return;
+    input.value='';
+    delete input.dataset.expectedDateSource;
+}
+
+window.markPoExpectedDateManual = function() {
+    const input=document.getElementById('poExpectedDate');
+    if(input)input.dataset.expectedDateSource='manual';
+};
+
+window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = '') {
+    const input=document.getElementById('poExpectedDate');
+    if(!input || poEditingId)return input?.value||'';
+    if(input.dataset.expectedDateSource==='manual')return input.value||'';
+    if(!globalThis.YushinSupplier?.purchaseExpectedDate)return '';
+
+    const vendorName=String(document.getElementById('poVendorName')?.value||'').trim();
+    const liveSupplier=supplierForVendorName(vendorName);
+    const supplierId=String(preferredSupplierId||liveSupplier?.id||liveSupplier?.supplierId||'').trim();
+    const orderDate=String(document.getElementById('poDate')?.value||'').trim();
+    const expected=globalThis.YushinSupplier.purchaseExpectedDate(
+        items||[],
+        productSupplierMappingCache,
+        orderDate,
+        supplierId
+    );
+
+    if(expected){
+        input.value=expected;
+        input.dataset.expectedDateSource='lead-time';
+    }else if(input.dataset.expectedDateSource==='lead-time'){
+        input.value='';
+        delete input.dataset.expectedDateSource;
+    }
+    return expected;
+};
+
 async function autoFillPoSupplier(items) {
     await loadSupplierWarehouseMasters();
     const rows=items||[];
@@ -12627,33 +12666,20 @@ async function autoFillPoSupplier(items) {
         item.productId,
         item.itemCode
     )).filter(Boolean);
-    if (!resolved.length) return '';
+    if (!resolved.length) {
+        window.autoFillPoExpectedDate(rows,'__unresolved__');
+        return '';
+    }
     const ids = [...new Set(resolved.map(item => item.id || item.supplierId))];
-    if (ids.length !== 1) return '';
+    if (ids.length !== 1) {
+        window.autoFillPoExpectedDate(rows,'__multiple__');
+        return '';
+    }
     const supplier = resolved[0];
     const header = supplier.purchaseHeaderName || supplier.supplierName || '';
     const input = document.getElementById('poVendorName');
     if (input && header) input.value = header;
-
-    // Odoo-style vendor lead time: only auto-fill when every selected item has
-    // an item-specific supplier lead time for the same supplier. User input always wins.
-    const expectedInput=document.getElementById('poExpectedDate');
-    const poDate=String(document.getElementById('poDate')?.value||'').trim();
-    const leadTimes=resolved.map(item=>{
-        const mapping=item.productSupplierMapping;
-        if(!mapping)return null;
-        const days=Number(mapping.leadTimeDays);
-        return Number.isFinite(days)&&days>=0?Math.floor(days):null;
-    });
-    if(expectedInput&&!expectedInput.value&&poDate
-        &&resolved.length===rows.length
-        &&leadTimes.length===rows.length
-        &&leadTimes.every(days=>days!==null)
-        &&globalThis.YushinSupplier?.expectedArrivalDate){
-        const expected=globalThis.YushinSupplier.expectedArrivalDate(poDate,Math.max(...leadTimes));
-        if(expected)expectedInput.value=expected;
-    }
-
+    window.autoFillPoExpectedDate(rows,ids[0]);
     window.updatePoSupplierEmailHint?.();
     return header;
 }
@@ -12814,6 +12840,7 @@ window.removePoItem = function(idx) {
     const removed = poItems[idx];
     poItems.splice(idx, 1);
     poAllItems = poAllItems.filter(item => item !== removed);
+    window.autoFillPoExpectedDate(poItems);
     renderPoItemsTable();
 };
 
