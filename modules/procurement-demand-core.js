@@ -36,8 +36,10 @@
     const orderedQty=n(record.orderedQty);
     const receivedQty=Math.min(orderedQty,n(record.receivedQty));
     const cancelled=record.cancelled===true||String(record.status||'').toUpperCase()===STATUSES.CANCELLED;
+    // Cancelling/stopping a Material Request prevents further ordering, but any
+    // supplier commitment already placed still has to be received/closed.
     const remainingToOrderQty=cancelled?0:Math.max(0,requestedQty-orderedQty);
-    const remainingToReceiveQty=cancelled?0:Math.max(0,orderedQty-receivedQty);
+    const remainingToReceiveQty=Math.max(0,orderedQty-receivedQty);
     let status=STATUSES.PENDING;
     if(cancelled)status=STATUSES.CANCELLED;
     else if(requestedQty>0&&receivedQty>=requestedQty)status=STATUSES.RECEIVED;
@@ -175,8 +177,24 @@
     return normalizeDemand({...record,requestedQty:n(requestedQty)});
   }
 
+  function cancelDemand(record={}){
+    const current=normalizeDemand(record);
+    return normalizeDemand({...current,cancelled:true,status:STATUSES.CANCELLED});
+  }
+
+  function reopenDemand(record={},requestedQty){
+    const current=normalizeDemand(record);
+    const nextRequested=requestedQty===undefined?current.requestedQty:n(requestedQty);
+    return normalizeDemand({
+      ...current,
+      cancelled:false,
+      status:'',
+      requestedQty:Math.max(nextRequested,current.orderedQty)
+    });
+  }
+
   return {
     SOURCES,STATUSES,demandIdForSource,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel,
-    demandDocument,applyOrder,applyReceipt,reconcileRequestedQty
+    demandDocument,applyOrder,applyReceipt,reconcileRequestedQty,cancelDemand,reopenDemand
   };
 });
