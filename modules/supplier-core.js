@@ -178,6 +178,48 @@
       .sort((a,b)=>a.priority-b.priority||a.supplierId.localeCompare(b.supplierId))[0]||null;
   }
 
+  function parseBusinessDate(value){
+    const normalized=text(value);
+    const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+    if(!match)return '';
+    const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+    const date=new Date(Date.UTC(year,month-1,day));
+    if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return '';
+    return normalized;
+  }
+
+  function addCalendarDays(value,days=0){
+    const normalized=parseBusinessDate(value);
+    if(!normalized)return '';
+    const [year,month,day]=normalized.split('-').map(Number);
+    const offsetNumber=Number(days);
+    const offset=Number.isFinite(offsetNumber)?Math.max(0,Math.floor(offsetNumber)):0;
+    const date=new Date(Date.UTC(year,month-1,day));
+    date.setUTCDate(date.getUTCDate()+offset);
+    return date.toISOString().slice(0,10);
+  }
+
+  // Odoo-style vendor lead time projection adapted to Yushin's current
+  // single expected-date PO header. Only project when every selected item has
+  // an explicit lead time for the selected supplier; otherwise leave it blank
+  // rather than inventing a date.
+  function purchaseExpectedDate(items=[],mappings=[],orderDate='',supplierId=''){
+    const base=parseBusinessDate(orderDate);
+    if(!base)return '';
+    const requiredSupplierId=text(supplierId);
+    const leadTimes=[];
+    for(const item of items||[]){
+      const candidates=requiredSupplierId
+        ? (mappings||[]).filter(mapping=>normalizeProductSupplierMapping(mapping).supplierId===requiredSupplierId)
+        : (mappings||[]);
+      const mapping=selectProductSupplierMapping(candidates,item||{});
+      if(!mapping||!(Number(mapping.leadTimeDays)>0))return '';
+      leadTimes.push(Number(mapping.leadTimeDays));
+    }
+    if(!leadTimes.length)return '';
+    return addCalendarDays(base,Math.max(...leadTimes));
+  }
+
   function communicationEvent(po={},contact={},input={}){
     const channel=text(input.channel||'MAILTO').toUpperCase();
     const preparedAt=text(input.preparedAt||input.createdAt);
@@ -214,6 +256,9 @@
     validateProductSupplierMapping,
     productSupplierMatches,
     selectProductSupplierMapping,
+    parseBusinessDate,
+    addCalendarDays,
+    purchaseExpectedDate,
     communicationEvent
   };
 });
