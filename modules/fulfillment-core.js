@@ -116,39 +116,6 @@
     return '處理中';
   }
 
-  function allocateLots(lots, qty, expiryManaged) {
-    const wanted = n(qty);
-    const eligible = (lots || []).filter(l => n(l.remainingQty) > 0);
-    const sorted = [...eligible].sort((a, b) => {
-      if (expiryManaged) {
-        const ae = a.expiryDate || '9999-12-31';
-        const be = b.expiryDate || '9999-12-31';
-        if (ae !== be) return ae.localeCompare(be);
-      }
-      return String(a.receivedAt || '').localeCompare(String(b.receivedAt || ''));
-    });
-    let remaining = wanted;
-    const allocations = [];
-    for (const lot of sorted) {
-      if (remaining <= 0) break;
-      const take = Math.min(remaining, n(lot.remainingQty));
-      if (!take) continue;
-      allocations.push({
-        lotId: lot.id || lot.lotId || '',
-        qty: take,
-        unitCost: n(lot.unitCost),
-        cost: take * n(lot.unitCost)
-      });
-      remaining -= take;
-    }
-    return {
-      allocations,
-      allocatedQty: wanted - remaining,
-      shortageQty: remaining,
-      cogs: allocations.reduce((sum, a) => sum + a.cost, 0)
-    };
-  }
-
   return {
     normalizeItem,
     reserveFromAvailable,
@@ -160,7 +127,6 @@
     deliver,
     returnDelivery,
     sourceStatus,
-    fulfillmentStatus,
-    allocateLots
+    fulfillmentStatus
   };
 });
