@@ -55,3 +55,23 @@ test('supplier summary groups by supplier id and sorts by spend',()=>{
   assert.ok(a);
   assert.equal(a.orderedAmount,500);
 });
+
+test('brand and month summaries reuse the same procurement projection',()=>{
+  const result=analytics.summarize([
+    {id:'S1',supplier:'A',brand:'Thermo',method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1',sourceItemId:'I1',qty:2,receivedQty:2,status:'RECEIVED',unitCost:100,purchaseDocumentId:'P1',orderDate:'2026-09-30'},
+    {id:'S2',supplier:'B',brand:'Thermo',method:'PURCHASING_PO',sourceType:'STOCK_REPLENISHMENT',qty:4,receivedQty:1,status:'PARTIAL_RECEIPT',unitCost:50,purchaseDocumentId:'P2',orderDate:'2026-10-01'}
+  ]);
+  const thermo=result.byBrand.find(row=>row.brand==='Thermo');
+  assert.equal(thermo.documentCount,2);
+  assert.equal(thermo.orderedAmount,400);
+  assert.equal(thermo.receivedAmount,250);
+  assert.deepEqual(result.byMonth.map(row=>row.month),['2026-10','2026-09']);
+});
+
+test('missing purchase unit cost is surfaced as a data-quality count',()=>{
+  const result=analytics.summarize([
+    {id:'S1',supplier:'A',brand:'Thermo',method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1',sourceItemId:'I1',qty:2,status:'ORDERED',unitCost:0,purchaseDocumentId:'P1',orderDate:'2026-10-01'}
+  ]);
+  assert.equal(result.totals.missingUnitCostCount,1);
+  assert.equal(result.byBrand[0].missingUnitCostCount,1);
+});
