@@ -7318,7 +7318,10 @@ window.openInventoryReplenishment = async function(inventoryId) {
     poEditingId = null;
     poAllItems = [];
     poItems = [{
-        orderId:'', itemName:item.itemName || match?.nameCn || match?.nameEn || '',
+        orderId:'',
+        sourceType:'STOCK_REPLENISHMENT',
+        sourceId:demand.sourceId || item.id || item.productKey || item.productId || '',
+        itemName:item.itemName || match?.nameCn || match?.nameEn || '',
         itemCode:item.itemCode || match?.model || '', productId:item.productId || item.productKey || match?.productId || '',
         brand:resolveBrandName(item.brand || match?.brand || ''), qty:suggestedQty,
         unitPrice, supplier:match?.supplier || '', productLine:match?.productLine || '',
@@ -11846,7 +11849,8 @@ window.openDirectStockPurchase = async function() {
 
 function emptyDirectPoItem() {
     return {
-        orderId:'', itemName:'', itemCode:'', productId:'', brand:'', qty:1, unitPrice:0, supplier:'',
+        orderId:'', sourceType:'STOCK_REPLENISHMENT', sourceId:'',
+        itemName:'', itemCode:'', productId:'', brand:'', qty:1, unitPrice:0, supplier:'',
         productLine:'', fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
     };
 }
@@ -12443,8 +12447,8 @@ window.printPurchaseOrder = async function() {
                     // 正式訂購單永遠是 PURCHASING_PO；是否為客戶需求或備庫由 sourceType 表示。
                     type:'PURCHASING_PO',
                     method:'PURCHASING_PO',
-                    sourceType:item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT',
-                    sourceId:item.orderId||'',
+                    sourceType:item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT'),
+                    sourceId:item.orderId||item.sourceId||'',
                     sourceItemId:item.itemId||'',
                     internalNo:poNo,
                     purchaseDocumentId:poDocumentId,
