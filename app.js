@@ -7339,6 +7339,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
         orderId:'',
         sourceType:'STOCK_REPLENISHMENT',
         sourceId:demand.sourceId || item.id || item.productKey || item.productId || '',
+        demandId:demand.demandId || '',
         itemName:item.itemName || match?.nameCn || match?.nameEn || '',
         itemCode:item.itemCode || match?.model || '', productId:item.productId || item.productKey || match?.productId || '',
         brand:resolveBrandName(item.brand || match?.brand || ''), qty:suggestedQty,
@@ -8187,14 +8188,15 @@ window.saveSelfOrder = async function() {
             const item=items[index];
             if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，不能自行訂貨。');
             const already=Math.max(0,Number(item.supplyOrderedQty||0));
-            const remaining=remainingProcurementQty(order,item);
+            const demand=procurementDemandForOrderItem({...order,id:orderId},item);
+            const remaining=demand.remainingToOrderQty;
             if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
             const supplyRef=db.collection('supplyOrders').doc();
             internalNo=`SO-${orderDate.replace(/-/g,'')}-${supplyRef.id.slice(0,6).toUpperCase()}`;
             const now=new Date().toISOString();
             const record={
                 type:'SALES_SELF_ORDER',method:'SALES_SELF_ORDER',
-                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,
+                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,demandId:demand.demandId||'',
                 internalNo,status:'ORDERED',orderId,itemId,
                 ownerUid:order.ownerUid||currentUser?.uid||'',salesCode:order.salesCode||currentUserCode||'',
                 salesName:order.salesName||currentUserName||'',
@@ -9186,6 +9188,10 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
             supplier: item.supplier || '',
             warehouseId: item.warehouseId || '',
             qty,
+            demandId:demand.demandId || '',
+            sourceType:demand.sourceType || 'SALES_ORDER',
+            sourceId:demand.sourceId || order.id || '',
+            sourceItemId:demand.sourceItemId || item.itemId || '',
             demandStatus:demand.status,
             demandStatusLabel:globalThis.YushinProcurementDemand?.statusLabel(demand.status) || '待採購',
             salesName: order.salesName || '',
@@ -9715,7 +9721,17 @@ function pendingPurchaseLines(order) {
     if (!displayByIndex.size) return [];
     return purchaseItemsFromOrder(order)
         .filter(line => displayByIndex.has(Number(line.orderItemIndex)))
-        .map(line => ({ ...line, qty: displayByIndex.get(Number(line.orderItemIndex)).qty }));
+        .map(line => {
+            const demand = displayByIndex.get(Number(line.orderItemIndex));
+            return {
+                ...line,
+                qty:demand.qty,
+                demandId:demand.demandId || '',
+                sourceType:demand.sourceType || 'SALES_ORDER',
+                sourceId:demand.sourceId || order.id || '',
+                sourceItemId:demand.sourceItemId || line.itemId || ''
+            };
+        });
 }
 
 function syncOrderIntoPurchasingCaches(order, options = {}) {
@@ -9867,7 +9883,8 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const itemIndex = items.findIndex(item => item.itemId === itemId);
             if (itemIndex < 0) throw new Error('找不到來源訂單品項。');
             const item = items[itemIndex];
-            const qty = remainingProcurementQty(order, item);
+            const demand = procurementDemandForOrderItem(order, item);
+            const qty = demand.remainingToOrderQty;
             const existingSupply = supplySnapshot.exists ? { id:supplyRef.id, ...supplySnapshot.data() } : null;
             if (!(qty > 0) && !existingSupply) throw new Error('此品項已無待採購數量，請重新整理。');
 
@@ -9934,6 +9951,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 sourceType:'SALES_ORDER',
                 sourceId:orderId,
                 sourceItemId:itemId,
+                demandId:existingSupply?.demandId||demand.demandId||'',
                 internalNo,
                 status:nextSupplyStatus,
                 orderId:existingSupply?.orderId||orderId,
@@ -12486,7 +12504,12 @@ window.printPurchaseOrder = async function() {
                     method:'PURCHASING_PO',
                     sourceType:item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT'),
                     sourceId:item.orderId||item.sourceId||'',
-                    sourceItemId:item.itemId||'',
+                    sourceItemId:item.itemId||item.sourceItemId||'',
+                    demandId:item.demandId||globalThis.YushinProcurementDemand?.demandIdForSource({
+                        sourceType:item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT'),
+                        sourceId:item.orderId||item.sourceId||'',
+                        sourceItemId:item.itemId||item.sourceItemId||''
+                    })||'',
                     internalNo:poNo,
                     purchaseDocumentId:poDocumentId,
                     purchaseDocumentNo:poNo,
