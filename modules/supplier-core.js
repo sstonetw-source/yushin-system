@@ -18,12 +18,14 @@
 
   function normalizeSupplier(record={}){
     const supplierName=text(record.supplierName||record.name);
+    const leadTimeNumber=Number(record.leadTimeDays??record.delay??0);
     return {
       ...record,
       supplierId:text(record.supplierId||record.id),
       supplierName,
       purchaseHeaderName:text(record.purchaseHeaderName)||supplierName,
       email:normalizeEmail(record.email||record.emailId),
+      leadTimeDays:Number.isFinite(leadTimeNumber)&&leadTimeNumber>=0?Math.floor(leadTimeNumber):0,
       active:record.active!==false
     };
   }
@@ -72,7 +74,8 @@
       supplierId:snapshot.supplierId||po.supplierId||'',
       supplierName:snapshot.supplierName||po.supplierName||po.vendorName||'',
       purchaseHeaderName:snapshot.purchaseHeaderName||po.vendorName||po.supplierName||'',
-      email:snapshot.email||po.supplierEmail||''
+      email:snapshot.email||po.supplierEmail||'',
+      leadTimeDays:snapshot.leadTimeDays??po.supplierLeadTimeDays??0
     });
   }
 
@@ -86,7 +89,8 @@
       supplierId:normalized.supplierId,
       supplierName:normalized.supplierName,
       purchaseHeaderName:normalized.purchaseHeaderName,
-      email:normalized.email
+      email:normalized.email,
+      leadTimeDays:normalized.leadTimeDays
     };
   }
 
@@ -111,46 +115,6 @@
     };
   }
 
-  function normalizeProductSupplierMapping(record={}){
-    const priorityNumber=Number(record.priority??record.sequence??1);
-    const leadTimeNumber=Number(record.leadTimeDays??record.delay??0);
-    return {
-      ...record,
-      mappingId:text(record.mappingId||record.id),
-      productId:text(record.productId),
-      itemCode:text(record.itemCode||record.productCode),
-      supplierId:text(record.supplierId||record.partnerId),
-      supplierPartNo:text(record.supplierPartNo||record.supplierPartNumber||record.vendorProductCode),
-      priority:Number.isFinite(priorityNumber)&&priorityNumber>0?Math.floor(priorityNumber):1,
-      leadTimeDays:Number.isFinite(leadTimeNumber)&&leadTimeNumber>=0?Math.floor(leadTimeNumber):0,
-      active:record.active!==false
-    };
-  }
-
-  function validateProductSupplierMapping(record={}){
-    const mapping=normalizeProductSupplierMapping(record);
-    const errors=[];
-    if(!mapping.productId&&!mapping.itemCode)errors.push('product');
-    if(!mapping.supplierId)errors.push('supplierId');
-    return {valid:errors.length===0,errors,mapping};
-  }
-
-  function productSupplierMatches(mapping={},product={}){
-    const x=normalizeProductSupplierMapping(mapping);
-    if(!x.active)return false;
-    const productId=text(product.productId||product.id);
-    const itemCode=text(product.itemCode||product.model||product.productCode).toLocaleLowerCase();
-    if(productId&&x.productId&&x.productId===productId)return true;
-    return !!itemCode&&!!x.itemCode&&x.itemCode.toLocaleLowerCase()===itemCode;
-  }
-
-  function selectProductSupplierMapping(mappings=[],product={}){
-    return (mappings||[])
-      .filter(mapping=>productSupplierMatches(mapping,product))
-      .map(normalizeProductSupplierMapping)
-      .sort((a,b)=>a.priority-b.priority||a.supplierId.localeCompare(b.supplierId))[0]||null;
-  }
-
   function parseBusinessDate(value){
     const normalized=text(value);
     const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
@@ -172,33 +136,26 @@
     return date.toISOString().slice(0,10);
   }
 
-  // Odoo-style vendor lead time projection adapted to Yushin's current
-  // single expected-date PO header. Only project when every selected item has
-  // an explicit lead time for the selected supplier; otherwise leave it blank
-  // rather than inventing a date.
-  function expectedArrivalDate(orderDate,mappingOrDays=0){
-    const days=mappingOrDays&&typeof mappingOrDays==='object'
-      ? normalizeProductSupplierMapping(mappingOrDays).leadTimeDays
-      : mappingOrDays;
+  // Simplified vendor lead time: one default number of calendar days per supplier.
+  // This keeps automatic ETA without maintaining product-by-product supplier rules.
+  function expectedArrivalDate(orderDate,supplierOrDays=0){
+    const days=supplierOrDays&&typeof supplierOrDays==='object'
+      ? normalizeSupplier(supplierOrDays).leadTimeDays
+      : supplierOrDays;
     return addCalendarDays(orderDate,days);
   }
 
-  function itemExpectedArrivalDate(item={},mappings=[],orderDate='',supplierId=''){
-    const base=parseBusinessDate(orderDate);
-    if(!base)return '';
-    const requiredSupplierId=text(supplierId);
-    const candidates=requiredSupplierId
-      ? (mappings||[]).filter(mapping=>normalizeProductSupplierMapping(mapping).supplierId===requiredSupplierId)
-      : (mappings||[]);
-    const mapping=selectProductSupplierMapping(candidates,item||{});
-    if(!mapping||!(Number(mapping.leadTimeDays)>0))return '';
-    return addCalendarDays(base,mapping.leadTimeDays);
+  function itemExpectedArrivalDate(item={},supplierOrDays=0,orderDate=''){
+    const supplierDays=supplierOrDays&&typeof supplierOrDays==='object'
+      ? normalizeSupplier(supplierOrDays).leadTimeDays
+      : Number(supplierOrDays||0);
+    if(!(supplierDays>0))return '';
+    return expectedArrivalDate(orderDate,supplierDays);
   }
 
-  function purchaseExpectedDate(items=[],mappings=[],orderDate='',supplierId=''){
-    const dates=(items||[]).map(item=>itemExpectedArrivalDate(item,mappings,orderDate,supplierId));
-    if(!dates.length||dates.some(date=>!date))return '';
-    return dates.sort().at(-1)||'';
+  function purchaseExpectedDate(items=[],supplierOrDays=0,orderDate=''){
+    if(!(items||[]).length)return '';
+    return itemExpectedArrivalDate(items[0]||{},supplierOrDays,orderDate);
   }
 
   function communicationEvent(po={},contact={},input={}){
@@ -231,10 +188,6 @@
     documentSnapshot,
     snapshotForPurchaseOrder,
     purchaseOrderContact,
-    normalizeProductSupplierMapping,
-    validateProductSupplierMapping,
-    productSupplierMatches,
-    selectProductSupplierMapping,
     parseBusinessDate,
     addCalendarDays,
     expectedArrivalDate,
