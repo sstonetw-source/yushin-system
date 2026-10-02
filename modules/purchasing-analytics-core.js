@@ -118,6 +118,9 @@
     return {
       documents:new Set(),
       lineCount:0,
+      orderedQty:0,
+      receivedQty:0,
+      incomingQty:0,
       orderedAmount:0,
       receivedAmount:0,
       incomingAmount:0,
@@ -142,6 +145,9 @@
   function addMetric(metric,row){
     if(row.documentKey)metric.documents.add(row.documentKey);
     metric.lineCount++;
+    metric.orderedQty+=row.effectiveOrderedQty;
+    metric.receivedQty+=row.receivedQty;
+    metric.incomingQty+=row.incomingQty;
     metric.orderedAmount+=row.orderedAmount;
     metric.receivedAmount+=row.receivedAmount;
     metric.incomingAmount+=row.incomingAmount;
@@ -176,6 +182,10 @@
     return {
       documentCount:metric.documents.size,
       lineCount:metric.lineCount,
+      orderedQty:metric.orderedQty,
+      receivedQty:metric.receivedQty,
+      incomingQty:metric.incomingQty,
+      serviceLevel:metric.orderedQty?(metric.receivedQty/metric.orderedQty)*100:null,
       orderedAmount:metric.orderedAmount,
       receivedAmount:metric.receivedAmount,
       incomingAmount:metric.incomingAmount,
