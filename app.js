@@ -3527,30 +3527,73 @@ function normalizeBrandMasterRecord(id, data = {}) {
 }
 
 function getUnifiedBrandEntries(includeMaintenance = false) {
-    // 唯一可選來源為管理員設定的主要代理廠牌；Product Master、歷史訂單、
-    // 供應商對應及分公司勾選都不會自行擴大一般廠牌下拉選單。
+    // Brand Master 是一般廠牌選單的正式來源；「是否獨立統計」只影響進銷存分組，
+    // 不再決定這個廠牌能不能出現在估價、訂單、Forecast 等一般廠牌選單。
     const entries = new Map();
-    keyStatisticBrands.forEach(configuredName => {
-        const name = String(configuredName || '').trim();
-        const key = normalizeBrandLookupKey(name);
+    const companyKeys = ['yushin', 'morningstar', 'MULTI-LIFE'];
+
+    const statisticConfigForEntry = master => keyStatisticBrands.find(configuredName => {
+        const configuredKey = normalizeBrandLookupKey(configuredName);
+        const configuredAliases = keyStatisticBrandAliases[configuredName] || [];
+        return configuredKey === normalizeBrandLookupKey(master.name)
+            || (master.aliases || []).some(alias => normalizeBrandLookupKey(alias) === configuredKey)
+            || configuredAliases.some(alias => normalizeBrandLookupKey(alias) === normalizeBrandLookupKey(master.name));
+    }) || '';
+
+    brandMasterCache.filter(master => master?.name && master.active !== false).forEach(master => {
+        const key = normalizeBrandLookupKey(master.name);
         if (!key || key === normalizeBrandLookupKey('維修') || entries.has(key)) return;
-        const master = brandMasterCache.find(item => item.active !== false && (
-            normalizeBrandLookupKey(item.name) === key ||
-            (item.aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)
-        ));
-        const canonicalName = master?.name || name;
-        entries.set(normalizeBrandLookupKey(canonicalName), {
-            id: master?.id || '', name: canonicalName,
-            aliases: dedupeBrandsCaseInsensitive([name, ...(master?.aliases || []), ...(keyStatisticBrandAliases[name] || [])])
-                .filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(canonicalName)),
-            isKeyBrand: true,
-            companies: ['yushin', 'morningstar', 'MULTI-LIFE'].filter(company =>
-                includesBrandCaseInsensitive(companyAgencyBrands[company], canonicalName) ||
-                includesBrandCaseInsensitive(companyAgencyBrands[company], name)
-            ),
+        const statisticConfig = statisticConfigForEntry(master);
+        const aliases = dedupeBrandsCaseInsensitive([
+            ...(master.aliases || []),
+            ...(statisticConfig ? (keyStatisticBrandAliases[statisticConfig] || []) : [])
+        ]).filter(alias => normalizeBrandLookupKey(alias) !== key);
+        const companies = companyKeys.filter(company =>
+            (master.companies || []).includes(company)
+            || includesBrandCaseInsensitive(companyAgencyBrands[company] || [], master.name)
+            || aliases.some(alias => includesBrandCaseInsensitive(companyAgencyBrands[company] || [], alias))
+        );
+        entries.set(key, {
+            ...master,
+            aliases,
+            isKeyBrand: !!statisticConfig,
+            companies,
             active: true
         });
     });
+
+    // 相容層：舊的「獨立統計廠牌」若還沒同步進 Brand Master，先保留可選，
+    // 管理員下一次儲存廠牌設定時會同步成正式 Brand Master。
+    keyStatisticBrands.forEach(configuredName => {
+        const name = String(configuredName || '').trim();
+        const key = normalizeBrandLookupKey(name);
+        if (!key || key === normalizeBrandLookupKey('維修')) return;
+        const configuredAliases = dedupeBrandsCaseInsensitive(keyStatisticBrandAliases[name] || []);
+        const existing = [...entries.values()].find(entry =>
+            normalizeBrandLookupKey(entry.name) === key
+            || (entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)
+            || configuredAliases.some(alias =>
+                normalizeBrandLookupKey(alias) === normalizeBrandLookupKey(entry.name)
+                || (entry.aliases || []).some(entryAlias => normalizeBrandLookupKey(entryAlias) === normalizeBrandLookupKey(alias))
+            )
+        );
+        if (existing) {
+            existing.isKeyBrand = true;
+            existing.aliases = dedupeBrandsCaseInsensitive([
+                ...(existing.aliases || []), name, ...configuredAliases
+            ]).filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(existing.name));
+            return;
+        }
+        entries.set(key, {
+            id: '',
+            name,
+            aliases: configuredAliases.filter(alias => normalizeBrandLookupKey(alias) !== key),
+            isKeyBrand: true,
+            companies: companyKeys.filter(company => includesBrandCaseInsensitive(companyAgencyBrands[company] || [], name)),
+            active: true
+        });
+    });
+
     if (includeMaintenance) entries.set(normalizeBrandLookupKey('維修'), {
         id: '', name: '維修', aliases: [], isKeyBrand: false, companies: [], active: true
     });
@@ -14516,16 +14559,21 @@ function statisticBrandAliasLookup() {
 
 function rawBrandsWithOrderCounts() {
     const entries = new Map();
+
+    // 即使某廠牌目前還沒有訂單，只要已存在 Brand Master，也要能在設定頁看到，
+    // 並明確選擇要獨立統計或歸入「其他廠牌」。
+    getUnifiedBrandEntries(false).forEach(entry => {
+        const key = normalizeStatisticBrandKey(entry.name);
+        if (key && !entries.has(key)) entries.set(key, { name: entry.name, count: 0 });
+    });
+
     const lines = salesStatisticsOrders.flatMap(salesStatisticOrderLines);
-    lines.map(order => order.brand).forEach(value => {
-        const brand = String(value || '').trim();
+    lines.forEach(order => {
+        const brand = String(order.brand || '').trim();
         if (!brand || brand === '維修') return;
         const key = normalizeStatisticBrandKey(brand);
         if (!entries.has(key)) entries.set(key, { name: brand, count: 0 });
-    });
-    lines.forEach(order => {
-        const key = normalizeStatisticBrandKey(order.brand);
-        if (entries.has(key)) entries.get(key).count++;
+        entries.get(key).count++;
     });
     return [...entries.values()];
 }
@@ -14551,11 +14599,40 @@ window.removeStatisticBrand = function(brand) {
 
 window.addStatisticBrand = function() {
     const input = document.getElementById('newStatisticBrandName');
-    const brand = input.value.trim();
+    const brand = String(input?.value || '').trim();
+    const independent = document.getElementById('newStatisticBrandIndependent')?.checked === true;
     if (!brand) { alert('請輸入廠牌名稱。'); return; }
-    if (normalizeStatisticBrandKey(brand) === normalizeStatisticBrandKey('維修') || statisticBrandAliasLookup().has(normalizeStatisticBrandKey(brand))) { alert('這個廠牌已存在，或會自動合併至既有廠牌。'); return; }
-    keyStatisticBrands.push(brand);
+    if (normalizeStatisticBrandKey(brand) === normalizeStatisticBrandKey('維修')) {
+        alert('「維修」是系統固定分類，不需要另外建立廠牌。');
+        return;
+    }
+
+    const existing = getUnifiedBrandEntries(false).find(entry =>
+        normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(brand)
+        || (entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === normalizeBrandLookupKey(brand))
+    );
+
+    if (existing) {
+        if (independent && !includesBrandCaseInsensitive(keyStatisticBrands, existing.name)) {
+            keyStatisticBrands.push(existing.name);
+        } else if (!independent) {
+            alert('這個廠牌已存在於 Brand Master。');
+            return;
+        }
+    } else {
+        brandMasterCache.push(normalizeBrandMasterRecord('', {
+            name: brand,
+            aliases: [],
+            isKeyBrand: independent,
+            companies: [],
+            active: true
+        }));
+        if (independent) keyStatisticBrands.push(brand);
+    }
+
     input.value = '';
+    const independentInput = document.getElementById('newStatisticBrandIndependent');
+    if (independentInput) independentInput.checked = false;
     renderKeyStatisticBrands();
 };
 
@@ -14577,7 +14654,7 @@ window.saveKeyStatisticBrands = async function() {
         if (salesStatisticsOrders.length) renderSalesStatistics();
         renderKeyStatisticBrands();
         renderCompanyAgencyBrandSettings();
-        alert('已儲存廠牌設定，並同步 Brand Master。');
+        alert('已儲存廠牌與進銷存統計設定，並同步 Brand Master。');
     } catch (err) {
         alert('儲存設定失敗：' + err.message);
     }

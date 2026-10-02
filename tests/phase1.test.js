@@ -4423,3 +4423,13 @@ test('product navigation uses the short product label', () => {
     assert.match(indexSource, /<h2>產品<\/h2>/);
     assert.match(appSource, /\{ key: 'products', label: '產品', system: true \}/);
 });
+
+
+test('Brand Master drives brand dropdowns while statistics grouping stays independent', () => {
+    assert.match(appSource, /Brand Master 是一般廠牌選單的正式來源/);
+    assert.match(appSource, /brandMasterCache\.filter\(master => master\?\.name && master\.active !== false\)/);
+    assert.match(appSource, /getUnifiedBrandEntries\(false\)\.forEach\(entry =>/);
+    assert.match(indexSource, /廠牌與進銷存統計/);
+    assert.match(indexSource, /其他廠牌（合併計算）/);
+    assert.match(indexSource, /id="newStatisticBrandIndependent"/);
+});
