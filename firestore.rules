@@ -400,6 +400,41 @@ service cloud.firestore {
         && nonNegativeInventory(request.resource.data);
     }
 
+    function businessProcurementDemandCreate(data) {
+      return businessOwner()
+        && owns(data)
+        && data.get('sourceType', '') == 'SALES_ORDER'
+        && data.get('sourceId', '') != ''
+        && data.get('sourceItemId', '') != ''
+        && data.get('demandId', '') != ''
+        && data.get('requestedQty', 0) is number
+        && data.get('orderedQty', 0) is number
+        && data.get('receivedQty', 0) is number
+        && data.get('requestedQty', 0) >= 0
+        && data.get('orderedQty', 0) >= 0
+        && data.get('orderedQty', 0) <= data.get('requestedQty', 0)
+        && data.get('receivedQty', 0) == 0;
+    }
+
+    function businessProcurementDemandOperationalUpdate() {
+      return businessOwner()
+        && owns(resource.data)
+        && owns(request.resource.data)
+        && request.resource.data.get('demandId', '') == resource.data.get('demandId', '')
+        && request.resource.data.get('sourceType', '') == resource.data.get('sourceType', '')
+        && request.resource.data.get('sourceId', '') == resource.data.get('sourceId', '')
+        && request.resource.data.get('sourceItemId', '') == resource.data.get('sourceItemId', '')
+        && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+        && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
+        && request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0)
+        && request.resource.data.get('orderedQty', 0) >= resource.data.get('orderedQty', 0)
+        && request.resource.data.get('orderedQty', 0) <= request.resource.data.get('requestedQty', 0)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
+          'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt'
+        ]);
+    }
+
     match /users/{id} {
       allow read: if signedIn() && (id == request.auth.uid || active());
       allow create, update: if admin();
@@ -562,6 +597,18 @@ service cloud.firestore {
         && request.resource.data.get('state', '') == 'PREPARED'
         && request.resource.data.get('verifiedSent', true) == false;
       allow update: if false;
+      allow delete: if admin();
+    }
+
+    // ERP Material Request-like purchasing demand. Demand identity is stable and
+    // supplier orders / receipts link back through demandId.
+    match /procurementDemands/{id} {
+      allow read: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
+      allow create: if admin() || purchaser() || warehouse()
+        || businessProcurementDemandCreate(request.resource.data);
+      allow update: if admin() || purchaser() || warehouse()
+        || businessProcurementDemandOperationalUpdate();
       allow delete: if admin();
     }
 
