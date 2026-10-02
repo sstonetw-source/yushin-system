@@ -402,7 +402,8 @@ test('retrying a partly reserved order does not reserve the same stock twice', a
         warehouseStockDocId:()=> 'W-1__P-1',
         inventoryNumbers:row=>({onHand:row.onHand||0,reserved:row.reserved||0,available:(row.onHand||0)-(row.reserved||0)}),
         inventoryMovementRecord:(type,quantity)=>({type,quantity}),
-        salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{}
+        salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{},
+        YushinReservation:reservation
     });
     vm.runInContext(appSource.slice(start,end),context);
     const order={customerName:'Customer',orderDate:'2026-09-28',salesCode:'S1'};
