@@ -4102,7 +4102,7 @@ window.loadSupplierMasterToEditor = function(id) {
 };
 
 window.saveSupplierMaster = async function() {
-    if(trueUserRole!=='admin')return;
+    if(!canCreatePurchaseOrderCapability())return;
     const button=actionButtonFromEventOrSelector('[onclick="saveSupplierMaster()"]');
     const buttonState=beginActionButton(button,'儲存中…');
     if(button&&!buttonState)return;
@@ -4152,7 +4152,7 @@ window.saveSupplierMaster = async function() {
 };
 
 window.disableSupplierMaster = async function(id) {
-    if(trueUserRole!=='admin'||!id)return;
+    if(!canCreatePurchaseOrderCapability()||!id)return;
     const status=document.getElementById('supplierMasterStatus');
     const activeMappings=supplierMappingCache.filter(mapping=>mapping.supplierId===id);
     if(activeMappings.length){
@@ -4167,7 +4167,7 @@ window.disableSupplierMaster = async function(id) {
 };
 
 window.saveSupplierMapping = async function() {
-    if(trueUserRole!=='admin')return;
+    if(!canCreatePurchaseOrderCapability())return;
     const button=actionButtonFromEventOrSelector('[onclick="saveSupplierMapping()"]');
     const buttonState=beginActionButton(button,'儲存中…');
     if(button&&!buttonState)return;
@@ -4214,7 +4214,7 @@ window.saveSupplierMapping = async function() {
 };
 
 window.disableSupplierMapping = async function(id) {
-    if (trueUserRole !== 'admin' || !id) return;
+    if (!canCreatePurchaseOrderCapability() || !id) return;
     await db.collection('brandSupplierMappings').doc(id).set({ active:false, updatedAt:new Date().toISOString() }, { merge:true });
     supplierWarehouseLoadPromise = null;
     await loadSupplierWarehouseMasters(true);
@@ -9478,6 +9478,11 @@ window.loadPurchasingAnalytics = async function(force = false) {
 
 window.renderPurchasingView = function() {
     populatePurchasingFilters();
+    if (purchasingView === 'suppliers') {
+        renderSupplierMasterAdmin();
+        renderSupplierMappingAdmin();
+        return;
+    }
     if (purchasingView === 'analytics') {
         const rangeKey = purchasingAnalyticsRangeKey();
         if (!purchasingAnalyticsLoading && purchasingAnalyticsLoadedRangeKey !== rangeKey) {
@@ -9523,14 +9528,14 @@ window.changePurchasePeriod = function(value) {
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history', 'analytics'].includes(view)) return;
+    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history', 'analytics', 'suppliers'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
-    if (view === 'analytics' && !canCreatePurchaseOrderCapability()) return;
+    if ((view === 'analytics' || view === 'suppliers') && !canCreatePurchaseOrderCapability()) return;
     const previousPurchasingView = purchasingView;
     purchasingView = view;
     if (view === 'completed' && previousPurchasingView !== 'completed') purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
     populatePurchasingFilters();
-    const workflowView = !['history', 'analytics'].includes(view);
+    const workflowView = !['history', 'analytics', 'suppliers'].includes(view);
     const filters = workflowView ? purchaseFilterContext() : null;
     const normalizedItemsByOrder = workflowView
         ? new Map(ordersCache.map(order => [order.id, normalizedOrderItems(order)]))
@@ -9551,19 +9556,34 @@ window.switchPurchasingView = function(view, tab) {
     document.getElementById('purchase-tab-work')?.classList.toggle('active', workflowView);
     document.getElementById('purchase-tab-history')?.classList.toggle('active', view === 'history');
     document.getElementById('purchase-tab-analysis')?.classList.toggle('active', view === 'analytics');
+    document.getElementById('purchase-tab-suppliers')?.classList.toggle('active', view === 'suppliers');
     const cards = document.getElementById('purchaseWorkCards');
     if (cards) cards.style.display = workflowView ? '' : 'none';
+    const filterToolbar = document.getElementById('purchaseFilterToolbar');
+    if (filterToolbar) filterToolbar.style.display = view === 'suppliers' ? 'none' : '';
     const pendingPanel=document.getElementById('purchasePendingPanel');
     const poPanel=document.getElementById('poListPanel');
     const dispatchPanel=document.getElementById('purchaseDispatchPanel');
     const completedPanel=document.getElementById('purchaseCompletedPanel');
     const analyticsPanel=document.getElementById('purchaseAnalyticsPanel');
+    const supplierPanel=document.getElementById('purchaseSupplierPanel');
     if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
     if(poPanel)poPanel.style.display=(view==='receiving'||view==='history')?'':'none';
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
     if(analyticsPanel)analyticsPanel.style.display=view==='analytics'?'':'none';
-    if (view === 'analytics') {
+    if(supplierPanel)supplierPanel.style.display=view==='suppliers'?'':'none';
+    if (view === 'suppliers') {
+        renderSupplierMasterAdmin();
+        renderSupplierMappingAdmin();
+        if (!purchasingViewLoaded.has('suppliers')) {
+            purchasingViewLoaded.add('suppliers');
+            loadSupplierWarehouseMasters(false).catch(err => {
+                purchasingViewLoaded.delete('suppliers');
+                console.error('供應商主檔首次載入失敗：', err);
+            });
+        }
+    } else if (view === 'analytics') {
         renderPurchasingView();
     } else if (view === 'ordering') {
         renderPendingPurchaseOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
