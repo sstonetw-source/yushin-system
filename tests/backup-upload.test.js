@@ -26,6 +26,11 @@ test('backup upload validates project, count, duplicate paths, and collection bo
   assert.throws(() => validate(backup([row, row])), /重複/);
   assert.throws(() => validate(backup([{ ...row, path: 'settings/rolePermissions' }])), /路徑/);
   assert.equal(validate(backup([{ id:'u1', path:'users/u1', data:{ role:'admin' } }], 'users')).length, 0);
+  assert.equal(validate(backup([{
+    id:'SALES_ORDER%3Ao1%3Ai1',
+    path:'procurementDemands/SALES_ORDER%3Ao1%3Ai1',
+    data:{ demandId:'SALES_ORDER:o1:i1', requestedQty:5, orderedQty:0, receivedQty:0 }
+  }], 'procurementDemands')).length, 1);
 });
 
 test('restore checks each live document in a transaction and excludes permissions', () => {
