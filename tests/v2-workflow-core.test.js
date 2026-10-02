@@ -205,3 +205,45 @@ test('procurement quantity moves to arrival only when in-transit supply covers t
     orderedQty:10,shortageQty:7,supplyOrderedQty:7,receivedQty:0,fulfillmentType:'WAREHOUSE'
   }),'arrival');
 });
+
+
+test('workflow projection uses reservation as the authoritative warehouse shortage',()=>{
+  const p=w.projectItem({
+    orderedQty:10,
+    reservedQty:4,
+    shortageQty:99,
+    supplyOrderedQty:3,
+    receivedQty:1,
+    fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(p.shortageQty,6);
+  assert.equal(p.inTransitQty,2);
+  assert.equal(p.remainingToOrderQty,4);
+  assert.equal(p.workCategory,'ordering');
+});
+
+test('workflow projection reopens demand after a return and clears it after replacement receipt',()=>{
+  const returned=w.projectItem({
+    orderedQty:10,
+    deliveredQty:10,
+    returnedQty:2,
+    reservedQty:0,
+    supplyOrderedQty:10,
+    receivedQty:10,
+    fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(returned.outstandingQty,2);
+  assert.equal(returned.remainingToOrderQty,2);
+  const replaced=w.projectItem({
+    orderedQty:10,
+    deliveredQty:10,
+    returnedQty:2,
+    reservedQty:2,
+    supplyOrderedQty:12,
+    receivedQty:12,
+    fulfillmentType:'WAREHOUSE'
+  });
+  assert.equal(replaced.shortageQty,0);
+  assert.equal(replaced.remainingToOrderQty,0);
+  assert.equal(replaced.workCategory,'delivery');
+});

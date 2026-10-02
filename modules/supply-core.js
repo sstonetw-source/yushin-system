@@ -1,18 +1,15 @@
 (function(root,factory){
-  const api=factory();
+  const receiving=typeof module==='object'&&module.exports?require('./receiving-core.js'):(root&&root.YushinReceiving);
+  const api=factory(receiving);
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinSupply=api;
-})(typeof globalThis!=='undefined'?globalThis:this,function(){
+})(typeof globalThis!=='undefined'?globalThis:this,function(receiving){
   const TYPES=Object.freeze({PURCHASING_PO:'PURCHASING_PO',PURCHASING_MANUAL:'PURCHASING_MANUAL',SALES_SELF_ORDER:'SALES_SELF_ORDER',STOCK_REPLENISHMENT:'STOCK_REPLENISHMENT'});
   function n(v){const x=Number(v);return Number.isFinite(x)?Math.max(0,x):0;}
   function normalize(record={}){
     const type=Object.values(TYPES).includes(record.type)?record.type:TYPES.PURCHASING_PO;
-    const qty=n(record.qty);
-    const receivedQty=Math.min(qty,n(record.receivedQty));
-    const cancelled=String(record.status||'').toUpperCase()==='CANCELLED';
-    const remainingQty=cancelled?0:Math.max(0,qty-receivedQty);
-    const status=cancelled?'CANCELLED':receivedQty>=qty&&qty>0?'RECEIVED':receivedQty>0?'PARTIAL_RECEIPT':record.status||'ORDERED';
-    return {...record,type,qty,receivedQty,remainingQty,status};
+    if(!receiving)throw new Error('Receiving core is required.');
+    return {...receiving.normalizeSupply(record),type};
   }
   function validate(record={}){
     const x=normalize(record),errors=[];
@@ -24,8 +21,9 @@
     return {valid:errors.length===0,errors,record:x};
   }
   function applyReceipt(record,qty){
-    const x=normalize(record),applied=Math.min(n(qty),x.remainingQty);
-    return {appliedQty:applied,record:normalize({...x,receivedQty:x.receivedQty+applied})};
+    if(!receiving)throw new Error('Receiving core is required.');
+    const result=receiving.applyReceipt(normalize(record),qty);
+    return {...result,record:{...result.record,type:normalize(record).type}};
   }
   function createsCustomerDispatch(record){
     const x=normalize(record);

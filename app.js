@@ -7683,13 +7683,17 @@ function purchaseProgressInfo(order) {
     items.forEach(item=>{
         const direct=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
         if(!direct) allDirect=false;
-        const returnedQty=direct?itemDispatchState(order,item).returned:Number(item.returnedQty||0);
+        const dispatch=itemDispatchState(order,item);
+        const returnedQty=direct?dispatch.returned:Number(item.returnedQty??dispatch.returned??0);
         const quantities=window.YushinWorkflow?.procurementQuantities({
             orderedQty:item.orderedQty??item.qty,
             fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+            reservedQty:item.reservedQty,
             shortageQty:item.shortageQty,
             supplyOrderedQty:item.supplyOrderedQty,
             receivedQty:item.receivedQty,
+            deliveredQty:dispatch.grossDelivered,
+            effectiveDeliveredQty:dispatch.delivered,
             returnedQty
         });
         const ordered=Math.max(0,Number(item.supplyOrderedQty||0));
@@ -7970,9 +7974,10 @@ function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOv
         returnedQty:dispatch.returned,
         effectiveDeliveredQty:dispatch.delivered,
         orderedQty:item.orderedQty??item.qty,
-        deliveredQty:dispatch.delivered,
+        deliveredQty:dispatch.grossDelivered,
         isBilled:!!order.isBilled,
         fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+        reservedQty:item.reservedQty,
         shortageQty:item.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
         receivedQty:item.receivedQty
@@ -8813,26 +8818,21 @@ function purchaseLineMatchesFilters(date, salesName, brand, context = null) {
 }
 
 function remainingProcurementQty(order, item, dispatchOverride = null) {
-    const returnedQty = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP'
-        ? (dispatchOverride || itemDispatchState(order,item)).returned
-        : Number(item.returnedQty || 0);
+    const dispatch = dispatchOverride || itemDispatchState(order,item);
+    const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
     const quantities = window.YushinWorkflow?.procurementQuantities({
         orderedQty:item.orderedQty ?? item.qty,
         fulfillmentType:item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
+        reservedQty:item.reservedQty,
         shortageQty:item.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
         receivedQty:item.receivedQty,
-        returnedQty
+        deliveredQty:dispatch.grossDelivered,
+        effectiveDeliveredQty:dispatch.delivered,
+        returnedQty:directShip ? dispatch.returned : Number(item.returnedQty ?? dispatch.returned ?? 0)
     });
-    if (quantities) return quantities.remainingToOrderQty;
-    const qty = Math.max(0, Number(item.orderedQty ?? item.qty ?? 0));
-    const ordered = Math.max(0, Number(item.supplyOrderedQty || 0));
-    if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') {
-        return Math.max(0, qty + Math.max(0, Number(returnedQty || 0)) - ordered);
-    }
-    const shortage = Math.max(0, Number(item.shortageQty || 0));
-    const received = Math.max(0, Number(item.receivedQty || 0));
-    return Math.max(0, shortage - Math.max(0, ordered - received));
+    if (!quantities) throw new Error('Workflow core 未載入，無法計算採購需求。');
+    return quantities.remainingToOrderQty;
 }
 
 function purchasingLifecycleSnapshot(normalizedItemsByOrder, sourceOrders = ordersCache) {
@@ -8895,9 +8895,8 @@ function standaloneReceivingSupplyMetrics(filters = purchaseFilterContext()) {
         if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
         const status = String(supply.status || '').toUpperCase();
         if (!['ORDERED', 'PARTIAL_RECEIPT'].includes(status)) return;
-        const ordered = Math.max(0, Number(supply.qty || 0));
-        const received = Math.max(0, Number(supply.receivedQty || 0));
-        const remaining = Math.max(0, ordered - received);
+        const receiving = window.YushinReceiving?.normalizeSupply(supply);
+        const remaining = receiving ? receiving.remainingQty : 0;
         if (!(remaining > 0)) return;
         if (!purchaseLineMatchesFilters(supply.orderDate || supply.createdAt, '', supply.brand, {
             ...filters,
@@ -10863,8 +10862,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 deliveryRecords,deliveredQty:grossDelivered,isDelivered:nextOrder.isDelivered,
                 ...orderWorkIndexFields(nextOrder),updatedAt:now
             });
-            const receivedQty=Number(supply.receivedQty||0)+qty;
-            tx.update(supplyRef,{receivedQty,status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',updatedAt:now});
+            const receiptPlan=window.YushinReceiving.applyReceipt(supply,qty);
+            const receivedQty=receiptPlan.record.receivedQty;
+            tx.update(supplyRef,{receivedQty,status:receiptPlan.record.status,updatedAt:now});
             tx.set(receiptRef,{receiptId:operationKey,operationId:operationKey,supplyOrderId:supplyId,orderId:supply.orderId,itemId:supply.itemId,qty,cumulativeReceivedQty:receivedQty,fulfillmentType:'DIRECT_SHIP',sourceType:'SUPPLY_ORDER',createdAt:now,createdBy:actor});
             return;
         }
@@ -10897,8 +10897,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                         if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存占用紀錄，無法安全入庫。');
                         const reservation=reservationSnap.data();
                         const currentReserved=Math.max(0,Number(reservation.quantity||0));
-                        const next=window.YushinFulfillment.applyReceipt({...item,reservedQty:currentReserved},qty);
-                        reserveQty=Math.max(0,Number(next.reservedQty||0)-currentReserved);
+                        const receiptPlan=window.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:currentReserved},qty);
+                        const next=receiptPlan.item;
+                        reserveQty=receiptPlan.reservedDelta;
                         reservedForSource=reserveQty;
                         items[itemIndex]={...next,reservedQty:next.reservedQty};
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
@@ -10913,20 +10914,17 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                     }else{
                         // 取消中的來源訂單不重新占庫存，但仍同步實際到貨摘要。
                         // 這樣日後恢復訂單時，不會把已經到倉的數量再次誤判成在途採購。
-                        const orderedQty=Math.max(0,Number(item.orderedQty??item.qty??0));
-                        const currentReceived=Math.max(0,Number(item.receivedQty||0));
-                        const receivedForOrder=Math.min(qty,Math.max(0,orderedQty-currentReceived));
-                        if(receivedForOrder>0){
-                            items[itemIndex]={...item,receivedQty:currentReceived+receivedForOrder};
-                            const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
-                            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
-                        }
+                        const receiptPlan=window.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:0},qty);
+                        items[itemIndex]={...item,receivedQty:receiptPlan.item.receivedQty};
+                        const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+                        tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
                     }
                 }
             }
         }
+        const receiptPlan=window.YushinReceiving.applyReceipt(supply,qty);
         const registeredIncoming=Math.max(0,Number(supply.incomingRegisteredQty||0));
-        const incomingRelease=Math.min(qty,registeredIncoming);
+        const incomingRelease=receiptPlan.incomingReleaseQty;
         const embeddedLots=[...(invSnap.exists?(invSnap.data().lots||[]):[])];
         const embeddedIndex=embeddedLots.findIndex(l=>(l.lotNo||'')===lotNo&&(l.expiryDate||'')===expiryDate);
         if(embeddedIndex>=0)embeddedLots[embeddedIndex]={...embeddedLots[embeddedIndex],qty:Number(embeddedLots[embeddedIndex].qty||0)+qty};
@@ -10948,11 +10946,10 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             lotId:lotRef.id,lotNo,expiryDate,createdAt:now,createdBy:actor
         });
         tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
-        const receivedQty=Number(supply.receivedQty||0)+qty;
         tx.update(supplyRef,{
-            receivedQty,
-            incomingRegisteredQty:Math.max(0,registeredIncoming-incomingRelease),
-            status:receivedQty>=Number(supply.qty||0)?'RECEIVED':'PARTIAL_RECEIPT',
+            receivedQty:receiptPlan.record.receivedQty,
+            incomingRegisteredQty:receiptPlan.record.incomingRegisteredQty,
+            status:receiptPlan.record.status,
             updatedAt:now
         });
     });
