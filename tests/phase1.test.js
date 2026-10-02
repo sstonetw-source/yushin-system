@@ -864,12 +864,32 @@ test('phase 2 documents link to productId while retaining historical snapshots',
 
 test('phase 2 Product Import supports normalized fields, cost split and preview', () => {
     assert.match(appSource, /又鑫標準 Product Import 匯入預覽/);
-    assert.match(appSource, /confirmProductMasterImport\(brandGroups\)/);
+    assert.match(appSource, /confirmProductMasterImport\(brandGroups, importErrors\)/);
     for (const field of ['單位', '標準成本（含稅）', '庫存管理', '批號管理', '效期管理', '啟用']) {
         assert.ok(appSource.includes(field), `missing import field: ${field}`);
     }
     assert.match(appSource, /standardCostProvided/);
     assert.match(appSource, /collection\('productCosts'\)/);
+});
+
+test('Product Import preview distinguishes add update unchanged and blocks all writes on row errors', () => {
+    const summaryStart=appSource.indexOf('async function summarizeProductMasterImport(groups, errors = [])');
+    const summaryEnd=appSource.indexOf('async function confirmProductMasterImport',summaryStart);
+    const summarySource=appSource.slice(summaryStart,summaryEnd);
+    assert.match(summarySource,/let added = 0, updated = 0, unchanged = 0/);
+    assert.match(summarySource,/PRODUCT_MASTER_IMPORT_FIELDS\.forEach/);
+    assert.match(summarySource,/changedFields\.push\('標準成本'\)/);
+    assert.match(summarySource,/action = '新增'/);
+    assert.match(summarySource,/action = '更新'/);
+    assert.match(summarySource,/errorCount:errors\.length/);
+
+    const confirmStart=appSource.indexOf('async function confirmProductMasterImport(groups, errors = [])');
+    const confirmEnd=appSource.indexOf('\nwindow.downloadProductMasterTemplate',confirmStart);
+    const confirmSource=appSource.slice(confirmStart,confirmEnd);
+    assert.match(confirmSource,/新增 .*更新 .*不變 .*錯誤/);
+    assert.match(confirmSource,/summary\.errorCount > 0/);
+    assert.match(confirmSource,/有錯誤的匯入檔不會寫入雲端/);
+    assert.match(indexSource,/新增／更新／不變／錯誤/);
 });
 
 

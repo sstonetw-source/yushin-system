@@ -129,7 +129,7 @@
                         <button type="button" onclick="document.getElementById('productImportExcelInput').click()">匯入標準產品檔</button>
                         <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
                     </div>
-                    <p class="product-import-summary">一份 Excel 維護產品、建議售價與標準成本。只處理本次檔案中的品項，不影響其他產品與歷史採購資料。</p>
+                    <p class="product-import-summary">一份 Excel 維護產品、建議售價與標準成本。寫入前會先比對並顯示「新增／更新／不變／錯誤」；有錯誤時整批不寫入。</p>
                     <details class="product-import-rules">
                         <summary>查看欄位規則</summary>
                         <div class="product-import-rules-grid">
@@ -1569,6 +1569,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261002-45"></script>
+    <script src="app.js?v=20261002-46"></script>
 </body>
 </html>
