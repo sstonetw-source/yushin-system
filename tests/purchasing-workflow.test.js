@@ -901,6 +901,20 @@ test('direct-ship returns create replacement supply demand', () => {
     assert.match(app.slice(selfStart,selfEnd),/remainingProcurementQty\(order,item,dispatchStateByItem\?\.get\(item\) \|\| null\)/);
 });
 
+test('inventory replenishment source is preserved through formal PO supply records', () => {
+    const replenishStart=app.indexOf('window.openInventoryReplenishment = async function');
+    const replenishEnd=app.indexOf('\nwindow.setInventorySafetyStock',replenishStart);
+    const replenishSource=app.slice(replenishStart,replenishEnd);
+    assert.match(replenishSource,/sourceType:'STOCK_REPLENISHMENT'/);
+    assert.match(replenishSource,/sourceId:demand\.sourceId/);
+
+    const poStart=app.indexOf('const supplyRecord={');
+    const poEnd=app.indexOf('transaction.set\(supplyRef,supplyRecord\)',poStart);
+    const poSource=app.slice(poStart,poEnd);
+    assert.match(poSource,/sourceType:item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
+    assert.match(poSource,/sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
+});
+
 test('inventory replenishment uses the same procurement demand core', () => {
     const source=app.match(/window\.openInventoryReplenishment = async function\(inventoryId\) \{[\s\S]*?\n\};/)?.[0] || '';
     assert.match(source,/YushinProcurementDemand\?\.fromStockReplenishment/);
