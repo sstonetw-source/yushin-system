@@ -8749,7 +8749,13 @@ async function persistOrderProcurementDemands(orderId, order, items = []) {
         batch.set(ref,doc,{merge:true});
         writes++;
     }
-    if(writes)await batch.commit();
+    if(writes){
+        await batch.commit();
+        // 新的採購需求已正式寫入後，立刻把採購頁標成需要重新讀取。
+        // 否則使用者若本次登入曾開過採購頁，畫面會沿用舊 cache，
+        // 出現「訂單有待採購、採購頁卻是 0」直到手動重整。
+        invalidateProcurementDemandQueue();
+    }
 }
 
 async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStatus) {
