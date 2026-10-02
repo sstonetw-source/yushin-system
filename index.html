@@ -929,6 +929,14 @@
                     <tbody id="purchaseAnalyticsSupplierBody"></tbody>
                 </table>
             </div>
+            <div class="panel" style="overflow-x:auto;">
+                <h3 style="margin-top:0;">在途採購帳齡</h3>
+                <div class="inventory-summary-note" style="margin-bottom:10px;">依正式訂購日起算尚未到貨品項；用來快速找出長時間卡住的採購與占用金額。</div>
+                <table class="sales-stats-table">
+                    <thead><tr><th>等待區間</th><th>採購單</th><th>待到貨品項</th><th>未到貨數量</th><th>在途金額</th><th>其中逾期</th><th>最久等待</th></tr></thead>
+                    <tbody id="purchaseAnalyticsAgingBody"></tbody>
+                </table>
+            </div>
             <div class="sales-stat-tables purchase-analytics-breakdowns">
                 <div>
                     <h3>需求來源分析</h3>
@@ -1556,7 +1564,7 @@
     <script src="modules/reservation-core.js?v=20261002-2"></script>
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
-    <script src="modules/purchasing-analytics-core.js?v=20261002-10"></script>
-    <script src="app.js?v=20261002-38"></script>
+    <script src="modules/purchasing-analytics-core.js?v=20261002-11"></script>
+    <script src="app.js?v=20261002-39"></script>
 </body>
 </html>
