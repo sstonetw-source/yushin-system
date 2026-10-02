@@ -102,6 +102,8 @@
       purchaseDocumentId:String(supply.purchaseDocumentId||''),
       purchaseDocumentNo:String(supply.purchaseDocumentNo||''),
       supplyInternalNo:String(supply.internalNo||''),
+      supplyOrderDate:String(supply.orderDate||''),
+      supplyCreatedAt:String(supply.createdAt||''),
       supplierId:String(supply.supplierId||''),
       supplier:String(supply.supplier||supply.supplierName||''),
       productId:String(supply.productId||''),
