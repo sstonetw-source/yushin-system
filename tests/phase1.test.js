@@ -249,7 +249,7 @@ test('purchaser order form assigns a salesperson while preserving creator identi
 
 test('low-stock inventory can hand off to formal replenishment purchase flow without duplicating incoming stock', () => {
     assert.match(appSource, /openInventoryReplenishment/);
-    assert.match(appSource, /safetyStock>0 && n\.available<=safetyStock && n\.available\+n\.incoming<safetyStock && canEditPage\('orders\.po'\)/);
+    assert.match(appSource, /stockPolicy==='SAFETY_STOCK' && safetyStock>0 && n\.available<=safetyStock && n\.available\+n\.incoming<safetyStock && canEditPage\('orders\.po'\)/);
     const start=appSource.indexOf('window.openInventoryReplenishment');
     const end=appSource.indexOf('\nwindow.setInventorySafetyStock',start);
     const source=appSource.slice(start,end);
@@ -263,6 +263,36 @@ test('low-stock inventory can hand off to formal replenishment purchase flow wit
     assert.match(source,/poDirectStockMode = true/);
     assert.match(source,/generatePoNo\(\)/);
 });
+
+test('inventory page owns stock policy and safety-stock replenishment only applies to that policy', () => {
+    assert.match(indexSource,/id="inventoryPolicyFilter"/);
+    assert.match(indexSource,/>不備庫</);
+    assert.match(indexSource,/>安全庫存</);
+    assert.match(indexSource,/>依訂單採購</);
+    assert.match(indexSource,/<th>庫存策略<\/th>/);
+    assert.match(indexSource,/由客戶訂單缺口進入既有採購需求流程/);
+
+    assert.match(appSource,/const INVENTORY_STOCK_POLICIES = Object\.freeze/);
+    assert.match(appSource,/NO_STOCK:'NO_STOCK'/);
+    assert.match(appSource,/SAFETY_STOCK:'SAFETY_STOCK'/);
+    assert.match(appSource,/ORDER_ONLY:'ORDER_ONLY'/);
+    assert.match(appSource,/window\.setInventoryStockPolicy=async function/);
+    assert.match(appSource,/stockPolicy:next/);
+
+    const replenishStart=appSource.indexOf('window.openInventoryReplenishment');
+    const replenishEnd=appSource.indexOf('\nwindow.setInventoryStockPolicy',replenishStart);
+    const replenishSource=appSource.slice(replenishStart,replenishEnd);
+    assert.match(replenishSource,/inventoryStockPolicy\(item\) !== INVENTORY_STOCK_POLICIES\.SAFETY_STOCK/);
+    assert.match(replenishSource,/不是「安全庫存」策略/);
+
+    const renderStart=appSource.indexOf('window.renderInventoryList=function()');
+    const renderEnd=appSource.indexOf('\nwindow.openInventoryReplenishment',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/inventoryStockPolicyControl\(x\)/);
+    assert.match(renderSource,/policyFilter && stockPolicy!==policyFilter/);
+    assert.match(renderSource,/stockPolicy==='SAFETY_STOCK' && safetyStock>0/);
+});
+
 
 test('purchase document history shows document age while arrival work uses supply timing', () => {
     assert.match(appSource, /function poWaitingDays\(po\)/);
