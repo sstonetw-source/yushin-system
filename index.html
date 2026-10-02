@@ -1301,7 +1301,7 @@
         <div id="admin-agencies" class="admin-panel" style="display:none;">
             <div class="panel">
                 <strong>廠牌設定</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">Product Import 的新廠牌會自動加入 Brand Master，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修固定獨立統計。</p>
+                <p style="font-size:12px;color:#666;margin:6px 0;">Product Import 的新廠牌會自動加入 Brand Master，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修也當作一般廠牌管理，可自行決定是否獨立統計。</p>
                 <div class="toolbar no-print" style="margin:10px 0 4px;">
                     <button type="button" id="syncBrandsFromProductsBtn" class="btn-secondary" onclick="syncBrandsFromProductMaster()">↻ 從 Product Master 同步廠牌</button>
                     <span style="font-size:12px;color:#777;">用於補齊既有 Product Master 中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span>
@@ -1591,6 +1591,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261002-69"></script>
+    <script src="app.js?v=20261002-70"></script>
 </body>
 </html>
