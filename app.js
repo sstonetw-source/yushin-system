@@ -11318,6 +11318,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
         const mappedSupplier = supplierForProduct(match.brand, match.productLine);
         if (!document.getElementById('poVendorName').value && mappedSupplier) {
             document.getElementById('poVendorName').value = mappedSupplier.purchaseHeaderName || mappedSupplier.supplierName || '';
+            document.getElementById('poVendorEmail').value = mappedSupplier.purchaseEmail || '';
         } else if (!document.getElementById('poVendorName').value && match.supplier) {
             document.getElementById('poVendorName').value = match.supplier;
         }
@@ -11803,6 +11804,8 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const vendorName = document.getElementById('poVendorName').value.trim();
+    const vendorEmail = String(document.getElementById('poVendorEmail')?.value || '').trim();
+    const selectedSupplier = supplierForVendorName(vendorName);
     if (!vendorName) {
         alert('請填寫抬頭（要下單的廠商名稱）。');
         return;
