@@ -111,7 +111,7 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(indexSource, /app\.js\?v=\d{8}-\d+/);
 });
 
-test('product management uses complete paginated server search without exposing protected cost data', () => {
+test('product management uses complete paginated keyword search without exposing protected cost data', () => {
     assert.match(indexSource, /id="product-system"/);
     assert.match(indexSource, /data-main-nav="products"/);
     const searchStart = appSource.indexOf('window.searchProductManagement =');
@@ -119,11 +119,12 @@ test('product management uses complete paginated server search without exposing 
     const productSearch = appSource.slice(searchStart, searchEnd);
     assert.match(productSearch, /db\.collection\('products'\)/);
     assert.match(productSearch, /while \(true\)/);
-    assert.match(productSearch, /orderBy\(field\)/);
-    assert.match(productSearch, /startAt\(value\)/);
-    assert.match(productSearch, /endAt\(value \+ '\\uf8ff'\)/);
-    assert.match(productSearch, /limit\(DEFAULT_LIST_LIMIT\)/);
-    assert.match(productSearch, /firestoreReadWithTimeout\(query\.get\(\), label\)/);
+    assert.match(productSearch, /orderBy\(firebase\.firestore\.FieldPath\.documentId\(\)\)/);
+    assert.match(productSearch, /limit\(pageSize\)/);
+    assert.match(productSearch, /startAfter\(cursor\)/);
+    assert.match(productSearch, /firestoreReadWithTimeout\(query\.get\(\), '產品完整關鍵字搜尋'\)/);
+    assert.match(productSearch, /queryTerms\.every\(term => haystack\.includes\(term\)\)/);
+    assert.match(productSearch, /partNo\.includes\(normalizedPartQuery\)/);
     assert.match(productSearch, /generation !== productManagementSearchGeneration/);
     assert.doesNotMatch(productSearch, /slice\(0, 50\)/);
     assert.doesNotMatch(productSearch, /productCosts|loadVisibleProductCost/);
@@ -140,9 +141,9 @@ test('inventory product lookup debounces server search', () => {
 test('product management debounces full Product Master search', () => {
     assert.match(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(appSource, /productManagementSearchTimer = scheduleListSearch\(productManagementSearchTimer, \(\) => searchProductManagement\(\)\)/);
-    assert.match(appSource, /scanPrefix\('normalizedPartNo', normalized/);
-    assert.match(appSource, /scanPrefix\('productName', raw/);
-    assert.match(appSource, /scanPrefix\('nameEn', raw/);
+    assert.match(appSource, /const queryTerms = queryText\.split\(\/\\s\+\/\)\.filter\(Boolean\)/);
+    assert.match(appSource, /orderBy\(firebase\.firestore\.FieldPath\.documentId\(\)\)/);
+    assert.match(appSource, /matchesKeyword\(data\)/);
     assert.match(indexSource, /搜尋會查完整 Product Master/);
 });
 
@@ -2877,9 +2878,10 @@ test('product master search throttles intermediate table renders', () => {
     const end=appSource.indexOf('\nfunction ensureProductMasterEditor',start);
     const source=appSource.slice(start,end);
     assert.match(source,/let lastIntermediateRenderAt = 0/);
-    assert.match(source,/now - lastIntermediateRenderAt >= 100/);
-    assert.match(source,/productManagementResults = \[\.\.\.map\.values\(\)\][\s\S]*?renderProductManagementResults\(\);[\s\S]*?if \(status\) \{/);
-    assert.match(source,/完成，共 \$\{productManagementResults\.length\} 筆/);
+    assert.match(source,/const renderProgress = force =>/);
+    assert.match(source,/now - lastIntermediateRenderAt < 120/);
+    assert.match(source,/productManagementResults = \[\.\.\.map\.values\(\)\][\s\S]*?renderProductManagementResults\(\);[\s\S]*?搜尋中：已檢查/);
+    assert.match(source,/完成，已檢查 \$\{checked\} 筆，共找到 \$\{productManagementResults\.length\} 筆/);
 });
 
 
@@ -2939,11 +2941,12 @@ test('product master search sorts only when rendering', () => {
     const start=appSource.indexOf('window.searchProductManagement = async function()');
     const end=appSource.indexOf('\nfunction ensureProductMasterEditor',start);
     const source=appSource.slice(start,end);
-    const throttleStart=source.indexOf('if (now - lastIntermediateRenderAt >= 100)');
-    const throttleEnd=source.indexOf('\n        }', throttleStart)+10;
-    const throttleSource=source.slice(throttleStart,throttleEnd);
-    assert.match(throttleSource,/productManagementResults = \[\.\.\.map\.values\(\)\]/);
-    assert.match(source,/if \(generation !== productManagementSearchGeneration\) return;\s*productManagementResults = \[\.\.\.map\.values\(\)\]/);
+    const renderStart=source.indexOf('const renderProgress = force =>');
+    const renderEnd=source.indexOf('\n    };', renderStart)+7;
+    const renderSource=source.slice(renderStart,renderEnd);
+    assert.match(renderSource,/productManagementResults = \[\.\.\.map\.values\(\)\]/);
+    assert.match(renderSource,/\.sort\(/);
+    assert.match(source,/if \(generation !== productManagementSearchGeneration\) return;\s*renderProgress\(true\)/);
 });
 
 
