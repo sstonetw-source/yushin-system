@@ -2278,3 +2278,202 @@ html[data-app-environment="preview"] body { border-top: 0; }
         margin-top: 0;
     }
 }
+
+
+/* ===== 2026-10-02：手機一致性、無橡皮筋、估價單對齊 ===== */
+@media screen and (max-width: 640px) {
+    /* 把捲動交給 App 容器，根頁面不再跟著 iOS viewport 拉伸。 */
+    html,
+    body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        background: #003366;
+    }
+    #appContainer {
+        position: relative;
+        width: 100%;
+        height: 100vh;
+        height: 100dvh;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+        background: #f4f4f9;
+        box-sizing: border-box;
+    }
+
+    /* 只讓最上層功能選單固定；估價單第二層導覽跟內容一起捲動。 */
+    #quote-system > .quote-module-nav {
+        position: static;
+        top: auto;
+        z-index: auto;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    /* 建立估價單整個工作區不可超出手機寬度。 */
+    #quote-system,
+    #quoteCreatePanel,
+    #printableQuote,
+    #printableQuote .table-wrap,
+    #itemTable {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+    #quote-system,
+    #quoteCreatePanel,
+    #printableQuote {
+        overflow-x: hidden;
+    }
+
+    /* 公司切換固定三等分，避免按鈕依文字長度偏一邊。 */
+    #quoteCreatePanel > .company-sub-nav {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 7px;
+        width: 100%;
+        margin: 0 0 10px;
+        padding: 8px;
+        box-sizing: border-box;
+    }
+    #quoteCreatePanel > .company-sub-nav .sub-tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 42px;
+        margin: 0;
+        padding: 8px 4px;
+        box-sizing: border-box;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    /* 手機頁首改成真正分欄，Logo 不再以絕對定位壓到公司名稱。 */
+    #printableQuote .header-container {
+        display: grid;
+        grid-template-columns: 64px minmax(0, 1fr) 64px;
+        align-items: center;
+        gap: 4px;
+        min-height: 82px;
+        margin-bottom: 8px;
+        padding: 6px 0;
+        box-sizing: border-box;
+    }
+    #printableQuote .company-logo {
+        position: static !important;
+        left: auto !important;
+        top: auto !important;
+        transform: none !important;
+        grid-column: 1;
+        justify-self: center;
+        width: 60px !important;
+        max-width: 60px !important;
+        max-height: 60px !important;
+        object-fit: contain;
+    }
+    #printableQuote .header-info {
+        grid-column: 2;
+        min-width: 0;
+        width: 100%;
+    }
+    #printableQuote .header-info h1 {
+        font-size: 18px;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+    }
+    #printableQuote .header-info h2 {
+        font-size: 12px;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+    }
+    #printableQuote .header-info p {
+        font-size: 10.5px;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+    }
+
+    /* 鼎新的桌機雙框只留給桌機／PDF；手機輸入頁維持卡片，不再出現大黑框。 */
+    #printableQuote.theme-MULTI-LIFE #itemTable {
+        border: 0 !important;
+        background: transparent !important;
+    }
+    #printableQuote.theme-MULTI-LIFE #itemTable tbody,
+    #printableQuote.theme-MULTI-LIFE #itemTable td {
+        background: transparent !important;
+    }
+    #printableQuote.theme-MULTI-LIFE #itemTable tr {
+        border: 0 !important;
+        background: #fff !important;
+    }
+
+    /* 抬頭欄位統一尺寸，避免左右寬度與高度看起來歪斜。 */
+    #printableQuote .meta-section {
+        width: 100%;
+        margin: 0 0 10px;
+        box-sizing: border-box;
+    }
+    #printableQuote .meta-row,
+    #printableQuote .meta-row-three,
+    #printableQuote .meta-row-three > div {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+    #printableQuote .meta-row,
+    #printableQuote .meta-row-three > div {
+        min-height: 44px;
+        margin: 4px 0;
+    }
+    #printableQuote .meta-section label {
+        width: 70px;
+        font-size: 13px;
+    }
+    #printableQuote .meta-section input,
+    #printableQuote .meta-section select {
+        min-width: 0;
+        min-height: 40px;
+        padding: 7px 9px;
+        font-size: 14px;
+    }
+
+    /* Forecast 操作固定兩欄；每一顆按鈕同寬同高。 */
+    #forecastTable td.forecast-actions[data-th]::before {
+        content: none !important;
+        display: none !important;
+    }
+    #forecastTable td.forecast-actions {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+        padding: 10px 0 0 !important;
+        box-sizing: border-box;
+    }
+    #forecastTable td.forecast-actions button {
+        width: 100% !important;
+        height: 44px;
+        min-width: 0;
+        min-height: 44px;
+        max-height: 44px;
+        margin: 0 !important;
+        padding: 8px 10px !important;
+        box-sizing: border-box;
+        line-height: 1.2;
+    }
+
+    /* 主功能列維持同一個外框節奏。 */
+    .nav-tabs {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    .mobile-nav-toggle {
+        min-height: 50px;
+        border-radius: 10px;
+    }
+}

@@ -4334,6 +4334,24 @@ test('receipt retry stays idempotent after outstanding supply is cancelled', () 
 });
 
 
+test('mobile layout disables root rubber-band, aligns quote workspace, and equalizes Forecast actions', () => {
+    assert.match(indexSource, /<meta name="theme-color" content="#003366">/);
+    assert.match(cssSource, /#appContainer \{[\s\S]*?height: 100dvh;[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior: none;/);
+    assert.match(cssSource, /#quote-system > \.quote-module-nav \{[\s\S]*?position: static;/);
+    assert.match(cssSource, /#quoteCreatePanel > \.company-sub-nav \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+    assert.match(cssSource, /#printableQuote \.header-container \{[\s\S]*?grid-template-columns: 64px minmax\(0, 1fr\) 64px/);
+    assert.match(cssSource, /#forecastTable td\.forecast-actions \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+    assert.match(cssSource, /#forecastTable td\.forecast-actions button \{[\s\S]*?height: 44px;/);
+});
+
+test('mobile function menu closes when user returns to content or scrolls', () => {
+    assert.match(appSource, /window\.collapseMobileMainNav = function\(\)/);
+    assert.match(appSource, /document\.addEventListener\('pointerdown'/);
+    assert.match(appSource, /if \(nav\.contains\(event\.target\)\) return;/);
+    assert.match(appSource, /app\.addEventListener\('scroll'/);
+    assert.match(appSource, /collapseMobileMainNav\(\)/);
+});
+
 test('mobile navigation resets toggle state after selecting a workspace', () => {
     const navItems=[...indexSource.matchAll(/data-main-nav="[^"]+"[^>]+onclick="([^"]+)"/g)];
     assert.ok(navItems.length>=8);

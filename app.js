@@ -17865,3 +17865,30 @@ window.handlePriceExcelUpload = async function(input) {
     };
     reader.readAsArrayBuffer(file);
 };
+
+
+// ===== 2026-10-02：手機功能選單自動收合 =====
+window.collapseMobileMainNav = function() {
+    const nav = document.querySelector('.nav-tabs');
+    if (!nav?.classList.contains('mobile-open')) return;
+    nav.classList.remove('mobile-open');
+    const toggle = nav.querySelector('.mobile-nav-toggle');
+    toggle?.setAttribute('aria-expanded', 'false');
+    toggle?.setAttribute('aria-label', '開啟功能選單');
+};
+
+(function bindMobileMainNavAutoCollapse() {
+    const nav = document.querySelector('.nav-tabs');
+    const app = document.getElementById('appContainer');
+    if (!nav || !app) return;
+
+    document.addEventListener('pointerdown', event => {
+        if (!nav.classList.contains('mobile-open')) return;
+        if (nav.contains(event.target)) return;
+        collapseMobileMainNav();
+    }, { passive:true });
+
+    app.addEventListener('scroll', () => {
+        if (nav.classList.contains('mobile-open')) collapseMobileMainNav();
+    }, { passive:true });
+})();
