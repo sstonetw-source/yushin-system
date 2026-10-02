@@ -2,17 +2,19 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const supplier=require('../modules/supplier-core.js');
 
-test('supplier master normalizes name header and email',()=>{
+test('supplier master normalizes contact and default lead time',()=>{
   const x=supplier.normalizeSupplier({
     id:'sup-1',
     supplierName:'  ACME   Bio  ',
     purchaseHeaderName:'',
-    email:' Orders@Example.COM '
+    email:' Orders@Example.COM ',
+    leadTimeDays:14
   });
   assert.equal(x.supplierId,'sup-1');
   assert.equal(x.supplierName,'ACME Bio');
   assert.equal(x.purchaseHeaderName,'ACME Bio');
   assert.equal(x.email,'orders@example.com');
+  assert.equal(x.leadTimeDays,14);
 });
 
 test('purchase order keeps an immutable supplier snapshot',()=>{
@@ -20,13 +22,15 @@ test('purchase order keeps an immutable supplier snapshot',()=>{
     id:'sup-1',
     supplierName:'ACME Bio',
     purchaseHeaderName:'ACME Taiwan',
-    email:'old@example.com'
+    email:'old@example.com',
+    leadTimeDays:10
   });
   assert.deepEqual(snapshot,{
     supplierId:'sup-1',
     supplierName:'ACME Bio',
     purchaseHeaderName:'ACME Taiwan',
-    email:'old@example.com'
+    email:'old@example.com',
+    leadTimeDays:10
   });
 });
 
@@ -64,58 +68,26 @@ test('communication event records preparation, not verified sending',()=>{
   assert.equal(event.recipientEmail,'orders@example.com');
 });
 
-test('product-specific supplier mapping outranks by priority',()=>{
-  const selected=supplier.selectProductSupplierMapping([
-    {productId:'P1',supplierId:'S2',priority:2,leadTimeDays:7},
-    {productId:'P1',supplierId:'S1',priority:1,supplierPartNo:'V-100',leadTimeDays:3},
-    {productId:'P2',supplierId:'S3',priority:1}
-  ],{productId:'P1',itemCode:'A-100'});
-  assert.equal(selected.supplierId,'S1');
-  assert.equal(selected.supplierPartNo,'V-100');
-  assert.equal(selected.leadTimeDays,3);
-});
-
-test('product supplier relation can match by item code when product id is unavailable',()=>{
-  const selected=supplier.selectProductSupplierMapping([
-    {itemCode:'ABC-1',supplierId:'S1',priority:1}
-  ],{itemCode:'abc-1'});
-  assert.equal(selected.supplierId,'S1');
-});
-
-test('product supplier relation requires product identity and supplier',()=>{
-  assert.equal(supplier.validateProductSupplierMapping({productId:'P1',supplierId:'S1'}).valid,true);
-  assert.deepEqual(supplier.validateProductSupplierMapping({supplierId:'S1'}).errors,['product']);
-  assert.deepEqual(supplier.validateProductSupplierMapping({productId:'P1'}).errors,['supplierId']);
-});
-
-
 test('vendor lead time suggests an expected arrival date without timezone drift',()=>{
   assert.equal(supplier.expectedArrivalDate('2026-10-02',{leadTimeDays:10}),'2026-10-12');
   assert.equal(supplier.expectedArrivalDate('2026-10-30',3),'2026-11-02');
   assert.equal(supplier.expectedArrivalDate('',3),'');
 });
 
-
-test('purchase expected date uses the longest explicit lead time for the selected supplier',()=>{
-  const expected=supplier.purchaseExpectedDate([
-    {productId:'P1',itemCode:'A-1'},
-    {productId:'P2',itemCode:'A-2'}
-  ],[
-    {productId:'P1',supplierId:'S1',priority:1,leadTimeDays:3},
-    {productId:'P2',supplierId:'S1',priority:1,leadTimeDays:7}
-  ],'2026-10-02','S1');
+test('purchase expected date uses the supplier default lead time',()=>{
+  const expected=supplier.purchaseExpectedDate(
+    [{itemCode:'A-1'},{itemCode:'A-2'}],
+    {supplierId:'S1',leadTimeDays:7},
+    '2026-10-02'
+  );
   assert.equal(expected,'2026-10-09');
 });
 
-test('purchase expected date stays blank when any item lacks selected supplier lead time',()=>{
-  const expected=supplier.purchaseExpectedDate([
-    {productId:'P1'},
-    {productId:'P2'}
-  ],[
-    {productId:'P1',supplierId:'S1',priority:1,leadTimeDays:3},
-    {productId:'P2',supplierId:'S2',priority:1,leadTimeDays:5}
-  ],'2026-10-02','S1');
-  assert.equal(expected,'');
+test('purchase expected date stays blank when supplier has no default lead time',()=>{
+  assert.equal(
+    supplier.purchaseExpectedDate([{itemCode:'A-1'}],{supplierId:'S1',leadTimeDays:0},'2026-10-02'),
+    ''
+  );
 });
 
 test('purchase expected date handles month rollover with calendar days',()=>{
@@ -123,13 +95,8 @@ test('purchase expected date handles month rollover with calendar days',()=>{
   assert.equal(supplier.addCalendarDays('not-a-date',5),'');
 });
 
-
-test('item expected arrival date follows the selected supplier mapping',()=>{
-  const mappings=[
-    {productId:'P1',supplierId:'S1',priority:1,leadTimeDays:3},
-    {productId:'P1',supplierId:'S2',priority:1,leadTimeDays:9}
-  ];
-  assert.equal(supplier.itemExpectedArrivalDate({productId:'P1'},mappings,'2026-10-02','S1'),'2026-10-05');
-  assert.equal(supplier.itemExpectedArrivalDate({productId:'P1'},mappings,'2026-10-02','S2'),'2026-10-11');
-  assert.equal(supplier.itemExpectedArrivalDate({productId:'P2'},mappings,'2026-10-02','S1'),'');
+test('item expected arrival uses the same supplier default for every item',()=>{
+  const supplierMaster={supplierId:'S1',leadTimeDays:3};
+  assert.equal(supplier.itemExpectedArrivalDate({itemCode:'A'},supplierMaster,'2026-10-02'),'2026-10-05');
+  assert.equal(supplier.itemExpectedArrivalDate({itemCode:'B'},supplierMaster,'2026-10-02'),'2026-10-05');
 });
