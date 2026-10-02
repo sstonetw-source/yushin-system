@@ -2265,3 +2265,27 @@ test('formal PO snapshots supplier part numbers and keeps internal product ident
 
     assert.match(html,/id="poVendorName"[^>]+renderPoItemsTable\(\)/);
 });
+
+
+test('grouped procurement selection only builds compatible warehouse purchase orders', () => {
+    assert.match(html,/id="purchasePendingBatchPoBtn"[^>]+onclick="openSelectedPurchaseDraft\(\)"/);
+    assert.match(html,/<th class="no-print">合併<\/th>/);
+    assert.match(app,/const selectedPendingPurchaseDemandIds = new Set\(\)/);
+    assert.match(app,/class="pending-purchase-batch-select"/);
+
+    const start=app.indexOf('window.openSelectedPurchaseDraft = async function');
+    const end=app.indexOf('\n// 「採購訂單」列出所有已經產生過的訂購單紀錄',start);
+    assert.ok(start>=0&&end>start);
+    const source=app.slice(start,end);
+    assert.match(source,/selectedIds\.length<2/);
+    assert.match(source,/sourceType\|\|''\)!=='SALES_ORDER'/);
+    assert.match(source,/DIRECT_SHIP/);
+    assert.match(source,/warehouseIds\.size!==1/);
+    assert.match(source,/companies\.length>1/);
+    assert.match(source,/supplierIds\.size!==1/);
+    assert.match(source,/preloadPurchaseCostsForItems\(initialItems\)/);
+    assert.match(source,/poItems=items/);
+    assert.match(source,/poAllItems=items/);
+    assert.match(source,/await autoFillPoSupplier\(items\)/);
+    assert.match(source,/已合併 \$\{items\.length\} 筆待採購需求/);
+});
