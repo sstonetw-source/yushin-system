@@ -4113,15 +4113,17 @@ function renderProductSupplierMappingAdmin() {
             item.id===mapping.supplierId || item.supplierId===mapping.supplierId
         )||{};
         const leadTime=Math.max(0,Number(mapping.leadTimeDays||0));
+        const minimumOrderQty=Math.max(0,Number(mapping.minimumOrderQty||0));
         return `<tr>
             <td>${escapeHtml(mapping.itemCode||mapping.productId||'')}</td>
             <td>${escapeHtml(supplier.supplierName||'找不到供應商')}</td>
             <td>${escapeHtml(mapping.supplierPartNo||'')}</td>
             <td>${Math.max(1,Number(mapping.priority||1))}</td>
             <td>${leadTime?leadTime+' 天':'－'}</td>
+            <td>${minimumOrderQty>0?minimumOrderQty:'－'}</td>
             <td><button type="button" class="btn-small btn-danger" onclick="disableProductSupplierMapping('${escapeAttr(mapping.id||mapping.mappingId||'')}')">停用</button></td>
         </tr>`;
-    }).join(''):'<tr><td colspan="6" style="color:#888;">尚未設定產品指定供應來源；系統會使用廠牌／產品線預設。</td></tr>';
+    }).join(''):'<tr><td colspan="7" style="color:#888;">尚未設定產品指定供應來源；系統會使用廠牌／產品線預設。</td></tr>';
 }
 
 function renderWarehouseMasterAdmin() {
@@ -4285,6 +4287,12 @@ window.saveProductSupplierMapping = async function() {
     const supplierPartNo=String(document.getElementById('productSupplierPartNo')?.value||'').trim();
     const priority=Math.max(1,Math.floor(Number(document.getElementById('productSupplierPriority')?.value||1)));
     const leadTimeDays=Math.max(0,Math.floor(Number(document.getElementById('productSupplierLeadTime')?.value||0)));
+    const minimumOrderQtyRaw=Number(document.getElementById('productSupplierMinimumOrderQty')?.value||0);
+    if(!Number.isFinite(minimumOrderQtyRaw)||minimumOrderQtyRaw<0){
+        if(status)status.innerText='最小訂購量必須是 0 以上數字。';
+        return;
+    }
+    const minimumOrderQty=minimumOrderQtyRaw>0?minimumOrderQtyRaw:0;
     if(!itemCode){if(status)status.innerText='請輸入產品貨號。';return;}
     const normalized=supplierSelection.normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
     const supplier=supplierMasterCache.find(item=>{
@@ -4301,7 +4309,7 @@ window.saveProductSupplierMapping = async function() {
         const productId=product.productId||stableProductId(product);
         const supplierId=supplier.id||supplier.supplierId||'';
         const validation=globalThis.YushinSupplier?.validateProductSupplierMapping({
-            productId,itemCode:product.model||itemCode,supplierId,supplierPartNo,priority,leadTimeDays
+            productId,itemCode:product.model||itemCode,supplierId,supplierPartNo,priority,leadTimeDays,minimumOrderQty
         });
         if(!validation?.valid)throw new Error('產品供應來源資料不完整：'+(validation?.errors||[]).join(', '));
         const mappingId=stableMasterId('psm',productId+'|'+supplierId);
@@ -4321,8 +4329,10 @@ window.saveProductSupplierMapping = async function() {
         ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
         const priorityInput=document.getElementById('productSupplierPriority');
         const leadInput=document.getElementById('productSupplierLeadTime');
+        const minimumOrderQtyInput=document.getElementById('productSupplierMinimumOrderQty');
         if(priorityInput)priorityInput.value='1';
         if(leadInput)leadInput.value='0';
+        if(minimumOrderQtyInput)minimumOrderQtyInput.value='0';
         if(status)status.innerText='產品供應來源已儲存。';
     }catch(err){
         if(status)status.innerText='儲存失敗：'+(err?.message||err);
@@ -12905,6 +12915,12 @@ function poSupplierPartNoForItem(item = {}, supplierId = '') {
     return String(mapping?.supplierPartNo||'').trim();
 }
 
+function poMinimumOrderQtyForItem(item = {}, supplierId = '') {
+    const mapping=productSupplierMappingForPoItem(item,supplierId);
+    const value=Number(mapping?.minimumOrderQty||0);
+    return Number.isFinite(value)&&value>0?value:0;
+}
+
 function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', headerExpectedDate = '', expectedDateSource = '') {
     const manualHeader = expectedDateSource === 'manual'
         || (!!headerExpectedDate && expectedDateSource !== 'lead-time');
@@ -12921,7 +12937,8 @@ function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', h
             );
         }
         const supplierPartNo=poSupplierPartNoForItem(item,supplierId);
-        return { ...item, scheduleDate, supplierPartNo };
+        const minimumOrderQty=poMinimumOrderQtyForItem(item,supplierId);
+        return { ...item, scheduleDate, supplierPartNo, minimumOrderQty };
     });
 }
 
@@ -13409,6 +13426,23 @@ window.printPurchaseOrder = async function() {
         supplierContact||{},
         {supplierName:vendorName,purchaseHeaderName:vendorName}
     );
+    if(supplierSnapshot.supplierId&&globalThis.YushinSupplier?.validatePurchaseQuantity){
+        const minimumOrderViolations=poItems.map(item=>({
+            item,
+            rule:globalThis.YushinSupplier.validatePurchaseQuantity(
+                item,
+                item.qty,
+                productSupplierMappingCache,
+                supplierSnapshot.supplierId
+            )
+        })).filter(row=>!row.rule.valid);
+        if(minimumOrderViolations.length){
+            alert('以下品項低於此供應商的最小訂購量：\n'+minimumOrderViolations.map(({item,rule})=>
+                `${item.itemCode||item.itemName||'未命名品項'}：目前 ${Number(item.qty||0)}，至少 ${rule.minimumOrderQty}`
+            ).join('\n'));
+            return;
+        }
+    }
     const poDate=document.getElementById('poDate').value;
     const expectedDateInput=document.getElementById('poExpectedDate');
     const expectedDate=expectedDateInput?.value||'';
