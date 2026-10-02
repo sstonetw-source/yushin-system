@@ -1194,7 +1194,7 @@
                 <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">訂 購 單</h2>
 
                 <div class="meta-row-three">
-                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;" oninput="updatePoSupplierEmailHint()" onchange="updatePoSupplierEmailHint(); autoFillPoExpectedDate()"><datalist id="poVendorSuggestions"></datalist><small id="poSupplierEmailHint" class="no-print" style="display:block;margin-top:3px;color:#9a6700;">尚未設定供應商 Email</small></div>
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;" oninput="updatePoSupplierEmailHint()" onchange="updatePoSupplierEmailHint(); autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist><small id="poSupplierEmailHint" class="no-print" style="display:block;margin-top:3px;color:#9a6700;">尚未設定供應商 Email</small></div>
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
                     <div><label>訂購日期：</label><input type="date" id="poDate" onchange="autoFillPoExpectedDate()"></div>
                 </div>
@@ -1556,6 +1556,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-5"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-10"></script>
-    <script src="app.js?v=20261002-32"></script>
+    <script src="app.js?v=20261002-33"></script>
 </body>
 </html>
