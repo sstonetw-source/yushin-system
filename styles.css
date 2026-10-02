@@ -149,6 +149,24 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
     font-size:13px;
     font-weight:700;
 }
+.product-management-tools-note {
+    margin:-2px 0 10px;
+    color:#65727e;
+    font-size:12px;
+    line-height:1.5;
+}
+.product-management-toggle {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    min-height:38px;
+    padding:0 8px;
+    color:#455563;
+    font-size:13px;
+}
+.product-management-toggle input { width:18px; height:18px; }
+.product-management-table tr.is-inactive { opacity:.68; background:#f7f7f7; }
+
 .product-management-tools-actions {
     display:flex;
     gap:8px;

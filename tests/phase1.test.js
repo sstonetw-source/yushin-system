@@ -4432,6 +4432,26 @@ test('admin exposes the loaded application asset version', () => {
 });
 
 
+test('Product Master management has clear edit and soft-disable controls', () => {
+    assert.match(indexSource, /Product Master 管理/);
+    assert.match(indexSource, /id="productManagementShowInactive"/);
+    assert.match(indexSource, /錯誤品項請按「停用」/);
+    const rowStart=appSource.indexOf('function productManagementRow(product)');
+    const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
+    const rowSource=appSource.slice(rowStart,rowEnd);
+    assert.match(rowSource,/openProductMasterEditor/);
+    assert.match(rowSource,/setProductMasterActive/);
+    assert.match(rowSource,/重新啟用/);
+    assert.match(rowSource,/停用/);
+
+    const toggleStart=appSource.indexOf('window.setProductMasterActive = async function');
+    const toggleEnd=appSource.indexOf('\nwindow.openPendingProductMasterEditor',toggleStart);
+    const toggleSource=appSource.slice(toggleStart,toggleEnd);
+    assert.match(toggleSource,/status: active \? 'ACTIVE' : 'INACTIVE'/);
+    assert.match(toggleSource,/歷史單據與關聯資料會保留/);
+    assert.doesNotMatch(toggleSource,/\.delete\(/);
+});
+
 test('product management can batch-select products into one quote or one order', () => {
     assert.match(indexSource, /id="productManagementSelectionBar"/);
     assert.match(indexSource, /addProductManagementSelectionToQuote\(\)/);
