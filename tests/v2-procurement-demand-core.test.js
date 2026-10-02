@@ -1,0 +1,54 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const d=require('../modules/procurement-demand-core.js');
+
+test('sales shortage uses in-transit supply to reduce remaining purchase demand',()=>{
+  const demand=d.fromSalesOrder({
+    sourceId:'o1',sourceItemId:'i1',fulfillmentType:'WAREHOUSE',
+    shortageQty:7,inTransitQty:4
+  });
+  assert.equal(demand.requestedQty,7);
+  assert.equal(demand.orderedQty,4);
+  assert.equal(demand.remainingToOrderQty,3);
+  assert.equal(demand.status,d.STATUSES.PARTIALLY_ORDERED);
+});
+
+test('covered sales shortage becomes ordered and waits for receipt',()=>{
+  const demand=d.fromSalesOrder({
+    fulfillmentType:'WAREHOUSE',shortageQty:7,inTransitQty:7
+  });
+  assert.equal(demand.remainingToOrderQty,0);
+  assert.equal(demand.status,d.STATUSES.ORDERED);
+});
+
+test('direct ship uses cumulative supplier order and receipt quantities',()=>{
+  const demand=d.fromSalesOrder({
+    fulfillmentType:'DIRECT_SHIP',requiredSupplyQty:12,supplyOrderedQty:12,receivedQty:5
+  });
+  assert.equal(demand.requestedQty,12);
+  assert.equal(demand.remainingToOrderQty,0);
+  assert.equal(demand.remainingToReceiveQty,7);
+  assert.equal(demand.status,d.STATUSES.PARTIALLY_RECEIVED);
+});
+
+test('stock replenishment treats incoming as already ordered against safety-stock gap',()=>{
+  const demand=d.fromStockReplenishment({safetyStock:20,available:5,incoming:7});
+  assert.equal(demand.requestedQty,15);
+  assert.equal(demand.orderedQty,7);
+  assert.equal(demand.remainingToOrderQty,8);
+  assert.equal(demand.status,d.STATUSES.PARTIALLY_ORDERED);
+});
+
+test('stock replenishment does not duplicate an incoming order that already covers safety stock',()=>{
+  const demand=d.fromStockReplenishment({safetyStock:20,available:5,incoming:15});
+  assert.equal(demand.remainingToOrderQty,0);
+  assert.equal(demand.status,d.STATUSES.ORDERED);
+});
+
+test('ERP-style demand statuses include partial order partial receipt and received',()=>{
+  assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:0}).status,d.STATUSES.PENDING);
+  assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:4}).status,d.STATUSES.PARTIALLY_ORDERED);
+  assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:10}).status,d.STATUSES.ORDERED);
+  assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:10,receivedQty:4}).status,d.STATUSES.PARTIALLY_RECEIVED);
+  assert.equal(d.normalizeDemand({requestedQty:10,orderedQty:10,receivedQty:10}).status,d.STATUSES.RECEIVED);
+});
