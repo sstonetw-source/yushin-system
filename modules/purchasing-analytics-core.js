@@ -9,7 +9,42 @@
     return Number.isFinite(number)?Math.max(0,number):0;
   }
 
-  function projectSupply(record={}){
+  function timeOf(value){
+    const time=Date.parse(String(value||''));
+    return Number.isFinite(time)?time:null;
+  }
+
+  function dayDiff(start,end){
+    const a=timeOf(start),b=timeOf(end);
+    return a===null||b===null?null:Math.max(0,(b-a)/86400000);
+  }
+
+  function receiptsBySupply(records=[]){
+    const map=new Map();
+    for(const receipt of records||[]){
+      const key=String(receipt?.supplyOrderId||'').trim();
+      if(!key)continue;
+      if(!map.has(key))map.set(key,[]);
+      map.get(key).push(receipt);
+    }
+    for(const rows of map.values()){
+      rows.sort((a,b)=>String(a.createdAt||a.receiptDate||'').localeCompare(String(b.createdAt||b.receiptDate||'')));
+    }
+    return map;
+  }
+
+  function completionReceiptAt(receipts=[],targetQty=0){
+    const target=n(targetQty);
+    if(!(target>0))return '';
+    let total=0;
+    for(const receipt of receipts){
+      total+=n(receipt?.qty);
+      if(total>=target)return String(receipt?.createdAt||receipt?.receiptDate||'');
+    }
+    return '';
+  }
+
+  function projectSupply(record={},receipts=[]){
     if(!supply)throw new Error('Supply core is required.');
     const x=supply.normalize(record);
     const unitCost=n(x.unitCost);
@@ -26,6 +61,10 @@
     const brand=String(x.brand||'未指定廠牌').trim()||'未指定廠牌';
     const date=String(x.orderDate||x.createdAt||'').slice(0,10);
     const month=/^\d{4}-\d{2}/.test(date)?date.slice(0,7):'未指定月份';
+    const completionAt=!cancelled&&effectiveOrderedQty>0
+      ? completionReceiptAt(receipts,effectiveOrderedQty)
+      : '';
+    const leadTimeDays=completionAt?dayDiff(x.orderDate||x.createdAt,completionAt):null;
     return {
       record:x,
       supplier:supplierName,
@@ -46,6 +85,8 @@
       stockAmount:isStockReplenishment?effectiveOrderedQty*unitCost:0,
       customerOrderAmount:isStockReplenishment?0:effectiveOrderedQty*unitCost,
       missingUnitCost:effectiveOrderedQty>0&&unitCost<=0,
+      completionAt,
+      leadTimeDays,
       isStockReplenishment
     };
   }
@@ -59,7 +100,9 @@
       incomingAmount:0,
       stockAmount:0,
       customerOrderAmount:0,
-      missingUnitCostCount:0
+      missingUnitCostCount:0,
+      leadTimeDaysTotal:0,
+      leadTimeCount:0
     };
   }
 
@@ -72,6 +115,10 @@
     metric.stockAmount+=row.stockAmount;
     metric.customerOrderAmount+=row.customerOrderAmount;
     if(row.missingUnitCost)metric.missingUnitCostCount++;
+    if(Number.isFinite(row.leadTimeDays)){
+      metric.leadTimeDaysTotal+=row.leadTimeDays;
+      metric.leadTimeCount++;
+    }
   }
 
   function finalizeMetric(metric){
@@ -83,7 +130,9 @@
       incomingAmount:metric.incomingAmount,
       stockAmount:metric.stockAmount,
       customerOrderAmount:metric.customerOrderAmount,
-      missingUnitCostCount:metric.missingUnitCostCount
+      missingUnitCostCount:metric.missingUnitCostCount,
+      leadTimeCount:metric.leadTimeCount,
+      avgLeadTimeDays:metric.leadTimeCount?metric.leadTimeDaysTotal/metric.leadTimeCount:null
     };
   }
 
@@ -99,8 +148,10 @@
     return result.sort((a,b)=>b.orderedAmount-a.orderedAmount||String(a[labelKey]).localeCompare(String(b[labelKey]),'zh-Hant'));
   }
 
-  function summarize(records=[]){
-    const rows=(records||[]).map(projectSupply).filter(row=>row.effectiveOrderedQty>0||row.receivedQty>0);
+  function summarize(records=[],receiptRecords=[]){
+    const receiptMap=receiptsBySupply(receiptRecords);
+    const rows=(records||[]).map(record=>projectSupply(record,receiptMap.get(String(record?.id||''))||[]))
+      .filter(row=>row.effectiveOrderedQty>0||row.receivedQty>0);
     const totalMetric=newMetric();
     rows.forEach(row=>addMetric(totalMetric,row));
     const bySupplier=grouped(rows,row=>row.supplierKey,'supplierKey').map(group=>{
