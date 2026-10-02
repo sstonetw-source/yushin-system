@@ -2674,6 +2674,7 @@ function productManagementSource(product) {
         nameEn: product.nameEn || '',
         itemName: product.productName || product.nameCn || product.nameEn || '',
         brand: resolveBrandName(product.brandName || product.brand || ''),
+        brandId: product.brandId || brandIdForName(product.brandName || product.brand || ''),
         spec: product.specification || product.spec || '',
         price: Number(product.listPrice ?? product.price ?? 0),
         unitPrice: Number(product.listPrice ?? product.price ?? 0),
@@ -3293,6 +3294,7 @@ window.saveForecast = async function() {
 
     const customerName = document.getElementById('forecastCustomer').value.trim();
     const brand = normalizeForecastBrand(document.getElementById('forecastBrand').value);
+    const brandId = brandIdForName(brand);
     const productName = document.getElementById('forecastProduct').value.trim();
 
     if (!customerName) {
@@ -3339,6 +3341,7 @@ window.saveForecast = async function() {
                 customerName,
                 customerId: syncCustomerMaster(customerName, { salesCode: currentUserCode || '' }),
                 brand,
+                brandId,
                 productName,
                 estimatedAmount,
                 stage,
@@ -3378,6 +3381,7 @@ window.saveForecast = async function() {
                 customerName,
                 customerId: syncCustomerMaster(customerName, { salesCode: existing.salesCode || currentUserCode || '' }),
                 brand,
+                brandId,
                 productName,
                 estimatedAmount,
                 updatedAt: now
@@ -3746,6 +3750,7 @@ async function forecastOrderItems(forecast) {
                 nameEn: item.nameEn || '',
                 model: item.model || '',
                 brand: resolveBrandName(item.brand || ''),
+                brandId: item.brandId || brandIdForName(item.brand || ''),
                 productId: item.productId || '',
                 productLine: item.productLine || '',
                 productType: item.productType || '',
@@ -3767,6 +3772,7 @@ async function forecastOrderItems(forecast) {
         nameEn: match?.nameEn || '',
         model: match?.model || '',
         brand: normalizeForecastBrand(forecast.brand || match?.brand || ''),
+        brandId: match?.brandId || forecast.brandId || brandIdForName(forecast.brand || match?.brand || ''),
         productId: match?.productId || forecast.productId || '',
         productLine: match?.productLine || '',
         productType: match?.productType || '',
@@ -3788,6 +3794,7 @@ function forecastItemToOrderSource(forecast, item) {
         itemName: item.nameCn || item.nameEn || item.model || forecast.productName || '',
         itemCode: item.model || '',
         brand: normalizeForecastBrand(item.brand || forecast.brand || match?.brand || ''),
+        brandId: item.brandId || match?.brandId || forecast.brandId || brandIdForName(item.brand || forecast.brand || match?.brand || ''),
         qty,
         unitPrice,
         totalPrice,
@@ -3828,6 +3835,7 @@ async function createForecastOrdersDirectly(forecast, items) {
         customerName:forecast.customerName||'',
         customerId:forecast.customerId||customerIdForName(forecast.customerName||''),
         brand:firstItem.brand||'',
+        brandId:firstItem.brandId||brandIdForName(firstItem.brand||''),
         itemCode:firstItem.itemCode||'',
         itemCodeKey:normalizeHistoryItemCode(firstItem.itemCode||''),
         itemName:firstItem.itemName||'',
@@ -5239,9 +5247,11 @@ function invalidateQuoteProductIdentityIfBrandChanged(input) {
     if (!row) return;
     const productIdInput = row.querySelector('.item-product-id');
     const productId = String(productIdInput?.value || '').trim();
+    const currentBrand = quoteRowBrandValue(row);
+    const brandIdInput = row.querySelector('.item-brand-id');
+    if (brandIdInput) brandIdInput.value = brandIdForName(currentBrand);
     if (!productId) return;
     const linkedProduct = priceList.find(item => (item.productId || stableProductId(item)) === productId);
-    const currentBrand = quoteRowBrandValue(row);
     const linkedBrand = resolveBrandName(linkedProduct?.brand || '');
     if (linkedProduct && normalizeBrandLookupKey(currentBrand) === normalizeBrandLookupKey(linkedBrand)) return;
     if (productIdInput) productIdInput.value = '';
@@ -5265,6 +5275,7 @@ window.finalizeQuoteBrandInput = function(input) {
         input.value = brand;
         rememberQuoteBrand(brand);
     }
+    invalidateQuoteProductIdentityIfBrandChanged(input);
     onQuoteBrandSelectChange(input);
     setTimeout(() => {
         const container = row.querySelector('.quote-brand-suggestions');
@@ -5606,6 +5617,7 @@ window.addQuoteRow = function(itemData = {}) {
                         </div>
                         <input type="hidden" class="item-product-line" value="${escapeAttr(itemData.productLine || '')}">
                         <input type="hidden" class="item-product-type" value="${itemData.productType || ''}">
+                        <input type="hidden" class="item-brand-id" value="${escapeAttr(itemData.brandId || brandIdForName(itemData.brand || ''))}">
                         <input type="hidden" class="item-product-id" value="${itemData.productId || ''}">
                     </div>
                 </div>
@@ -5937,6 +5949,7 @@ function collectCurrentQuoteRecord() {
         record.items.push({
             nameEn: row.querySelector('.item-en').value, nameCn: row.querySelector('.item-cn').value,
             model: row.querySelector('.item-model').value, brand: quoteRowBrandValue(row),
+            brandId: row.querySelector('.item-brand-id')?.value || brandIdForName(quoteRowBrandValue(row)),
             productLine: row.querySelector('.item-product-line').value, productType: row.querySelector('.item-product-type').value,
             productId, productMasterMatched: !!productId, spec: row.querySelector('.item-spec').value,
             ...quoteExtraDataFromRow(row), qty: row.querySelector('.qty').value,
@@ -7280,6 +7293,8 @@ window.createForecastFromQuote = async function(quoteNo) {
         );
 
         const brand = brands.length === 1 ? brands[0] : brands.join(' / ');
+        const brandIds = [...new Set(items.map(item => item.brandId || brandIdForName(item.brand || '')).filter(Boolean))];
+        const brandId = brandIds.length === 1 ? brandIds[0] : '';
         const status = q.dealClosed ? 'won' : 'active';
         const stage = q.dealClosed ? 'stage5' : 'stage2';
         const displayProgress = `${forecastTodayLabel()} 由估價單建立`;
@@ -7291,6 +7306,8 @@ window.createForecastFromQuote = async function(quoteNo) {
             customerName: forecastCustomerName,
             customerId: q.customerId || syncCustomerMaster(forecastCustomerName, { salesCode: q.salesCode || salesCodeForName(q.salesName) }),
             brand,
+            brandId,
+            brandIds,
             productName,
             // Forecast 主列表維持一筆，但保留估價單每個品項的 snapshot，轉訂單時才能拆回多筆。
             items: items.map(item => ({
@@ -7298,6 +7315,7 @@ window.createForecastFromQuote = async function(quoteNo) {
                 nameEn: item.nameEn || '',
                 model: item.model || '',
                 brand: resolveBrandName(item.brand || ''),
+                brandId: item.brandId || brandIdForName(item.brand || ''),
                 productId: item.productId || '',
                 productLine: item.productLine || '',
                 productType: item.productType || '',
@@ -7396,6 +7414,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
                 productMasterMatched:sourceItem.productMasterMatched===true&&!!sourceItem.productId,
                 itemCode:sourceItem.model||'', itemName:sourceItem.nameCn||sourceItem.nameEn||'',
                 itemNameEn:sourceItem.nameEn||'', brand,
+                brandId:sourceItem.brandId||priceMatch?.brandId||brandIdForName(brand),
                 productLine:sourceItem.productLine||priceMatch?.productLine||'',
                 productType:sourceItem.productType||priceMatch?.productType||'',
                 spec:sourceItem.spec||priceMatch?.spec||'', supplier:priceMatch?.supplier||'',
@@ -8800,11 +8819,13 @@ function normalizedOrderItems(order) {
         const returnedQty = returnRecords
             ? (returnQtyByItemId.get(itemId) || 0)
             : Math.max(0,Number(item.returnedQty||0));
+        const brandIdentity = brandIdentityForRecord(item);
         const base = {
             ...item,
             itemId,
             itemCodeKey: item.itemCodeKey || normalizeHistoryItemCode(item.itemCode || ''),
-            brand: resolveBrandName(item.brand || ''),
+            brand: brandIdentity.brand,
+            brandId: brandIdentity.brandId,
             qty: Number(item.qty || item.orderedQty || 0),
             unitPrice: parseMoney(item.unitPrice || 0),
             totalPrice: parseMoney(item.totalPrice || 0),
@@ -16133,12 +16154,14 @@ function normalizeNewOrderItem(item = {}) {
     const match=findPriceItemForOrder(item);
     const qty=Math.max(0,Number(item.qty||0));
     const unitPrice=Number(item.unitPrice||0);
+    const productId=String(item.productId||match?.productId||'').trim();
+    const brand=resolveBrandName(match?.brand||item.brand||'');
     return {
         ...item,itemId:item.itemId||`item-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
-        brand:resolveBrandName(item.brand||''),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
-        productId:match?.productId||item.productId||stableProductId(match||item),productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
-        productMasterMatched:!!match || item.productMasterMatched === true,
+        brand,brandId:match?.brandId||item.brandId||brandIdForName(brand),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
+        productId,productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
+        productMasterMatched:!!productId && (!!match || item.productMasterMatched === true),
         supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
         warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' ? String(item.warehouseId||'') : ''
@@ -16438,6 +16461,7 @@ window.saveNewOrder = function() {
         customerName: document.getElementById('orderCustomer').value.trim(),
         customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
         brand: firstItem.brand,
+        brandId: firstItem.brandId || brandIdForName(firstItem.brand),
         itemCode: itemCode,
         itemCodeKey: normalizeHistoryItemCode(itemCode),
         itemName: firstItem.itemName,
@@ -17534,6 +17558,16 @@ window.saveBrandAliases = async function(brandName, button) {
         alert('每個標準廠牌最多設定 9 個別名，請刪除不必要的名稱。');
         return;
     }
+    const canonicalKey = normalizeBrandLookupKey(canonical);
+    const conflict = getUnifiedBrandEntries(false).find(entry => {
+        if (normalizeBrandLookupKey(entry.name) === canonicalKey) return false;
+        const otherKeys = [entry.name, ...(entry.aliases || [])].map(normalizeBrandLookupKey);
+        return aliases.some(alias => otherKeys.includes(normalizeBrandLookupKey(alias)));
+    });
+    if (conflict) {
+        alert(`別名已屬於另一個標準廠牌「${conflict.name}」。每個別名只能對應一個 Brand Master。`);
+        return;
+    }
     const state = beginActionButton(button, '儲存中…');
     if (!state) return;
     try {
@@ -18093,6 +18127,8 @@ function applyQuoteProductMatch(row, match) {
     row.querySelector('.item-product-line').value = match.productLine || '';
     row.querySelector('.item-product-type').value = match.productType || '';
     row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
+    const brandIdInput = row.querySelector('.item-brand-id');
+    if (brandIdInput) brandIdInput.value = match.brandId || brandIdForName(match.brand || '');
     if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
 
     const priceInput = row.querySelector('.inc-price');
@@ -18190,6 +18226,37 @@ function normalizeProductMasterList(items) {
 function brandMasterEntryForName(value) {
     const key = normalizeBrandLookupKey(resolveBrandName(value));
     return getUnifiedBrandEntries(true).find(entry => normalizeBrandLookupKey(entry.name) === key) || null;
+}
+
+function brandIdForName(value) {
+    return brandMasterEntryForName(value)?.id || '';
+}
+
+function productMasterForRecord(record = {}) {
+    const productId = String(record?.productId || '').trim();
+    if (productId) {
+        const product = priceList.find(item =>
+            String(item.productId || '') === productId
+            && item.status !== 'INACTIVE' && item.active !== false
+        );
+        if (product) return product;
+    }
+    return findPriceItemForOrder(record);
+}
+
+function brandIdentityForRecord(record = {}) {
+    const product = productMasterForRecord(record);
+    if (product) {
+        const brand = resolveBrandName(product.brand || '');
+        return { brand, brandId: product.brandId || brandIdForName(brand) };
+    }
+    const savedBrandId = String(record?.brandId || '').trim();
+    if (savedBrandId) {
+        const entry = getUnifiedBrandEntries(true).find(item => item.id === savedBrandId);
+        if (entry) return { brand: entry.name, brandId: entry.id };
+    }
+    const brand = resolveBrandName(record?.brand || '');
+    return { brand, brandId: brandIdForName(brand) };
 }
 
 
@@ -18617,7 +18684,8 @@ function productTypeForOrder(order) {
 }
 
 function statisticBrandForOrder(order) {
-    const brand = (order.brand || '').trim();
+    const identity = brandIdentityForRecord(order);
+    const brand = identity.brand;
     if (brand === '維修') return '維修';
     return statisticBrandAliasLookup().get(normalizeStatisticBrandKey(brand)) || '其他廠牌';
 }

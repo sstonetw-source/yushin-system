@@ -167,6 +167,26 @@ test('product code matching is ambiguity-safe and datalists stay bounded', () =>
     assert.doesNotMatch(appSource, /button\.style\.width = '100%'/);
 });
 
+test('canonical brand identity follows product through quote forecast order and statistics', () => {
+    assert.match(appSource, /function brandIdForName\(value\)/);
+    assert.match(appSource, /function brandIdentityForRecord\(record = \{\}\)/);
+    assert.match(appSource, /class="item-brand-id"/);
+    assert.match(appSource, /brandId: row\.querySelector\('\.item-brand-id'\)/);
+    assert.match(appSource, /brandId: firstItem\.brandId \|\| brandIdForName\(firstItem\.brand\)/);
+    assert.match(appSource, /brandIds = \[\.\.\.new Set\(items\.map/);
+    assert.match(appSource, /const identity = brandIdentityForRecord\(order\)/);
+    assert.match(appSource, /別名已屬於另一個標準廠牌/);
+});
+
+test('formal order normalization never invents a product id for an unmatched item', () => {
+    const start = appSource.indexOf('function normalizeNewOrderItem(item = {})');
+    const end = appSource.indexOf('\n}\n\nfunction currentOrderModalItem', start) + 2;
+    const source = appSource.slice(start, end);
+    assert.match(source, /const productId=String\(item\.productId\|\|match\?\.productId\|\|''\)\.trim\(\)/);
+    assert.doesNotMatch(source, /stableProductId\(match\|\|item\)/);
+    assert.match(source, /productMasterMatched:!!productId/);
+});
+
 test('inventory product lookup debounces server search', () => {
     assert.match(indexSource, /id="businessProductSearch"[^>]+oninput="queueBusinessProductSearch\(\)"/);
     assert.match(appSource, /businessProductSearchTimer=scheduleListSearch\(businessProductSearchTimer,\(\)=>searchBusinessProducts\(\)\)/);
