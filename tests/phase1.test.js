@@ -2555,27 +2555,15 @@ test('purchaser order edit fields match visible order UI', () => {
 });
 
 
-test('purchasing work tabs reuse one shared orders refresh', () => {
-    assert.match(appSource,/let purchasingOrdersReady = false/);
-
-    const refreshStart=appSource.indexOf('function refreshPurchasingOrderCache');
-    const refreshEnd=appSource.indexOf('\nfunction loadPurchasingReceivingQueue',refreshStart);
-    const refreshSource=appSource.slice(refreshStart,refreshEnd);
-    assert.match(refreshSource,/options\.reuseOrders && purchasingOrdersReady/);
-    assert.match(refreshSource,/purchasingOrdersReady = true/);
-
-    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
-    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
-    const switchSource=appSource.slice(switchStart,switchEnd);
-    assert.match(switchSource,/loadPendingPurchaseOrders\(true, \{ reuseOrders:true \}\)/);
-    assert.match(switchSource,/loadPurchasingReceivingQueue\(true, \{ reuseOrders:true \}\)/);
-    assert.match(switchSource,/loadPurchasingDispatchOrders\(true, \{ reuseOrders:true \}\)/);
-
-    const roleStart=appSource.indexOf('window.switchViewRole = function');
-    const roleEnd=appSource.indexOf('\nfunction actuallySwitchMainTab',roleStart);
-    assert.match(appSource.slice(roleStart,roleEnd),/purchasingOrdersReady = false/);
+test('purchasing ordering tab uses procurement demand while downstream tabs reuse orders', () => {
+    const start=appSource.indexOf('window.switchPurchasingView = function');
+    const end=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/loadPendingPurchaseOrders\(true\)/);
+    assert.match(source,/loadPurchasingReceivingQueue\(true, \{ reuseOrders:true \}\)/);
+    assert.match(source,/loadPurchasingDispatchOrders\(true, \{ reuseOrders:true \}\)/);
+    assert.match(appSource,/collection\('procurementDemands'\)/);
 });
-
 
 test('quote form loads staff only for roles that need owner selection', () => {
     const start=appSource.indexOf('function ensureQuoteFormInitialized');
@@ -2894,20 +2882,15 @@ test('quote list builds item search text only when searching', () => {
 });
 
 
-test('purchasing refresh loaders reuse normalized item snapshots', () => {
-    const pendingStart=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
-    const pendingEnd=appSource.indexOf('\nconst pendingPurchaseOrderKeys',pendingStart);
-    const pendingSource=appSource.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/normalizedItemsByOrder = new Map/);
-    assert.match(pendingSource,/pendingProcurementDisplayLines\([\s\S]*?normalizedItemsByOrder\.get\(order\.id\),[\s\S]*?dispatchStatesByOrder\.get\(order\.id\),[\s\S]*?lifecyclesByOrder\.get\(order\.id\)/);
-    assert.match(pendingSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
-
-    const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
-    const dispatchEnd=appSource.indexOf('\nwindow.loadPurchasingDispatchOrders',dispatchStart);
-    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
-    assert.match(dispatchSource,/normalizedItemsByOrder = new Map/);
-    assert.match(dispatchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
-    assert.match(dispatchSource,/renderPurchasingCompletedOrders\(completedRows\)/);
+test('purchasing ordering loader reads material requests and joins only source orders', () => {
+    const start=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
+    const end=appSource.indexOf('\nconst pendingPurchaseOrderKeys',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/collection\('procurementDemands'\)/);
+    assert.match(source,/where\('remainingToOrderQty','>',0\)/);
+    assert.match(source,/readDocumentsByIds\('orders',missing\)/);
+    assert.doesNotMatch(source,/refreshPurchasingOrderCache/);
+    assert.doesNotMatch(source,/normalizedItemsByOrder = new Map/);
 });
 
 test('Product Master search renders results in 100-row UI pages', () => {
@@ -3451,38 +3434,14 @@ test('normalized fulfillment snapshot avoids rescanning delivery records', () =>
 });
 
 
-test('purchasing work queues share one dispatch snapshot per render', () => {
-    const helperStart=appSource.indexOf('function purchasingDispatchStateSnapshot');
-    const helperEnd=appSource.indexOf('\nfunction pendingProcurementDisplayLines',helperStart);
-    const helperSource=appSource.slice(helperStart,helperEnd);
-    assert.match(helperSource,/new Map\(items\.map\(item => \[item, itemDispatchState\(order, item\)\]\)\)/);
-
-    const pendingLinesStart=appSource.indexOf('function pendingProcurementDisplayLines');
-    const pendingLinesEnd=appSource.indexOf('\nfunction renderPurchasingWorkCards',pendingLinesStart);
-    const pendingLinesSource=appSource.slice(pendingLinesStart,pendingLinesEnd);
-    assert.match(pendingLinesSource,/dispatchStateByItem = null/);
-    assert.match(pendingLinesSource,/dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState/);
-
-    const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
-    const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
-    const viewSource=appSource.slice(viewStart,viewEnd);
-    assert.match(viewSource,/purchasingDispatchStateSnapshot\(normalizedItemsByOrder\)/);
-    assert.match(viewSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
-    assert.match(viewSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
-
-    const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders');
-    const dispatchEnd=appSource.indexOf('\nfunction pendingPurchaseLines',dispatchStart);
-    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
-    assert.match(dispatchSource,/dispatchStatesByOrder = null/);
-    assert.match(dispatchSource,/states\?\.get\(item\) \|\| itemDispatchState/);
-
-    const pendingRenderStart=appSource.indexOf('function renderPendingPurchaseOrders');
-    const pendingRenderEnd=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',pendingRenderStart);
-    const pendingRenderSource=appSource.slice(pendingRenderStart,pendingRenderEnd);
-    assert.match(pendingRenderSource,/dispatchStatesByOrder = null/);
-    assert.match(pendingRenderSource,/dispatchStatesByOrder\?\.get\(order\.id\)/);
+test('purchasing ordering queue does not recompute dispatch state', () => {
+    const start=appSource.indexOf('function renderPendingPurchaseOrders(');
+    const end=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/procurementDemandCache/);
+    assert.match(source,/remainingToOrderQty/);
+    assert.doesNotMatch(source,/purchasingDispatchStateSnapshot|itemDispatchState|pendingProcurementDisplayLines/);
 });
-
 
 test('order work cards and rows share lifecycle snapshots', () => {
     const metricsStart=appSource.indexOf('function buildOrderItemWorkMetrics');
@@ -3571,23 +3530,17 @@ test('purchasing cards and completed rows share lifecycle snapshots', () => {
 });
 
 
-test('purchasing background refresh reuses painted rows while preserving loading feedback', () => {
-    const receivingStart=appSource.indexOf('function loadPurchasingReceivingQueue');
-    const receivingEnd=appSource.indexOf('\nlet purchasingFilterOptionsSignature',receivingStart);
-    const receivingSource=appSource.slice(receivingStart,receivingEnd);
-    assert.match(receivingSource,/if \(options\.reuseOrders\) \{[\s\S]*?待到貨資料載入中…[\s\S]*?\} else \{[\s\S]*?renderPoList\(\)/);
-
-    const pendingStart=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
-    const pendingEnd=appSource.indexOf('\nconst pendingPurchaseOrderKeys',pendingStart);
-    const pendingSource=appSource.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/if \(options\.reuseOrders\) \{[\s\S]*?purchasePendingStatus[\s\S]*?載入中…[\s\S]*?\} else \{[\s\S]*?renderPendingPurchaseOrders\(\)/);
-
-    const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
-    const dispatchEnd=appSource.indexOf('\nwindow\.loadPurchasingDispatchOrders',dispatchStart);
-    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
-    assert.match(dispatchSource,/if \(options\.reuseOrders\) \{[\s\S]*?purchaseDispatchStatus[\s\S]*?載入中…/);
+test('purchasing demand refresh paints cached rows before cloud refresh', () => {
+    const start=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
+    const end=appSource.indexOf('\nconst pendingPurchaseOrderKeys',start);
+    const source=appSource.slice(start,end);
+    const firstRender=source.indexOf('renderPendingPurchaseOrders();');
+    const query=source.indexOf("db.collection('procurementDemands')");
+    const finalRender=source.lastIndexOf('renderPendingPurchaseOrders();');
+    assert.ok(firstRender>=0&&query>firstRender&&finalRender>query);
+    assert.match(source,/pendingPurchaseLoading=true/);
+    assert.match(source,/pendingPurchaseLoading=false/);
 });
-
 
 test('receiving parallel refresh preserves older source orders', () => {
     const helperStart=appSource.indexOf('function mergeReceivingSourceOrdersIntoOrderCache()');
@@ -3611,34 +3564,16 @@ test('receiving parallel refresh preserves older source orders', () => {
 });
 
 
-test('purchasing detail queues reuse lifecycle snapshots', () => {
-    const pendingStart=appSource.indexOf('function renderPendingPurchaseOrders');
-    const pendingEnd=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',pendingStart);
-    const pendingSource=appSource.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/lifecyclesByOrder = null/);
-    assert.match(pendingSource,/lifecyclesByOrder\?\.get\(order\.id\)/);
-
-    const dispatchStart=appSource.indexOf('function renderPurchasingDispatchOrders');
-    const dispatchEnd=appSource.indexOf('\nfunction pendingPurchaseLines',dispatchStart);
-    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
-    assert.match(dispatchSource,/lifecyclesByOrder = null/);
-    assert.match(dispatchSource,/lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo/);
-
+test('purchasing detail queues use the correct authoritative source by stage', () => {
+    const orderingStart=appSource.indexOf('function renderPendingPurchaseOrders(');
+    const orderingEnd=appSource.indexOf('\nwindow.loadPendingPurchaseOrders',orderingStart);
+    const ordering=appSource.slice(orderingStart,orderingEnd);
+    assert.match(ordering,/procurementDemandCache/);
+    assert.doesNotMatch(ordering,/orderLifecycleInfo/);
     const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
     const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
-    const receivingSource=appSource.slice(receivingStart,receivingEnd);
-    assert.match(receivingSource,/lifecyclesByOrder = null/);
-    assert.match(receivingSource,/lifecyclesByOrder\?\.get\(order\.id\) \|\| orderLifecycleInfo/);
-
-    const switchStart=appSource.indexOf('window.switchPurchasingView = function');
-    const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
-    const switchSource=appSource.slice(switchStart,switchEnd);
-    assert.match(switchSource,/const lifecyclesByOrder = workflowView[\s\S]*?purchasingLifecycleSnapshot\(normalizedItemsByOrder\)[\s\S]*?: null/);
-    assert.match(switchSource,/renderPendingPurchaseOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
-    assert.match(switchSource,/renderPurchasingDispatchOrders\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
-    assert.match(switchSource,/renderPoList\(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder\)/);
+    assert.match(appSource.slice(receivingStart,receivingEnd),/lifecyclesByOrder/);
 });
-
 
 test('completed purchasing load-more reuses one render snapshot', () => {
     const start=appSource.indexOf('window.loadMorePurchasingCompleted = async function()');
@@ -3708,27 +3643,14 @@ test('purchasing cache sync performs one unified active render', () => {
 });
 
 
-test('purchasing queues reuse already loaded order cache without duplicate render work', () => {
-    const orderLoadStart=appSource.indexOf('async function loadOrderPage');
-    const orderLoadEnd=appSource.indexOf('\nwindow.loadOrdersFromCloud',orderLoadStart);
-    const orderLoadSource=appSource.slice(orderLoadStart,orderLoadEnd);
-    assert.match(orderLoadSource,/writeAppDataCache\('orders', ordersCache\);[\s\S]*?purchasingOrdersReady = true/);
-
-    const pendingStart=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
-    const pendingEnd=appSource.indexOf('\nconst pendingPurchaseOrderKeys',pendingStart);
-    const pendingSource=appSource.slice(pendingStart,pendingEnd);
-    assert.match(pendingSource,/if \(options\.reuseOrders && purchasingOrdersReady\)/);
-    assert.match(pendingSource,/pendingPurchaseHasMore = !!orderPaginationState/);
-    assert.match(pendingSource,/return ordersCache/);
-
-    const dispatchStart=appSource.indexOf('async function loadPurchasingDispatchOrders');
-    const dispatchEnd=appSource.indexOf('\nwindow\.loadPurchasingDispatchOrders',dispatchStart);
-    const dispatchSource=appSource.slice(dispatchStart,dispatchEnd);
-    assert.match(dispatchSource,/if \(options\.reuseOrders && purchasingOrdersReady\)/);
-    assert.match(dispatchSource,/purchasingDispatchHasMore = !!orderPaginationState/);
-    assert.match(dispatchSource,/return ordersCache/);
+test('purchasing ordering queue is independent from recent-order pagination', () => {
+    const start=appSource.indexOf('window.loadPendingPurchaseOrders = async function');
+    const end=appSource.indexOf('\nconst pendingPurchaseOrderKeys',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/procurementDemandCursor/);
+    assert.match(source,/procurementDemandHasMore/);
+    assert.doesNotMatch(source,/orderPaginationState|refreshPurchasingOrderCache|ordersCache\.filter/);
 });
-
 
 test('receiving page load performs one unified render', () => {
     const start=appSource.indexOf('async function loadPurchaseOrderPage');
