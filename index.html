@@ -842,6 +842,7 @@
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購工作</button>
             <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">全部訂購單</button>
+            <button type="button" id="purchase-tab-analysis" onclick="switchPurchasingView('analytics')">採購分析</button>
         </div>
         <div id="purchaseWorkCards" class="order-work-cards no-print" aria-label="採購工作狀態">
             <button type="button" class="order-work-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)"><span>待採購</span><strong id="purchaseCountOrdering">0 筆</strong><small id="purchaseAmountOrdering">NT$ 0</small></button>
@@ -905,6 +906,26 @@
             <div class="inventory-summary-note">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div>
             <div class="table-wrap"><table><thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>已完成採購品項</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
+        </div>
+        <div id="purchaseAnalyticsPanel" style="display:none">
+            <div class="toolbar no-print">
+                <button type="button" id="purchaseAnalyticsRefreshBtn" class="btn-secondary" onclick="loadPurchasingAnalytics(true)">↻ 更新分析</button>
+                <span id="purchaseAnalyticsStatus" role="status"></span>
+            </div>
+            <div class="inventory-summary-note">依上方期間、業務與廠牌篩選。採購數字以供應紀錄為準；已取消的未到貨數量不列入有效採購。</div>
+            <div class="sales-stat-cards purchase-analytics-cards">
+                <div class="sales-stat-card"><span>有效下單金額</span><strong id="purchaseAnalyticsOrdered">NT$ 0</strong><small id="purchaseAnalyticsOrderedDetail">0 筆採購品項</small></div>
+                <div class="sales-stat-card"><span>已到貨金額</span><strong id="purchaseAnalyticsReceived">NT$ 0</strong><small id="purchaseAnalyticsReceivedDetail">實際已收數量 × 進貨單價</small></div>
+                <div class="sales-stat-card"><span>在途金額</span><strong id="purchaseAnalyticsIncoming">NT$ 0</strong><small id="purchaseAnalyticsIncomingDetail">尚未到貨</small></div>
+                <div class="sales-stat-card"><span>備庫採購</span><strong id="purchaseAnalyticsStock">NT$ 0</strong><small id="purchaseAnalyticsMixDetail">客戶訂單採購 NT$ 0</small></div>
+            </div>
+            <div class="panel" style="overflow-x:auto;">
+                <h3 style="margin-top:0;">供應商採購分析</h3>
+                <table class="sales-stats-table">
+                    <thead><tr><th>供應商</th><th>採購單</th><th>品項</th><th>有效下單</th><th>已到貨</th><th>在途</th><th>備庫採購</th><th>客戶訂單採購</th></tr></thead>
+                    <tbody id="purchaseAnalyticsSupplierBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
