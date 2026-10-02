@@ -498,15 +498,15 @@ test('order lifecycle, delivery and return mutations refresh work category index
 });
 
 
-test('purchasing work cards reuse the shared recent order cache',()=>{
-    assert.match(app,/function refreshPurchasingOrderCache\(reset = true, options = \{\}\)/);
-    assert.match(app,/if \(options\.reuseOrders && purchasingOrdersReady\) return Promise\.resolve\(ordersCache\)/);
-    assert.match(app,/pendingPurchaseCache = ordersCache\.filter\(order =>/);
-    assert.match(app,/pendingProcurementDisplayLines\([\s\S]*?normalizedItemsByOrder\.get\(order\.id\)/);
-    assert.match(app,/purchasingDispatchCache = ordersCache\.filter\(order =>/);
-    assert.doesNotMatch(app,/where\('workCategories',\s*'array-contains',\s*'ordering'\)/);
-    assert.doesNotMatch(app,/where\('workCategories','array-contains','dispatch'\)/);
-    assert.match(app,/supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
+test('purchasing work cards use demand queue for ordering and orders for downstream work',()=>{
+    const start=app.indexOf('function renderPurchasingWorkCards(');
+    const end=app.indexOf('\nfunction purchasingCompletedRows',start);
+    const source=app.slice(start,end);
+    assert.match(source,/demandOrderingRows=procurementDemandLoaded/);
+    assert.match(source,/procurementDemandCache\.filter/);
+    assert.match(source,/remainingToOrderQty/);
+    assert.match(source,/buildOrderItemWorkMetrics\(/);
+    assert.match(source,/category==='ordering'/);
 });
 
 test('shortage allocation trusts warehouse stock even when aggregate inventory cache is missing',()=>{
@@ -702,31 +702,27 @@ test('loading another receiving page retains source status for earlier supply ro
     assert.match(source,/receivingSourceOrderCache=nextSourceOrders/);
 });
 
-test('pending purchasing work loads one shared order page at a time without losing older rows', () => {
-    const refreshStart=app.indexOf('function refreshPurchasingOrderCache(');
-    const refreshEnd=app.indexOf('\nfunction loadPurchasingReceivingQueue',refreshStart);
-    const refresh=app.slice(refreshStart,refreshEnd);
+test('pending purchasing work pages procurement demands without losing older rows', () => {
     const start=app.indexOf('window.loadPendingPurchaseOrders = async function');
     const end=app.indexOf('\nconst pendingPurchaseOrderKeys',start);
     const source=app.slice(start,end);
-    assert.ok(refreshStart>=0&&refreshEnd>refreshStart&&start>=0&&end>start);
-    assert.match(refresh,/if \(purchasingOrderRefreshPromise\) return purchasingOrderRefreshPromise/);
-    assert.match(refresh,/loadOrderPage\(reset, \{ silent: true, skipRender: true \}\)/);
-    assert.match(source,/await refreshPurchasingOrderCache\(reset, options\)/);
-    assert.match(source,/pendingPurchaseCache = ordersCache\.filter/);
-    assert.match(source,/pendingPurchaseHasMore = !!orderPaginationState/);
+    assert.match(source,/collection\('procurementDemands'\)/);
+    assert.match(source,/where\('remainingToOrderQty','>',0\)/);
+    assert.match(source,/orderBy\('remainingToOrderQty','desc'\)/);
+    assert.match(source,/startAfter\(procurementDemandCursor\)/);
+    assert.match(source,/const byId=new Map\(\(reset\?\[\]:procurementDemandCache\)/);
+    assert.match(source,/procurementDemandHasMore=snapshot\.size===DEFAULT_LIST_LIMIT/);
 });
 
-test('pending purchasing work reports a shared order-load failure without overwriting the card count', () => {
+test('pending purchasing work reports a procurement-demand load failure', () => {
     const start=app.indexOf('window.loadPendingPurchaseOrders = async function');
     const end=app.indexOf('\nconst pendingPurchaseOrderKeys',start);
     const source=app.slice(start,end);
     const renderStart=app.indexOf('function renderPendingPurchaseOrders(');
     const renderEnd=app.indexOf('\nwindow.loadPendingPurchaseOrders',renderStart);
     const renderSource=app.slice(renderStart,renderEnd);
-    assert.ok(start>=0&&end>start&&renderStart>=0&&renderEnd>renderStart);
-    assert.match(source,/catch \(err\) \{[\s\S]*?pendingPurchaseError = `待採購清單讀取失敗/);
-    assert.match(source,/finally \{[\s\S]*?renderPendingPurchaseOrders\(/);
+    assert.match(source,/pendingPurchaseError=.*待採購需求讀取失敗/);
+    assert.match(source,/finally\{[\s\S]*?renderPendingPurchaseOrders\(\)/);
     assert.doesNotMatch(renderSource,/purchaseCountOrdering/);
 });
 
@@ -1224,25 +1220,18 @@ test('warehouse receiving no longer mutates purchase-order receipt state', () =>
 });
 
 
-test('purchasing pending card and detail share the same item work-state engine', () => {
+test('purchasing pending card and detail share the procurement demand source', () => {
     const cardStart=app.indexOf('function renderPurchasingWorkCards(');
     const cardEnd=app.indexOf('\nfunction purchasingCompletedRows',cardStart);
     const detailStart=app.indexOf('function renderPendingPurchaseOrders(');
     const detailEnd=app.indexOf('\nwindow.loadPendingPurchaseOrders',detailStart);
-    const helperStart=app.indexOf('function buildOrderItemWorkMetrics(');
-    const helperEnd=app.indexOf('\nwindow.setOrderWorkFilter',helperStart);
-    const displayStart=app.indexOf('function pendingProcurementDisplayLines(');
-    const displayEnd=app.indexOf('\nfunction renderPurchasingWorkCards',displayStart);
-    const formalStart=app.indexOf('function pendingPurchaseLines(order)');
-    const formalEnd=app.indexOf('\nfunction syncOrderIntoPurchasingCaches',formalStart);
-    assert.ok(cardStart>=0&&detailStart>=0&&helperStart>=0&&displayStart>=0&&formalStart>=0);
-    assert.match(app.slice(cardStart,cardEnd),/buildOrderItemWorkMetrics\(/);
-    assert.match(app.slice(helperStart,helperEnd),/orderItemDisplayCategories\(order,item,lifecycle,dispatch\)/);
-    assert.match(app.slice(displayStart,displayEnd),/orderItemWorkCategory\(order, item, lifecycle, dispatch\) !== 'ordering'/);
-    assert.match(app.slice(detailStart,detailEnd),/pendingProcurementDisplayLines\([\s\S]*?normalizedItemsByOrder\?\.get\(order\.id\)/);
-    assert.match(app.slice(detailStart,detailEnd),/自行訂貨/);
-    assert.doesNotMatch(app.slice(detailStart,detailEnd),/業務自行訂貨/);
-    assert.match(app.slice(formalStart,formalEnd),/procurementType === 'PURCHASING_PO'/);
+    const card=app.slice(cardStart,cardEnd),detail=app.slice(detailStart,detailEnd);
+    assert.match(card,/procurementDemandCache\.filter/);
+    assert.match(card,/remainingToOrderQty/);
+    assert.match(detail,/procurementDemandCache/);
+    assert.match(detail,/remainingToOrderQty/);
+    assert.doesNotMatch(detail,/pendingProcurementDisplayLines/);
+    assert.match(detail,/自行訂貨/);
 });
 
 test('PO core transaction commits before the print dialog opens', () => {
