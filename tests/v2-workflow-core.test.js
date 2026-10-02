@@ -2,6 +2,8 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const w=require('../modules/workflow-core.js');
 const fulfillment=require('../modules/fulfillment-core.js');
+const reservation=require('../modules/reservation-core.js');
+const receiving=require('../modules/receiving-core.js');
 const supply=require('../modules/supply-core.js');
 
 test('customer advance delivery requires a complete request and admin approval before delivery',()=>{
@@ -100,7 +102,12 @@ test('direct ship ignores warehouse shortage semantics and follows order then re
 
 
 test('cross-module shortage purchase and partial receipts stay numerically aligned',()=>{
-  let item=fulfillment.reserveFromAvailable({orderedQty:10},4);
+  const initialReservation=reservation.planReservation({requestedQty:10,existingQty:0,sameStock:true,availableQty:4});
+  let item=fulfillment.normalizeItem({
+    orderedQty:10,
+    reservedQty:initialReservation.reservedQty,
+    shortageQty:initialReservation.shortageQty
+  });
   assert.deepEqual(
     {reservedQty:item.reservedQty,shortageQty:item.shortageQty},
     {reservedQty:4,shortageQty:6}
@@ -120,7 +127,7 @@ test('cross-module shortage purchase and partial receipts stay numerically align
 
   let receipt=supply.applyReceipt(supplyRecord,2);
   supplyRecord=receipt.record;
-  item=fulfillment.applyReceipt(item,receipt.appliedQty);
+  item=receiving.applyReceiptToOrderItem(item,receipt.appliedQty).item;
   assert.deepEqual(
     {supplyReceived:supplyRecord.receivedQty,itemReceived:item.receivedQty,reservedQty:item.reservedQty,shortageQty:item.shortageQty},
     {supplyReceived:2,itemReceived:2,reservedQty:6,shortageQty:4}
@@ -129,7 +136,7 @@ test('cross-module shortage purchase and partial receipts stay numerically align
 
   receipt=supply.applyReceipt(supplyRecord,4);
   supplyRecord=receipt.record;
-  item=fulfillment.applyReceipt(item,receipt.appliedQty);
+  item=receiving.applyReceiptToOrderItem(item,receipt.appliedQty).item;
   assert.deepEqual(
     {supplyReceived:supplyRecord.receivedQty,itemReceived:item.receivedQty,reservedQty:item.reservedQty,shortageQty:item.shortageQty},
     {supplyReceived:6,itemReceived:6,reservedQty:10,shortageQty:0}
