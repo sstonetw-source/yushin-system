@@ -4338,7 +4338,11 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     assert.match(quickSource,/產品識別不可在追加採購前變更/);
     assert.match(quickSource,/訂貨方式不可在追加採購前變更/);
     assert.match(quickSource,/入庫倉庫不可在追加採購前變更/);
-    assert.match(quickSource,/type:existingSupply\?\.type\|\|'PURCHASING_MANUAL'/);
+    assert.match(quickSource,/type:'PURCHASING_MANUAL'/);
+    assert.match(quickSource,/method:'PURCHASING_MANUAL'/);
+    assert.match(quickSource,/sourceType:'SALES_ORDER'/);
+    assert.match(quickSource,/sourceId:orderId/);
+    assert.match(quickSource,/sourceItemId:itemId/);
     assert.match(quickSource,/ownerUid:existingSupply\?\.ownerUid\|\|order\.ownerUid/);
     assert.match(quickSource,/itemCode:existingSupply\?\.itemCode\|\|item\.itemCode/);
     assert.match(quickSource,/createdByUid:existingSupply\?\.createdByUid\|\|currentUser\?\.uid/);
