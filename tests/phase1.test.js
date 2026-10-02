@@ -187,6 +187,15 @@ test('formal order normalization never invents a product id for an unmatched ite
     assert.match(source, /productMasterMatched:!!productId/);
 });
 
+test('canonical brand identity continues through purchasing supply and inventory', () => {
+    assert.match(appSource, /brandId: item\.brandId \|\| order\.brandId \|\| ''/);
+    assert.match(appSource, /brandId:item\.brandId\|\|brandIdForName\(item\.brand\|\|'\'\)/);
+    assert.match(appSource, /brandId:supply\.brandId\|\|brandIdForName\(supply\.brand\|\|'\'\)/);
+    assert.match(appSource, /findPriceItemByCodeValue\(row\.itemCode, row\.brand\)/);
+    assert.match(appSource, /productId:key,warehouseId:row\.warehouseId/);
+    assert.match(appSource, /findProductByCode\(requestedCode, preferredBrand\)/);
+});
+
 test('inventory product lookup debounces server search', () => {
     assert.match(indexSource, /id="businessProductSearch"[^>]+oninput="queueBusinessProductSearch\(\)"/);
     assert.match(appSource, /businessProductSearchTimer=scheduleListSearch\(businessProductSearchTimer,\(\)=>searchBusinessProducts\(\)\)/);

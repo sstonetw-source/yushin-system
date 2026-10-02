@@ -8360,19 +8360,22 @@ window.removeInventoryAdjustmentRow = function(idx) {
 window.onInventoryAdjustmentCode = async function(idx, value) {
     if (!inventoryAdjustmentRows[idx]) return;
     const requestedCode = String(value||'').trim();
+    const preferredBrand = resolveBrandName(inventoryAdjustmentRows[idx].brand || '');
     inventoryAdjustmentRows[idx] = {
         ...inventoryAdjustmentRows[idx],
         itemCode: requestedCode,
         itemName: '',
-        brand: '',
+        brand: preferredBrand,
+        brandId: brandIdForName(preferredBrand),
         productId: ''
     };
-    const match = requestedCode ? await findProductByCode(requestedCode) : null;
+    const match = requestedCode ? await findProductByCode(requestedCode, preferredBrand) : null;
     if (!inventoryAdjustmentRows[idx] || String(inventoryAdjustmentRows[idx].itemCode||'').trim() !== requestedCode) return;
     if (match) {
         inventoryAdjustmentRows[idx].itemCode = match.model || requestedCode;
         inventoryAdjustmentRows[idx].itemName = match.nameCn || match.nameEn || '';
         inventoryAdjustmentRows[idx].brand = resolveBrandName(match.brand || '');
+        inventoryAdjustmentRows[idx].brandId = match.brandId || brandIdForName(match.brand || '');
         inventoryAdjustmentRows[idx].productId = match.productId || stableProductId(match);
     }
     renderInventoryAdjustmentRows();
@@ -8381,6 +8384,11 @@ window.onInventoryAdjustmentCode = async function(idx, value) {
 window.updateInventoryAdjustmentRow = function(idx, field, value) {
     if (!inventoryAdjustmentRows[idx]) return;
     inventoryAdjustmentRows[idx][field] = ['qty','unitCost'].includes(field) ? Number(value||0) : String(value||'').trim();
+    if (field === 'brand') {
+        inventoryAdjustmentRows[idx].brand = resolveBrandName(value);
+        inventoryAdjustmentRows[idx].brandId = brandIdForName(value);
+        if (inventoryAdjustmentRows[idx].itemCode) onInventoryAdjustmentCode(idx, inventoryAdjustmentRows[idx].itemCode);
+    }
 };
 
 function renderInventoryAdjustmentRows() {
@@ -8416,8 +8424,9 @@ window.saveInventoryAdjustmentBatch = async function() {
     const results=[];
     for(const row of rows){
       try{
-        const match=findPriceItemByCodeValue(row.itemCode);
-        if(!match) throw new Error(`Product Master 找不到貨號 ${row.itemCode}`);
+        const match=(row.productId && priceList.find(item => item.productId === row.productId))
+            || findPriceItemByCodeValue(row.itemCode, row.brand);
+        if(!match) throw new Error(`Product Master 找不到唯一產品：${row.brand ? row.brand + ' / ' : ''}${row.itemCode}`);
         let delta=Number(row.qty||0);
         if(type==='scrap' || type==='decrease') delta=-Math.abs(delta);
         const key=match.productId||stableProductId(match);
@@ -8454,13 +8463,15 @@ window.saveInventoryAdjustmentBatch = async function() {
           const now=new Date().toISOString();
           if(type!=='warehouse_allocation'){
             {
-              const nextInventory={...old,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now};
+              const canonicalBrand=resolveBrandName(match.brand||row.brand||'');
+              const nextInventory={...old,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:canonicalBrand,brandId:match.brandId||row.brandId||brandIdForName(canonicalBrand),onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now};
               nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
               tx.set(ref,nextInventory,{merge:true});
             }
           }
           if(whRef){
-            tx.set(whRef,{warehouseId:row.warehouseId,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+            const canonicalBrand=resolveBrandName(match.brand||row.brand||'');
+            tx.set(whRef,{warehouseId:row.warehouseId,productKey:key,productId:key,itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:canonicalBrand,brandId:match.brandId||row.brandId||brandIdForName(canonicalBrand),onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
           }
           let authoritativeLotId='';
           if(type==='initial'&&delta>0){
@@ -8469,7 +8480,8 @@ window.saveInventoryAdjustmentBatch = async function() {
             tx.set(lotRef,{productKey:key,productId:key,warehouseId:row.warehouseId||'',lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',receivedQty:delta,remainingQty:delta,sourceType:'INITIAL_STOCK',sourceId:'',receivedAt:now,createdBy:actor});
             tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey:key,productId:key,warehouseId:row.warehouseId||'',unitCost:Number(row.unitCost||0),sourceType:'INITIAL_STOCK',sourceId:'',createdAt:now,createdBy:actor});
           }
-          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:resolveBrandName(row.brand||match.brand||''),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',lotId:authoritativeLotId,sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
+          const movementBrand=resolveBrandName(match.brand||row.brand||'');
+          tx.set(db.collection('inventoryMovements').doc(),{type,qty:delta,productKey:key,productId:key,warehouseId:row.warehouseId||'',itemCode:match.model||row.itemCode,itemName:row.itemName||match.nameCn||match.nameEn||'',brand:movementBrand,brandId:match.brandId||row.brandId||brandIdForName(movementBrand),lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',lotId:authoritativeLotId,sourceType:'manual',sourceId:'',createdAt:now,createdBy:actor});
         });
         if(row.warehouseId) invalidateWarehouseStockCache(key,row.warehouseId);
         results.push({row,ok:true});
@@ -12542,23 +12554,29 @@ async function registerPurchaseIncoming(poId, poRecord) {
             const now = new Date().toISOString();
 
             if (invSnap.exists) {
-                tx.set(invRef,{incoming:Math.max(0,inv.incoming+delta),updatedAt:now},{merge:true});
+                tx.set(invRef,{
+                    incoming:Math.max(0,inv.incoming+delta),
+                    brand:resolveBrandName(supply.brand||''),
+                    brandId:supply.brandId||brandIdForName(supply.brand||''),
+                    updatedAt:now
+                },{merge:true});
             } else {
                 const nextInventory={
                     productKey:key,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',
-                    brand:resolveBrandName(supply.brand||''),onHand:0,reserved:0,incoming:Math.max(0,delta),lots:[],updatedAt:now
+                    brand:resolveBrandName(supply.brand||''),brandId:supply.brandId||brandIdForName(supply.brand||''),onHand:0,reserved:0,incoming:Math.max(0,delta),lots:[],updatedAt:now
                 };
                 nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
                 tx.set(invRef,nextInventory,{merge:true});
             }
             tx.set(whRef,{
                 warehouseId,productKey:key,productId:supply.productId||'',itemCode:supply.itemCode||'',
-                itemName:supply.itemName||'',brand:resolveBrandName(supply.brand||''),
+                itemName:supply.itemName||'',brand:resolveBrandName(supply.brand||''),brandId:supply.brandId||brandIdForName(supply.brand||''),
                 onHand:wh.onHand,reserved:wh.reserved,incoming:Math.max(0,wh.incoming+delta),updatedAt:now
             },{merge:true});
             tx.update(supplyRef,{incomingRegisteredQty:targetQty,incomingRegisteredAt:now,updatedAt:now});
             tx.set(db.collection('inventoryMovements').doc(),{
-                type:'purchase_incoming',qty:delta,productKey:key,warehouseId,
+                type:'purchase_incoming',qty:delta,productKey:key,productId:supply.productId||'',warehouseId,
+                brand:resolveBrandName(supply.brand||''),brandId:supply.brandId||brandIdForName(supply.brand||''),
                 fulfillmentType:'WAREHOUSE',sourceType:'SUPPLY_ORDER',sourceId:supplyId,
                 purchaseDocumentId:poId,createdAt:now,createdBy:currentUserName||currentUser?.email||''
             });
@@ -13425,6 +13443,7 @@ function purchaseItemsFromSavedPo(po) {
         itemCode: item.itemCode || item.productCode || item.code || item.model || '',
         productId: item.productId || '',
         brand: item.brand || item.manufacturer || '',
+        brandId: item.brandId || '',
         qty: parseFloat(item.qty ?? item.quantity ?? item.count) || 1,
         unitPrice: parseFloat(item.unitPrice ?? item.costPrice ?? item.cost ?? item.purchasePrice) || 0
     })).filter(item => item.itemName || item.itemCode);
@@ -13472,6 +13491,7 @@ function purchaseItemsFromOrder(order) {
             itemCode,
             productId: item.productId || order.productId || '',
             brand,
+            brandId: item.brandId || order.brandId || '',
             qty: remainingPurchase,
             productLine: item.productLine || order.productLine || '',
             ownerUid: order.ownerUid || '',
@@ -13529,7 +13549,7 @@ window.openDirectStockPurchase = async function() {
 function emptyDirectPoItem() {
     return {
         orderId:'', sourceType:'STOCK_REPLENISHMENT', sourceId:'',
-        itemName:'', itemCode:'', productId:'', brand:'', qty:1, unitPrice:0, supplier:'',
+        itemName:'', itemCode:'', productId:'', brand:'', brandId:'', qty:1, unitPrice:0, supplier:'',
         productLine:'', fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
     };
 }
@@ -13546,18 +13566,20 @@ window.addDirectPoItem = function() {
 window.onDirectPoCodeChange = async function(idx, value) {
     if (!poItems[idx]) return;
     const requestedCode = String(value || '').trim();
+    const preferredBrand = resolveBrandName(poItems[idx].brand || '');
     poItems[idx] = {
         ...poItems[idx],
         itemCode: requestedCode,
         itemName: '',
         productId: '',
-        brand: '',
+        brand: preferredBrand,
+        brandId: brandIdForName(preferredBrand),
         unitPrice: 0,
         supplier: '',
         productLine: ''
     };
     poAllItems = poItems;
-    const match = requestedCode ? await findProductByCode(requestedCode) : null;
+    const match = requestedCode ? await findProductByCode(requestedCode, preferredBrand) : null;
     if (!poItems[idx] || String(poItems[idx].itemCode || '').trim() !== requestedCode) return;
     if (match) {
         const secureCost = await loadVisibleProductCost(match);
@@ -13568,6 +13590,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
             itemName: match.nameCn || match.nameEn || '',
             productId: match.productId || stableProductId(match),
             brand: resolveBrandName(match.brand || ''),
+            brandId: match.brandId || brandIdForName(match.brand || ''),
             unitPrice: secureCost !== null && Number.isFinite(secureCost)
                 ? secureCost
                 : Number(match.cost || 0),
@@ -13597,6 +13620,13 @@ window.onDirectPoCodeChange = async function(idx, value) {
 window.updateDirectPoText = function(idx, field, value) {
     if (!poItems[idx]) return;
     poItems[idx][field] = field === 'brand' ? resolveBrandName(value) : String(value || '').trim();
+    if (field === 'brand') {
+        poItems[idx].brandId = brandIdForName(poItems[idx].brand);
+        if (poItems[idx].itemCode) {
+            onDirectPoCodeChange(idx, poItems[idx].itemCode);
+            return;
+        }
+    }
     poAllItems = poItems;
     window.autoFillPoExpectedDate(poItems);
 };
@@ -14212,7 +14242,10 @@ window.printPurchaseOrder = async function() {
         expectedDateSource,
         scheduleDate:expectedDate,
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
-        items: scheduledPoItems.map(item => ({ ...item, brand: resolveBrandName(item.brand || '') })),
+        items: scheduledPoItems.map(item => {
+            const brand = resolveBrandName(item.brand || '');
+            return { ...item, brand, brandId:item.brandId || brandIdForName(brand) };
+        }),
         ...netAmountMetadata(poNetTotal),
         createdAt: new Date().toISOString(),
         lastOutputAt: new Date().toISOString(),
@@ -14332,6 +14365,7 @@ window.printPurchaseOrder = async function() {
                     itemCode:item.itemCode||'',
                     itemName:item.itemName||'',
                     brand:resolveBrandName(item.brand||''),
+                    brandId:item.brandId||brandIdForName(item.brand||''),
                     qty:Number(item.qty||0),
                     receivedQty:0,
                     incomingRegisteredQty:0,
@@ -14374,6 +14408,7 @@ window.printPurchaseOrder = async function() {
                             itemCode:item.itemCode||identityLine?.itemCode||'',
                             itemName:item.itemName||identityLine?.itemName||'',
                             brand:item.brand||resolveBrandName(identityLine?.brand||''),
+                            brandId:item.brandId||identityLine?.brandId||brandIdForName(item.brand||identityLine?.brand||''),
                             productLine:item.productLine||identityLine?.productLine||'',
                             supplyOrderedQty:cumulative,
                             purchaseDocumentNos:[...new Set([...(item.purchaseDocumentNos||[]),poNo])],
