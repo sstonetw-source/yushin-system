@@ -80,12 +80,16 @@
     const x=normalize(record);
     const orderedQty=n(x.qty);
     const receivedQty=Math.min(orderedQty,n(x.receivedQty));
-    const remainingQty=x.status==='CANCELLED'?0:Math.max(0,orderedQty-receivedQty);
+    const terminal=['CANCELLED','CLOSED'].includes(x.status);
+    const remainingQty=terminal?0:Math.max(0,orderedQty-receivedQty);
     let receiptStatus='pending';
     let label='待到貨 '+receivedQty+'/'+orderedQty;
     if(x.status==='CANCELLED'){
       receiptStatus='cancelled';
-      label=receivedQty>0?'部分到貨 '+receivedQty+'/'+orderedQty+'・其餘取消':'未到貨已取消';
+      label='未到貨已取消';
+    }else if(x.status==='CLOSED'){
+      receiptStatus='closed';
+      label=receivedQty>0?'部分到貨 '+receivedQty+'/'+orderedQty+'・未到貨結案':'未到貨結案';
     }else if(x.status==='RECEIVED'){
       receiptStatus='full';
       label='已到貨 '+receivedQty+'/'+orderedQty;
