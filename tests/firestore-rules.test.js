@@ -588,3 +588,26 @@ test('sales cannot add cost to a formal purchasing order after creation', async 
   });
   await assertFails(updateDoc(doc(db('sales1'), 'orders/formal-cost-update'), { costPrice:99 }));
 });
+
+test('purchase communication timeline is purchaser-only and immutable', async () => {
+  const event = {
+    purchaseOrderId:'PO-1',
+    purchaseOrderNo:'PO-1',
+    supplierId:'sup-1',
+    supplierName:'Supplier',
+    recipientEmail:'orders@example.com',
+    channel:'MAILTO',
+    state:'PREPARED',
+    verifiedSent:false,
+    preparedAt:'2026-10-02T05:00:00.000Z',
+    createdAt:'2026-10-02T05:00:00.000Z',
+    createdByUid:'buyer1',
+    createdBy:'Buyer'
+  };
+  await assertSucceeds(setDoc(doc(db('buyer1'),'purchaseOrderCommunications/c1'),event));
+  await assertFails(setDoc(doc(db('sales1'),'purchaseOrderCommunications/c2'),{...event,createdByUid:'sales1'}));
+  await assertFails(setDoc(doc(db('buyer1'),'purchaseOrderCommunications/c3'),{...event,verifiedSent:true}));
+  await assertFails(updateDoc(doc(db('buyer1'),'purchaseOrderCommunications/c1'),{state:'SENT'}));
+  await assertSucceeds(getDoc(doc(db('buyer1'),'purchaseOrderCommunications/c1')));
+  await assertFails(getDoc(doc(db('sales1'),'purchaseOrderCommunications/c1')));
+});
