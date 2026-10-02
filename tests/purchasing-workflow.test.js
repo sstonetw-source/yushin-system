@@ -2234,3 +2234,33 @@ test('procurement need date stays separate from supplier ETA', () => {
     assert.match(poSource,/expectedDate:item\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
     assert.match(poSource,/scheduleDate:item\.scheduleDate\|\|poRecord\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
 });
+
+
+test('formal PO snapshots supplier part numbers and keeps internal product identity', () => {
+    const helperStart=app.indexOf('function productSupplierMappingForPoItem');
+    const helperEnd=app.indexOf('\nasync function autoFillPoSupplier',helperStart);
+    const helperSource=app.slice(helperStart,helperEnd);
+    assert.ok(helperStart>=0&&helperEnd>helperStart);
+    assert.match(helperSource,/mapping\.supplierId/);
+    assert.match(helperSource,/poEditingId && snapshot/);
+    assert.match(helperSource,/supplierPartNo/);
+
+    const renderStart=app.indexOf('function renderPoItemsTable()');
+    const renderEnd=app.indexOf('\nwindow.updatePoItem',renderStart);
+    const renderSource=app.slice(renderStart,renderEnd);
+    assert.match(renderSource,/供應商貨號：/);
+    assert.match(renderSource,/poSupplierPartNoForItem/);
+
+    const printStart=app.indexOf('window.printPurchaseOrder = async function()');
+    const printEnd=app.indexOf('\nwindow.openDirectStockPurchase',printStart);
+    const printSource=app.slice(printStart,printEnd);
+    assert.match(printSource,/supplierPartNo:item\.supplierPartNo\|\|''/);
+    assert.match(printSource,/items: scheduledPoItems\.map/);
+
+    const searchStart=app.indexOf('function purchaseOrderSearchTokens');
+    const searchEnd=app.indexOf('\nwindow.schedulePurchaseOrderHistorySearch',searchStart);
+    const searchSource=app.slice(searchStart,searchEnd);
+    assert.match(searchSource,/item\.supplierPartNo/);
+
+    assert.match(html,/id="poVendorName"[^>]+renderPoItemsTable\(\)/);
+});
