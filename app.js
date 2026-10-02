@@ -9773,8 +9773,8 @@ function workflowSalesFilterNames() {
 }
 
 function workflowPurchasingBrandNames() {
-    // 訂單／採購分工只顯示「獨立統計」的主要廠牌；
-    // 其餘品牌統一落入「其他廠牌」，讓採購可直接依責任分組處理。
+    // 採購分工只列出管理員設定為「獨立統計」的主要廠牌；
+    // 未列出的品牌由既有 orderBrandFilterValue() 統一歸入「其他廠牌」。
     return getUnifiedBrandEntries(false)
         .filter(entry => entry?.name && entry.active !== false && entry.isKeyBrand === true)
         .map(entry => entry.name);
@@ -10292,33 +10292,33 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         lifecycleMap
     );
     const standaloneReceiving = standaloneReceivingSupplyMetrics(filters);
-    // 客戶訂單的待採購統計必須與訂單頁共用同一個 workflow 計算結果。
-    // procurementDemands 是採購執行佇列，可能在背景同步完成前短暫落後；不能拿它覆蓋訂單狀態圖卡。
-    // 公司備庫沒有對應客戶訂單，因此只有 STOCK_REPLENISHMENT 額外加到採購頁。
-    const standaloneOrdering = { count:0, amount:0 };
-    if (procurementDemandLoaded) {
-        procurementDemandCache.forEach(demand => {
-            if (String(demand.sourceType || '') !== 'STOCK_REPLENISHMENT') return;
-            if (!(Number(demand.remainingToOrderQty || 0) > 0)) return;
-            const date = String(demand.createdAt || '').slice(0,10);
-            if (!purchaseLineMatchesFilters(date, '', demand.brand || '', { ...filters, selectedSales:'' })) return;
-            standaloneOrdering.count += 1;
-            standaloneOrdering.amount += Math.max(0, Number(demand.unitCost || demand.purchaseUnitCost || 0))
-                * Math.max(0, Number(demand.remainingToOrderQty || 0));
-        });
-    }
+    const demandOrderingRows=procurementDemandLoaded ? procurementDemandCache.filter(demand=>{
+        if(!(Number(demand.remainingToOrderQty||0)>0))return false;
+        const order=demand.sourceType==='SALES_ORDER'
+            ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
+            : null;
+        if(order&&normalizedOrderStatus(order)!=='normal')return false;
+        const date=order?.orderDate||String(demand.createdAt||'').slice(0,10);
+        return purchaseLineMatchesFilters(date,demand.salesName||order?.salesName||'',demand.brand||'',filters);
+    }) : null;
+    const demandOrderingAmount=demandOrderingRows ? demandOrderingRows.reduce((sum,demand)=>{
+        const order=demand.sourceType==='SALES_ORDER'
+            ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
+            : null;
+        const item=order ? normalizedOrderItems(order).find(row=>String(row.itemId||'')===String(demand.sourceItemId||'')) : null;
+        return sum + Number(item?.unitPrice||item?.salesPrice||0)*Number(demand.remainingToOrderQty||0);
+    },0) : 0;
 
     definitions.forEach(([category, countId, amountId]) => {
         const count = document.getElementById(countId);
         const amount = document.getElementById(amountId);
-        const extraCount = category === 'arrival'
-            ? standaloneReceiving.count
-            : (category === 'ordering' ? standaloneOrdering.count : 0);
-        const extraAmount = category === 'arrival'
-            ? standaloneReceiving.amount
-            : (category === 'ordering' ? standaloneOrdering.amount : 0);
-        if (count) count.textContent = `${metrics[category].count + extraCount} 筆`;
-        if (amount) amount.textContent = formatStatsMoney(metrics[category].amount + extraAmount);
+        const useDemand=category==='ordering'&&demandOrderingRows;
+        const baseCount=useDemand?demandOrderingRows.length:metrics[category].count;
+        const baseAmount=useDemand?demandOrderingAmount:metrics[category].amount;
+        const extraCount = category === 'arrival' ? standaloneReceiving.count : 0;
+        const extraAmount = category === 'arrival' ? standaloneReceiving.amount : 0;
+        if (count) count.textContent = `${baseCount + extraCount} 筆`;
+        if (amount) amount.textContent = formatStatsMoney(baseAmount + extraAmount);
     });
     // 圖卡統計已載入資料中的全部已完成品項；50 筆限制只套在下方明細顯示，
     // 避免使用者按「載入更多」時圖卡數字跟著人為跳動。
@@ -10897,50 +10897,14 @@ function renderPendingPurchaseOrders() {
     let shown = 0;
     const visibleSelectableIds=new Set();
 
-    // 正式 procurementDemands 是採購佇列的主資料；若背景同步尚未寫入，
-    // 仍以目前 ordersCache 的 workflow 推導結果補上，避免訂單頁顯示待採購、採購頁卻是 0 筆。
-    const demandRowsById = new Map(
-        procurementDemandCache
-            .filter(demand => Number(demand.remainingToOrderQty || 0) > 0)
-            .map(demand => [String(demand.id || demand.demandId || ''), demand])
-    );
-    ordersCache.forEach(order => {
-        const items = normalizedOrderItems(order);
-        const lifecycle = orderLifecycleInfo(order, items);
-        const states = new Map(items.map(item => [item, itemDispatchState(order, item)]));
-        pendingProcurementDisplayLines(order, items, states, lifecycle).forEach(line => {
-            const id = String(line.demandId || '');
-            if (!id || demandRowsById.has(id)) return;
-            demandRowsById.set(id, {
-                id,
-                demandId:id,
-                sourceType:line.sourceType,
-                sourceId:line.sourceId,
-                sourceItemId:line.sourceItemId,
-                remainingToOrderQty:line.qty,
-                requestedQty:line.qty,
-                itemCode:line.itemCode,
-                itemName:line.itemName,
-                productId:line.productId,
-                brand:line.brand,
-                salesName:line.salesName,
-                fulfillmentType:line.fulfillmentType,
-                procurementType:line.procurementType,
-                status:'OPEN',
-                createdAt:order.createdAt || order.orderDate || '',
-                scheduleDate:order.requiredByDate || order.expectedDate || ''
-            });
-        });
-    });
-    const rows=[...demandRowsById.values()]
+    const rows=[...procurementDemandCache]
+        .filter(demand=>Number(demand.remainingToOrderQty||0)>0)
         .sort((a,b)=>String(a.scheduleDate||a.createdAt||'').localeCompare(String(b.scheduleDate||b.createdAt||'')));
 
     for(const demand of rows){
         const sourceType=String(demand.sourceType||'');
         const order=sourceType==='SALES_ORDER'
-            ? procurementDemandSourceOrderCache.get(String(demand.sourceId||''))
-                || ordersCache.find(row => String(row.id || '') === String(demand.sourceId || ''))
-                || null
+            ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
             : null;
         if(order&&normalizedOrderStatus(order)!=='normal')continue;
         const sourceItems=order ? normalizedOrderItems(order) : [];
