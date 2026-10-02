@@ -25,6 +25,8 @@ jobs:
           node --check modules/workflow-core.js
           node --check modules/procurement-demand-core.js
           node --check modules/purchasing-analytics-core.js
+          node --check functions/purchase-email-core.js
+          node --check functions/index.js
       - name: Phase 1 regression tests
         run: node --test tests/phase1.test.js
       - name: Purchasing workflow tests
@@ -57,6 +59,9 @@ jobs:
       - name: Purchasing analytics core tests
         if: always()
         run: node --test tests/v2-purchasing-analytics-core.test.js
+      - name: Purchase email core tests
+        if: always()
+        run: node --test tests/v2-purchase-email-core.test.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator
