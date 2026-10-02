@@ -16,6 +16,7 @@ jobs:
       - name: JavaScript syntax check
         run: |
           node --check app.js
+          node --check modules/inventory-core.js
           node --check modules/receiving-core.js
           node --check modules/fulfillment-core.js
           node --check modules/supply-core.js
@@ -26,6 +27,9 @@ jobs:
       - name: Purchasing workflow tests
         if: always()
         run: node --test --test-reporter=spec tests/purchasing-workflow.test.js
+      - name: Inventory core tests
+        if: always()
+        run: node --test tests/v2-inventory-core.test.js
       - name: Receiving core tests
         if: always()
         run: node --test tests/v2-receiving-core.test.js
