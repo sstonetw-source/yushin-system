@@ -2055,6 +2055,10 @@ test('system audit reconciles procurement demand from linked supply records', ()
 
 test('purchase flows persist procurement demand through order and receipt transactions', () => {
     assert.match(app, /collection\('procurementDemands'\)/);
+    const persistStart=app.indexOf('async function persistOrderProcurementDemands');
+    const persistEnd=app.indexOf('\nasync function syncOrderProcurementDemandLifecycle',persistStart);
+    assert.ok(persistStart>=0&&persistEnd>persistStart);
+    assert.match(app.slice(persistStart,persistEnd),/await batch\.commit\(\)[\s\S]*?invalidateProcurementDemandQueue\(\)/);
     assert.match(app, /demandId:demand\.demandId\s*\|\|\s*''/);
     assert.match(app, /demandId:existingSupply\?\.demandId\|\|demandId\|\|''/);
     assert.match(app, /demandId:demandProjection\.demandId\|\|''/);
