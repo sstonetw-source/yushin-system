@@ -1083,7 +1083,7 @@
                 <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">訂 購 單</h2>
 
                 <div class="meta-row-three">
-                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;"><datalist id="poVendorSuggestions"></datalist></div>
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;" oninput="updatePoSupplierEmailHint()" onchange="updatePoSupplierEmailHint()"><datalist id="poVendorSuggestions"></datalist><small id="poSupplierEmailHint" class="no-print" style="display:block;margin-top:3px;color:#9a6700;">尚未設定供應商 Email</small></div>
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
                     <div><label>訂購日期：</label><input type="date" id="poDate"></div>
                 </div>
@@ -1121,6 +1121,7 @@
 
             <div class="no-print" style="margin-top:16px;text-align:right;border-top:1px solid #eee;padding-top:12px;">
                 <p id="poSaveStatus" role="status" aria-live="polite" style="text-align:left;margin:0 0 10px;"></p>
+                <button type="button" id="emailPurchaseOrderBtn" class="btn-secondary" style="display:none;" onclick="emailPurchaseOrder(poEditingId)">📧 郵件／分享</button>
                 <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 匯出 PDF（自動同步雲端）</button>
             </div>
         </div>
