@@ -1757,3 +1757,54 @@ test('supplier master stores one canonical email field and PO snapshots supplier
     assert.match(app,/supplierEmail:normalizeSupplierEmail\(supplierContact\?\.email\|\|''\)/);
     assert.doesNotMatch(app,/poVendorEmail|purchaseEmail|vendorEmail/);
 });
+
+test('supplier master stores email and preserves it across brand mappings', () => {
+    assert.match(html,/id="supplierMasterEmail"/);
+    assert.match(html,/<th>Email<\/th>/);
+    const start=app.indexOf('window.saveSupplierMapping = async function');
+    const end=app.indexOf('\nwindow.disableSupplierMapping',start);
+    const source=app.slice(start,end);
+    assert.match(source,/supplierMasterEmail/);
+    assert.match(source,/savedSupplierEmail=supplierEmail\|\|normalizeSupplierEmail\(existingSupplier\?\.email\|\|''\)/);
+    assert.match(source,/email:savedSupplierEmail/);
+});
+
+test('purchase order snapshots supplier identity and email onto PO and supply records', () => {
+    const start=app.indexOf('const supplierContact = supplierForVendorName\(vendorName\);');
+    const end=app.indexOf('poRecord.searchTokens=purchaseOrderSearchTokens',start);
+    const source=app.slice(start,end);
+    assert.match(source,/supplierId:supplierContact\?\.id\|\|supplierContact\?\.supplierId\|\|''/);
+    assert.match(source,/supplierName:supplierContact\?\.supplierName\|\|vendorName/);
+    assert.match(source,/supplierEmail:normalizeSupplierEmail\(supplierContact\?\.email\|\|''\)/);
+    const supplyStart=app.indexOf('const supplyRecord={',end);
+    const supplyEnd=app.indexOf('transaction.set\(supplyRef,supplyRecord\)',supplyStart);
+    const supplySource=app.slice(supplyStart,supplyEnd);
+    assert.match(supplySource,/supplierId:poRecord\.supplierId\|\|''/);
+    assert.match(supplySource,/supplierEmail:poRecord\.supplierEmail\|\|''/);
+});
+
+test('saved PO can prepare a PDF blob and share through any mail app with mailto fallback', () => {
+    assert.match(html,/id="emailPurchaseOrderBtn"/);
+    const pdfStart=app.indexOf('async function printSavedPoDocument\(poNo, vendorName\)');
+    const pdfEnd=app.indexOf('\n\nwindow.printPurchaseOrder',pdfStart);
+    const pdfSource=app.slice(pdfStart,pdfEnd);
+    assert.match(pdfSource,/pdf\.output\('blob'\)/);
+    assert.match(pdfSource,/const download = options\.download !== false/);
+    assert.match(pdfSource,/pdf\.save\(fileName\)/);
+
+    const mailStart=app.indexOf('window.emailPurchaseOrder = async function');
+    const mailEnd=app.indexOf('\n\n\/\/ 從原始訂單上的訂購單號',mailStart);
+    const mailSource=app.slice(mailStart,mailEnd);
+    assert.match(mailSource,/navigator\.canShare/);
+    assert.match(mailSource,/navigator\.share/);
+    assert.match(mailSource,/mailto:\$\{contact\.email\}/);
+    assert.match(mailSource,/new File\(\[attachment\.blob\]/);
+});
+
+test('vendor suggestions include Supplier Master before purchase history', () => {
+    const start=app.indexOf('function populatePoVendorSuggestions\(\)');
+    const end=app.indexOf('\n\nwindow.closePurchaseOrderModal',start);
+    const source=app.slice(start,end);
+    assert.match(source,/supplierMasterCache\.forEach/);
+    assert.match(source,/poListCache\.forEach/);
+});
