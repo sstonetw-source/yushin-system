@@ -17905,6 +17905,7 @@ window.calculateStorageUsage = async function() {
     const collections = [
         { key: 'quotes', label: '估價單' }, { key: 'forecasts', label: 'Forecast' },
         { key: 'orders', label: '訂單' }, { key: 'purchaseOrders', label: '採購單' },
+        { key: 'procurementDemands', label: '採購需求' },
         { key: 'supplyOrders', label: '供應／訂貨紀錄' }, { key: 'receipts', label: '收貨紀錄' },
         { key: 'dispatchRecords', label: '出貨打單紀錄' }, { key: 'inventory', label: '庫存彙總' },
         { key: 'inventoryLots', label: '庫存批次' }, { key: 'inventoryLotCosts', label: '受保護批次成本' },
@@ -17958,7 +17959,7 @@ window.downloadDatabaseBackup = async function() {
     const button = document.getElementById('databaseBackupBtn');
     const status = document.getElementById('databaseBackupStatus');
     const collections = [
-        'quotes', 'forecasts', 'orders', 'purchaseOrders', 'equipment', 'users', 'settings',
+        'quotes', 'forecasts', 'orders', 'purchaseOrders', 'procurementDemands', 'equipment', 'users', 'settings',
         'brands', 'productLines', 'products', 'productCosts', 'priceHistory', 'customers', 'salesCodes',
         'suppliers', 'brandSupplierMappings', 'warehouses', 'warehouseStocks',
         'inventory', 'inventoryLots', 'inventoryLotCosts', 'inventoryReservations',
@@ -18032,7 +18033,7 @@ window.downloadDatabaseBackup = async function() {
 // separate administrator review, so the browser cannot recreate them from an old file.
 let pendingDatabaseBackup = null;
 const RESTORABLE_BACKUP_COLLECTIONS = new Set([
-    'quotes','forecasts','orders','purchaseOrders','equipment','brands','productLines',
+    'quotes','forecasts','orders','purchaseOrders','procurementDemands','equipment','brands','productLines',
     'products','productCosts','priceHistory','customers','salesCodes','suppliers',
     'brandSupplierMappings','warehouses','warehouseStocks','inventory','inventoryLots',
     'inventoryLotCosts','inventoryReservations','inventoryMovements',
@@ -18333,7 +18334,7 @@ function systemAuditProductKey(record = {}) {
 }
 
 const TEST_DATA_RESET_DELETE_COLLECTIONS = [
-    'orders','purchaseOrders','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
+    'orders','purchaseOrders','procurementDemands','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
     'receipts','dispatchRecords','deliveries','inventoryMovements','auditLogs'
 ];
 let testDataResetPreviewState = null;
