@@ -4898,3 +4898,23 @@ test('admin data health also checks missing price, order lines and planning cons
     assert.match(indexSource,/缺少廠牌／貨號／品名／建議售價/);
 });
 
+
+
+test('order complete timeline records purchasing and receipt events on order items', () => {
+    assert.match(appSource,/orderEvents:\[/);
+    assert.match(appSource,/type:'PURCHASING_PO'/);
+    assert.match(appSource,/type:'PURCHASING_MANUAL'/);
+    assert.match(appSource,/type:'SALES_SELF_ORDER'/);
+    assert.match(appSource,/receiptEvents:\[/);
+    assert.match(appSource,/action=event\.type==='SALES_SELF_ORDER'\?'業務自行訂貨':'採購已訂貨'/);
+    assert.match(appSource,/event\.fulfillmentType==='DIRECT_SHIP'\?'原廠直送到貨':'採購入庫'/);
+    assert.match(appSource,/sourceOrderStatus:'cancelled'/);
+});
+
+test('receipt event ids use the idempotent receipt operation key', () => {
+    const start=appSource.indexOf('async function receiveSupplyOrderRecord');
+    const end=appSource.indexOf('\nwindow.savePoReceiptBatch',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/receiptEvents:[\s\S]*?id:operationKey/);
+    assert.match(source,/if\(receiptSnap\.exists\)/);
+});

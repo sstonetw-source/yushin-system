@@ -8974,7 +8974,16 @@ window.saveSelfOrder = async function() {
             if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
             tx.set(supplyRef,record);
             if(demandRef)tx.set(demandRef,demandDoc,{merge:true});
-            items[index]={...item,supplyOrderedQty:already+qty,selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate};
+            items[index]={
+                ...item,
+                supplyOrderedQty:already+qty,
+                selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],
+                orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate,
+                orderEvents:[
+                    ...(item.orderEvents||[]).filter(event=>event.id!==supplyRef.id),
+                    {id:supplyRef.id,type:'SALES_SELF_ORDER',at:now,date:orderDate,qty,documentNo:internalNo,by:deliveryActor()}
+                ]
+            };
             savedOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(savedOrder),updatedAt:now});
         });
@@ -10955,7 +10964,11 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 items[itemIndex] = {
                     ...item, supplyOrderedQty:nextOrdered,
                     manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])],
-                    orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate
+                    orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate,
+                    orderEvents:[
+                        ...(item.orderEvents||[]).filter(event=>event.id!==supplyRef.id),
+                        {id:supplyRef.id,type:'PURCHASING_MANUAL',at:now,date:orderDate,qty,documentNo:internalNo,by:currentUserName||currentUser?.email||''}
+                    ]
                 };
                 savedOrder = { ...order, items, itemCount:items.length, orderSchemaVersion:2, updatedAt:now };
                 tx.update(orderRef, {items, itemCount:items.length, orderSchemaVersion:2,
@@ -12876,7 +12889,16 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             // can legitimately make gross delivered quantity exceed the original ordered quantity.
             // Completion is decided from net delivered (gross - returns), not by truncating history.
             const delivered=Number(item.deliveredQty||0)+qty;
-            items[itemIndex]={...item,receivedQty:Number(item.receivedQty||0)+qty,deliveredQty:delivered,directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty};
+            items[itemIndex]={
+                ...item,
+                receivedQty:Number(item.receivedQty||0)+qty,
+                deliveredQty:delivered,
+                directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty,
+                receiptEvents:[
+                    ...(item.receiptEvents||[]),
+                    {id:operationKey,at:now,date:localDateString(),qty,sourceId:supplyId,by:actor,fulfillmentType:'DIRECT_SHIP'}
+                ]
+            };
             const deliveryRecord={
                 id:`direct-${operationKey}`,itemId:supply.itemId,date:localDateString(),qty,
                 notes:'原廠直送到貨確認',createdBy:actor,createdAt:now,sourceType:'DIRECT_SHIP_RECEIPT',sourceId:supplyId
@@ -12943,7 +12965,14 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                         const next=receiptPlan.item;
                         reserveQty=receiptPlan.reservedDelta;
                         reservedForSource=reserveQty;
-                        items[itemIndex]={...next,reservedQty:next.reservedQty};
+                        items[itemIndex]={
+                            ...next,
+                            reservedQty:next.reservedQty,
+                            receiptEvents:[
+                                ...(item.receiptEvents||[]),
+                                {id:operationKey,at:now,date:localDateString(),qty,sourceId:supplyId,by:actor,fulfillmentType:'WAREHOUSE'}
+                            ]
+                        };
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
                         tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
                         tx.set(reservationRef,{
@@ -12957,7 +12986,14 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                         // 取消中的來源訂單不重新占庫存，但仍同步實際到貨摘要。
                         // 這樣日後恢復訂單時，不會把已經到倉的數量再次誤判成在途採購。
                         const receiptPlan=window.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:0},qty);
-                        items[itemIndex]={...item,receivedQty:receiptPlan.item.receivedQty};
+                        items[itemIndex]={
+                            ...item,
+                            receivedQty:receiptPlan.item.receivedQty,
+                            receiptEvents:[
+                                ...(item.receiptEvents||[]),
+                                {id:operationKey,at:now,date:localDateString(),qty,sourceId:supplyId,by:actor,fulfillmentType:'WAREHOUSE',sourceOrderStatus:'cancelled'}
+                            ]
+                        };
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
                         tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
                     }
@@ -14103,7 +14139,11 @@ window.printPurchaseOrder = async function() {
                             productLine:item.productLine||identityLine?.productLine||'',
                             supplyOrderedQty:cumulative,
                             purchaseDocumentNos:[...new Set([...(item.purchaseDocumentNos||[]),poNo])],
-                            orderedAt:item.orderedAt && item.orderedAt < poRecord.poDate ? item.orderedAt : poRecord.poDate
+                            orderedAt:item.orderedAt && item.orderedAt < poRecord.poDate ? item.orderedAt : poRecord.poDate,
+                            orderEvents:[
+                                ...(item.orderEvents||[]).filter(event=>event.id!==poDocumentId),
+                                {id:poDocumentId,type:'PURCHASING_PO',at:poRecord.createdAt||new Date().toISOString(),date:poRecord.poDate||'',qty:orderedQty,documentNo:poNo,by:poRecord.buyerName||currentUserName||currentUser?.email||''}
+                            ]
                         }:item;
                     });
                     const nextOrderData={...orderData,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2};
@@ -14746,6 +14786,25 @@ function renderOrderStatusHistory(order) {
             detail:[order.orderNo||order.id||'',order.customerName||''].filter(Boolean).join('｜')
         });
     }
+    normalizedOrderItems(order).forEach(item=>{
+        const itemLabel=[item.itemCode||'',item.itemName||''].filter(Boolean).join(' ');
+        const orderEvents=Array.isArray(item.orderEvents)?item.orderEvents:[];
+        orderEvents.forEach(event=>{
+            const action=event.type==='SALES_SELF_ORDER'?'業務自行訂貨':'採購已訂貨';
+            const detail=[itemLabel,event.documentNo||'',event.qty!=null?(`數量 ${event.qty}`):''].filter(Boolean).join('｜');
+            entries.push({at:event.at||event.date||item.orderedAt||'',action,by:event.by||'',detail});
+        });
+        // 已有 orderedAt 的既有資料仍可顯示一筆採購時間，不要求回補歷史事件。
+        if(!orderEvents.length&&item.orderedAt&&Number(item.supplyOrderedQty||0)>0){
+            const documentNos=[...(item.purchaseDocumentNos||[]),...(item.manualOrderNos||[]),...(item.selfOrderNos||[])].filter(Boolean);
+            entries.push({at:item.orderedAt,action:(item.procurementType||'')==='SALES_SELF_ORDER'?'業務自行訂貨':'採購已訂貨',by:'',detail:[itemLabel,documentNos.join('、'),`累計 ${Number(item.supplyOrderedQty||0)}`].filter(Boolean).join('｜')});
+        }
+        (item.receiptEvents||[]).forEach(event=>{
+            const action=event.fulfillmentType==='DIRECT_SHIP'?'原廠直送到貨':'採購入庫';
+            const detail=[itemLabel,event.qty!=null?(`到貨 ${event.qty}`):'',event.sourceOrderStatus==='cancelled'?'來源訂單已取消，轉自由庫存':''].filter(Boolean).join('｜');
+            entries.push({at:event.at||event.date||'',action,by:event.by||'',detail});
+        });
+    });
     (order.statusHistory || []).forEach(item => entries.push({ at: item.at, action: item.label || '進度變更', by: item.by, detail: '' }));
     (order.deliveryHistory || []).forEach(item => {
         const action = { create: '新增送貨', edit: '修改送貨', delete: '刪除送貨', cancel_all: '取消全部送貨', clear_legacy_estimate: '取消歷史推估' }[item.action] || '送貨異動';
