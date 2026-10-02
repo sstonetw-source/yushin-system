@@ -169,6 +169,52 @@
     return {appliedQty,demand};
   }
 
+  // ERP/Odoo-style purchase planning: the customer/material demand remains the
+  // business need, while a supplier PO may be larger because of MOQ. Warehouse
+  // excess becomes free stock; direct ship cannot safely over-deliver a customer.
+  function planPurchaseOrder(record={},qty=0,options={}){
+    const current=normalizeDemand(record);
+    const purchaseQty=n(qty);
+    const fulfillmentType=String(options.fulfillmentType||record.fulfillmentType||'WAREHOUSE').toUpperCase();
+    if(!(purchaseQty>0))return {
+      valid:false,reason:'qty',purchaseQty,demandAllocatedQty:0,excessStockQty:0,demand:current
+    };
+
+    if(current.sourceType===SOURCES.STOCK_REPLENISHMENT){
+      const expanded=normalizeDemand({
+        ...current,
+        requestedQty:Math.max(current.requestedQty,current.orderedQty+purchaseQty)
+      });
+      const applied=applyOrder(expanded,purchaseQty);
+      return {
+        valid:applied.appliedQty===purchaseQty,
+        reason:applied.appliedQty===purchaseQty?'':'demand_changed',
+        purchaseQty,
+        demandAllocatedQty:purchaseQty,
+        excessStockQty:0,
+        demand:applied.demand
+      };
+    }
+
+    const demandAllocatedQty=Math.min(purchaseQty,current.remainingToOrderQty);
+    const excessStockQty=Math.max(0,purchaseQty-demandAllocatedQty);
+    if(!(demandAllocatedQty>0))return {
+      valid:false,reason:'no_demand',purchaseQty,demandAllocatedQty:0,excessStockQty,demand:current
+    };
+    if(fulfillmentType==='DIRECT_SHIP'&&excessStockQty>0)return {
+      valid:false,reason:'direct_ship_excess',purchaseQty,demandAllocatedQty,excessStockQty,demand:current
+    };
+    const applied=applyOrder(current,demandAllocatedQty);
+    return {
+      valid:applied.appliedQty===demandAllocatedQty,
+      reason:applied.appliedQty===demandAllocatedQty?'':'demand_changed',
+      purchaseQty,
+      demandAllocatedQty:applied.appliedQty,
+      excessStockQty,
+      demand:applied.demand
+    };
+  }
+
   function applyReceipt(record={},qty=0){
     const current=normalizeDemand(record);
     const appliedQty=Math.min(n(qty),current.remainingToReceiveQty);
@@ -184,11 +230,15 @@
   // A cancelled supply contributes only the quantity that was already physically received.
   function supplyContribution(record={}){
     const qty=n(record.qty);
-    const receivedQty=Math.min(qty,n(record.receivedQty));
+    const hasDemandAllocation=record.demandAllocatedQty!==undefined&&record.demandAllocatedQty!==null&&record.demandAllocatedQty!=='';
+    const demandAllocatedQty=hasDemandAllocation?Math.min(qty,n(record.demandAllocatedQty)):qty;
+    const receivedQty=Math.min(demandAllocatedQty,n(record.receivedQty));
     const terminal=['CANCELLED','CLOSED'].includes(String(record.status||'').toUpperCase());
     return {
-      orderedQty:terminal?receivedQty:qty,
-      receivedQty
+      orderedQty:terminal?receivedQty:demandAllocatedQty,
+      receivedQty,
+      demandAllocatedQty,
+      excessStockQty:Math.max(0,qty-demandAllocatedQty)
     };
   }
 
@@ -247,9 +297,11 @@
     const rows=(supplies||[]).map(supply=>{
       if(demandId&&String(supply?.demandId||'')&&String(supply.demandId)!==demandId)return null;
       const qty=n(supply?.qty);
-      const received=Math.min(qty,n(supply?.receivedQty));
+      const hasDemandAllocation=supply?.demandAllocatedQty!==undefined&&supply?.demandAllocatedQty!==null&&supply?.demandAllocatedQty!=='';
+      const demandAllocatedQty=hasDemandAllocation?Math.min(qty,n(supply.demandAllocatedQty)):qty;
+      const received=Math.min(demandAllocatedQty,n(supply?.receivedQty));
       const terminal=['CANCELLED','CLOSED'].includes(String(supply?.status||'').toUpperCase());
-      const remaining=terminal?0:Math.max(0,qty-received);
+      const remaining=terminal?0:Math.max(0,demandAllocatedQty-received);
       if(!(remaining>0))return null;
       return {
         remaining,
@@ -310,7 +362,7 @@
 
   return {
     SOURCES,STATUSES,demandIdForSource,normalizeDemand,fromSalesOrder,fromStockReplenishment,statusLabel,
-    demandDocument,applyOrder,applyReceipt,supplyContribution,reconcileLinkedSupplies,applySupplyCancellation,
+    demandDocument,applyOrder,planPurchaseOrder,applyReceipt,supplyContribution,reconcileLinkedSupplies,applySupplyCancellation,
     deliveryPlanRisk,reconcileRequestedQty,cancelDemand,reopenDemand
   };
 });
