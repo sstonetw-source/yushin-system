@@ -11709,7 +11709,7 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
 
 window.cancelManualSupplyOutstanding = async function(supplyId) {
     if (!canCreatePurchaseOrderCapability()) {
-        alert('只有管理員或採購可以取消快速採購的未到貨數量。');
+        alert('只有管理員或採購可以停止快速採購的未到貨數量。');
         return;
     }
     const actionKey = `supply:${supplyId}`;
@@ -11732,8 +11732,9 @@ window.cancelManualSupplyOutstanding = async function(supplyId) {
         alert('這筆供應紀錄不是快速採購，請從對應的正式訂購單處理。');
         return;
     }
-    if (String(supply.status || '').toUpperCase() === 'CANCELLED') {
-        showActionFeedback('這筆快速採購的未到貨數量已取消。', 'success');
+    if (isPurchaseTerminalStatus(supply.status)) {
+        const label=String(supply.status||'').toUpperCase()==='CLOSED'?'已結案':'已取消';
+        showActionFeedback(`這筆快速採購${label}，沒有待處理的未到貨數量。`, 'success');
         return;
     }
     const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
@@ -11743,7 +11744,7 @@ window.cancelManualSupplyOutstanding = async function(supplyId) {
     }
 
     const reasonRaw = prompt(
-        `取消快速採購 ${supply.internalNo || supply.id} 尚未到貨的 ${remaining} 個。\n已實際到貨的數量不會回沖，原訂單會重新出現尚需採購的數量。\n\n請輸入取消原因：`
+        `停止快速採購 ${supply.internalNo || supply.id} 尚未到貨的 ${remaining} 個。\n已實際到貨的數量不會回沖；若已有到貨紀錄，這筆供應會標示為「已結案」。\n原訂單會重新出現尚需採購的數量。\n\n請輸入原因：`
     );
     if (reasonRaw === null) return;
     const reason = String(reasonRaw || '').trim();
@@ -11764,12 +11765,12 @@ window.cancelManualSupplyOutstanding = async function(supplyId) {
         if (result.orderId) await refreshAffectedOrderCaches([result.orderId]);
         else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         showActionFeedback(
-            `已取消快速採購 ${supply.internalNo || supply.id} 未到貨數量 ${result.cancelledQty || remaining}；在途庫存已同步。`,
+            `${result.terminalStatus==='CLOSED'?'已結案':'已取消'}快速採購 ${supply.internalNo || supply.id}；停止未到貨數量 ${result.cancelledQty || remaining}，在途庫存已同步。`,
             'success'
         );
     } catch (err) {
-        console.error('取消快速採購未到貨失敗：', err);
-        alert('取消快速採購失敗：' + (err?.message || err) + '。可以重新執行；已成功的異動不會重複扣除。');
+        console.error('停止快速採購未到貨失敗：', err);
+        alert('停止快速採購失敗：' + (err?.message || err) + '。可以重新執行；已成功的異動不會重複扣除。');
     } finally {
         purchaseCancellationInProgress.delete(actionKey);
         if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
