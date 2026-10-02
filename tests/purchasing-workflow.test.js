@@ -257,6 +257,14 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /return YushinWorkflow\.itemWorkCategory\(input\);/);
 });
 
+test('item dispatch state delegates quantity math to fulfillment core', () => {
+    const start = app.indexOf('function itemDispatchState(order, item)');
+    const end = app.indexOf('\nfunction orderContextActionState', start);
+    const source = app.slice(start, end);
+    assert.match(source, /YushinFulfillment\?\.dispatchState/);
+    assert.doesNotMatch(source, /const preparedOutstanding=Math\.max/);
+});
+
 test('stock order shows dispatch, shipping, billing and complete as work advances', () => {
     const dispatchStart = app.indexOf('function itemDispatchState(order, item)');
     const dispatchEnd = app.indexOf('\nfunction orderContextActionState', dispatchStart);
@@ -269,7 +277,7 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
         savedDeliveryRecords:order=>order.deliveryRecords||[],
         savedReturnRecords:()=>[],
         orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
-        YushinWorkflow:workflow
+        YushinWorkflow:workflow,YushinFulfillment:fulfillment
     });
     vm.runInContext(source,ctx);
     const order={items:[{itemId:'I1',qty:3,orderedQty:3,shortageQty:0,
@@ -300,7 +308,7 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
         normalizedOrderItems:order=>order.items,
         savedDeliveryRecords:()=>[],savedReturnRecords:()=>[],
         orderLifecycleInfo:()=>({status:'normal',returned:0,effectiveDelivered:0}),
-        YushinWorkflow:workflow
+        YushinWorkflow:workflow,YushinFulfillment:fulfillment
     });
     vm.runInContext(source,context);
     const order={items:[{itemId:'I1',qty:10,orderedQty:10,shortageQty:5,
