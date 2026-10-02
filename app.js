@@ -7368,6 +7368,9 @@ window.openInventoryReplenishment = async function(inventoryId) {
         sourceType:'STOCK_REPLENISHMENT',
         sourceId:demand.sourceId || item.id || item.productKey || item.productId || '',
         demandId:demand.demandId || '',
+        demandRequestedQty:demand.requestedQty,
+        demandOrderedQty:demand.orderedQty,
+        demandReceivedQty:demand.receivedQty,
         itemName:item.itemName || match?.nameCn || match?.nameEn || '',
         itemCode:item.itemCode || match?.model || '', productId:item.productId || item.productKey || match?.productId || '',
         brand:resolveBrandName(item.brand || match?.brand || ''), qty:suggestedQty,
@@ -12750,6 +12753,56 @@ window.printPurchaseOrder = async function() {
             });
             const supplyOrderIds = [];
             poRecord.items.forEach((item,itemIndex)=>{
+                const sourceType=item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT');
+                let demandProjection;
+                let sourceOrderForDemand=null;
+                let sourceItemForDemand=null;
+                if(sourceType==='SALES_ORDER'){
+                    const sourceSnapshot=orderSnapshots.find(snapshot=>snapshot.id===item.orderId);
+                    if(!sourceSnapshot?.exists)throw new Error('採購需求找不到來源訂單。');
+                    sourceOrderForDemand={id:sourceSnapshot.id,...sourceSnapshot.data()};
+                    const sourceItems=normalizedOrderItems(sourceOrderForDemand);
+                    sourceItemForDemand=sourceItems.find(row=>row.itemId===item.itemId)
+                        || sourceItems[Number(item.orderItemIndex||0)];
+                    if(!sourceItemForDemand)throw new Error('採購需求找不到來源訂單品項。');
+                    demandProjection=procurementDemandForOrderItem(sourceOrderForDemand,sourceItemForDemand);
+                }else{
+                    demandProjection=globalThis.YushinProcurementDemand.normalizeDemand({
+                        demandId:item.demandId||globalThis.YushinProcurementDemand.demandIdForSource({
+                            sourceType,sourceId:item.sourceId||item.productId||item.itemCode||''
+                        }),
+                        sourceType,
+                        sourceId:item.sourceId||item.productId||item.itemCode||'',
+                        sourceItemId:'',
+                        requestedQty:Number(item.demandRequestedQty??item.qty??0),
+                        orderedQty:Number(item.demandOrderedQty||0),
+                        receivedQty:Number(item.demandReceivedQty||0),
+                        scheduleDate:poRecord.expectedDate||''
+                    });
+                }
+                const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demandProjection,Number(item.qty||0));
+                if(demandOrderPlan.appliedQty!==Number(item.qty||0)){
+                    throw new Error('採購需求數量已變更，請重新整理後再建立訂購單。');
+                }
+                const demandRef=procurementDemandRef(demandProjection.demandId);
+                const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
+                    productId:item.productId||sourceItemForDemand?.productId||'',
+                    productKey:poIncomingKey(item)||inventoryProductKey(sourceItemForDemand||{}),
+                    itemCode:item.itemCode||sourceItemForDemand?.itemCode||'',
+                    itemName:item.itemName||sourceItemForDemand?.itemName||'',
+                    brand:resolveBrandName(item.brand||sourceItemForDemand?.brand||''),
+                    fulfillmentType:item.fulfillmentType||sourceItemForDemand?.fulfillmentType||'WAREHOUSE',
+                    warehouseId:(item.fulfillmentType||sourceItemForDemand?.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
+                        ? '' : (item.warehouseId||sourceItemForDemand?.warehouseId||defaultWarehouse()?.id||''),
+                    ownerUid:item.ownerUid||sourceOrderForDemand?.ownerUid||'',
+                    salesCode:item.salesCode||sourceOrderForDemand?.salesCode||'',
+                    salesName:item.salesName||sourceOrderForDemand?.salesName||'',
+                    scheduleDate:poRecord.expectedDate||''
+                },{
+                    createdAt:sourceOrderForDemand?.createdAt||poRecord.createdAt,
+                    updatedAt:poRecord.createdAt
+                });
+
                 const supplyId=formalSupplyOrderId(poDocumentId,itemIndex);
                 const supplyRef=db.collection('supplyOrders').doc(supplyId);
                 supplyOrderIds.push(supplyId);
@@ -12758,14 +12811,10 @@ window.printPurchaseOrder = async function() {
                     // 正式訂購單永遠是 PURCHASING_PO；是否為客戶需求或備庫由 sourceType 表示。
                     type:'PURCHASING_PO',
                     method:'PURCHASING_PO',
-                    sourceType:item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT'),
+                    sourceType,
                     sourceId:item.orderId||item.sourceId||'',
                     sourceItemId:item.itemId||item.sourceItemId||'',
-                    demandId:item.demandId||globalThis.YushinProcurementDemand?.demandIdForSource({
-                        sourceType:item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT'),
-                        sourceId:item.orderId||item.sourceId||'',
-                        sourceItemId:item.itemId||item.sourceItemId||''
-                    })||'',
+                    demandId:demandProjection.demandId||'',
                     internalNo:poNo,
                     purchaseDocumentId:poDocumentId,
                     purchaseDocumentNo:poNo,
@@ -12800,6 +12849,7 @@ window.printPurchaseOrder = async function() {
                     createdByRole:currentUserRole
                 };
                 transaction.set(supplyRef,supplyRecord);
+                if(demandRef)transaction.set(demandRef,demandDoc,{merge:true});
                 committedSupplyOrders.push({id:supplyId,...supplyRecord});
             });
             poRecord.supplyOrderIds=supplyOrderIds;
