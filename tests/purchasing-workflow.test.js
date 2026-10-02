@@ -1393,6 +1393,9 @@ test('purchase cancellation releases incoming and returns outstanding quantity t
     assert.match(source,/globalThis\.YushinReceiving\.normalizeSupply\(supply\)/);
     assert.match(source,/supplyProjection\.remainingQty/);
     assert.match(source,/supplyOrderedQty:Math\.max\(receivedForItem,currentSupplyOrdered-remaining\)/);
+    assert.match(source,/procurementDemandRef\(demandId\)/);
+    assert.match(source,/YushinProcurementDemand\.applySupplyCancellation\(demandSnap\.data\(\)\|\|\{\},supply\)/);
+    assert.match(source,/tx\.set\(demandRef,demandDoc,\{merge:true\}\)/);
     assert.match(source,/incoming:Math\.max\(0,inv\.incoming-registeredIncoming\)/);
     assert.match(source,/incoming:Math\.max\(0,wh\.incoming-registeredIncoming\)/);
     assert.match(source,/type:'purchase_incoming_cancel'/);
