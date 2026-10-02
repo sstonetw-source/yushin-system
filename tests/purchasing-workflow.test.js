@@ -2289,3 +2289,38 @@ test('grouped procurement selection only builds compatible warehouse purchase or
     assert.match(source,/await autoFillPoSupplier\(items\)/);
     assert.match(source,/已合併 \$\{items\.length\} 筆待採購需求/);
 });
+
+
+test('receiving list surfaces quantity-aware delivery plan risk before the required date is missed', () => {
+    const start=app.indexOf('function receivingPlanRiskInfo');
+    const end=app.indexOf('\n\nfunction receivingPlanRiskHtml',start);
+    assert.ok(start>=0&&end>start);
+    const source=app.slice(start,end);
+    const riskInfo=vm.runInNewContext(`${source}\nreceivingPlanRiskInfo`,{
+        globalThis:{
+            YushinProcurementDemand:{
+                deliveryPlanRisk:(demand,supplies)=>({
+                    status:'at_risk',
+                    requiredDate:demand.scheduleDate,
+                    plannedDate:supplies[0].expectedDate,
+                    delayDays:2
+                })
+            }
+        },
+        procurementDemandForOrderItem:()=>({scheduleDate:'2026-10-10'})
+    });
+    const projected=riskInfo({}, {}, [{expectedDate:'2026-10-12'}]);
+    assert.equal(projected.status,'at_risk');
+    assert.equal(projected.delayDays,2);
+    assert.equal(projected.sortRank,0);
+
+    const renderStart=app.indexOf('function renderPurchasingReceivingWorkList');
+    const renderEnd=app.indexOf('\nwindow.renderPoList = function',renderStart);
+    const renderSource=app.slice(renderStart,renderEnd);
+    assert.match(renderSource,/receivingPlanRiskInfo\(order, item, evidenceSupplies\)/);
+    assert.match(renderSource,/receivingPlanRiskHtml\(planRisk\)/);
+    assert.match(renderSource,/receivingPlanRiskRank/);
+    assert.match(renderSource,/planRiskDiff/);
+    assert.match(renderSource,/planRiskCount/);
+    assert.match(renderSource,/預計晚於需求日/);
+});
