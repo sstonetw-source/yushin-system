@@ -7,6 +7,7 @@
     ORDERED:'ORDERED',
     PARTIAL_RECEIPT:'PARTIAL_RECEIPT',
     RECEIVED:'RECEIVED',
+    CLOSED:'CLOSED',
     CANCELLED:'CANCELLED'
   });
 
@@ -18,10 +19,11 @@
   function normalizeSupply(record={}){
     const qty=n(record.qty);
     const receivedQty=Math.min(qty,n(record.receivedQty));
-    const cancelled=String(record.status||'').toUpperCase()===STATUSES.CANCELLED;
-    const remainingQty=cancelled?0:Math.max(0,qty-receivedQty);
-    const status=cancelled
-      ? STATUSES.CANCELLED
+    const rawStatus=String(record.status||'').toUpperCase();
+    const terminalStatus=[STATUSES.CANCELLED,STATUSES.CLOSED].includes(rawStatus)?rawStatus:'';
+    const remainingQty=terminalStatus?0:Math.max(0,qty-receivedQty);
+    const status=terminalStatus
+      ? terminalStatus
       : qty>0&&receivedQty>=qty
         ? STATUSES.RECEIVED
         : receivedQty>0
@@ -39,7 +41,7 @@
 
   function applyReceipt(record={},requestedQty=0){
     const current=normalizeSupply(record);
-    if(current.status===STATUSES.CANCELLED){
+    if([STATUSES.CANCELLED,STATUSES.CLOSED].includes(current.status)){
       return {appliedQty:0,incomingReleaseQty:0,record:current};
     }
     const appliedQty=Math.min(n(requestedQty),current.remainingQty);
