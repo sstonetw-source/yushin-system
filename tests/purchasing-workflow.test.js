@@ -2204,3 +2204,33 @@ test('item-level PO schedule dates flow into supply records while manual header 
     assert.match(app,/expectedDate:item\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
     assert.match(app,/scheduleDate:item\.scheduleDate\|\|poRecord\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
 });
+
+
+test('procurement need date stays separate from supplier ETA', () => {
+    const demandStart=app.indexOf('function procurementDemandForOrderItem');
+    const demandEnd=app.indexOf('\nfunction procurementDemandRef',demandStart);
+    const demandSource=app.slice(demandStart,demandEnd);
+    assert.match(
+        demandSource,
+        /scheduleDate:item\.requiredByDate\|\|item\.scheduleDate\|\|order\.requiredByDate\|\|order\.expectedDate\|\|''/
+    );
+
+    const persistStart=app.indexOf('async function persistOrderProcurementDemands');
+    const persistEnd=app.indexOf('\nasync function syncOrderProcurementDemandLifecycle',persistStart);
+    const persistSource=app.slice(persistStart,persistEnd);
+    assert.match(
+        persistSource,
+        /scheduleDate:demand\.scheduleDate\|\|item\.requiredByDate\|\|item\.scheduleDate\|\|order\.requiredByDate\|\|order\.expectedDate\|\|''/
+    );
+
+    const poStart=app.indexOf('const scheduledPoItems=poItemsWithScheduleDates');
+    const poEnd=app.indexOf('\n        // 訂購單會同時改寫來源訂單與供應紀錄',poStart);
+    const poSource=app.slice(poStart,poEnd);
+    assert.match(
+        poSource,
+        /scheduleDate:String\(item\.demandScheduleDate\|\|item\.requiredByDate\|\|''\)\.trim\(\)/
+    );
+    assert.match(poSource,/scheduleDate:demandProjection\.scheduleDate[\s\S]*?sourceOrderForDemand\?\.expectedDate/);
+    assert.match(poSource,/expectedDate:item\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
+    assert.match(poSource,/scheduleDate:item\.scheduleDate\|\|poRecord\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
+});
