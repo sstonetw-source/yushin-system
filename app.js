@@ -8015,7 +8015,9 @@ window.saveSelfOrder = async function() {
             internalNo=`SO-${orderDate.replace(/-/g,'')}-${supplyRef.id.slice(0,6).toUpperCase()}`;
             const now=new Date().toISOString();
             const record={
-                type:'SALES_SELF_ORDER',internalNo,status:'ORDERED',orderId,itemId,
+                type:'SALES_SELF_ORDER',method:'SALES_SELF_ORDER',
+                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,
+                internalNo,status:'ORDERED',orderId,itemId,
                 ownerUid:order.ownerUid||currentUser?.uid||'',salesCode:order.salesCode||currentUserCode||'',
                 salesName:order.salesName||currentUserName||'',
                 customerName:order.customerName||'',productId:item.productId||'',productKey:inventoryProductKey(item),
@@ -9732,7 +9734,11 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             savedSupply = {
                 ...(existingSupply || {}),
                 id:supplyRef.id,
-                type:existingSupply?.type||'PURCHASING_MANUAL',
+                type:'PURCHASING_MANUAL',
+                method:'PURCHASING_MANUAL',
+                sourceType:'SALES_ORDER',
+                sourceId:orderId,
+                sourceItemId:itemId,
                 internalNo,
                 status:nextSupplyStatus,
                 orderId:existingSupply?.orderId||orderId,
@@ -12189,8 +12195,13 @@ window.printPurchaseOrder = async function() {
                 const supplyRef=db.collection('supplyOrders').doc(supplyId);
                 supplyOrderIds.push(supplyId);
                 const supplyRecord={
-                    // 客戶訂單採購與公司備貨是兩種不同供應來源；purchaseOrders 只保存文件快照。
-                    type:item.orderId?'PURCHASING_PO':'STOCK_REPLENISHMENT',
+                    // ERPNext-style：採購方式與需求來源分開。
+                    // 正式訂購單永遠是 PURCHASING_PO；是否為客戶需求或備庫由 sourceType 表示。
+                    type:'PURCHASING_PO',
+                    method:'PURCHASING_PO',
+                    sourceType:item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT',
+                    sourceId:item.orderId||'',
+                    sourceItemId:item.itemId||'',
                     internalNo:poNo,
                     purchaseDocumentId:poDocumentId,
                     purchaseDocumentNo:poNo,
