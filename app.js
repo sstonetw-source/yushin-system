@@ -7225,7 +7225,29 @@ window.setInventorySafetyStock=async function(inventoryId){
  const safetyStock=Number(raw);if(!Number.isFinite(safetyStock)||safetyStock<0){alert('安全庫存必須是 0 以上數字。');return;}
  try{await db.collection('inventory').doc(inventoryId).update({safetyStock,updatedAt:new Date().toISOString()});item.safetyStock=safetyStock;renderInventoryList();}catch(err){alert('安全庫存更新失敗：'+err.message);}
 };
-window.renderPendingInventoryItems=function(){const body=document.getElementById('pendingInventoryBody');const hint=document.getElementById('pendingInventoryEmptyHint');if(!body)return;const supplies=pendingSupplyCache.map(x=>{const remaining=Math.max(0,Number(x.qty||0)-Number(x.receivedQty||0));const label=x.purchaseDocumentNo||x.internalNo||'供應紀錄';const action=canReceiveInventoryCapability()?`<button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(label)}・入庫</button>`:'僅可查看';return `<tr><td data-th="貨號">${escapeHtml(x.itemCode||'')}</td><td data-th="品名">${escapeHtml(x.itemName||'')}</td><td data-th="廠牌">${escapeHtml(x.brand||'')}</td><td data-th="在途數量">${remaining}</td><td data-th="供應商">${escapeHtml(x.supplier||'')}</td><td data-th="狀態">${action}</td></tr>`;});body.innerHTML=supplies.join('');if(hint)hint.style.display=supplies.length?'none':'block';};
+window.renderPendingInventoryItems=function(){
+    const body=document.getElementById('pendingInventoryBody');
+    const hint=document.getElementById('pendingInventoryEmptyHint');
+    if(!body)return;
+    const supplies=pendingSupplyCache.map(x=>{
+        const progress=globalThis.YushinSupply?.receiptProgress(x);
+        if(!progress)return '';
+        const label=x.purchaseDocumentNo||x.internalNo||'供應紀錄';
+        const action=canReceiveInventoryCapability()
+            ? `<button type="button" class="btn-small btn-secondary" onclick="receiveSupplyOrder('${escapeAttr(x.id)}')">${escapeHtml(label)}・入庫</button>`
+            : '僅可查看';
+        return `<tr>
+            <td data-th="貨號">${escapeHtml(x.itemCode||'')}</td>
+            <td data-th="品名">${escapeHtml(x.itemName||'')}</td>
+            <td data-th="廠牌">${escapeHtml(x.brand||'')}</td>
+            <td data-th="在途數量">${progress.remainingQty}</td>
+            <td data-th="供應商">${escapeHtml(x.supplier||'')}</td>
+            <td data-th="狀態">${escapeHtml(progress.label)}<div class="inventory-row-actions">${action}</div></td>
+        </tr>`;
+    }).filter(Boolean);
+    body.innerHTML=supplies.join('');
+    if(hint)hint.style.display=supplies.length?'none':'block';
+};
 window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
 let inventoryAdjustmentRows = [];
 
@@ -9037,9 +9059,9 @@ function standaloneReceivingSupplyMetrics(filters = purchaseFilterContext()) {
         // 公司備庫沒有客戶訂單，不應被業務篩選隱藏；日期與廠牌篩選仍照常套用。
         if (supply.orderId) return;
         if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
-        const receiving = globalThis.YushinReceiving?.normalizeSupply(supply);
-        if (!receiving || !['ORDERED', 'PARTIAL_RECEIPT'].includes(receiving.status)) return;
-        const remaining = receiving.remainingQty;
+        const progress = globalThis.YushinSupply?.receiptProgress(supply);
+        if (!progress || !['ORDERED', 'PARTIAL_RECEIPT'].includes(progress.status)) return;
+        const remaining = progress.remainingQty;
         if (!(remaining > 0)) return;
         if (!purchaseLineMatchesFilters(supply.orderDate || supply.createdAt, '', supply.brand, {
             ...filters,
@@ -10356,9 +10378,10 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     // 例如庫存補貨，或客戶訂單取消後供應商仍照常出貨。這些不可從採購頁消失。
     supplyReceivingCache.forEach(supply => {
         if (representedSupplyIds.has(supply.id)) return;
-        const ordered = Math.max(0, Number(supply.qty || 0));
-        const received = Math.max(0, Number(supply.receivedQty || 0));
-        const remaining = Math.max(0, ordered - received);
+        const supplyProgress = globalThis.YushinSupply?.receiptProgress(supply);
+        if (!supplyProgress) return;
+        const ordered = supplyProgress.orderedQty;
+        const remaining = supplyProgress.remainingQty;
         if (remaining <= 0) return;
 
         const sourceOrder = receivingSourceOrderForItem(supply, orderById);
@@ -10401,7 +10424,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             <td data-th="客戶">${escapeHtml(customerLabel)}</td>
             <td data-th="負責業務">${escapeHtml(salesName)}</td>
             <td data-th="待到貨品項">${escapeHtml(supply.itemCode || supply.itemName || supply.id)} × ${ordered}</td>
-            <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${received > 0 ? `部分到貨 ${received}/${ordered}` : `待到貨 0/${ordered}`}</td>
+            <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${escapeHtml(supplyProgress.label)}</td>
             <td data-th="操作" class="no-print">${actionHtml}</td>`;
         fragment.appendChild(tr);
         standaloneSupplyCount++;
@@ -10433,7 +10456,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         return;
     }
     const head = document.getElementById('poListHeadRow');
-    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>建立天數</th><th>品項</th><th>總計金額</th><th>文件狀態</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>預計到貨</th><th>等待天數</th><th>品項</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th>';
     const tbody = document.getElementById('poListBody');
     const searchInput = document.getElementById('poListSearch');
     if (!tbody || !searchInput) return;
