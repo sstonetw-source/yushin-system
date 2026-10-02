@@ -1809,3 +1809,13 @@ test('purchase order snapshots supplier identity and email onto PO and supply re
     assert.match(supplySource,/supplierEmail:poRecord\.supplierEmail\|\|''/);
 });
 
+test('purchase history derives receipt status from batched supply records', () => {
+    const helperStart=app.indexOf('async function loadPurchaseHistorySupplyProjection');
+    const helperEnd=app.indexOf('\nfunction purchaseHistoryItemReceiptProgress',helperStart);
+    const helper=app.slice(helperStart,helperEnd);
+    assert.match(helper,/readDocumentsByIds\('supplyOrders', missing\)/);
+    assert.match(app,/YushinSupply\.receiptProgress\(supply\)/);
+    const loadStart=app.indexOf('async function loadPurchaseOrderPage');
+    const loadEnd=app.indexOf('\nwindow.loadMyPurchaseOrders',loadStart);
+    assert.match(app.slice(loadStart,loadEnd),/await loadPurchaseHistorySupplyProjection\(freshRecords, reset\)/);
+});
