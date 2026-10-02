@@ -1741,7 +1741,7 @@ function ensureProductMasterEditor() {
         <input type="hidden" id="pmEditCreatedAt">
         <input type="hidden" id="pmEditSource">
         <div class="form-grid" style="margin-top:14px;">
-          <div><label>廠牌 *</label><input id="pmEditBrand" type="text" list="quickProductBrandList" autocomplete="off"></div>
+          <div><label>廠牌 *</label><input id="pmEditBrand" type="text" list="pmBrandList" autocomplete="off"><datalist id="pmBrandList"></datalist></div>
           <div><label>原廠貨號 *</label><input id="pmEditCode" type="text" autocomplete="off"></div>
           <div><label>中文品名 *</label><input id="pmEditNameCn" type="text" autocomplete="off"></div>
           <div><label>英文品名</label><input id="pmEditNameEn" type="text" autocomplete="off"></div>
@@ -1788,6 +1788,9 @@ function populateProductMasterEditor(product = {}, options = {}) {
     const existingIdentity = !!(product.productId || product.id);
     const brandInput = document.getElementById('pmEditBrand');
     const codeInput = document.getElementById('pmEditCode');
+    const brandList = document.getElementById('pmBrandList');
+    if (brandList) brandList.innerHTML = getUnifiedBrandNames(false)
+        .map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
     brandInput.value = product.brandName || product.brand || options.brand || '';
     codeInput.value = product.manufacturerPartNo || product.sku || options.itemCode || '';
     brandInput.disabled = existingIdentity;
@@ -1857,6 +1860,10 @@ window.saveProductMasterEditor = async function() {
     const productLine = String(document.getElementById('pmEditProductLine').value || '').trim();
     if (!brand || !code || !productName) {
         alert('請至少完成廠牌、原廠貨號與中文品名。');
+        return;
+    }
+    if (!brandMasterEntryForName(brand)) {
+        alert('此廠牌不在啟用中的 Brand Master，請先到「廠牌管理」建立廠牌。');
         return;
     }
 
@@ -2208,23 +2215,31 @@ window.handleForecastBrandFilterChange = function() {
 };
 
 function populateForecastBrandDropdown(selectedBrand = '') {
-    const input = document.getElementById('forecastBrand');
-    const list = document.getElementById('forecastBrandList');
-    if (!input || !list) return;
+    const select = document.getElementById('forecastBrand');
+    if (!select) return;
 
     const selected = normalizeForecastBrand(selectedBrand);
     const entries = getUnifiedBrandEntries(false)
         .sort((x, y) => Number(y.isKeyBrand) - Number(x.isKeyBrand) || x.name.localeCompare(y.name, 'zh-Hant'));
 
-    list.innerHTML = '';
+    select.innerHTML = '<option value="">請選擇廠牌</option>';
     entries.forEach(entry => {
         const option = document.createElement('option');
         option.value = entry.name;
-        option.label = entry.isKeyBrand ? '重點代理' : '廠牌';
-        list.appendChild(option);
+        option.textContent = entry.name;
+        select.appendChild(option);
     });
 
-    input.value = selected || '';
+    if (selected && !entries.some(entry => normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(selected))) {
+        const legacy = document.createElement('option');
+        legacy.value = selected;
+        legacy.textContent = selected + '（舊資料）';
+        legacy.disabled = true;
+        legacy.selected = true;
+        select.appendChild(legacy);
+    } else {
+        select.value = selected || '';
+    }
 }
 
 window.loadForecasts = async function(reset = true) {
@@ -2561,6 +2576,10 @@ window.saveForecast = async function() {
 
     if (!brand) {
         alert('請選擇廠牌。');
+        return;
+    }
+    if (!brandMasterEntryForName(brand)) {
+        alert('此廠牌不在啟用中的 Brand Master，請先到「廠牌管理」建立廠牌。');
         return;
     }
 
@@ -3562,38 +3581,6 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
         });
     });
 
-    // 相容層：舊的「獨立統計廠牌」若還沒同步進 Brand Master，先保留可選，
-    // 管理員下一次儲存廠牌設定時會同步成正式 Brand Master。
-    keyStatisticBrands.forEach(configuredName => {
-        const name = String(configuredName || '').trim();
-        const key = normalizeBrandLookupKey(name);
-        if (!key || key === normalizeBrandLookupKey('維修')) return;
-        const configuredAliases = dedupeBrandsCaseInsensitive(keyStatisticBrandAliases[name] || []);
-        const existing = [...entries.values()].find(entry =>
-            normalizeBrandLookupKey(entry.name) === key
-            || (entry.aliases || []).some(alias => normalizeBrandLookupKey(alias) === key)
-            || configuredAliases.some(alias =>
-                normalizeBrandLookupKey(alias) === normalizeBrandLookupKey(entry.name)
-                || (entry.aliases || []).some(entryAlias => normalizeBrandLookupKey(entryAlias) === normalizeBrandLookupKey(alias))
-            )
-        );
-        if (existing) {
-            existing.isKeyBrand = true;
-            existing.aliases = dedupeBrandsCaseInsensitive([
-                ...(existing.aliases || []), name, ...configuredAliases
-            ]).filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(existing.name));
-            return;
-        }
-        entries.set(key, {
-            id: '',
-            name,
-            aliases: configuredAliases.filter(alias => normalizeBrandLookupKey(alias) !== key),
-            isKeyBrand: true,
-            companies: companyKeys.filter(company => includesBrandCaseInsensitive(companyAgencyBrands[company] || [], name)),
-            active: true
-        });
-    });
-
     if (includeMaintenance) entries.set(normalizeBrandLookupKey('維修'), {
         id: '', name: '維修', aliases: [], isKeyBrand: false, companies: [], active: true
     });
@@ -4066,17 +4053,39 @@ function isCompanyOtherOptionAllowed(company) {
 }
 
 function getCompanySelectableBrands(company) {
-    return getPriceListBrands(true);
+    return getUnifiedBrandNames(true);
 }
 
-// 估價單的廠牌只使用價目表中已有的廠牌；載入舊估價單時若廠牌已不在價目表，
-// 仍暫時顯示該舊值，避免一開啟舊單就把歷史資料洗掉。
+function quoteAllowedCompaniesForBrand(brand) {
+    const canonical = resolveBrandName(brand);
+    if (!canonical) return [];
+    return ['yushin', 'morningstar', 'MULTI-LIFE'].filter(company =>
+        includesBrandCaseInsensitive(companyAgencyBrands[company] || [], canonical)
+    );
+}
+
+function quoteBrandRestrictionText(brand) {
+    const companies = quoteAllowedCompaniesForBrand(brand);
+    if (!companies.length) return '';
+    const labels = companies.map(company =>
+        comparisonCompanyData[company]?.label || companyData[company]?.title || company
+    );
+    return '限' + labels.join('／');
+}
+
+// 估價單允許報帳／虛擬品項，因此廠牌可留白，也可用「其他」自由輸入。
+// 正式 Brand Master 廠牌若有限定公司，仍顯示在清單中，但錯誤公司抬頭下不可選。
 function quoteBrandOptions(selectedBrand) {
-    const selected = (selectedBrand || '').trim();
+    const selectedRaw = String(selectedBrand || '').trim();
+    const selected = resolveBrandName(selectedRaw);
     const brands = getCompanySelectableBrands(currentCompany);
-    const selectedOption = selected && !brands.includes(selected) ? '其他' : selected;
-    return ['<option value="">請選擇廠牌</option>']
-        .concat(brands.map(brand => `<option value="${escapeAttr(brand)}"${brand === selectedOption ? ' selected' : ''}>${escapeHtml(brand)}</option>`))
+    const selectedOption = selected && brands.includes(selected) ? selected : (selectedRaw ? '其他' : '');
+    return ['<option value="">未指定廠牌</option>']
+        .concat(brands.map(brand => {
+            const allowed = isCompanyBrandAllowed(currentCompany, brand);
+            const restriction = allowed ? '' : quoteBrandRestrictionText(brand);
+            return `<option value="${escapeAttr(brand)}"${brand === selectedOption ? ' selected' : ''}${allowed ? '' : ' disabled'}>${escapeHtml(brand)}${restriction ? '（' + escapeHtml(restriction) + '）' : ''}</option>`;
+        }))
         .concat(`<option value="其他"${selectedOption === '其他' ? ' selected' : ''}>其他（自行輸入）</option>`)
         .join('');
 }
@@ -4697,11 +4706,13 @@ function currentQuoteOutputValidation() {
     const rows = [...document.querySelectorAll('#quoteItems tr')];
     if (!rows.some(row => (row.querySelector('.item-cn')?.value || row.querySelector('.item-en')?.value || row.querySelector('.item-model')?.value).trim())) return '請至少填寫一個品項。';
     if (rows.some(row => row.querySelector('.item-brand')?.value === '其他' && !quoteRowBrandValue(row))) return '已選擇「其他」廠牌，請輸入廠牌名稱。';
-    const hasUnassignedBrand = rows.some(row => {
+    const hasRestrictedBrand = rows.some(row => {
+        const select = row.querySelector('.item-brand');
+        if (!select || select.value === '其他') return false;
         const brand = quoteRowBrandValue(row);
-        return brand && !isCompanyBrandAllowed(currentCompany, brand) && !isCompanyOtherOptionAllowed(currentCompany);
+        return brand && !isCompanyBrandAllowed(currentCompany, brand);
     });
-    if (hasUnassignedBrand) return '此估價單含有不屬於目前分公司代理的廠牌，請先更換廠牌或分公司。';
+    if (hasRestrictedBrand) return '此估價單含有目前公司抬頭不可使用的廠牌，請改用允許的公司抬頭或更換廠牌。';
     const total = parseFloat((document.getElementById('grandTotal').innerText || '').replace(/,/g, '')) || 0;
     if (total <= 0) return '含稅總金額必須大於 0。';
     return '';
@@ -13176,7 +13187,9 @@ window.editNewOrderDraftItem=function(index){
 };
 window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();saveOrderDraft();};
 window.addCurrentOrderItemToDraft=function(){
-    const item=currentOrderModalItem();if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
+    const item=currentOrderModalItem();
+    if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
+    if(item.productMasterMatched!==true){alert('正式訂單品項必須先對應 Product Master。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>(existing.productId&&item.productId&&existing.productId===item.productId)||(!existing.productId&&!item.productId&&normalizeHistoryItemCode(existing.itemCode)===normalizeHistoryItemCode(item.itemCode)));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
@@ -13435,6 +13448,7 @@ window.saveNewOrder = function() {
     const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])];
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
+    if(items.some(item=>item.productMasterMatched!==true)){alert('正式訂單的每個品項都必須對應 Product Master。請先選擇既有產品，或用「快速新增產品」建立基本資料。');return;}
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
     const assistedOwner = currentUserRole === 'purchaser'
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
@@ -14688,7 +14702,7 @@ window.saveCompanyAgencyBrands = async function() {
         await syncLegacyBrandSettingsToMaster();
         populateQuoteBrandDropdowns();
         if (typeof populateForecastBrandDropdown === 'function') populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
-        alert('已儲存各分公司的代理廠牌設定，並同步 Brand Master。');
+        alert('已儲存各廠牌的報價公司限制。未勾選任何公司的廠牌維持不限制。');
     } catch (err) {
         alert('儲存設定失敗：' + err.message);
     }
@@ -15357,8 +15371,13 @@ window.saveQuickProduct = async function() {
     const authorizationType = document.getElementById('quickProductAuthorization')?.value || 'NON_AUTHORIZED';
     const priceRaw = document.getElementById('quickProductPrice')?.value ?? '';
     const costRaw = document.getElementById('quickProductCost')?.value ?? '';
-    if (!brand || !code || !productName || String(priceRaw).trim() === '') {
-        alert('請填寫廠牌、貨號、品名與建議售價。');
+    if (!brand || !code || !productName) {
+        alert('請填寫廠牌、貨號與品名。');
+        return;
+    }
+    const brandEntry = brandMasterEntryForName(brand);
+    if (!brandEntry) {
+        alert('此廠牌不在啟用中的 Brand Master，請先到「廠牌管理」建立廠牌。');
         return;
     }
 
@@ -15367,7 +15386,6 @@ window.saveQuickProduct = async function() {
     if (!state) return;
     try {
     const normalizedPartNo = normalizeItemCodeLoose(code);
-    const brandEntry = brandMasterEntryForName(brand);
     const duplicateSnap = await firestoreReadWithTimeout(
         db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get(),
         'Product Master 重複貨號檢查'
@@ -17101,6 +17119,13 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
 }
 
 async function saveProductMasterBrand(imported, brand) {
+    if (!brandMasterEntryForName(brand)) {
+        if (currentUserRole === 'admin') {
+            await upsertBrandMaster(brand, { active:true });
+        } else {
+            throw new Error(`廠牌「${brand}」尚未建立 Brand Master，請先由管理員建立廠牌。`);
+        }
+    }
     const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand })));
     const syncResult = await syncImportedBrandToFormalProductMaster(normalizedItems, brand);
     normalizedItems.map(productItemWithoutCost).forEach(item => cacheProductLookupItem(item));

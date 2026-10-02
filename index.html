@@ -259,8 +259,9 @@
         >
 
         <label>廠牌 *</label>
-        <input id="forecastBrand" list="forecastBrandList" autocomplete="off" placeholder="選擇既有廠牌或自行輸入">
-        <datalist id="forecastBrandList"></datalist>
+        <select id="forecastBrand">
+            <option value="">請選擇廠牌</option>
+        </select>
 
         <label>產品／品項 *</label>
         <input
@@ -904,9 +905,11 @@
                 <div><label>中文品名</label><input type="text" id="orderItemName"></div>
                 <div><label>英文品名</label><input type="text" id="orderItemNameEn"></div>
                 <div><label>廠牌</label>
-                    <select id="orderBrand" onchange="onOrderBrandSelectChange()"><option value="">請選擇廠牌</option></select>
-                    <input type="text" id="orderBrandOther" placeholder="請輸入廠牌" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                    <select id="orderBrand" disabled aria-label="由 Product Master 自動帶入廠牌"><option value="">選擇產品後自動帶入</option></select>
+                    <input type="text" id="orderBrandOther" readonly style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                    <small style="display:block;color:#777;margin-top:4px;">正式訂單由 Product Master 自動帶入廠牌。</small>
                 </div>
+
                 <input type="hidden" id="orderProductLine" value="">
                 <div><label>規格</label><input type="text" id="orderSpec"></div>
                 <div><label>數量</label><input type="number" id="orderQty" value="1" oninput="calcOrderTotal()"></div>
@@ -1158,10 +1161,10 @@
                 <button style="margin-top:10px;" onclick="saveKeyStatisticBrands()">💾 儲存廠牌與統計設定</button>
             </div>
             <div class="panel" style="margin-top:16px;">
-                <strong>分公司代理廠牌設定</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">標記各分公司代理的主要廠牌，用於採購與代理產品判斷；一般估價單仍可選其他廠牌，不會因此新增到主要廠牌選單。</p>
+                <strong>報價公司限制</strong>
+                <p style="font-size:12px;color:#666;margin:6px 0;">只有少數簽在特定分公司的廠牌需要設定。某廠牌若完全未勾選任何公司＝三家公司都可報價；若有勾選＝只能使用勾選公司的估價單抬頭。受限制廠牌在其他公司的估價單仍會顯示，但不能選取。</p>
                 <div id="companyAgencyBrandSettings"></div>
-                <button style="margin-top:12px;" onclick="saveCompanyAgencyBrands()">💾 儲存分公司代理廠牌</button>
+                <button style="margin-top:12px;" onclick="saveCompanyAgencyBrands()">💾 儲存報價公司限制</button>
             </div>
 
             <div class="panel" style="margin-top:16px;">
@@ -1411,6 +1414,6 @@
     <script src="modules/supply-core.js?v=20261001-6"></script>
     <script src="modules/reservation-core.js?v=20260922-4"></script>
     <script src="modules/workflow-core.js?v=20260930-6"></script>
-    <script src="app.js?v=20261002-2"></script>
+    <script src="app.js?v=20261002-3"></script>
 </body>
 </html>

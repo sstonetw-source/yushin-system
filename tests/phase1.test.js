@@ -180,8 +180,8 @@ test('Brand Master drives the main brand list while statistics grouping remains 
         includesBrandCaseInsensitive:(values, name) => values.includes(name)
     });
     vm.runInContext(appSource.slice(start, end), context);
-    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Thermo', 'Unlisted Excel Brand']);
-    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Thermo', 'Unlisted Excel Brand', '維修']));
+    assert.deepEqual(Array.from(context.getUnifiedBrandEntries(false), item => item.name), ['Roche', 'Unlisted Excel Brand']);
+    assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Unlisted Excel Brand', '維修']));
     const classificationStart = appSource.indexOf('function statisticBrandForOrder(order)');
     const classificationEnd = appSource.indexOf('\n}\n', classificationStart) + 2;
     Object.assign(context, {
@@ -1129,10 +1129,12 @@ test('Brand Master compatibility removal is guarded by a read-only full-source a
     assert.doesNotMatch(audit, /\.set\(|\.update\(|\.delete\(|db\.batch\(/);
 });
 
-test('Forecast brand entry accepts known brands and free-input new brands', () => {
-    assert.match(appSource, /forecastBrandList/);
-    assert.match(appSource, /populateForecastBrandDropdown/);
-    assert.match(appSource, /input\.value = selected \|\| ''/);
+test('Forecast brand entry is limited to active Brand Master brands', () => {
+    assert.match(indexSource, /<select id="forecastBrand">/);
+    assert.doesNotMatch(indexSource, /id="forecastBrandList"/);
+    assert.match(appSource, /function populateForecastBrandDropdown/);
+    assert.match(appSource, /getUnifiedBrandEntries\(false\)/);
+    assert.match(appSource, /此廠牌不在啟用中的 Brand Master/);
 });
 
 test('new business records persist stable salesCode while keeping legacy owner fields', () => {
@@ -4432,4 +4434,31 @@ test('Brand Master drives brand dropdowns while statistics grouping stays indepe
     assert.match(indexSource, /廠牌與進銷存統計/);
     assert.match(indexSource, /其他廠牌（合併計算）/);
     assert.match(indexSource, /id="newStatisticBrandIndependent"/);
+});
+
+
+test('quote brands support virtual items and enforce company-specific restrictions', () => {
+    assert.match(appSource, /<option value="">未指定廠牌<\/option>/);
+    assert.match(appSource, /其他（自行輸入）/);
+    assert.match(appSource, /function quoteBrandRestrictionText/);
+    assert.match(appSource, /hasRestrictedBrand/);
+    assert.match(indexSource, /<strong>報價公司限制<\/strong>/);
+    assert.match(indexSource, /完全未勾選任何公司＝三家公司都可報價/);
+});
+
+test('formal orders require Product Master and derive brand from the product', () => {
+    assert.match(indexSource, /id="orderBrand" disabled/);
+    assert.match(indexSource, /正式訂單由 Product Master 自動帶入廠牌/);
+    assert.match(appSource, /正式訂單的每個品項都必須對應 Product Master/);
+    assert.match(appSource, /item\.productMasterMatched!==true/);
+});
+
+test('Product Master and Product Import use active Brand Master brands', () => {
+    assert.match(appSource, /id="pmBrandList"/);
+    assert.match(appSource, /brandMasterEntryForName\(brand\)/);
+    const start = appSource.indexOf('async function saveProductMasterBrand(imported, brand)');
+    const end = appSource.indexOf('\n}\n', start) + 2;
+    const source = appSource.slice(start, end);
+    assert.match(source, /upsertBrandMaster\(brand, \{ active:true \}\)/);
+    assert.match(source, /尚未建立 Brand Master/);
 });
