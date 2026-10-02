@@ -98,24 +98,6 @@
     return normalizeItem({ ...x, returnedQty: x.returnedQty + applied });
   }
 
-  function sourceStatus(item) {
-    const x = normalizeItem(item);
-    if (x.shortageQty <= 0) return '有庫存';
-    if (x.supplyOrderedQty > 0) return '已訂貨';
-    return '未訂貨';
-  }
-
-  function fulfillmentStatus(item) {
-    const x = normalizeItem(item);
-    const netDelivered = x.deliveredQty - x.returnedQty;
-    if (x.orderedQty > 0 && netDelivered >= x.orderedQty) return '全部送貨';
-    if (netDelivered > 0) return '部分送貨';
-    if (shippableQty(x) > 0) return '可出貨';
-    if (pendingDispatchQty(x) > 0) return '待打單';
-    if (x.supplyOrderedQty > 0 || x.shortageQty > 0) return '處理中';
-    return '處理中';
-  }
-
   return {
     normalizeItem,
     reserveFromAvailable,
@@ -125,8 +107,6 @@
     shippableQty,
     prepareDispatch,
     deliver,
-    returnDelivery,
-    sourceStatus,
-    fulfillmentStatus
+    returnDelivery
   };
 });
