@@ -8194,6 +8194,25 @@ window.saveSelfOrder = async function() {
             const supplyRef=db.collection('supplyOrders').doc();
             internalNo=`SO-${orderDate.replace(/-/g,'')}-${supplyRef.id.slice(0,6).toUpperCase()}`;
             const now=new Date().toISOString();
+            const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demand,qty);
+            if(demandOrderPlan.appliedQty!==qty)throw new Error('採購需求數量已變更，請重新整理後再試。');
+            const demandRef=procurementDemandRef(demand.demandId);
+            const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
+                productId:item.productId||'',
+                productKey:inventoryProductKey(item),
+                itemCode:item.itemCode||'',
+                itemName:item.itemName||'',
+                brand:item.brand||'',
+                fulfillmentType:item.fulfillmentType||'WAREHOUSE',
+                warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
+                ownerUid:order.ownerUid||currentUser?.uid||'',
+                salesCode:order.salesCode||currentUserCode||'',
+                salesName:order.salesName||currentUserName||'',
+                scheduleDate:item.scheduleDate||order.expectedDate||''
+            },{
+                createdAt:order.createdAt||now,
+                updatedAt:now
+            });
             const record={
                 type:'SALES_SELF_ORDER',method:'SALES_SELF_ORDER',
                 sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,demandId:demand.demandId||'',
@@ -8210,6 +8229,7 @@ window.saveSelfOrder = async function() {
             const validation=window.YushinSupply?.validate(record);
             if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
             tx.set(supplyRef,record);
+            if(demandRef)tx.set(demandRef,demandDoc,{merge:true});
             items[index]={...item,supplyOrderedQty:already+qty,selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate};
             savedOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
             tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(savedOrder),updatedAt:now});
@@ -9136,6 +9156,21 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
     });
     if (!demand) throw new Error('Procurement Demand core 未載入，無法計算採購需求。');
     return demand;
+}
+
+function procurementDemandRef(demandId) {
+    const id=String(demandId||'').trim();
+    return id ? db.collection('procurementDemands').doc(encodeURIComponent(id)) : null;
+}
+
+function procurementDemandDocument(demand={},context={},meta={}) {
+    if (!globalThis.YushinProcurementDemand?.demandDocument) {
+        throw new Error('Procurement Demand core 未載入，無法建立正式採購需求。');
+    }
+    return globalThis.YushinProcurementDemand.demandDocument({
+        ...demand,
+        ...context
+    },meta);
 }
 
 function remainingProcurementQty(order, item, dispatchOverride = null) {
