@@ -4863,3 +4863,38 @@ test('admin data health is a dedicated read-only check and validates Product Mas
     assert.match(appSource,/庫存策略異常/);
     assert.match(appSource,/安全庫存設定異常/);
 });
+
+test('cross-module navigation revalidates operational pages without requiring manual refresh', () => {
+    assert.match(appSource,/const previousTabId = document\.querySelector\('\.content-section\.active'\)\?\.id \|\| ''/);
+    assert.match(appSource,/const forceRefresh = !!previousTabId && previousTabId !== tabId/);
+    assert.match(appSource,/initializePageData\('forecast', \{ force: forceRefresh \}\)/);
+    assert.match(appSource,/initializePageData\('orders\.list', \{ force: forceRefresh \}\)/);
+    assert.match(appSource,/initializePageData\('orders\.po', \{ force: forceRefresh \}\)/);
+    assert.match(appSource,/initializePageData\('inventory', \{ force: forceRefresh \}\)/);
+});
+
+test('replenishment center derives projected stock from authoritative warehouse stocks', () => {
+    assert.match(appSource,/async function loadWarehouseStocksForInventoryPage\(items = inventoryCache\)/);
+    assert.match(appSource,/function inventoryAggregateStock\(item = \{\}\)[\s\S]*?warehouseStockTotals\(productKey\)/);
+    assert.match(appSource,/await loadWarehouseStocksForInventoryPage\(inventoryReplenishmentCache\)/);
+    assert.match(appSource,/projected:available\+incoming/);
+    assert.match(indexSource,/預計庫存 = 可用庫存 \+ 在途/);
+    assert.match(indexSource,/<th>在途<\/th><th>預計<\/th>/);
+});
+
+test('order progress modal exposes a complete timeline including order creation', () => {
+    assert.match(indexSource,/完整時間軸/);
+    assert.match(appSource,/action:'建立訂單'/);
+    assert.match(appSource,/const deliveryHistoryRecordIds=new Set/);
+    assert.match(appSource,/action:'送貨紀錄'/);
+    assert.match(appSource,/const returnHistoryRecordIds=new Set/);
+    assert.match(appSource,/action:'退貨紀錄'/);
+});
+
+test('admin data health also checks missing price, order lines and planning consistency', () => {
+    assert.match(appSource,/Product Master 缺少建議售價/);
+    assert.match(appSource,/訂單品項找不到 Product/);
+    assert.match(appSource,/庫存策略與安全庫存不一致/);
+    assert.match(indexSource,/缺少廠牌／貨號／品名／建議售價/);
+});
+
