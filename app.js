@@ -9196,7 +9196,7 @@ function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = pu
 
 function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel, includeLeadTime = false) {
     const leadTimeCell = row => includeLeadTime
-        ? `<td>${row.leadTimeCount ? Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '－'}</td>`
+        ? `<td>${row.leadTimeCount ? '完整到貨平均 '+Number(row.avgLeadTimeDays||0).toFixed(1)+' 天' : '完整到貨：－'}<div style="font-size:11px;color:#667584;margin-top:3px;">${row.openAgeCount ? '目前在途 '+row.openAgeCount+' 筆｜平均 '+Number(row.avgOpenAgeDays||0).toFixed(1)+' 天｜最久 '+Number(row.maxOpenAgeDays||0).toFixed(1)+' 天' : '目前無在途'}</div></td>`
         : '';
     return rows.length ? rows.map(row => `<tr>
         <td>${escapeHtml(row[labelKey] || '')}</td>
@@ -9234,7 +9234,9 @@ function renderPurchasingAnalytics() {
         ? `平均完整到貨 ${Number(totals.avgLeadTimeDays||0).toFixed(1)} 天（${totals.leadTimeCount} 筆品項）`
         : (totals.receivedAmount ? '已有部分到貨，尚無完整到貨交期樣本' : '期間內尚無已到貨金額');
     const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
-    if (incomingDetail) incomingDetail.textContent = totals.incomingAmount ? '已下單、尚未到貨' : '目前沒有在途金額';
+    if (incomingDetail) incomingDetail.textContent = totals.openAgeCount
+        ? `目前在途 ${totals.openAgeCount} 筆｜平均等待 ${Number(totals.avgOpenAgeDays||0).toFixed(1)} 天｜最久 ${Number(totals.maxOpenAgeDays||0).toFixed(1)} 天`
+        : '目前沒有在途採購';
     const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
     if (mixDetail) mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerOrderAmount)}`;
 
