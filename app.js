@@ -19603,9 +19603,16 @@ window.runSystemDataAudit = async function() {
         products.forEach(product => {
             const id = String(product.productId || product.id || '').trim();
             if (id) productIds.add(id);
-            const code = normalizeItemCodeLoose(product.manufacturerPartNo || product.itemCode || product.sku || '');
+            const brand = String(product.brandName || product.brand || '').trim();
+            const rawCode = String(product.manufacturerPartNo || product.itemCode || product.sku || '').trim();
+            const code = normalizeItemCodeLoose(rawCode);
+            const name = String(product.productName || product.nameCn || product.nameEn || '').trim();
+            const label = [brand || '未設定廠牌', rawCode || id || '未設定貨號'].join(' / ');
+            if (!brand) issues.push({ type:'Product Master 缺少廠牌', detail:label });
+            if (!rawCode) issues.push({ type:'Product Master 缺少貨號', detail:label });
+            if (!name) issues.push({ type:'Product Master 缺少品名', detail:label });
             if (code) productCodes.add(code);
-            const duplicateKey = normalizeBrandLookupKey(product.brandName || product.brand || '') + '|' + code;
+            const duplicateKey = normalizeBrandLookupKey(brand) + '|' + code;
             if (code) {
                 const list = duplicateProducts.get(duplicateKey) || [];
                 list.push(product);
@@ -19712,6 +19719,13 @@ window.runSystemDataAudit = async function() {
             // inventory 只保留產品索引／總覽快取；實際數量以 warehouseStocks 為準。
             // 健康檢查不可再把 aggregate cache 的 onHand / reserved 當成正式庫存錯誤。
             if (!knownProduct(item)) issues.push({ type:'庫存索引找不到 Product', detail:`${item.itemCode || item.id}` });
+            const policy=String(item.stockPolicy||'ORDER_ONLY').toUpperCase();
+            const safetyStock=Number(item.safetyStock||0);
+            if(!Object.values(INVENTORY_STOCK_POLICIES).includes(policy)){
+                issues.push({ type:'庫存策略異常', detail:`${item.itemCode || item.id}｜${policy || '未設定'}` });
+            }else if(policy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK && !(safetyStock>0)){
+                issues.push({ type:'安全庫存設定異常', detail:`${item.itemCode || item.id}｜安全庫存 ${safetyStock}` });
+            }
         });
 
         warehouseStocks.forEach(stock => {

@@ -4850,3 +4850,16 @@ test('inventory projected stock and replenishment center avoid duplicate repleni
     assert.match(indexSource,/<th>預計庫存<\/th>/);
     assert.match(indexSource,/需補貨（預計庫存不足）/);
 });
+
+
+test('admin data health is a dedicated read-only check and validates Product Master plus inventory policy', () => {
+    assert.match(indexSource,/id="admin-sub-health"/);
+    assert.match(indexSource,/id="admin-health"/);
+    assert.match(indexSource,/執行資料健康檢查/);
+    assert.equal((indexSource.match(/id="systemDataAuditBtn"/g)||[]).length,1);
+    assert.match(appSource,/Product Master 缺少廠牌/);
+    assert.match(appSource,/Product Master 缺少貨號/);
+    assert.match(appSource,/Product Master 缺少品名/);
+    assert.match(appSource,/庫存策略異常/);
+    assert.match(appSource,/安全庫存設定異常/);
+});

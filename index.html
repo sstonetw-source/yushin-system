@@ -1285,6 +1285,7 @@
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
             <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-warehouses" onclick="switchAdminTab('warehouses', this)">🏬 倉庫管理</div>
+            <div class="sub-tab" id="admin-sub-health" onclick="switchAdminTab('health', this)">資料健康</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
             <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>
             <span id="systemVersionLabel" class="no-print" style="margin-left:auto;align-self:center;font-size:11px;color:#777;white-space:nowrap;"></span>
@@ -1431,6 +1432,25 @@
             </div>
         </div>
 
+        <!-- 資料健康：管理員手動執行，避免每次登入掃描完整主檔與歷史資料 -->
+        <div id="admin-health" class="admin-panel" style="display:none;">
+            <div class="panel">
+                <h3 style="margin-top:0;">資料健康</h3>
+                <p style="font-size:13px;color:#555;line-height:1.7;">
+                    手動檢查 Product Master 必填資料、重複產品、人員角色、訂單與採購關聯、庫存策略、分倉與庫存占用。
+                    這是唯讀檢查，不會修改或刪除資料；因為會讀取多個集合，不會在登入時自動執行。
+                </p>
+                <div class="toolbar no-print" style="display:block;margin-top:12px;">
+                    <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">執行資料健康檢查</button>
+                    <span style="display:block;margin-top:7px;font-size:12px;color:#666;">
+                        會列出 Product Master 缺少廠牌／貨號／品名、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
+                    </span>
+                    <div id="systemDataAuditStatus" style="margin-top:10px;font-size:13px;white-space:pre-line;"></div>
+                    <div id="systemDataAuditResults" style="margin-top:10px;"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- 資料庫管理：備份、估算雲端資料量與清理舊資料 -->
         <div id="admin-storage" class="admin-panel" style="display:none;">
             <h4 style="margin-top:0;">資料庫備份</h4>
@@ -1470,16 +1490,6 @@
                 <span style="display:block;margin-top:8px;font-size:12px;color:#666;">
                     僅真正管理員可執行。保留估價單；清除 Forecast、訂單、採購、庫存交易／占用／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、Product／Supplier／Brand／Customer Master、倉庫與系統設定。估價單中指向已清除資料的連結將無法開啟，原成交狀態不變。
                 </span>
-            </div>
-
-            <h4 style="margin-top:28px;">系統資料檢查</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">檢查系統資料</button>
-                <span style="font-size:12px;color:#666;">
-                    唯讀檢查 Product Master、人員、訂單、採購、庫存、分倉與庫存占用的關聯；只列出異常，不會修改或刪除正式資料。
-                </span>
-                <div id="systemDataAuditStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-                <div id="systemDataAuditResults" style="margin-top:10px;"></div>
             </div>
 
             <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
@@ -1576,6 +1586,6 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261002-50"></script>
+    <script src="app.js?v=20261002-51"></script>
 </body>
 </html>
