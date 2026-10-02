@@ -1913,3 +1913,14 @@ test('purchase history separates PO document status from receipt progress', () =
     assert.match(source,/data-th="文件狀態"/);
     assert.match(source,/data-th="到貨進度"/);
 });
+
+test('purchasing analytics shows procurement mix instead of only raw totals', () => {
+    const start=app.indexOf('function renderPurchasingAnalytics()');
+    const end=app.indexOf('\nwindow.loadPurchasingAnalytics',start);
+    const source=app.slice(start,end);
+    assert.ok(start>=0&&end>start);
+    assert.match(source,/stockShare = totals\.orderedAmount > 0/);
+    assert.match(source,/totals\.stockAmount \/ totals\.orderedAmount/);
+    assert.match(source,/客戶訂單採購/);
+    assert.match(source,/備庫占比/);
+});
