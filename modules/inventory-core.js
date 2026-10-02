@@ -20,20 +20,22 @@
     return Number.isFinite(time)?time:Number.MAX_SAFE_INTEGER;
   }
 
-  function sortLotsForIssue(lots=[]){
+  function sortLotsForIssue(lots=[],expiryManaged=true){
     return [...lots].filter(lot=>n(lot.remainingQty??lot.qty)>0).sort((a,b)=>{
-      const ae=String(a.expiryDate||''),be=String(b.expiryDate||'');
-      if(ae&&be&&ae!==be)return ae.localeCompare(be);
-      if(ae&&!be)return -1;
-      if(!ae&&be)return 1;
+      if(expiryManaged){
+        const ae=String(a.expiryDate||''),be=String(b.expiryDate||'');
+        if(ae&&be&&ae!==be)return ae.localeCompare(be);
+        if(ae&&!be)return -1;
+        if(!ae&&be)return 1;
+      }
       return lotTime(a.receivedAt)-lotTime(b.receivedAt);
     });
   }
 
-  function allocateLots(lots=[],qty=0){
+  function allocateLots(lots=[],qty=0,expiryManaged=true){
     let remaining=n(qty);
     const allocations=[];
-    for(const lot of sortLotsForIssue(lots)){
+    for(const lot of sortLotsForIssue(lots,expiryManaged)){
       if(remaining<=0)break;
       const available=n(lot.remainingQty??lot.qty);
       const take=Math.min(available,remaining);
