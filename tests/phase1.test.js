@@ -5431,3 +5431,13 @@ test('equipment and inventory editors show a modal before background support rea
     assert.ok(transferSource.indexOf("overlay?.classList.add('active')") < transferSource.indexOf('await loadWarehouseMaster()'));
     assert.match(transferSource, /正在讀取各倉庫庫存/);
 });
+
+
+test('safety-stock purchase gives immediate button feedback while support data loads', () => {
+    const start = appSource.indexOf('window.openInventoryReplenishment = async function');
+    const end = appSource.indexOf('\n};', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /beginActionButton\(button, '準備訂購單…'\)/);
+    assert.match(source, /await loadSupplierWarehouseMasters\(\)/);
+    assert.match(source, /finally \{\s*endActionButton\(button, buttonState\);/);
+});
