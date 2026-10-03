@@ -2482,7 +2482,10 @@ test('order and purchasing initialization avoid duplicate brand-driven renders',
     const purchaseSource=source.slice(purchaseStart,purchaseEnd);
     assert.match(purchaseSource,/switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
     assert.match(purchaseSource,/Promise\.allSettled\(\[ensureSalesListLoaded\(\), ensureBrandSettingsLoaded\(\)\]\)/);
-    assert.equal((purchaseSource.match(/renderPurchasingView\(\)/g) || []).length, 0);
+    // 首次進採購頁會在 active supplyOrders 載入完成後重畫一次工作卡，
+    // 讓「待到貨」數字不必等使用者點進待到貨頁才正確。
+    assert.equal((purchaseSource.match(/renderPurchasingView\(\)/g) || []).length, 1);
+    assert.match(purchaseSource,/loadActiveReceivingSupplyCache\(true\)[\s\S]*?renderPurchasingView\(\)/);
     assert.equal((purchaseSource.match(/populatePurchasingFilters\(\)/g) || []).length, 1);
     assert.doesNotMatch(purchaseSource,/loadBrandMaster\(\)\.then/);
 });
@@ -3903,7 +3906,8 @@ test('deferred receiving load merges source orders only after parallel reads fin
     const queueStart=appSource.indexOf('function loadPurchasingReceivingQueue');
     const queueEnd=appSource.indexOf('\nlet purchasingFilterOptionsSignature',queueStart);
     const queueSource=appSource.slice(queueStart,queueEnd);
-    assert.match(queueSource,/loadPurchaseOrderPage\(reset, \{ deferRender:true \}\)/);
+    assert.match(queueSource,/loadActiveReceivingSupplyCache\(reset\)/);
+    assert.doesNotMatch(queueSource,/loadPurchaseOrderPage\(reset/);
     assert.match(queueSource,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
     assert.match(queueSource,/renderPurchasingView\(\)/);
 });
