@@ -197,9 +197,11 @@ test('canonical brand identity continues through purchasing supply and inventory
     assert.match(appSource, /findProductByCode\(requestedCode, preferredBrand\)/);
 });
 
-test('inventory product lookup debounces server search', () => {
-    assert.match(indexSource, /id="businessProductSearch"[^>]+oninput="queueBusinessProductSearch\(\)"/);
-    assert.match(appSource, /businessProductSearchTimer=scheduleListSearch\(businessProductSearchTimer,\(\)=>searchBusinessProducts\(\)\)/);
+test('inventory uses one debounced search for inventory and Product Master results', () => {
+    assert.match(indexSource, /id="inventorySearch"[^>]+oninput="scheduleInventorySearch\(\)"/);
+    assert.doesNotMatch(indexSource, /id="businessProductSearch"/);
+    assert.match(appSource, /scheduleListSearch\(inventorySearchTimer,\(\)=>runInventoryUnifiedSearch\(\)\)/);
+    assert.match(appSource, /Promise\.allSettled\(\[runInventorySearch\(\),window\.searchBusinessProducts\(keyword\)\]\)/);
     assert.match(appSource, /db\.collection\('products'\).*limit\(25\)/s);
 });
 
@@ -376,7 +378,8 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     assert.match(appSource,/inventoryCache\.find\(x=>x\.id===inventoryId\)\|\|inventorySearchResults\.find\(x=>x\.id===inventoryId\)/);
     assert.match(appSource,/stockPolicy:next/);
     assert.match(appSource,/function canManageInventoryStockPolicy\(\)[\s\S]*?currentUserRole === 'admin' \|\| currentUserRole === 'purchaser'/);
-    assert.match(appSource,/if\(!canManageInventoryStockPolicy\(\)\)return escapeHtml\(inventoryStockPolicyLabel\(policy\)\)/);
+    assert.match(appSource,/function inventoryStockPolicyBadge\(item = \{\}\)/);
+    assert.match(indexSource,/id="inventoryPolicyOverlay"/);
     assert.match(appSource,/只有管理員或採購可以調整庫存策略/);
     assert.match(appSource,/只有管理員或採購可以設定安全庫存/);
 
@@ -389,7 +392,8 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     const renderStart=appSource.indexOf('window.renderInventoryList=function()');
     const renderEnd=appSource.indexOf('\nwindow.openInventoryReplenishment',renderStart);
     const renderSource=appSource.slice(renderStart,renderEnd);
-    assert.match(renderSource,/inventoryStockPolicyControl\(x\)/);
+    assert.match(renderSource,/inventoryStockPolicyBadge\(x\)/);
+    assert.match(renderSource,/openInventoryPolicySettings/);
     assert.match(renderSource,/policyFilter && stockPolicy!==policyFilter/);
     assert.match(renderSource,/const plan=inventoryReplenishmentPlan\(x,n\)/);
     assert.match(renderSource,/if\(stateFilter==='low' && !plan\.needsReplenishment\)return/);
@@ -5210,4 +5214,42 @@ test('ignored pending products can clear visible history without reactivating re
     assert.match(appSource,/window\.clearIgnoredPendingProducts = async function/);
     assert.match(appSource,/archived:true,clearedAt:now|archived:true, clearedAt:now/);
     assert.match(appSource,/pendingProductMasterIgnoredItems\.filter\(item => item\.archived !== true\)/);
+});
+
+test('inventory mobile cards default to summary and hide unused details', () => {
+    assert.match(appSource,/inventory-mobile-summary/);
+    assert.match(appSource,/inventory-details-toggle/);
+    assert.match(appSource,/inventory-no-detail/);
+    assert.match(appSource,/productMaster\?\.lotTracked\|\|productMaster\?\.expiryTracked/);
+    assert.match(cssSource,/#inventoryListBody td\.inventory-detail-field/);
+    assert.match(cssSource,/tr\.inventory-expanded td\.inventory-detail-field:not\(\.inventory-no-detail\)/);
+});
+
+test('replenishment center collapses its table when no item needs replenishment', () => {
+    assert.match(indexSource,/id="inventoryReplenishmentDetails"/);
+    assert.match(appSource,/details\.hidden=empty/);
+    assert.match(appSource,/✓ 目前沒有需要補貨的品項/);
+    assert.match(cssSource,/\.inventory-replenishment-details\[hidden\]/);
+});
+
+test('inventory actions use one adjustment entry point and returns keep their original source', () => {
+    const adjustmentStart=indexSource.indexOf('id="inventoryAdjustmentOverlay"');
+    const adjustmentEnd=indexSource.indexOf('id="inventoryPolicyOverlay"',adjustmentStart);
+    const adjustmentSource=indexSource.slice(adjustmentStart,adjustmentEnd);
+    assert.doesNotMatch(adjustmentSource,/value="return"/);
+    assert.match(adjustmentSource,/客戶退貨請從原訂單操作/);
+    const renderStart=appSource.indexOf('window.renderInventoryList=function()');
+    const renderEnd=appSource.indexOf('\nwindow.openInventoryReplenishment',renderStart);
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/>庫存異動</);
+    assert.doesNotMatch(renderSource,/>退貨</);
+    assert.doesNotMatch(renderSource,/>報廢</);
+    assert.doesNotMatch(renderSource,/>分倉</);
+});
+
+test('inventory policy settings clear stale safety stock outside safety-stock mode', () => {
+    assert.match(indexSource,/id="inventoryPolicyOverlay"/);
+    assert.match(appSource,/function saveInventoryPlanningSettings/);
+    assert.match(appSource,/next===INVENTORY_STOCK_POLICIES\.SAFETY_STOCK\?Number\(safetyStock\|\|0\):0/);
+    assert.match(appSource,/safetyStock:normalizedSafety/);
 });
