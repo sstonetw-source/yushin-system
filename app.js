@@ -8175,91 +8175,109 @@ window.renderInventoryList=function(){
 window.toggleInventoryRowDetails=function(button){const row=button?.closest?.('tr');if(!row)return;const expanded=row.classList.toggle('inventory-expanded');button.textContent=expanded?'收合詳細':'詳細資料';};
 window.openInventoryReplenishment = async function(inventoryId) {
     if (!canEditPage('orders.po')) { alert('您沒有採購權限。'); return; }
-    const item = inventoryCache.find(x => x.id === inventoryId)
-        || inventorySearchResults.find(x => x.id === inventoryId)
-        || inventoryReplenishmentCache.find(x => x.id === inventoryId);
-    if (!item) { alert('找不到庫存品項。'); return; }
-    if (inventoryStockPolicy(item) !== INVENTORY_STOCK_POLICIES.SAFETY_STOCK) {
-        alert('這個品項目前不是「安全庫存」策略，不會建立主動補庫採購。');
-        return;
-    }
-    await loadSupplierWarehouseMasters();
-    const stock = inventoryAggregateStock(item);
-    const safetyStock = Math.max(0, Number(item.safetyStock || 0));
-    if (!(safetyStock > 0)) {
-        alert('請先設定安全庫存，再建立補庫採購。');
-        return;
-    }
-    const demand = globalThis.YushinProcurementDemand?.fromStockReplenishment({
-        sourceId:item.id || item.productKey || item.productId || '',
-        safetyStock,
-        available:stock.available,
-        incoming:stock.incoming
-    });
-    if (!demand) throw new Error('Procurement Demand core 未載入，無法計算補庫需求。');
-    const projectedAvailable = stock.available + stock.incoming;
-    if (!(demand.remainingToOrderQty > 0)) {
-        alert(`目前可用 ${stock.available}、在途 ${stock.incoming}；既有在途到貨後已可達安全庫存 ${safetyStock}，不需重複建立補庫採購。`);
-        return;
-    }
-    const suggestedQty = demand.remainingToOrderQty;
+    const button = actionButtonFromEventOrSelector();
+    const buttonState = beginActionButton(button, '準備訂購單…');
+    if (button && !buttonState) return;
 
-    // ERP Material Request first: persist the replenishment need before opening a PO.
-    // Closing the PO modal must never make a real replenishment requirement disappear.
-    const demandRef=procurementDemandRef(demand.demandId);
-    if(demandRef){
-        const now=new Date().toISOString();
-        const demandDoc=procurementDemandDocument(demand,{
-            productId:item.productId||item.productKey||'',
-            productKey:item.productKey||item.productId||'',
-            itemCode:item.itemCode||'',
-            itemName:item.itemName||'',
-            brand:item.brand||'',
+    try {
+        const item = inventoryCache.find(x => x.id === inventoryId)
+            || inventorySearchResults.find(x => x.id === inventoryId)
+            || inventoryReplenishmentCache.find(x => x.id === inventoryId);
+        if (!item) { alert('找不到庫存品項。'); return; }
+        if (inventoryStockPolicy(item) !== INVENTORY_STOCK_POLICIES.SAFETY_STOCK) {
+            alert('這個品項目前不是「安全庫存」策略，不會建立主動補庫採購。');
+            return;
+        }
+
+        await loadSupplierWarehouseMasters();
+        const stock = inventoryAggregateStock(item);
+        const safetyStock = Math.max(0, Number(item.safetyStock || 0));
+        if (!(safetyStock > 0)) {
+            alert('請先設定安全庫存，再建立補庫採購。');
+            return;
+        }
+
+        const demand = globalThis.YushinProcurementDemand?.fromStockReplenishment({
+            sourceId:item.id || item.productKey || item.productId || '',
+            safetyStock,
+            available:stock.available,
+            incoming:stock.incoming
+        });
+        if (!demand) throw new Error('Procurement Demand core 未載入，無法計算補庫需求。');
+        const projectedAvailable = stock.available + stock.incoming;
+        if (!(demand.remainingToOrderQty > 0)) {
+            alert(`目前可用 ${stock.available}、在途 ${stock.incoming}；既有在途到貨後已可達安全庫存 ${safetyStock}，不需重複建立補庫採購。`);
+            return;
+        }
+        const suggestedQty = demand.remainingToOrderQty;
+
+        // 先保存補貨需求，再開訂購單；等待期間按鈕會立即顯示「準備訂購單…」。
+        const demandRef = procurementDemandRef(demand.demandId);
+        if (demandRef) {
+            const now = new Date().toISOString();
+            const demandDoc = procurementDemandDocument(demand, {
+                productId:item.productId || item.productKey || '',
+                productKey:item.productKey || item.productId || '',
+                itemCode:item.itemCode || '',
+                itemName:item.itemName || '',
+                brand:item.brand || '',
+                fulfillmentType:'WAREHOUSE',
+                warehouseId:defaultWarehouse()?.id || ''
+            }, { createdAt:item.createdAt || now, updatedAt:now });
+            await demandRef.set(demandDoc, { merge:true });
+            invalidateProcurementDemandQueue();
+        }
+
+        const match = await findProductByCode(item.itemCode || '');
+        let unitPrice = 0;
+        if (match) {
+            const secureCost = await loadVisibleProductCost(match);
+            unitPrice = secureCost !== null && Number.isFinite(secureCost)
+                ? secureCost
+                : Number(match.cost || 0);
+        }
+
+        poDirectStockMode = true;
+        poEditingId = null;
+        poAllItems = [];
+        poItems = [{
+            orderId:'',
+            sourceType:'STOCK_REPLENISHMENT',
+            sourceId:demand.sourceId || item.id || item.productKey || item.productId || '',
+            demandId:demand.demandId || '',
+            demandRequestedQty:demand.requestedQty,
+            demandOrderedQty:demand.orderedQty,
+            demandReceivedQty:demand.receivedQty,
+            itemName:item.itemName || match?.nameCn || match?.nameEn || '',
+            itemCode:item.itemCode || match?.model || '',
+            productId:item.productId || item.productKey || match?.productId || '',
+            brand:resolveBrandName(item.brand || match?.brand || ''),
+            qty:suggestedQty,
+            unitPrice,
+            supplier:match?.supplier || '',
+            productLine:match?.productLine || '',
             fulfillmentType:'WAREHOUSE',
-            warehouseId:defaultWarehouse()?.id||''
-        },{createdAt:item.createdAt||now,updatedAt:now});
-        await demandRef.set(demandDoc,{merge:true});
-        invalidateProcurementDemandQueue();
-    }
+            warehouseId:defaultWarehouse()?.id || ''
+        }];
+        poAllItems = poItems;
+        populatePoVendorSuggestions();
+        document.getElementById('poVendorName').value = '';
+        document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
+        document.getElementById('poDate').value = localDateString();
+        clearPoExpectedDate();
+        await autoFillPoSupplier(poItems);
+        switchPoCompany(currentCompany || 'yushin', null, true);
+        generatePoNo();
+        updatePoModeUI();
 
-    const match = await findProductByCode(item.itemCode || '');
-    let unitPrice = 0;
-    if (match) {
-        const secureCost = await loadVisibleProductCost(match);
-        unitPrice = secureCost !== null && Number.isFinite(secureCost)
-            ? secureCost
-            : Number(match.cost || 0);
+        const hint = document.getElementById('poModeHint');
+        if (hint) hint.textContent = `安全庫存補貨：${globalThis.YushinProcurementDemand.statusLabel(demand.status)}。目前可用 ${stock.available}，在途 ${stock.incoming}，到貨後預估可用 ${projectedAvailable}，安全庫存 ${safetyStock}，本次仍需採購 ${suggestedQty}。`;
+        document.getElementById('poModalOverlay').classList.add('active');
+    } catch (err) {
+        alert('準備安全庫存訂購單失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, buttonState);
     }
-    poDirectStockMode = true;
-    poEditingId = null;
-    poAllItems = [];
-    poItems = [{
-        orderId:'',
-        sourceType:'STOCK_REPLENISHMENT',
-        sourceId:demand.sourceId || item.id || item.productKey || item.productId || '',
-        demandId:demand.demandId || '',
-        demandRequestedQty:demand.requestedQty,
-        demandOrderedQty:demand.orderedQty,
-        demandReceivedQty:demand.receivedQty,
-        itemName:item.itemName || match?.nameCn || match?.nameEn || '',
-        itemCode:item.itemCode || match?.model || '', productId:item.productId || item.productKey || match?.productId || '',
-        brand:resolveBrandName(item.brand || match?.brand || ''), qty:suggestedQty,
-        unitPrice, supplier:match?.supplier || '', productLine:match?.productLine || '',
-        fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
-    }];
-    poAllItems = poItems;
-    populatePoVendorSuggestions();
-    document.getElementById('poVendorName').value = '';
-    document.getElementById('poBuyerName').innerText = currentUserName || (currentUser ? currentUser.email : '');
-    document.getElementById('poDate').value = localDateString();
-    clearPoExpectedDate();
-    await autoFillPoSupplier(poItems);
-    switchPoCompany(currentCompany || 'yushin', null, true);
-    generatePoNo();
-    updatePoModeUI();
-    const hint = document.getElementById('poModeHint');
-    if (hint) hint.textContent = `安全庫存補貨：${globalThis.YushinProcurementDemand.statusLabel(demand.status)}。目前可用 ${stock.available}，在途 ${stock.incoming}，到貨後預估可用 ${projectedAvailable}，安全庫存 ${safetyStock}，本次仍需採購 ${suggestedQty}。`;
-    document.getElementById('poModalOverlay').classList.add('active');
 };
 
 function inventoryItemById(inventoryId) {return inventoryCache.find(x=>x.id===inventoryId)||inventorySearchResults.find(x=>x.id===inventoryId)||inventoryReplenishmentCache.find(x=>x.id===inventoryId)||null;}
