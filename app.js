@@ -6738,7 +6738,8 @@ async function addDocumentPagesToPdf(pdf, pages, options = {}) {
     const {
         scale = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 1.15 : 1.65,
         onProgress = null,
-        addPageBeforeFirst = false
+        addPageBeforeFirst = false,
+        isolateRoot = null
     } = options;
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const jpegQuality = isMobile ? 0.88 : 0.92;
@@ -6753,6 +6754,8 @@ async function addDocumentPagesToPdf(pdf, pages, options = {}) {
             logging:false,
             useCORS:true,
             allowTaint:false,
+            ignoreElements: element => !!isolateRoot && element.parentElement === document.body && element !== isolateRoot,
+            imageTimeout:5000,
             width:Math.ceil(page.scrollWidth),
             height:Math.ceil(page.scrollHeight),
             windowWidth:794
@@ -12728,6 +12731,7 @@ window.reprintPurchaseOrder = async function(poId) {
     document.getElementById('poDate').value = po.poDate || '';
     const poExpectedDateInput=document.getElementById('poExpectedDate');
     if(poExpectedDateInput)poExpectedDateInput.value=po.expectedDate||po.scheduleDate||'';
+    syncPoLeadWeeks();
     document.getElementById('poNo').innerText = po.poNo || '';
 
     renderPoItemsTable();
@@ -14130,6 +14134,8 @@ window.updateDirectPoText = function(idx, field, value) {
 };
 
 function updatePoModeUI() {
+    const leadWeeks=document.getElementById('poLeadWeeks');
+    if(leadWeeks)leadWeeks.disabled=!!poEditingId;
     const addBtn = document.getElementById('poAddStockItemBtn');
     const hint = document.getElementById('poModeHint');
     const brandList = document.getElementById('poBrandList');
@@ -14165,10 +14171,13 @@ function updatePoModeUI() {
 
 
 function clearPoExpectedDate() {
+    const weeks=document.getElementById('poLeadWeeks');
+    if(weeks)weeks.value='';
     const input=document.getElementById('poExpectedDate');
     if(!input)return;
     input.value='';
     delete input.dataset.expectedDateSource;
+    syncPoLeadWeeks();
 }
 
 window.markPoExpectedDateManual = function() {
@@ -14179,7 +14188,10 @@ window.markPoExpectedDateManual = function() {
 window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = '') {
     const input=document.getElementById('poExpectedDate');
     if(!input || poEditingId)return input?.value||'';
-    if(input.dataset.expectedDateSource==='manual')return input.value||'';
+    if(input.dataset.expectedDateSource==='manual') {
+        if(document.getElementById('poLeadWeeks')?.value!=='')window.setPoLeadWeeks();
+        return input.value||'';
+    }
     if(!globalThis.YushinSupplier?.purchaseExpectedDate)return '';
 
     const vendorName=String(document.getElementById('poVendorName')?.value||'').trim();
@@ -14202,7 +14214,35 @@ window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = 
         input.value='';
         delete input.dataset.expectedDateSource;
     }
+    syncPoLeadWeeks();
     return expected;
+};
+
+function syncPoLeadWeeks() {
+    const weeks=document.getElementById('poLeadWeeks');
+    const date=document.getElementById('poExpectedDate')?.value;
+    const ordered=document.getElementById('poDate')?.value;
+    if(weeks)weeks.value=date&&ordered?Math.max(0,(Date.parse(date)-Date.parse(ordered))/604800000).toFixed(1).replace(/\.0$/,''):'';
+    const hint=document.getElementById('poExpectedDateHint');
+    if(hint)hint.textContent=date?`預計 ${date} 到貨`:'未設定交期';
+}
+
+window.setPoLeadWeeks = function() {
+    if(poEditingId)return;
+    const weeks=document.getElementById('poLeadWeeks');
+    const date=document.getElementById('poExpectedDate');
+    const ordered=document.getElementById('poDate')?.value;
+    if(!weeks||!date)return;
+    const value=Number(weeks.value);
+    if(weeks.value===''||!ordered){date.value='';delete date.dataset.expectedDateSource;}
+    else if(Number.isFinite(value)&&value>=0){
+        const expected=new Date(ordered+'T00:00:00Z');
+        expected.setUTCDate(expected.getUTCDate()+Math.round(value*7));
+        date.value=expected.toISOString().slice(0,10);
+        date.dataset.expectedDateSource='manual';
+    }
+    const hint=document.getElementById('poExpectedDateHint');
+    if(hint)hint.textContent=date.value?`預計 ${date.value} 到貨`:'未設定交期';
 };
 
 function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', headerExpectedDate = '', expectedDateSource = '') {
@@ -14451,6 +14491,8 @@ function poPdfFileName(poNo, vendorName) {
 }
 
 function normalizePoPdfFields(root) {
+    const expected=root.querySelector('#poExpectedDate');
+    if(expected){const label=expected.parentElement.querySelector('label[style]');if(label)label.style.display='';}
     root.querySelectorAll('.no-print').forEach(node => node.remove());
     root.querySelectorAll('input').forEach(input => {
         const span = document.createElement('span');
@@ -14577,6 +14619,7 @@ async function printSavedPoDocument(poNo, vendorName) {
 
         await addDocumentPagesToPdf(pdf, pages, {
             scale,
+            isolateRoot:stage,
             onProgress: (pageNo, pageCount) => {
                 if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
                 updatePoSaveStatus(`正在產生採購單 PDF… ${pageNo}/${pageCount}`);
