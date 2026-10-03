@@ -346,8 +346,8 @@ test('purchaser order form assigns a salesperson while preserving creator identi
 
 test('low-stock inventory can hand off to formal replenishment purchase flow without duplicating incoming stock', () => {
     assert.match(appSource, /openInventoryReplenishment/);
-    assert.match(appSource, /const plan=inventoryReplenishmentPlan\(x,n\)/);
-    assert.match(appSource, /plan\.needsReplenishment && canEditPage\('orders\.po'\)/);
+    assert.match(appSource, /plan=inventoryReplenishmentPlan\(x,n\)/);
+    assert.match(appSource, /plan\.needsReplenishment&&canEditPage\('orders\.po'\)/);
     const start=appSource.indexOf('window.openInventoryReplenishment');
     const end=appSource.indexOf('\nwindow.setInventorySafetyStock',start);
     const source=appSource.slice(start,end);
@@ -394,9 +394,9 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     const renderSource=appSource.slice(renderStart,renderEnd);
     assert.match(renderSource,/inventoryStockPolicyBadge\(x\)/);
     assert.match(renderSource,/openInventoryPolicySettings/);
-    assert.match(renderSource,/policyFilter && stockPolicy!==policyFilter/);
-    assert.match(renderSource,/const plan=inventoryReplenishmentPlan\(x,n\)/);
-    assert.match(renderSource,/if\(stateFilter==='low' && !plan\.needsReplenishment\)return/);
+    assert.match(renderSource,/policyFilter&&stockPolicy!==policyFilter/);
+    assert.match(renderSource,/plan=inventoryReplenishmentPlan\(x,n\)/);
+    assert.match(renderSource,/if\(stateFilter==='low'&&!plan\.needsReplenishment\)return/);
 });
 
 
@@ -1941,7 +1941,9 @@ test('V2 manual orders and copies preserve multiple items', () => {
 });
 
 test('V2 product lookup is server bounded and shows sale and inventory quantities', () => {
-    assert.match(indexSource, /searchBusinessProducts/);
+    assert.match(indexSource, /id="inventorySearch"/);
+    assert.doesNotMatch(indexSource, /id="businessProductSearch"/);
+    assert.match(indexSource, /id="businessProductSearchResults"/);
     const start=appSource.indexOf('window.searchBusinessProducts');
     const end=appSource.indexOf('window.renderInventoryList',start);
     const source=appSource.slice(start,end);
@@ -1973,7 +1975,7 @@ test('personnel screen omits duplicate dashboard while safety stock remains avai
     assert.doesNotMatch(indexSource, /adminDashboardCards/);
     assert.match(appSource, /limit\(100\)/);
     assert.match(appSource, /setInventorySafetyStock/);
-    assert.match(appSource, /safetyStock,updatedAt/);
+    assert.match(appSource, /safetyStock:normalizedSafety,updatedAt/);
 });
 
 test('V2 generic order status toggler only permits reversible billing state', () => {
@@ -5104,10 +5106,10 @@ test('business product search renders incoming and projected stock columns', () 
     const start=appSource.indexOf('body.innerHTML=products.map(product=>');
     const end=appSource.indexOf('\n',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/const projected=inventoryProjectedStock\(n\)/);
+    assert.match(source,/projected=inventoryProjectedStock\(n\)/);
     assert.match(source,/\$\{n\.incoming\}/);
     assert.match(source,/\$\{projected\}/);
-    assert.match(source,/colspan="9"/);
+    assert.match(source,/data-th="預計"/);
 });
 
 test('data health surfaces failed inventory reservation synchronization', () => {
