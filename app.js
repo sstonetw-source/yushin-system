@@ -14509,9 +14509,29 @@ function createPoPdfStage() {
 
     const stage = document.createElement('div');
     stage.className = 'quote-pdf-stage po-pdf-stage';
-    const documentNode = source.cloneNode(true);
-    documentNode.className = 'po-pdf-document';
-    normalizePoPdfFields(documentNode);
+    const documentNode = document.createElement('div');
+    documentNode.className = 'po-pdf-document po-pdf-page';
+    const text = id => document.getElementById(id)?.textContent || '';
+    const value = id => document.getElementById(id)?.value || '';
+    documentNode.innerHTML = `
+        <div class="header-container"><div class="header-info">
+            <h1>${escapeHtml(text('poCompTitle'))}</h1><h2>${escapeHtml(text('poCompSub'))}</h2>
+            <p>${escapeHtml(text('poCompAddr'))}</p><p>${escapeHtml(text('poCompContact'))}</p>
+        </div></div>
+        <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">採 購 單</h2>
+        <div class="meta-row-three">
+            <div>抬頭：${escapeHtml(value('poVendorName'))}</div>
+            <div>採購人員：${escapeHtml(text('poBuyerName'))}</div>
+            <div>訂購日期：${escapeHtml(value('poDate'))}</div>
+        </div>
+        <div class="meta-row-three"><div>預計到貨日：${escapeHtml(value('poExpectedDate'))}</div><div>單號：${escapeHtml(text('poNo'))}</div></div>
+        <table style="width:100%;margin-top:8px;border-collapse:collapse;">
+            <thead><tr><th>品名 / 規格</th><th>貨號</th><th>廠牌</th><th>數量</th><th>單價</th><th>小計</th></tr></thead>
+            <tbody>${poItems.map(item => `<tr><td>${escapeHtml(item.itemName||'')}${item.spec?`<br>${escapeHtml(item.spec)}`:''}</td><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${Number(item.qty||0)}</td><td>${Number(item.unitPrice||0).toLocaleString('zh-TW')}</td><td>${(Number(item.qty||0)*Number(item.unitPrice||0)).toLocaleString('zh-TW')}</td></tr>`).join('')}</tbody>
+        </table>
+        <div class="po-total-section" style="text-align:right;margin-top:10px;">
+            <p>未稅合計：NT$ ${escapeHtml(text('poSubtotal'))}</p><p>營業稅（5%）：NT$ ${escapeHtml(text('poTax'))}</p><p><b>總計金額：NT$ ${escapeHtml(text('poGrandTotal'))}</b></p>
+        </div>`;
     stage.appendChild(documentNode);
     document.body.appendChild(stage);
     return { stage, documentNode };
@@ -14610,12 +14630,13 @@ async function printSavedPoDocument(poNo, vendorName) {
         stage = exportDom.stage;
         await waitForPdfImages(exportDom.documentNode);
 
-        const pages = paginatePoPdfDocument(stage, exportDom.documentNode);
-        await waitForPdfImages(stage);
+        const isSinglePage = exportDom.documentNode.scrollHeight <= quotePdfPageHeightPx(stage) - 12;
+        const pages = isSinglePage ? [exportDom.documentNode] : paginatePoPdfDocument(stage, exportDom.documentNode);
+        if (!isSinglePage) await waitForPdfImages(stage);
 
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         const scale = isMobile ? 1.15 : 1.65;
-        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
+        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:!isSinglePage });
 
         await addDocumentPagesToPdf(pdf, pages, {
             scale,
