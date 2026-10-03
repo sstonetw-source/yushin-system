@@ -4661,6 +4661,12 @@ function renderSupplierMappingAdmin() {
 
 function renderSupplierSettingsAdmin() {
     const body=document.getElementById('supplierSettingsBody');
+    const suggestions=document.getElementById('supplierSettingSuggestions');
+    if(suggestions){
+        suggestions.innerHTML=supplierMasterCache.map(supplier =>
+            `<option value="${escapeAttr(supplier.supplierName||'')}">${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</option>`
+        ).join('');
+    }
     if(!body)return;
     const rows=[...supplierMappingCache].sort((a,b)=>
         String(a.brandName||'').localeCompare(String(b.brandName||''),'zh-Hant')
@@ -4683,6 +4689,20 @@ function renderSupplierSettingsAdmin() {
         </tr>`;
     }).join(''):'<tr><td colspan="7" style="color:#888;">尚未設定供應商。</td></tr>';
 }
+
+window.fillSupplierSettingFromName = function() {
+    const name=String(document.getElementById('supplierSettingName')?.value||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+    if(!name)return;
+    const supplier=supplierMasterCache.find(item =>
+        String(item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===name
+    );
+    if(!supplier)return;
+    const id=supplier.id||supplier.supplierId||'';
+    const editing=document.getElementById('supplierSettingEditingSupplierId'); if(editing)editing.value=id;
+    const header=document.getElementById('supplierSettingHeader'); if(header)header.value=supplier.purchaseHeaderName||supplier.supplierName||'';
+    const email=document.getElementById('supplierSettingEmail'); if(email)email.value=supplier.email||'';
+    const lead=document.getElementById('supplierSettingLeadTime'); if(lead)lead.value=String(Math.max(0,Number(supplier.leadTimeDays||0)));
+};
 
 window.clearSupplierSettingEditor = function() {
     ['supplierSettingEditingMappingId','supplierSettingEditingSupplierId','supplierSettingBrand','supplierSettingLine','supplierSettingName','supplierSettingHeader','supplierSettingEmail']
@@ -4737,8 +4757,15 @@ window.saveSupplierSetting = async function() {
             String(item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalizedName
         );
         const editingSupplier=supplierMasterCache.find(item=>(item.id||item.supplierId)===editingSupplierId);
-        const supplierId=(sameName?.id||sameName?.supplierId||editingSupplierId||stableMasterId('sup',supplierName));
-        const previous=sameName||editingSupplier||supplierMasterCache.find(item=>(item.id||item.supplierId)===supplierId);
+        const normalizedEditingName=String(editingSupplier?.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+        // 若這列改成另一個供應商名稱，不直接改寫舊 Supplier Master；
+        // 舊供應商可能同時被其他廠牌使用，避免一列編輯把其他廠牌的供應商一起改名。
+        const supplierId=(sameName?.id||sameName?.supplierId
+            ||(editingSupplier&&normalizedEditingName===normalizedName?editingSupplierId:'')
+            ||stableMasterId('sup',supplierName));
+        const previous=sameName
+            ||(editingSupplier&&normalizedEditingName===normalizedName?editingSupplier:null)
+            ||supplierMasterCache.find(item=>(item.id||item.supplierId)===supplierId);
         const mappingId=stableMasterId('bsm',brandName+'|'+(productLine||'default'));
         const now=new Date().toISOString();
         const batch=db.batch();

@@ -900,10 +900,11 @@
                 <p style="font-size:12px;color:#666;margin:6px 0 12px;">同一供應商可對應多個廠牌；產品線留白代表該廠牌的預設供應商。</p>
                 <input id="supplierSettingEditingMappingId" type="hidden">
                 <input id="supplierSettingEditingSupplierId" type="hidden">
+                <datalist id="supplierSettingSuggestions"></datalist>
                 <div class="supplier-setting-grid">
                     <label>廠牌<input id="supplierSettingBrand" type="text" list="poBrandList" placeholder="選擇廠牌"></label>
                     <label>產品線（選填）<input id="supplierSettingLine" type="text" placeholder="留白＝廠牌預設"></label>
-                    <label>供應商<input id="supplierSettingName" type="text" placeholder="供應商名稱"></label>
+                    <label>供應商<input id="supplierSettingName" type="text" list="supplierSettingSuggestions" placeholder="供應商名稱" onchange="fillSupplierSettingFromName()"></label>
                     <label>訂購單抬頭<input id="supplierSettingHeader" type="text" placeholder="留白＝供應商名稱"></label>
                     <label>訂購 Email<input id="supplierSettingEmail" type="email" placeholder="orders@supplier.com"></label>
                     <label>預設交期<input id="supplierSettingLeadTime" type="number" min="0" step="1" value="0" placeholder="天數"></label>

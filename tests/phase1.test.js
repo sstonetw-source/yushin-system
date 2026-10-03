@@ -5150,3 +5150,14 @@ test('supplier settings use one consolidated brand supplier email editor', () =>
     assert.match(appSource,/batch\.set\(db\.collection\('suppliers'\)/);
     assert.match(appSource,/batch\.set\(db\.collection\('brandSupplierMappings'\)/);
 });
+
+test('consolidated supplier editor reuses existing suppliers without renaming a shared Supplier Master', () => {
+    assert.match(indexSource,/id="supplierSettingSuggestions"/);
+    assert.match(indexSource,/onchange="fillSupplierSettingFromName\(\)"/);
+    assert.match(appSource,/window\.fillSupplierSettingFromName = function/);
+    const start=appSource.indexOf('window.saveSupplierSetting = async function');
+    const end=appSource.indexOf('\nwindow.disableSupplierSetting',start);
+    const source=appSource.slice(start,end);
+    assert.match(source,/normalizedEditingName===normalizedName/);
+    assert.match(source,/stableMasterId\('sup',supplierName\)/);
+});
