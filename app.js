@@ -3242,6 +3242,9 @@ window.openForecastModal = function(id = '') {
     if (!canCreateForecastCapability() || !canEditPage('forecast')) return;
 
     const item = id ? forecastCache.find(entry => entry.id === id) : null;
+    const overlay = document.getElementById('forecastModalOverlay');
+    if (!overlay) return;
+    overlay.classList.add('active');
 
     document.getElementById('forecastId').value = item?.id || '';
     document.getElementById('forecastCustomer').value = item?.customerName || '';
@@ -3253,15 +3256,11 @@ window.openForecastModal = function(id = '') {
     document.getElementById('forecastProgress').value = '';
 
     const workflowSection = document.getElementById('forecastWorkflowSection');
-    if (workflowSection) {
-        if (item) workflowSection.style.display = 'none';
-        else workflowSection.style.display = '';
-    }
+    if (workflowSection) workflowSection.style.display = item ? 'none' : '';
     const currentProgressSection = document.getElementById('forecastCurrentProgressSection');
     if (currentProgressSection) currentProgressSection.style.display = 'none';
 
     document.getElementById('forecastModalTitle').innerText = item ? '編輯 Forecast' : '新增 Forecast';
-    document.getElementById('forecastModalOverlay').classList.add('active');
 };
 
 window.closeForecastModal = function() {
@@ -4380,7 +4379,25 @@ function normalizeBrandMasterRecord(id, data = {}) {
     };
 }
 
+let unifiedBrandEntriesCache = null;
+let primaryBrandNamesCache = null;
+
+function invalidateBrandDerivedCaches() {
+    unifiedBrandEntriesCache = null;
+    primaryBrandNamesCache = null;
+}
+
+function deferUntilAfterPaint(task, label = '背景初始化') {
+    if (typeof task !== 'function') return;
+    const run = () => setTimeout(() => {
+        Promise.resolve().then(task).catch(err => console.error(label + '失敗：', err));
+    }, 0);
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else run();
+}
+
 function getUnifiedBrandEntries(includeMaintenance = false) {
+    if (Array.isArray(unifiedBrandEntriesCache)) return unifiedBrandEntriesCache;
     // Brand Master 的「標準名稱」是全系統唯一廠牌名稱；別名只用來辨識輸入，
     // 不應在 Product Master、估價、訂單或進銷存分析中形成第二個廠牌。
     const entries = new Map();
@@ -4460,8 +4477,9 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
         }
     });
 
-    return [...entries.values()]
+    unifiedBrandEntriesCache = [...entries.values()]
         .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hant'));
+    return unifiedBrandEntriesCache;
 }
 
 function getUnifiedBrandNames(includeMaintenance = false) {
@@ -5082,6 +5100,7 @@ function loadBrandMaster() {
         brandMasterCache = rows
             .map(row => normalizeBrandMasterRecord(row.id, row))
             .filter(item => item.name && item.active !== false);
+        invalidateBrandDerivedCaches();
         return brandMasterCache;
     }).catch(err => {
         // 暫時失敗時保留既有資料，但不要永久記住失敗結果；下次需要時可重新連線。
@@ -5121,6 +5140,7 @@ async function upsertBrandMaster(name, patch = {}) {
     const index = brandMasterCache.findIndex(item => item.id === id || normalizeBrandLookupKey(item.name) === normalizeBrandLookupKey(canonicalName));
     if (index >= 0) brandMasterCache[index] = { ...brandMasterCache[index], ...next };
     else brandMasterCache.push(next);
+    invalidateBrandDerivedCaches();
 }
 
 async function syncLegacyBrandSettingsToMaster() {
@@ -5309,6 +5329,7 @@ function quoteBrandRestrictionText(brand) {
 // 估價單與訂單的人工選擇統一只列「獨立統計」主要廠牌；
  // 非主要廠牌一律走「其他廠牌」並保存實際輸入名稱，統計時仍歸入其他廠牌。
 function getPrimaryBrandNames() {
+    if (Array.isArray(primaryBrandNamesCache)) return [...primaryBrandNamesCache];
     const masterBrands = getUnifiedBrandEntries(false)
         .filter(entry => entry?.name && entry.active !== false && entry.isKeyBrand === true)
         .map(entry => entry.name);
@@ -5316,12 +5337,14 @@ function getPrimaryBrandNames() {
         .map(name => resolveBrandName(name))
         .filter(Boolean);
 
-    return dedupeBrandsCaseInsensitive([...masterBrands, ...legacyBrands])
+    primaryBrandNamesCache = dedupeBrandsCaseInsensitive([...masterBrands, ...legacyBrands])
         .filter(name => name && name !== '其他' && name !== '其他廠牌')
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    return [...primaryBrandNamesCache];
 }
 
 function refreshBusinessBrandControls() {
+    invalidateBrandDerivedCaches();
     populateQuoteBrandDropdowns();
     populateOrderBrandDropdown();
     populateEquipmentBrandDropdown();
@@ -8458,28 +8481,53 @@ window.openInventoryQuantityEditor=async function(inventoryId){
         openInventoryAdjustment('adjustment',item);
         return;
     }
-    await loadWarehouseMaster();
-    await loadWarehouseStocksForInventoryPage([item]);
-    const activeWarehouses=warehouseMasterCache.filter(warehouse=>warehouse.active!==false);
-    const productKey=String(item.productKey||item.productId||'').trim();
-    const preferredWarehouse=activeWarehouses.find(warehouse=>{
-        const stock=warehouseStockCache.get(warehouse.id+'||'+productKey);
-        return Number(inventoryNumbers(stock||{}).onHand||0)>0;
-    })||defaultWarehouse()||activeWarehouses[0]||null;
+
     inventoryQuantityEditingId=inventoryId;
-    inventoryQuantityEditingWarehouseId=preferredWarehouse?.id||'';
+    inventoryQuantityEditingWarehouseId='';
+    const overlay=document.getElementById('inventorySetQuantityOverlay');
     const label=document.getElementById('inventoryQuantityItemLabel');
-    if(label)label.textContent=`${item.itemCode||'－'}｜${item.itemName||'未命名品項'}｜${item.brand||'未指定廠牌'}`;
     const warehouseRow=document.getElementById('inventoryQuantityWarehouseRow');
     const warehouseSelect=document.getElementById('inventoryQuantityWarehouse');
-    if(warehouseSelect){
-        warehouseSelect.innerHTML=activeWarehouses.map(warehouse=>`<option value="${escapeAttr(warehouse.id)}">${escapeHtml(warehouse.warehouseName||warehouse.id)}</option>`).join('');
-        warehouseSelect.value=inventoryQuantityEditingWarehouseId;
+    const currentEl=document.getElementById('inventoryQuantityCurrent');
+    const target=document.getElementById('inventoryQuantityTarget');
+    const note=document.getElementById('inventoryQuantityNote');
+    const saveButton=document.getElementById('saveInventoryQuantityBtn');
+
+    if(label)label.textContent=`${item.itemCode||'－'}｜${item.itemName||'未命名品項'}｜${item.brand||'未指定廠牌'}`;
+    if(warehouseRow)warehouseRow.style.display='none';
+    if(warehouseSelect){warehouseSelect.innerHTML='<option value="">讀取中…</option>';warehouseSelect.disabled=true;}
+    if(currentEl)currentEl.textContent='讀取中…';
+    if(target){target.value='';target.disabled=true;}
+    if(note)note.value='';
+    if(saveButton){saveButton.disabled=true;saveButton.textContent='讀取中…';}
+    overlay?.classList.add('active');
+
+    try{
+        await loadWarehouseMaster();
+        await loadWarehouseStocksForInventoryPage([item]);
+        if(inventoryQuantityEditingId!==inventoryId||!overlay?.classList.contains('active'))return;
+
+        const activeWarehouses=warehouseMasterCache.filter(warehouse=>warehouse.active!==false);
+        const productKey=String(item.productKey||item.productId||'').trim();
+        const preferredWarehouse=activeWarehouses.find(warehouse=>{
+            const stock=warehouseStockCache.get(warehouse.id+'||'+productKey);
+            return Number(inventoryNumbers(stock||{}).onHand||0)>0;
+        })||defaultWarehouse()||activeWarehouses[0]||null;
+        inventoryQuantityEditingWarehouseId=preferredWarehouse?.id||'';
+
+        if(warehouseSelect){
+            warehouseSelect.innerHTML=activeWarehouses.map(warehouse=>`<option value="${escapeAttr(warehouse.id)}">${escapeHtml(warehouse.warehouseName||warehouse.id)}</option>`).join('');
+            warehouseSelect.value=inventoryQuantityEditingWarehouseId;
+            warehouseSelect.disabled=false;
+        }
+        if(warehouseRow)warehouseRow.style.display=activeWarehouses.length>1?'':'none';
+        if(target)target.disabled=false;
+        refreshInventoryQuantityEditorValue();
+        if(saveButton){saveButton.disabled=false;saveButton.textContent='確認修改';}
+    }catch(err){
+        if(inventoryQuantityEditingId===inventoryId)closeInventoryQuantityEditor();
+        alert('讀取庫存資料失敗：'+(err?.message||err));
     }
-    if(warehouseRow)warehouseRow.style.display=activeWarehouses.length>1?'':'none';
-    const note=document.getElementById('inventoryQuantityNote');if(note)note.value='';
-    refreshInventoryQuantityEditorValue();
-    document.getElementById('inventorySetQuantityOverlay')?.classList.add('active');
 };
 
 window.onInventoryQuantityWarehouseChange=function(warehouseId){
@@ -8566,27 +8614,49 @@ window.openInventoryTransfer=async function(inventoryId){
         alert('批號／效期品項目前不提供跨倉移動，避免批號與倉庫數量不同步。');
         return;
     }
-    await loadWarehouseMaster();
-    const warehouses=activeInventoryWarehouses();
-    if(warehouses.length<2){alert('目前只有一個啟用中的倉庫，不需要移動庫存。');return;}
-    await loadWarehouseStocksForInventoryPage([item]);
-    const source=warehouses.find(warehouse=>{
-        const n=inventoryWarehouseState(item,warehouse.id);
-        return Number(n.onHand||0)-Number(n.reserved||0)>0;
-    })||warehouses[0];
-    const target=warehouses.find(warehouse=>warehouse.id!==source.id)||warehouses[1];
+
     inventoryTransferEditingId=inventoryId;
+    const overlay=document.getElementById('inventoryTransferOverlay');
     const label=document.getElementById('inventoryTransferItemLabel');
-    if(label)label.textContent=`${item.itemCode||'－'}｜${item.itemName||'未命名品項'}｜${item.brand||'未指定廠牌'}`;
-    const options=warehouses.map(warehouse=>`<option value="${escapeAttr(warehouse.id)}">${escapeHtml(warehouse.warehouseName||warehouse.id)}</option>`).join('');
     const from=document.getElementById('inventoryTransferFrom');
     const to=document.getElementById('inventoryTransferTo');
-    if(from){from.innerHTML=options;from.value=source.id;}
-    if(to){to.innerHTML=options;to.value=target.id;}
     const qty=document.getElementById('inventoryTransferQty');
-    if(qty)qty.value='';
-    updateInventoryTransferHint();
-    document.getElementById('inventoryTransferOverlay')?.classList.add('active');
+    const hint=document.getElementById('inventoryTransferHint');
+    const saveButton=document.getElementById('saveInventoryTransferBtn');
+    if(label)label.textContent=`${item.itemCode||'－'}｜${item.itemName||'未命名品項'}｜${item.brand||'未指定廠牌'}`;
+    if(from){from.innerHTML='<option value="">讀取中…</option>';from.disabled=true;}
+    if(to){to.innerHTML='<option value="">讀取中…</option>';to.disabled=true;}
+    if(qty){qty.value='';qty.disabled=true;}
+    if(hint)hint.textContent='正在讀取各倉庫庫存…';
+    if(saveButton){saveButton.disabled=true;saveButton.textContent='讀取中…';}
+    overlay?.classList.add('active');
+
+    try{
+        await loadWarehouseMaster();
+        const warehouses=activeInventoryWarehouses();
+        if(warehouses.length<2){
+            if(inventoryTransferEditingId===inventoryId)closeInventoryTransfer();
+            alert('目前只有一個啟用中的倉庫，不需要移動庫存。');
+            return;
+        }
+        await loadWarehouseStocksForInventoryPage([item]);
+        if(inventoryTransferEditingId!==inventoryId||!overlay?.classList.contains('active'))return;
+
+        const source=warehouses.find(warehouse=>{
+            const n=inventoryWarehouseState(item,warehouse.id);
+            return Number(n.onHand||0)-Number(n.reserved||0)>0;
+        })||warehouses[0];
+        const target=warehouses.find(warehouse=>warehouse.id!==source.id)||warehouses[1];
+        const options=warehouses.map(warehouse=>`<option value="${escapeAttr(warehouse.id)}">${escapeHtml(warehouse.warehouseName||warehouse.id)}</option>`).join('');
+        if(from){from.innerHTML=options;from.value=source.id;from.disabled=false;}
+        if(to){to.innerHTML=options;to.value=target.id;to.disabled=false;}
+        if(qty)qty.disabled=false;
+        if(saveButton){saveButton.disabled=false;saveButton.textContent='確認移動';}
+        updateInventoryTransferHint();
+    }catch(err){
+        if(inventoryTransferEditingId===inventoryId)closeInventoryTransfer();
+        alert('讀取倉庫庫存失敗：'+(err?.message||err));
+    }
 };
 
 window.updateInventoryTransferHint=function(){
@@ -16402,6 +16472,7 @@ window.deleteOrder = function(orderId) {
 let newOrderDraftItems = [];
 const ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2';
 let requestedOrderOwnerUid = '';
+let orderModalOpenGeneration = 0;
 
 function populateOrderOwnerSelect() {
     const wrap = document.getElementById('orderOwnerWrap');
@@ -16532,6 +16603,68 @@ function restoreSavedOrderDraft(){
     } finally { restoringOrderDraft=false; }
 }
 
+function updateOrderDraftRecoveryBanner(source = null) {
+    const banner = document.getElementById('orderDraftRecoveryBanner');
+    const message = document.getElementById('orderDraftRecoveryMessage');
+    if (!banner) return;
+    const pendingId = localStorage.getItem(pendingOrderCreateKey());
+    const draft = pendingId ? readOrderDraft() : null;
+    const shouldShow = !source && !!pendingId && !!draft;
+    banner.style.display = shouldShow ? '' : 'none';
+    if (!shouldShow || !message) return;
+    const savedAt = draft.savedAt ? new Date(draft.savedAt) : null;
+    const timeText = savedAt && !Number.isNaN(savedAt.getTime())
+        ? savedAt.toLocaleString('zh-TW', { hour12:false })
+        : '';
+    message.textContent = timeText
+        ? `發現上次儲存未完成的訂單（${timeText}）。為避免重複下單，請先恢復確認或放棄這次重試。`
+        : '發現上次儲存未完成的訂單。為避免重複下單，請先恢復確認或放棄這次重試。';
+}
+
+window.restoreSavedOrderDraftFromBanner = function() {
+    populateOrderBrandDropdown();
+    populateOrderOwnerSelect();
+    restoreSavedOrderDraft();
+    const banner = document.getElementById('orderDraftRecoveryBanner');
+    if (banner) banner.style.display = 'none';
+    const draft = readOrderDraft();
+    loadWarehouseMaster().then(() => {
+        populateOrderWarehouseOptions(draft?.warehouseId || '');
+        refreshOrderWarehouseStock();
+    }).catch(err => console.warn('恢復訂單草稿時讀取倉庫失敗：', err));
+};
+
+window.discardSavedOrderDraftFromBanner = async function() {
+    const button = document.getElementById('discardOrderDraftBtn');
+    const pendingId = localStorage.getItem(pendingOrderCreateKey());
+    if (button) {
+        button.disabled = true;
+        button.textContent = '確認中…';
+    }
+    try {
+        if (pendingId) {
+            const snapshot = await firestoreReadWithTimeout(
+                db.collection('orders').doc(pendingId).get(),
+                '確認未完成訂單'
+            );
+            if (snapshot.exists) {
+                alert('這筆訂單已經存在雲端，為避免重複下單，系統不會直接清除續傳資料。請先回訂單列表確認該筆訂單。');
+                return;
+            }
+        }
+        clearSavedOrderDraft({ clearPending:true });
+        updateOrderDraftRecoveryBanner();
+        showActionFeedback('未完成訂單重試資料已清除。');
+    } catch (err) {
+        alert('目前無法確認未完成訂單狀態，為避免資料重複，暫不清除：' + (err?.message || err));
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = '放棄這次重試';
+        }
+    }
+};
+
 function normalizeNewOrderItem(item = {}) {
     const match=findPriceItemForOrder(item);
     const qty=Math.max(0,Number(item.qty||0));
@@ -16586,24 +16719,16 @@ window.addCurrentOrderItemToDraft=function(){
 window.openOrderModal = function(source = null) {
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
-    // 先讓使用者立即看到表單，再做品牌、倉庫與客戶建議等初始化；
-    // 即使某個輔助資料暫時讀取失敗，按鈕也不會呈現「完全沒反應」。
+    const openingGeneration = ++orderModalOpenGeneration;
+    const recoveryBanner = document.getElementById('orderDraftRecoveryBanner');
+    if (recoveryBanner) recoveryBanner.style.display = 'none';
+
+    // 第一階段只做輕量欄位重設並立即顯示；主檔與輔助清單延後到首幀之後。
     overlay.classList.add('active');
     requestedOrderOwnerUid = source?.ownerUid || '';
-    populateOrderOwnerSelect();
-    if (currentUserRole === 'purchaser') {
-        ensureSalesListLoaded().then(populateOrderOwnerSelect).catch(err => console.error('讀取負責業務名單失敗：', err));
-    }
-    loadWarehouseMaster().then(() => {
-        populateOrderWarehouseOptions(source?.warehouseId || '');
-        if (source?.fulfillmentType === 'WAREHOUSE' && source?.warehouseId) {
-            const warehouse=document.getElementById('orderWarehouse');
-            if (warehouse) warehouse.value=source.warehouseId;
-        }
-    });
-    populateOrderBrandDropdown();
-    populateOrderCustomerSuggestions();
-    newOrderDraftItems=[];renderNewOrderDraftItems();
+    newOrderDraftItems = [];
+    renderNewOrderDraftItems();
+
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
@@ -16617,10 +16742,11 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderUnitPrice').value = 0;
     document.getElementById('orderTotalPrice').value = 0;
     document.getElementById('orderCostPrice').value = '';
-    const procurement=document.getElementById('orderProcurementType');if(procurement)procurement.value=source?.procurementType||'PURCHASING_PO';
+    const procurement = document.getElementById('orderProcurementType');
+    if (procurement) procurement.value = source?.procurementType || 'PURCHASING_PO';
     onOrderProcurementTypeChange();
     document.getElementById('orderFulfillmentType').value = source?.fulfillmentType || 'WAREHOUSE';
-    populateOrderWarehouseOptions(source?.warehouseId || '');
+    document.getElementById('orderWarehouse').value = source?.warehouseId || '';
     onOrderFulfillmentChange();
     document.getElementById('orderTransactionType').value = '';
     document.getElementById('orderInvoiceTitle').disabled = true;
@@ -16637,30 +16763,63 @@ window.openOrderModal = function(source = null) {
         codeInput.dataset.productType = source.productType || '';
         codeInput.dataset.productMasterMatched = (source.productMasterMatched === true || !!source.productId) ? '1' : '0';
         document.getElementById('orderItemName').value = source.itemName || '';
-        const nameEn=document.getElementById('orderItemNameEn');if(nameEn)nameEn.value=source.itemNameEn||source.nameEn||'';
-        const spec=document.getElementById('orderSpec');if(spec)spec.value=source.spec||source.specification||'';
-        document.getElementById('orderProductLine').value=source.productLine||'';
+        const nameEn = document.getElementById('orderItemNameEn');
+        if (nameEn) nameEn.value = source.itemNameEn || source.nameEn || '';
+        const spec = document.getElementById('orderSpec');
+        if (spec) spec.value = source.spec || source.specification || '';
+        document.getElementById('orderProductLine').value = source.productLine || '';
         document.getElementById('orderQty').value = source.qty || 1;
         document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
         if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
             document.getElementById('orderCostPrice').value = source.costPrice ?? '';
         }
-        if (source.brand) {
-            selectBrandInDropdown(document.getElementById('orderBrand'), source.brand);
-            onOrderBrandSelectChange();
-        }
         const total = source.totalPrice !== undefined && source.totalPrice !== null && source.totalPrice !== ''
             ? source.totalPrice
             : (Number(source.qty || 1) * Number(source.unitPrice || 0));
         document.getElementById('orderTotalPrice').value = total || 0;
-        const sourceMatch = source.itemCode ? findPriceItemForOrder({ itemCode: source.itemCode, brand: source.brand || '' }) : null;
-        if (sourceMatch) {
-            applyOrderProductCost(sourceMatch);
-            refreshOrderWarehouseStock();
-        }
     }
 
-    if(localStorage.getItem(pendingOrderCreateKey()) && readOrderDraft()) restoreSavedOrderDraft();
+    deferUntilAfterPaint(async () => {
+        if (openingGeneration !== orderModalOpenGeneration || !overlay.classList.contains('active')) return;
+
+        populateOrderOwnerSelect();
+        if (currentUserRole === 'purchaser') {
+            ensureSalesListLoaded()
+                .then(() => {
+                    if (openingGeneration === orderModalOpenGeneration) populateOrderOwnerSelect();
+                })
+                .catch(err => console.error('讀取負責業務名單失敗：', err));
+        }
+
+        populateOrderBrandDropdown();
+        if (source?.brand) {
+            selectBrandInDropdown(document.getElementById('orderBrand'), source.brand);
+            onOrderBrandSelectChange();
+        }
+        populateOrderCustomerSuggestions();
+        updateOrderDraftRecoveryBanner(source);
+
+        try {
+            await loadWarehouseMaster();
+            if (openingGeneration !== orderModalOpenGeneration || !overlay.classList.contains('active')) return;
+            populateOrderWarehouseOptions(source?.warehouseId || '');
+            if (source?.fulfillmentType === 'WAREHOUSE' && source?.warehouseId) {
+                const warehouse = document.getElementById('orderWarehouse');
+                if (warehouse) warehouse.value = source.warehouseId;
+            }
+            refreshOrderWarehouseStock();
+        } catch (err) {
+            console.warn('新增訂單：倉庫主檔載入失敗，先保留目前表單。', err);
+        }
+
+        if (source?.itemCode) {
+            const sourceMatch = findPriceItemForOrder({ itemCode: source.itemCode, brand: source.brand || '' });
+            if (sourceMatch) {
+                applyOrderProductCost(sourceMatch);
+                refreshOrderWarehouseStock();
+            }
+        }
+    }, '新增訂單背景初始化');
 };
 
 let customerMasterSuggestionTimer = null;
@@ -16789,6 +16948,7 @@ window.copyOrderAsNew = function(orderId) {
 };
 
 window.closeOrderModal = function(options = {}) {
+    orderModalOpenGeneration++;
     document.getElementById('orderModalOverlay').classList.remove('active');
     if (!options.preserveSource) {
         window._orderModalSourceLink = null;
@@ -17402,11 +17562,11 @@ window.onEqModelChange = function() {
 };
 
 window.openEquipmentModal = function(eqId) {
-    populateEquipmentSalesDropdown();
-    populateEquipmentBrandDropdown();
-    populateOrderCustomerSuggestions();
+    const eq = eqId ? equipmentList.find(item => item.id === eqId) : null;
+    if (eqId && !eq) return;
 
     const overlay = document.getElementById('eqModalOverlay');
+    if (!overlay) return;
     overlay.dataset.editId = eqId || '';
     overlay.classList.add('active');
     currentEquipmentId = eqId || null;
@@ -17414,23 +17574,14 @@ window.openEquipmentModal = function(eqId) {
     document.getElementById('eqSaveHint').innerText = '';
     const deleteBtn = document.getElementById('eqModalDeleteBtn');
     const logSection = document.getElementById('eqLogSection');
+    const brandSelect = document.getElementById('eqBrand');
+    if (brandSelect) brandSelect.value = '';
+    onEqBrandSelectChange();
 
-    if (eqId) {
-        const eq = equipmentList.find(e => e.id === eqId);
-        if (!eq) return;
+    if (eq) {
         document.getElementById('eqModalTitle').innerText = `${eq.customerName || ''} － ${eq.model || '編輯儀器'}`;
         document.getElementById('eqCustomer').value = eq.customerName || '';
         document.getElementById('eqModel').value = eq.model || '';
-        // 既有資料的廠牌如果不在價格表清單裡（例如舊資料、已停產品項），就落到「其他」並帶出原本文字
-        const eqBrandSelect = document.getElementById('eqBrand');
-        if (eq.brand && ![...eqBrandSelect.options].some(o => o.value === eq.brand)) {
-            eqBrandSelect.value = '其他';
-            onEqBrandSelectChange();
-            document.getElementById('eqBrandOther').value = eq.brand;
-        } else {
-            eqBrandSelect.value = eq.brand || '';
-            onEqBrandSelectChange();
-        }
         document.getElementById('eqSerial').value = eq.serialNo || '';
         document.getElementById('eqSales').value = eq.salesName || '';
         document.getElementById('eqLocation').value = eq.location || '';
@@ -17452,18 +17603,26 @@ window.openEquipmentModal = function(eqId) {
         ['eqCustomer', 'eqModel', 'eqSerial', 'eqSales', 'eqLocation', 'eqInstallDate', 'eqLastService', 'eqNotes'].forEach(id => {
             document.getElementById(id).value = '';
         });
-        document.getElementById('eqBrand').value = '';
-        onEqBrandSelectChange();
         document.getElementById('eqCycle').value = 12;
         document.getElementById('eqNoMaintenance').checked = false;
         onEqNoMaintenanceChange();
-        // 一般業務新增儀器時，自動帶出自己的名字；管理員／工程師／採購新增時可自行從下拉選單挑選負責業務
-        if (!canViewAllEquipment()) {
-            document.getElementById('eqSales').value = currentUserName || '';
-        }
+        if (!canViewAllEquipment()) document.getElementById('eqSales').value = currentUserName || '';
         deleteBtn.style.display = 'none';
         logSection.style.display = 'none';
     }
+
+    deferUntilAfterPaint(() => {
+        if (!overlay.classList.contains('active') || overlay.dataset.editId !== (eqId || '')) return;
+        populateEquipmentSalesDropdown();
+        populateEquipmentBrandDropdown();
+        populateOrderCustomerSuggestions();
+        if (eq?.brand) {
+            selectBrandInDropdown(document.getElementById('eqBrand'), eq.brand);
+            onEqBrandSelectChange();
+        }
+        if (eq?.salesName) document.getElementById('eqSales').value = eq.salesName;
+        else if (!canViewAllEquipment()) document.getElementById('eqSales').value = currentUserName || '';
+    }, '儀器表單背景初始化');
 };
 
 window.closeEquipmentModal = function() {
