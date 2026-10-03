@@ -5342,3 +5342,47 @@ test('mobile purchase editor uses cards, iOS dates stay visible, inventory cards
     assert.match(cssSource, /\.po-pdf-page \.po-total-section\s*\{[\s\S]*?padding-bottom:\s*2mm/);
 });
 
+
+
+test('order modal opens immediately before support-data initialization', () => {
+    const start = appSource.indexOf('window.openOrderModal = function');
+    const end = appSource.indexOf('let customerMasterSuggestionTimer', start);
+    const source = appSource.slice(start, end);
+    const openPos = source.indexOf("overlay.classList.add('active')");
+    const brandPos = source.indexOf('populateOrderBrandDropdown()');
+    assert.ok(openPos >= 0 && brandPos >= 0 && openPos < brandPos);
+    assert.match(source, /if \(field\) field\.value = ''/);
+});
+
+test('inventory intake opens before warehouse loading and uses mobile-labelled rows', () => {
+    const start = appSource.indexOf('window.openInventoryAdjustment = async function');
+    const end = appSource.indexOf('window.closeInventoryAdjustment', start);
+    const source = appSource.slice(start, end);
+    assert.ok(source.indexOf("overlay?.classList.add('active')") < source.indexOf('await loadWarehouseMaster()'));
+    assert.doesNotMatch(source, /loadSupplierWarehouseMasters/);
+
+    const rowStart = appSource.indexOf('function renderInventoryAdjustmentRows()');
+    const rowEnd = appSource.indexOf('window.saveInventoryAdjustmentBatch', rowStart);
+    const rowSource = appSource.slice(rowStart, rowEnd);
+    assert.match(rowSource, /data-label="貨號"/);
+    assert.match(rowSource, /inventory-adjustment-readonly/);
+    assert.match(indexSource, /class="inventory-adjustment-table"/);
+    assert.match(cssSource, /#inventoryAdjustmentOverlay \.inventory-adjustment-row td::before/);
+});
+
+test('purchasing presents three primary jobs and separates safety-stock replenishment', () => {
+    for (const id of ['purchase-card-ordering', 'purchase-card-stocking', 'purchase-card-replenishment']) {
+        assert.match(indexSource, new RegExp('id="' + id + '"'));
+    }
+    assert.match(indexSource, /① 處理訂單/);
+    assert.match(indexSource, /② 備貨/);
+    assert.match(indexSource, /③ 訂安全庫存/);
+    assert.match(indexSource, /id="purchaseFulfillmentTabs"/);
+
+    const switchStart = appSource.indexOf('window.switchPurchasingView = function');
+    const switchEnd = appSource.indexOf('async function loadPurchasingDispatchOrders', switchStart);
+    const switchSource = appSource.slice(switchStart, switchEnd);
+    assert.match(switchSource, /'replenishment'/);
+    assert.match(switchSource, /replenishmentPanel\.style\.display=view==='replenishment'/);
+    assert.match(switchSource, /view === 'replenishment'[\s\S]*?loadInventoryReplenishmentCenter/);
+});

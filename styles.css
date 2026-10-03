@@ -2970,3 +2970,182 @@ html[data-app-environment="preview"] body { border-top: 0; }
     }
 }
 
+
+
+/* ===== 2026-10-03：採購三大工作入口／新增庫存手機卡片 ===== */
+.purchase-task-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+.purchase-task-card {
+    min-height: 94px;
+    padding: 13px 14px;
+}
+.purchase-task-card span { font-size: 14px; }
+.purchase-task-card strong { margin-top: 7px; font-size: 20px; }
+.purchase-task-card small {
+    margin-top: 6px;
+    font-size: 12px;
+    white-space: normal;
+    line-height: 1.45;
+}
+.purchase-stage-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 10px;
+    border: 1px solid #d5e1ec;
+    border-radius: 9px;
+    background: #f4f8fc;
+}
+.purchase-stage-button {
+    border: 1px solid #c7d4df;
+    border-radius: 7px;
+    background: #fff;
+    color: #334;
+    text-align: left;
+    padding: 9px 10px;
+}
+.purchase-stage-button.active {
+    background: #003366;
+    border-color: #003366;
+    color: #fff;
+}
+.purchase-stage-button span,
+.purchase-stage-button strong,
+.purchase-stage-button small { display: block; }
+.purchase-stage-button strong { margin-top: 3px; font-size: 16px; }
+.purchase-stage-button small { margin-top: 2px; font-size: 10px; opacity: .8; }
+.purchase-section-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 2px 0 10px;
+}
+.purchase-section-heading strong { color: #203040; font-size: 18px; }
+.purchase-section-heading span { color: #667584; font-size: 12px; }
+.purchase-replenishment-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.purchase-replenishment-actions button { margin: 0; }
+.inventory-adjustment-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
+}
+.inventory-adjustment-actions > div {
+    display: flex;
+    gap: 8px;
+}
+.inventory-adjustment-readonly {
+    background: #f5f7f9 !important;
+    color: #52606d;
+}
+
+@media screen and (max-width: 640px) {
+    .purchase-task-cards {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    .purchase-task-card {
+        min-height: 76px;
+        padding: 11px 13px;
+    }
+    .purchase-task-card strong { font-size: 18px; }
+    .purchase-stage-tabs {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        padding: 8px;
+    }
+    .purchase-stage-button {
+        padding: 8px 7px;
+        text-align: center;
+    }
+    .purchase-stage-button small { display: none; }
+    .purchase-section-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 3px;
+    }
+    .purchase-replenishment-heading {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .purchase-replenishment-actions {
+        justify-content: space-between;
+    }
+    .purchase-replenishment-actions button {
+        min-height: 40px;
+    }
+
+    #inventoryAdjustmentOverlay .eq-modal-box {
+        width: calc(100vw - 24px);
+        max-width: none !important;
+        max-height: calc(100vh - 28px);
+        overflow: auto;
+        padding: 16px;
+        box-sizing: border-box;
+    }
+    #inventoryAdjustmentOverlay .table-wrap { overflow: visible; }
+    #inventoryAdjustmentOverlay .inventory-adjustment-table,
+    #inventoryAdjustmentOverlay .inventory-adjustment-table tbody,
+    #inventoryAdjustmentOverlay .inventory-adjustment-table tr,
+    #inventoryAdjustmentOverlay .inventory-adjustment-table td {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+    #inventoryAdjustmentOverlay .inventory-adjustment-table thead { display: none; }
+    #inventoryAdjustmentOverlay .inventory-adjustment-row {
+        margin: 0 0 12px;
+        padding: 12px;
+        border: 1px solid #d8e1e8;
+        border-radius: 10px;
+        background: #fff;
+    }
+    #inventoryAdjustmentOverlay .inventory-adjustment-row td {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr);
+        align-items: center;
+        gap: 9px;
+        padding: 6px 0;
+        border: 0;
+    }
+    #inventoryAdjustmentOverlay .inventory-adjustment-row td::before {
+        content: attr(data-label);
+        color: #52606d;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.35;
+    }
+    #inventoryAdjustmentOverlay .inventory-adjustment-row input,
+    #inventoryAdjustmentOverlay .inventory-adjustment-row select {
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+        box-sizing: border-box;
+        font-size: 16px;
+    }
+    #inventoryAdjustmentOverlay .inventory-adjustment-row .btn-danger {
+        width: 100%;
+        min-height: 40px;
+        margin: 0;
+    }
+    .inventory-adjustment-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .inventory-adjustment-actions > button,
+    .inventory-adjustment-actions > div,
+    .inventory-adjustment-actions > div button { width: 100%; }
+    .inventory-adjustment-actions > div {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}

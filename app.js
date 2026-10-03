@@ -880,6 +880,8 @@ function initializePageData(mainKey, options = {}) {
             mergeReceivingSourceOrdersIntoOrderCache();
             if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         }).catch(err => console.warn('待到貨背景資料載入失敗：', err));
+        loadInventoryReplenishmentCenter(false)
+            .catch(err => console.warn('安全庫存背景資料載入失敗：', err));
         Promise.allSettled([ensureSalesListLoaded(), ensureBrandSettingsLoaded()]).then(results => {
             const failed = results.filter(result => result.status === 'rejected');
             failed.forEach(result => console.warn('採購頁背景設定載入失敗：', result.reason));
@@ -4998,14 +5000,21 @@ window.disableWarehouseMaster = async function(id) {
 };
 
 function populateOrderWarehouseOptions(selected = '') {
-    const select = document.getElementById('orderWarehouse');
-    if (!select) return;
-    const current = selected || select.value;
-    select.innerHTML = '<option value="">請選擇倉庫</option>' + warehouseMasterCache
-        .filter(item => item.active !== false)
-        .map(item => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.warehouseName || item.id)}${item.isDefault ? '（預設）' : ''}</option>`).join('');
-    if (warehouseMasterCache.some(item => item.id === current)) select.value = current;
-    else if (defaultWarehouse()) select.value = defaultWarehouse().id;
+    const field = document.getElementById('orderWarehouse');
+    if (!field) return;
+    const activeWarehouses = warehouseMasterCache.filter(item => item.active !== false);
+    const current = selected || field.value;
+    const nextValue = activeWarehouses.some(item => item.id === current)
+        ? current
+        : (defaultWarehouse()?.id || activeWarehouses[0]?.id || '');
+
+    // 舊版曾使用下拉選單；目前正式訂單採「依實際庫存自動配置」，
+    // orderWarehouse 是隱藏欄位，只需保存預設倉庫 id。
+    if (field.tagName === 'SELECT') {
+        field.innerHTML = '<option value="">請選擇倉庫</option>' + activeWarehouses
+            .map(item => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.warehouseName || item.id)}${item.isDefault ? '（預設）' : ''}</option>`).join('');
+    }
+    field.value = nextValue;
 }
 
 async function warehouseStockSnapshot(productKey, warehouseId) {
@@ -8063,8 +8072,44 @@ function inventoryReplenishmentPlan(item = {}, stock = {}) {
 }
 
 
-function renderInventoryReplenishmentCenter() {const body=document.getElementById('purchaseReplenishmentBody'),status=document.getElementById('purchaseReplenishmentStatus'),details=document.getElementById('purchaseReplenishmentDetails'),panel=document.getElementById('purchaseReplenishmentPanel');if(!body||!status)return;const rows=inventoryReplenishmentCache.map(item=>({item,stock:inventoryAggregateStock(item)})).map(row=>({...row,plan:inventoryReplenishmentPlan(row.item,row.stock)})).filter(row=>row.plan.needsReplenishment).sort((a,b)=>b.plan.suggestedQty-a.plan.suggestedQty||String(a.item.itemCode||'').localeCompare(String(b.item.itemCode||''),'zh-Hant'));const empty=!inventoryReplenishmentLoading&&!rows.length;status.textContent=inventoryReplenishmentLoading?'正在檢查安全庫存品項…':(rows.length?`需補貨 ${rows.length} 個品項；建議量已扣除現有占用與在途。`:'✓ 目前沒有需要補貨的品項。');if(details)details.hidden=empty;if(panel)panel.classList.toggle('is-empty',empty);body.innerHTML=rows.map(({item,stock,plan})=>`<tr><td data-th="貨號">${escapeHtml(item.itemCode||'')}</td><td data-th="品名">${escapeHtml(item.itemName||'')}</td><td data-th="廠牌">${escapeHtml(item.brand||'')}</td><td data-th="現有">${stock.onHand}</td><td data-th="占用">${stock.reserved}</td><td data-th="可用">${stock.available}</td><td data-th="在途">${stock.incoming}</td><td data-th="預計"><strong>${plan.projected}</strong></td><td data-th="安全庫存">${plan.safetyStock}</td><td data-th="建議補貨"><strong>${plan.suggestedQty}</strong></td><td data-th="操作" class="no-print">${canEditPage('orders.po')?`<button type="button" class="btn-small" onclick="openInventoryReplenishment('${escapeAttr(item.id)}')">建立訂購單</button>`:'僅可查看'}</td></tr>`).join('');}
+function renderInventoryReplenishmentCenter() {
+    const body = document.getElementById('purchaseReplenishmentBody');
+    const status = document.getElementById('purchaseReplenishmentStatus');
+    const details = document.getElementById('purchaseReplenishmentDetails');
+    const panel = document.getElementById('purchaseReplenishmentPanel');
+    if (!body || !status) return;
 
+    const rows = inventoryReplenishmentCache
+        .map(item => ({ item, stock: inventoryAggregateStock(item) }))
+        .map(row => ({ ...row, plan: inventoryReplenishmentPlan(row.item, row.stock) }))
+        .filter(row => row.plan.needsReplenishment)
+        .sort((a, b) => b.plan.suggestedQty - a.plan.suggestedQty || String(a.item.itemCode || '').localeCompare(String(b.item.itemCode || ''), 'zh-Hant'));
+
+    const empty = !inventoryReplenishmentLoading && !rows.length;
+    status.textContent = inventoryReplenishmentLoading
+        ? '正在檢查安全庫存品項…'
+        : (rows.length ? `需補貨 ${rows.length} 個品項；建議量已扣除現有占用與在途。` : '✓ 目前沒有需要補貨的品項。');
+
+    const taskCount = document.getElementById('purchaseCountReplenishment');
+    if (taskCount) taskCount.textContent = inventoryReplenishmentLoading ? '檢查中…' : `${rows.length} 品項`;
+
+    if (details) details.hidden = empty;
+    if (panel) panel.classList.toggle('is-empty', empty);
+
+    body.innerHTML = rows.map(({ item, stock, plan }) => `<tr>
+        <td data-th="貨號">${escapeHtml(item.itemCode || '')}</td>
+        <td data-th="品名">${escapeHtml(item.itemName || '')}</td>
+        <td data-th="廠牌">${escapeHtml(item.brand || '')}</td>
+        <td data-th="現有">${stock.onHand}</td>
+        <td data-th="占用">${stock.reserved}</td>
+        <td data-th="可用">${stock.available}</td>
+        <td data-th="在途">${stock.incoming}</td>
+        <td data-th="預計"><strong>${plan.projected}</strong></td>
+        <td data-th="安全庫存">${plan.safetyStock}</td>
+        <td data-th="建議補貨"><strong>${plan.suggestedQty}</strong></td>
+        <td data-th="操作" class="no-print">${canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment('${escapeAttr(item.id)}')">建立訂購單</button>` : '僅可查看'}</td>
+      </tr>`).join('');
+}
 async function loadInventoryReplenishmentCenter(force=false) {
  if(!canAccessPage('orders.po'))return;
  if(inventoryReplenishmentLoading)return;
@@ -8311,8 +8356,69 @@ window.renderInventoryLedger=function(){
 let inventoryAdjustmentRows = [];
 
 function inventoryAdjustmentTitle(type) {return ({initial:'新增庫存',adjustment:'批號／效期庫存異動',scrap:'報廢'})[type]||'庫存異動';}
-window.onInventoryAdjustmentTypeChange=function(){const type=document.getElementById('inventoryAdjustmentType')?.value||'adjustment',title=document.getElementById('inventoryAdjustmentTitle'),hint=document.getElementById('inventoryAdjustmentHint');if(title)title.innerText=inventoryAdjustmentTitle(type);if(hint)hint.textContent=type==='scrap'?'報廢請輸入正數，系統會自動扣除並保留報廢異動紀錄。':'一般盤點請使用「修改庫存」直接輸入盤點後數量；這裡的數量代表本次增加或減少量，供批號／效期品項使用。';};
-window.openInventoryAdjustment = async function(type = 'initial', item = null) {if(!canEditPage('inventory'))return;await loadSupplierWarehouseMasters();const selectedType=type||'initial',source=item||null;inventoryAdjustmentRows=[{itemCode:source?.itemCode||'',itemName:source?.itemName||'',brand:source?.brand||'',productId:source?.productId||source?.productKey||'',warehouseId:defaultWarehouse()?.id||'',qty:0,unitCost:0,lotNo:'',expiryDate:''}];const typeSelect=document.getElementById('inventoryAdjustmentType');if(typeSelect){typeSelect.value=selectedType;typeSelect.disabled=selectedType==='initial';const initialOption=typeSelect.querySelector('option[value="initial"]');if(initialOption)initialOption.disabled=selectedType!=='initial';}const addRowBtn=document.getElementById('inventoryAddRowBtn');if(addRowBtn)addRowBtn.style.display=selectedType==='initial'?'':'none';onInventoryAdjustmentTypeChange();renderInventoryAdjustmentRows();document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');};
+window.onInventoryAdjustmentTypeChange=function(){
+    const type=document.getElementById('inventoryAdjustmentType')?.value||'adjustment';
+    const title=document.getElementById('inventoryAdjustmentTitle');
+    const hint=document.getElementById('inventoryAdjustmentHint');
+    if(title)title.innerText=inventoryAdjustmentTitle(type);
+    if(!hint)return;
+    if(type==='initial'){
+        hint.textContent='輸入貨號後會自動帶入品名與廠牌；倉庫預設帶入常用倉庫。只需要填數量與實際單位成本，批號／效期有管理需求時再填。';
+    }else if(type==='scrap'){
+        hint.textContent='報廢請輸入正數，系統會自動扣除並保留報廢異動紀錄。';
+    }else{
+        hint.textContent='一般盤點請使用庫存卡片的「修改庫存」直接輸入盤點後數量；這裡只處理批號／效期品項的增減異動。';
+    }
+};
+window.openInventoryAdjustment = async function(type = 'initial', item = null) {
+    if (!canEditPage('inventory')) return;
+    const selectedType = type || 'initial';
+    const source = item || null;
+    const overlay = document.getElementById('inventoryAdjustmentOverlay');
+    const typeSelect = document.getElementById('inventoryAdjustmentType');
+    const typeWrap = document.getElementById('inventoryAdjustmentTypeWrap');
+    const addRowBtn = document.getElementById('inventoryAddRowBtn');
+
+    inventoryAdjustmentRows = [{
+        itemCode: source?.itemCode || '',
+        itemName: source?.itemName || '',
+        brand: source?.brand || '',
+        productId: source?.productId || source?.productKey || '',
+        warehouseId: defaultWarehouse()?.id || '',
+        qty: 0,
+        unitCost: 0,
+        lotNo: '',
+        expiryDate: ''
+    }];
+
+    if (typeSelect) {
+        typeSelect.value = selectedType;
+        typeSelect.disabled = selectedType === 'initial';
+        const initialOption = typeSelect.querySelector('option[value="initial"]');
+        if (initialOption) initialOption.disabled = selectedType !== 'initial';
+    }
+    if (typeWrap) typeWrap.style.display = selectedType === 'initial' ? 'none' : '';
+    if (addRowBtn) {
+        addRowBtn.style.display = selectedType === 'initial' ? '' : 'none';
+        addRowBtn.textContent = '＋ 再加一個品項';
+    }
+
+    onInventoryAdjustmentTypeChange();
+    renderInventoryAdjustmentRows();
+    overlay?.classList.add('active');
+
+    try {
+        await loadWarehouseMaster();
+        const fallbackWarehouseId = defaultWarehouse()?.id || '';
+        inventoryAdjustmentRows = inventoryAdjustmentRows.map(row => ({
+            ...row,
+            warehouseId: row.warehouseId || fallbackWarehouseId
+        }));
+        renderInventoryAdjustmentRows();
+    } catch (err) {
+        console.warn('新增庫存：倉庫主檔載入失敗，先保留目前表單。', err);
+    }
+};
 window.closeInventoryAdjustment = function() {
     const typeSelect = document.getElementById('inventoryAdjustmentType');
     if (typeSelect) typeSelect.disabled = false;
@@ -8623,24 +8729,29 @@ window.updateInventoryAdjustmentRow = function(idx, field, value) {
 };
 
 function renderInventoryAdjustmentRows() {
-    const body=document.getElementById('inventoryAdjustmentRows');
-    if(!body)return;
-    const warehouseOptions=warehouseMasterCache.filter(w=>w.active!==false).map(w=>`<option value="${escapeAttr(w.id)}">${escapeHtml(w.warehouseName||w.id)}</option>`).join('');
-    body.innerHTML=inventoryAdjustmentRows.map((row,idx)=>`
-      <tr>
-        <td><input type="text" list="priceModelList" value="${escapeAttr(row.itemCode||'')}" onchange="onInventoryAdjustmentCode(${idx},this.value)"></td>
-        <td><input type="text" value="${escapeAttr(row.itemName||'')}" onchange="updateInventoryAdjustmentRow(${idx},'itemName',this.value)"></td>
-        <td><input type="text" list="poBrandList" value="${escapeAttr(row.brand||'')}" onchange="updateInventoryAdjustmentRow(${idx},'brand',this.value)"></td>
-        <td><select onchange="updateInventoryAdjustmentRow(${idx},'warehouseId',this.value)"><option value="">請選倉庫</option>${warehouseOptions}</select></td>
-        <td><input type="number" step="any" value="${row.qty||''}" onchange="updateInventoryAdjustmentRow(${idx},'qty',this.value)"></td>
-        <td><input type="number" min="0" step="any" value="${row.unitCost||''}" onchange="updateInventoryAdjustmentRow(${idx},'unitCost',this.value)" placeholder="必填"></td>
-        <td><input type="text" value="${escapeAttr(row.lotNo||'')}" onchange="updateInventoryAdjustmentRow(${idx},'lotNo',this.value)" placeholder="批號"></td>
-        <td><input type="date" value="${escapeAttr(row.expiryDate||'')}" onchange="updateInventoryAdjustmentRow(${idx},'expiryDate',this.value)"></td>
-        <td><button type="button" class="btn-small btn-danger" onclick="removeInventoryAdjustmentRow(${idx})">刪除</button></td>
+    const body = document.getElementById('inventoryAdjustmentRows');
+    if (!body) return;
+    const warehouseOptions = warehouseMasterCache
+        .filter(w => w.active !== false)
+        .map(w => `<option value="${escapeAttr(w.id)}">${escapeHtml(w.warehouseName || w.id)}</option>`)
+        .join('');
+
+    body.innerHTML = inventoryAdjustmentRows.map((row, idx) => `
+      <tr class="inventory-adjustment-row">
+        <td data-label="貨號"><input type="text" list="priceModelList" value="${escapeAttr(row.itemCode || '')}" onchange="onInventoryAdjustmentCode(${idx},this.value)" placeholder="輸入 Product Master 貨號"></td>
+        <td data-label="品名"><input class="inventory-adjustment-readonly" type="text" value="${escapeAttr(row.itemName || '')}" readonly placeholder="自動帶入"></td>
+        <td data-label="廠牌"><input class="inventory-adjustment-readonly" type="text" value="${escapeAttr(row.brand || '')}" readonly placeholder="自動帶入"></td>
+        <td data-label="倉庫"><select onchange="updateInventoryAdjustmentRow(${idx},'warehouseId',this.value)"><option value="">請選倉庫</option>${warehouseOptions}</select></td>
+        <td data-label="數量"><input type="number" step="any" value="${row.qty || ''}" onchange="updateInventoryAdjustmentRow(${idx},'qty',this.value)" inputmode="decimal" placeholder="本次入庫數量"></td>
+        <td data-label="實際單位成本"><input type="number" min="0" step="any" value="${row.unitCost || ''}" onchange="updateInventoryAdjustmentRow(${idx},'unitCost',this.value)" inputmode="decimal" placeholder="必填"></td>
+        <td data-label="批號（選填）"><input type="text" value="${escapeAttr(row.lotNo || '')}" onchange="updateInventoryAdjustmentRow(${idx},'lotNo',this.value)" placeholder="無批號可留白"></td>
+        <td data-label="效期（選填）"><input type="date" value="${escapeAttr(row.expiryDate || '')}" onchange="updateInventoryAdjustmentRow(${idx},'expiryDate',this.value)"></td>
+        <td data-label="操作"><button type="button" class="btn-small btn-danger" onclick="removeInventoryAdjustmentRow(${idx})">刪除這筆</button></td>
       </tr>`).join('');
-    [...body.querySelectorAll('tr')].forEach((tr,idx)=>{
-      const select=tr.querySelector('select');
-      if(select&&inventoryAdjustmentRows[idx]?.warehouseId) select.value=inventoryAdjustmentRows[idx].warehouseId;
+
+    [...body.querySelectorAll('tr')].forEach((tr, idx) => {
+        const select = tr.querySelector('select');
+        if (select && inventoryAdjustmentRows[idx]?.warehouseId) select.value = inventoryAdjustmentRows[idx].warehouseId;
     });
 }
 window.saveInventoryAdjustmentBatch = async function() {
@@ -10599,6 +10710,13 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         if (count) count.textContent = `${baseCount + extraCount} 筆`;
         if (amount) amount.textContent = formatStatsMoney(baseAmount + extraAmount);
     });
+    const stockingSummary = document.getElementById('purchaseStockingSummary');
+    if (stockingSummary) {
+        const receiving = document.getElementById('purchaseCountReceiving')?.textContent || '0 筆';
+        const dispatch = document.getElementById('purchaseCountDispatch')?.textContent || '0 筆';
+        stockingSummary.textContent = `待到貨 ${receiving}｜待打單 ${dispatch}`;
+    }
+
     // 圖卡統計已載入資料中的全部已完成品項；50 筆限制只套在下方明細顯示，
     // 避免使用者按「載入更多」時圖卡數字跟著人為跳動。
     const completed = completedRows || purchasingCompletedRows(filters, itemMap, stateMap, lifecycleMap);
@@ -10762,6 +10880,10 @@ window.renderPurchasingView = function() {
         renderSupplierMappingAdmin();
         return;
     }
+    if (purchasingView === 'replenishment') {
+        renderInventoryReplenishmentCenter();
+        return;
+    }
     if (purchasingView === 'history') {
         // 全部訂購單不顯示工作卡；直接畫正式訂購單歷史，
         // 不需要為了被隱藏的卡片掃描整批 ordersCache。
@@ -10798,7 +10920,7 @@ window.changePurchasePeriod = function(value) {
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history', 'suppliers'].includes(view)) return;
+    if (!['ordering', 'receiving', 'dispatch', 'completed', 'replenishment', 'history', 'suppliers'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     if (view === 'suppliers' && !canCreatePurchaseOrderCapability()) return;
     const previousPurchasingView = purchasingView;
@@ -10821,21 +10943,37 @@ window.switchPurchasingView = function(view, tab) {
         : null;
     if (workflowView) renderPurchasingWorkCards(normalizedItemsByOrder, completedRows, filters, dispatchStatesByOrder, lifecyclesByOrder);
     const orderingTab = document.getElementById('purchase-card-ordering');
+    const replenishmentTab = document.getElementById('purchase-card-replenishment');
     if (orderingTab) orderingTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
-    document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
+    if (replenishmentTab) replenishmentTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const activeTaskId = view === 'ordering'
+        ? 'purchase-card-ordering'
+        : (view === 'replenishment'
+            ? 'purchase-card-replenishment'
+            : (['receiving', 'dispatch', 'completed'].includes(view) ? 'purchase-card-stocking' : ''));
+    document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el =>
+        el.classList.toggle('active', !!activeTaskId && el.id === activeTaskId)
+    );
+    document.querySelectorAll('#purchaseFulfillmentTabs .purchase-stage-button').forEach(el =>
+        el.classList.toggle('active', el.id === `purchase-card-${view}`)
+    );
     document.getElementById('purchase-tab-work')?.classList.toggle('active', workflowView);
     document.getElementById('purchase-tab-history')?.classList.toggle('active', view === 'history');
     document.getElementById('purchase-tab-suppliers')?.classList.toggle('active', view === 'suppliers');
     const cards = document.getElementById('purchaseWorkCards');
     if (cards) cards.style.display = workflowView ? '' : 'none';
     const filterToolbar = document.getElementById('purchaseFilterToolbar');
-    if (filterToolbar) filterToolbar.style.display = view === 'suppliers' ? 'none' : '';
+    if (filterToolbar) filterToolbar.style.display = (view === 'suppliers' || view === 'replenishment') ? 'none' : '';
+    const fulfillmentTabs = document.getElementById('purchaseFulfillmentTabs');
+    if (fulfillmentTabs) fulfillmentTabs.style.display = ['receiving', 'dispatch', 'completed'].includes(view) ? '' : 'none';
     const pendingPanel=document.getElementById('purchasePendingPanel');
+    const replenishmentPanel=document.getElementById('purchaseReplenishmentPanel');
     const poPanel=document.getElementById('poListPanel');
     const dispatchPanel=document.getElementById('purchaseDispatchPanel');
     const completedPanel=document.getElementById('purchaseCompletedPanel');
     const supplierPanel=document.getElementById('purchaseSupplierPanel');
     if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
+    if(replenishmentPanel)replenishmentPanel.style.display=view==='replenishment'?'':'none';
     if(poPanel)poPanel.style.display=(view==='receiving'||view==='history')?'':'none';
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
@@ -10850,9 +10988,10 @@ window.switchPurchasingView = function(view, tab) {
                 console.error('供應商主檔首次載入失敗：', err);
             });
         }
-    } else if (view === 'ordering') {
+    } else if (view === 'replenishment') {
         renderInventoryReplenishmentCenter();
         loadInventoryReplenishmentCenter(false).catch(err => console.error('安全庫存補貨自動更新失敗：', err));
+    } else if (view === 'ordering') {
         renderPendingPurchaseOrders();
         if (!purchasingViewLoaded.has('ordering')) {
             purchasingViewLoaded.add('ordering');
@@ -16445,6 +16584,11 @@ window.addCurrentOrderItemToDraft=function(){
 };
 
 window.openOrderModal = function(source = null) {
+    const overlay = document.getElementById('orderModalOverlay');
+    if (!overlay) return;
+    // 先讓使用者立即看到表單，再做品牌、倉庫與客戶建議等初始化；
+    // 即使某個輔助資料暫時讀取失敗，按鈕也不會呈現「完全沒反應」。
+    overlay.classList.add('active');
     requestedOrderOwnerUid = source?.ownerUid || '';
     populateOrderOwnerSelect();
     if (currentUserRole === 'purchaser') {
@@ -16465,7 +16609,8 @@ window.openOrderModal = function(source = null) {
     const today = new Date();
     document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderItemNameEn', 'orderProductLine', 'orderSpec', 'orderInvoiceTitle'].forEach(id => {
-        document.getElementById(id).value = '';
+        const field = document.getElementById(id);
+        if (field) field.value = '';
     });
     onOrderBrandSelectChange();
     document.getElementById('orderQty').value = 1;
@@ -16515,7 +16660,6 @@ window.openOrderModal = function(source = null) {
         }
     }
 
-    document.getElementById('orderModalOverlay').classList.add('active');
     if(localStorage.getItem(pendingOrderCreateKey()) && readOrderDraft()) restoreSavedOrderDraft();
 };
 
