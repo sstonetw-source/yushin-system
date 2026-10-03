@@ -2348,8 +2348,14 @@ test('purchasing auto-loads without manual refresh buttons and reads stay bounde
     const pageEnd=appSource.indexOf('window.loadMyPurchaseOrders',pageStart);
     const pageSource=appSource.slice(pageStart,pageEnd);
     assert.match(pageSource,/firestoreReadWithTimeout\(query\.get\(\), '訂購單清單'\)/);
-    assert.match(pageSource,/firestoreReadWithTimeout\(supplyQuery\.get\(\), '待到貨供應'\)/);
-    assert.match(pageSource,/待到貨來源訂單/);
+    const receivingStart=appSource.indexOf('async function loadActiveReceivingSupplyCache');
+    const receivingEnd=appSource.indexOf('\nfunction loadPurchasingReceivingQueue',receivingStart);
+    const receivingSource=appSource.slice(receivingStart,receivingEnd);
+    assert.match(receivingSource,/where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
+    assert.match(receivingSource,/firestoreReadWithTimeout\(query\.get\(\), '待到貨供應'\)/);
+    assert.match(receivingSource,/while \(true\)/);
+    assert.match(receivingSource,/snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(receivingSource,/待到貨來源訂單/);
 
     const switchStart=appSource.indexOf('window.switchPurchasingView = function');
     const switchEnd=appSource.indexOf('async function loadPurchasingDispatchOrders',switchStart);
@@ -2966,7 +2972,8 @@ test('receiving refresh coalesces final purchasing render', () => {
     const queueStart=appSource.indexOf('function loadPurchasingReceivingQueue');
     const queueEnd=appSource.indexOf('\nlet purchasingFilterOptionsSignature',queueStart);
     const queueSource=appSource.slice(queueStart,queueEnd);
-    assert.match(queueSource,/loadPurchaseOrderPage\(reset, \{ deferRender:true \}\)/);
+    assert.match(queueSource,/loadActiveReceivingSupplyCache\(reset\)/);
+    assert.doesNotMatch(queueSource,/loadPurchaseOrderPage\(reset/);
     assert.match(queueSource,/renderPurchasingView\(\)/);
 
     const pageStart=appSource.indexOf('async function loadPurchaseOrderPage');

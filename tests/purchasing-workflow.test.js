@@ -388,11 +388,28 @@ test('receiving waits for both order work state and purchase evidence before dec
     const queueStart=app.indexOf('function loadPurchasingReceivingQueue(');
     const queueEnd=app.indexOf('\nlet purchasingFilterOptionsSignature',queueStart);
     const queue=app.slice(queueStart,queueEnd);
-    assert.match(queue,/Promise\.allSettled\(\[[\s\S]*?loadPurchaseOrderPage\(reset, \{ deferRender:true \}\)[\s\S]*?refreshPurchasingOrderCache\(reset, options\)/);
+    assert.match(queue,/Promise\.allSettled\(\[[\s\S]*?loadActiveReceivingSupplyCache\(reset\)[\s\S]*?refreshPurchasingOrderCache\(reset, options\)/);
+    assert.doesNotMatch(queue,/loadPurchaseOrderPage\(reset/);
     assert.match(queue,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
     assert.match(queue,/renderPurchasingView\(\)/);
     assert.match(app,/採購資料載入中/);
     assert.match(app,/尚未找到可操作的採購紀錄/);
+});
+
+test('purchasing startup preloads active supplyOrders so in-transit stock is not shown as zero', () => {
+    const initStart=app.indexOf("if (mainKey === 'orders.po') {");
+    const initEnd=app.indexOf("if (mainKey === 'inventory') {",initStart);
+    const init=app.slice(initStart,initEnd);
+    assert.match(init,/loadActiveReceivingSupplyCache\(true\)/);
+    assert.match(init,/mergeReceivingSourceOrdersIntoOrderCache\(\)/);
+
+    const loaderStart=app.indexOf('async function loadActiveReceivingSupplyCache');
+    const loaderEnd=app.indexOf('\nfunction loadPurchasingReceivingQueue',loaderStart);
+    const loader=app.slice(loaderStart,loaderEnd);
+    assert.match(loader,/where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
+    assert.match(loader,/supplyReceivingCache = rows/);
+    assert.match(loader,/supplyReceivingHasMore = false/);
+    assert.match(loader,/orderBy\(firebase\.firestore\.FieldPath\.documentId\(\)\)/);
 });
 
 test('purchase-order history search reads every indexed match instead of stopping at 50', () => {

@@ -874,6 +874,12 @@ function initializePageData(mainKey, options = {}) {
         // 採購頁只啟動一個共用 orders 背景更新；各工作分頁都沿用同一份 ordersCache。
         // 先立即畫快取，業務名單＋品牌設定在背景完成後只補畫一次，避免手機重複掃同一批訂單。
         switchPurchasingView(canCreatePurchaseOrderCapability() ? 'ordering' : 'receiving');
+        // 待到貨圖卡需要 supplyOrders 才能包含公司備庫採購；不能等使用者點進「待到貨」才載入，
+        // 否則重新登入後可能短暫顯示 0，甚至與庫存「在途」數字不一致。
+        loadActiveReceivingSupplyCache(true).then(() => {
+            mergeReceivingSourceOrdersIntoOrderCache();
+            if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+        }).catch(err => console.warn('待到貨背景資料載入失敗：', err));
         Promise.allSettled([ensureSalesListLoaded(), ensureBrandSettingsLoaded()]).then(results => {
             const failed = results.filter(result => result.status === 'rejected');
             failed.forEach(result => console.warn('採購頁背景設定載入失敗：', result.reason));
@@ -1256,6 +1262,7 @@ window.switchViewRole = function(role) {
     receivingSourceOrderStatusCache = new Map();
     receivingSourceOrderCache = new Map();
     purchasingReceivingReady = false;
+    activeReceivingSupplyLoadPromise = null;
     purchasingOrdersReady = false;
     purchasingDispatchCache = [];
     purchasingDispatchCursor = null;
@@ -10140,6 +10147,7 @@ let receivingSourceOrderCache = new Map();
 let purchasingOrderRefreshPromise = null;
 let purchasingOrdersReady = false;
 let purchasingReceivingLoadPromise = null;
+let activeReceivingSupplyLoadPromise = null;
 let purchasingReceivingReady = false;
 let purchasingView = 'ordering';
 let pendingPurchaseCursor = null;
@@ -10190,6 +10198,66 @@ function refreshPurchasingOrderCache(reset = true, options = {}) {
     return purchasingOrderRefreshPromise;
 }
 
+async function loadActiveReceivingSupplyCache(reset = true) {
+    if (!canAccessPage('orders.po')) return [];
+    if (activeReceivingSupplyLoadPromise) return activeReceivingSupplyLoadPromise;
+    const requestedRole = currentUserRole;
+    activeReceivingSupplyLoadPromise = (async () => {
+        const records = new Map((reset ? [] : supplyReceivingCache).map(row => [row.id, row]));
+        let cursor = null;
+        while (true) {
+            let query = db.collection('supplyOrders')
+                .where('status','in',['ORDERED','PARTIAL_RECEIPT'])
+                .orderBy(firebase.firestore.FieldPath.documentId())
+                .limit(DEFAULT_LIST_LIMIT);
+            if (cursor) query = query.startAfter(cursor);
+            const snapshot = await firestoreReadWithTimeout(query.get(), '待到貨供應');
+            snapshot.docs.forEach(doc => records.set(doc.id, { id:doc.id, ...doc.data() }));
+            if (snapshot.size < DEFAULT_LIST_LIMIT) break;
+            cursor = snapshot.docs[snapshot.docs.length - 1];
+        }
+        if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return [];
+
+        const rows = [...records.values()]
+            .sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
+        supplyReceivingCache = rows;
+        // 這裡已完整讀取「仍在途」的 active queue；待到貨工作不再受 50 筆歷史分頁影響。
+        supplyReceivingCursor = null;
+        supplyReceivingHasMore = false;
+
+        const sourceOrderIds = [...new Set(rows.map(row=>String(row.orderId||'').trim()).filter(Boolean))];
+        const cachedOrders = new Map(ordersCache.map(order=>[order.id,order]));
+        const nextSourceOrders = new Map();
+        const nextSourceStatuses = new Map();
+        sourceOrderIds.forEach(id => {
+            const cached = cachedOrders.get(id);
+            if (!cached) return;
+            nextSourceOrders.set(id,cached);
+            nextSourceStatuses.set(id,normalizedOrderStatus(cached));
+        });
+        const missingSourceIds = sourceOrderIds.filter(id=>!nextSourceOrders.has(id));
+        for (let i=0;i<missingSourceIds.length;i+=10) {
+            const batch = missingSourceIds.slice(i,i+10);
+            const sourceSnap = await firestoreReadWithTimeout(
+                db.collection('orders').where(firebase.firestore.FieldPath.documentId(),'in',batch).get(),
+                '待到貨來源訂單'
+            );
+            sourceSnap.docs.forEach(doc => {
+                const order={id:doc.id,...doc.data()};
+                nextSourceOrders.set(doc.id,order);
+                nextSourceStatuses.set(doc.id,normalizedOrderStatus(order));
+            });
+        }
+        if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return [];
+        receivingSourceOrderCache = nextSourceOrders;
+        receivingSourceOrderStatusCache = nextSourceStatuses;
+        return rows;
+    })().finally(() => {
+        activeReceivingSupplyLoadPromise = null;
+    });
+    return activeReceivingSupplyLoadPromise;
+}
+
 function loadPurchasingReceivingQueue(reset = true, options = {}) {
     if (purchasingReceivingLoadPromise) return purchasingReceivingLoadPromise;
     purchasingReceivingReady = false;
@@ -10200,13 +10268,13 @@ function loadPurchasingReceivingQueue(reset = true, options = {}) {
         renderPoList();
     }
     purchasingReceivingLoadPromise = Promise.allSettled([
-        loadPurchaseOrderPage(reset, { deferRender:true }),
+        loadActiveReceivingSupplyCache(reset),
         refreshPurchasingOrderCache(reset, options)
     ]).then(results => {
         purchasingReceivingReady = true;
         const failed = results.filter(result => result.status === 'rejected');
-        // 兩條查詢平行完成後，以待到貨來源訂單再合併一次，
-        // 避免較晚完成的近期訂單刷新覆蓋較舊但仍在途的來源訂單。
+        // 「全部訂購單」歷史查詢與「待到貨」供應查詢分離，避免兩頁同時載入時共用 lock
+        // 造成 supplyOrders 沒有真正查到、卻被誤標成已載入的 0 筆狀態。
         mergeReceivingSourceOrdersIntoOrderCache();
         renderPurchasingView();
         if (failed.length) throw failed[0].reason;
