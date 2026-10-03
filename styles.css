@@ -2781,3 +2781,192 @@ html[data-app-environment="preview"] body { border-top: 0; }
     .purchase-replenishment-heading { align-items:flex-start; }
     .inventory-quantity-modal, .inventory-transfer-modal { width:calc(100vw - 28px); max-height:calc(100vh - 40px); overflow:auto; }
 }
+
+
+/* ===== 2026-10-03：手機訂購單／庫存精簡與 PDF 安全邊界 ===== */
+/* PDF 多留底部安全空間，避免 iPhone html2canvas 在總計最後一行附近裁切。 */
+.po-pdf-page {
+    padding-bottom: 8mm;
+}
+.po-pdf-page .po-total-section {
+    margin-bottom: 3mm !important;
+    padding-bottom: 2mm;
+    line-height: 1.4;
+}
+.po-pdf-page .po-total-section p {
+    line-height: 1.4;
+}
+
+@media screen and (max-width: 640px) {
+    /* 訂購單輸入視窗在手機改成卡片式品項，不再把 7 欄硬塞在同一列。 */
+    #poModalOverlay {
+        padding: 12px 8px calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+    #poModalOverlay .eq-modal-box {
+        width: 100%;
+        max-width: none;
+        padding: 16px 14px;
+        border-radius: 12px;
+    }
+    #poModalOverlay #printablePO .meta-row-three {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        width: 100%;
+    }
+    #poModalOverlay #printablePO .meta-row-three > div {
+        display: grid;
+        grid-template-columns: 86px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+    #poModalOverlay #printablePO .meta-row-three label {
+        width: auto;
+        min-width: 0;
+    }
+    #poModalOverlay #poDate,
+    #poModalOverlay #poExpectedDate {
+        width: 100%;
+        min-width: 0;
+        min-height: 42px;
+        box-sizing: border-box;
+        color: #222;
+        -webkit-text-fill-color: #222;
+        background: #fff;
+        opacity: 1;
+        color-scheme: light;
+    }
+    #poModalOverlay input[type="date"]::-webkit-date-and-time-value {
+        min-height: 1.2em;
+        text-align: left;
+    }
+
+    #poModalOverlay #poItemsTable {
+        width: 100%;
+        min-width: 0;
+        margin-top: 10px !important;
+        border-collapse: separate !important;
+        border-spacing: 0;
+    }
+    #poModalOverlay #poItemsTable thead {
+        display: none;
+    }
+    #poModalOverlay #poItemsTable,
+    #poModalOverlay #poItemsTable tbody,
+    #poModalOverlay #poItemsTable tr,
+    #poModalOverlay #poItemsTable td {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+    #poModalOverlay #poItemsTable tr {
+        margin-bottom: 12px;
+        padding: 12px;
+        border: 1px solid #d8e1eb;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    #poModalOverlay #poItemsTable td {
+        border: 0 !important;
+        border-bottom: 1px solid #edf1f5 !important;
+        padding: 8px 0 !important;
+        text-align: left;
+    }
+    #poModalOverlay #poItemsTable td:last-child {
+        border-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    #poModalOverlay #poItemsTable td::before {
+        display: block;
+        margin-bottom: 4px;
+        color: #7a858f;
+        font-size: 11px;
+        font-weight: 700;
+    }
+    #poModalOverlay #poItemsTable td:nth-child(1)::before { content: "品名 / 規格"; }
+    #poModalOverlay #poItemsTable td:nth-child(2)::before { content: "貨號"; }
+    #poModalOverlay #poItemsTable td:nth-child(3)::before { content: "廠牌"; }
+    #poModalOverlay #poItemsTable td:nth-child(4)::before { content: "數量"; }
+    #poModalOverlay #poItemsTable td:nth-child(5)::before { content: "單價"; }
+    #poModalOverlay #poItemsTable td:nth-child(6)::before { content: "小計"; }
+    #poModalOverlay #poItemsTable td:nth-child(7)::before { content: "操作"; }
+    #poModalOverlay #poItemsTable td input {
+        width: 100% !important;
+        min-width: 0;
+        min-height: 40px;
+        padding: 7px 9px !important;
+        box-sizing: border-box;
+        font-size: 16px !important;
+    }
+    #poModalOverlay #poItemsTable td:nth-child(6) {
+        font-size: 16px;
+        font-weight: 700;
+    }
+    #poModalOverlay #poItemsTable td:nth-child(7) button {
+        width: 100%;
+        min-height: 40px;
+        margin: 0;
+    }
+    #poModalOverlay .po-total-section {
+        margin-top: 12px !important;
+        padding: 10px 12px;
+        border-radius: 9px;
+        background: #f6f8fa;
+        text-align: left !important;
+    }
+
+    /* 庫存卡片只留互補資訊：貨號、可用／在途／預計、現有／占用、策略與批號效期。 */
+    #inventoryListBody tr.inventory-expanded td.inventory-detail-field {
+        display: none !important;
+    }
+    #inventoryListBody td.inventory-detail-field:nth-child(1),
+    #inventoryListBody td.inventory-detail-field:nth-child(5),
+    #inventoryListBody td.inventory-detail-field:nth-child(6),
+    #inventoryListBody td.inventory-detail-field:nth-child(12) {
+        display: block !important;
+    }
+    #inventoryListBody td.inventory-detail-field:nth-child(1) {
+        padding: 0 0 4px !important;
+        border-bottom: 0 !important;
+        color: #667584;
+        font-size: 12px;
+    }
+    #inventoryListBody td.inventory-detail-field:nth-child(1)::before {
+        display: block !important;
+        margin-bottom: 2px !important;
+    }
+    #inventoryListBody td.inventory-detail-field:nth-child(5),
+    #inventoryListBody td.inventory-detail-field:nth-child(6),
+    #inventoryListBody td.inventory-detail-field:nth-child(12) {
+        padding: 7px 0 !important;
+    }
+    #inventoryListBody .inventory-details-toggle {
+        display: none !important;
+    }
+
+    /* 編輯既有估價單時保持單列，減少手機畫面高度。 */
+    .quote-editing-banner {
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 8px;
+        padding: 8px 10px;
+    }
+    .quote-editing-banner > div {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .quote-editing-banner button {
+        flex: 0 0 auto;
+        width: auto !important;
+        min-height: 34px;
+        padding: 6px 10px !important;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+}
+

@@ -5297,3 +5297,16 @@ test('inventory policy settings clear stale safety stock outside safety-stock mo
     assert.match(appSource,/next===INVENTORY_STOCK_POLICIES\.SAFETY_STOCK\?Number\(safetyStock\|\|0\):0/);
     assert.match(appSource,/safetyStock:normalizedSafety/);
 });
+
+
+test('mobile purchase editor uses cards, iOS dates stay visible, inventory cards are compact, and PO PDF keeps a safe bottom margin', () => {
+    assert.match(cssSource, /#poModalOverlay #poItemsTable thead\s*\{\s*display:\s*none/);
+    assert.match(cssSource, /#poModalOverlay #poItemsTable td:nth-child\(1\)::before \{ content: "品名 \/ 規格"; \}/);
+    assert.match(cssSource, /#poModalOverlay #poExpectedDate[\s\S]*?-webkit-text-fill-color:\s*#222/);
+    assert.match(cssSource, /#inventoryListBody \.inventory-details-toggle\s*\{\s*display:\s*none !important/);
+    assert.match(cssSource, /#inventoryListBody td\.inventory-detail-field:nth-child\(5\)/);
+    assert.match(cssSource, /\.quote-editing-banner\s*\{[\s\S]*?flex-direction:\s*row !important/);
+    assert.match(cssSource, /\.po-pdf-page\s*\{\s*padding-bottom:\s*8mm/);
+    assert.match(cssSource, /\.po-pdf-page \.po-total-section\s*\{[\s\S]*?padding-bottom:\s*2mm/);
+});
+
