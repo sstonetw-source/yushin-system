@@ -368,7 +368,11 @@ input[type="number"] {
 
 .footer-note { font-size: 10.5px; color: #333; line-height: 1.1; margin-bottom: 4px; }
 .footer-note input[type="number"] { text-align: center; }
-.bottom-layout { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+.bottom-layout { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 4px; }
+.quote-footer-left { width: 46%; min-width: 260px; display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
+.quote-remarks-block { width:100%; text-align:left; }
+.quote-remarks-block label { display:block; margin-bottom:4px; font-size:11px; font-weight:bold; color:#333; }
+.quote-remarks-block textarea { width:100%; min-height:64px; box-sizing:border-box; padding:7px 8px; border:1px solid #ccc; border-radius:4px; resize:vertical; font:inherit; line-height:1.35; background:#fff; }
 .stamp-section { width: 195px; }
 .stamp-section img { width: 180px; height: auto; }
 .total-section { text-align: right; font-size: 13px; font-weight: bold; }
@@ -465,6 +469,10 @@ input[type="number"] {
     gap:12px;
     margin-bottom:4px;
 }
+.quote-pdf-stage .quote-pdf-footer-left { flex:1 1 auto; min-width:0; max-width:52%; text-align:left; }
+.quote-pdf-stage .quote-pdf-remarks { margin:0 0 6px; font-size:10.5px; line-height:1.35; white-space:pre-wrap; overflow-wrap:anywhere; }
+.quote-pdf-stage .quote-pdf-remarks b { margin-right:4px; }
+.quote-pdf-stage .quote-pdf-footer-left .stamp-section { width:195px; }
 .quote-pdf-stage .quote-pdf-item-detail {
     display:flex;
     flex-direction:column;
@@ -1074,6 +1082,8 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     }
 
     .bottom-layout { flex-direction: column; align-items: stretch; gap: 10px; }
+    .quote-footer-left { width:100%; min-width:0; }
+    .quote-remarks-block textarea { min-height:76px; }
     .stamp-section { width: 100%; text-align: center; }
     .total-section { text-align: left; }
 
@@ -2697,3 +2707,5 @@ html[data-app-environment="preview"] body { border-top: 0; }
 @media (max-width:560px) {
     .admin-overview-cards { grid-template-columns:1fr; }
 }
+
+.comparison-quote-remarks { margin-top:4mm; text-align:left; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.4; }

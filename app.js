@@ -5607,7 +5607,6 @@ function quoteExtraDataFromRow(row) {
         origin: String(row.querySelector('.item-origin')?.value || '').trim(),
         leadTime: String(row.querySelector('.item-lead-time')?.value || '').trim(),
         hospitalItemCode: String(row.querySelector('.item-hospital-code')?.value || '').trim(),
-        remarks: String(row.querySelector('.item-remarks')?.value || '').trim(),
         customFields
     };
 }
@@ -5618,7 +5617,6 @@ function quoteOptionalFieldKeysFromItems(items = []) {
         if (String(item.origin || '').trim()) keys.add('origin');
         if (String(item.leadTime || '').trim()) keys.add('leadTime');
         if (String(item.hospitalItemCode || '').trim()) keys.add('hospitalItemCode');
-        if (String(item.remarks || '').trim()) keys.add('remarks');
     });
     return [...keys];
 }
@@ -5665,7 +5663,7 @@ window.applyCustomerQuotePreferences = async function(customerName) {
             ? snapshot.data().quoteOptionalFields
             : [];
         // 估價單目前只保留仍可編輯的「更多資訊」欄位；舊偏好不再讓已移除欄位自動展開。
-        const supportedFields = new Set(['origin','leadTime','hospitalItemCode','remarks']);
+        const supportedFields = new Set(['origin','leadTime','hospitalItemCode']);
         activeQuoteOptionalFields = new Set(fields.filter(field => supportedFields.has(field)));
         if (!activeQuoteOptionalFields.size) return;
         document.querySelectorAll('#quoteItems tr').forEach(row => {
@@ -5741,7 +5739,6 @@ window.addQuoteRow = function(itemData = {}) {
                         <label>產地<input type="text" class="item-origin" value="${escapeAttr(itemData.origin || '')}" placeholder="例如：USA"></label>
                         <label>交貨期<input type="text" class="item-lead-time" value="${escapeAttr(itemData.leadTime || '')}" placeholder="例如：下單後 4–6 週"></label>
                         <label>院內料號<input type="text" class="item-hospital-code" value="${escapeAttr(itemData.hospitalItemCode || '')}"></label>
-                        <label>備註<input type="text" class="item-remarks" value="${escapeAttr(itemData.remarks || '')}" placeholder="例如：客戶指定條件、包裝或其他說明"></label>
                     </div>
                     <div class="quote-custom-fields"></div>
                     <button type="button" class="btn-small btn-secondary quote-add-custom-field" onclick="addQuoteCustomField(this)">＋ 自訂欄位</button>
@@ -5761,7 +5758,7 @@ window.addQuoteRow = function(itemData = {}) {
     if (itemData.brand) selectBrandInDropdown(quoteBrandSelect, itemData.brand);
     onQuoteBrandSelectChange(quoteBrandSelect);
     const extraDetails = tr.querySelector('.quote-extra-fields');
-    const hasExtraData = ['origin','leadTime','hospitalItemCode','remarks'].some(key => String(itemData[key] || '').trim())
+    const hasExtraData = ['origin','leadTime','hospitalItemCode'].some(key => String(itemData[key] || '').trim())
         || (Array.isArray(itemData.customFields) && itemData.customFields.length);
     if (extraDetails && (hasExtraData || activeQuoteOptionalFields.size)) extraDetails.open = true;
     const customButton = tr.querySelector('.quote-add-custom-field');
@@ -5968,6 +5965,7 @@ function saveQuoteDraft() {
             quoteNo: document.getElementById('quoteNo')?.value || '',
             discountRate: document.getElementById('discountRateInput')?.value || '0',
             validDays: document.getElementById('validDays')?.value || '90',
+            remarks: document.getElementById('quoteRemarks')?.value || '',
             editingQuoteNo,
             items
         };
@@ -5998,6 +5996,7 @@ function restoreQuoteDraft(draft) {
     document.getElementById('quoteDate').value = draft.quoteDate || '';
     document.getElementById('discountRateInput').value = draft.discountRate || 0;
     document.getElementById('validDays').value = draft.validDays || 90;
+    document.getElementById('quoteRemarks').value = draft.remarks || '';
 
     document.getElementById('quoteItems').innerHTML = '';
     if (draft.items && draft.items.length) {
@@ -6058,6 +6057,7 @@ function collectCurrentQuoteRecord() {
         ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName, '', selectedSales?.code || salesCodeForName(salesName)) ? currentUser?.uid || '' : ''),
         quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), ...commercialCreatorFields(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
+        remarks: document.getElementById('quoteRemarks')?.value.trim() || '',
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
     };
@@ -6155,13 +6155,12 @@ function formatComparisonMoney(value) {
 
 function renderComparisonExtraFields(extra = {}, variant = 'b') {
     const labels = variant === 'a'
-        ? { origin:'ORIGIN', leadTime:'LEAD TIME', hospitalItemCode:'HOSPITAL ITEM', remarks:'REMARKS' }
-        : { origin:'產地', leadTime:'交貨期', hospitalItemCode:'院內料號', remarks:'備註' };
+        ? { origin:'ORIGIN', leadTime:'LEAD TIME', hospitalItemCode:'HOSPITAL ITEM' }
+        : { origin:'產地', leadTime:'交貨期', hospitalItemCode:'院內料號' };
     const rows = [
         [labels.origin, extra.origin],
         [labels.leadTime, extra.leadTime],
         [labels.hospitalItemCode, extra.hospitalItemCode],
-        [labels.remarks, extra.remarks],
         ...(Array.isArray(extra.customFields) ? extra.customFields.map(field => [field.label, field.value]) : [])
     ].filter(([label, value]) => String(label || '').trim() && String(value || '').trim());
     if (!rows.length) return '';
@@ -6174,6 +6173,7 @@ function renderComparisonQuotePage(companyKey, percent, variant) {
     const company = comparisonCompanyData[companyKey];
     const total = roundedComparisonTotal(percent);
     const items = comparisonItemsForTotal(total);
+    const quoteRemarks = String(document.getElementById('quoteRemarks')?.value || '').trim();
     const showLogo = company.logo && !['yihder', 'kangning'].includes(companyKey);
     const logo = showLogo ? `<img class="comparison-company-logo" src="${escapeAttr(company.logo)}" alt="${escapeAttr(company.title)} Logo">` : '';
     const stamp = company.stamp
@@ -6188,6 +6188,7 @@ function renderComparisonQuotePage(companyKey, percent, variant) {
         <header class="comparison-quote-header"><div class="comparison-company-block">${headerIdentity}${company.addr ? `<p>${escapeHtml(company.addr)}</p>` : ''}${company.contact ? `<p>${company.contact}</p>` : ''}</div>${variant === 'a' ? '<div class="comparison-document-title">QUOTATION</div>' : ''}</header>
         <div class="comparison-quote-meta">${document.getElementById('clientName').value.trim() ? `<div><span>${variant === 'a' ? 'CUSTOMER' : '抬頭'}</span><strong>${escapeHtml(document.getElementById('clientName').value)}</strong></div>` : ''}<div><span>${variant === 'a' ? 'DATE' : '報價日期'}</span><strong>${escapeHtml(document.getElementById('quoteDate').value || '')}</strong></div></div>
         <div class="comparison-product-list">${items.map(item => `<article class="comparison-product-item"><div class="comparison-product-main"><strong class="comparison-product-name">${escapeHtml(item.name || '－')}</strong><span class="comparison-product-model">${variant === 'a' ? 'MODEL' : '型號'}：${escapeHtml(item.model || '－')}</span>${renderComparisonExtraFields(item.extra, variant)}</div><span class="comparison-unit-price">${variant === 'a' ? 'UNIT' : '單價'} NT$ ${formatComparisonMoney(item.unitPrice)}</span><span class="comparison-product-qty">${variant === 'a' ? 'QTY' : '數量'} ${escapeHtml(String(item.qty || 0))}</span><strong class="comparison-product-subtotal">${variant === 'a' ? 'SUBTOTAL' : '小計'} NT$ ${formatComparisonMoney(item.amount)}</strong></article>`).join('')}</div>
+        ${quoteRemarks ? `<div class="comparison-quote-remarks"><b>${variant === 'a' ? 'REMARKS' : '備註'}：</b>${escapeHtml(quoteRemarks)}</div>` : ''}
         <div class="comparison-quote-total-row"><span>${variant === 'a' ? 'TOTAL (TAX INCLUDED)' : '含稅總金額'}</span><strong>NT$ ${total.toLocaleString()}</strong></div>
         <div class="comparison-quote-chinese-total">合計新台幣 ${numberToChineseWords(total)}元整</div>
         <div class="comparison-quote-stamp">${stamp}</div>
@@ -6269,6 +6270,7 @@ window.openSavedThreeQuoteRecord = async function(quoteNo) {
         setQuoteOutputStatus('');
         document.getElementById('validDays').value = baseQuote.validDays ?? 90;
         document.getElementById('discountRateInput').value = baseQuote.discountRate || 0;
+        document.getElementById('quoteRemarks').value = baseQuote.remarks || '';
         updateSalesPhoneDisplay();
 
         const itemsBody = document.getElementById('quoteItems');
@@ -6497,7 +6499,6 @@ function quotePdfExtraRows(item = {}) {
         ['產地', item.origin],
         ['交貨期', item.leadTime],
         ['院內料號', item.hospitalItemCode],
-        ['備註', item.remarks],
         ...(Array.isArray(item.customFields) ? item.customFields.map(field => [field.label, field.value]) : [])
     ].filter(([label, value]) => String(label || '').trim() && String(value || '').trim());
 }
@@ -6512,6 +6513,7 @@ function renderQuotePdfDocument(quoteData = {}) {
     const tax = Math.round(total - total / 1.05);
     const discountRate = parseFloat(quoteData.discountRate) || 0;
     const validDays = String(quoteData.validDays ?? '').trim();
+    const remarks = String(quoteData.remarks || '').trim();
     const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(quoteData.salesName));
     const salesPhone = selectedSales?.phone || '';
     const items = Array.isArray(quoteData.items) ? quoteData.items : [];
@@ -6567,7 +6569,10 @@ function renderQuotePdfDocument(quoteData = {}) {
         <div class="quote-summary-block">
             ${validDays ? `<div class="footer-note">* 本估價單有效期限 ${escapeHtml(validDays)} 天。</div>` : ''}
             <div class="quote-pdf-bottom">
-                <div class="stamp-section">${stamp ? `<img src="${escapeAttr(stamp)}" alt="${escapeAttr(info?.title || '')} 估價單章">` : ''}</div>
+                <div class="quote-pdf-footer-left">
+                    ${remarks ? `<div class="quote-pdf-remarks"><b>備註：</b><span>${escapeHtml(remarks)}</span></div>` : ''}
+                    <div class="stamp-section">${stamp ? `<img src="${escapeAttr(stamp)}" alt="${escapeAttr(info?.title || '')} 估價單章">` : ''}</div>
+                </div>
                 <div class="total-section">
                     <p>銷售額合計：NT$ <span>${subtotal.toLocaleString()}</span></p>
                     <p>營業稅 (5%)：NT$ <span>${tax.toLocaleString()}</span></p>
@@ -6850,6 +6855,7 @@ async function fetchAndFillQuote(qNo) {
         document.getElementById('quoteDate').value = data.quoteDate || '';
         document.getElementById('validDays').value = data.validDays ?? 90;
         document.getElementById('discountRateInput').value = data.discountRate || 0;
+        document.getElementById('quoteRemarks').value = data.remarks || '';
         document.getElementById('quoteItems').innerHTML = '';
         (Array.isArray(data.items) ? data.items : []).forEach(item => addQuoteRow(item));
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
@@ -6912,6 +6918,7 @@ window.openQuoteFromAdmin = async function(quoteNo) {
         setQuoteOutputStatus('');
         document.getElementById('validDays').value = source.validDays ?? 90;
         document.getElementById('discountRateInput').value = source.discountRate || 0;
+        document.getElementById('quoteRemarks').value = source.remarks || '';
         updateSalesPhoneDisplay();
 
         const itemsBody = document.getElementById('quoteItems');
@@ -6961,6 +6968,7 @@ window.copyQuoteAsNew = async function(quoteNo) {
         document.getElementById('ordererName').value = source.ordererName || '';
         document.getElementById('discountRateInput').value = source.discountRate || 0;
         document.getElementById('validDays').value = source.validDays || 90;
+        document.getElementById('quoteRemarks').value = source.remarks || '';
         initDate();
 
         const salesSelect = document.getElementById('salesName');
@@ -9661,10 +9669,10 @@ function fullHistorySearchValues(type, record = {}) {
     }
     if (type === 'quote') {
         return [
-            record.quoteNo, record.clientName, record.ordererName, record.salesName,
+            record.quoteNo, record.clientName, record.ordererName, record.salesName, record.remarks,
             ...(Array.isArray(record.items) ? record.items.flatMap(item => [
                 item.brand, item.model, item.nameCn, item.nameEn, item.spec,
-                item.origin, item.leadTime, item.hospitalItemCode, item.remarks,
+                item.origin, item.leadTime, item.hospitalItemCode,
                 ...(Array.isArray(item.customFields) ? item.customFields.flatMap(field => [field.label, field.value]) : [])
             ]) : [])
         ];
@@ -14674,6 +14682,7 @@ function resetQuoteFormForNextOne() {
     document.getElementById('ordererName').value = '';
     document.getElementById('discountRateInput').value = 0;
     document.getElementById('validDays').value = 90;
+    document.getElementById('quoteRemarks').value = '';
 
     document.getElementById('quoteItems').innerHTML = '';
     addQuoteRow();

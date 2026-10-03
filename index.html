@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261003-4">
+        <link rel="stylesheet" href="styles.css?v=20261003-5">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -575,7 +575,13 @@
             <div class="quote-summary-block">
                 <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
                 <div class="bottom-layout">
-                    <div class="stamp-section"><img id="companyStamp" src=""></div>
+                    <div class="quote-footer-left">
+                        <div class="quote-remarks-block">
+                            <label for="quoteRemarks">備註：</label>
+                            <textarea id="quoteRemarks" placeholder="整張估價單的備註（選填）"></textarea>
+                        </div>
+                        <div class="stamp-section"><img id="companyStamp" src=""></div>
+                    </div>
                     <div class="total-section">
                         <p>銷售額合計：NT$ <span id="subtotalAmount">0</span></p>
                         <p>營業稅 (5%)：NT$ <span id="taxAmount">0</span></p>
@@ -1632,7 +1638,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-4"></script>
+    <script src="app.js?v=20261003-5"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

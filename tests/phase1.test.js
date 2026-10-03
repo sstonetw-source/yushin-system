@@ -808,7 +808,7 @@ test('quote optional item fields stay collapsed, persist, export only when fille
     assert.match(appSource, /item-origin/);
     assert.match(appSource, /item-lead-time/);
     assert.match(appSource, /item-hospital-code/);
-    assert.match(appSource, /item-remarks/);
+    assert.doesNotMatch(appSource, /class="item-remarks"/);
     assert.doesNotMatch(appSource, /class="item-manufacturer"/);
     assert.match(appSource, /type="hidden" class="item-product-line"/);
     assert.doesNotMatch(appSource, /產品線（選填）/);
@@ -823,6 +823,29 @@ test('quote optional item fields stay collapsed, persist, export only when fille
     assert.match(appSource, /item\.hospitalItemCode/);
 });
 
+
+
+test('quote remarks are document-wide and appear in the lower-left quote footer', () => {
+    assert.match(indexSource, /id="quoteRemarks"/);
+    assert.match(indexSource, /class="quote-footer-left"/);
+    const addRowStart=appSource.indexOf('window.addQuoteRow = function');
+    const addRowEnd=appSource.indexOf('\n};',addRowStart)+3;
+    const addRowSource=appSource.slice(addRowStart,addRowEnd);
+    assert.doesNotMatch(addRowSource,/item-remarks/);
+    const collectStart=appSource.indexOf('function collectCurrentQuoteRecord()');
+    const collectEnd=appSource.indexOf('\n}\n\nfunction comparisonBaseTotal',collectStart)+2;
+    const collectSource=appSource.slice(collectStart,collectEnd);
+    assert.match(collectSource,/remarks: document\.getElementById\('quoteRemarks'\)/);
+    assert.match(appSource,/remarks: document\.getElementById\('quoteRemarks'\)\?\.value \|\| ''/);
+    assert.match(appSource,/document\.getElementById\('quoteRemarks'\)\.value = draft\.remarks \|\| ''/);
+    const renderStart=appSource.indexOf('function renderQuotePdfDocument(quoteData = {})');
+    const renderEnd=appSource.indexOf('\n}\n\nfunction createQuotePdfStage',renderStart)+2;
+    const renderSource=appSource.slice(renderStart,renderEnd);
+    assert.match(renderSource,/quote-pdf-remarks/);
+    assert.match(renderSource,/quoteData\.remarks/);
+    assert.match(cssSource,/\.quote-remarks-block textarea/);
+    assert.match(cssSource,/\.quote-pdf-stage \.quote-pdf-remarks/);
+});
 
 test('quote PDF uses an isolated fixed grid so mobile card CSS cannot reshape it', () => {
     const renderStart = appSource.indexOf('function renderQuotePdfDocument(quoteData = {})');
