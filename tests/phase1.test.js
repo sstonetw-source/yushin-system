@@ -1415,12 +1415,15 @@ test('Brand Master compatibility removal is guarded by a read-only full-source a
     assert.doesNotMatch(audit, /\.set\(|\.update\(|\.delete\(|db\.batch\(/);
 });
 
-test('Forecast brand entry is limited to active Brand Master brands', () => {
-    assert.match(indexSource, /<select id="forecastBrand">/);
-    assert.doesNotMatch(indexSource, /id="forecastBrandList"/);
-    assert.match(appSource, /function populateForecastBrandDropdown/);
-    assert.match(appSource, /getUnifiedBrandEntries\(false\)/);
-    assert.match(appSource, /此廠牌不在啟用中的 Brand Master/);
+test('Forecast brand entry shares primary brands plus an explicit Other input', () => {
+    assert.match(indexSource, /<select id="forecastBrand" onchange="onForecastBrandSelectChange\(\)">/);
+    assert.match(indexSource, /id="forecastBrandOther"[^>]*placeholder="輸入實際廠牌名稱"/);
+    const start = appSource.indexOf('function populateForecastBrandDropdown');
+    const end = appSource.indexOf('\nwindow.loadForecasts', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /populateBrandSelect\(select, '請選擇廠牌', true, getPrimaryBrandNames\(\)\)/);
+    assert.match(source, /onForecastBrandSelectChange/);
+    assert.match(appSource, /getBrandFieldValue\('forecastBrand', 'forecastBrandOther'\)/);
 });
 
 test('new business records persist stable salesCode while keeping legacy owner fields', () => {
@@ -4925,6 +4928,35 @@ test('quote and order brand entry share primary brands plus an explicit Other br
     assert.doesNotMatch(appSource, /placeholder="搜尋或輸入廠牌"/);
     assert.match(indexSource, /<strong>報價公司限制<\/strong>/);
     assert.match(indexSource, /完全未勾選任何公司＝三家公司都可報價/);
+});
+
+test('business-facing brand filters share primary brands plus Other grouping', () => {
+    const forecastStart = appSource.indexOf('function populateForecastBrandFilter()');
+    const forecastEnd = appSource.indexOf('\nfunction forecastOwnSalesName', forecastStart);
+    const forecastSource = appSource.slice(forecastStart, forecastEnd);
+    assert.match(forecastSource, /const brands = getPrimaryBrandNames\(\)/);
+    assert.match(forecastSource, /OTHER_BRAND_OPTION_KEY/);
+
+    const inventoryStart = appSource.indexOf('function populateInventoryBrandFilter()');
+    const inventoryEnd = appSource.indexOf('\nfunction warehouseStockRowsForProduct', inventoryStart);
+    const inventorySource = appSource.slice(inventoryStart, inventoryEnd);
+    assert.match(inventorySource, /const brands=getPrimaryBrandNames\(\)/);
+    assert.match(inventorySource, /OTHER_BRAND_OPTION_KEY/);
+
+    const equipmentStart = appSource.indexOf('function populateEquipmentListFilters()');
+    const equipmentEnd = appSource.indexOf('\nwindow.renderEquipmentList', equipmentStart);
+    const equipmentSource = appSource.slice(equipmentStart, equipmentEnd);
+    assert.match(equipmentSource, /const brands = getPrimaryBrandNames\(\)/);
+    assert.match(equipmentSource, /OTHER_BRAND_OPTION_KEY/);
+
+    const quoteStart = appSource.indexOf('function populateMyQuoteBrandFilter');
+    const quoteEnd = appSource.indexOf('\nfunction populateMyQuoteSalesFilter', quoteStart);
+    const quoteSource = appSource.slice(quoteStart, quoteEnd);
+    assert.match(quoteSource, /const brandNames = getPrimaryBrandNames\(\)/);
+    assert.match(quoteSource, /OTHER_BRAND_OPTION_KEY/);
+
+    assert.match(appSource, /function refreshBusinessBrandControls\(\)/);
+    assert.match(appSource, /function workflowPurchasingBrandNames\(\)[\s\S]*?return getPrimaryBrandNames\(\)/);
 });
 
 test('formal orders allow primary or Other brand selection but still require Product Master', () => {

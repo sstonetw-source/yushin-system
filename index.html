@@ -263,9 +263,10 @@
         >
 
         <label>廠牌 *</label>
-        <select id="forecastBrand">
+        <select id="forecastBrand" onchange="onForecastBrandSelectChange()">
             <option value="">請選擇廠牌</option>
         </select>
+        <input id="forecastBrandOther" type="text" placeholder="輸入實際廠牌名稱" autocomplete="off" style="display:none;margin-top:8px;">
 
         <label>產品／品項 *</label>
         <input
@@ -1666,7 +1667,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-12"></script>
+    <script src="app.js?v=20261003-13"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
@@ -1685,15 +1686,15 @@
 
         function productBrandBrowserIndependentKeys(entries) {
             const keys = new Set();
+            if (typeof getPrimaryBrandNames === 'function') {
+                getPrimaryBrandNames().forEach(name => {
+                    if (name) keys.add(productBrandBrowserKey(name));
+                });
+                return keys;
+            }
             entries.forEach(entry => {
                 if (entry.isKeyBrand === true) keys.add(productBrandBrowserKey(entry.name));
             });
-            if (typeof keyStatisticBrands !== 'undefined' && Array.isArray(keyStatisticBrands)) {
-                keyStatisticBrands.forEach(name => {
-                    const canonical = typeof resolveBrandName === 'function' ? resolveBrandName(name) : name;
-                    if (canonical) keys.add(productBrandBrowserKey(canonical));
-                });
-            }
             return keys;
         }
 

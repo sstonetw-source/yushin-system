@@ -2823,34 +2823,21 @@ let forecastSalesFilterSignature = '';
 
 function populateForecastBrandFilter() {
     const select = document.getElementById('forecastBrandFilter');
-    if (!select) return;
+    if (!select) return [];
 
     const current = select.value;
-    const brands = new Map();
-
-    getPriceListBrands(false).forEach(brand => {
-        const key = String(brand || '').trim().toLocaleLowerCase();
-        if (key && !brands.has(key)) brands.set(key, brand);
-    });
-
-    const forecastRows = forecastHistorySearchActive ? forecastHistorySearchResults : forecastCache;
-    forecastRows.forEach(item => {
-        const brand = normalizeForecastBrand(item.brand || '');
-        const key = brand.toLocaleLowerCase();
-        if (key && !brands.has(key)) brands.set(key, brand);
-    });
-
-    const sortedBrands = [...brands.values()].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    const signature = JSON.stringify(sortedBrands);
+    const brands = getPrimaryBrandNames();
+    const signature = JSON.stringify(brands);
     if (signature !== forecastBrandFilterSignature) {
-        select.innerHTML = '<option value="">全部廠牌</option>' + sortedBrands.map(brand =>
+        select.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
             `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`
-        ).join('');
+        ).join('') + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
         forecastBrandFilterSignature = signature;
     }
 
-    if (sortedBrands.includes(current)) select.value = current;
-    else if (select.value && !sortedBrands.includes(select.value)) select.value = '';
+    if (brands.includes(current) || current === OTHER_BRAND_OPTION_KEY) select.value = current;
+    else if (current) select.value = '';
+    return brands;
 }
 
 function forecastOwnSalesName() {
@@ -2936,28 +2923,30 @@ function populateForecastBrandDropdown(selectedBrand = '') {
     if (!select) return;
 
     const selected = normalizeForecastBrand(selectedBrand);
-    const entries = getUnifiedBrandEntries(false)
-        .sort((x, y) => Number(y.isKeyBrand) - Number(x.isKeyBrand) || x.name.localeCompare(y.name, 'zh-Hant'));
-
-    select.innerHTML = '<option value="">請選擇廠牌</option>';
-    entries.forEach(entry => {
-        const option = document.createElement('option');
-        option.value = entry.name;
-        option.textContent = entry.name;
-        select.appendChild(option);
-    });
-
-    if (selected && !entries.some(entry => normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(selected))) {
-        const legacy = document.createElement('option');
-        legacy.value = selected;
-        legacy.textContent = selected + '（舊資料）';
-        legacy.disabled = true;
-        legacy.selected = true;
-        select.appendChild(legacy);
-    } else {
-        select.value = selected || '';
+    populateBrandSelect(select, '請選擇廠牌', true, getPrimaryBrandNames());
+    if (selected) selectBrandInDropdown(select, selected);
+    else {
+        select.value = '';
+        const otherInput = document.getElementById('forecastBrandOther');
+        if (otherInput) {
+            otherInput.value = '';
+            otherInput.style.display = 'none';
+        }
     }
+    onForecastBrandSelectChange();
 }
+
+window.onForecastBrandSelectChange = function() {
+    const select = document.getElementById('forecastBrand');
+    const otherInput = document.getElementById('forecastBrandOther');
+    if (!select || !otherInput) return;
+    if (select.value === '其他') {
+        otherInput.style.display = '';
+    } else {
+        otherInput.style.display = 'none';
+        otherInput.value = '';
+    }
+};
 
 window.loadForecasts = async function(reset = true) {
     if (forecastLoading || !canAccessPage('forecast')) return;
@@ -3152,6 +3141,7 @@ window.renderForecastList = function() {
 
     const keyword = (document.getElementById('forecastSearch')?.value || '').trim().toLocaleLowerCase();
     const brandFilter = document.getElementById('forecastBrandFilter')?.value || '';
+    const selectableBrands = getPrimaryBrandNames();
     const salesFilter = document.getElementById('forecastSalesFilter')?.value || '';
     const statusFilter = document.getElementById('forecastStatusFilter')?.value || 'active';
 
@@ -3176,7 +3166,7 @@ window.renderForecastList = function() {
         `.toLocaleLowerCase();
 
         if (!forecastHistorySearchActive && keyword && !searchable.includes(keyword)) return;
-        if (brandFilter && brand.toLocaleLowerCase() !== brandFilter.toLocaleLowerCase()) return;
+        if (brandFilter && orderBrandFilterValue(brand, selectableBrands) !== brandFilter) return;
         if (salesFilter && salesName !== salesFilter) return;
         if (item.status !== statusFilter) return;
 
@@ -3283,7 +3273,7 @@ window.saveForecast = async function() {
     const existing = id ? forecastCache.find(item => item.id === id) : null;
 
     const customerName = document.getElementById('forecastCustomer').value.trim();
-    const brand = normalizeForecastBrand(document.getElementById('forecastBrand').value);
+    const brand = normalizeForecastBrand(getBrandFieldValue('forecastBrand', 'forecastBrandOther'));
     const brandId = brandIdForName(brand);
     const productName = document.getElementById('forecastProduct').value.trim();
 
@@ -3294,10 +3284,6 @@ window.saveForecast = async function() {
 
     if (!brand) {
         alert('請選擇廠牌。');
-        return;
-    }
-    if (!brandMasterEntryForName(brand)) {
-        alert('此廠牌不在啟用中的 Brand Master，請先到「廠牌管理」建立廠牌。');
         return;
     }
 
@@ -4256,11 +4242,7 @@ function ensureBrandSettingsLoaded() {
                 }, { merge:true });
                 maintenanceBrandMigrationPending = false;
             }
-            populateQuoteBrandDropdowns();
-            populateOrderBrandDropdown();
-            populateEquipmentBrandDropdown();
-            if (typeof populateForecastBrandDropdown === 'function')
-                populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+            refreshBusinessBrandControls();
             renderBrandAliasManager();
             renderCompanyAgencyBrandSettings();
         }).catch(err => {
@@ -4460,7 +4442,7 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
                 id: masterIsCanonical ? master.id : existing.id,
                 name: canonicalName,
                 aliases: dedupeBrandsCaseInsensitive([...(existing.aliases || []), ...aliases]),
-                isKeyBrand: existing.isKeyBrand || !!statisticConfig,
+                isKeyBrand: existing.isKeyBrand || master.isKeyBrand === true || !!statisticConfig,
                 companies: [...new Set([...(existing.companies || []), ...companies])],
                 active: true
             });
@@ -4469,7 +4451,7 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
                 ...master,
                 name: canonicalName,
                 aliases,
-                isKeyBrand: !!statisticConfig,
+                isKeyBrand: master.isKeyBrand === true || !!statisticConfig,
                 companies,
                 active: true
             });
@@ -5318,17 +5300,40 @@ function quoteBrandRestrictionText(brand) {
 // 估價單與訂單的人工選擇統一只列「獨立統計」主要廠牌；
  // 非主要廠牌一律走「其他廠牌」並保存實際輸入名稱，統計時仍歸入其他廠牌。
 function getPrimaryBrandNames() {
-    return dedupeBrandsCaseInsensitive(
-        (keyStatisticBrands || [])
-            .map(name => resolveBrandName(name))
-            .filter(name => name && name !== '其他' && name !== '其他廠牌')
-    );
+    const masterBrands = getUnifiedBrandEntries(false)
+        .filter(entry => entry?.name && entry.active !== false && entry.isKeyBrand === true)
+        .map(entry => entry.name);
+    const legacyBrands = (keyStatisticBrands || [])
+        .map(name => resolveBrandName(name))
+        .filter(Boolean);
+
+    return dedupeBrandsCaseInsensitive([...masterBrands, ...legacyBrands])
+        .filter(name => name && name !== '其他' && name !== '其他廠牌')
+        .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+}
+
+function refreshBusinessBrandControls() {
+    populateQuoteBrandDropdowns();
+    populateOrderBrandDropdown();
+    populateEquipmentBrandDropdown();
+    if (typeof populateForecastBrandDropdown === 'function') {
+        populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+    }
+    if (typeof populateForecastBrandFilter === 'function') populateForecastBrandFilter();
+    if (typeof populateMyQuoteBrandFilter === 'function') populateMyQuoteBrandFilter();
+    if (typeof populateInventoryBrandFilter === 'function') populateInventoryBrandFilter();
+    if (typeof populatePurchaserOrderFilters === 'function') populatePurchaserOrderFilters();
+    if (typeof populatePurchasingFilters === 'function') populatePurchasingFilters();
+    if (typeof populateEquipmentListFilters === 'function') populateEquipmentListFilters();
+    if (typeof populateSalesStatisticsFilters === 'function') populateSalesStatisticsFilters();
+    if (typeof window.renderProductBrandBrowser === 'function') window.renderProductBrandBrowser();
 }
 
 function brandOtherInputForSelect(select) {
     if (!select) return null;
     if (select.id === 'orderBrand') return document.getElementById('orderBrandOther');
     if (select.id === 'eqBrand') return document.getElementById('eqBrandOther');
+    if (select.id === 'forecastBrand') return document.getElementById('forecastBrandOther');
     return select.closest?.('tr')?.querySelector('.item-brand-other') || null;
 }
 
@@ -5456,7 +5461,7 @@ window.onQuoteBrandOtherInput = function(input) {
 };
 
 function populateEquipmentBrandDropdown() {
-    populateBrandSelect(document.getElementById('eqBrand'), '請選擇廠牌');
+    populateBrandSelect(document.getElementById('eqBrand'), '請選擇廠牌', true, getPrimaryBrandNames());
     onEqBrandSelectChange();
 }
 
@@ -7254,21 +7259,15 @@ function populateMyQuoteBrandFilter(source = []) {
     const select = document.getElementById('myQuoteBrandFilter');
     if (!select) return;
     const selected = select.value;
-    const brands = new Map();
-    source.forEach(quote => {
-        quoteBrandsForRecord(quote).forEach(brand => {
-            const key = String(brand).trim().toLocaleLowerCase();
-            if (key && !brands.has(key)) brands.set(key, brand);
-        });
-    });
-    const brandNames = [...brands.values()].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+    const brandNames = getPrimaryBrandNames();
     const signature = JSON.stringify(brandNames);
     if (signature !== myQuoteBrandFilterSignature) {
         select.innerHTML = '<option value="">全部廠牌</option>' + brandNames
-            .map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
+            .map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
+            + `<option value="${OTHER_BRAND_OPTION_KEY}">其他廠牌</option>`;
         myQuoteBrandFilterSignature = signature;
     }
-    if (brandNames.includes(selected)) select.value = selected;
+    if (brandNames.includes(selected) || selected === OTHER_BRAND_OPTION_KEY) select.value = selected;
     else if (selected) select.value = '';
 }
 
@@ -7310,6 +7309,7 @@ window.renderMyQuotesList = function() {
     populateMyQuoteBrandFilter(visibleQuoteSource);
     const salesFilter = document.getElementById('myQuoteSalesFilter')?.value || '';
     const brandFilter = document.getElementById('myQuoteBrandFilter')?.value || '';
+    const selectableBrands = getPrimaryBrandNames();
     const salesHeader = document.getElementById('myQuotesSalesHeader');
     if (salesHeader) salesHeader.style.display = isAdminViewingAll ? '' : 'none';
 
@@ -7322,7 +7322,7 @@ window.renderMyQuotesList = function() {
             if (!searchable.includes(keyword)) return;
         }
         if (salesFilter && stripPhoneSuffix(q.salesName || '') !== salesFilter) return;
-        if (brandFilter && !quoteBrandsForRecord(q).includes(brandFilter)) return;
+        if (brandFilter && !quoteBrandsForRecord(q).some(brand => orderBrandFilterValue(brand, selectableBrands) === brandFilter)) return;
         if (statusFilter === 'open' && q.dealClosed) return;
         if (statusFilter === 'deal' && !q.dealClosed) return;
         if (!dateInUnifiedPeriod(q.quoteDate || q.createdAt, periodFilter)) return;
@@ -7985,7 +7985,7 @@ function populateInventoryBrandFilter() {
  const select=document.getElementById('inventoryBrandFilter');
  if(!select)return [];
  const selected=select.value;
- const brands=getPriceListBrands(true);
+ const brands=getPrimaryBrandNames();
  const signature=JSON.stringify(brands);
  if(signature!==inventoryBrandFilterSignature){
    select.innerHTML='<option value="">全部廠牌</option>'+brands.map(brand=>
@@ -17137,10 +17137,7 @@ function populateEquipmentListFilters() {
         ...equipmentSearchResults.map(item => stripPhoneSuffix(item.salesName || ''))
     ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     const selectedBrand = brandSelect.value;
-    const brands = dedupeBrandsCaseInsensitive([
-        ...getPriceListBrands(true), ...equipmentList.map(item => resolveBrandName(item.brand || '')),
-        ...equipmentSearchResults.map(item => resolveBrandName(item.brand || ''))
-    ]).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const brands = getPrimaryBrandNames();
     const signature = JSON.stringify([canSeeAll, names, brands]);
     if (signature !== equipmentFilterOptionsSignature) {
         if (canSeeAll) {
@@ -18031,11 +18028,7 @@ window.saveKeyStatisticBrands = async function() {
         keyStatisticBrands = selected;
         keyStatisticBrandAliases = aliases;
         await syncLegacyBrandSettingsToMaster();
-        populateQuoteBrandDropdowns();
-        populateOrderBrandDropdown();
-        populateEquipmentBrandDropdown();
-        if (typeof populateForecastBrandDropdown === 'function')
-            populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+        refreshBusinessBrandControls();
         if (salesStatisticsOrders.length) renderSalesStatistics();
         renderKeyStatisticBrands();
         renderCompanyAgencyBrandSettings();
@@ -18071,8 +18064,7 @@ window.saveCompanyAgencyBrands = async function() {
         companyAgencyBrands = next;
         companyAgencyBrandsConfigured = true;
         await syncLegacyBrandSettingsToMaster();
-        populateQuoteBrandDropdowns();
-        if (typeof populateForecastBrandDropdown === 'function') populateForecastBrandDropdown(document.getElementById('forecastBrand')?.value || '');
+        refreshBusinessBrandControls();
         alert('已儲存各廠牌的報價公司限制。未勾選任何公司的廠牌維持不限制。');
     } catch (err) {
         alert('儲存設定失敗：' + err.message);
