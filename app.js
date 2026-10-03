@@ -10552,14 +10552,23 @@ function purchasingAnalyticsRowMatches(supply, filters = adminPurchaseAnalyticsF
     return true;
 }
 
+function statisticBrandForSupply(supply = {}) {
+    const grouped = orderBrandFilterValue(
+        supply.brand || supply.brandName || '',
+        workflowPurchasingBrandNames()
+    );
+    return grouped || OTHER_BRAND_OPTION_KEY;
+}
+
 function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = adminPurchaseAnalyticsFilterContext()) {
     if (!globalThis.YushinPurchasingAnalytics?.summarize) {
         throw new Error('Purchasing analytics core 未載入，無法計算採購分析。');
     }
-    const filtered=(rows||[]).filter(row=>purchasingAnalyticsRowMatches(row,filters));
+    const filtered=(rows||[])
+        .filter(row=>purchasingAnalyticsRowMatches(row,filters))
+        .map(row=>({ ...row, brand:statisticBrandForSupply(row) }));
     return globalThis.YushinPurchasingAnalytics.summarize(filtered);
 }
-
 function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel) {
     return rows.length ? rows.map(row => `<tr>
         <td>${escapeHtml(row[labelKey] || '')}</td>
@@ -10645,6 +10654,7 @@ function renderPurchasingAnalytics() {
         const costWarning = totals.missingUnitCostCount ? `｜${totals.missingUnitCostCount} 筆進貨成本未填` : '';
         status.textContent = `${range}｜${totals.lineCount} 筆品項｜${totals.documentCount} 張採購單${costWarning}`;
     }
+    renderUnifiedBrandAnalytics();
 }
 
 window.loadPurchasingAnalytics = async function(force = false) {
@@ -18186,9 +18196,21 @@ function inventoryAnalysisTotals(start,end) {
     return { purchase, sales, difference: sales - purchase, stockValue, incoming, cogs, grossProfit:sales-cogs };
 }
 function renderInventoryAnalysisSummary(start,end){
-    const t=inventoryAnalysisTotals(start,end),fmt=v=>Math.round(v).toLocaleString();
-    const ids={invAnalysisPurchases:t.purchase,invAnalysisSales:t.sales,invAnalysisDifference:t.difference,invAnalysisStockValue:t.stockValue,invAnalysisIncoming:t.incoming};
-    Object.entries(ids).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.innerText=fmt(v);});
+    const t=inventoryAnalysisTotals(start,end);
+    const ids={
+        invAnalysisPurchases:t.purchase,
+        invAnalysisSales:t.sales,
+        invAnalysisDifference:t.difference,
+        invAnalysisGrossProfit:t.grossProfit,
+        invAnalysisStockValue:t.stockValue,
+        invAnalysisIncoming:t.incoming
+    };
+    Object.entries(ids).forEach(([id,v])=>{
+        const el=document.getElementById(id);
+        if(el)el.innerText=formatStatsMoney(v);
+    });
+    const rate=document.getElementById('invAnalysisGrossProfitRate');
+    if(rate)rate.innerText=t.sales?`毛利率 ${(t.grossProfit/t.sales*100).toFixed(1)}%`:'毛利率 －';
 }
 
 function salesAmount(order) {
@@ -18985,7 +19007,7 @@ function populateSalesStatisticsFilters() {
     const orderLines = salesStatisticsOrders.flatMap(salesStatisticOrderLines);
     const selects = [
         { id: 'salesStatsSalesFilter', label: '全部業務', values: salesStatisticsOrders.map(o => stripPhoneSuffix(o.salesName) || '未指定業務') },
-        { id: 'salesStatsBrandFilter', label: '全部廠牌', values: [...keyStatisticBrands, '其他廠牌', '維修'] },
+        { id: 'salesStatsBrandFilter', label: '全部廠牌', values: [...getPrimaryBrandNames(), OTHER_BRAND_OPTION_KEY] },
         { id: 'salesStatsTypeFilter', label: '全部類型', values: orderLines.map(productTypeForOrder) },
         { id: 'salesStatsLineFilter', label: '全部產品線', values: orderLines.map(productLineForOrder) }
     ];
@@ -19072,6 +19094,56 @@ function buildSalesStatisticsReport() {
     };
 }
 
+function renderUnifiedBrandAnalytics() {
+    const body=document.getElementById('unifiedBrandAnalyticsBody');
+    if(!body)return;
+    const salesReport=buildSalesStatisticsReport();
+    let purchaseByBrand=[];
+    try{
+        purchaseByBrand=purchasingAnalyticsMetrics(
+            purchasingAnalyticsRows,
+            adminPurchaseAnalyticsFilterContext()
+        ).byBrand||[];
+    }catch(err){
+        console.warn('廠牌進銷整合暫時無法取得採購資料：',err);
+    }
+
+    const purchaseMap=new Map(purchaseByBrand.map(row=>[row.brand,row]));
+    const names=[...new Set([
+        ...Object.keys(salesReport.byBrand||{}),
+        ...purchaseByBrand.map(row=>row.brand).filter(Boolean)
+    ])];
+    const preferred=[...getPrimaryBrandNames(),OTHER_BRAND_OPTION_KEY];
+    const preferredIndex=new Map(preferred.map((name,index)=>[name,index]));
+    names.sort((a,b)=>{
+        const ai=preferredIndex.has(a)?preferredIndex.get(a):Number.MAX_SAFE_INTEGER;
+        const bi=preferredIndex.has(b)?preferredIndex.get(b):Number.MAX_SAFE_INTEGER;
+        return ai-bi||String(a).localeCompare(String(b),'zh-Hant');
+    });
+
+    if(!names.length){
+        body.innerHTML='<tr><td colspan="7" style="color:#888;">目前篩選期間沒有可整合的進銷資料。</td></tr>';
+        return;
+    }
+
+    body.innerHTML=names.map(name=>{
+        const sales=salesReport.byBrand[name]||newSalesStatsMetric();
+        const purchase=purchaseMap.get(name)||{};
+        const missing=sales.missingCostIds?.size||0;
+        const profit=missing?'待補成本':formatStatsMoney(sales.profit||0);
+        const rate=missing?'待補成本':sales.totalSales?((sales.profit||0)/sales.totalSales*100).toFixed(1)+'%':'－';
+        return `<tr>
+            <td>${escapeHtml(name)}</td>
+            <td>${formatStatsMoney(sales.totalSales||0)}</td>
+            <td>${profit}</td>
+            <td>${rate}</td>
+            <td>${formatStatsMoney(purchase.orderedAmount||0)}</td>
+            <td>${formatStatsMoney(purchase.receivedAmount||0)}</td>
+            <td>${formatStatsMoney(purchase.incomingAmount||0)}</td>
+        </tr>`;
+    }).join('');
+}
+
 window.renderSalesStatistics = function() {
     const _analysisStart=document.getElementById('salesStatsStart')?.value||localDateString().slice(0,4)+'-01-01';
     const _analysisEnd=document.getElementById('salesStatsEnd')?.value||localDateString();
@@ -19106,6 +19178,7 @@ window.renderSalesStatistics = function() {
     renderSalesStatsRows('salesStatsBySales', bySales, total.totalSales);
     renderSalesStatsRows('salesStatsByType', byType, total.totalSales);
     renderSalesStatsRows('salesStatsByLine', byLine, total.totalSales);
+    renderUnifiedBrandAnalytics();
 };
 
 function salesStatsMetricExportRows(values, grandTotal, label) {

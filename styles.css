@@ -2687,3 +2687,13 @@ html[data-app-environment="preview"] body { border-top: 0; }
         grid-column: auto;
     }
 }
+
+
+/* Unified admin inventory-sales dashboard */
+.admin-unified-summary { margin-top:14px; }
+.admin-overview-cards { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+.admin-sales-heading { margin-top:22px; }
+.unified-brand-analysis { margin:18px 0 22px; }
+@media (max-width:560px) {
+    .admin-overview-cards { grid-template-columns:1fr; }
+}

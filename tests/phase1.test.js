@@ -5161,3 +5161,30 @@ test('consolidated supplier editor reuses existing suppliers without renaming a 
     assert.match(source,/normalizedEditingName===normalizedName/);
     assert.match(source,/stableMasterId\('sup',supplierName\)/);
 });
+
+
+test('admin inventory-sales dashboard presents one unified management view', () => {
+    const adminStart=indexSource.indexOf('<div id="admin-statistics"');
+    const adminEnd=indexSource.indexOf('<div id="admin-warehouses"',adminStart);
+    const adminSource=indexSource.slice(adminStart,adminEnd);
+    assert.match(adminSource,/id="invAnalysisSales"/);
+    assert.match(adminSource,/id="invAnalysisPurchases"/);
+    assert.match(adminSource,/id="invAnalysisGrossProfit"/);
+    assert.match(adminSource,/id="invAnalysisStockValue"/);
+    assert.match(adminSource,/id="invAnalysisIncoming"/);
+    assert.match(adminSource,/id="unifiedBrandAnalyticsBody"/);
+    assert.match(adminSource,/id="purchaseAnalyticsPanel"/);
+});
+
+test('sales and purchasing analytics share primary plus other brand buckets', () => {
+    assert.match(appSource,/values: \[\.\.\.getPrimaryBrandNames\(\), OTHER_BRAND_OPTION_KEY\]/);
+    assert.match(appSource,/function statisticBrandForSupply\(supply = \{\}\)/);
+    assert.match(appSource,/brand:statisticBrandForSupply\(row\)/);
+    assert.match(appSource,/function renderUnifiedBrandAnalytics\(\)/);
+});
+
+test('ignored pending products can clear visible history without reactivating reminders', () => {
+    assert.match(appSource,/window\.clearIgnoredPendingProducts = async function/);
+    assert.match(appSource,/archived:true,clearedAt:now|archived:true, clearedAt:now/);
+    assert.match(appSource,/pendingProductMasterIgnoredItems\.filter\(item => item\.archived !== true\)/);
+});

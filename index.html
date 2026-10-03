@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261003-3">
+        <link rel="stylesheet" href="styles.css?v=20261003-4">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1312,6 +1312,29 @@
                 <button class="btn-secondary" onclick="loadSalesStatistics()">↻ 更新</button>
                 <span style="font-size:12px;color:#666;">實際送貨依送貨日期計算，退貨依退貨日期負數沖銷；待出貨為截至迄日的未交餘額。</span>
             </div>
+
+            <div class="admin-unified-summary">
+                <div class="admin-analytics-heading">
+                    <div>
+                        <h3>公司總覽</h3>
+                        <p>同一期間一次看實際銷售、實際進貨、實際毛利、目前庫存與在途；進貨以實際到貨為準，庫存為目前仍有餘量的批次成本。</p>
+                    </div>
+                </div>
+                <div class="sales-stat-cards admin-overview-cards">
+                    <div class="sales-stat-card sales-stat-card-total"><span>實際銷售額</span><strong id="invAnalysisSales">NT$ 0</strong><small>期間送貨減退貨</small></div>
+                    <div class="sales-stat-card"><span>實際進貨額</span><strong id="invAnalysisPurchases">NT$ 0</strong><small>期間實際到貨成本</small></div>
+                    <div class="sales-stat-card"><span>實際毛利</span><strong id="invAnalysisGrossProfit">NT$ 0</strong><small id="invAnalysisGrossProfitRate">毛利率 －</small></div>
+                    <div class="sales-stat-card"><span>目前庫存金額</span><strong id="invAnalysisStockValue">NT$ 0</strong><small>現有批次餘量 × 實際成本</small></div>
+                    <div class="sales-stat-card"><span>待到貨金額</span><strong id="invAnalysisIncoming">NT$ 0</strong><small>尚未到貨的倉庫型採購</small></div>
+                </div>
+            </div>
+
+            <div class="admin-analytics-heading admin-sales-heading">
+                <div>
+                    <h3>銷售與毛利</h3>
+                    <p>以下銷售分析沿用同一組日期、業務、廠牌、類型與產品線篩選。</p>
+                </div>
+            </div>
             <div class="sales-stat-cards">
                 <div class="sales-stat-card"><span>實際送貨金額</span><strong id="salesStatsActualSales">NT$ 0</strong><small id="salesStatsActualDetail"></small></div>
                 <div class="sales-stat-card"><span>待出貨金額</span><strong id="salesStatsPendingSales">NT$ 0</strong><small id="salesStatsPendingDetail"></small></div>
@@ -1322,13 +1345,22 @@
                 <tbody><tr><td id="salesStatsSalesInc">NT$ 0</td><td id="salesStatsCostInc">NT$ 0</td><td id="salesStatsProfit">NT$ 0</td><td id="salesStatsProfitRate">－</td><td><button type="button" id="salesStatsMissingCost" class="missing-cost-trigger" onclick="openMissingCostOrders()" disabled>0 筆</button></td><td id="salesStatsEstimated">NT$ 0／0 筆</td></tr></tbody></table>
                 <span id="salesStatsOrderCount" style="display:block;margin-top:8px;color:#666;font-size:13px;"></span>
             </div>
+
+            <div class="panel unified-brand-analysis" style="overflow-x:auto;">
+                <h3 style="margin-top:0;">廠牌進銷整合</h3>
+                <div class="inventory-summary-note" style="margin-bottom:10px;">銷售與採購使用同一套「主要廠牌＋其他廠牌」歸類；有效採購／已到貨／在途依採購單日期區間計算。</div>
+                <table class="sales-stats-table">
+                    <thead><tr><th>廠牌</th><th>銷售總額</th><th>銷售毛利</th><th>毛利率</th><th>有效採購</th><th>已到貨</th><th>在途</th></tr></thead>
+                    <tbody id="unifiedBrandAnalyticsBody"><tr><td colspan="7" style="color:#888;">載入分析資料中…</td></tr></tbody>
+                </table>
+            </div>
+
             <div class="sales-stat-tables">
                 <div><h3>各廠牌統計</h3><table class="sales-stats-table"><thead><tr><th>廠牌</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByBrand"></tbody></table></div>
                 <div><h3>各業務統計</h3><table class="sales-stats-table"><thead><tr><th>業務</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsBySales"></tbody></table></div>
                 <div><h3>各類型統計</h3><table class="sales-stats-table"><thead><tr><th>類型</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByType"></tbody></table></div>
                 <div><h3>各產品線統計</h3><table class="sales-stats-table"><thead><tr><th>產品線</th><th>實際送貨</th><th>待出貨</th><th>總金額</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>占比</th></tr></thead><tbody id="salesStatsByLine"></tbody></table></div>
             </div>
-        </div>
 
             <div id="purchaseAnalyticsPanel" class="admin-purchase-analytics">
                 <div class="admin-analytics-heading">
@@ -1386,6 +1418,8 @@
                     </table>
                 </div>
             </div>
+        </div>
+
         </div>
 
         <div class="eq-modal-overlay no-print" id="missingCostOrdersOverlay" onclick="if(event.target===this) closeMissingCostOrders()">
@@ -1598,7 +1632,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-3"></script>
+    <script src="app.js?v=20261003-4"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
