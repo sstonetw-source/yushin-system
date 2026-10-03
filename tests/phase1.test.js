@@ -136,7 +136,7 @@ test('product identity handoffs clear stale hidden state before saving', () => {
     const orderInputStart = appSource.indexOf('window.onOrderItemCodeInput = function(input)');
     const orderInputEnd = appSource.indexOf('\n};', orderInputStart) + 3;
     const orderInput = appSource.slice(orderInputStart, orderInputEnd);
-    assert.match(orderInput, /clearOrderProductMatch\(input\)/);
+    assert.match(orderInput, /clearOrderProductMatch\(input, \{ preserveBrand:true \}\)/);
     assert.match(appSource, /if \(input\.value\.trim\(\) !== value\) return/);
 
     const directPoStart = appSource.indexOf('window.onDirectPoCodeChange = async function');
@@ -152,8 +152,9 @@ test('product identity handoffs clear stale hidden state before saving', () => {
     assert.match(inventoryCode, /productId: ''/);
     assert.match(inventoryCode, /String\(inventoryAdjustmentRows\[idx\]\.itemCode\|\|''\)\.trim\(\) !== requestedCode/);
 
-    assert.match(appSource, /function invalidateQuoteProductIdentityIfBrandChanged\(input\)/);
-    assert.match(appSource, /invalidateQuoteProductIdentityIfBrandChanged\(input\);\n    renderQuoteBrandSuggestions/);
+    assert.match(appSource, /function invalidateQuoteProductIdentityIfBrandChanged\(select\)/);
+    assert.match(appSource, /if \(userChanged\) invalidateQuoteProductIdentityIfBrandChanged\(select\)/);
+    assert.match(appSource, /window\.onQuoteBrandOtherInput = function\(input\)/);
 });
 
 test('product code matching is ambiguity-safe and datalists stay bounded', () => {
@@ -1283,6 +1284,7 @@ test('order brand filter uses selectable brands and groups alternate spelling an
             { name:'Bio-Rad', active:true, isKeyBrand:true },
             { name:'自行輸入品牌', active:true, isKeyBrand:false }
         ],
+        getPrimaryBrandNames: () => ['Beckman', 'Bio-Rad'],
         canViewAllData: () => true,
         stripPhoneSuffix: value => value,
         escapeAttr: value => value,
@@ -4759,7 +4761,11 @@ test('product management can batch-select products into one quote or one order',
     assert.match(appSource, /function toggleVisibleProductManagementSelection/);
     assert.match(appSource, /products\.forEach\(product => addQuoteRow\(productManagementSource\(product\)\)\)/);
     assert.match(appSource, /newOrderDraftItems = sources\.slice\(1\)\.map\(normalizeNewOrderItem\)/);
-    assert.match(appSource, /saveOrderDraft\(\);\s*clearProductManagementSelection\(\);/);
+    const orderBatchStart=appSource.indexOf('window.addProductManagementSelectionToOrder = function');
+    const orderBatchEnd=appSource.indexOf('\n};',orderBatchStart)+3;
+    const orderBatchSource=appSource.slice(orderBatchStart,orderBatchEnd);
+    assert.match(orderBatchSource, /clearProductManagementSelection\(\)/);
+    assert.doesNotMatch(orderBatchSource, /saveOrderDraft\(\)/);
 });
 
 test('sales can use Product Master for quote and order while Product Master itself stays read-only', () => {
