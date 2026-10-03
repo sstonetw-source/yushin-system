@@ -10370,125 +10370,30 @@ function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = ad
         .map(row=>({ ...row, brand:statisticBrandForSupply(row) }));
     return globalThis.YushinPurchasingAnalytics.summarize(filtered);
 }
-function purchasingAnalyticsRowsHtml(rows, labelKey, emptyLabel) {
-    return rows.length ? rows.map(row => `<tr>
-        <td>${escapeHtml(row[labelKey] || '')}</td>
-        <td>${row.documentCount}</td>
-        <td>${row.lineCount}</td>
-        <td>${formatStatsMoney(row.orderedAmount)}</td>
-        <td>${formatStatsMoney(row.receivedAmount)}</td>
-        <td>${formatStatsMoney(row.incomingAmount)}</td>
-        <td>${formatStatsMoney(row.stockAmount)}</td>
-        <td>${formatStatsMoney(row.customerOrderAmount)}</td>
-    </tr>`).join('') : `<tr><td colspan="8" style="color:#888;">${emptyLabel}</td></tr>`;
-}
-
-function purchasingAnalyticsAgingRowsHtml(rows = []) {
-    return (rows||[]).map(row => `<tr>
-        <td>${escapeHtml(row.label||'')}</td>
-        <td>${Number(row.documentCount||0).toLocaleString()}</td>
-        <td>${Number(row.lineCount||0).toLocaleString()}</td>
-        <td>${Number(row.incomingQty||0).toLocaleString()}</td>
-        <td>${formatStatsMoney(row.incomingAmount)}</td>
-        <td style="${row.lateLineCount?'color:#b42318;font-weight:600;':''}">${Number(row.lateLineCount||0).toLocaleString()}</td>
-        <td>${row.maxOpenAgeDays===null||row.maxOpenAgeDays===undefined?'－':Number(row.maxOpenAgeDays||0).toFixed(1)+' 天'}</td>
-    </tr>`).join('');
-}
-
-function renderPurchasingAnalytics() {
-    const status = document.getElementById('purchaseAnalyticsStatus');
-    const supplierBody = document.getElementById('purchaseAnalyticsSupplierBody');
-    const sourceBody = document.getElementById('purchaseAnalyticsSourceBody');
-    const brandBody = document.getElementById('purchaseAnalyticsBrandBody');
-    const monthBody = document.getElementById('purchaseAnalyticsMonthBody');
-    const agingBody = document.getElementById('purchaseAnalyticsAgingBody');
-    if (!supplierBody) return;
-    const filters = adminPurchaseAnalyticsFilterContext();
-    const { totals, bySupplier, bySource, byBrand, byMonth, agingBuckets = [] } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
-    const setMoney = (id, value) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = formatStatsMoney(value);
-    };
-    setMoney('purchaseAnalyticsOrdered', totals.orderedAmount);
-    setMoney('purchaseAnalyticsReceived', totals.receivedAmount);
-    setMoney('purchaseAnalyticsIncoming', totals.incomingAmount);
-    setMoney('purchaseAnalyticsStock', totals.stockAmount);
-    const orderedDetail = document.getElementById('purchaseAnalyticsOrderedDetail');
-    if (orderedDetail) orderedDetail.textContent = `${totals.lineCount} 筆採購品項／${totals.documentCount} 張採購單`;
-    const receivedDetail = document.getElementById('purchaseAnalyticsReceivedDetail');
-    if (receivedDetail) {
-        receivedDetail.textContent = totals.receivedAmount
-            ? '實際已收數量 × 進貨單價'
-            : '期間內尚無已到貨金額';
-    }
-    const incomingDetail = document.getElementById('purchaseAnalyticsIncomingDetail');
-    if (incomingDetail) {
-        const lateText=totals.lateLineCount
-            ? `｜逾期 ${totals.lateLineCount} 筆 ${formatStatsMoney(totals.lateAmount)}｜最久逾期 ${Number(totals.maxLateDays||0).toFixed(0)} 天`
-            : '';
-        const oldestAging=agingBuckets.find(row=>row.key==='31_plus');
-        const oldestText=oldestAging?.lineCount
-            ? `｜31+ 天 ${oldestAging.lineCount} 筆 ${formatStatsMoney(oldestAging.incomingAmount)}`
-            : '';
-        incomingDetail.textContent = totals.openAgeCount
-            ? `目前在途 ${totals.openAgeCount} 筆｜平均等待 ${Number(totals.avgOpenAgeDays||0).toFixed(1)} 天｜最久 ${Number(totals.maxOpenAgeDays||0).toFixed(1)} 天${lateText}${oldestText}`
-            : '目前沒有在途採購';
-    }
-    const mixDetail = document.getElementById('purchaseAnalyticsMixDetail');
-    if (mixDetail) {
-        const stockShare = totals.orderedAmount > 0 ? (totals.stockAmount / totals.orderedAmount) * 100 : 0;
-        mixDetail.textContent = `客戶訂單採購 ${formatStatsMoney(totals.customerOrderAmount)}｜備庫占比 ${stockShare.toFixed(0)}%`;
-    }
-
-    supplierBody.innerHTML = purchasingAnalyticsRowsHtml(
-        bySupplier.map(row=>({...row,label:row.supplier})),
-        'label',
-        '目前篩選期間沒有採購資料。'
-    );
-    if (sourceBody) sourceBody.innerHTML = purchasingAnalyticsRowsHtml(bySource, 'source', '目前沒有需求來源採購資料。');
-    if (brandBody) brandBody.innerHTML = purchasingAnalyticsRowsHtml(byBrand, 'brand', '目前沒有廠牌採購資料。');
-    if (monthBody) monthBody.innerHTML = purchasingAnalyticsRowsHtml(byMonth, 'month', '目前沒有月份採購資料。');
-    if (agingBody) agingBody.innerHTML = purchasingAnalyticsAgingRowsHtml(agingBuckets);
-
-    if (status && !purchasingAnalyticsLoading) {
-        const range = [filters.start, filters.end].filter(Boolean).join(' ～ ') || '全部期間';
-        const costWarning = totals.missingUnitCostCount ? `｜${totals.missingUnitCostCount} 筆進貨成本未填` : '';
-        status.textContent = `${range}｜${totals.lineCount} 筆品項｜${totals.documentCount} 張採購單${costWarning}`;
-    }
-    renderUnifiedBrandAnalytics();
-}
-
 window.loadPurchasingAnalytics = async function(force = false) {
     if (trueUserRole !== 'admin' || purchasingAnalyticsLoading) return purchasingAnalyticsRows;
     const filters = adminPurchaseAnalyticsFilterContext();
     const rangeKey = purchasingAnalyticsRangeKey(filters);
     if (!force && purchasingAnalyticsLoadedRangeKey === rangeKey) {
-        renderPurchasingAnalytics();
+        renderUnifiedBrandAnalytics();
         return purchasingAnalyticsRows;
     }
-    const status = document.getElementById('purchaseAnalyticsStatus');
-    const button = document.getElementById('purchaseAnalyticsRefreshBtn');
     purchasingAnalyticsLoading = true;
-    if (status) status.textContent = '載入採購分析中…';
-    if (button) { button.disabled = true; button.textContent = '更新中…'; }
     try {
         let query = db.collection('supplyOrders');
         if (filters.start) query = query.where('orderDate', '>=', filters.start);
         if (filters.end) query = query.where('orderDate', '<=', filters.end);
         query = query.orderBy('orderDate', 'desc');
 
-        const supplyRows = await readQueryInBatches(query);
-        purchasingAnalyticsRows = supplyRows;
+        purchasingAnalyticsRows = await readQueryInBatches(query);
         purchasingAnalyticsLoadedRangeKey = rangeKey;
         return purchasingAnalyticsRows;
     } catch (err) {
-        console.error('採購分析讀取失敗：', err);
-        if (status) status.textContent = '採購分析讀取失敗：' + (err?.message || err);
+        console.error('進銷存採購資料讀取失敗：', err);
         throw err;
     } finally {
         purchasingAnalyticsLoading = false;
-        if (button) { button.disabled = false; button.textContent = '↻ 更新分析'; }
-        renderPurchasingAnalytics();
+        renderUnifiedBrandAnalytics();
     }
 };
 
@@ -17502,7 +17407,7 @@ window.switchAdminTab = function(tab, el) {
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
     });
-    // 進銷存分析在同一次登入期間保留快取；採購分析也集中在此，不再放在採購工作頁。
+    // 進銷存分析在同一次登入期間保留快取；正式採購資料只供上方進銷整合使用，不另外顯示重複採購分析面板。
     if (tab === 'statistics') ensureBrandSettingsLoaded().then(async () => {
         if (salesStatisticsOrders.length) renderSalesStatistics();
         else await loadSalesStatistics();
@@ -18829,9 +18734,9 @@ window.renderAdminStatistics = function() {
     if (trueUserRole !== 'admin') return;
     const rangeKey = purchasingAnalyticsRangeKey(adminPurchaseAnalyticsFilterContext());
     if (!purchasingAnalyticsLoading && purchasingAnalyticsLoadedRangeKey !== rangeKey) {
-        loadPurchasingAnalytics(false).catch(err => console.error('採購分析期間更新失敗：', err));
+        loadPurchasingAnalytics(false).catch(err => console.error('進銷存採購資料期間更新失敗：', err));
     } else {
-        renderPurchasingAnalytics();
+        renderUnifiedBrandAnalytics();
     }
 };
 

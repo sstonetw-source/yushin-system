@@ -2342,7 +2342,7 @@ test('purchasing auto-loads without manual refresh buttons and reads stay bounde
     const purchasingEnd=indexSource.indexOf('<div id="purchaseTimelineOverlay"',purchasingStart);
     const purchasingSource=indexSource.slice(purchasingStart,purchasingEnd);
     assert.equal(purchasingSource.includes('id="purchaseAnalyticsRefreshBtn"'), false);
-    assert.match(indexSource,/id="purchaseAnalyticsRefreshBtn"/);
+    assert.doesNotMatch(indexSource,/id="purchaseAnalyticsRefreshBtn"/);
 
     const pageStart=appSource.indexOf('async function loadPurchaseOrderPage');
     const pageEnd=appSource.indexOf('window.loadMyPurchaseOrders',pageStart);
@@ -5156,15 +5156,18 @@ test('new order inventory reservation writes explicit ownership metadata', () =>
 });
 
 
-test('purchase analytics is consolidated into admin inventory-sales analysis', () => {
+test('duplicate purchase analytics UI is removed while purchase data still feeds inventory-sales analysis', () => {
     assert.doesNotMatch(indexSource, /id="purchase-tab-analysis"/);
     const adminStart=indexSource.indexOf('<div id="admin-statistics"');
     const adminEnd=indexSource.indexOf('<div id="admin-warehouses"',adminStart);
     const adminSource=indexSource.slice(adminStart,adminEnd);
-    assert.match(adminSource,/id="purchaseAnalyticsPanel"/);
-    assert.match(adminSource,/採購與供應商分析/);
+    assert.doesNotMatch(adminSource,/id="purchaseAnalyticsPanel"/);
+    assert.doesNotMatch(adminSource,/採購與供應商分析/);
+    assert.doesNotMatch(indexSource,/id="purchaseAnalyticsRefreshBtn"/);
     assert.match(appSource,/function adminPurchaseAnalyticsFilterContext\(\)/);
+    assert.match(appSource,/window\.loadPurchasingAnalytics = async function/);
     assert.match(appSource,/trueUserRole !== 'admin' \|\| purchasingAnalyticsLoading/);
+    assert.match(appSource,/renderUnifiedBrandAnalytics\(\)/);
     assert.doesNotMatch(appSource,/view === 'analytics'/);
 });
 
@@ -5202,7 +5205,7 @@ test('admin inventory-sales dashboard presents one unified management view', () 
     assert.match(adminSource,/id="invAnalysisStockValue"/);
     assert.match(adminSource,/id="invAnalysisIncoming"/);
     assert.match(adminSource,/id="unifiedBrandAnalyticsBody"/);
-    assert.match(adminSource,/id="purchaseAnalyticsPanel"/);
+    assert.doesNotMatch(adminSource,/id="purchaseAnalyticsPanel"/);
 });
 
 test('sales and purchasing analytics share primary plus other brand buckets', () => {
