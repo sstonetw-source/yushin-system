@@ -898,8 +898,9 @@
     <div id="purchasing-system" class="content-section">
         <div class="module-header no-print">
             <h2>採購管理</h2>
+            <button type="button" id="purchaseDirectOrderBtn" onclick="switchPurchasingView('replenishment')">＋ 直接訂貨</button>
         </div>
-        <div id="purchaseWorkCards" class="order-work-cards purchase-task-cards no-print" aria-label="採購主要工作">
+        <div id="purchaseWorkCards" class="order-work-cards purchase-task-cards no-print" aria-label="採購主要工作" hidden>
             <button type="button" class="order-work-card purchase-task-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)">
                 <span>① 處理訂單</span>
                 <strong id="purchaseCountOrdering">0 筆</strong>
@@ -922,9 +923,18 @@
             <button type="button" class="purchase-stage-button" id="purchase-card-completed" onclick="switchPurchasingView('completed', this)"><span>已完成</span><strong id="purchaseCountCompleted">0 筆</strong><small id="purchaseAmountCompleted">NT$ 0</small></button>
         </div>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
-            <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購工作</button>
-            <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">全部訂購單</button>
+            <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">業務需求</button>
+            <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('receiving')">訂購單</button>
             <button type="button" id="purchase-tab-suppliers" onclick="switchPurchasingView('suppliers')">供應商</button>
+        </div>
+        <div id="purchaseBusinessStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="業務需求進度">
+            <button type="button" onclick="switchPurchasingView('ordering')" data-purchase-stage="ordering">待採購</button>
+            <button type="button" onclick="switchPurchasingView('dispatch')" data-purchase-stage="dispatch">待打單</button>
+            <button type="button" onclick="switchPurchasingView('completed')" data-purchase-stage="completed">已打單／可出貨</button>
+        </div>
+        <div id="purchaseDocumentStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="訂購單追蹤">
+            <button type="button" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving">未到齊／收貨</button>
+            <button type="button" onclick="switchPurchasingView('history')" data-purchase-stage="history">全部訂購單</button>
         </div>
         <div id="purchaseFilterToolbar" class="order-period-toolbar no-print" aria-label="採購篩選條件">
             <select id="purchaseSalesFilter" aria-label="採購負責業務" onchange="renderPurchasingView()"><option value="">全部業務</option></select>
@@ -943,12 +953,13 @@
         <div class="panel no-print purchase-replenishment-panel" id="purchaseReplenishmentPanel" style="display:none;">
             <div class="purchase-replenishment-heading">
                 <div>
-                    <strong>安全庫存補貨</strong>
+                    <strong>直接訂貨</strong>
+                    <p>沒有業務訂單也可以訂貨。自行備貨或其他用途請建立空白訂購單；安全庫存補貨可從下方建議帶入。</p>
                     <div id="purchaseReplenishmentStatus">自動檢查中…</div>
                 </div>
                 <div class="purchase-replenishment-actions">
                     <span class="order-progress-badge">自動更新</span>
-                    <button type="button" onclick="openDirectStockPurchase()">＋ 直接採購</button>
+                    <button type="button" onclick="openDirectStockPurchase()">＋ 建立空白訂購單</button>
                 </div>
             </div>
             <div id="purchaseReplenishmentDetails" class="table-wrap purchase-replenishment-details">
@@ -961,7 +972,7 @@
 
         <div id="purchasePendingPanel">
             <div class="purchase-section-heading no-print">
-                <strong>處理訂單</strong>
+                <strong>業務需求</strong>
                 <span>只處理客戶訂單中需要採購的品項。</span>
             </div>
             <div class="toolbar no-print">
@@ -1696,7 +1707,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-17"></script>
+    <script src="app.js?v=20261003-18"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

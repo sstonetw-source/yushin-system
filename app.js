@@ -10602,6 +10602,7 @@ function populatePurchasingFilters() {
 }
 
 function purchasePeriodRange() {
+    if (['ordering', 'receiving', 'dispatch'].includes(purchasingView)) return { start:'', end:'' };
     const preset = document.getElementById('poPeriodFilter')?.value || 'this-year';
     if (preset === 'custom') return {
         start: document.getElementById('purchasePeriodStart')?.value || '',
@@ -11059,15 +11060,35 @@ window.switchPurchasingView = function(view, tab) {
     document.querySelectorAll('#purchaseFulfillmentTabs .purchase-stage-button').forEach(el =>
         el.classList.toggle('active', el.id === `purchase-card-${view}`)
     );
-    document.getElementById('purchase-tab-work')?.classList.toggle('active', workflowView);
-    document.getElementById('purchase-tab-history')?.classList.toggle('active', view === 'history');
+    document.getElementById('purchase-tab-work')?.classList.toggle('active', ['ordering','dispatch','completed'].includes(view));
+    document.getElementById('purchase-tab-history')?.classList.toggle('active', ['receiving','history'].includes(view));
     document.getElementById('purchase-tab-suppliers')?.classList.toggle('active', view === 'suppliers');
     const cards = document.getElementById('purchaseWorkCards');
-    if (cards) cards.style.display = workflowView ? '' : 'none';
+    if (cards) cards.style.display = 'none';
+    const directButton = document.getElementById('purchaseDirectOrderBtn');
+    if (directButton) directButton.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const businessTab = document.getElementById('purchase-tab-work');
+    if (businessTab) businessTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const businessStages = document.getElementById('purchaseBusinessStages');
+    if (businessStages) businessStages.style.display = ['ordering','dispatch','completed'].includes(view) ? '' : 'none';
+    const documentStages = document.getElementById('purchaseDocumentStages');
+    if (documentStages) documentStages.style.display = ['receiving','history'].includes(view) ? '' : 'none';
+    document.querySelectorAll('[data-purchase-stage]').forEach(el => el.classList.toggle('active', el.dataset.purchaseStage === view));
+    const periodSelect = document.getElementById('poPeriodFilter');
+    if (periodSelect) {
+        const showPeriod = ['history','completed'].includes(view);
+        periodSelect.style.display = showPeriod ? '' : 'none';
+        const label = document.querySelector('label[for="poPeriodFilter"]');
+        if (label) label.style.display = showPeriod ? '' : 'none';
+        const custom = document.getElementById('purchaseCustomPeriod');
+        if (custom) custom.style.display = showPeriod && periodSelect.value === 'custom' ? '' : 'none';
+        const note = document.querySelector('#purchaseFilterToolbar .order-period-note');
+        if (note) note.textContent = showPeriod ? '依選擇日期查詢歷史紀錄。' : '顯示跨年度未完成工作，避免漏掉舊需求。';
+    }
     const filterToolbar = document.getElementById('purchaseFilterToolbar');
     if (filterToolbar) filterToolbar.style.display = (view === 'suppliers' || view === 'replenishment') ? 'none' : '';
     const fulfillmentTabs = document.getElementById('purchaseFulfillmentTabs');
-    if (fulfillmentTabs) fulfillmentTabs.style.display = ['receiving', 'dispatch', 'completed'].includes(view) ? '' : 'none';
+    if (fulfillmentTabs) fulfillmentTabs.style.display = 'none';
     const pendingPanel=document.getElementById('purchasePendingPanel');
     const replenishmentPanel=document.getElementById('purchaseReplenishmentPanel');
     const poPanel=document.getElementById('poListPanel');
@@ -11330,6 +11351,7 @@ function renderPendingPurchaseOrders() {
     const visibleSelectableIds=new Set();
 
     const rows=[...procurementDemandCache]
+        .filter(demand=>demand.sourceType==='SALES_ORDER')
         .filter(demand=>Number(demand.remainingToOrderQty||0)>0)
         .sort((a,b)=>String(a.scheduleDate||a.createdAt||'').localeCompare(String(b.scheduleDate||b.createdAt||'')));
 
@@ -11385,7 +11407,7 @@ function renderPendingPurchaseOrders() {
     if(status)status.textContent=pendingPurchaseLoading
         ? '載入中…'
         : pendingPurchaseError || (shown
-            ? `已顯示 ${shown} 筆正式採購需求${procurementDemandHasMore?'；尚有更多需求可載入':''}`
+            ? `已顯示 ${shown} 筆業務待採購品項${procurementDemandHasMore?'；尚有更多需求可載入':''}`
             : procurementDemandHasMore ? '目前這一批沒有符合篩選的需求，可載入更多' : '目前沒有待採購需求');
     const more=document.getElementById('purchasePendingMoreBtn');
     if(more){more.style.display=procurementDemandHasMore?'':'none';more.disabled=pendingPurchaseLoading;}

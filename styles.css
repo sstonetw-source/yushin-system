@@ -49,6 +49,9 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
     z-index: 3000; padding: 30px 15px; overflow-y: auto; box-sizing: border-box;
 }
 .eq-modal-overlay.active { display: flex; }
+#purchaseWorkCards[hidden], #purchaseFulfillmentTabs { display: none !important; }
+#purchaseBusinessStages, #purchaseDocumentStages { gap: 8px; border-bottom: 0; margin: 8px 0 16px; }
+#purchaseBusinessStages button, #purchaseDocumentStages button { padding: 7px 14px; font-size: 13px; border-radius: 20px; }
 .eq-modal-box {
     background: #fff; border-radius: 14px; padding: 20px 24px; width: 100%;
     max-width: 780px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); box-sizing: border-box;
