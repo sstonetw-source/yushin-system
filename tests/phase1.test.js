@@ -1247,6 +1247,18 @@ test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustme
  assert.match(appSource,/orderBy\('createdAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
 });
 
+test('inventory movement history uses readable labels instead of raw internal ids',()=>{
+ assert.match(indexSource,/最近庫存異動/);
+ assert.match(indexSource,/<th>品項<\/th>/);
+ assert.match(appSource,/function inventoryMovementTypeLabel/);
+ assert.match(appSource,/warehouse_transfer_out:'倉庫移出'/);
+ assert.match(appSource,/receipt:'採購入庫'/);
+ assert.match(appSource,/movement\.itemCode\|\|item\?\.itemCode\|\|key/);
+ assert.match(appSource,/inventoryMovementSourceLabel/);
+ assert.match(appSource,/人工盤點/);
+ assert.match(appSource,/data-th="品項"/);
+});
+
 test('inventory refreshes automatically with bounded Firestore reads and no manual refresh button',()=>{
  assert.doesNotMatch(indexSource,/id="inventoryRefreshBtn"/);
  assert.doesNotMatch(appSource,/inventoryRefreshBtn/);

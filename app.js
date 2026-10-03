@@ -8227,7 +8227,87 @@ window.renderPendingInventoryItems=function(){
     body.innerHTML=supplies.join('');
     if(hint)hint.style.display=supplies.length?'none':'block';
 };
-window.renderInventoryLedger=function(){const b=document.getElementById('inventoryLedgerBody');if(!b)return;b.innerHTML=inventoryLedgerCache.map(x=>`<tr><td>${escapeHtml(x.createdAt||'')}</td><td>${escapeHtml(x.productKey||'')}</td><td>${escapeHtml(x.type||'')}</td><td>${Number(x.qty||0)}</td><td>${escapeHtml((x.sourceType||'')+' '+(x.sourceId||''))}</td><td>${escapeHtml(x.createdBy||'')}</td></tr>`).join('');};
+function inventoryMovementTypeLabel(type='') {
+    return ({
+        initial:'新增庫存',
+        adjustment:'盤點調整',
+        scrap:'報廢',
+        warehouse_transfer_out:'倉庫移出',
+        warehouse_transfer_in:'倉庫移入',
+        purchase_incoming:'採購在途',
+        purchase_incoming_cancel:'取消在途',
+        purchase_incoming_close:'結束在途',
+        receipt:'採購入庫',
+        reserve:'訂單占用',
+        release:'解除占用',
+        reserve_from_receipt:'到貨自動占用',
+        ship:'出貨',
+        ship_reversal:'撤銷出貨',
+        return_in:'客戶退貨入庫',
+        return_reversal:'撤銷退貨'
+    })[String(type||'')] || String(type||'庫存異動');
+}
+
+function inventoryMovementTimeLabel(value='') {
+    if(!value)return '';
+    const date=new Date(value);
+    if(Number.isNaN(date.getTime()))return String(value);
+    const pad=n=>String(n).padStart(2,'0');
+    return `${date.getFullYear()}/${pad(date.getMonth()+1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function inventoryWarehouseName(warehouseId='') {
+    if(!warehouseId)return '';
+    return warehouseMasterCache.find(row=>row.id===warehouseId)?.warehouseName || warehouseId;
+}
+
+function inventoryMovementProductInfo(movement={}) {
+    const key=String(movement.productKey||movement.productId||'').trim();
+    const item=[...inventoryCache,...inventorySearchResults].find(row=>String(row.productKey||row.productId||'').trim()===key);
+    return {
+        code:movement.itemCode||item?.itemCode||key,
+        name:movement.itemName||item?.itemName||''
+    };
+}
+
+function inventoryMovementSourceLabel(movement={}) {
+    if(movement.type==='warehouse_transfer_out'||movement.type==='warehouse_transfer_in'){
+        const from=inventoryWarehouseName(movement.fromWarehouseId||'');
+        const to=inventoryWarehouseName(movement.toWarehouseId||'');
+        return from&&to?`${from} → ${to}`:'倉庫移動';
+    }
+    const sourceType=String(movement.sourceType||'').toUpperCase();
+    const sourceId=String(movement.sourceId||'').trim();
+    const documentNo=String(movement.purchaseDocumentId||'').trim();
+    let label='';
+    if(sourceType==='SUPPLY_ORDER')label='採購';
+    else if(sourceType==='ORDER')label='訂單';
+    else if(sourceType==='MANUAL')label='人工';
+    else if(sourceType)label=movement.sourceType;
+    const id=documentNo||sourceId;
+    if(id&&id!=='quantity-editor')label+=`${label?'｜':''}${id}`;
+    if(sourceId==='quantity-editor')label='人工盤點';
+    if(movement.note)label+=`${label?'｜':''}${movement.note}`;
+    return label||'－';
+}
+
+window.renderInventoryLedger=function(){
+    const body=document.getElementById('inventoryLedgerBody');
+    if(!body)return;
+    body.innerHTML=inventoryLedgerCache.map(movement=>{
+        const product=inventoryMovementProductInfo(movement);
+        const qty=Number(movement.qty||0);
+        const qtyLabel=`${qty>0?'+':''}${qty}`;
+        return `<tr>
+            <td data-th="時間">${escapeHtml(inventoryMovementTimeLabel(movement.createdAt||''))}</td>
+            <td data-th="品項"><strong>${escapeHtml(product.code||'－')}</strong>${product.name?`<div class="inventory-ledger-item-name">${escapeHtml(product.name)}</div>`:''}</td>
+            <td data-th="類型">${escapeHtml(inventoryMovementTypeLabel(movement.type||''))}</td>
+            <td data-th="數量"><strong>${escapeHtml(qtyLabel)}</strong></td>
+            <td data-th="來源">${escapeHtml(inventoryMovementSourceLabel(movement))}</td>
+            <td data-th="人員">${escapeHtml(movement.createdBy||'')}</td>
+        </tr>`;
+    }).join('');
+};
 let inventoryAdjustmentRows = [];
 
 function inventoryAdjustmentTitle(type) {return ({initial:'新增庫存',adjustment:'批號／效期庫存異動',scrap:'報廢'})[type]||'庫存異動';}
