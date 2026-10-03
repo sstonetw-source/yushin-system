@@ -2756,6 +2756,7 @@ html[data-app-environment="preview"] body { border-top: 0; }
 .inventory-quantity-field { margin-top:14px; }
 .inventory-quantity-field label { display:block; margin-bottom:6px; font-weight:700; color:#27394d; }
 .inventory-quantity-field input, .inventory-quantity-field select { width:100%; min-height:44px; box-sizing:border-box; }
+.inventory-transfer-modal .inventory-summary-note { margin-top:14px; }
 .inventory-quantity-field small { display:block; margin-top:6px; color:#667584; line-height:1.5; }
 .inventory-quantity-current { margin:14px 0 4px; padding:12px 14px; border-radius:8px; background:#f5f8fb; color:#425466; }
 .inventory-quantity-current strong { margin-left:6px; color:#003f73; font-size:22px; }
@@ -2778,5 +2779,5 @@ html[data-app-environment="preview"] body { border-top: 0; }
         font-size:16px;
     }
     .purchase-replenishment-heading { align-items:flex-start; }
-    .inventory-quantity-modal { width:calc(100vw - 28px); max-height:calc(100vh - 40px); overflow:auto; }
+    .inventory-quantity-modal, .inventory-transfer-modal { width:calc(100vw - 28px); max-height:calc(100vh - 40px); overflow:auto; }
 }

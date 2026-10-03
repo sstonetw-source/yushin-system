@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261003-8">
+        <link rel="stylesheet" href="styles.css?v=20261003-9">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -537,6 +537,34 @@
         <div class="eq-modal-close-row">
           <button type="button" id="saveInventoryQuantityBtn" onclick="saveInventoryQuantity()">確認修改</button>
           <button type="button" class="btn-secondary" onclick="closeInventoryQuantityEditor()">取消</button>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="eq-modal-overlay no-print" id="inventoryTransferOverlay" onclick="if(event.target===this) closeInventoryTransfer()">
+      <div class="eq-modal-box inventory-transfer-modal" style="max-width:560px;">
+        <div class="inventory-quantity-heading">
+          <h3 style="margin:0;">移動庫存</h3>
+          <button type="button" class="btn-secondary" onclick="closeInventoryTransfer()">✕ 關閉</button>
+        </div>
+        <div id="inventoryTransferItemLabel" class="inventory-summary-note"></div>
+        <div class="inventory-quantity-field">
+          <label for="inventoryTransferFrom">從倉庫</label>
+          <select id="inventoryTransferFrom" onchange="updateInventoryTransferHint()"></select>
+        </div>
+        <div class="inventory-quantity-field">
+          <label for="inventoryTransferTo">到倉庫</label>
+          <select id="inventoryTransferTo" onchange="updateInventoryTransferHint()"></select>
+        </div>
+        <div class="inventory-quantity-field">
+          <label for="inventoryTransferQty">移動數量</label>
+          <input id="inventoryTransferQty" type="number" min="0" step="any" inputmode="decimal">
+        </div>
+        <div id="inventoryTransferHint" class="inventory-summary-note">只移動庫存位置，公司總庫存不變；已被訂單占用的數量不能移出。</div>
+        <div class="eq-modal-close-row">
+          <button type="button" id="saveInventoryTransferBtn" onclick="saveInventoryTransfer()">確認移動</button>
+          <button type="button" class="btn-secondary" onclick="closeInventoryTransfer()">取消</button>
         </div>
       </div>
     </div>
@@ -1638,7 +1666,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-8"></script>
+    <script src="app.js?v=20261003-9"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
