@@ -5119,3 +5119,28 @@ test('new order inventory reservation writes explicit ownership metadata', () =>
     assert.match(source, /ownerUid:order\.ownerUid\|\|currentUser\?\.uid\|\|''/);
     assert.match(source, /salesCode:order\.salesCode\|\|salesCodeForName\(order\.salesName\)\|\|''/);
 });
+
+
+test('purchase analytics is consolidated into admin inventory-sales analysis', () => {
+    assert.doesNotMatch(indexSource, /id="purchase-tab-analysis"/);
+    const adminStart=indexSource.indexOf('<div id="admin-statistics"');
+    const adminEnd=indexSource.indexOf('<div id="admin-warehouses"',adminStart);
+    const adminSource=indexSource.slice(adminStart,adminEnd);
+    assert.match(adminSource,/id="purchaseAnalyticsPanel"/);
+    assert.match(adminSource,/採購與供應商分析/);
+    assert.match(appSource,/function adminPurchaseAnalyticsFilterContext\(\)/);
+    assert.match(appSource,/trueUserRole !== 'admin' \|\| purchasingAnalyticsLoading/);
+    assert.doesNotMatch(appSource,/view === 'analytics'/);
+});
+
+test('supplier settings use one consolidated brand supplier email editor', () => {
+    assert.match(indexSource,/id="supplierSettingBrand"/);
+    assert.match(indexSource,/id="supplierSettingName"/);
+    assert.match(indexSource,/id="supplierSettingEmail"/);
+    assert.match(indexSource,/id="supplierSettingsBody"/);
+    assert.doesNotMatch(indexSource,/<strong>供應商主檔<\/strong>/);
+    assert.doesNotMatch(indexSource,/<strong>廠牌 → 供應商對應<\/strong>/);
+    assert.match(appSource,/window\.saveSupplierSetting = async function/);
+    assert.match(appSource,/batch\.set\(db\.collection\('suppliers'\)/);
+    assert.match(appSource,/batch\.set\(db\.collection\('brandSupplierMappings'\)/);
+});

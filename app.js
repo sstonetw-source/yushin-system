@@ -4525,6 +4525,7 @@ async function loadSupplierWarehouseMasters(force = false) {
         supplierMasterCache.sort((a,b)=>String(a.supplierName||'').localeCompare(String(b.supplierName||''),'zh-Hant'));
         renderSupplierMasterAdmin();
         renderSupplierMappingAdmin();
+        renderSupplierSettingsAdmin();
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
         return {
@@ -4656,6 +4657,127 @@ function renderSupplierMappingAdmin() {
         </tr>`;
     }).join('') : '<tr><td colspan="6" style="color:#888;">尚未設定供應商對應。</td></tr>';
 }
+
+
+function renderSupplierSettingsAdmin() {
+    const body=document.getElementById('supplierSettingsBody');
+    if(!body)return;
+    const rows=[...supplierMappingCache].sort((a,b)=>
+        String(a.brandName||'').localeCompare(String(b.brandName||''),'zh-Hant')
+        || String(a.productLine||'').localeCompare(String(b.productLine||''),'zh-Hant')
+    );
+    body.innerHTML=rows.length?rows.map(mapping=>{
+        const supplier=supplierMasterCache.find(item => item.id===mapping.supplierId || item.supplierId===mapping.supplierId) || {};
+        const leadTimeDays=Math.max(0,Number(supplier.leadTimeDays||0));
+        return `<tr>
+            <td>${escapeHtml(mapping.brandName||'')}</td>
+            <td>${escapeHtml(mapping.productLine||'預設')}</td>
+            <td>${escapeHtml(supplier.supplierName||'找不到供應商')}</td>
+            <td>${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</td>
+            <td>${escapeHtml(supplier.email||'')}</td>
+            <td>${leadTimeDays?leadTimeDays+' 天':'－'}</td>
+            <td>
+                <button type="button" class="btn-small btn-secondary" onclick="loadSupplierSettingToEditor('${escapeAttr(mapping.id||mapping.mappingId||'')}')">編輯</button>
+                <button type="button" class="btn-small btn-danger" onclick="disableSupplierSetting('${escapeAttr(mapping.id||mapping.mappingId||'')}')">停用</button>
+            </td>
+        </tr>`;
+    }).join(''):'<tr><td colspan="7" style="color:#888;">尚未設定供應商。</td></tr>';
+}
+
+window.clearSupplierSettingEditor = function() {
+    ['supplierSettingEditingMappingId','supplierSettingEditingSupplierId','supplierSettingBrand','supplierSettingLine','supplierSettingName','supplierSettingHeader','supplierSettingEmail']
+        .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    const lead=document.getElementById('supplierSettingLeadTime'); if(lead)lead.value='0';
+    const status=document.getElementById('supplierSettingStatus'); if(status)status.textContent='';
+};
+
+window.loadSupplierSettingToEditor = function(mappingId) {
+    const mapping=supplierMappingCache.find(item=>(item.id||item.mappingId)===mappingId);
+    if(!mapping)return;
+    const supplier=supplierMasterCache.find(item => item.id===mapping.supplierId || item.supplierId===mapping.supplierId) || {};
+    document.getElementById('supplierSettingEditingMappingId').value=mappingId;
+    document.getElementById('supplierSettingEditingSupplierId').value=supplier.id||supplier.supplierId||mapping.supplierId||'';
+    document.getElementById('supplierSettingBrand').value=mapping.brandName||'';
+    document.getElementById('supplierSettingLine').value=mapping.productLine||'';
+    document.getElementById('supplierSettingName').value=supplier.supplierName||'';
+    document.getElementById('supplierSettingHeader').value=supplier.purchaseHeaderName||supplier.supplierName||'';
+    document.getElementById('supplierSettingEmail').value=supplier.email||'';
+    document.getElementById('supplierSettingLeadTime').value=String(Math.max(0,Number(supplier.leadTimeDays||0)));
+    const status=document.getElementById('supplierSettingStatus');
+    if(status)status.textContent=`正在編輯：${mapping.brandName||''} → ${supplier.supplierName||''}`;
+};
+
+window.saveSupplierSetting = async function() {
+    if(!canCreatePurchaseOrderCapability())return;
+    const button=actionButtonFromEventOrSelector('[onclick="saveSupplierSetting()"]');
+    const state=beginActionButton(button,'儲存中…');
+    if(button&&!state)return;
+    const status=document.getElementById('supplierSettingStatus');
+    const editingMappingId=String(document.getElementById('supplierSettingEditingMappingId')?.value||'').trim();
+    const editingSupplierId=String(document.getElementById('supplierSettingEditingSupplierId')?.value||'').trim();
+    const brandName=resolveBrandName(document.getElementById('supplierSettingBrand')?.value||'');
+    const productLine=String(document.getElementById('supplierSettingLine')?.value||'').trim();
+    const supplierName=String(document.getElementById('supplierSettingName')?.value||'').trim();
+    const purchaseHeaderName=String(document.getElementById('supplierSettingHeader')?.value||'').trim()||supplierName;
+    const supplierEmail=normalizeSupplierEmail(document.getElementById('supplierSettingEmail')?.value||'');
+    const leadTimeDays=Math.max(0,Math.floor(Number(document.getElementById('supplierSettingLeadTime')?.value||0)));
+    if(!brandName||!supplierName){
+        if(status)status.textContent=!brandName?'請選擇廠牌。':'請輸入供應商名稱。';
+        endActionButton(button,state);
+        return;
+    }
+    if(supplierEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplierEmail)){
+        if(status)status.textContent='供應商 Email 格式不正確。';
+        endActionButton(button,state);
+        return;
+    }
+    try{
+        const normalizedName=supplierName.normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase();
+        const sameName=supplierMasterCache.find(item =>
+            String(item.supplierName||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLocaleLowerCase()===normalizedName
+        );
+        const editingSupplier=supplierMasterCache.find(item=>(item.id||item.supplierId)===editingSupplierId);
+        const supplierId=(sameName?.id||sameName?.supplierId||editingSupplierId||stableMasterId('sup',supplierName));
+        const previous=sameName||editingSupplier||supplierMasterCache.find(item=>(item.id||item.supplierId)===supplierId);
+        const mappingId=stableMasterId('bsm',brandName+'|'+(productLine||'default'));
+        const now=new Date().toISOString();
+        const batch=db.batch();
+        batch.set(db.collection('suppliers').doc(supplierId),{
+            supplierId,supplierName,purchaseHeaderName,email:supplierEmail,leadTimeDays,
+            active:true,createdAt:previous?.createdAt||now,updatedAt:now
+        },{merge:true});
+        batch.set(db.collection('brandSupplierMappings').doc(mappingId),{
+            mappingId,brandName,productLine,supplierId,isDefault:!productLine,active:true,updatedAt:now
+        },{merge:true});
+        if(editingMappingId&&editingMappingId!==mappingId){
+            batch.set(db.collection('brandSupplierMappings').doc(editingMappingId),{active:false,updatedAt:now},{merge:true});
+        }
+        await batch.commit();
+        supplierWarehouseLoadPromise=null;
+        await loadSupplierWarehouseMasters(true);
+        window.clearSupplierSettingEditor();
+        if(status)status.textContent='供應商設定已儲存。';
+    }catch(err){
+        console.error('儲存供應商設定失敗：',err);
+        if(status)status.textContent='儲存失敗：'+(err?.message||err);
+    }finally{
+        endActionButton(button,state);
+    }
+};
+
+window.disableSupplierSetting = async function(mappingId) {
+    if(!canCreatePurchaseOrderCapability()||!mappingId)return;
+    const status=document.getElementById('supplierSettingStatus');
+    try{
+        await db.collection('brandSupplierMappings').doc(mappingId).set({active:false,updatedAt:new Date().toISOString()},{merge:true});
+        supplierWarehouseLoadPromise=null;
+        await loadSupplierWarehouseMasters(true);
+        if(String(document.getElementById('supplierSettingEditingMappingId')?.value||'')===mappingId)window.clearSupplierSettingEditor();
+        if(status)status.textContent='供應商對應已停用；供應商主檔保留供其他廠牌使用。';
+    }catch(err){
+        if(status)status.textContent='停用失敗：'+(err?.message||err);
+    }
+};
 
 function renderWarehouseMasterAdmin() {
     const body = document.getElementById('warehouseMasterBody');
@@ -10372,11 +10494,21 @@ window.loadMorePurchasingCompleted = async function() {
     renderPurchasingCompletedOrders(loadedRows);
 };
 
-function purchasingAnalyticsRangeKey(filters = purchaseFilterContext()) {
+function adminPurchaseAnalyticsFilterContext() {
+    return {
+        start: document.getElementById('salesStatsStart')?.value || '',
+        end: document.getElementById('salesStatsEnd')?.value || '',
+        selectedSales: stripPhoneSuffix(document.getElementById('salesStatsSalesFilter')?.value || ''),
+        selectedBrand: document.getElementById('salesStatsBrandFilter')?.value || '',
+        selectableBrands: workflowPurchasingBrandNames()
+    };
+}
+
+function purchasingAnalyticsRangeKey(filters = adminPurchaseAnalyticsFilterContext()) {
     return JSON.stringify([filters.start || '', filters.end || '']);
 }
 
-function purchasingAnalyticsRowMatches(supply, filters = purchaseFilterContext()) {
+function purchasingAnalyticsRowMatches(supply, filters = adminPurchaseAnalyticsFilterContext()) {
     const businessDate = normalizeBusinessDate(supply.orderDate || supply.createdAt);
     if ((filters.start || filters.end)
         && (!businessDate || (filters.start && businessDate < filters.start) || (filters.end && businessDate > filters.end))) return false;
@@ -10393,7 +10525,7 @@ function purchasingAnalyticsRowMatches(supply, filters = purchaseFilterContext()
     return true;
 }
 
-function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = purchaseFilterContext()) {
+function purchasingAnalyticsMetrics(rows = purchasingAnalyticsRows, filters = adminPurchaseAnalyticsFilterContext()) {
     if (!globalThis.YushinPurchasingAnalytics?.summarize) {
         throw new Error('Purchasing analytics core 未載入，無法計算採購分析。');
     }
@@ -10434,7 +10566,7 @@ function renderPurchasingAnalytics() {
     const monthBody = document.getElementById('purchaseAnalyticsMonthBody');
     const agingBody = document.getElementById('purchaseAnalyticsAgingBody');
     if (!supplierBody) return;
-    const filters = purchaseFilterContext();
+    const filters = adminPurchaseAnalyticsFilterContext();
     const { totals, bySupplier, bySource, byBrand, byMonth, agingBuckets = [] } = purchasingAnalyticsMetrics(purchasingAnalyticsRows, filters);
     const setMoney = (id, value) => {
         const el = document.getElementById(id);
@@ -10489,8 +10621,8 @@ function renderPurchasingAnalytics() {
 }
 
 window.loadPurchasingAnalytics = async function(force = false) {
-    if (!canCreatePurchaseOrderCapability() || purchasingAnalyticsLoading) return purchasingAnalyticsRows;
-    const filters = purchaseFilterContext();
+    if (trueUserRole !== 'admin' || purchasingAnalyticsLoading) return purchasingAnalyticsRows;
+    const filters = adminPurchaseAnalyticsFilterContext();
     const rangeKey = purchasingAnalyticsRangeKey(filters);
     if (!force && purchasingAnalyticsLoadedRangeKey === rangeKey) {
         renderPurchasingAnalytics();
@@ -10529,15 +10661,6 @@ window.renderPurchasingView = function() {
         renderSupplierMappingAdmin();
         return;
     }
-    if (purchasingView === 'analytics') {
-        const rangeKey = purchasingAnalyticsRangeKey();
-        if (!purchasingAnalyticsLoading && purchasingAnalyticsLoadedRangeKey !== rangeKey) {
-            loadPurchasingAnalytics(false).catch(err => console.error('採購分析期間更新失敗：', err));
-        } else {
-            renderPurchasingAnalytics();
-        }
-        return;
-    }
     if (purchasingView === 'history') {
         // 全部訂購單不顯示工作卡；直接畫正式訂購單歷史，
         // 不需要為了被隱藏的卡片掃描整批 ordersCache。
@@ -10574,14 +10697,14 @@ window.changePurchasePeriod = function(value) {
 
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
-    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history', 'analytics', 'suppliers'].includes(view)) return;
+    if (!['ordering', 'receiving', 'dispatch', 'completed', 'history', 'suppliers'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
-    if ((view === 'analytics' || view === 'suppliers') && !canCreatePurchaseOrderCapability()) return;
+    if (view === 'suppliers' && !canCreatePurchaseOrderCapability()) return;
     const previousPurchasingView = purchasingView;
     purchasingView = view;
     if (view === 'completed' && previousPurchasingView !== 'completed') purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
     populatePurchasingFilters();
-    const workflowView = !['history', 'analytics', 'suppliers'].includes(view);
+    const workflowView = !['history', 'suppliers'].includes(view);
     const filters = workflowView ? purchaseFilterContext() : null;
     const normalizedItemsByOrder = workflowView
         ? new Map(ordersCache.map(order => [order.id, normalizedOrderItems(order)]))
@@ -10601,7 +10724,6 @@ window.switchPurchasingView = function(view, tab) {
     document.querySelectorAll('#purchaseWorkCards .order-work-card').forEach(el => el.classList.toggle('active', el === (tab || document.getElementById(`purchase-card-${view}`))));
     document.getElementById('purchase-tab-work')?.classList.toggle('active', workflowView);
     document.getElementById('purchase-tab-history')?.classList.toggle('active', view === 'history');
-    document.getElementById('purchase-tab-analysis')?.classList.toggle('active', view === 'analytics');
     document.getElementById('purchase-tab-suppliers')?.classList.toggle('active', view === 'suppliers');
     const cards = document.getElementById('purchaseWorkCards');
     if (cards) cards.style.display = workflowView ? '' : 'none';
@@ -10611,17 +10733,14 @@ window.switchPurchasingView = function(view, tab) {
     const poPanel=document.getElementById('poListPanel');
     const dispatchPanel=document.getElementById('purchaseDispatchPanel');
     const completedPanel=document.getElementById('purchaseCompletedPanel');
-    const analyticsPanel=document.getElementById('purchaseAnalyticsPanel');
     const supplierPanel=document.getElementById('purchaseSupplierPanel');
     if(pendingPanel)pendingPanel.style.display=view==='ordering'?'':'none';
     if(poPanel)poPanel.style.display=(view==='receiving'||view==='history')?'':'none';
     if(dispatchPanel)dispatchPanel.style.display=view==='dispatch'?'':'none';
     if(completedPanel)completedPanel.style.display=view==='completed'?'':'none';
-    if(analyticsPanel)analyticsPanel.style.display=view==='analytics'?'':'none';
     if(supplierPanel)supplierPanel.style.display=view==='suppliers'?'':'none';
     if (view === 'suppliers') {
-        renderSupplierMasterAdmin();
-        renderSupplierMappingAdmin();
+        renderSupplierSettingsAdmin();
         renderProductSupplierMappingAdmin();
         if (!purchasingViewLoaded.has('suppliers')) {
             purchasingViewLoaded.add('suppliers');
@@ -10630,8 +10749,6 @@ window.switchPurchasingView = function(view, tab) {
                 console.error('供應商主檔首次載入失敗：', err);
             });
         }
-    } else if (view === 'analytics') {
-        renderPurchasingView();
     } else if (view === 'ordering') {
         renderPendingPurchaseOrders();
         if (!purchasingViewLoaded.has('ordering')) {
@@ -17546,8 +17663,12 @@ window.switchAdminTab = function(tab, el) {
         renderSupplierMappingAdmin();
         renderWarehouseMasterAdmin();
     });
-    // 統計資料在同一次登入期間保留快取；使用者按「重新整理」時才再次讀取。
-    if (tab === 'statistics') ensureBrandSettingsLoaded().then(() => salesStatisticsOrders.length ? renderSalesStatistics() : loadSalesStatistics());
+    // 進銷存分析在同一次登入期間保留快取；採購分析也集中在此，不再放在採購工作頁。
+    if (tab === 'statistics') ensureBrandSettingsLoaded().then(async () => {
+        if (salesStatisticsOrders.length) renderSalesStatistics();
+        else await loadSalesStatistics();
+        await loadPurchasingAnalytics(false);
+    }).catch(err => console.error('進銷存分析載入失敗：', err));
     if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
 };
@@ -18852,6 +18973,17 @@ function populateSalesStatisticsFilters() {
     });
 }
 
+window.renderAdminStatistics = function() {
+    renderSalesStatistics();
+    if (trueUserRole !== 'admin') return;
+    const rangeKey = purchasingAnalyticsRangeKey(adminPurchaseAnalyticsFilterContext());
+    if (!purchasingAnalyticsLoading && purchasingAnalyticsLoadedRangeKey !== rangeKey) {
+        loadPurchasingAnalytics(false).catch(err => console.error('採購分析期間更新失敗：', err));
+    } else {
+        renderPurchasingAnalytics();
+    }
+};
+
 window.setSalesStatisticsPeriod = function(period) {
     const now = new Date();
     const year = now.getFullYear();
@@ -18870,7 +19002,7 @@ window.setSalesStatisticsPeriod = function(period) {
     }
     document.getElementById('salesStatsStart').value = start;
     document.getElementById('salesStatsEnd').value = end;
-    renderSalesStatistics();
+    renderAdminStatistics();
 };
 
 function buildSalesStatisticsReport() {
