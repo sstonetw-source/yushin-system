@@ -1975,11 +1975,13 @@ test('standalone receiving and inventory pending rows use canonical supply recei
     assert.match(inventorySource,/progress\.label/);
 });
 
-test('procurement analytics is admin-only and lives outside the purchasing workspace', () => {
+test('procurement data feed stays admin-only after duplicate analytics UI removal', () => {
     const loadStart=app.indexOf('window.loadPurchasingAnalytics = async function');
     const loadEnd=app.indexOf('\nwindow.renderPurchasingView',loadStart);
-    assert.match(app.slice(loadStart,loadEnd),/trueUserRole !== 'admin'/);
-    assert.match(html,/id="purchaseAnalyticsPanel"/);
+    const loadSource=app.slice(loadStart,loadEnd);
+    assert.match(loadSource,/trueUserRole !== 'admin'/);
+    assert.match(loadSource,/renderUnifiedBrandAnalytics\(\)/);
+    assert.doesNotMatch(html,/id="purchaseAnalyticsPanel"/);
     assert.doesNotMatch(html,/id="purchase-tab-analysis"/);
 
     const switchStart=app.indexOf('window.switchPurchasingView = function');
@@ -2001,31 +2003,22 @@ test('purchase history separates PO document status from receipt progress', () =
     assert.match(source,/data-th="到貨進度"/);
 });
 
-test('purchasing analytics shows procurement mix instead of only raw totals', () => {
-    const start=app.indexOf('function renderPurchasingAnalytics()');
-    const end=app.indexOf('\nwindow.loadPurchasingAnalytics',start);
+test('unified brand analysis keeps purchase values after duplicate purchase dashboard removal', () => {
+    const start=app.indexOf('function renderUnifiedBrandAnalytics()');
+    const end=app.indexOf('\nwindow.renderSalesStatistics',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/stockShare = totals\.orderedAmount > 0/);
-    assert.match(source,/totals\.stockAmount \/ totals\.orderedAmount/);
-    assert.match(source,/客戶訂單採購/);
-    assert.match(source,/備庫占比/);
+    assert.match(source,/purchasingAnalyticsMetrics\(/);
+    assert.match(source,/purchase\.orderedAmount/);
+    assert.match(source,/purchase\.receivedAmount/);
+    assert.match(source,/purchase\.incomingAmount/);
 });
 
-test('purchasing analytics exposes ERP-style open PO aging buckets', () => {
-    assert.match(html,/id="purchaseAnalyticsAgingBody"/);
-    assert.match(html,/在途採購帳齡/);
-    assert.match(html,/等待區間/);
-    assert.match(html,/未到貨數量/);
-
-    const start=app.indexOf('function purchasingAnalyticsAgingRowsHtml');
-    const end=app.indexOf('\nwindow.loadPurchasingAnalytics',start);
-    const source=app.slice(start,end);
-    assert.ok(start>=0&&end>start);
-    assert.match(source,/agingBuckets = \[\]/);
-    assert.match(source,/oldestAging=agingBuckets\.find\(row=>row\.key==='31_plus'\)/);
-    assert.match(source,/31\+ 天/);
-    assert.match(source,/agingBody\.innerHTML = purchasingAnalyticsAgingRowsHtml\(agingBuckets\)/);
+test('removed purchase dashboard leaves no duplicate aging UI', () => {
+    assert.doesNotMatch(html,/id="purchaseAnalyticsAgingBody"/);
+    assert.doesNotMatch(html,/在途採購帳齡/);
+    assert.doesNotMatch(app,/function purchasingAnalyticsAgingRowsHtml/);
+    assert.match(app,/purchasingAnalyticsMetrics\(/);
 });
 
 test('purchase order freezes supplier snapshot and records communication events', () => {
