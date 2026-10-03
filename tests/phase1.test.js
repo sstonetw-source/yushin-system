@@ -5456,3 +5456,17 @@ test('slow admin opens show immediate button feedback', () => {
     assert.match(editorSource, /beginActionButton\(button, '載入產品…'\)/);
     assert.match(editorSource, /finally \{\s*endActionButton\(button, buttonState\);/);
 });
+
+
+test('customer suggestions stay bounded while full Customer Master remains lazy-searchable', () => {
+    const start = appSource.indexOf('function populateOrderCustomerSuggestions()');
+    const end = appSource.indexOf('const RECENT_CUSTOMERS_STORAGE_KEY', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /ordersCache\.slice\(0, 20\)/);
+    assert.match(source, /equipmentList\.slice\(0, 20\)/);
+    assert.match(source, /myQuotesCache\.slice\(0, 20\)/);
+    assert.doesNotMatch(source, /ordersCache\.map\(/);
+    assert.doesNotMatch(source, /querySelectorAll\('#clientList option'\)/);
+    assert.match(appSource, /queueCustomerMasterSuggestions/);
+    assert.match(appSource, /\.limit\(20\)[\s\S]*Customer Master 客戶建議/);
+});
