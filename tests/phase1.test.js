@@ -420,8 +420,10 @@ test('agency settings do not trigger a full orders statistics query', () => {
     const agencyLine = adminSwitch.split('\n').find(line => line.includes("tab === 'agencies'"));
     assert.ok(agencyLine);
     assert.doesNotMatch(agencyLine, /loadSalesStatistics/);
-    const statisticsLine = adminSwitch.split('\n').find(line => line.includes("tab === 'statistics'"));
-    assert.match(statisticsLine, /salesStatisticsOrders\.length/);
+    const statisticsStart = adminSwitch.indexOf("if (tab === 'statistics')");
+    const statisticsSource = adminSwitch.slice(statisticsStart);
+    assert.match(statisticsSource, /salesStatisticsOrders\.length/);
+    assert.match(statisticsSource, /loadPurchasingAnalytics\(false\)/);
 });
 
 test('saving one new order updates the local cache without reloading the list', () => {
@@ -2307,7 +2309,11 @@ test('purchasing auto-loads without manual refresh buttons and reads stay bounde
     assert.equal(indexSource.includes('id="purchasePoRefreshBtn"'), false);
     assert.equal(indexSource.includes('id="purchaseDispatchRefreshBtn"'), false);
     assert.equal(indexSource.includes('id="purchaseCompletedRefreshBtn"'), false);
-    assert.equal(indexSource.includes('id="purchaseAnalyticsRefreshBtn"'), false);
+    const purchasingStart=indexSource.indexOf('<div id="purchasing-system"');
+    const purchasingEnd=indexSource.indexOf('<div id="purchaseTimelineOverlay"',purchasingStart);
+    const purchasingSource=indexSource.slice(purchasingStart,purchasingEnd);
+    assert.equal(purchasingSource.includes('id="purchaseAnalyticsRefreshBtn"'), false);
+    assert.match(indexSource,/id="purchaseAnalyticsRefreshBtn"/);
 
     const pageStart=appSource.indexOf('async function loadPurchaseOrderPage');
     const pageEnd=appSource.indexOf('window.loadMyPurchaseOrders',pageStart);
@@ -3159,7 +3165,7 @@ test('purchase history skips hidden work-card calculations', () => {
     const switchStart=appSource.indexOf('window.switchPurchasingView = function');
     const switchEnd=appSource.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
     const switchSource=appSource.slice(switchStart,switchEnd);
-    assert.match(switchSource,/const workflowView = !\['history', 'analytics', 'suppliers'\]\.includes\(view\)/);
+    assert.match(switchSource,/const workflowView = !\['history', 'suppliers'\]\.includes\(view\)/);
     assert.match(switchSource,/const normalizedItemsByOrder = workflowView[\s\S]*?: null/);
     assert.match(switchSource,/if \(workflowView\) renderPurchasingWorkCards/);
 });

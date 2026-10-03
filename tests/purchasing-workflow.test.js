@@ -1893,14 +1893,14 @@ test('purchase order PDF renderer can return a blob without downloading', () => 
     assert.match(source,/return \{blob,fileName\}/);
 });
 
-test('supplier master owns canonical contact fields and PO snapshots supplier contact', () => {
-    assert.match(html,/id="supplierMasterEmail"/);
-    assert.match(html,/id="supplierMasterBody"/);
-    const start=app.indexOf('window.saveSupplierMaster = async function');
-    const end=app.indexOf('\nwindow.disableSupplierMaster',start);
+test('supplier settings keep canonical Supplier Master contact fields and PO snapshots supplier contact', () => {
+    assert.match(html,/id="supplierSettingEmail"/);
+    assert.match(html,/id="supplierSettingsBody"/);
+    const start=app.indexOf('window.saveSupplierSetting = async function');
+    const end=app.indexOf('\nwindow.disableSupplierSetting',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/db\.collection\('suppliers'\)\.doc\(supplierId\)/);
+    assert.match(source,/batch\.set\(db\.collection\('suppliers'\)\.doc\(supplierId\)/);
     assert.match(source,/email:supplierEmail/);
     assert.match(app,/snapshotForPurchaseOrder/);
     assert.match(app,/supplierEmail:supplierSnapshot\.email\|\|''/);
@@ -1908,17 +1908,18 @@ test('supplier master owns canonical contact fields and PO snapshots supplier co
     assert.doesNotMatch(app,/poVendorEmail|purchaseEmail|vendorEmail/);
 });
 
-test('brand supplier mapping references an existing supplier without rewriting Supplier Master', () => {
-    assert.match(html,/id="supplierMappingSupplier"/);
-    assert.match(html,/id="supplierMasterSuggestions"/);
-    const start=app.indexOf('window.saveSupplierMapping = async function');
-    const end=app.indexOf('\nwindow.disableSupplierMapping',start);
+test('consolidated supplier setting writes Supplier Master and brand mapping atomically', () => {
+    assert.match(html,/id="supplierSettingBrand"/);
+    assert.match(html,/id="supplierSettingName"/);
+    assert.match(html,/id="supplierSettingEmail"/);
+    const start=app.indexOf('window.saveSupplierSetting = async function');
+    const end=app.indexOf('\nwindow.disableSupplierSetting',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/supplierMappingSupplier/);
-    assert.match(source,/db\.collection\('brandSupplierMappings'\)\.doc\(mappingId\)/);
-    assert.doesNotMatch(source,/db\.collection\('suppliers'\)/);
-    assert.doesNotMatch(source,/supplierMasterEmail/);
+    assert.match(source,/const batch=db\.batch\(\)/);
+    assert.match(source,/batch\.set\(db\.collection\('suppliers'\)\.doc\(supplierId\)/);
+    assert.match(source,/batch\.set\(db\.collection\('brandSupplierMappings'\)\.doc\(mappingId\)/);
+    assert.match(source,/await batch\.commit\(\)/);
 });
 
 test('supplier master cannot be disabled while active mappings still reference it', () => {
@@ -1974,15 +1975,18 @@ test('standalone receiving and inventory pending rows use canonical supply recei
     assert.match(inventorySource,/progress\.label/);
 });
 
-test('procurement analytics is limited to purchaser and admin capability', () => {
+test('procurement analytics is admin-only and lives outside the purchasing workspace', () => {
     const loadStart=app.indexOf('window.loadPurchasingAnalytics = async function');
     const loadEnd=app.indexOf('\nwindow.renderPurchasingView',loadStart);
-    assert.match(app.slice(loadStart,loadEnd),/!canCreatePurchaseOrderCapability\(\)/);
+    assert.match(app.slice(loadStart,loadEnd),/trueUserRole !== 'admin'/);
+    assert.match(html,/id="purchaseAnalyticsPanel"/);
+    assert.doesNotMatch(html,/id="purchase-tab-analysis"/);
 
     const switchStart=app.indexOf('window.switchPurchasingView = function');
-    const switchEnd=app.indexOf('\nwindow.changePurchasePeriod',switchStart);
-    assert.match(app.slice(switchStart,switchEnd),/\(view === 'analytics' \|\| view === 'suppliers'\) && !canCreatePurchaseOrderCapability\(\)/);
-    assert.match(app,/purchaseAnalysisTab\.style\.display = canCreatePurchaseOrderCapability\(\) \? '' : 'none'/);
+    const switchEnd=app.indexOf('\nasync function loadPurchasingDispatchOrders',switchStart);
+    const source=app.slice(switchStart,switchEnd);
+    assert.doesNotMatch(source,/view === 'analytics'/);
+    assert.match(source,/view === 'suppliers' && !canCreatePurchaseOrderCapability\(\)/);
 });
 
 test('purchase history separates PO document status from receipt progress', () => {
@@ -2068,11 +2072,12 @@ test('purchase flows persist procurement demand through order and receipt transa
     assert.match(app, /YushinProcurementDemand\.applyReceipt\(baseDemand,receiptQty\)/);
 });
 
-test('Supplier Master lives in purchasing workspace as a single master-data surface', () => {
+test('supplier settings live in purchasing workspace as one consolidated master-data surface', () => {
     assert.match(html,/id="purchase-tab-suppliers"/);
     assert.match(html,/id="purchaseSupplierPanel"/);
-    assert.equal((html.match(/id="supplierMasterBody"/g)||[]).length,1);
-    assert.equal((html.match(/id="supplierMappingBody"/g)||[]).length,1);
+    assert.equal((html.match(/id="supplierSettingsBody"/g)||[]).length,1);
+    assert.equal((html.match(/id="supplierMasterBody"/g)||[]).length,0);
+    assert.equal((html.match(/id="supplierMappingBody"/g)||[]).length,0);
 });
 
 test('Supplier Master uses purchasing capability instead of admin-only writes', () => {
