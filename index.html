@@ -1011,9 +1011,9 @@
                 <div><label>中文品名</label><input type="text" id="orderItemName"></div>
                 <div><label>英文品名</label><input type="text" id="orderItemNameEn"></div>
                 <div><label>廠牌</label>
-                    <select id="orderBrand" disabled aria-label="由 Product Master 自動帶入廠牌"><option value="">選擇產品後自動帶入</option></select>
-                    <input type="text" id="orderBrandOther" readonly style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
-                    <small style="display:block;color:#777;margin-top:4px;">正式訂單由 Product Master 自動帶入廠牌。</small>
+                    <select id="orderBrand" aria-label="訂單廠牌" onchange="onOrderBrandSelectChange(true)"><option value="">請選擇廠牌</option></select>
+                    <input type="text" id="orderBrandOther" placeholder="輸入實際廠牌名稱" autocomplete="off" oninput="onOrderBrandOtherInput()" onchange="onOrderBrandOtherChange()" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
+                    <small style="display:block;color:#777;margin-top:4px;">主要廠牌直接選；其他廠牌請輸入實際名稱。正式訂單仍需對應 Product Master。</small>
                 </div>
 
                 <input type="hidden" id="orderProductLine" value="">
@@ -1597,7 +1597,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-1"></script>
+    <script src="app.js?v=20261003-2"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

@@ -5159,85 +5159,97 @@ function quoteBrandRestrictionText(brand) {
     return '限' + labels.join('／');
 }
 
-// 估價單允許報帳／虛擬品項，因此廠牌可留白，也可用「其他」自由輸入。
-// 正式 Brand Master 廠牌若有限定公司，仍顯示在清單中，但錯誤公司抬頭下不可選。
-const QUOTE_RECENT_BRANDS_STORAGE_KEY = 'quote_recent_brands_v1';
+// 估價單與訂單的人工選擇統一只列「獨立統計」主要廠牌；
+ // 非主要廠牌一律走「其他廠牌」並保存實際輸入名稱，統計時仍歸入其他廠牌。
+function getPrimaryBrandNames() {
+    return dedupeBrandsCaseInsensitive(
+        (keyStatisticBrands || [])
+            .map(name => resolveBrandName(name))
+            .filter(name => name && name !== '其他' && name !== '其他廠牌')
+    );
+}
 
-function quoteRecentBrandNames() {
-    try {
-        const saved = JSON.parse(localStorage.getItem(QUOTE_RECENT_BRANDS_STORAGE_KEY) || '[]');
-        return Array.isArray(saved)
-            ? saved.map(value => resolveBrandName(value)).filter(Boolean).slice(0, 8)
-            : [];
-    } catch (_) {
-        return [];
+function brandOtherInputForSelect(select) {
+    if (!select) return null;
+    if (select.id === 'orderBrand') return document.getElementById('orderBrandOther');
+    if (select.id === 'eqBrand') return document.getElementById('eqBrandOther');
+    return select.closest?.('tr')?.querySelector('.item-brand-other') || null;
+}
+
+function populateBrandSelect(select, placeholderText, includeMaintenance = false, brandNames = null) {
+    if (!select) return;
+    const otherInput = brandOtherInputForSelect(select);
+    const currentValue = select.value === '其他' ? (otherInput?.value || '其他') : select.value;
+    const names = Array.isArray(brandNames) ? brandNames : getPriceListBrands(includeMaintenance);
+    select.innerHTML = `<option value="">${placeholderText}</option>`;
+    dedupeBrandsCaseInsensitive(names).forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b;
+        opt.text = b;
+        select.appendChild(opt);
+    });
+    const otherOpt = document.createElement('option');
+    otherOpt.value = '其他';
+    otherOpt.text = '其他廠牌（自行輸入）';
+    select.appendChild(otherOpt);
+
+    const canonical = resolveBrandName(currentValue);
+    const isMain = [...select.options].some(o => o.value === canonical);
+    select.value = isMain ? canonical : (currentValue ? '其他' : '');
+    if (otherInput) {
+        otherInput.value = !isMain && currentValue !== '其他' ? currentValue : '';
+        otherInput.style.display = select.value === '其他' ? '' : 'none';
     }
 }
 
-function rememberQuoteBrand(brand) {
-    const name = resolveBrandName(brand);
-    if (!name) return;
-    const key = normalizeBrandLookupKey(name);
-    const recent = quoteRecentBrandNames().filter(value => normalizeBrandLookupKey(value) !== key);
-    localStorage.setItem(QUOTE_RECENT_BRANDS_STORAGE_KEY, JSON.stringify([name, ...recent].slice(0, 8)));
-}
-
-function quoteBrandSuggestions(query = '') {
-    const raw = String(query || '').normalize('NFKC').trim();
-    const needle = raw.toLocaleLowerCase();
-    const all = getCompanySelectableBrands(currentCompany);
-    const preferred = dedupeBrandsCaseInsensitive([
-        ...quoteRecentBrandNames(),
-        ...keyStatisticBrands.map(resolveBrandName).filter(Boolean)
-    ]);
-
-    const source = needle
-        ? all.filter(brand => String(brand || '').normalize('NFKC').toLocaleLowerCase().includes(needle))
-        : preferred.filter(brand => all.some(item => normalizeBrandLookupKey(item) === normalizeBrandLookupKey(brand)));
-
-    const fallback = !needle && !source.length ? all.slice(0, 6) : source;
-    return dedupeBrandsCaseInsensitive(fallback).slice(0, 10).map(brand => ({
-        brand,
-        allowed: isCompanyBrandAllowed(currentCompany, brand),
-        restriction: quoteBrandRestrictionText(brand)
-    }));
-}
-
-function renderQuoteBrandSuggestions(input) {
-    const row = input?.closest?.('tr');
-    const container = row?.querySelector('.quote-brand-suggestions');
-    if (!container) return;
-
-    const suggestions = quoteBrandSuggestions(input.value);
-    container.replaceChildren();
-    if (!suggestions.length) {
-        container.hidden = true;
+// Product Master 若帶回非主要廠牌，不把真實名稱洗成「其他廠牌」；
+// UI 顯示「其他廠牌」，實際名稱留在旁邊輸入框。
+function selectBrandInDropdown(select, brandName) {
+    if (!select) return;
+    const otherInput = brandOtherInputForSelect(select);
+    const canonical = resolveBrandName(brandName);
+    if (!canonical) {
+        select.value = '';
+        if (otherInput) {
+            otherInput.value = '';
+            otherInput.style.display = 'none';
+        }
         return;
     }
-
-    suggestions.forEach(item => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'quote-brand-suggestion' + (item.allowed ? '' : ' restricted');
-        button.disabled = !item.allowed;
-        button.textContent = item.brand + (item.restriction ? `（${item.restriction}）` : '');
-        button.addEventListener('pointerdown', event => {
-            event.preventDefault();
-            if (!item.allowed) return;
-            input.value = item.brand;
-            invalidateQuoteProductIdentityIfBrandChanged(input);
-            rememberQuoteBrand(item.brand);
-            container.hidden = true;
-            onQuoteBrandSelectChange(input);
-            saveQuoteDraft();
-        });
-        container.appendChild(button);
-    });
-    container.hidden = false;
+    const isMain = [...select.options].some(o => o.value === canonical);
+    select.value = isMain ? canonical : '其他';
+    if (otherInput) {
+        otherInput.value = isMain ? '' : canonical;
+        otherInput.style.display = isMain ? 'none' : '';
+    }
 }
 
-function invalidateQuoteProductIdentityIfBrandChanged(input) {
-    const row = input?.closest?.('tr');
+function populateOrderBrandDropdown() {
+    populateBrandSelect(document.getElementById('orderBrand'), '請選擇廠牌', true, getPrimaryBrandNames());
+    onOrderBrandSelectChange();
+}
+
+function populateQuoteBrandDropdowns() {
+    document.querySelectorAll('#quoteItems .item-brand').forEach(select => {
+        const row = select.closest('tr');
+        const currentValue = quoteRowBrandValue(row);
+        populateBrandSelect(select, '請選擇廠牌', true, getPrimaryBrandNames());
+        if (currentValue) selectBrandInDropdown(select, currentValue);
+        onQuoteBrandSelectChange(select);
+    });
+}
+
+function quoteRowBrandValue(row) {
+    const select = row?.querySelector('.item-brand');
+    if (!select) return '';
+    const raw = select.value === '其他'
+        ? String(row.querySelector('.item-brand-other')?.value || '').trim()
+        : String(select.value || '').trim();
+    return resolveBrandName(raw);
+}
+
+function invalidateQuoteProductIdentityIfBrandChanged(select) {
+    const row = select?.closest?.('tr');
     if (!row) return;
     const productIdInput = row.querySelector('.item-product-id');
     const productId = String(productIdInput?.value || '').trim();
@@ -5255,104 +5267,36 @@ function invalidateQuoteProductIdentityIfBrandChanged(input) {
     if (productType) productType.value = '';
 }
 
-window.onQuoteBrandSearchInput = function(input) {
-    invalidateQuoteProductIdentityIfBrandChanged(input);
-    renderQuoteBrandSuggestions(input);
-    onQuoteBrandSelectChange(input);
-};
-
-window.finalizeQuoteBrandInput = function(input) {
-    const row = input?.closest?.('tr');
+window.onQuoteBrandSelectChange = function(select, userChanged = false) {
+    const row = select?.closest?.('tr');
     if (!row) return;
+    const otherInput = row.querySelector('.item-brand-other');
+    if (otherInput) {
+        if (select.value === '其他') {
+            otherInput.style.display = '';
+        } else {
+            otherInput.style.display = 'none';
+            otherInput.value = '';
+        }
+    }
+    if (userChanged) invalidateQuoteProductIdentityIfBrandChanged(select);
     const brand = quoteRowBrandValue(row);
-    if (brand) {
-        input.value = brand;
-        rememberQuoteBrand(brand);
-    }
-    invalidateQuoteProductIdentityIfBrandChanged(input);
-    onQuoteBrandSelectChange(input);
-    setTimeout(() => {
-        const container = row.querySelector('.quote-brand-suggestions');
-        if (container) container.hidden = true;
-    }, 120);
-    saveQuoteDraft();
-};
-
-function populateBrandSelect(select, placeholderText, includeMaintenance = false) {
-    if (!select) return;
-    const otherInput = select.id === 'orderBrand' ? document.getElementById('orderBrandOther')
-        : select.id === 'eqBrand' ? document.getElementById('eqBrandOther') : null;
-    const currentValue = select.value === '其他' ? (otherInput?.value || '其他') : select.value;
-    select.innerHTML = `<option value="">${placeholderText}</option>`;
-    getPriceListBrands(includeMaintenance).forEach(b => {
-        const opt = document.createElement('option');
-        opt.value = b;
-        opt.text = b;
-        select.appendChild(opt);
-    });
-    const otherOpt = document.createElement('option');
-    otherOpt.value = '其他';
-    otherOpt.text = '其他（自行輸入）';
-    select.appendChild(otherOpt);
-    const canonical = resolveBrandName(currentValue);
-    const isMain = [...select.options].some(o => o.value === canonical);
-    select.value = isMain ? canonical : (currentValue ? '其他' : '');
-    if (otherInput) {
-        otherInput.value = !isMain && currentValue !== '其他' ? currentValue : '';
-        otherInput.style.display = select.value === '其他' ? '' : 'none';
-    }
-}
-
-// 價目表可能包含非主要廠牌；只在「其他」文字框帶入實際名稱，不擴大下拉選單。
-function selectBrandInDropdown(select, brandName) {
-    if (!select || !brandName) return;
-    const canonical = resolveBrandName(brandName);
-
-    if (select.matches?.('.item-brand') && select.tagName === 'INPUT') {
-        select.value = canonical || brandName;
-        onQuoteBrandSelectChange(select);
-        return;
-    }
-
-    const isMain = [...select.options].some(o => o.value === canonical);
-    select.value = isMain ? canonical : '其他';
-    const otherInput = select.id === 'orderBrand' ? document.getElementById('orderBrandOther')
-        : select.id === 'eqBrand' ? document.getElementById('eqBrandOther')
-        : select.closest('tr')?.querySelector('.item-brand-other');
-    if (otherInput) {
-        otherInput.value = isMain ? '' : brandName;
-        otherInput.style.display = isMain ? 'none' : '';
-    }
-}
-
-function populateOrderBrandDropdown() {
-    populateBrandSelect(document.getElementById('orderBrand'), '請選擇廠牌', true);
-    onOrderBrandSelectChange();
-}
-
-function populateQuoteBrandDropdowns() {
-    document.querySelectorAll('#quoteItems .item-brand').forEach(input => {
-        const currentValue = quoteRowBrandValue(input.closest('tr'));
-        input.value = currentValue || '';
-        onQuoteBrandSelectChange(input);
-    });
-}
-
-function quoteRowBrandValue(row) {
-    const input = row?.querySelector('.item-brand');
-    if (!input) return '';
-    return resolveBrandName(String(input.value || '').trim());
-}
-
-window.onQuoteBrandSelectChange = function(input) {
-    const row = input?.closest?.('tr');
-    const hint = row?.querySelector('.quote-brand-restriction');
+    const brandIdInput = row.querySelector('.item-brand-id');
+    if (brandIdInput) brandIdInput.value = brandIdForName(brand);
+    const hint = row.querySelector('.quote-brand-restriction');
     if (!hint) return;
-    const brand = quoteRowBrandValue(row);
     const restriction = brand ? quoteBrandRestrictionText(brand) : '';
     const allowed = !brand || isCompanyBrandAllowed(currentCompany, brand);
     hint.textContent = restriction ? (allowed ? restriction : `${restriction}，目前公司抬頭不可使用`) : '';
     hint.classList.toggle('blocked', !!brand && !allowed);
+};
+
+window.onQuoteBrandOtherInput = function(input) {
+    const row = input?.closest?.('tr');
+    const select = row?.querySelector('.item-brand');
+    if (!row || !select) return;
+    invalidateQuoteProductIdentityIfBrandChanged(select);
+    onQuoteBrandSelectChange(select);
 };
 
 function populateEquipmentBrandDropdown() {
@@ -5360,8 +5304,21 @@ function populateEquipmentBrandDropdown() {
     onEqBrandSelectChange();
 }
 
-// 廠牌選單選到「其他」時，顯示旁邊的文字輸入框讓使用者自行輸入；選別的廠牌就隱藏並清空
-window.onOrderBrandSelectChange = function() {
+// 訂單允許先選主要廠牌，或選「其他廠牌」輸入實際名稱。
+function clearOrderProductIdentityKeepBrand(input) {
+    if (input) {
+        input.dataset.autofillStatus = '';
+        input.dataset.productLine = '';
+        input.dataset.productType = '';
+        input.dataset.productMasterMatched = '0';
+    }
+    const hiddenProductLine = document.getElementById('orderProductLine');
+    if (hiddenProductLine) hiddenProductLine.value = '';
+    window._orderModalProductId = '';
+    setOrderCostFieldForProduct(null);
+}
+
+window.onOrderBrandSelectChange = function(userChanged = false) {
     const select = document.getElementById('orderBrand');
     const otherInput = document.getElementById('orderBrandOther');
     if (!select || !otherInput) return;
@@ -5370,6 +5327,24 @@ window.onOrderBrandSelectChange = function() {
     } else {
         otherInput.style.display = 'none';
         otherInput.value = '';
+    }
+    if (!userChanged) return;
+    const codeInput = document.getElementById('orderItemCode');
+    clearOrderProductIdentityKeepBrand(codeInput);
+    const selectedBrand = getBrandFieldValue('orderBrand', 'orderBrandOther');
+    if (codeInput?.value.trim() && (select.value !== '其他' || selectedBrand)) {
+        onOrderItemCodeChange(codeInput);
+    }
+};
+
+window.onOrderBrandOtherInput = function() {
+    clearOrderProductIdentityKeepBrand(document.getElementById('orderItemCode'));
+};
+
+window.onOrderBrandOtherChange = function() {
+    const codeInput = document.getElementById('orderItemCode');
+    if (codeInput?.value.trim() && getBrandFieldValue('orderBrand', 'orderBrandOther')) {
+        onOrderItemCodeChange(codeInput);
     }
 };
 
@@ -5396,21 +5371,13 @@ function getBrandFieldValue(selectId, otherInputId) {
 }
 
 // 新增訂單與估價單共用同一套 Product Master 貨號比對；第一次開啟也會等待價格表完成載入，不需手動重新整理。
-function clearOrderProductMatch(input) {
-    if (input) {
-        input.dataset.autofillStatus = '';
-        input.dataset.productLine = '';
-        input.dataset.productType = '';
-        input.dataset.productMasterMatched = '0';
-    }
-    const hiddenProductLine = document.getElementById('orderProductLine');
-    if (hiddenProductLine) hiddenProductLine.value = '';
+function clearOrderProductMatch(input, options = {}) {
+    clearOrderProductIdentityKeepBrand(input);
+    if (options.preserveBrand) return;
     const brandSelect = document.getElementById('orderBrand');
     const brandOther = document.getElementById('orderBrandOther');
     if (brandSelect) brandSelect.value = '';
     if (brandOther) { brandOther.value = ''; brandOther.style.display = 'none'; }
-    window._orderModalProductId = '';
-    setOrderCostFieldForProduct(null);
 }
 
 async function applyOrderProductMatch(input, match) {
@@ -5444,16 +5411,17 @@ async function applyOrderProductMatch(input, match) {
 window.onOrderItemCodeChange = async function(input) {
     const value = input.value.trim();
     if (!value) {
-        clearOrderProductMatch(input);
+        clearOrderProductMatch(input, { preserveBrand:true });
         clearQuickProductButton(input);
         clearProductMatchChoices(input);
         return;
     }
     const matches = await findProductsByCode(value);
     if (input.value.trim() !== value) return;
-    const match = selectProductCodeMatch(matches);
+    const selectedBrand = getBrandFieldValue('orderBrand', 'orderBrandOther');
+    const match = selectProductCodeMatch(matches, selectedBrand);
     if (!match) {
-        clearOrderProductMatch(input);
+        clearOrderProductMatch(input, { preserveBrand:true });
         input.dataset.autofillStatus = 'not-found';
         if (matches.length > 1) showProductMatchChoices(input, matches, 'order');
         else showQuickProductButton(input, 'order');
@@ -5466,7 +5434,7 @@ let orderItemCodeTimer = null;
 window.onOrderItemCodeInput = function(input) {
     clearTimeout(orderItemCodeTimer);
     queueProductCodeSuggestions(input.value);
-    clearOrderProductMatch(input);
+    clearOrderProductMatch(input, { preserveBrand:true });
     clearQuickProductButton(input);
     clearProductMatchChoices(input);
     const value = input.value.trim();
@@ -5604,11 +5572,9 @@ window.addQuoteRow = function(itemData = {}) {
                 <div class="item-row-pair">
                     <div class="item-brand-field">
                         <label>廠牌：</label>
-                        <div class="quote-brand-search">
-                            <input type="text" class="item-brand" value="${escapeAttr(resolveBrandName(itemData.brand || ''))}" placeholder="搜尋或輸入廠牌" autocomplete="off" onfocus="onQuoteBrandSearchInput(this)" oninput="onQuoteBrandSearchInput(this)" onblur="finalizeQuoteBrandInput(this)">
-                            <div class="quote-brand-suggestions" hidden></div>
-                            <small class="quote-brand-restriction"></small>
-                        </div>
+                        <select class="item-brand" onchange="onQuoteBrandSelectChange(this, true)" aria-label="估價單廠牌"><option value="">請選擇廠牌</option></select>
+                        <input type="text" class="item-brand-other" placeholder="輸入實際廠牌名稱" autocomplete="off" oninput="onQuoteBrandOtherInput(this)" style="display:none;">
+                        <small class="quote-brand-restriction"></small>
                         <input type="hidden" class="item-product-line" value="${escapeAttr(itemData.productLine || '')}">
                         <input type="hidden" class="item-product-type" value="${itemData.productType || ''}">
                         <input type="hidden" class="item-brand-id" value="${escapeAttr(itemData.brandId || brandIdForName(itemData.brand || ''))}">
@@ -5641,6 +5607,10 @@ window.addQuoteRow = function(itemData = {}) {
     `;
 
     tbody.appendChild(tr);
+    const quoteBrandSelect = tr.querySelector('.item-brand');
+    populateBrandSelect(quoteBrandSelect, '請選擇廠牌', true, getPrimaryBrandNames());
+    if (itemData.brand) selectBrandInDropdown(quoteBrandSelect, itemData.brand);
+    onQuoteBrandSelectChange(quoteBrandSelect);
     const extraDetails = tr.querySelector('.quote-extra-fields');
     const hasExtraData = ['origin','leadTime','hospitalItemCode','remarks'].some(key => String(itemData[key] || '').trim())
         || (Array.isArray(itemData.customFields) && itemData.customFields.length);
@@ -5915,6 +5885,10 @@ function currentQuoteOutputValidation() {
     if (!document.getElementById('salesName').value) return '請先從下拉選單選擇負責業務。';
     const rows = [...document.querySelectorAll('#quoteItems tr')];
     if (!rows.some(row => (row.querySelector('.item-cn')?.value || row.querySelector('.item-en')?.value || row.querySelector('.item-model')?.value).trim())) return '請至少填寫一個品項。';
+    const missingOtherBrand = rows.some(row =>
+        row.querySelector('.item-brand')?.value === '其他' && !quoteRowBrandValue(row)
+    );
+    if (missingOtherBrand) return '已選擇「其他廠牌」，請輸入實際廠牌名稱。';
     const hasRestrictedBrand = rows.some(row => {
         const brand = quoteRowBrandValue(row);
         return brand && !isCompanyBrandAllowed(currentCompany, brand);
@@ -9773,11 +9747,8 @@ function workflowSalesFilterNames() {
 }
 
 function workflowPurchasingBrandNames() {
-    // 採購分工只列出管理員設定為「獨立統計」的主要廠牌；
-    // 未列出的品牌由既有 orderBrandFilterValue() 統一歸入「其他廠牌」。
-    return getUnifiedBrandEntries(false)
-        .filter(entry => entry?.name && entry.active !== false && entry.isKeyBrand === true)
-        .map(entry => entry.name);
+    // 訂單／採購篩選與估價／訂單輸入共用同一份「獨立統計」主要廠牌清單。
+    return getPrimaryBrandNames();
 }
 
 function populatePurchaserOrderFilters() {
@@ -18144,7 +18115,7 @@ function selectProductCodeMatch(matches, preferredBrand = '') {
         const preferred = matches.filter(item =>
             normalizeBrandLookupKey(resolveBrandName(item.brand || '')) === preferredKey
         );
-        if (preferred.length === 1) return preferred[0];
+        return preferred.length === 1 ? preferred[0] : null;
     }
     return matches.length === 1 ? matches[0] : null;
 }
@@ -18590,10 +18561,6 @@ window.saveQuickProduct = async function() {
         return;
     }
     const brandEntry = brandMasterEntryForName(brand);
-    if (!brandEntry) {
-        alert('此廠牌不在啟用中的 Brand Master，請先到「廠牌管理」建立廠牌。');
-        return;
-    }
 
     const button = document.getElementById('saveQuickProductBtn');
     const state = beginActionButton(button, '檢查中…');

@@ -4848,21 +4848,28 @@ test('brand settings can sync missing brands from Product Master without changin
     assert.match(source,/既有獨立統計與報價公司限制未變更/);
 });
 
-test('quote brands use searchable free-text suggestions and keep company restrictions', () => {
-    assert.match(appSource, /QUOTE_RECENT_BRANDS_STORAGE_KEY/);
-    assert.match(appSource, /function quoteBrandSuggestions/);
-    assert.match(appSource, /window\.onQuoteBrandSearchInput/);
-    assert.match(appSource, /placeholder="搜尋或輸入廠牌"/);
-    assert.match(appSource, /quote-brand-suggestions/);
+test('quote and order brand entry share primary brands plus an explicit Other brand input', () => {
+    assert.match(appSource, /function getPrimaryBrandNames\(\)/);
+    assert.match(appSource, /otherOpt\.text = '其他廠牌（自行輸入）'/);
+    assert.match(appSource, /<select class="item-brand" onchange="onQuoteBrandSelectChange\(this, true\)"/);
+    assert.match(appSource, /class="item-brand-other" placeholder="輸入實際廠牌名稱"/);
+    assert.match(appSource, /function quoteRowBrandValue/);
+    assert.match(appSource, /missingOtherBrand/);
     assert.match(appSource, /function quoteBrandRestrictionText/);
     assert.match(appSource, /hasRestrictedBrand/);
+    assert.doesNotMatch(appSource, /placeholder="搜尋或輸入廠牌"/);
     assert.match(indexSource, /<strong>報價公司限制<\/strong>/);
     assert.match(indexSource, /完全未勾選任何公司＝三家公司都可報價/);
 });
 
-test('formal orders require Product Master and derive brand from the product', () => {
-    assert.match(indexSource, /id="orderBrand" disabled/);
-    assert.match(indexSource, /正式訂單由 Product Master 自動帶入廠牌/);
+test('formal orders allow primary or Other brand selection but still require Product Master', () => {
+    assert.match(indexSource, /id="orderBrand" aria-label="訂單廠牌" onchange="onOrderBrandSelectChange\(true\)"/);
+    assert.doesNotMatch(indexSource, /id="orderBrand" disabled/);
+    assert.match(indexSource, /id="orderBrandOther" placeholder="輸入實際廠牌名稱"/);
+    assert.doesNotMatch(indexSource, /id="orderBrandOther" readonly/);
+    assert.match(appSource, /getPrimaryBrandNames\(\)/);
+    assert.match(appSource, /selectProductCodeMatch\(matches, selectedBrand\)/);
+    assert.match(appSource, /clearOrderProductMatch\(input, \{ preserveBrand:true \}\)/);
     assert.match(appSource, /正式訂單的每個品項都必須對應 Product Master/);
     assert.match(appSource, /item\.productMasterMatched!==true/);
 });
@@ -4904,6 +4911,8 @@ test('quick Product Master creation keeps list price optional', () => {
     const source=appSource.slice(start,end);
     assert.match(source,/if \(!brand \|\| !code \|\| !productName\)/);
     assert.doesNotMatch(source,/!brand \|\| !code \|\| !productName \|\| String\(priceRaw\)/);
+    assert.doesNotMatch(source,/此廠牌不在啟用中的 Brand Master/);
+    assert.match(source,/brandId: brandEntry\?\.id \|\| ''/);
 });
 
 
