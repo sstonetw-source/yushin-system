@@ -5441,3 +5441,18 @@ test('safety-stock purchase gives immediate button feedback while support data l
     assert.match(source, /await loadSupplierWarehouseMasters\(\)/);
     assert.match(source, /finally \{\s*endActionButton\(button, buttonState\);/);
 });
+
+
+test('slow admin opens show immediate button feedback', () => {
+    const ignoredStart = appSource.indexOf('window.openIgnoredPendingProducts = async function');
+    const ignoredEnd = appSource.indexOf('\n};', ignoredStart);
+    const ignoredSource = appSource.slice(ignoredStart, ignoredEnd);
+    assert.match(ignoredSource, /beginActionButton\(button, '載入中…'\)/);
+    assert.match(ignoredSource, /finally \{\s*endActionButton\(button, buttonState\);/);
+
+    const editorStart = appSource.indexOf('window.openProductMasterEditor = async function');
+    const editorEnd = appSource.indexOf('\n};', editorStart);
+    const editorSource = appSource.slice(editorStart, editorEnd);
+    assert.match(editorSource, /beginActionButton\(button, '載入產品…'\)/);
+    assert.match(editorSource, /finally \{\s*endActionButton\(button, buttonState\);/);
+});
