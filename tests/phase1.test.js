@@ -1246,15 +1246,14 @@ test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustme
  assert.match(appSource,/orderBy\('createdAt','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
 });
 
-test('inventory refresh gives immediate feedback and bounded Firestore reads',()=>{
- assert.match(indexSource,/id="inventoryRefreshBtn"[\s\S]*?>↻ 更新<\/button>/);
+test('inventory refreshes automatically with bounded Firestore reads and no manual refresh button',()=>{
+ assert.doesNotMatch(indexSource,/id="inventoryRefreshBtn"/);
  const start=appSource.indexOf('window.loadInventory=async function');
  const end=appSource.indexOf('\n};',start)+3;
  const source=appSource.slice(start,end);
- assert.match(source,/inventoryRefreshBtn/);
- assert.match(source,/載入中…/);
  assert.match(source,/firestoreReadWithTimeout\(q\.get\(\),'庫存清單'\)/);
  assert.match(source,/firestoreReadWithTimeout\(db\.collection\('inventoryMovements'\)[\s\S]*?'庫存異動'\)/);
+ assert.match(appSource,/if \(mainKey === 'inventory'\) \{[\s\S]*?loadInventory\(true\)/);
 });
 
 
@@ -5017,7 +5016,7 @@ test('inventory projected stock and replenishment center avoid duplicate repleni
     assert.match(appSource,/window\.loadInventoryReplenishmentCenter=loadInventoryReplenishmentCenter/);
     assert.match(appSource,/where\('stockPolicy','==',INVENTORY_STOCK_POLICIES\.SAFETY_STOCK\)/);
     assert.match(appSource,/inventoryReplenishmentCache\.find\(x => x\.id === inventoryId\)/);
-    assert.match(indexSource,/id="inventoryReplenishmentBody"/);
+    assert.match(indexSource,/id="purchaseReplenishmentBody"/);
     assert.match(indexSource,/預計庫存 = 可用庫存 \+ 在途/);
     assert.match(indexSource,/<th>預計庫存<\/th>/);
     assert.match(indexSource,/需補貨（預計庫存不足）/);
@@ -5231,10 +5230,10 @@ test('inventory mobile cards default to summary and hide unused details', () => 
 });
 
 test('replenishment center collapses its table when no item needs replenishment', () => {
-    assert.match(indexSource,/id="inventoryReplenishmentDetails"/);
+    assert.match(indexSource,/id="purchaseReplenishmentDetails"/);
     assert.match(appSource,/details\.hidden=empty/);
     assert.match(appSource,/✓ 目前沒有需要補貨的品項/);
-    assert.match(cssSource,/\.inventory-replenishment-details\[hidden\]/);
+    assert.match(cssSource,/.purchase-replenishment-details\[hidden\]/);
 });
 
 test('inventory actions use one adjustment entry point and returns keep their original source', () => {
@@ -5246,10 +5245,16 @@ test('inventory actions use one adjustment entry point and returns keep their or
     const renderStart=appSource.indexOf('window.renderInventoryList=function()');
     const renderEnd=appSource.indexOf('\nwindow.openInventoryReplenishment',renderStart);
     const renderSource=appSource.slice(renderStart,renderEnd);
-    assert.match(renderSource,/>庫存異動</);
+    assert.match(renderSource,/>修改庫存</);
     assert.doesNotMatch(renderSource,/>退貨</);
     assert.doesNotMatch(renderSource,/>報廢</);
     assert.doesNotMatch(renderSource,/>分倉</);
+    assert.doesNotMatch(renderSource,/建立補庫採購/);
+    assert.match(appSource,/window\.openInventoryQuantityEditor=async function/);
+    assert.match(appSource,/const delta=target-current/);
+    assert.match(indexSource,/id="inventorySetQuantityOverlay"/);
+    assert.doesNotMatch(indexSource,/value="decrease"/);
+    assert.doesNotMatch(indexSource,/value="warehouse_allocation"/);
 });
 
 test('inventory policy settings clear stale safety stock outside safety-stock mode', () => {

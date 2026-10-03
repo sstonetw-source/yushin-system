@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261003-6">
+        <link rel="stylesheet" href="styles.css?v=20261003-8">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -458,27 +458,20 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <div class="section-header no-print"><h2>庫存管理</h2><div style="display:flex;gap:8px;flex-wrap:wrap;"><button onclick="openInventoryAdjustment('initial')">＋ 新增庫存</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
+      <div class="section-header no-print"><h2>庫存管理</h2><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 新增庫存</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
       <div class="toolbar no-print inventory-toolbar">
         <input id="inventorySearch" type="search" placeholder="搜尋庫存／產品：貨號 / 品名 / 廠牌 / 批號" oninput="scheduleInventorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();runInventoryUnifiedSearchNow();}">
         <span id="inventorySearchStatus" role="status"></span>
         <select id="inventoryBrandFilter" aria-label="庫存廠牌" onchange="renderInventoryList()"><option value="">全部廠牌</option></select>
         <select id="inventoryPolicyFilter" aria-label="庫存策略" onchange="renderInventoryList()"><option value="">全部策略</option><option value="NO_STOCK">不備庫</option><option value="SAFETY_STOCK">安全庫存</option><option value="ORDER_ONLY">依訂單採購</option></select>
         <select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">需補貨（預計庫存不足）</option><option value="out">缺貨</option><option value="reserved">有占用</option></select>
-        <button type="button" id="inventoryRefreshBtn" class="btn-secondary" onclick="loadInventory(true)">↻ 更新</button>
+        
       </div>
       <div id="businessProductSearchResults" class="table-wrap inventory-product-search-results" style="display:none;">
         <div class="inventory-search-subheading"><strong>Product Master／售價補充結果</strong><span id="businessProductSearchStatus"></span></div>
         <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
       </div>
-      <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存品項只有在預計庫存低於門檻時才進入補貨中心；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div>
-      <div class="panel no-print" id="inventoryReplenishmentPanel" style="margin:12px 0;">
-        <div class="inventory-replenishment-heading">
-          <div><strong>補貨中心</strong><div id="inventoryReplenishmentStatus" style="font-size:12px;color:#666;margin-top:3px;">正在檢查安全庫存品項…</div></div>
-          <button type="button" id="inventoryReplenishmentRefreshBtn" class="btn-secondary" onclick="loadInventoryReplenishmentCenter(true)">↻ 更新補貨建議</button>
-        </div>
-        <div id="inventoryReplenishmentDetails" class="table-wrap inventory-replenishment-details" style="margin-top:10px;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th><th>安全庫存</th><th>建議補貨</th><th>操作</th></tr></thead><tbody id="inventoryReplenishmentBody"><tr><td colspan="11" style="color:#777;">讀取中…</td></tr></tbody></table></div>
-      </div>
+      <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div>
       <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
       <h3>待建檔品項</h3>
@@ -497,14 +490,12 @@
             <label>異動類型</label>
             <select id="inventoryAdjustmentType" onchange="onInventoryAdjustmentTypeChange()">
               <option value="initial">期初庫存／新增入庫</option>
-              <option value="adjustment">人工調整（正數增加／負數減少）</option>
-              <option value="decrease">人工減少</option>
+              <option value="adjustment">批號／效期庫存異動</option>
               <option value="scrap">報廢</option>
-              <option value="warehouse_allocation">分配至倉庫（不改總量）</option>
             </select>
           </div>
         </div>
-        <div class="inventory-summary-note" id="inventoryAdjustmentHint">人工調整可用正數增加、負數減少；報廢請輸入正數，系統會自動扣除。客戶退貨請從原訂單操作，供應商退貨請從原採購來源處理，避免失去來源追蹤。</div>
+        <div class="inventory-summary-note" id="inventoryAdjustmentHint">一般盤點請直接使用庫存卡片的「修改庫存」，輸入盤點後的現有數量；這裡保留給新增庫存、批號／效期品項異動與報廢。客戶退貨請從原訂單操作，供應商退貨請從原採購來源處理。</div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫</th><th>數量</th><th>實際單位成本</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
@@ -521,6 +512,35 @@
       </div>
     </div>
 
+
+    <div class="eq-modal-overlay no-print" id="inventorySetQuantityOverlay" onclick="if(event.target===this) closeInventoryQuantityEditor()">
+      <div class="eq-modal-box inventory-quantity-modal" style="max-width:520px;">
+        <div class="inventory-quantity-heading">
+          <h3 style="margin:0;">修改庫存</h3>
+          <button type="button" class="btn-secondary" onclick="closeInventoryQuantityEditor()">✕ 關閉</button>
+        </div>
+        <div id="inventoryQuantityItemLabel" class="inventory-summary-note"></div>
+        <div id="inventoryQuantityWarehouseRow" class="inventory-quantity-field" style="display:none;">
+          <label for="inventoryQuantityWarehouse">倉庫</label>
+          <select id="inventoryQuantityWarehouse" onchange="onInventoryQuantityWarehouseChange(this.value)"></select>
+        </div>
+        <div class="inventory-quantity-current">目前現有數量：<strong id="inventoryQuantityCurrent">0</strong></div>
+        <div class="inventory-quantity-field">
+          <label for="inventoryQuantityTarget">盤點後現有數量</label>
+          <input id="inventoryQuantityTarget" type="number" min="0" step="any" inputmode="decimal">
+          <small>直接輸入現在實際看到的數量，系統會自動計算增加或減少並留下異動紀錄。</small>
+        </div>
+        <div class="inventory-quantity-field">
+          <label for="inventoryQuantityNote">調整原因（選填）</label>
+          <input id="inventoryQuantityNote" type="text" placeholder="例如：盤點修正">
+        </div>
+        <div class="eq-modal-close-row">
+          <button type="button" id="saveInventoryQuantityBtn" onclick="saveInventoryQuantity()">確認修改</button>
+          <button type="button" class="btn-secondary" onclick="closeInventoryQuantityEditor()">取消</button>
+        </div>
+      </div>
+    </div>
+
     <div class="eq-modal-overlay no-print" id="inventoryPolicyOverlay" onclick="if(event.target===this) closeInventoryPolicySettings()">
       <div class="eq-modal-box inventory-policy-modal" style="max-width:520px;">
         <h3 style="margin-top:0;">庫存設定</h3>
@@ -529,7 +549,7 @@
           <div><label>庫存策略</label><select id="inventoryPolicySettingSelect" onchange="onInventoryPolicySettingChange()"><option value="ORDER_ONLY">依訂單採購</option><option value="SAFETY_STOCK">安全庫存</option><option value="NO_STOCK">不備庫</option></select></div>
           <div id="inventorySafetyStockSettingRow"><label>安全庫存量</label><input id="inventorySafetyStockSetting" type="number" min="0" step="any" value="0"></div>
         </div>
-        <div class="inventory-summary-note">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」會在預計庫存低於門檻時進入補貨中心。</div>
+        <div class="inventory-summary-note">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」在預計庫存低於門檻時，會自動顯示在採購頁的安全庫存補貨。</div>
         <div class="eq-modal-close-row"><button type="button" id="saveInventoryPolicySettingsBtn" onclick="saveInventoryPolicySettings()">儲存設定</button><button type="button" class="btn-secondary" onclick="closeInventoryPolicySettings()">取消</button></div>
       </div>
     </div>
@@ -877,6 +897,22 @@
             <span class="order-period-note">待採購、待到貨、待打單與訂單頁共用同一套品項狀態與訂單日期；全部採購單則依正式訂購日期查詢。</span>
         </div>
         <div id="purchasePendingPanel">
+
+            <div class="panel no-print purchase-replenishment-panel" id="purchaseReplenishmentPanel">
+                <div class="purchase-replenishment-heading">
+                    <div>
+                        <strong>安全庫存補貨</strong>
+                        <div id="purchaseReplenishmentStatus">自動檢查中…</div>
+                    </div>
+                    <span class="order-progress-badge">自動更新</span>
+                </div>
+                <div id="purchaseReplenishmentDetails" class="table-wrap purchase-replenishment-details">
+                    <table>
+                        <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th><th>安全庫存</th><th>建議補貨</th><th>操作</th></tr></thead>
+                        <tbody id="purchaseReplenishmentBody"><tr><td colspan="11" style="color:#777;">自動檢查中…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
             <div class="toolbar no-print">
                 <button type="button" id="purchasePendingBatchPoBtn" class="btn-secondary" onclick="openSelectedPurchaseDraft()" disabled>合併產生訂購單</button>
                 <span id="purchasePendingStatus" role="status"></span>
@@ -1602,7 +1638,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-7"></script>
+    <script src="app.js?v=20261003-8"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

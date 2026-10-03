@@ -2744,3 +2744,39 @@ html[data-app-environment="preview"] body { border-top: 0; }
   #inventoryListBody .inventory-details-toggle { display:inline-flex; align-items:center; justify-content:center; }
   .inventory-product-search-results { margin-bottom:12px; }
 }
+
+
+/* Inventory / purchasing workflow simplification 2026-10-03 */
+.inventory-header-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.purchase-replenishment-panel { margin:0 0 16px; }
+.purchase-replenishment-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.purchase-replenishment-heading #purchaseReplenishmentStatus { margin-top:4px; color:#667584; font-size:12px; }
+.purchase-replenishment-details[hidden] { display:none !important; }
+.inventory-quantity-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.inventory-quantity-field { margin-top:14px; }
+.inventory-quantity-field label { display:block; margin-bottom:6px; font-weight:700; color:#27394d; }
+.inventory-quantity-field input, .inventory-quantity-field select { width:100%; min-height:44px; box-sizing:border-box; }
+.inventory-quantity-field small { display:block; margin-top:6px; color:#667584; line-height:1.5; }
+.inventory-quantity-current { margin:14px 0 4px; padding:12px 14px; border-radius:8px; background:#f5f8fb; color:#425466; }
+.inventory-quantity-current strong { margin-left:6px; color:#003f73; font-size:22px; }
+
+@media screen and (max-width:640px) {
+    #inventory-system .section-header { flex-direction:column; align-items:stretch; }
+    #inventory-system .section-header h2 { font-size:24px; }
+    .inventory-header-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .inventory-header-actions button { width:100%; min-height:44px; margin:0; }
+    .inventory-header-actions button:first-child { grid-column:1 / -1; }
+    .inventory-toolbar #inventorySearch {
+        flex:0 0 auto;
+        width:100%;
+        min-width:0;
+        height:46px;
+        min-height:46px;
+        max-height:46px;
+        box-sizing:border-box;
+        padding:9px 10px;
+        font-size:16px;
+    }
+    .purchase-replenishment-heading { align-items:flex-start; }
+    .inventory-quantity-modal { width:calc(100vw - 28px); max-height:calc(100vh - 40px); overflow:auto; }
+}
