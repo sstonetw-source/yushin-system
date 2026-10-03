@@ -1249,6 +1249,7 @@ test('phase 7 inventory provides ledger lots expiry FEFO and controlled adjustme
 
 test('inventory refreshes automatically with bounded Firestore reads and no manual refresh button',()=>{
  assert.doesNotMatch(indexSource,/id="inventoryRefreshBtn"/);
+ assert.doesNotMatch(appSource,/inventoryRefreshBtn/);
  const start=appSource.indexOf('window.loadInventory=async function');
  const end=appSource.indexOf('\n};',start)+3;
  const source=appSource.slice(start,end);
@@ -5275,6 +5276,7 @@ test('inventory actions use one adjustment entry point and returns keep their or
     assert.match(appSource,/公司總庫存不變/);
     assert.doesNotMatch(appSource,/type==='warehouse_allocation'/);
     assert.doesNotMatch(appSource,/type==='decrease'/);
+    assert.doesNotMatch(appSource,/openInventoryItemAdjustment/);
 });
 
 test('inventory policy settings clear stale safety stock outside safety-stock mode', () => {

@@ -7872,8 +7872,6 @@ async function loadWarehouseStocksForInventoryPage(items = inventoryCache) {
 
 window.loadInventory=async function(reset=true){
  if(inventoryLoading||!canAccessPage('inventory'))return;if(reset){inventoryCursor=null;inventoryHasMore=true;warehouseStockCache=new Map();if(!inventoryCache.length){const cached=readAppDataCache('inventory');if(cached?.records?.length){inventoryCache=cached.records;renderInventoryList();}}} inventoryLoading=true;
- const refreshButton=document.getElementById('inventoryRefreshBtn');
- if(refreshButton&&reset){refreshButton.disabled=true;refreshButton.textContent='載入中…';}
  try{let q=db.collection('inventory').orderBy('updatedAt','desc').limit(DEFAULT_LIST_LIMIT);if(inventoryCursor)q=q.startAfter(inventoryCursor);const snap=await firestoreReadWithTimeout(q.get(),'庫存清單');if(!snap.empty)inventoryCursor=snap.docs[snap.docs.length-1];
  const freshRows=snap.docs.map(d=>({id:d.id,...d.data()}));
  if(reset){
@@ -7894,7 +7892,7 @@ window.loadInventory=async function(reset=true){
  writeAppDataCache('inventory', inventoryCache);
  renderInventoryList();renderInventoryLedger();renderPendingInventoryItems();
 
- }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';if(refreshButton){refreshButton.disabled=false;refreshButton.textContent='↻ 更新';}}
+ }catch(e){alert('讀取庫存失敗：'+e.message);}finally{inventoryLoading=false;const b=document.getElementById('inventoryLoadMoreBtn');if(b)b.style.display=inventoryHasMore?'':'none';}
 };
 let businessProductSearchGeneration = 0;
 function resetBusinessProductSearchResults() {const wrap=document.getElementById('businessProductSearchResults'),body=document.getElementById('businessProductSearchBody'),status=document.getElementById('businessProductSearchStatus');businessProductSearchGeneration+=1;if(wrap)wrap.style.display='none';if(body)body.innerHTML='';if(status)status.textContent='';}
@@ -8235,7 +8233,6 @@ let inventoryAdjustmentRows = [];
 function inventoryAdjustmentTitle(type) {return ({initial:'新增庫存',adjustment:'批號／效期庫存異動',scrap:'報廢'})[type]||'庫存異動';}
 window.onInventoryAdjustmentTypeChange=function(){const type=document.getElementById('inventoryAdjustmentType')?.value||'adjustment',title=document.getElementById('inventoryAdjustmentTitle'),hint=document.getElementById('inventoryAdjustmentHint');if(title)title.innerText=inventoryAdjustmentTitle(type);if(hint)hint.textContent=type==='scrap'?'報廢請輸入正數，系統會自動扣除並保留報廢異動紀錄。':'一般盤點請使用「修改庫存」直接輸入盤點後數量；這裡的數量代表本次增加或減少量，供批號／效期品項使用。';};
 window.openInventoryAdjustment = async function(type = 'initial', item = null) {if(!canEditPage('inventory'))return;await loadSupplierWarehouseMasters();const selectedType=type||'initial',source=item||null;inventoryAdjustmentRows=[{itemCode:source?.itemCode||'',itemName:source?.itemName||'',brand:source?.brand||'',productId:source?.productId||source?.productKey||'',warehouseId:defaultWarehouse()?.id||'',qty:0,unitCost:0,lotNo:'',expiryDate:''}];const typeSelect=document.getElementById('inventoryAdjustmentType');if(typeSelect){typeSelect.value=selectedType;typeSelect.disabled=selectedType==='initial';const initialOption=typeSelect.querySelector('option[value="initial"]');if(initialOption)initialOption.disabled=selectedType!=='initial';}const addRowBtn=document.getElementById('inventoryAddRowBtn');if(addRowBtn)addRowBtn.style.display=selectedType==='initial'?'':'none';onInventoryAdjustmentTypeChange();renderInventoryAdjustmentRows();document.getElementById('inventoryAdjustmentOverlay')?.classList.add('active');};
-window.openInventoryItemAdjustment = function(type, inventoryId) {const item=inventoryItemById(inventoryId);if(!item){alert('找不到這個庫存品項，請重新整理後再試。');return;}openInventoryAdjustment(type==='initial'?'adjustment':(type||'adjustment'),item);};
 window.closeInventoryAdjustment = function() {
     const typeSelect = document.getElementById('inventoryAdjustmentType');
     if (typeSelect) typeSelect.disabled = false;
