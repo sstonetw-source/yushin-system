@@ -1057,6 +1057,13 @@
     <div class="eq-modal-overlay no-print" id="orderModalOverlay" onclick="if(event.target===this) closeOrderModal()">
         <div class="eq-modal-box">
             <h3 id="orderModalTitle">新增訂單</h3>
+            <div id="orderDraftRecoveryBanner" class="inventory-summary-note" style="display:none;margin:0 0 12px;padding:10px 12px;border:1px solid #d5e1ec;border-radius:8px;background:#f4f8fc;">
+                <div id="orderDraftRecoveryMessage" style="line-height:1.5;"></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                    <button type="button" onclick="restoreSavedOrderDraftFromBanner()">恢復未完成訂單</button>
+                    <button type="button" id="discardOrderDraftBtn" class="btn-secondary" onclick="discardSavedOrderDraftFromBanner()">放棄這次重試</button>
+                </div>
+            </div>
             <div class="form-grid">
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
                 <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid"><option value="">請選擇負責業務</option></select></div>
@@ -1689,7 +1696,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-14"></script>
+    <script src="app.js?v=20261003-15"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
