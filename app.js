@@ -1596,6 +1596,9 @@ window.ignorePendingProductMaster = async function(index) {
 
 window.openIgnoredPendingProducts = async function() {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const button = actionButtonFromEventOrSelector('#ignoredPendingProductBtn');
+    const buttonState = beginActionButton(button, '載入中…');
+    if (button && !buttonState) return;
     try {
         await loadIgnoredPendingProducts();
         let overlay = document.getElementById('ignoredPendingProductOverlay');
@@ -1624,6 +1627,8 @@ window.openIgnoredPendingProducts = async function() {
         overlay.classList.add('active');
     } catch (err) {
         alert('讀取已移除待補產品失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, buttonState);
     }
 };
 
@@ -2377,13 +2382,22 @@ window.openNewProductMasterEditor = function() {
 
 window.openProductMasterEditor = async function(productId) {
     if (!canManagePendingProductMaster()) return;
-    let product = productManagementResults.find(item => (item.productId || item.id) === productId);
-    if (!product && productId) {
-        const snap = await firestoreReadWithTimeout(db.collection('products').doc(productId).get(), '讀取 Product Master');
-        if (snap.exists) product = { id:snap.id, ...snap.data() };
+    const button = actionButtonFromEventOrSelector();
+    const buttonState = beginActionButton(button, '載入產品…');
+    if (button && !buttonState) return;
+    try {
+        let product = productManagementResults.find(item => (item.productId || item.id) === productId);
+        if (!product && productId) {
+            const snap = await firestoreReadWithTimeout(db.collection('products').doc(productId).get(), '讀取 Product Master');
+            if (snap.exists) product = { id:snap.id, ...snap.data() };
+        }
+        if (!product) { alert('找不到這筆 Product Master。'); return; }
+        populateProductMasterEditor(product);
+    } catch (err) {
+        alert('讀取 Product Master 失敗：' + (err?.message || err));
+    } finally {
+        endActionButton(button, buttonState);
     }
-    if (!product) { alert('找不到這筆 Product Master。'); return; }
-    populateProductMasterEditor(product);
 };
 
 window.setProductMasterActive = async function(productId, active) {
