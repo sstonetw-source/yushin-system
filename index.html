@@ -472,7 +472,7 @@
         <div class="inventory-search-subheading"><strong>Product Master／售價補充結果</strong><span id="businessProductSearchStatus"></span></div>
         <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
       </div>
-      <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出訂購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div>
+      <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div>
       <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
       <h3>待建檔品項</h3>
@@ -898,7 +898,7 @@
     <div id="purchasing-system" class="content-section">
         <div class="module-header no-print">
             <h2>採購管理</h2>
-            <button type="button" id="purchaseDirectOrderBtn" onclick="switchPurchasingView('replenishment')">＋ 直接訂貨</button>
+            <button type="button" id="purchaseDirectOrderBtn" onclick="openDirectStockPurchase()">＋ 直接訂貨</button>
         </div>
         <div id="purchaseWorkCards" class="order-work-cards purchase-task-cards no-print" aria-label="採購主要工作" hidden>
             <button type="button" class="order-work-card purchase-task-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)">
@@ -923,18 +923,19 @@
             <button type="button" class="purchase-stage-button" id="purchase-card-completed" onclick="switchPurchasingView('completed', this)"><span>已完成</span><strong id="purchaseCountCompleted">0 筆</strong><small id="purchaseAmountCompleted">NT$ 0</small></button>
         </div>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
-            <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">業務需求</button>
-            <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('receiving')">訂購單</button>
+            <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
+            <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">採購單</button>
             <button type="button" id="purchase-tab-suppliers" onclick="switchPurchasingView('suppliers')">供應商</button>
         </div>
         <div id="purchaseBusinessStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="業務需求進度">
             <button type="button" onclick="switchPurchasingView('ordering')" data-purchase-stage="ordering">待採購</button>
+            <button type="button" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving">待到貨</button>
             <button type="button" onclick="switchPurchasingView('dispatch')" data-purchase-stage="dispatch">待打單</button>
-            <button type="button" onclick="switchPurchasingView('completed')" data-purchase-stage="completed">已打單／可出貨</button>
+            <button type="button" onclick="switchPurchasingView('completed')" data-purchase-stage="completed">已完成</button>
         </div>
-        <div id="purchaseDocumentStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="訂購單追蹤">
+        <div id="purchaseDocumentStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="採購單追蹤">
             <button type="button" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving">未到齊／收貨</button>
-            <button type="button" onclick="switchPurchasingView('history')" data-purchase-stage="history">全部訂購單</button>
+            <button type="button" onclick="switchPurchasingView('history')" data-purchase-stage="history">全部採購單</button>
         </div>
         <div id="purchaseFilterToolbar" class="order-period-toolbar no-print" aria-label="採購篩選條件">
             <select id="purchaseSalesFilter" aria-label="採購負責業務" onchange="renderPurchasingView()"><option value="">全部業務</option></select>
@@ -953,13 +954,13 @@
         <div class="panel no-print purchase-replenishment-panel" id="purchaseReplenishmentPanel" style="display:none;">
             <div class="purchase-replenishment-heading">
                 <div>
-                    <strong>直接訂貨</strong>
-                    <p>沒有業務訂單也可以訂貨。自行備貨或其他用途請建立空白訂購單；安全庫存補貨可從下方建議帶入。</p>
+                    <strong>安全庫存補貨</strong>
+                    <p>依可用與在途庫存計算建議補貨量，可帶入採購單後調整數量。一般備貨或其他用途可直接訂貨。</p>
                     <div id="purchaseReplenishmentStatus">自動檢查中…</div>
                 </div>
                 <div class="purchase-replenishment-actions">
                     <span class="order-progress-badge">自動更新</span>
-                    <button type="button" onclick="openDirectStockPurchase()">＋ 建立空白訂購單</button>
+                    <button type="button" onclick="openDirectStockPurchase()">＋ 建立空白採購單</button>
                 </div>
             </div>
             <div id="purchaseReplenishmentDetails" class="table-wrap purchase-replenishment-details">
@@ -972,11 +973,11 @@
 
         <div id="purchasePendingPanel">
             <div class="purchase-section-heading no-print">
-                <strong>業務需求</strong>
+                <strong>業務訂單需求</strong>
                 <span>只處理客戶訂單中需要採購的品項。</span>
             </div>
             <div class="toolbar no-print">
-                <button type="button" id="purchasePendingBatchPoBtn" class="btn-secondary" onclick="openSelectedPurchaseDraft()" disabled>合併產生訂購單</button>
+                <button type="button" id="purchasePendingBatchPoBtn" class="btn-secondary" onclick="openSelectedPurchaseDraft()" disabled>合併產生採購單</button>
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
             <div class="table-wrap"><table>
@@ -985,7 +986,7 @@
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
         </div>
-        <!-- 採購訂單：列出所有已經產生過的訂購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
+        <!-- 採購訂單：列出所有已經產生過的採購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
         <div id="poListPanel" style="display:none">
             <div class="toolbar no-print">
                 <input type="text" id="poListSearch" placeholder="搜尋全部採購單：單號 / 廠商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
@@ -995,7 +996,7 @@
                 <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>預計到貨</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="poListBody"></tbody>
             </table>
-            <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何訂購單。</div>
+            <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何採購單。</div>
             <div class="po-load-more-row no-print"><button type="button" id="poLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMorePurchaseOrders()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseDispatchPanel" style="display:none">
@@ -1016,7 +1017,7 @@
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseSupplierPanel" style="display:none">
-            <div class="inventory-summary-note">供應商設定改為一列完成：廠牌／產品線、供應商、訂購單抬頭、Email 與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div>
+            <div class="inventory-summary-note">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭、Email 與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div>
             <div class="panel supplier-setting-panel" style="margin-top:16px;">
                 <strong>供應商設定</strong>
                 <p style="font-size:12px;color:#666;margin:6px 0 12px;">同一供應商可對應多個廠牌；產品線留白代表該廠牌的預設供應商。</p>
@@ -1027,7 +1028,7 @@
                     <label>廠牌<input id="supplierSettingBrand" type="text" list="poBrandList" placeholder="選擇廠牌"></label>
                     <label>產品線（選填）<input id="supplierSettingLine" type="text" placeholder="留白＝廠牌預設"></label>
                     <label>供應商<input id="supplierSettingName" type="text" list="supplierSettingSuggestions" placeholder="供應商名稱" onchange="fillSupplierSettingFromName()"></label>
-                    <label>訂購單抬頭<input id="supplierSettingHeader" type="text" placeholder="留白＝供應商名稱"></label>
+                    <label>採購單抬頭<input id="supplierSettingHeader" type="text" placeholder="留白＝供應商名稱"></label>
                     <label>訂購 Email<input id="supplierSettingEmail" type="email" placeholder="orders@supplier.com"></label>
                     <label>預設交期<input id="supplierSettingLeadTime" type="number" min="0" step="1" value="0" placeholder="天數"></label>
                     <div class="supplier-setting-actions">
@@ -1038,7 +1039,7 @@
                 <div id="supplierSettingStatus" class="inline-status" role="status" aria-live="polite"></div>
                 <div class="table-wrap" style="margin-top:12px;">
                     <table>
-                        <thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>訂購單抬頭</th><th>訂購 Email</th><th>預設交期</th><th>操作</th></tr></thead>
+                        <thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>採購單抬頭</th><th>訂購 Email</th><th>預設交期</th><th>操作</th></tr></thead>
                         <tbody id="supplierSettingsBody"></tbody>
                     </table>
                 </div>
@@ -1050,7 +1051,7 @@
     <div id="purchaseTimelineOverlay" class="eq-modal-overlay no-print" onclick="if(event.target===this) closePurchaseOrderTimeline()">
         <div class="eq-modal-box" style="max-width:920px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-                <h3 id="purchaseTimelineTitle" style="margin:0;">訂購單追蹤</h3>
+                <h3 id="purchaseTimelineTitle" style="margin:0;">採購單追蹤</h3>
                 <button type="button" class="btn-secondary" onclick="closePurchaseOrderTimeline()">關閉</button>
             </div>
             <div id="purchaseTimelineSummary" class="inventory-summary-note" style="margin-top:12px;"></div>
@@ -1208,17 +1209,17 @@
         </div>
     </div>
 
-    <!-- 產生訂購單彈出視窗：把選取的訂單品項，整理成給廠商下單用的「訂購單」，格式跟估價單相同，
+    <!-- 產生採購單彈出視窗：把選取的訂單品項，整理成給廠商下單用的「採購單」，格式跟估價單相同，
          單價預設帶入「含稅成本」（不是賣給客戶的售價），採購可以在這裡再次修改後才輸出 -->
     <div class="eq-modal-overlay" id="poModalOverlay" onclick="if(event.target===this) closePurchaseOrderModal()">
         <div class="eq-modal-box" style="max-width:820px;">
             <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;">
-                <h3 id="poModalTitle" style="margin:0;">建立訂購單</h3>
+                <h3 id="poModalTitle" style="margin:0;">建立採購單</h3>
                 <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">✕ 關閉</button>
             </div>
             <div id="poExistingBanner" class="po-existing-banner no-print" style="display:none;">
                 <div><span>正在查看：</span><strong id="poExistingNumber"></strong></div>
-                <button type="button" id="poCopyAsNewBtn" class="btn-secondary" style="display:none;" onclick="copySavedPurchaseOrderAsNew(poEditingId)">複製成新訂購單</button>
+                <button type="button" id="poCopyAsNewBtn" class="btn-secondary" style="display:none;" onclick="copySavedPurchaseOrderAsNew(poEditingId)">複製成新採購單</button>
             </div>
             <div class="no-print" id="poModeHint" style="font-size:12px;color:#666;margin:6px 0;">
                 訂單採購：品項來自業務訂單，可調整採購數量與進貨單價。
@@ -1238,7 +1239,7 @@
                         <p id="poCompContact"></p>
                     </div>
                 </div>
-                <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">訂 購 單</h2>
+                <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">採 購 單</h2>
 
                 <div class="meta-row-three">
                     <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;" oninput="updatePoSupplierEmailHint()" onchange="updatePoSupplierEmailHint(); autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist><small id="poSupplierEmailHint" class="no-print" style="display:block;margin-top:3px;color:#9a6700;">尚未設定供應商 Email</small></div>
@@ -1707,7 +1708,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-18"></script>
+    <script src="app.js?v=20261003-19"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
