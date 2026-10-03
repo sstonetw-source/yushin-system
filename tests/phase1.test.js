@@ -5386,3 +5386,48 @@ test('purchasing presents three primary jobs and separates safety-stock replenis
     assert.match(switchSource, /replenishmentPanel\.style\.display=view==='replenishment'/);
     assert.match(switchSource, /view === 'replenishment'[\s\S]*?loadInventoryReplenishmentCenter/);
 });
+
+
+test('brand-derived selectors are cached and invalidated only when brand settings change', () => {
+    assert.match(appSource, /let unifiedBrandEntriesCache = null;/);
+    assert.match(appSource, /let primaryBrandNamesCache = null;/);
+    assert.match(appSource, /function invalidateBrandDerivedCaches\(\)/);
+    assert.match(appSource, /if \(Array\.isArray\(unifiedBrandEntriesCache\)\) return unifiedBrandEntriesCache;/);
+    assert.match(appSource, /if \(Array\.isArray\(primaryBrandNamesCache\)\) return \[\.\.\.primaryBrandNamesCache\];/);
+    assert.match(appSource, /brandMasterCache = rows[\s\S]*?invalidateBrandDerivedCaches\(\);[\s\S]*?return brandMasterCache;/);
+    assert.match(appSource, /function refreshBusinessBrandControls\(\) \{\s*invalidateBrandDerivedCaches\(\);/);
+});
+
+test('new order paints first and offers explicit safe recovery instead of auto-restoring', () => {
+    const start = appSource.indexOf('window.openOrderModal = function');
+    const end = appSource.indexOf('let customerMasterSuggestionTimer', start);
+    const source = appSource.slice(start, end);
+    assert.ok(source.indexOf("overlay.classList.add('active')") >= 0);
+    assert.match(source, /deferUntilAfterPaint\(async \(\) =>/);
+    assert.ok(source.indexOf("overlay.classList.add('active')") < source.indexOf('populateOrderBrandDropdown()'));
+    assert.doesNotMatch(source, /restoreSavedOrderDraft\(\);/);
+    assert.match(appSource, /window\.restoreSavedOrderDraftFromBanner = function/);
+    assert.match(appSource, /window\.discardSavedOrderDraftFromBanner = async function/);
+    assert.match(indexSource, /id="orderDraftRecoveryBanner"/);
+    assert.match(indexSource, /恢復未完成訂單/);
+});
+
+test('equipment and inventory editors show a modal before background support reads', () => {
+    const equipmentStart = appSource.indexOf('window.openEquipmentModal = function');
+    const equipmentEnd = appSource.indexOf('window.closeEquipmentModal', equipmentStart);
+    const equipmentSource = appSource.slice(equipmentStart, equipmentEnd);
+    assert.ok(equipmentSource.indexOf("overlay.classList.add('active')") < equipmentSource.indexOf('populateEquipmentSalesDropdown()'));
+    assert.match(equipmentSource, /deferUntilAfterPaint/);
+
+    const quantityStart = appSource.indexOf('window.openInventoryQuantityEditor=async function');
+    const quantityEnd = appSource.indexOf('window.onInventoryQuantityWarehouseChange', quantityStart);
+    const quantitySource = appSource.slice(quantityStart, quantityEnd);
+    assert.ok(quantitySource.indexOf("overlay?.classList.add('active')") < quantitySource.indexOf('await loadWarehouseMaster()'));
+    assert.match(quantitySource, /讀取中…/);
+
+    const transferStart = appSource.indexOf('window.openInventoryTransfer=async function');
+    const transferEnd = appSource.indexOf('window.closeInventoryTransfer', transferStart);
+    const transferSource = appSource.slice(transferStart, transferEnd);
+    assert.ok(transferSource.indexOf("overlay?.classList.add('active')") < transferSource.indexOf('await loadWarehouseMaster()'));
+    assert.match(transferSource, /正在讀取各倉庫庫存/);
+});
