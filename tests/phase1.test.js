@@ -347,7 +347,8 @@ test('purchaser order form assigns a salesperson while preserving creator identi
 test('low-stock inventory can hand off to formal replenishment purchase flow without duplicating incoming stock', () => {
     assert.match(appSource, /openInventoryReplenishment/);
     assert.match(appSource, /plan=inventoryReplenishmentPlan\(x,n\)/);
-    assert.match(appSource, /plan\.needsReplenishment&&canEditPage\('orders\.po'\)/);
+    assert.match(indexSource,/id="purchaseReplenishmentPanel"/);
+    assert.doesNotMatch(indexSource,/id="inventoryReplenishmentPanel"/);
     const start=appSource.indexOf('window.openInventoryReplenishment');
     const end=appSource.indexOf('\nwindow.setInventorySafetyStock',start);
     const source=appSource.slice(start,end);
@@ -5047,7 +5048,7 @@ test('cross-module navigation refreshes dirty operational pages without re-query
     assert.doesNotMatch(appSource,/const forceRefresh = !!previousTabId/);
     const inventoryStart=appSource.indexOf("function invalidateWarehouseStockCache");
     const inventoryEnd=appSource.indexOf("\nfunction expiryDays",inventoryStart);
-    assert.match(appSource.slice(inventoryStart,inventoryEnd),/markMainPageDirty\('inventory'\)/);
+    assert.match(appSource.slice(inventoryStart,inventoryEnd),/markMainPageDirty\('inventory', 'orders\.po'\)/);
     const demandStart=appSource.indexOf("function invalidateProcurementDemandQueue");
     const demandEnd=appSource.indexOf("\nlet pendingPurchaseError",demandStart);
     assert.match(appSource.slice(demandStart,demandEnd),/markMainPageDirty\('orders\.po'\)/);
