@@ -16905,14 +16905,15 @@ function populateOrderCustomerSuggestions() {
     const list = document.getElementById('orderCustomerSuggestions');
     if (!list) return;
     const customersByKey = new Map();
+    // 空白欄位只提供少量近期候選；完整客戶資料由輸入 2 個字後查 Customer Master。
+    // 這樣歷史訂單／估價／儀器增加後，開啟表單不會為了 datalist 掃完整快取與整份 DOM。
     const names = [
         ...getRecentCustomerNames(),
         ...customerMasterSuggestionResults,
-        ...ordersCache.map(order => order.customerName),
-        ...equipmentList.map(equipment => equipment.customerName),
-        ...myQuotesCache.map(quote => quote.clientName),
-        ...myQuotesCache.map(quote => quote.ordererName),
-        ...[...document.querySelectorAll('#clientList option')].map(option => option.value)
+        ...ordersCache.slice(0, 20).map(order => order.customerName),
+        ...equipmentList.slice(0, 20).map(equipment => equipment.customerName),
+        ...myQuotesCache.slice(0, 20).map(quote => quote.clientName),
+        ...myQuotesCache.slice(0, 20).map(quote => quote.ordererName)
     ];
     names.forEach(value => {
         const name = String(value || '').trim();
