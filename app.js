@@ -8093,7 +8093,7 @@ function renderInventoryReplenishmentCenter() {
     const taskCount = document.getElementById('purchaseCountReplenishment');
     if (taskCount) taskCount.textContent = inventoryReplenishmentLoading ? '檢查中…' : `${rows.length} 品項`;
 
-    if (details) details.hidden = empty;
+    if(details)details.hidden=empty;
     if (panel) panel.classList.toggle('is-empty', empty);
 
     body.innerHTML = rows.map(({ item, stock, plan }) => `<tr>
