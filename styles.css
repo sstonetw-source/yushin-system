@@ -1231,7 +1231,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 @media (max-width: 768px) {
     #forecastTable thead,
     #poListPanel table thead,
-    #inventory-system > .table-wrap table thead,
+    #inventoryStockPanel > .table-wrap table thead,
     #inventory-system h3 + .table-wrap table thead {
         display: none;
     }
@@ -1244,10 +1244,10 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     #poListPanel table tbody,
     #poListPanel table tr,
     #poListPanel table td,
-    #inventory-system > .table-wrap table,
-    #inventory-system > .table-wrap table tbody,
-    #inventory-system > .table-wrap table tr,
-    #inventory-system > .table-wrap table td,
+    #inventoryStockPanel > .table-wrap table,
+    #inventoryStockPanel > .table-wrap table tbody,
+    #inventoryStockPanel > .table-wrap table tr,
+    #inventoryStockPanel > .table-wrap table td,
     #inventory-system h3 + .table-wrap table,
     #inventory-system h3 + .table-wrap table tbody,
     #inventory-system h3 + .table-wrap table tr,
@@ -1259,7 +1259,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     }
 
     #forecastTable tr,
-    #inventory-system > .table-wrap table tbody tr,
+    #inventoryStockPanel > .table-wrap table tbody tr,
     #inventory-system h3 + .table-wrap table tbody tr {
         border: 0;
         border-radius: 14px;
@@ -1281,7 +1281,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 
     #forecastTable td,
     #poListPanel table td,
-    #inventory-system > .table-wrap table td,
+    #inventoryStockPanel > .table-wrap table td,
     #inventory-system h3 + .table-wrap table td {
         border: 0;
         padding: 7px 0;
@@ -1291,7 +1291,7 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 
     #forecastTable td:not(:last-child),
     #poListPanel table td:not(:last-child),
-    #inventory-system > .table-wrap table td:not(:last-child),
+    #inventoryStockPanel > .table-wrap table td:not(:last-child),
     #inventory-system h3 + .table-wrap table td:not(:last-child) {
         border-bottom: 1px solid #f0f0f0;
     }
