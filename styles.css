@@ -3180,3 +3180,29 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 .receipt-task-error { background:#fff6e8; border-color:#e6b86a; }
 .receipt-task button { flex-shrink:0; }
 @media(max-width:600px) { .receipt-task { flex-wrap:wrap; } }
+
+/* Shared quotation-style action buttons; state/navigation cards keep their own layout. */
+:is(.content-section, .eq-modal-box, .modal, .modal-overlay) button:not(.order-work-card):not(.purchase-stage-button):not(.product-brand-button):not(.link-button):not(.inventory-details-toggle) {
+    border-radius: 4px !important;
+    padding: 8px 16px !important;
+    font-size: 14px !important;
+    font-family: inherit;
+    line-height: 1.4;
+    min-height: 36px;
+    box-sizing: border-box;
+}
+:is(.content-section, .eq-modal-box, .modal) button.btn-small {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+    min-height: 32px;
+}
+button.btn-secondary { background-color: #666 !important; color: #fff !important; }
+button.btn-danger { background-color: #cc0000 !important; color: #fff !important; }
+button:focus-visible { outline: 2px solid #00509e; outline-offset: 2px; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+#purchaseBusinessStages { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: 8px; margin: 0 0 14px; }
+#purchaseBusinessStages .order-work-card { padding: 10px 8px; border-radius: 8px; font-size: 14px; }
+.document-download-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; text-align: left; }
+.document-download-settings span { color: #53657a; font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 900px) { #purchaseBusinessStages { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width: 520px) { #purchaseBusinessStages { grid-template-columns: repeat(2,minmax(0,1fr)); } }

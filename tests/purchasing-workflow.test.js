@@ -175,7 +175,7 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
     let printCalls = 0;
     const messages = [];
     const context = vm.createContext({
-        window:{}, poEditingId:'PO1', poListCache:[savedPo],
+        window:{DocumentDownloads:{prepare:async()=>{}}}, poEditingId:'PO1', poListCache:[savedPo],
         canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
         document:{getElementById:()=>button},
         registerPurchaseIncoming:async () => { registrationCalls++; await new Promise(resolve => { releaseRegistration=resolve; }); },
@@ -190,6 +190,7 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
 
     vm.runInContext('poIncomingSyncPending=true', context);
     const pendingPrint = context.window.printPurchaseOrder();
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(button.disabled, true);
     assert.match(button.innerText, /同步雲端後開啟列印/);
     await context.window.printPurchaseOrder();
@@ -217,7 +218,7 @@ test('PO PDF export starts from the user action without browser print', () => {
     assert.match(source, /paginatePoPdfDocument/);
     assert.match(source, /addDocumentPagesToPdf/);
     assert.match(source, /const fileName=poPdfFileName\(poNo, vendorName\)/);
-    assert.match(source, /pdf\.save\(fileName\)/);
+    assert.match(source, /DocumentDownloads\.savePdf\('purchase', pdf, fileName\)/);
     assert.doesNotMatch(source, /window\.print\(/);
 });
 

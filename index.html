@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261004-2">
+        <link rel="stylesheet" href="styles.css?v=20261004-3">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -671,6 +671,11 @@
             <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
         </div>
+        <div class="document-download-settings no-print">
+            <button type="button" class="btn-secondary" onclick="configureDocumentDownloadFolder('quote')">設定下載資料夾</button>
+            <button type="button" class="btn-secondary btn-small" onclick="resetDocumentDownloadFolder('quote')">使用預設下載</button>
+            <span data-download-folder="quote" role="status">使用瀏覽器預設下載</span>
+        </div>
         <div id="quoteOutputStatus" class="quote-output-status no-print" style="display:none;"></div>
         </div> <!-- /#quoteCreatePanel -->
 
@@ -905,38 +910,16 @@
             <h2>採購管理</h2>
             <button type="button" id="purchaseDirectOrderBtn" onclick="openDirectStockPurchase()">＋ 直接訂貨</button>
         </div>
-        <div id="purchaseWorkCards" class="order-work-cards purchase-task-cards no-print" aria-label="採購主要工作" hidden>
-            <button type="button" class="order-work-card purchase-task-card active" id="purchase-card-ordering" onclick="switchPurchasingView('ordering', this)">
-                <span>① 處理訂單</span>
-                <strong id="purchaseCountOrdering">0 筆</strong>
-                <small id="purchaseAmountOrdering">客戶訂單待採購</small>
-            </button>
-            <button type="button" class="order-work-card purchase-task-card" id="purchase-card-stocking" onclick="switchPurchasingView('receiving', this)">
-                <span>② 備貨</span>
-                <strong>到貨／打單</strong>
-                <small id="purchaseStockingSummary">待到貨 0 筆｜待打單 0 筆</small>
-            </button>
-            <button type="button" class="order-work-card purchase-task-card" id="purchase-card-replenishment" onclick="switchPurchasingView('replenishment', this)">
-                <span>③ 訂安全庫存</span>
-                <strong id="purchaseCountReplenishment">檢查中…</strong>
-                <small>依安全庫存自動建議補貨</small>
-            </button>
-        </div>
-        <div id="purchaseFulfillmentTabs" class="purchase-stage-tabs no-print" style="display:none;" aria-label="備貨進度">
-            <button type="button" class="purchase-stage-button active" id="purchase-card-receiving" onclick="switchPurchasingView('receiving', this)"><span>待到貨</span><strong id="purchaseCountReceiving">0 筆</strong><small id="purchaseAmountReceiving">NT$ 0</small></button>
-            <button type="button" class="purchase-stage-button" id="purchase-card-dispatch" onclick="switchPurchasingView('dispatch', this)"><span>待打單</span><strong id="purchaseCountDispatch">0 筆</strong><small id="purchaseAmountDispatch">NT$ 0</small></button>
-            <button type="button" class="purchase-stage-button" id="purchase-card-completed" onclick="switchPurchasingView('completed', this)"><span>已完成</span><strong id="purchaseCountCompleted">0 筆</strong><small id="purchaseAmountCompleted">NT$ 0</small></button>
-        </div>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
             <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">採購單</button>
             <button type="button" id="purchase-tab-suppliers" onclick="switchPurchasingView('suppliers')">供應商</button>
         </div>
-        <div id="purchaseBusinessStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="業務需求進度">
-            <button type="button" onclick="switchPurchasingView('ordering')" data-purchase-stage="ordering">待採購</button>
-            <button type="button" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving">待到貨</button>
-            <button type="button" onclick="switchPurchasingView('dispatch')" data-purchase-stage="dispatch">待打單</button>
-            <button type="button" onclick="switchPurchasingView('completed')" data-purchase-stage="completed">已完成</button>
+        <div id="purchaseBusinessStages" class="order-work-cards no-print" style="display:none;" aria-label="業務需求進度">
+            <button type="button" class="order-work-card" id="purchase-card-ordering" onclick="switchPurchasingView('ordering')" data-purchase-stage="ordering"><span>待採購</span><strong id="purchaseCountOrdering">0 筆</strong><small id="purchaseAmountOrdering">NT$ 0</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-receiving" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving"><span>待到貨</span><strong id="purchaseCountReceiving">0 筆</strong><small id="purchaseAmountReceiving">NT$ 0</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-dispatch" onclick="switchPurchasingView('dispatch')" data-purchase-stage="dispatch"><span>待打單</span><strong id="purchaseCountDispatch">0 筆</strong><small id="purchaseAmountDispatch">NT$ 0</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-completed" onclick="switchPurchasingView('completed')" data-purchase-stage="completed"><span>已完成</span><strong id="purchaseCountCompleted">0 筆</strong><small id="purchaseAmountCompleted">NT$ 0</small></button>
         </div>
         <div id="purchaseDocumentStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="採購單追蹤">
             <button type="button" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving">未到齊／收貨</button>
@@ -1285,6 +1268,11 @@
             <div class="no-print" style="margin-top:16px;text-align:right;border-top:1px solid #eee;padding-top:12px;">
                 <p id="poSaveStatus" role="status" aria-live="polite" style="text-align:left;margin:0 0 10px;"></p>
                 <button type="button" id="emailPurchaseOrderBtn" class="btn-secondary" style="display:none;" onclick="emailPurchaseOrder(poEditingId)">📧 郵件／分享</button>
+                <div class="document-download-settings no-print">
+                    <button type="button" class="btn-secondary" onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
+                    <button type="button" class="btn-secondary btn-small" onclick="resetDocumentDownloadFolder('purchase')">使用預設下載</button>
+                    <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
+                </div>
                 <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 匯出 PDF（自動同步雲端）</button>
             </div>
         </div>
@@ -1683,7 +1671,8 @@
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
-    <script src="app.js?v=20261004-30"></script>
+    <script src="modules/document-downloads.js?v=20261004-1"></script>
+    <script src="app.js?v=20261004-31"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

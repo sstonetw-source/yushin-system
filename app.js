@@ -475,6 +475,7 @@ window.addEventListener('DOMContentLoaded', () => {
     firebase.auth().onAuthStateChanged(function(user) {
         if (user) {
             currentUser = user;
+            window.DocumentDownloads?.setUser(user.uid);
             // Returning sessions can render immediately from a small local profile cache.
             // Firestore is still authoritative; permissions are refreshed before any new session data is trusted.
             const cachedProfile=readCachedUserProfile(user.uid);
@@ -523,6 +524,7 @@ window.addEventListener('DOMContentLoaded', () => {
             });
         } else {
             currentUser = null;
+            window.DocumentDownloads?.setUser('');
             currentUserRole = null;
             trueUserRole = null;
             currentUserName = '';
@@ -6401,6 +6403,7 @@ window.printThreeQuotes = async function() {
             throw new Error('PDF 元件尚未載入');
         }
 
+        await window.DocumentDownloads.prepare('quote');
         quoteData = quoteDataForPdfExport();
         quoteData.lastOutputAt = new Date().toISOString();
         quoteData.lastOutputType = 'THREE_QUOTE_PDF';
@@ -6459,7 +6462,7 @@ window.printThreeQuotes = async function() {
         });
 
         const threeQuoteName = quotePdfFileName(quoteData).replace(/\.pdf$/i, '-三家估價.pdf');
-        pdf.save(threeQuoteName);
+        await window.DocumentDownloads.savePdf('quote', pdf, threeQuoteName);
         setQuoteOutputStatus('✓ 三家估價單已產生並同步');
         closeThreeQuoteDialog();
     } catch (err) {
@@ -6804,6 +6807,7 @@ window.exportCurrentQuotePdf = async function() {
 
     let stage = null;
     try {
+        await window.DocumentDownloads.prepare('quote');
         if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
             throw new Error('PDF 元件尚未載入');
         }
@@ -6860,7 +6864,7 @@ window.exportCurrentQuotePdf = async function() {
             }
         });
         if (button) button.innerText = '正在下載 PDF…';
-        pdf.save(quotePdfFileName(quoteData));
+        await window.DocumentDownloads.savePdf('quote', pdf, quotePdfFileName(quoteData));
         if (isNewQuote) setQuoteOutputStatus('✓ PDF 已產生，估價單已同步');
         else setQuoteOutputStatus('PDF 已產生；估價單同步中…');
         syncPromise.then(() => {});
@@ -8149,9 +8153,18 @@ function renderInventoryReplenishmentCenter() {
         <td data-th="預計"><strong>${plan.projected}</strong></td>
         <td data-th="安全庫存">${plan.safetyStock}</td>
         <td data-th="建議補貨"><strong>${plan.suggestedQty}</strong></td>
-        <td data-th="操作" class="no-print">${canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment('${escapeAttr(item.id)}')">建立採購單</button>` : '僅可查看'}</td>
+        <td data-th="操作" class="no-print">${canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment('${escapeAttr(item.id)}')">建立採購單</button>${canManageInventoryStockPolicy() ? ` <button type="button" class="btn-small btn-danger" onclick="removeInventoryReplenishmentReminder('${escapeAttr(item.id)}')">移除提醒</button>` : ''}` : '僅可查看'}</td>
       </tr>`).join('');
 }
+window.removeInventoryReplenishmentReminder = async function(inventoryId) {
+    if (!canManageInventoryStockPolicy()) return alert('只有管理員或採購可以移除安全庫存提醒。');
+    if (!confirm('移除這個品項的安全庫存備貨提醒？\n\n此品項將改為「依訂單採購」，庫存、既有需求與採購單會保留。日後可在庫存設定重新開啟安全庫存。')) return;
+    try {
+        await saveInventoryPlanningSettings(inventoryId, INVENTORY_STOCK_POLICIES.ORDER_ONLY);
+        await loadInventoryReplenishmentCenter(true);
+        showActionFeedback('已移除安全庫存備貨提醒。');
+    } catch (err) { alert('移除提醒失敗：' + err.message); }
+};
 async function loadInventoryReplenishmentCenter(force=false) {
  if(!canAccessPage('orders.po'))return;
  if(inventoryReplenishmentLoading)return;
@@ -10333,6 +10346,15 @@ window.renderOrdersList = function() {
         shown++;
 
         const tr = document.createElement('tr');
+        if (canManageOrderOps && (o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') {
+            loadVisibleProductCost(findPriceItemForOrder(o) || {productId:o.productId}).then(cost => {
+                if (!tr.isConnected || cost === null || !Number.isFinite(cost)) return;
+                const input = tr.querySelector('.order-cost-input');
+                if (input) input.value = String(cost);
+                const profit = tr.querySelector('[id^="orderProfit_"]');
+                if (profit) profit.textContent = formatProfitPercent(o.unitPrice, cost);
+            });
+        }
         // 這些摘要共用上方已算好的 dispatch state，不再各自掃描送貨／退貨紀錄。
         const deliveryProgress = canConfirmOrderDelivery ? deliveryProgressInfo(o, allOrderItems) : null;
         const fulfillmentProgress = canConfirmOrderDelivery ? fulfillmentProgressInfo(o, allOrderItems, dispatchStateByItem) : null;
@@ -10351,7 +10373,7 @@ window.renderOrdersList = function() {
             <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=activeOrderWorkFilter==='dispatch'&&displayCategories.includes('dispatch')?'dispatch':primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待出貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
             ${canManageOrderOps ? `
-            <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" value="${o.costPrice != null ? o.costPrice : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
+            <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice ?? '') : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
             <td data-th="交易資訊" class="order-transaction-cell">
                 <select onchange="updateOrderField('${o.id}','transactionType',this.value)">
                     <option value="" ${!o.transactionType ? 'selected' : ''}>未選擇</option>
@@ -14818,7 +14840,7 @@ async function printSavedPoDocument(poNo, vendorName) {
         const blob=pdf.output('blob');
         if(download){
             if (button) button.innerText = '正在下載 PDF…';
-            pdf.save(fileName);
+            await window.DocumentDownloads.savePdf('purchase', pdf, fileName);
             updatePoSaveStatus('✓ 採購單 PDF 已產生');
             if(poDirectStockOpenGeneration===modalGeneration&&poEditingId===exportingPoId)closePurchaseOrderModal();
             showActionFeedback(`採購單 ${poNo} PDF 已匯出。`,'success');
@@ -14843,6 +14865,10 @@ window.printPurchaseOrder = async function() {
         updatePoSaveStatus(poNoLoading ? '採購單號仍在產生中，完成後即可列印 / 存為 PDF。' : '採購單號尚未就緒，請切換公司或重新開啟後再試。', !poNoLoading);
         return;
     }
+    poSaveInProgress = true;
+    try { await window.DocumentDownloads.prepare('purchase'); }
+    catch (err) { updatePoSaveStatus(err.message, true); return; }
+    finally { poSaveInProgress = false; }
     if (poEditingId) {
         const savedPo = poListCache.find(po => po.id === poEditingId);
         if (!savedPo) { alert('找不到已儲存的採購單，請重新整理。'); return; }
@@ -17057,6 +17083,7 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderUnitPrice').value = 0;
     document.getElementById('orderTotalPrice').value = 0;
     document.getElementById('orderCostPrice').value = '';
+    delete document.getElementById('orderCostPrice').dataset.autofillCost;
     const procurement = document.getElementById('orderProcurementType');
     if (procurement) procurement.value = source?.procurementType || 'PURCHASING_PO';
     onOrderProcurementTypeChange();
@@ -17127,6 +17154,7 @@ window.openOrderModal = function(source = null) {
             console.warn('新增訂單：倉庫主檔載入失敗，先保留目前表單。', err);
         }
 
+        if (openingGeneration !== orderModalOpenGeneration || !overlay.classList.contains('active')) return;
         if (source?.itemCode) {
             const sourceMatch = findPriceItemForOrder({ itemCode: source.itemCode, brand: source.brand || '' });
             if (sourceMatch) {
@@ -19406,21 +19434,38 @@ function setOrderCostFieldForProduct(item) {
     const input = document.getElementById('orderCostPrice');
     if (!wrap || !input) return;
     const selfOrder = document.getElementById('orderProcurementType')?.value === 'SALES_SELF_ORDER';
-    wrap.style.display = selfOrder ? '' : 'none';
+    const authorized = currentUserRole === 'admin' || currentUserRole === 'purchaser';
+    wrap.style.display = selfOrder || authorized ? '' : 'none';
+    input.readOnly = !selfOrder;
+    input.placeholder = selfOrder ? '本次交易含稅成本，可修改' : '選擇產品後帶入標準成本';
+    const label = wrap.querySelector('label');
+    if (label) label.textContent = selfOrder ? '含稅交易成本' : '含稅標準成本（參考）';
     if (!selfOrder) input.value = '';
 }
-window.onOrderProcurementTypeChange=function(){
-    setOrderCostFieldForProduct(null);
-    const hint=document.getElementById('orderWarehouseStockHint');
-    if(hint&&document.getElementById('orderProcurementType')?.value!=='SALES_SELF_ORDER')hint.textContent='交由採購訂貨：業務只需確認售價，採購成本由採購流程處理。';
+window.onOrderProcurementTypeChange = function() {
+    const input = document.getElementById('orderCostPrice');
+    if (input) { input.value = ''; delete input.dataset.autofillCost; }
+    applyOrderProductCost(findPriceItemForOrder({itemCode:document.getElementById('orderItemCode')?.value || '',brand:getBrandFieldValue('orderBrand','orderBrandOther')}));
 };
-
+let orderCostRequestGeneration = 0;
 async function applyOrderProductCost(item) {
+    const generation = ++orderCostRequestGeneration;
+    const openingGeneration = orderModalOpenGeneration;
     setOrderCostFieldForProduct(item);
     const input = document.getElementById('orderCostPrice');
-    if (!input || document.getElementById('orderProcurementType')?.value !== 'SALES_SELF_ORDER') return;
-    // 自行調貨成本是本次交易成本，必須由使用者自行輸入；不從公司價格表／productCosts 帶入。
+    if (!input || !item) return;
+    const selfOrder = document.getElementById('orderProcurementType')?.value === 'SALES_SELF_ORDER';
+    const initialValue = input.value;
+    // A manually entered transaction cost remains authoritative, including zero.
+    if (selfOrder && initialValue !== '' && initialValue !== input.dataset.autofillCost) return;
     input.value = '';
+    delete input.dataset.autofillCost;
+    const cost = await loadVisibleProductCost(item);
+    if (generation !== orderCostRequestGeneration || openingGeneration !== orderModalOpenGeneration || input.value !== '') return;
+    if (cost !== null && Number.isFinite(cost) && cost >= 0) {
+        input.value = String(cost);
+        input.dataset.autofillCost = String(cost);
+    }
 }
 
 function clearQuickProductButton(input) {
@@ -22425,3 +22470,12 @@ window.collapseMobileMainNav = function() {
         if (nav.classList.contains('mobile-open')) collapseMobileMainNav();
     }, { passive:true });
 })();
+
+window.configureDocumentDownloadFolder = async function(kind) {
+    try { await window.DocumentDownloads.choose(kind); }
+    catch (err) { if(err.name !== 'AbortError') alert('設定下載資料夾失敗：' + err.message); }
+};
+window.resetDocumentDownloadFolder = async function(kind) {
+    try { await window.DocumentDownloads.reset(kind); }
+    catch (err) { alert('重設下載資料夾失敗：' + err.message); }
+};

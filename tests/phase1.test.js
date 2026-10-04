@@ -931,7 +931,7 @@ test('primary quote export generates PDF directly without browser print', () => 
     assert.match(appSource, /window\.exportCurrentQuotePdf = async function/);
     assert.match(appSource, /addDocumentPagesToPdf/);
     assert.match(appSource, /new window\.jspdf\.jsPDF/);
-    assert.match(appSource, /pdf\.save\(quotePdfFileName\(quoteData\)\)/);
+    assert.match(appSource, /DocumentDownloads\.savePdf\('quote', pdf, quotePdfFileName\(quoteData\)\)/);
     assert.match(appSource, /persistQuoteOutputRecord\(quoteData, 'PDF'\)/);
     assert.match(cssSource, /\.quote-pdf-stage/);
     assert.match(cssSource, /width: 190mm/);
@@ -5041,12 +5041,13 @@ test('quote quick Product Master creation is optional while formal orders requir
     assert.match(source, /productId: firstItem\.productId \|\| ''/);
 });
 
-test('self-order transaction cost is manual and standard cost is not auto-filled into an order', () => {
+test('order costs auto-fill from protected costs while preserving manual transaction input', () => {
     const start=appSource.indexOf('async function applyOrderProductCost');
     const end=appSource.indexOf('\nfunction clearQuickProductButton',start);
     const source=appSource.slice(start,end);
     assert.match(source, /input\.value = ''/);
-    assert.doesNotMatch(source, /loadVisibleProductCost|item\.cost/);
+    assert.match(source, /loadVisibleProductCost\(item\)/);
+    assert.match(source, /initialValue !== input\.dataset\.autofillCost/);
     assert.doesNotMatch(appSource, /safeEmbeddedOrderCost/);
 });
 
