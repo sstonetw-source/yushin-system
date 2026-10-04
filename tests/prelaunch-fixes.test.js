@@ -142,3 +142,34 @@ test('purchase summary is independent of the paged demand detail cache',async()=
  await c.loadPurchaseDemandSummary();assert.equal(vm.runInContext('purchaseDemandSummaryRows.length',c),75);assert.equal(c.procurementDemandCache.length,1);
  c.procurementDemandCache.push({id:'second'});assert.equal(vm.runInContext('purchaseDemandSummaryRows.length',c),75);
 });
+
+test('purchase history hides cancellation for fully received orders and checks every item',()=>{
+ const rendered=[];
+ const controls={poListBody:{appendChild:fragment=>rendered.push(...fragment.rows)},poListSearch:{value:''}};
+ const c=context({purchasingView:'history',poHistorySearchActive:false,poListCache:[],companyData:{},
+  document:{getElementById:id=>controls[id],createDocumentFragment:()=>({rows:[],appendChild(row){this.rows.push(row);}}),createElement:()=>({innerHTML:''})},
+  purchaseFilterContext:()=>({}),purchaseItemsFromSavedPo:po=>po.items,purchaseOrderSupplierContact:()=>({}),
+  isPurchaseTerminalStatus:status=>['CLOSED','CANCELLED'].includes(status),purchaseLineMatchesFilters:()=>true,
+  purchaseHistoryItemReceiptProgress:(po,index)=>({remainingQty:po.items[index].remainingQty,label:'progress'}),
+  canCreatePurchaseOrderCapability:()=>true,purchaseOrderDocumentStatusLabel:()=>'',poWaitingDays:()=>0,
+  escapeHtml:x=>x,inlineJsValue:x=>JSON.stringify(x),localDateString:()=> '2026-10-04'});
+ vm.runInContext(section('window.renderPoList = function(', '\n// 把「採購訂單」'),c);
+ function render(items,status='ORDERED',allowed=true){
+  rendered.length=0;c.canCreatePurchaseOrderCapability=()=>allowed;c.poListCache=[{id:'PO1',status,items:items.map(remainingQty=>({qty:1,remainingQty,unitPrice:10}))}];c.renderPoList();return rendered.map(row=>row.innerHTML).join('');
+ }
+ assert.doesNotMatch(render([0]),/cancelPurchaseOrderOutstanding/);
+ assert.match(render([1]),/取消剩餘未到貨數量/);
+ assert.match(render([0,1]),/取消剩餘未到貨數量/);
+ assert.doesNotMatch(render([0,0]),/cancelPurchaseOrderOutstanding/);
+ assert.doesNotMatch(render([1],'CLOSED'),/cancelPurchaseOrderOutstanding/);
+ assert.doesNotMatch(render([1],'CANCELLED'),/cancelPurchaseOrderOutstanding/);
+ assert.doesNotMatch(render([1],'ORDERED',false),/cancelPurchaseOrderOutstanding/);
+});
+
+test('download settings keep folder selection without the default-download reset button',()=>{
+ const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8');
+ assert.doesNotMatch(html,/resetDocumentDownloadFolder\(/);
+ assert.doesNotMatch(html,/>使用預設下載</);
+ assert.match(html,/configureDocumentDownloadFolder\('quote'\)/);
+ assert.match(html,/configureDocumentDownloadFolder\('purchase'\)/);
+});

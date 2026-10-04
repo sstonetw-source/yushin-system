@@ -12926,6 +12926,8 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         const supplierContact = purchaseOrderSupplierContact(po);
 
         const poTerminal=isPurchaseTerminalStatus(po.status);
+        const poHasOutstanding = !poTerminal && items.some((_, index) =>
+            Number(purchaseHistoryItemReceiptProgress(po, index).remainingQty) > 0);
         items.forEach((item,itemIndex)=>{
             const ordered=Math.max(0,Number(item.qty||0));
             if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
@@ -12956,7 +12958,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                             <div class="po-more-menu-popover">
                                 ${(po.purchaseType==='stock'||items.every(line=>!line.orderId))?`<button type="button" onclick="copySavedPurchaseOrderAsNew(${inlineJsValue(po.id)})">複製成新採購單</button>`:''}
                                 <button type="button" onclick="reprintPurchaseOrder(${inlineJsValue(po.id)})">查看正式內容</button>
-                                ${canCreatePurchaseOrderCapability()&&!poTerminal?`<button type="button" class="danger-menu-item" onclick="cancelPurchaseOrderOutstanding(${inlineJsValue(po.id)})">停止未到貨</button>`:''}
+                                ${canCreatePurchaseOrderCapability()&&poHasOutstanding?`<button type="button" class="danger-menu-item" onclick="cancelPurchaseOrderOutstanding(${inlineJsValue(po.id)})">取消剩餘未到貨數量</button>`:''}
                             </div>
                         </details>
                     </div>`:'—'}</td>
