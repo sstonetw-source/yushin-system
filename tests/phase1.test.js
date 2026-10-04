@@ -2130,11 +2130,11 @@ test('ordered action belongs to purchasing while the order list only shows progr
 });
 
 
-test('batch supply receipt reports partial success and requires a warehouse', () => {
+test('batch supply receipt preserves frozen retries and requires a warehouse', () => {
     assert.match(appSource, /尚未指定入庫倉庫/);
-    assert.match(appSource, /let completed = 0/);
-    assert.match(appSource, /已成功確認 \$\{completed\} 個品項到貨/);
-    assert.match(appSource, /已成功的資料不會重複處理/);
+    assert.match(appSource, /persistReceiptTasks\(job\.ownerUid\)/);
+    assert.match(appSource, /job\.state='error'/);
+    assert.match(appSource, /系統不會重複入庫/);
     assert.match(appSource, /到貨必須從供應紀錄進入/);
 });
 
@@ -3360,7 +3360,7 @@ test('receipt allocation retry resumes after committed receipt without duplicate
     assert.match(receiptSource,/receipt-allocation-pending/);
     assert.doesNotMatch(receiptSource,/if\(alreadyProcessed\)return/);
 
-    const saveStart=appSource.indexOf('window.savePoReceiptBatch = async function()');
+    const saveStart=appSource.indexOf('async function runReceiptTask(job)');
     const saveEnd=appSource.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
     const saveSource=appSource.slice(saveStart,saveEnd);
     assert.match(saveSource,/err\?\.code==='receipt-allocation-pending'/);
@@ -3945,7 +3945,8 @@ test('warehouse receiving capability is separate from purchase editing', () => {
 
     const saveStart=appSource.indexOf('window.savePoReceiptBatch = async function');
     const saveEnd=appSource.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
-    assert.match(appSource.slice(saveStart,saveEnd),/if \(!canReceiveInventoryCapability\(\) \|\| poReceiptSaveInProgress\) return/);
+    assert.match(appSource.slice(saveStart,saveEnd),/if \(!canReceiveInventoryCapability\(\)\) return/);
+    assert.match(appSource.slice(saveStart,saveEnd),/receiptTaskBlocksSupply\(supplyId\)/);
 
     const stockStart=appSource.indexOf('window.openDirectStockPurchase = async function');
     const stockEnd=appSource.indexOf('\nwindow.closePurchaseOrder',stockStart);

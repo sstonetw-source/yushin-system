@@ -59,7 +59,7 @@ test('purchasing has three item-level work queues and no legacy number function'
     assert.match(app, /switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
     assert.match(app, /function refreshPurchasingOrderCache\(reset = true, options = \{\}\)/);
     assert.match(app, /loadPendingPurchaseOrders\(true/);
-    assert.match(app, /loadMyPurchaseOrders\(/);
+    assert.match(app, /markMainPageDirty\('inventory','orders.list','orders.po','admin'\)/);
     assert.match(app, /loadPurchasingDispatchOrders\(true/);
     assert.doesNotMatch(app, /generateNextPoNumber/);
 });
@@ -865,12 +865,12 @@ test('supply receipt retries are idempotent by operation id', () => {
     assert.match(source,/where\('receiptId','==',operationKey\)/);
     assert.match(source,/operationId:operationKey/);
 
-    const saveStart=app.indexOf('window.savePoReceiptBatch = async function()');
+    const saveStart=app.indexOf('async function runReceiptTask(job)');
     const saveEnd=app.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
     const save=app.slice(saveStart,saveEnd);
     assert.match(save,/operationBase=poReceiptOperationId\|\|ensureReceiptOperationId\(supplyId\)/);
     assert.match(save,/receiveSupplyOrderRecord\(supplyId,entry\.qty,entry\.lotNo,entry\.expiryDate,operationId\)/);
-    assert.match(save,/clearReceiptOperationId\(supplyId\)/);
+    assert.match(save,/clearReceiptOperationId\(supplyId,job\.operationBase,job\.ownerUid\)/);
 });
 
 test('multi-item returns require and use an explicit return item selector', () => {

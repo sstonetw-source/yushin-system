@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261004-1">
+        <link rel="stylesheet" href="styles.css?v=20261004-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -91,6 +91,8 @@
             <button class="btn-secondary" onclick="handleLogout()">登出</button>
         </div>
     </div>
+
+    <div id="receiptTaskStatus" class="receipt-task-status no-print" role="status" aria-live="polite" hidden></div>
 
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
@@ -1295,7 +1297,7 @@
           <h3 id="poReceiptBatchTitle" style="margin:0;">到貨入庫</h3>
           <button type="button" class="btn-secondary" onclick="closePoReceiptBatch()">✕ 關閉</button>
         </div>
-        <div class="inventory-summary-note">可一次勾選多個到貨品項，支援部分到貨、批號與效期。完成後會同步更新供應紀錄到貨進度、在途、現有庫存與來源訂單占用。</div>
+        <div class="inventory-summary-note">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單占用。</div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>收貨</th><th>貨號</th><th>品名</th><th>訂購</th><th>已收</th><th>未收</th><th>本次到貨</th><th>批號</th><th>效期</th></tr></thead>
@@ -1681,7 +1683,7 @@
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
-    <script src="app.js?v=20261004-24"></script>
+    <script src="app.js?v=20261004-25"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
