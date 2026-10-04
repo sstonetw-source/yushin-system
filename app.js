@@ -15988,6 +15988,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     const orderId = orderIdOverride || currentDeliveryOrderId;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
+    if(orderInventorySyncIncomplete(cachedOrder)){showActionFeedback('訂單庫存尚未同步完成，請先完成同步。','warning');return;}
     const cachedProgress = deliveryProgressInfo(cachedOrder);
     if (normalizedOrderStatus(cachedOrder) !== 'normal') { alert('已取消的訂單不能送貨。'); return; }
     if (cachedProgress.state === 'complete') return quickCancelAllDelivery(orderId);
@@ -16015,7 +16016,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     };
     const optimisticActor = deliveryActor();
     const optimisticAt = new Date().toISOString();
-    cachedOrder.deliveryRecords = [...optimisticBefore.deliveryRecords, { id: `pending-${Date.now()}`, date: today, qty: cachedProgress.remaining, notes: '一鍵完成剩餘送貨', createdBy: optimisticActor, createdAt: optimisticAt }];
+    cachedOrder.deliveryRecords = [...optimisticBefore.deliveryRecords, { id: `pending-${Date.now()}`, itemId:allItems[0].itemId, date: today, qty: cachedProgress.remaining, notes: '一鍵完成剩餘送貨', createdBy: optimisticActor, createdAt: optimisticAt }];
     cachedOrder.deliveredQty = cachedProgress.total;
     cachedOrder.isDelivered = true;
     pendingDeliveryOrderIds.add(orderId);
@@ -16029,6 +16030,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
             const order = snapshot.data();
             if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
+            if(orderInventorySyncIncomplete(order))throw new Error('訂單庫存尚未同步完成');
             const transactionItems=normalizedOrderItems(order);
             // UI 已阻擋多品項一鍵送貨；transaction 仍要以最新資料再次驗證，
             // 避免 stale cache 或另一端剛修改品項後寫入無法歸屬品項的送貨紀錄。
@@ -16047,7 +16049,9 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
             records.push(record);
             const history = { action: 'create', source: 'quick_complete', recordId: record.id, before: null, after: record, by: actor, at: now };
             const statusEntries = [];
-            const inventoryResult=await applyInventoryDeliveryInTransaction(transaction, ref, order, remaining, actor, orderId);
+            const deliveryItem=transactionItems[0];
+            const itemOrder={...order,...deliveryItem,deliveryRecords:records.filter(row=>row.itemId===deliveryItem.itemId),isDelivered:false};
+            const inventoryResult=await applyInventoryDeliveryInTransaction(transaction, ref, itemOrder, remaining, actor, orderId);
             record.lotAllocations=inventoryResult?.lotAllocations||[];
             record.cogs=Number(inventoryResult?.cogs||0);
             records[records.length-1]=record;
@@ -16114,7 +16118,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
             const order = snapshot.data();
             // 前端雖已擋多品項，但 transaction 必須再次依最新 Firestore 資料驗證，
             // 避免 stale cache／重複操作把整張訂單的庫存還原到錯誤品項。
-            if (normalizedOrderItems(order).length > 1) throw new Error('多品項訂單不能一鍵取消全部送貨，請逐品項更正送貨紀錄。');
+            if (normalizedOrderItems(order).length !== 1) throw new Error('只有單品項訂單可以一鍵取消全部送貨，請逐品項更正送貨紀錄。');
             if (returnedQuantity(order) > 0) throw new Error('這筆訂單已有退貨紀錄，請先更正退貨紀錄。');
             const progress = deliveryProgressInfo(order);
             if (progress.state !== 'complete') throw new Error('這筆訂單目前不是全數已送貨狀態。');
@@ -16124,8 +16128,10 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
                 ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
                 : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
             const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
-            const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, order, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
             const currentItems=normalizedOrderItems(order);
+            const deliveryItem=currentItems[0];
+            const itemOrder={...order,...deliveryItem,deliveryRecords:savedDeliveryRecords(order),isDelivered:false};
+            const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
             const nextItems=currentItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
             const updates = { items:nextItems, deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
             Object.assign(updates,orderWorkIndexFields({...order,...updates}));
