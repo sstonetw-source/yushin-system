@@ -12742,7 +12742,7 @@ window.reprintPurchaseOrder = async function(poId) {
     document.getElementById('poDate').value = po.poDate || '';
     const poExpectedDateInput=document.getElementById('poExpectedDate');
     if(poExpectedDateInput)poExpectedDateInput.value=po.expectedDate||po.scheduleDate||'';
-    syncPoLeadWeeks();
+    syncPoLeadDays();
     document.getElementById('poNo').innerText = po.poNo || '';
 
     renderPoItemsTable();
@@ -14220,8 +14220,8 @@ window.updateDirectPoText = function(idx, field, value) {
 };
 
 function updatePoModeUI() {
-    const leadWeeks=document.getElementById('poLeadWeeks');
-    if(leadWeeks)leadWeeks.disabled=!!poEditingId;
+    const leadDays=document.getElementById('poLeadDays');
+    if(leadDays)leadDays.disabled=!!poEditingId;
     const addBtn = document.getElementById('poAddStockItemBtn');
     const hint = document.getElementById('poModeHint');
     const brandList = document.getElementById('poBrandList');
@@ -14257,13 +14257,13 @@ function updatePoModeUI() {
 
 
 function clearPoExpectedDate() {
-    const weeks=document.getElementById('poLeadWeeks');
-    if(weeks)weeks.value='';
+    const days=document.getElementById('poLeadDays');
+    if(days)days.value='';
     const input=document.getElementById('poExpectedDate');
     if(!input)return;
     input.value='';
     delete input.dataset.expectedDateSource;
-    syncPoLeadWeeks();
+    syncPoLeadDays();
 }
 
 window.markPoExpectedDateManual = function() {
@@ -14275,7 +14275,7 @@ window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = 
     const input=document.getElementById('poExpectedDate');
     if(!input || poEditingId)return input?.value||'';
     if(input.dataset.expectedDateSource==='manual') {
-        if(document.getElementById('poLeadWeeks')?.value!=='')window.setPoLeadWeeks();
+        if(document.getElementById('poLeadDays')?.value!=='')window.setPoLeadDays();
         return input.value||'';
     }
     if(!globalThis.YushinSupplier?.purchaseExpectedDate)return '';
@@ -14300,32 +14300,37 @@ window.autoFillPoExpectedDate = function(items = poItems, preferredSupplierId = 
         input.value='';
         delete input.dataset.expectedDateSource;
     }
-    syncPoLeadWeeks();
+    syncPoLeadDays();
     return expected;
 };
 
-function syncPoLeadWeeks() {
-    const weeks=document.getElementById('poLeadWeeks');
+function syncPoLeadDays() {
+    const days=document.getElementById('poLeadDays');
     const date=document.getElementById('poExpectedDate')?.value;
     const ordered=document.getElementById('poDate')?.value;
-    if(weeks)weeks.value=date&&ordered?Math.max(0,(Date.parse(date)-Date.parse(ordered))/604800000).toFixed(1).replace(/\.0$/,''):'';
+    if(days)days.value=date&&ordered?Math.max(0,(Date.parse(date)-Date.parse(ordered))/86400000):'';
     const hint=document.getElementById('poExpectedDateHint');
     if(hint)hint.textContent=date?`預計 ${date} 到貨`:'未設定交期';
 }
 
-window.setPoLeadWeeks = function() {
+window.setPoLeadDays = function() {
     if(poEditingId)return;
-    const weeks=document.getElementById('poLeadWeeks');
+    const days=document.getElementById('poLeadDays');
     const date=document.getElementById('poExpectedDate');
     const ordered=document.getElementById('poDate')?.value;
-    if(!weeks||!date)return;
-    const value=Number(weeks.value);
-    if(weeks.value===''||!ordered){date.value='';delete date.dataset.expectedDateSource;}
-    else if(Number.isFinite(value)&&value>=0){
+    if(!days||!date)return;
+    const value=Number(days.value);
+    if(days.value===''||!ordered){date.value='';delete date.dataset.expectedDateSource;}
+    else if(Number.isInteger(value)&&value>=0){
         const expected=new Date(ordered+'T00:00:00Z');
-        expected.setUTCDate(expected.getUTCDate()+Math.round(value*7));
+        expected.setUTCDate(expected.getUTCDate()+value);
         date.value=expected.toISOString().slice(0,10);
         date.dataset.expectedDateSource='manual';
+    }else{
+        date.value='';delete date.dataset.expectedDateSource;
+        const hint=document.getElementById('poExpectedDateHint');
+        if(hint)hint.textContent='請輸入 0 或以上的整數天數';
+        return;
     }
     const hint=document.getElementById('poExpectedDateHint');
     if(hint)hint.textContent=date.value?`預計 ${date.value} 到貨`:'未設定交期';
@@ -14701,6 +14706,8 @@ async function printSavedPoDocument(poNo, vendorName) {
     let stage = null;
     const button = document.getElementById('printPurchaseOrderBtn');
     const download = options.download !== false;
+    const modalGeneration = poDirectStockOpenGeneration;
+    const exportingPoId = poEditingId;
     try {
         if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
             throw new Error('PDF 元件尚未載入');
@@ -14739,6 +14746,8 @@ async function printSavedPoDocument(poNo, vendorName) {
             if (button) button.innerText = '正在下載 PDF…';
             pdf.save(fileName);
             updatePoSaveStatus('✓ 採購單 PDF 已產生');
+            if(poDirectStockOpenGeneration===modalGeneration&&poEditingId===exportingPoId)closePurchaseOrderModal();
+            showActionFeedback(`採購單 ${poNo} PDF 已匯出。`,'success');
         }else{
             updatePoSaveStatus('✓ 採購單 PDF 附件已準備');
         }
@@ -14751,6 +14760,11 @@ async function printSavedPoDocument(poNo, vendorName) {
 window.printPurchaseOrder = async function() {
     if (poSaveInProgress) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
+    const leadDaysInput=document.getElementById('poLeadDays');
+    if(!poEditingId&&leadDaysInput?.value&&(!Number.isInteger(Number(leadDaysInput.value))||Number(leadDaysInput.value)<0)){
+        updatePoSaveStatus('預計交期請輸入 0 或以上的整數天數。',true);
+        return;
+    }
     if (!poEditingId && !poNoReady) {
         updatePoSaveStatus(poNoLoading ? '採購單號仍在產生中，完成後即可列印 / 存為 PDF。' : '採購單號尚未就緒，請切換公司或重新開啟後再試。', !poNoLoading);
         return;
@@ -15118,16 +15132,21 @@ window.printPurchaseOrder = async function() {
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立採購單。
         registerPurchaseIncoming(poDocumentId, poRecord)
             .then(() => {
-                poIncomingSyncPending = false;
+                if(poEditingId===poDocumentId)poIncomingSyncPending = false;
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-                updatePoSaveStatus(`採購單 ${poNo} 已建立；在途庫存同步完成。`);
-                updatePoSaveButton();
+                if(poEditingId===poDocumentId){
+                    updatePoSaveStatus(`採購單 ${poNo} 已建立；在途庫存同步完成。`);
+                    updatePoSaveButton();
+                }
             })
             .catch(err => {
                 console.error('採購單在途庫存背景同步失敗：', err);
-                poIncomingSyncPending = true;
-                updatePoSaveStatus(`採購單已同步雲端，但在途庫存同步未完成：${err.message}。請由這張採購單重試同步，不要另建一張。`, true);
-                updatePoSaveButton();
+                if(poEditingId===poDocumentId){
+                    poIncomingSyncPending = true;
+                    updatePoSaveStatus(`採購單已同步雲端，但在途庫存同步未完成：${err.message}。請由這張採購單重試同步，不要另建一張。`, true);
+                    updatePoSaveButton();
+                }
+                showActionFeedback(`採購單 ${poNo} 已建立；在途同步未完成，請開啟這張採購單重試。`,'warning');
             });
     } catch (err) {
         console.error('儲存採購單紀錄失敗：', err);
