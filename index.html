@@ -1342,6 +1342,7 @@
                     Product Master 的新增、待補、停用與批次匯入集中在這裡；一般「產品」頁只負責搜尋、依廠牌瀏覽與加入估價單／訂單。
                 </p>
                 <section aria-label="廠牌與匯入批量管理"><h3>已建檔廠牌／匯入批次</h3><p>選擇廠牌或批次後可預覽產品並批量停用／恢復；保留歷史單據。舊資料沒有匯入批次，新匯入才會記錄。批次顯示產品最近一次匯入，不提供覆寫前版本還原。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="productOverviewLimit=200;renderProductManagementOverview()"></select><button onclick="bulkSetProductActive(false,this)">停用勾選產品</button><button class="btn-secondary" onclick="bulkSetProductActive(true,this)">恢復勾選產品</button></div><div class="table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="全選目前預覽" onchange="document.querySelectorAll('#productOverviewBody input[type=checkbox]').forEach(el=>el.checked=this.checked)"></th><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th><th>最近匯入檔案</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="productOverviewLimit+=200;renderProductManagementOverview()">顯示更多產品</button></section>
+                <div class="toolbar no-print"><button id="deleteBrandProductsBtn" type="button" class="btn-danger" disabled onclick="deleteEntireBrandProducts(this)">刪除整個廠牌的產品</button><span>請先選擇單一廠牌；包含未顯示及已停用產品。刪除前檢查作業關聯並下載備份，產品與標準成本會永久刪除。</span></div>
                 <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
             <!-- Product Master 管理（舊稱，保留供回歸測試辨識） -->
             <div class="product-management-tools-title">產品管理</div>
@@ -1710,7 +1711,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261004-22"></script>
+    <script src="app.js?v=20261004-23"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

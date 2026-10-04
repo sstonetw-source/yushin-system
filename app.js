@@ -18221,6 +18221,7 @@ let activeProductImportBatch = null;
 let productManagementOverviewRows = [];
 let productOverviewLimit = 200;
 let productOverviewLoading = false;
+let brandProductDeleteRunning = false;
 
 window.openInventoryReceiving = function() {
     if (!canAccessPage('inventory')) return alert('需要庫存頁權限才能收貨。');
@@ -18283,13 +18284,15 @@ window.loadProductManagementOverview = async function() {
 };
 window.renderProductManagementOverview = function() {
     const scope = document.getElementById('productOverviewScope').value;
+    const deleteButton = document.getElementById('deleteBrandProductsBtn');
+    if (deleteButton) deleteButton.disabled = brandProductDeleteRunning || !scope.startsWith('brand:') || currentUserRole !== 'admin';
     const rows = productManagementOverviewRows.filter(row => !scope || (scope.startsWith('brand:') ? (row.brandName || row.brand || '未分類') === scope.slice(6) : row.lastImportBatch === scope.slice(6)));
     document.getElementById('productOverviewStatus').textContent = `${rows.length} 個產品，啟用 ${rows.filter(row=>row.active!==false && row.status!=='INACTIVE').length} 個；目前顯示 ${Math.min(rows.length,productOverviewLimit)} 個。`;
     document.getElementById('productOverviewBody').innerHTML = rows.slice(0,productOverviewLimit).map(row => `<tr><td><input type="checkbox" value="${escapeAttr(row.id)}" aria-label="選取 ${escapeAttr(row.manufacturerPartNo || row.sku || row.id)}"></td><td>${escapeHtml(row.brandName || row.brand || '')}</td><td>${escapeHtml(row.manufacturerPartNo || row.sku || '')}</td><td>${escapeHtml(row.productName || row.nameCn || row.nameEn || '')}</td><td>${row.active===false || row.status==='INACTIVE' ? '停用' : '啟用'}</td><td>${escapeHtml(row.lastImportFile || '舊資料未記錄')} ${escapeHtml((row.lastImportedAt || '').slice(0,10))}</td></tr>`).join('');
     document.getElementById('productOverviewMore').style.display = rows.length > productOverviewLimit ? '' : 'none';
 };
 window.bulkSetProductActive = async function(active, button) {
-    if (currentUserRole !== 'admin') return;
+    if (currentUserRole !== 'admin' || brandProductDeleteRunning) return;
     const ids = [...document.querySelectorAll('#productOverviewBody input:checked')].map(el=>el.value);
     if (!ids.length) return alert('請先勾選要處理的產品。');
     if (!confirm(`確定${active ? '恢復' : '停用'}勾選的 ${ids.length} 個產品？不會刪除舊訂單或成本資料。`)) return;
@@ -18316,6 +18319,75 @@ window.bulkSetProductActive = async function(active, button) {
         renderProductManagementOverview();
         alert(`已完成 ${completed} 個；剩餘處理失敗：${err.message}`);
     } finally { button.disabled=false; }
+};
+
+window.deleteEntireBrandProducts = async function(button) {
+    if (!canDeleteProductMaster() || brandProductDeleteRunning || productMasterMigrationRunning) return;
+    const scope = document.getElementById('productOverviewScope')?.value || '';
+    if (!scope.startsWith('brand:')) return alert('請選擇單一廠牌，不能刪除全部產品或匯入批次。');
+    const brand = scope.slice(6);
+    brandProductDeleteRunning = true;
+    button.disabled = true;
+    button.textContent = '讀取廠牌產品…';
+    let deletedCount = 0;
+    const deletedIds = new Set();
+    try {
+        // 重新讀取完整名單，不以預覽的 200 筆或勾選範圍作為刪除目標。
+        const rows = (await readCollectionInBatches('products')).filter(row => (row.brandName || row.brand || '未分類') === brand);
+        if (!rows.length) return alert('這個廠牌目前沒有產品。');
+        const typed = prompt(`即將永久刪除「${brand}」全部 ${rows.length} 個產品及標準成本（包含停用產品）。\n\n歷史估價單／訂單、價格歷史、庫存紀錄、廠牌及供應商設定不刪除；但被刪產品的主檔連結將失效，重新匯入不同貨號不會自動修正舊單據。\n\n輸入完整廠牌名稱「${brand}」確認，或取消：`);
+        if (typed !== brand) return;
+        const blockers = [];
+        for (let offset=0; offset<rows.length; offset+=5) {
+            button.textContent = `檢查關聯 ${Math.min(offset+5,rows.length)}/${rows.length}…`;
+            const results = await Promise.all(rows.slice(offset,offset+5).map(async row => ({row, reasons:await productMasterOperationalBlockers(row.id)})));
+            results.forEach(({row,reasons})=>{
+                if (reasons.length) blockers.push(`${row.manufacturerPartNo || row.sku || row.id}：${reasons.join('、')}`);
+            });
+        }
+        if (blockers.length) return alert(`整個廠牌未刪除：${blockers.length} 個產品仍有作業關聯。\n${blockers.slice(0,15).join('\n')}${blockers.length>15?'\n（只列出前 15 個）':''}\n請先處理庫存／占用／採購，或改用批量停用。`);
+        button.textContent = '準備產品與成本備份…';
+        const costs = [];
+        for (let offset=0; offset<rows.length; offset+=10) {
+            const snap = await firestoreReadWithTimeout(db.collection('productCosts').where(firebase.firestore.FieldPath.documentId(),'in',rows.slice(offset,offset+10).map(row=>row.id)).get(), '廠牌刪除成本備份');
+            snap.docs.forEach(doc=>costs.push({id:doc.id,...doc.data()}));
+        }
+        const blob = new Blob([JSON.stringify({format:'YUSHIN_BRAND_PRODUCT_BACKUP',version:1,brand,createdAt:new Date().toISOString(),products:rows,productCosts:costs},null,2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href=url;link.download=`產品備份-${brand.replace(/[\\/:*?"<>|]/g,'_')}-${Date.now()}.json`;
+        document.body.appendChild(link);link.click();link.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),60000);
+        if (!confirm(`已觸發「${brand}」產品與成本備份下載。請確認備份檔案已下載完成，再按確定永久刪除 ${rows.length} 個產品。\n\n此操作沒有一鍵復原，請確保沒有其他人同時修改該廠牌產品或進行庫存／採購作業。`)) return;
+        for (let offset=0; offset<rows.length; offset+=200) {
+            if (!canDeleteProductMaster()) throw new Error('管理員權限已變更，已停止刪除。');
+            const slice = rows.slice(offset,offset+200);
+            const batch = db.batch();
+            slice.forEach(row=>{batch.delete(db.collection('products').doc(row.id));batch.delete(db.collection('productCosts').doc(row.id));});
+            button.textContent = `刪除中 ${deletedCount}/${rows.length}…`;
+            await batch.commit();
+            slice.forEach(row=>deletedIds.add(row.id));
+            deletedCount += slice.length;
+        }
+        alert(`已刪除「${brand}」${deletedCount} 個產品及標準成本。廠牌設定與歷史單據保留，可重新上傳修正後的價格表。\n請保存下載的備份；目前沒有一鍵復原功能。`);
+    } catch (err) {
+        alert(`廠牌刪除中斷，已刪除 ${deletedCount} 個產品：${err.message}\n尚未完成的資料保留；可重新選擇廠牌處理剩餘產品，請保留原備份。`);
+    } finally {
+        if (deletedIds.size) {
+            priceList = priceList.filter(item=>!deletedIds.has(item.productId || stableProductId(item)));
+            productManagementResults = productManagementResults.filter(item=>!deletedIds.has(item.productId || item.id));
+            deletedIds.forEach(id=>{productManagementSelection.delete(id);purchaseCostCache.delete(id);});
+            visibleProductCostCache.clear();
+            refreshPriceDatalists();
+            renderProductManagementResults();
+            markMainPageDirty('products');
+        }
+        brandProductDeleteRunning = false;
+        button.textContent = '刪除整個廠牌的產品';
+        await loadProductManagementOverview();
+        renderProductManagementOverview();
+        if (deletedIds.size && productBrandBrowseCurrent) reloadCurrentProductBrand();
+    }
 };
 
 function renderBrandAliasManager() {
@@ -21768,6 +21840,11 @@ window.handleProductCostExcelUpload = async function(input) {
 window.handlePriceExcelUpload = async function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
+    if (brandProductDeleteRunning) {
+        alert('正在刪除廠牌產品，請完成後再匯入。');
+        input.value = '';
+        return;
+    }
     if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser')) {
         alert('只有管理員或採購可以匯入 Product Master。');
         input.value = '';
