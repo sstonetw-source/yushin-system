@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261004-4">
+        <link rel="stylesheet" href="styles.css?v=20261004-5">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -148,7 +148,7 @@
         <div class="modal product-360-modal" role="dialog" aria-modal="true" aria-labelledby="product360Title">
             <div class="product-360-header">
                 <div>
-                    <h3 id="product360Title">Product 360°</h3>
+                    <h3 id="product360Title">庫存狀態</h3>
                     <p>同一個產品的主檔、庫存、採購與近期交易集中查看。</p>
                 </div>
                 <button type="button" class="btn-secondary" onclick="closeProduct360()">關閉</button>
@@ -162,7 +162,7 @@
     <!-- ============ Forecast 系統 ============ -->
 <div id="forecast-system" class="content-section">
     <div class="toolbar no-print forecast-section-header">
-        <button type="button" onclick="openForecastModal()">＋ 新增</button>
+        <button type="button" onclick="openForecastModal()">新增 Forecast</button>
         <button
             type="button"
             class="forecast-stage-info-trigger"
@@ -223,7 +223,7 @@
 
     <button
         id="forecastLoadMoreBtn"
-        class="btn-secondary no-print"
+        class="no-print btn-secondary"
         style="display:none;"
         onclick="loadForecasts(false)"
     >
@@ -467,7 +467,7 @@
       </div>
       <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div>
       <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
-      <button id="inventoryLoadMoreBtn" class="btn-secondary no-print" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
+      <button id="inventoryLoadMoreBtn" class="no-print btn-secondary" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
       <h3>待建檔品項</h3>
       <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>在途數量</th><th>供應商</th><th>狀態</th></tr></thead><tbody id="pendingInventoryBody"></tbody></table></div>
       <div class="empty-hint" id="pendingInventoryEmptyHint" style="display:none;">目前沒有待建檔品項。</div>
@@ -655,7 +655,7 @@
         </div>
 
         <div class="no-print quote-primary-actions" style="text-align: center; margin-top: 25px;">
-            <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">📄 匯出 PDF（自動同步雲端）</button>
+            <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;" class="btn-secondary">📄 匯出 PDF（自動同步雲端）</button>
             <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
         </div>
@@ -709,7 +709,7 @@
             <div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張為比價用；產生三估單後會把當時設定與第一張估價內容一併保存在估價單紀錄，可從全部／我的估價單再次調出。</div>
             <div class="eq-modal-close-row">
                 <button type="button" class="btn-secondary" onclick="closeThreeQuoteDialog()">取消</button>
-                <button type="button" id="threeQuotePrintBtn" onclick="printThreeQuotes()">匯出三頁 PDF</button>
+                <button type="button" id="threeQuotePrintBtn" onclick="printThreeQuotes()" class="btn-secondary">匯出三頁 PDF</button>
             </div>
         </div>
     </div>
@@ -851,7 +851,7 @@
                     <input type="date" id="exportStartDate">
                     <span>至</span>
                     <input type="date" id="exportEndDate" aria-label="匯出結束日期">
-                    <button type="button" onclick="exportOrdersByDate()">匯出 Excel（供採購下單）</button>
+                    <button type="button" onclick="exportOrdersByDate()" class="btn-secondary">匯出 Excel（供採購下單）</button>
                 </div>
             </details>
         </div>
@@ -892,9 +892,6 @@
 
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
-        <div class="module-header no-print">
-            <button type="button" id="purchaseDirectOrderBtn" onclick="openDirectStockPurchase()">＋ 直接訂貨</button>
-        </div>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
             <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">採購單</button>
@@ -924,16 +921,19 @@
             </div>
             <span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span>
         </div>
+        <section id="purchaseDirectPanel" class="panel no-print purchase-function-panel" style="display:none;">
+            <div class="purchase-section-heading"><strong>直接採購</strong><p>一般備貨或其他用途，建立成功後自動列入待到貨。</p></div>
+            <button type="button" id="purchaseDirectOrderBtn" onclick="openDirectStockPurchase()">直接採購</button>
+        </section>
         <div class="panel no-print purchase-replenishment-panel" id="purchaseReplenishmentPanel" style="display:none;">
             <div class="purchase-replenishment-heading">
                 <div>
                     <strong>安全庫存補貨</strong>
-                    <p>依可用與在途庫存計算建議補貨量，可帶入採購單後調整數量。一般備貨或其他用途可直接訂貨。</p>
+                    <p>依可用與在途庫存計算建議補貨量，可帶入採購單後調整數量。建立採購單後，自動列入待到貨。</p>
                     <div id="purchaseReplenishmentStatus">自動檢查中…</div>
                 </div>
                 <div class="purchase-replenishment-actions">
                     <span class="order-progress-badge">自動更新</span>
-                    <button type="button" onclick="openDirectStockPurchase()">＋ 建立空白採購單</button>
                 </div>
             </div>
             <div id="purchaseReplenishmentDetails" class="table-wrap purchase-replenishment-details">
@@ -944,7 +944,7 @@
             </div>
         </div>
 
-        <div id="purchasePendingPanel">
+        <div id="purchasePendingPanel" class="panel purchase-function-panel">
             <div class="purchase-section-heading no-print">
                 <strong>業務訂單需求</strong>
                 <span>只處理客戶訂單中需要採購的品項。</span>
@@ -1047,7 +1047,7 @@
             <div id="orderDraftRecoveryBanner" class="inventory-summary-note" style="display:none;margin:0 0 12px;padding:10px 12px;border:1px solid #d5e1ec;border-radius:8px;background:#f4f8fc;">
                 <div id="orderDraftRecoveryMessage" style="line-height:1.5;"></div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                    <button type="button" onclick="restoreSavedOrderDraftFromBanner()">恢復未完成訂單</button>
+                    <button type="button" onclick="restoreSavedOrderDraftFromBanner()" class="btn-secondary">恢復未完成訂單</button>
                     <button type="button" id="discardOrderDraftBtn" class="btn-secondary" onclick="discardSavedOrderDraftFromBanner()">放棄這次重試</button>
                 </div>
             </div>
@@ -1257,7 +1257,7 @@
                     <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
                     <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
                 </div>
-                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 匯出 PDF（自動同步雲端）</button>
+                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 建立採購單並下載 PDF</button>
             </div>
         </div>
     </div>
@@ -1288,10 +1288,10 @@
         <div class="sub-nav no-print">
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
-            <div class="sub-tab" id="admin-sub-products" onclick="switchAdminTab('products', this); if (typeof updatePendingProductMasterButton === 'function') updatePendingProductMasterButton();">產品管理</div>
+            <div class="sub-tab" id="admin-sub-products" onclick="switchAdminTab('products', this); if (typeof updatePendingProductMasterButton === 'function') updatePendingProductMasterButton();">📦 產品管理</div>
             <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-warehouses" onclick="switchAdminTab('warehouses', this)">🏬 倉庫管理</div>
-            <div class="sub-tab" id="admin-sub-health" onclick="switchAdminTab('health', this)">資料健康</div>
+            <div class="sub-tab" id="admin-sub-health" onclick="switchAdminTab('health', this)">🩺 資料健康</div>
             <div class="sub-tab" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">🔄 人員異動交接</div>
             <div class="sub-tab" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">🗄️ 資料庫管理</div>
             <span id="systemVersionLabel" class="no-print" style="margin-left:auto;align-self:center;font-size:11px;color:#777;white-space:nowrap;"></span>
@@ -1313,23 +1313,21 @@
             <div class="panel">
                 <h3 style="margin-top:0;">產品管理</h3>
                 <p style="font-size:12px;color:#666;margin:6px 0 14px;">
-                    Product Master 的新增、待補、停用與批次匯入集中在這裡；一般「產品」頁只負責搜尋、依廠牌瀏覽與加入估價單／訂單。
+                    上傳／移除整個廠牌的 Product Master，或新增單個產品。待補主檔請到「資料健康」查看。
                 </p>
-                <section aria-label="廠牌與匯入批量管理"><h3>已建檔廠牌／匯入批次</h3><p>選擇廠牌或批次後可預覽產品並批量停用／恢復；保留歷史單據。舊資料沒有匯入批次，新匯入才會記錄。批次顯示產品最近一次匯入，不提供覆寫前版本還原。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="loadProductManagementOverview(true)"></select><button onclick="bulkSetProductActive(false,this)">停用勾選產品</button><button class="btn-secondary" onclick="bulkSetProductActive(true,this)">恢復勾選產品</button></div><div class="table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="全選目前預覽" onchange="document.querySelectorAll('#productOverviewBody input[type=checkbox]').forEach(el=>el.checked=this.checked)"></th><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th><th>最近匯入檔案</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="loadProductManagementOverview(false)">載入更多產品</button></section>
-                <div class="toolbar no-print"><button id="deleteBrandProductsBtn" type="button" class="btn-danger" disabled onclick="deleteEntireBrandProducts(this)">刪除整個廠牌的產品</button><span>請先選擇單一廠牌；包含未顯示及已停用產品。刪除前檢查作業關聯並下載備份，產品與標準成本會永久刪除。</span></div>
+                <section aria-label="廠牌與匯入批量管理"><h3>廠牌 Product Master</h3><p>選擇廠牌查看主檔；下方可上傳標準產品檔，或新增單個產品。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="loadProductManagementOverview(true)"></select></div><details><summary>查看產品清單</summary><div class="table-wrap"><table><thead><tr><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="loadProductManagementOverview(false)">載入更多產品</button></details></section>
+                <div class="toolbar no-print"><button id="deleteBrandProductsBtn" type="button" class="btn-danger" disabled onclick="deleteEntireBrandProducts(this)">刪除整個廠牌的產品</button><span>請先選擇單一廠牌；包含未顯示及已停用產品。刪除前檢查作業關聯並下載備份，無關聯產品與成本會刪除；有單據或庫存關聯的產品保留並停用。</span></div>
                 <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
             <!-- Product Master 管理（舊稱，保留供回歸測試辨識） -->
             <div class="product-management-tools-title">產品管理</div>
             <div class="product-management-tools-actions">
-                <button type="button" id="createProductMasterBtn" class="btn-secondary" style="display:none;" onclick="openNewProductMasterEditor()">＋ 新增產品</button>
-                <button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補產品</button>
-                <button type="button" id="ignoredPendingProductBtn" class="btn-secondary" style="display:none;" onclick="openIgnoredPendingProducts()">已移除待補</button>
+                <button type="button" id="createProductMasterBtn" class="btn-secondary" style="display:none;" onclick="openNewProductMasterEditor()">新增單個 Product Master</button>
                 <label id="productManagementInactiveWrap" class="product-management-toggle" style="display:none;"><input type="checkbox" id="productManagementShowInactive" onchange="if(productBrandBrowseCurrent){reloadCurrentProductBrand();}else if(document.getElementById('productManagementSearch').value.trim().length>=2){searchProductManagement();}"> 顯示已停用</label>
             </div>
             <div class="product-management-tools-note">正式產品以 Product ID 管理；相同貨號若跨不同廠牌，系統會要求先確認廠牌，不會猜錯產品。搜尋產品後可直接按「編輯」修改主檔；一般錯誤請優先「停用」，永久刪除僅限管理員。</div>
 
             <details id="productBatchMaintenance" class="product-import-details" style="display:none;">
-                <summary>批次匯入</summary>
+                <summary>上傳廠牌 Product Master</summary>
                 <div class="product-import-card">
                     <div class="product-import-actions">
                         <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
@@ -1367,15 +1365,15 @@
                 </div>
                 <div id="syncBrandsFromProductsStatus" style="font-size:12px;color:#666;margin:4px 0 10px;"></div>
                 <div class="stat-brand-manager">
-                    <div><h4>獨立統計廠牌</h4><div id="keyStatisticBrands"></div></div>
-                    <div>
-                        <h4>其他廠牌（合併計算）</h4>
+                    <details open><summary>獨立統計廠牌</summary><div id="keyStatisticBrands"></div></details>
+                    <details open>
+                        <summary>其他廠牌（合併計算）</summary>
                         <div class="stat-brand-search-tools">
                             <input type="search" id="otherStatisticBrandSearch" placeholder="搜尋廠牌" oninput="renderOtherStatisticBrands()">
                             <small id="otherStatisticBrandCount"></small>
                         </div>
                         <div id="otherStatisticBrands"></div>
-                    </div>
+                    </details>
                 </div>
                 <div class="stat-brand-add">
                     <input type="text" id="newStatisticBrandName" placeholder="手動新增廠牌（沒有 Product Master 時使用）">
@@ -1418,16 +1416,16 @@
                 <select id="salesStatsBrandFilter" aria-label="廠牌" onchange="renderAdminStatistics()"><option value="">全部廠牌</option></select>
                 <select id="salesStatsLineFilter" aria-label="產品線" onchange="renderAdminStatistics()"><option value="">全部產品線</option></select>
                 <select id="salesStatsTypeFilter" aria-label="產品類型" onchange="renderAdminStatistics()"><option value="">全部類型</option></select>
-                <button type="button" onclick="exportTradeAnalysis()">匯出全部明細 Excel</button>
+                <button type="button" onclick="exportTradeAnalysis()" class="btn-secondary">匯出全部明細 Excel</button>
             </div>
-            <p class="inventory-summary-note">已進貨、已銷貨依所選期間的實際交易日期；待到貨、待送貨與庫存為目前數字。銷售為含稅金額，採購與庫存按紀錄成本計算。</p>
+            <p class="inventory-summary-note">進＝實際收貨；銷＝實際送貨，退貨扣回。下訂與核銷不計入進、銷。已進貨、已銷貨依所選期間的實際交易日期；待到貨、待送貨與庫存為目前數字。銷售為含稅金額，採購與庫存按紀錄成本計算。</p>
             <p id="tradeAnalysisStatus" role="status" aria-live="polite"></p>
             <p id="tradeAnalysisScope" class="inventory-summary-note"></p>
             <div class="sales-stat-cards admin-overview-cards trade-analysis-cards">
                 <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('incoming')"><span>待到貨採購金額</span><strong id="invAnalysisIncoming">讀取中…</strong><small>目前全部未到貨餘額・點選明細</small></button>
-                <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('purchases')"><span>已進貨金額</span><strong id="invAnalysisPurchases">讀取中…</strong><small>期間實際到貨成本・點選明細</small></button>
+                <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('purchases')"><span>已進貨（收貨）金額</span><strong id="invAnalysisPurchases">讀取中…</strong><small>期間實際到貨成本・點選明細</small></button>
                 <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('pending')"><span>待送貨訂單金額</span><strong id="invAnalysisPending">讀取中…</strong><small>目前全部未送貨餘額・點選明細</small></button>
-                <button type="button" class="sales-stat-card sales-stat-card-total" onclick="openTradeAnalysisDetail('sales')"><span>已銷貨金額</span><strong id="invAnalysisSales">讀取中…</strong><small>期間送貨減退貨・點選明細</small></button>
+                <button type="button" class="sales-stat-card sales-stat-card-total" onclick="openTradeAnalysisDetail('sales')"><span>已銷貨（送貨）金額</span><strong id="invAnalysisSales">讀取中…</strong><small>期間送貨減退貨・點選明細</small></button>
                 <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('stock')"><span>目前庫存金額</span><strong id="invAnalysisStockValue">讀取中…</strong><small>現有批次餘量 × 成本・點選明細</small></button>
             </div>
             <div class="panel" style="overflow-x:auto;">
@@ -1440,7 +1438,7 @@
                 <h3 id="tradeAnalysisDetailTitle"></h3>
                 <p id="tradeAnalysisDetailSummary"></p>
                 <div class="trade-analysis-detail-scroll"><table><thead id="tradeAnalysisDetailHead"></thead><tbody id="tradeAnalysisDetailBody"></tbody></table></div>
-                <div class="eq-modal-close-row"><button type="button" id="tradeAnalysisExport" onclick="exportTradeAnalysisDetail()">匯出此明細 Excel</button><button type="button" class="btn-secondary" onclick="closeTradeAnalysisDetail()">關閉</button></div>
+                <div class="eq-modal-close-row"><button type="button" id="tradeAnalysisExport" onclick="exportTradeAnalysisDetail()" class="btn-secondary">匯出此明細 Excel</button><button type="button" class="btn-secondary" onclick="closeTradeAnalysisDetail()">關閉</button></div>
             </div>
         </div>
 
@@ -1509,6 +1507,7 @@
                     這是唯讀檢查，不會修改或刪除資料；因為會讀取多個集合，不會在登入時自動執行。
                 </p>
                 <div class="toolbar no-print" style="display:block;margin-top:12px;">
+                    <div class="toolbar"><button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補產品</button><button type="button" id="ignoredPendingProductBtn" class="btn-secondary" style="display:none;" onclick="openIgnoredPendingProducts()">已移除待補</button></div><div id="pendingProductHealthStatus" role="status"></div><div id="pendingProductHealthResults"></div>
                     <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">執行資料健康檢查</button>
                     <span style="display:block;margin-top:7px;font-size:12px;color:#666;">
                         會列出 Product Master 缺少廠牌／貨號／品名／建議售價、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
@@ -1523,7 +1522,7 @@
         <div id="admin-storage" class="admin-panel" style="display:none;">
             <h4 style="margin-top:0;">資料庫備份</h4>
             <div class="toolbar no-print" style="display:block;">
-                <button id="databaseBackupBtn" onclick="downloadDatabaseBackup()">⬇️ 下載資料庫備份</button>
+                <button id="databaseBackupBtn" onclick="downloadDatabaseBackup()" class="btn-secondary">⬇️ 下載資料庫備份</button>
                 <button type="button" id="databaseBackupUploadBtn" class="btn-secondary" onclick="document.getElementById('databaseBackupFile').click()">⬆️ 上傳備份檢查</button>
                 <input id="databaseBackupFile" type="file" accept=".json,application/json" style="display:none" onchange="previewDatabaseBackupUpload(this)">
                 <button type="button" id="databaseBackupRestoreBtn" class="btn-secondary" onclick="restoreMissingDatabaseBackupDocuments()" style="display:none">補回缺少的文件</button>
@@ -1656,7 +1655,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261004-33"></script>
+    <script src="app.js?v=20261004-34"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

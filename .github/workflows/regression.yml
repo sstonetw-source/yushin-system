@@ -68,7 +68,7 @@ jobs:
         run: node --test tests/v2-purchase-email-core.test.js
       - name: Prelaunch regression tests
         if: always()
-        run: node --test tests/prelaunch-fixes.test.js tests/auth-startup.test.js tests/backup-upload.test.js
+        run: node --test tests/launch-workflow.test.js tests/prelaunch-fixes.test.js tests/auth-startup.test.js tests/backup-upload.test.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator

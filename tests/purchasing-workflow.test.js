@@ -30,11 +30,11 @@ const validate = vm.runInNewContext(`${syncGuard}\n${validation}\nassertPurchase
     }).remainingToOrderQty
 });
 
-test('purchase order action always uses the one-click print and cloud-sync label', () => {
+test('purchase order action distinguishes creation from downloading an existing document', () => {
     const start = app.indexOf('function updatePoSaveButton()');
     const end = app.indexOf('function poIncomingKey', start);
     const source = app.slice(start, end);
-    assert.match(source, /📄 匯出 PDF（自動同步雲端）/);
+    assert.match(source, /poEditingId \? '📄 下載 PDF' : '📄 建立採購單並下載 PDF'/);
     assert.doesNotMatch(source, /重試同步在途庫存/);
 });
 
@@ -223,7 +223,7 @@ test('PO PDF export starts from the user action without browser print', () => {
 });
 
 test('direct stock PO opens before supplier and warehouse masters finish loading', () => {
-    const source = app.match(/window\.openDirectStockPurchase = async function\(\) \{[\s\S]*?\n\};/)?.[0];
+    const source = app.match(/window\.openDirectStockPurchase = async function\(product = null\) \{[\s\S]*?\n\};/)?.[0];
     assert.ok(source);
     const openIndex = source.indexOf("poModalOverlay').classList.add('active')");
     const awaitIndex = source.indexOf('await loadSupplierWarehouseMasters()');

@@ -666,7 +666,7 @@ test('sales statistics uses a bounded cached query and ignores stale roles', () 
 
 test('purchase modal chooses a company that does not silently filter every item', () => {
     const start = appSource.indexOf('function bestPurchaseOrderCompany(');
-    const end = appSource.indexOf('\n}\n\nwindow.openDirectStockPurchase', start) + 2;
+    const end = appSource.indexOf('\n}\n\nwindow.addProductManagementToPurchase', start) + 2;
     assert.ok(start >= 0 && end > start);
     const context = {
         isCompanyBrandAllowed: (company, brand) => ({
@@ -1865,7 +1865,7 @@ test('Product Management is the single daily Product Import entry', () => {
     assert.doesNotMatch(indexSource, /id="admin-prices"/);
     assert.match(indexSource, /id="productManagementTools"/);
     assert.match(indexSource, /id="productBatchMaintenance"/);
-    assert.match(indexSource, />批次匯入</);
+    assert.match(indexSource, />上傳廠牌 Product Master</);
     assert.match(indexSource, /下載標準範本/);
     assert.match(indexSource, /查看欄位規則/);
     assert.match(indexSource, /只處理本次檔案中的品項/);
@@ -4283,8 +4283,9 @@ test('Product page stays mobile-safe while Product Management lives in admin', (
     assert.doesNotMatch(productSource,/id="productManagementTools"/);
     assert.ok(adminProductStart>=0&&adminAgencyStart>adminProductStart);
     assert.match(adminProductSource,/id="productManagementTools"/);
-    assert.match(adminProductSource,/新增產品/);
-    assert.match(adminProductSource,/待補產品/);
+    assert.match(adminProductSource,/新增單個 Product Master/);
+    assert.doesNotMatch(adminProductSource,/id="pendingProductMasterBtn"/);
+    assert.match(indexSource.slice(indexSource.indexOf('id="admin-health"')),/id="pendingProductMasterBtn"/);
     assert.match(adminProductSource,/id="priceUploadProgress"/);
 
     assert.match(cssSource,/#product-system\s*\{[\s\S]*?overflow-x:hidden/);
@@ -4799,7 +4800,7 @@ test('Product Management is admin-only while guarded permanent delete remains av
     const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);
     assert.match(rowSource,/openProductMasterEditor/);
-    assert.match(rowSource,/setProductMasterActive/);
+    assert.doesNotMatch(rowSource,/onclick="setProductMasterActive/);
     assert.match(rowSource,/deleteProductMaster/);
     assert.match(rowSource,/canDeleteProductMaster/);
     assert.match(rowSource,/canEditPage\('quote\.create'\)/);
@@ -4851,7 +4852,7 @@ test('sales can use Product Master for quote and order while Product Master itse
 
 test('Product 360 shows stock procurement and recent commercial activity without full database scans', () => {
     assert.match(indexSource,/id="product360Overlay"/);
-    assert.match(indexSource,/Product 360°/);
+    assert.match(indexSource,/id="product360Title">庫存狀態/);
     const rowStart=appSource.indexOf('function productManagementRow(product)');
     const rowEnd=appSource.indexOf('\nlet product360LoadGeneration',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);
@@ -4897,14 +4898,15 @@ test('Brand Master drives brand dropdowns while statistics grouping stays indepe
 });
 
 
-test('other statistic brands stay collapsed until searched', () => {
+test('all statistic brands are selectable inside collapsible lists', () => {
     assert.match(indexSource, /id="otherStatisticBrandSearch"/);
     assert.match(indexSource, /id="otherStatisticBrandCount"/);
     const start=appSource.indexOf('function renderOtherStatisticBrands()');
     const end=appSource.indexOf('\nwindow.promoteStatisticBrand',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/未搜尋時不展開完整清單/);
-    assert.match(source,/slice\(0, 20\)/);
+    assert.doesNotMatch(source,/slice\(0, 20\)|if \(!query\)/);
+    assert.match(source,/matches\.map/);
+    assert.match(indexSource,/<details open>\s*<summary>其他廠牌/);
 });
 
 test('brand settings can sync missing brands from Product Master without changing business settings', () => {

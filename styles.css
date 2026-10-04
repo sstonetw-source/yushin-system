@@ -3206,3 +3206,29 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .document-download-settings span { color: #53657a; font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 900px) { #purchaseBusinessStages { grid-template-columns: repeat(3,minmax(0,1fr)); } }
 @media (max-width: 520px) { #purchaseBusinessStages { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+/* Shared action semantics: primary blue, supporting grey, destructive red. */
+button.btn-secondary, button.status-ok, button.status-soon {
+    background:#626970 !important; color:#fff !important;
+}
+button.btn-danger, button.danger-menu-item, .danger-menu-item {
+    background:#c62828 !important; color:#fff !important;
+}
+button:disabled { opacity:.48; cursor:not-allowed; }
+.action-button-group, .product-management-actions, .order-compact-actions {
+    gap:8px; align-items:center;
+}
+.action-button-group { display:flex; flex-wrap:wrap; }
+.action-button-group button, .product-management-actions button, .order-compact-actions button {
+    min-height:36px; margin:0; white-space:nowrap;
+}
+#forecastTable td.forecast-actions { vertical-align:middle; }
+.purchase-function-panel, .purchase-replenishment-panel { margin:16px 0; border:1px solid #d7e1ec; border-radius:12px; }
+.purchase-section-heading, .purchase-replenishment-heading { align-items:flex-start; }
+.purchase-section-heading strong, .purchase-replenishment-heading strong { font-size:18px; color:#003366; }
+.purchase-section-heading p, .purchase-section-heading span, .purchase-replenishment-heading p { font-size:13px; color:#626970; margin:6px 0 12px; }
+.stat-brand-manager details { min-width:0; }
+.stat-brand-manager summary { cursor:pointer; font-weight:600; color:#003366; padding:10px 0; }
+.dispatch-list-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.dispatch-list-fields label { display:flex; flex-direction:column; gap:5px; }
+@media(max-width:768px) { .dispatch-list-fields { grid-template-columns:1fr; } }
