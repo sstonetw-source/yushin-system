@@ -15,7 +15,7 @@ function setup(storage=new Map()){
         supplyReceivingCache:[{id:'S1',itemCode:'A'},{id:'S2',itemCode:'B'}],pendingSupplyCache:[],
         inventoryReceivingVisible:false,purchasingReceivingLoadPromise:null,activeReceivingSupplyLoadPromise:null,markMainPageDirty:()=>{},canAccessPage:()=>false,getDataScope:()=> 'none',
         loadInventory:async()=>{},loadPurchasingReceivingQueue:async()=>{},refreshAffectedOrderCaches:async ids=>refreshes.push(ids),
-        escapeHtml:s=>s,escapeAttr:s=>s,showActionFeedback:(...args)=>notices.push(args),alert:s=>notices.push(['alert',s]),
+        escapeHtml:s=>s,escapeAttr:s=>s,inlineJsValue:s=>JSON.stringify(String(s)),showActionFeedback:(...args)=>notices.push(args),alert:s=>notices.push(['alert',s]),
         ensureReceiptOperationId:id=>'OP-'+id,clearReceiptOperationId:(...args)=>calls.push({clear:args}),
         closePoReceiptBatch:()=>{calls.push({closed:true});x.poReceiptTargetId='';selected=[];},
         receiveSupplyOrderRecord:(...args)=>{const d=deferred();calls.push({args,...d});return d.promise;},console

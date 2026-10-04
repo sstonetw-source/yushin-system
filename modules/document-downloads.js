@@ -28,6 +28,7 @@
         } finally { db.close(); }
     }
     function render() {
+        root.document?.querySelectorAll('[data-download-folder-button]').forEach(el=>{el.hidden=!supported();});
         root.document?.querySelectorAll('[data-download-folder]').forEach(el => {
             const handle = handles.get(el.dataset.downloadFolder);
             el.textContent = handle ? `下載資料夾：${handle.name}` : supported() ? '使用瀏覽器預設下載' : '此瀏覽器使用預設下載；可在瀏覽器設定調整位置';

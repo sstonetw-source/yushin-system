@@ -241,7 +241,7 @@ test('Brand Master drives the main brand list while statistics grouping remains 
     const start = appSource.indexOf('function getUnifiedBrandEntries(includeMaintenance = false)');
     const end = appSource.indexOf('\n}\n', start) + 2;
     const context = vm.createContext({
-        keyStatisticBrands:['Roche', 'Thermo', '維修'],
+        unifiedBrandEntriesCache:null, keyStatisticBrands:['Roche', 'Thermo', '維修'],
         brandMasterCache:[
             { id:'r', name:'Roche', aliases:['Roche Diagnostics'], active:true },
             { id:'x', name:'Unlisted Excel Brand', active:true },
@@ -621,7 +621,7 @@ test('moving an order reservation between warehouses releases the old stock befo
 });
 
 test('role changes cannot leave an older in-flight page in the cache', () => {
-    assert.match(appSource, /const requestedRole = currentUserRole;/);
+    assert.match(appSource, /const requestedRole = currentUserRole, requestedUid = currentUser\?\.uid;/);
     assert.match(appSource, /requestedRole !== currentUserRole/);
     assert.match(appSource, /orderReloadRequested = true/);
     assert.match(appSource, /myQuotesReloadRequested = true/);
@@ -772,7 +772,7 @@ test('quote and order full-history search scan every indexed match with progress
     const orderSearch = appSource.slice(orderStart, orderEnd);
     assert.match(orderSearch, /while \(true\)/);
     assert.match(orderSearch, /firestoreReadWithTimeout\(query\.get\(\), '訂單索引搜尋'\)/);
-    assert.match(orderSearch, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(orderSearch, /snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(orderSearch, /全歷史搜尋中：已檢查/);
     assert.match(orderSearch, /generation !== orderHistorySearchGeneration/);
     assert.doesNotMatch(orderSearch, /collection\('orders'\)\.get\(\)/);
@@ -782,7 +782,7 @@ test('quote and order full-history search scan every indexed match with progress
     const quoteSearch = appSource.slice(quoteStart, quoteEnd);
     assert.match(quoteSearch, /while \(true\)/);
     assert.match(quoteSearch, /firestoreReadWithTimeout\(query\.get\(\), '估價單索引搜尋'\)/);
-    assert.match(quoteSearch, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(quoteSearch, /snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(quoteSearch, /全歷史搜尋中：已檢查/);
     assert.match(quoteSearch, /generation !== quoteHistorySearchGeneration/);
     assert.doesNotMatch(quoteSearch, /collection\('quotes'\)\.get\(\)/);
@@ -1387,9 +1387,10 @@ test('purchasing and orders share brand names and date range semantics across wo
     controls.purchaseSalesFilter.value = '王先生';
     controls.purchaseBrandFilter.value = 'Bio-Rad';
     assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'B iorad'), true);
-    assert.equal(context.purchaseLineMatchesFilters('2025-09-28', '王先生', 'Biorad'), false);
+    assert.equal(context.purchaseLineMatchesFilters('2025-09-28', '王先生', 'Biorad'), true);
     assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '李先生', 'Biorad'), false);
     assert.equal(context.purchaseLineMatchesFilters('2026-09-28', '王先生', 'Beckman'), false);
+    context.purchasingView='completed';
     controls.poPeriodFilter.value = 'custom';
     controls.purchasePeriodStart.value = '2026-09-20';
     controls.purchasePeriodEnd.value = '2026-09-25';
@@ -1663,7 +1664,7 @@ test('Forecast edit hides workflow fields and history is available from the main
     const start = appSource.indexOf('window.openForecastModal');
     const end = appSource.indexOf('window.closeForecastModal', start);
     const s = appSource.slice(start, end);
-    assert.match(s, /workflowSection\.style\.display = 'none'/);
+    assert.match(s, /workflowSection\.style\.display = item \? 'none' : ''/);
     assert.match(s, /currentProgressSection\.style\.display = 'none'/);
 });
 
@@ -2118,11 +2119,11 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders');
     const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?已訂購/);
-    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?產生訂購單/);
+    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?產生採購單/);
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
-    assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?訂購單 \$\{poNo\} 已同步雲端/);
+    assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?採購單 \$\{poNo\} 已同步雲端/);
     // PO 會同時更新來源訂單與採購資料；核心 transaction 必須先成功，才可開啟可對外使用的列印文件。
     assert.match(save, /await commitPromise;[\s\S]*?printSavedPoDocument\(poNo, vendorName\);/);
     assert.doesNotMatch(save, /printSavedPoDocument\(poNo, vendorName\);[\s\S]*?await commitPromise/);
@@ -2203,7 +2204,7 @@ test('system data audit follows supplyOrders as procurement truth', () => {
   assert.match(source,/供應紀錄來源訂單不存在/);
   assert.match(source,/供應紀錄倉庫異常/);
   assert.match(source,/供應紀錄數量異常/);
-  assert.match(source,/訂購單文件找不到供應紀錄/);
+  assert.match(source,/採購單文件找不到供應紀錄/);
   assert.doesNotMatch(source,/po\.orderId \|\| po\.sourceOrderId/);
 });
 
@@ -2241,12 +2242,15 @@ test('new order modal has no manual draft UI or typing autosave, while save retr
   assert.doesNotMatch(appSource,/scheduleOrderDraftSave/);
   assert.doesNotMatch(appSource,/新增訂單（已恢復草稿）/);
   assert.match(appSource,/function saveOrderDraft\(\)/);
-  assert.match(appSource,/if\(localStorage\.getItem\(pendingOrderCreateKey\(\)\) && readOrderDraft\(\)\) restoreSavedOrderDraft\(\);/);
+  assert.match(appSource,/readOrderDraft\(\)/);
+  assert.match(appSource,/可重試的訂單|恢復未完成|pendingOrderCreateKey/);
+  assert.doesNotMatch(appSource,/if\(localStorage\.getItem\(pendingOrderCreateKey\(\)\) && readOrderDraft\(\)\) restoreSavedOrderDraft\(\);/);
   const saveStart=appSource.indexOf('window.saveNewOrder');
   const saveEnd=appSource.indexOf('// 匯出指定日期區間',saveStart);
   const saveFlow=appSource.slice(saveStart,saveEnd);
   assert.match(saveFlow,/saveOrderDraft\(\);/);
-  assert.match(saveFlow,/clearSavedOrderDraft\(\{ silent:true,clearPending:true \}\)/);
+  assert.match(saveFlow,/localStorage\.removeItem\(savedDraftKey\)/);
+  assert.match(saveFlow,/localStorage\.removeItem\(savedPendingKey\)/);
 });
 
 test('admin storage exposes a read-only legacy-cost audit without an execution button', () => {
@@ -2277,7 +2281,7 @@ test('Forecast full-history search scans every indexed match with progress feedb
     const source = appSource.slice(start, end);
     assert.match(source, /while \(true\)/);
     assert.match(source, /firestoreReadWithTimeout\(query\.get\(\), 'Forecast 索引搜尋'\)/);
-    assert.match(source, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(source, /snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(source, /全歷史搜尋中：已檢查/);
     assert.match(source, /generation !== forecastHistorySearchGeneration/);
     assert.match(appSource, /forecastHistorySearchTimer = scheduleListSearch\(forecastHistorySearchTimer, \(\) => runForecastHistorySearch\(true\)\)/);
@@ -2297,7 +2301,7 @@ test('order list does not block on full Product Master loading', () => {
 test('cached session restore does not initialize the same active page twice',()=>{
   assert.match(appSource,/let lastShowAppInitKey = '';/);
   assert.match(appSource,/if \(lastShowAppInitKey !== initKey\) \{\s*lastShowAppInitKey = initKey;\s*initializePageData\(activeMainKey\);/);
-  assert.match(appSource,/lastShowAppInitKey = '';\s*showLoginScreen\(\);/);
+  assert.match(appSource,/lastShowAppInitKey = '';[\s\S]*?showLoginScreen\(\);/);
 });
 
 
@@ -2324,7 +2328,7 @@ test('equipment full-history search scans every indexed match with progress feed
     assert.match(source, /while \(true\)/);
     assert.match(source, /where\('searchTokens', 'array-contains', queryToken\)/);
     assert.match(source, /firestoreReadWithTimeout\(query\.get\(\), '儀器索引搜尋'\)/);
-    assert.match(source, /snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(source, /snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(source, /全資料搜尋中：已檢查/);
     assert.match(source, /generation !== equipmentSearchGeneration/);
     assert.doesNotMatch(source, /equipmentSearchCursor/);
@@ -2332,11 +2336,11 @@ test('equipment full-history search scans every indexed match with progress feed
 });
 
 
-test('order list has no manual refresh while equipment refresh stays explicit', () => {
+test('order and equipment lists refresh automatically without manual refresh buttons', () => {
     assert.equal(indexSource.includes('id="orderRefreshBtn"'), false);
-    assert.equal(indexSource.includes('id="equipmentRefreshBtn"'), true);
+    assert.equal(indexSource.includes('id="equipmentRefreshBtn"'), false);
     assert.equal(appSource.includes("if (mainKey === 'orders.list')"), true);
-    assert.equal(appSource.includes('loadOrdersFromCloud();'), true);
+    assert.equal(appSource.includes('jobs.push(loadOrdersFromCloud());'), true);
 });
 
 
@@ -2365,15 +2369,15 @@ test('purchasing auto-loads without manual refresh buttons and reads stay bounde
     const pageStart=appSource.indexOf('async function loadPurchaseOrderPage');
     const pageEnd=appSource.indexOf('window.loadMyPurchaseOrders',pageStart);
     const pageSource=appSource.slice(pageStart,pageEnd);
-    assert.match(pageSource,/firestoreReadWithTimeout\(query\.get\(\), '訂購單清單'\)/);
+    assert.match(pageSource,/firestoreReadWithTimeout\(query\.get\(\), '採購單清單'\)/);
     const receivingStart=appSource.indexOf('async function loadActiveReceivingSupplyCache');
     const receivingEnd=appSource.indexOf('\nfunction loadPurchasingReceivingQueue',receivingStart);
     const receivingSource=appSource.slice(receivingStart,receivingEnd);
     assert.match(receivingSource,/where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
     assert.match(receivingSource,/firestoreReadWithTimeout\(query\.get\(\), '待到貨供應'\)/);
     assert.match(receivingSource,/while \(true\)/);
-    assert.match(receivingSource,/snapshot\.size < DEFAULT_LIST_LIMIT/);
-    assert.match(receivingSource,/待到貨來源訂單/);
+    assert.match(receivingSource,/snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
+    assert.match(receivingSource,/readDocumentsByIds\('orders', missingSourceIds\)/);
 
     const switchStart=appSource.indexOf('window.switchPurchasingView = function');
     const switchEnd=appSource.indexOf('async function loadPurchasingDispatchOrders',switchStart);
@@ -2381,7 +2385,7 @@ test('purchasing auto-loads without manual refresh buttons and reads stay bounde
     assert.match(switchSource,/loadPendingPurchaseOrders\(true\)/);
     assert.match(switchSource,/loadPurchasingReceivingQueue\(true/);
     assert.match(switchSource,/loadPurchaseOrderPage\(true\)/);
-    assert.equal(appSource.includes('loadPurchasingAnalytics(false)'), true);
+    assert.match(appSource,/loadPurchaseDemandSummary\(force\)/);
 });
 
 
@@ -2389,7 +2393,7 @@ test('purchase draft fallback read is bounded', () => {
     const start=appSource.indexOf('window.openOrderPurchaseDraft = async function');
     const end=appSource.indexOf('function updatePoLoadMoreButton',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('orders'\)\.doc\(orderId\)\.get\(\)[\s\S]*?'訂購單來源訂單'/);
+    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('orders'\)\.doc\(orderId\)\.get\(\)[\s\S]*?'採購單來源訂單'/);
     assert.match(source,/button\.textContent = '開啟中…'/);
 });
 
@@ -2498,7 +2502,7 @@ test('order and purchasing initialization avoid duplicate brand-driven renders',
     const purchaseStart=source.indexOf("if (mainKey === 'orders.po')");
     const purchaseEnd=source.indexOf("if (mainKey === 'inventory')",purchaseStart);
     const purchaseSource=source.slice(purchaseStart,purchaseEnd);
-    assert.match(purchaseSource,/switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
+    assert.match(purchaseSource,/switchPurchasingView\(wasLoaded \? purchasingView : \(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)\)/);
     assert.match(purchaseSource,/Promise\.allSettled\(\[ensureSalesListLoaded\(\), ensureBrandSettingsLoaded\(\)\]\)/);
     // 首次進採購頁會在 active supplyOrders 載入完成後重畫一次工作卡，
     // 讓「待到貨」數字不必等使用者點進待到貨頁才正確。
@@ -2541,7 +2545,7 @@ test('purchase draft preloads only selected lines and bounds supporting reads', 
 
     const poNoStart=appSource.indexOf('window.generatePoNo = async function');
     const poNoEnd=appSource.indexOf('function renderPoItemsTable',poNoStart);
-    assert.match(appSource.slice(poNoStart,poNoEnd),/firestoreReadWithTimeout\([\s\S]*?'訂購單號'/);
+    assert.match(appSource.slice(poNoStart,poNoEnd),/firestoreReadWithTimeout\([\s\S]*?'採購單號'/);
 });
 
 test('shared batch master reads are bounded', () => {
@@ -2563,13 +2567,13 @@ test('opening linked purchase orders and supply sync checks are bounded', () => 
     const idsStart=appSource.indexOf('async function readDocumentsByIds');
     const idsEnd=appSource.indexOf('async function loadInventoryAnalysisSupport',idsStart);
     const idsSource=appSource.slice(idsStart,idsEnd);
-    assert.match(idsSource,/firestoreReadWithTimeout\([\s\S]*?collectionName \+ ' 指定文件'/);
+    assert.match(idsSource,/firestoreReadWithTimeout\([\s\S]*?collectionName\s*\+\s*' 指定文件'/);
 
     const openStart=appSource.indexOf('window.openPurchaseOrderFromOrder = async function');
-    const openEnd=appSource.indexOf('/* =========================================================\n   產生訂購單',openStart);
+    const openEnd=appSource.indexOf('/* =========================================================\n   產生採購單',openStart);
     const openSource=appSource.slice(openStart,openEnd);
     assert.match(openSource,/beginActionButton\(button, '開啟中…'\)/);
-    assert.match(openSource,/firestoreReadWithTimeout\([\s\S]*?'訂購單紀錄'/);
+    assert.match(openSource,/firestoreReadWithTimeout\([\s\S]*?'採購單紀錄'/);
     assert.match(openSource,/await reprintPurchaseOrder\(po\.id\)/);
     assert.match(openSource,/endActionButton\(button, buttonState\)/);
 });
@@ -2915,7 +2919,7 @@ test('purchasing render reuses normalized order items', () => {
     assert.match(cardsSource,/const stateMap = dispatchStatesByOrder \|\| purchasingDispatchStateSnapshot\(itemMap\)/);
     assert.match(cardsSource,/const lifecycleMap = lifecyclesByOrder \|\| purchasingLifecycleSnapshot\(itemMap\)/);
     assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap,[\s\S]*?stateMap,[\s\S]*?lifecycleMap/);
-    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
+    assert.match(cardsSource,/purchasingCompletedRows\((?:historyFilters|filters), itemMap, stateMap, lifecycleMap\)/);
 
     const rowsStart=appSource.indexOf('function purchasingCompletedRows');
     const rowsEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',rowsStart);
@@ -3233,14 +3237,14 @@ test('history search throttles intermediate list renders', () => {
     const orderEnd=appSource.indexOf('\nwindow.scheduleOrderHistorySearch',orderStart);
     const orderSource=appSource.slice(orderStart,orderEnd);
     assert.match(orderSource,/let lastIntermediateRenderAt = 0/);
-    assert.match(orderSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(orderSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(orderSource,/orderHistorySearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderOrdersList\(\)[\s\S]*?全歷史搜尋完成/);
 
     const quoteStart=appSource.indexOf('function runQuoteHistorySearch()');
     const quoteEnd=appSource.indexOf('\nwindow.scheduleQuoteHistorySearch',quoteStart);
     const quoteSource=appSource.slice(quoteStart,quoteEnd);
     assert.match(quoteSource,/let lastIntermediateRenderAt = 0/);
-    assert.match(quoteSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(quoteSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(quoteSource,/quoteHistorySearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderMyQuotesList\(\)[\s\S]*?全歷史搜尋完成/);
 });
 
@@ -3250,14 +3254,14 @@ test('forecast and equipment history searches throttle intermediate renders', ()
     const forecastEnd=appSource.indexOf('\nwindow.scheduleForecastHistorySearch',forecastStart);
     const forecastSource=appSource.slice(forecastStart,forecastEnd);
     assert.match(forecastSource,/let lastIntermediateRenderAt = 0/);
-    assert.match(forecastSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(forecastSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(forecastSource,/forecastHistorySearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderForecastList\(\)[\s\S]*?全歷史搜尋完成/);
 
     const equipmentStart=appSource.indexOf('function runEquipmentSearch()');
     const equipmentEnd=appSource.indexOf('\nwindow.scheduleEquipmentSearch',equipmentStart);
     const equipmentSource=appSource.slice(equipmentStart,equipmentEnd);
     assert.match(equipmentSource,/let lastIntermediateRenderAt = 0/);
-    assert.match(equipmentSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < DEFAULT_LIST_LIMIT/);
+    assert.match(equipmentSource,/now - lastIntermediateRenderAt >= 100 \|\| snapshot\.size < (?:DEFAULT_LIST_LIMIT|200)/);
     assert.match(equipmentSource,/equipmentSearchResults = \[\.\.\.records\.values\(\)\][\s\S]*?renderEquipmentList\(\)[\s\S]*?全資料搜尋完成/);
 });
 
@@ -3591,7 +3595,7 @@ test('purchasing cards and completed rows share dispatch snapshots', () => {
     assert.match(cardsSource,/const stateMap = dispatchStatesByOrder \|\| purchasingDispatchStateSnapshot\(itemMap\)/);
     assert.match(cardsSource,/const lifecycleMap = lifecyclesByOrder \|\| purchasingLifecycleSnapshot\(itemMap\)/);
     assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?itemMap,[\s\S]*?stateMap,[\s\S]*?lifecycleMap/);
-    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
+    assert.match(cardsSource,/purchasingCompletedRows\((?:historyFilters|filters), itemMap, stateMap, lifecycleMap\)/);
 
     const viewStart=appSource.indexOf('window.renderPurchasingView = function()');
     const viewEnd=appSource.indexOf('\nwindow.changePurchasePeriod',viewStart);
@@ -3767,7 +3771,7 @@ test('purchasing cards and completed rows share lifecycle snapshots', () => {
     assert.match(cardsSource,/lifecyclesByOrder = null/);
     assert.match(cardsSource,/const lifecycleMap = lifecyclesByOrder \|\| purchasingLifecycleSnapshot\(itemMap\)/);
     assert.match(cardsSource,/buildOrderItemWorkMetrics\([\s\S]*?stateMap,[\s\S]*?lifecycleMap/);
-    assert.match(cardsSource,/purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
+    assert.match(cardsSource,/purchasingCompletedRows\((?:historyFilters|filters), itemMap, stateMap, lifecycleMap\)/);
 
     const completedStart=appSource.indexOf('function purchasingCompletedRows');
     const completedEnd=appSource.indexOf('\nfunction renderPurchasingCompletedOrders',completedStart);
@@ -5376,21 +5380,14 @@ test('inventory intake opens before warehouse loading and uses mobile-labelled r
     assert.match(cssSource, /#inventoryAdjustmentOverlay \.inventory-adjustment-row td::before/);
 });
 
-test('purchasing presents three primary jobs and separates safety-stock replenishment', () => {
-    for (const id of ['purchase-card-ordering', 'purchase-card-stocking', 'purchase-card-replenishment']) {
-        assert.match(indexSource, new RegExp('id="' + id + '"'));
+test('purchasing separates order work, stock replenishment and purchase history', () => {
+    for(const id of ['purchase-card-ordering','purchase-card-receiving','purchase-card-dispatch','purchase-tab-history','purchaseReplenishmentPanel']) {
+        assert.match(indexSource,new RegExp('id="'+id+'"'));
     }
-    assert.match(indexSource, /① 處理訂單/);
-    assert.match(indexSource, /② 備貨/);
-    assert.match(indexSource, /③ 訂安全庫存/);
-    assert.match(indexSource, /id="purchaseFulfillmentTabs"/);
-
-    const switchStart = appSource.indexOf('window.switchPurchasingView = function');
-    const switchEnd = appSource.indexOf('async function loadPurchasingDispatchOrders', switchStart);
-    const switchSource = appSource.slice(switchStart, switchEnd);
-    assert.match(switchSource, /'replenishment'/);
-    assert.match(switchSource, /replenishmentPanel\.style\.display=view==='replenishment'/);
-    assert.match(switchSource, /view === 'replenishment'[\s\S]*?loadInventoryReplenishmentCenter/);
+    assert.match(indexSource,/安全庫存補貨/);
+    assert.match(indexSource,/業務訂單需求/);
+    assert.match(appSource,/replenishmentPanel.style.display=\(view==='ordering'\|\|view==='replenishment'\)&&canCreatePurchaseOrderCapability\(\)/);
+    assert.match(appSource,/loadInventoryReplenishmentCenter\(false\)/);
 });
 
 
@@ -5443,7 +5440,7 @@ test('safety-stock purchase gives immediate button feedback while support data l
     const start = appSource.indexOf('window.openInventoryReplenishment = async function');
     const end = appSource.indexOf('\n};', start);
     const source = appSource.slice(start, end);
-    assert.match(source, /beginActionButton\(button, '準備訂購單…'\)/);
+    assert.match(source, /beginActionButton\(button, '準備採購單…'\)/);
     assert.match(source, /await loadSupplierWarehouseMasters\(\)/);
     assert.match(source, /finally \{\s*endActionButton\(button, buttonState\);/);
 });

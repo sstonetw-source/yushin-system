@@ -41,10 +41,10 @@ test('purchase order action always uses the one-click print and cloud-sync label
 test('purchasing user-facing copy avoids legacy stock-order and source-order wording', () => {
     assert.doesNotMatch(html, /來源訂單日期/);
     assert.doesNotMatch(app, /原廠備貨是公司庫存採購/);
-    assert.match(html, /全部採購單則依正式訂購日期查詢/);
+    assert.match(html, /已完成與全部採購單可依日期查詢/);
     assert.match(html, /📄 匯出 PDF（自動同步雲端）/);
     assert.doesNotMatch(app, /確認品項、廠商與單價後再儲存|完成後即可儲存|檢查並儲存中/);
-    assert.match(app, /正在同步訂購單到雲端/);
+    assert.match(app, /正在同步採購單到雲端/);
 });
 
 test('purchasing has three item-level work queues and no legacy number function', () => {
@@ -57,7 +57,7 @@ test('purchasing has three item-level work queues and no legacy number function'
     assert.match(html, /id="purchaseAmountOrdering"/);
     assert.match(html, /id="purchaseAmountReceiving"/);
     assert.match(html, /id="purchaseAmountDispatch"/);
-    assert.match(app, /switchPurchasingView\(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)/);
+    assert.match(app, /switchPurchasingView\(wasLoaded \? purchasingView : \(canCreatePurchaseOrderCapability\(\) \? 'ordering' : 'receiving'\)\)/);
     assert.match(app, /function refreshPurchasingOrderCache\(reset = true, options = \{\}\)/);
     assert.match(app, /loadPendingPurchaseOrders\(true/);
     assert.match(app, /markMainPageDirty\('inventory','orders.list','orders.po','admin'\)/);
@@ -336,7 +336,7 @@ test('purchasing completed card is not capped by the visible 50-row page', () =>
     const start = app.indexOf('function renderPurchasingWorkCards(');
     const end = app.indexOf('\nfunction purchasingCompletedRows(', start);
     const source = app.slice(start, end);
-    assert.match(source, /const completed = completedRows \|\| purchasingCompletedRows\(filters, itemMap, stateMap, lifecycleMap\)/);
+    assert.match(source, /const completed = completedRows \|\| purchasingCompletedRows\((?:historyFilters|filters), itemMap, stateMap, lifecycleMap\)/);
     assert.doesNotMatch(source, /visiblePurchasingCompletedRows\(/);
 });
 
@@ -459,7 +459,7 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
 test('purchase receiving queue calculates progress from supply orders only',()=>{
     assert.match(app,/function receivingEvidenceForWorkItem\(order, item, itemIndex, evidenceIndex = null\)/);
     assert.match(app,/supplyReceivingCache\.forEach\(supply =>/);
-    assert.match(app,/openSupplyReceipt\('\$\{escapeAttr\(entry\.id\)\}'\)/);
+    assert.match(app,/openSupplyReceipt\(\$\{inlineJsValue\(entry\.id\)\}\)/);
     assert.doesNotMatch(app,/receivePurchaseOrderItem/);
     assert.doesNotMatch(app,/poItemReceiptProgress/);
 });
@@ -523,8 +523,8 @@ test('purchasing work cards use demand queue for ordering and orders for downstr
     const start=app.indexOf('function renderPurchasingWorkCards(');
     const end=app.indexOf('\nfunction purchasingCompletedRows',start);
     const source=app.slice(start,end);
-    assert.match(source,/demandOrderingRows=procurementDemandLoaded/);
-    assert.match(source,/procurementDemandCache\.filter/);
+    assert.match(source,/demandOrderingRows=purchaseDemandSummaryReady/);
+    assert.match(source,/purchaseDemandSummaryRows\.filter/);
     assert.match(source,/remainingToOrderQty/);
     assert.match(source,/buildOrderItemWorkMetrics\(/);
     assert.match(source,/category==='ordering'/);
@@ -849,7 +849,7 @@ test('receiving queue keeps standalone stock and cancelled-order warehouse suppl
     assert.match(source,/來源訂單已取消，貨到後轉為可用庫存/);
     assert.match(source,/庫存補貨／非正常訂單供應/);
     assert.match(source,/來源訂單已取消，直送不可確認/);
-    assert.match(source,/openSupplyReceipt\('/);
+    assert.match(source,/openSupplyReceipt\(/);
 });
 
 test('supply receipt retries are idempotent by operation id', () => {
@@ -1253,7 +1253,7 @@ test('purchasing pending card and detail share the procurement demand source', (
     const detailStart=app.indexOf('function renderPendingPurchaseOrders(');
     const detailEnd=app.indexOf('\nwindow.loadPendingPurchaseOrders',detailStart);
     const card=app.slice(cardStart,cardEnd),detail=app.slice(detailStart,detailEnd);
-    assert.match(card,/procurementDemandCache\.filter/);
+    assert.match(card,/purchaseDemandSummaryRows\.filter/);
     assert.match(card,/remainingToOrderQty/);
     assert.match(detail,/procurementDemandCache/);
     assert.match(detail,/remainingToOrderQty/);
@@ -1383,8 +1383,8 @@ test('order and purchasing sales filters use the same stable staff source', () =
 });
 
 test('purchasing workspace exposes work and history tabs with four order-derived queues', () => {
-    assert.match(html, /id="purchase-tab-work"[^>]*>採購工作</);
-    assert.match(html, /id="purchase-tab-history"[^>]*>全部訂購單</);
+    assert.match(html, /id="purchase-tab-work"[^>]*>採購需求</);
+    assert.match(html, /id="purchase-tab-history"[^>]*>採購單</);
     for (const id of ['purchase-card-ordering','purchase-card-receiving','purchase-card-dispatch','purchase-card-completed']) {
         assert.match(html, new RegExp(`id="${id}"`));
     }
@@ -2268,7 +2268,7 @@ test('grouped procurement selection only builds compatible warehouse purchase or
     assert.match(app,/class="pending-purchase-batch-select"/);
 
     const start=app.indexOf('window.openSelectedPurchaseDraft = async function');
-    const end=app.indexOf('\n// 「採購訂單」列出所有已經產生過的訂購單紀錄',start);
+    const end=app.indexOf('\n// 「採購訂單」列出所有已經產生過的採購單紀錄',start);
     assert.ok(start>=0&&end>start);
     const source=app.slice(start,end);
     assert.match(source,/selectedIds\.length<2/);

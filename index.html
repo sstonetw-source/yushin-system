@@ -672,7 +672,7 @@
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
         </div>
         <div class="document-download-settings no-print">
-            <button type="button" class="btn-secondary" onclick="configureDocumentDownloadFolder('quote')">設定下載資料夾</button>
+            <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('quote')">設定下載資料夾</button>
             <button type="button" class="btn-secondary btn-small" onclick="resetDocumentDownloadFolder('quote')">使用預設下載</button>
             <span data-download-folder="quote" role="status">使用瀏覽器預設下載</span>
         </div>
@@ -745,7 +745,7 @@
             <button onclick="openEquipmentModal()">＋ 新增儀器</button>
             <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
             <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
-            <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 批量下載 Excel</button>
+            <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 匯出目前篩選結果（已載入）</button>
             <span style="font-size:12px;color:#666;">（批量上傳會依「儀器編號」比對：有既有紀錄就更新、沒有就新增，不會刪除任何既有資料，維修保養紀錄也會保留；一般業務只能新增/更新自己名下的儀器）</span>
         </div>
 
@@ -852,7 +852,7 @@
                 <span>至</span>
                 <input type="date" id="orderPeriodEnd" aria-label="訂單統計結束日期" onchange="renderOrdersList()">
             </div>
-            <span class="order-period-note">訂單進度依訂單日期；待報帳包含跨年度；已完成依開發票日期。</span>
+            <span class="order-period-note">未完成工作包含跨年度；已完成依開發票日期篩選目前已載入歷史；工作筆數不受載入更多影響。</span>
         </div>
         <div class="toolbar no-print order-primary-toolbar">
             <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
@@ -919,7 +919,7 @@
             <button type="button" class="order-work-card" id="purchase-card-ordering" onclick="switchPurchasingView('ordering')" data-purchase-stage="ordering"><span>待採購</span><strong id="purchaseCountOrdering">0 筆</strong><small id="purchaseAmountOrdering">NT$ 0</small></button>
             <button type="button" class="order-work-card" id="purchase-card-receiving" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving"><span>待到貨</span><strong id="purchaseCountReceiving">0 筆</strong><small id="purchaseAmountReceiving">NT$ 0</small></button>
             <button type="button" class="order-work-card" id="purchase-card-dispatch" onclick="switchPurchasingView('dispatch')" data-purchase-stage="dispatch"><span>待打單</span><strong id="purchaseCountDispatch">0 筆</strong><small id="purchaseAmountDispatch">NT$ 0</small></button>
-            <button type="button" class="order-work-card" id="purchase-card-completed" onclick="switchPurchasingView('completed')" data-purchase-stage="completed"><span>已完成</span><strong id="purchaseCountCompleted">0 筆</strong><small id="purchaseAmountCompleted">NT$ 0</small></button>
+            <button type="button" class="order-work-card" id="purchase-card-completed" onclick="switchPurchasingView('completed')" data-purchase-stage="completed"><span>已完成（已載入）</span><strong id="purchaseCountCompleted">0 筆</strong><small id="purchaseAmountCompleted">NT$ 0</small></button>
         </div>
         <div id="purchaseDocumentStages" class="purchase-view-tabs no-print" style="display:none;" aria-label="採購單追蹤">
             <button type="button" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving">未到齊／收貨</button>
@@ -937,7 +937,7 @@
                 <span>至</span>
                 <input type="date" id="purchasePeriodEnd" aria-label="採購統計結束日期" onchange="renderPurchasingView()">
             </div>
-            <span class="order-period-note">待採購、待到貨、待打單與訂單頁共用同一套品項狀態與訂單日期；全部採購單則依正式訂購日期查詢。</span>
+            <span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span>
         </div>
         <div class="panel no-print purchase-replenishment-panel" id="purchaseReplenishmentPanel" style="display:none;">
             <div class="purchase-replenishment-heading">
@@ -1269,7 +1269,7 @@
                 <p id="poSaveStatus" role="status" aria-live="polite" style="text-align:left;margin:0 0 10px;"></p>
                 <button type="button" id="emailPurchaseOrderBtn" class="btn-secondary" style="display:none;" onclick="emailPurchaseOrder(poEditingId)">📧 郵件／分享</button>
                 <div class="document-download-settings no-print">
-                    <button type="button" class="btn-secondary" onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
+                    <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
                     <button type="button" class="btn-secondary btn-small" onclick="resetDocumentDownloadFolder('purchase')">使用預設下載</button>
                     <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
                 </div>
@@ -1331,7 +1331,7 @@
                 <p style="font-size:12px;color:#666;margin:6px 0 14px;">
                     Product Master 的新增、待補、停用與批次匯入集中在這裡；一般「產品」頁只負責搜尋、依廠牌瀏覽與加入估價單／訂單。
                 </p>
-                <section aria-label="廠牌與匯入批量管理"><h3>已建檔廠牌／匯入批次</h3><p>選擇廠牌或批次後可預覽產品並批量停用／恢復；保留歷史單據。舊資料沒有匯入批次，新匯入才會記錄。批次顯示產品最近一次匯入，不提供覆寫前版本還原。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="productOverviewLimit=200;renderProductManagementOverview()"></select><button onclick="bulkSetProductActive(false,this)">停用勾選產品</button><button class="btn-secondary" onclick="bulkSetProductActive(true,this)">恢復勾選產品</button></div><div class="table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="全選目前預覽" onchange="document.querySelectorAll('#productOverviewBody input[type=checkbox]').forEach(el=>el.checked=this.checked)"></th><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th><th>最近匯入檔案</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="productOverviewLimit+=200;renderProductManagementOverview()">顯示更多產品</button></section>
+                <section aria-label="廠牌與匯入批量管理"><h3>已建檔廠牌／匯入批次</h3><p>選擇廠牌或批次後可預覽產品並批量停用／恢復；保留歷史單據。舊資料沒有匯入批次，新匯入才會記錄。批次顯示產品最近一次匯入，不提供覆寫前版本還原。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="loadProductManagementOverview(true)"></select><button onclick="bulkSetProductActive(false,this)">停用勾選產品</button><button class="btn-secondary" onclick="bulkSetProductActive(true,this)">恢復勾選產品</button></div><div class="table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="全選目前預覽" onchange="document.querySelectorAll('#productOverviewBody input[type=checkbox]').forEach(el=>el.checked=this.checked)"></th><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th><th>最近匯入檔案</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="loadProductManagementOverview(false)">載入更多產品</button></section>
                 <div class="toolbar no-print"><button id="deleteBrandProductsBtn" type="button" class="btn-danger" disabled onclick="deleteEntireBrandProducts(this)">刪除整個廠牌的產品</button><span>請先選擇單一廠牌；包含未顯示及已停用產品。刪除前檢查作業關聯並下載備份，產品與標準成本會永久刪除。</span></div>
                 <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
             <!-- Product Master 管理（舊稱，保留供回歸測試辨識） -->
@@ -1671,8 +1671,8 @@
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
-    <script src="modules/document-downloads.js?v=20261004-1"></script>
-    <script src="app.js?v=20261004-31"></script>
+    <script src="modules/document-downloads.js?v=20261004-2"></script>
+    <script src="app.js?v=20261004-32"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
@@ -1727,7 +1727,7 @@
                     typeof productBrandBrowseCurrent !== 'undefined' ? productBrandBrowseCurrent : ''
                 );
                 return '<button type="button" class="product-brand-button' + (active ? ' active' : '') + extraClass +
-                    '" onclick="browseProductMasterBrand(\'' + escapeAttr(entry.name) + '\')">' +
+                    '" onclick="browseProductMasterBrand(' + inlineJsValue(entry.name) + ')">' +
                     escapeHtml(entry.name) + '</button>';
             };
 
