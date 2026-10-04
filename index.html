@@ -458,7 +458,7 @@
         <span id="inventorySearchStatus" role="status"></span>
         <select id="inventoryBrandFilter" aria-label="庫存廠牌" onchange="renderInventoryList()"><option value="">全部廠牌</option></select>
         <select id="inventoryPolicyFilter" aria-label="庫存策略" onchange="renderInventoryList()"><option value="">全部策略</option><option value="NO_STOCK">不備庫</option><option value="SAFETY_STOCK">安全庫存</option><option value="ORDER_ONLY">依訂單採購</option></select>
-        <select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">需補貨（預計庫存不足）</option><option value="out">缺貨</option><option value="reserved">有占用</option></select>
+        <select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">需補貨（預計庫存不足）</option><option value="out">缺貨</option><option value="reserved">有占用</option><option value="archived">已移出庫存列表</option></select>
         
       </div>
       <div id="businessProductSearchResults" class="table-wrap inventory-product-search-results" style="display:none;">
@@ -1645,7 +1645,7 @@
     }, 15000);
     </script>
     <script src="modules/supplier-core.js?v=20261002-7"></script>
-    <script src="modules/inventory-core.js?v=20261002-2"></script>
+    <script src="modules/inventory-core.js?v=20261005-1"></script>
     <script src="modules/receiving-core.js?v=20261002-8"></script>
     <script src="modules/fulfillment-core.js?v=20261002-5"></script>
     <script src="modules/supply-core.js?v=20261002-5"></script>
@@ -1655,7 +1655,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261004-34"></script>
+    <script src="app.js?v=20261005-1"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

@@ -753,3 +753,40 @@ test('procurement demand permissions follow ERP ownership', async () => {
   }));
 });
 
+
+async function archiveInventoryBatch(uid, id, archived, auditId='archive-audit', extras={}) {
+  const client=db(uid),batch=writeBatch(client),at='2026-10-05T00:00:00.000Z';
+  batch.update(doc(client,'inventory/'+id),{listArchived:archived,listArchiveChangedAt:at,
+    listArchiveChangedByUid:uid,listArchiveAuditId:auditId,updatedAt:at,...extras});
+  batch.set(doc(client,'auditLogs/'+auditId),{action:archived?'inventory_list_archive':'inventory_list_restore',
+    actorUid:uid,inventoryId:id,createdAt:at,archived});
+  return batch.commit();
+}
+test('only admin can archive zero stock with a new atomic audit and restore it',async()=>{
+  await seed('inventory/archive1',{onHand:0,reserved:0,incoming:0,productId:'p1'});
+  for(const uid of ['buyer1','wh1','sales1','eng1','off1'])
+    await assertFails(archiveInventoryBatch(uid,'archive1',true,uid+'-audit'));
+  await assertFails(updateDoc(doc(db('admin'),'inventory/archive1'),{listArchived:true}));
+  await assertSucceeds(archiveInventoryBatch('admin','archive1',true));
+  await assertFails(updateDoc(doc(db('buyer1'),'inventory/archive1'),{listArchived:false}));
+  await assertSucceeds(updateDoc(doc(db('sales1'),'inventory/archive1'),{reserved:1}));
+  await assertSucceeds(archiveInventoryBatch('admin','archive1',false,'restore-audit'));
+  await assertFails(deleteDoc(doc(db('admin'),'inventory/archive1')));
+});
+test('archive rejects nonzero stock and simultaneous quantity reset',async()=>{
+  for(const field of ['onHand','reserved','incoming']){
+    const id='archive-'+field;await seed('inventory/'+id,{onHand:0,reserved:0,incoming:0,[field]:1});
+    await assertFails(archiveInventoryBatch('admin',id,true,field+'-audit'));
+    await assertFails(archiveInventoryBatch('admin',id,true,field+'-reset',{[field]:0}));
+  }
+});
+test('archive blocks forged metadata on create, invalid types and audit reuse',async()=>{
+  await assertFails(setDoc(doc(db('buyer1'),'inventory/create-archive'),{onHand:0,reserved:0,listArchived:true}));
+  await seed('inventory/archive2',{onHand:0,reserved:0,incoming:0});
+  await assertFails(archiveInventoryBatch('admin','archive2',true,'wrong-type',{listArchived:'true'}));
+  await assertFails(archiveInventoryBatch('admin','archive2',true,'wrong-actor',{listArchiveChangedByUid:'buyer1'}));
+  await seed('auditLogs/reused',{actorUid:'admin',inventoryId:'archive2',archived:true,
+    action:'inventory_list_archive',createdAt:'2026-10-05T00:00:00.000Z'});
+  await assertFails(updateDoc(doc(db('admin'),'inventory/archive2'),{listArchived:true,
+    listArchiveChangedByUid:'admin',listArchiveChangedAt:'2026-10-05T00:00:00.000Z',listArchiveAuditId:'reused'}));
+});

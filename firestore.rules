@@ -387,6 +387,38 @@ service cloud.firestore {
       return data.onHand >= 0 && data.reserved >= 0;
     }
 
+    function inventoryArchiveKeys() {
+      return ['listArchived', 'listArchiveChangedAt', 'listArchiveChangedByUid', 'listArchiveAuditId'];
+    }
+
+    function validInventoryArchiveChange(id) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny(inventoryArchiveKeys()) || validInventoryArchiveOperation(id);
+    }
+
+    function validInventoryArchiveOperation(id) {
+      let data = request.resource.data;
+      let auditId = data.get('listArchiveAuditId', '');
+      let auditPath = /databases/$(database)/documents/auditLogs/$(auditId);
+      return admin()
+        && data.listArchived is bool
+        && data.listArchived != resource.data.get('listArchived', false)
+        && data.listArchiveChangedByUid == request.auth.uid
+        && data.listArchiveChangedAt is string && data.listArchiveChangedAt.size() <= 32
+        && auditId is string && auditId.size() > 0 && auditId.size() <= 128
+        && data.diff(resource.data).affectedKeys().hasOnly([
+          'listArchived', 'listArchiveChangedAt', 'listArchiveChangedByUid', 'listArchiveAuditId', 'updatedAt'
+        ])
+        && (!data.listArchived || (resource.data.get('onHand', 0) == 0
+          && resource.data.get('reserved', 0) == 0 && resource.data.get('incoming', 0) == 0))
+        && !exists(auditPath)
+        && getAfter(auditPath).data.actorUid == request.auth.uid
+        && getAfter(auditPath).data.inventoryId == id
+        && getAfter(auditPath).data.archived == data.listArchived
+        && getAfter(auditPath).data.createdAt == data.listArchiveChangedAt
+        && getAfter(auditPath).data.action == (data.listArchived ? 'inventory_list_archive' : 'inventory_list_restore');
+    }
+
     function validInventoryStockPolicy(data) {
       let policy = data.get('stockPolicy', 'ORDER_ONLY');
       let safetyStock = data.get('safetyStock', 0);
@@ -699,6 +731,9 @@ service cloud.firestore {
           || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
         )
         && nonNegativeInventory(request.resource.data)
+        // Administrators can restore archived records from an existing backup.
+        && (!request.resource.data.keys().hasAny(inventoryArchiveKeys())
+          || (admin() && request.resource.data.get('listArchived', false) is bool))
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if (
           ((admin() || purchaser()) && nonNegativeInventory(request.resource.data)
@@ -708,6 +743,7 @@ service cloud.firestore {
             && warehouseKeepsInventoryPlanning())
           || businessInventoryOperationalUpdate()
         )
+        && validInventoryArchiveChange(id)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }

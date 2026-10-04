@@ -15,6 +15,22 @@
     return {onHand,reserved,available:Math.max(0,onHand-reserved),incoming};
   }
 
+  function stockIsEmpty(data={}){
+    const zero=value=>(typeof value==='number'||(typeof value==='string'&&value.trim()!==''))
+      && Number.isFinite(Number(value)) && Number(value)===0;
+    return ['onHand','reserved','incoming'].every(key=>{
+      return zero(data[key]===undefined?0:data[key]);
+    }) && (data.lots===undefined||Array.isArray(data.lots)) && (data.lots||[]).every(lot=>{
+      const value=lot.remainingQty??lot.qty??0;
+      return zero(value);
+    });
+  }
+
+  function isListArchived(item={},stock=item){
+    // New receipts/reservations must make the item visible even if its archive flag remains set.
+    return item.listArchived===true && stockIsEmpty(item) && stockIsEmpty(stock);
+  }
+
   function lotTime(value){
     const time=Date.parse(value||'');
     return Number.isFinite(time)?time:Number.MAX_SAFE_INTEGER;
@@ -118,6 +134,8 @@
 
   return {
     normalizeStock,
+    stockIsEmpty,
+    isListArchived,
     sortLotsForIssue,
     allocateLots,
     reverseLotAllocations,
