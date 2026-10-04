@@ -96,15 +96,6 @@
 
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
-        <div class="section-header no-print">
-            <div>
-                <h2>產品</h2>
-                <div class="section-subtitle">可直接依廠牌瀏覽 Product Master，也可搜尋完整資料庫；業務可加入估價單／建立訂單。</div>
-            </div>
-
-
-        </div>
-
         <div class="toolbar no-print product-search-toolbar">
             <input id="productManagementSearch" type="search" placeholder="搜尋貨號、中文品名或英文品名" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋</button>
@@ -170,18 +161,15 @@
 
     <!-- ============ Forecast 系統 ============ -->
 <div id="forecast-system" class="content-section">
-    <div class="section-header no-print forecast-section-header">
-        <h2>
-            Forecast
-            <button
-                type="button"
-                class="forecast-stage-info-trigger"
-                onclick="openForecastStageInfo()"
-                aria-label="查看 Forecast Stage 說明"
-                title="Stage 說明"
-            >ⓘ</button>
-        </h2>
+    <div class="toolbar no-print forecast-section-header">
         <button type="button" onclick="openForecastModal()">＋ 新增</button>
+        <button
+            type="button"
+            class="forecast-stage-info-trigger"
+            onclick="openForecastStageInfo()"
+            aria-label="查看 Forecast Stage 說明"
+            title="Stage 說明"
+        >ⓘ</button>
     </div>
 
     <div class="toolbar no-print forecast-toolbar">
@@ -461,7 +449,7 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <div class="section-header no-print"><h2>庫存管理</h2><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
+      <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
       <div class="toolbar no-print"><button onclick="switchInventoryWorkView(false)">庫存明細</button><button onclick="switchInventoryWorkView(true)">待收貨</button></div>
       <div id="inventoryReceivingPanel" style="display:none"><p id="inventoryReceivingStatus" role="status"></p><div class="table-wrap"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
       <div id="inventoryStockPanel">
@@ -827,7 +815,6 @@
     <div id="order-system" class="content-section">
         <div id="orderListPanel">
         <div class="module-header no-print">
-            <h2>訂單管理</h2>
             <button onclick="openOrderModal()">＋ 新增訂單</button>
         </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
@@ -906,7 +893,6 @@
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
         <div class="module-header no-print">
-            <h2>採購管理</h2>
             <button type="button" id="purchaseDirectOrderBtn" onclick="openDirectStockPurchase()">＋ 直接訂貨</button>
         </div>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">

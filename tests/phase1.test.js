@@ -4880,7 +4880,7 @@ test('new quotes and orders persist productIds for fast Product 360 lookup', () 
 
 test('product navigation uses the short product label', () => {
     assert.match(indexSource, /data-main-nav="products"[\s\S]*?<\/svg>產品<\/div>/);
-    assert.match(indexSource, /<h2>產品<\/h2>/);
+    assert.doesNotMatch(indexSource, /<h2>產品<\/h2>/);
     assert.match(appSource, /\{ key: 'products', label: '產品', system: true \}/);
 });
 
