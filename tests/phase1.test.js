@@ -427,8 +427,8 @@ test('agency settings do not trigger a full orders statistics query', () => {
     assert.doesNotMatch(agencyLine, /loadSalesStatistics/);
     const statisticsStart = adminSwitch.indexOf("if (tab === 'statistics')");
     const statisticsSource = adminSwitch.slice(statisticsStart);
-    assert.match(statisticsSource, /salesStatisticsOrders\.length/);
-    assert.match(statisticsSource, /loadPurchasingAnalytics\(false\)/);
+    assert.match(statisticsSource, /loadSalesStatistics\(\)/);
+    assert.doesNotMatch(statisticsSource, /loadPurchasingAnalytics/);
 });
 
 test('saving one new order updates the local cache without reloading the list', () => {
@@ -1276,7 +1276,7 @@ test('phase 8 adds warehouse to UI permission architecture',()=>{assert.match(ap
 
 test('phase 9 analysis separates actual receipts sales stock value incoming and purchase-sales difference',()=>{
  assert.match(appSource,/function inventoryAnalysisTotals\(start,end\)/);
- assert.match(appSource,/where\('type','==','receipt'\)/);
+ assert.match(appSource,/collection\('receipts'\)/);
  assert.match(appSource,/difference:\s*sales\s*-\s*purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
  assert.match(appSource,/readQueryInBatches\(receiptQuery\)/);
@@ -1285,8 +1285,8 @@ test('phase 8 fixed role permissions include warehouse role without an editable 
 
 
 test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=>{
- assert.match(appSource,/where\('type','==','receipt'\)/);
- assert.match(appSource,/const receiptQuery = db\.collection\('inventoryMovements'\)[\s\S]{0,500}where\('type','==','receipt'\)/);
+ assert.match(appSource,/collection\('receipts'\)/);
+ assert.match(appSource,/const receiptQuery = db\.collection\('receipts'\)[\s\S]{0,500}where\('receiptDate','>=',start\)/);
  assert.doesNotMatch(appSource,/collection\('inventoryMovements'\)\.get\(\)/);
 });
 test('phase 10 role model consistently documents warehouse',()=>{
@@ -5050,7 +5050,7 @@ test('self-order transaction cost is manual and standard cost is not auto-filled
 test('protected Product Master costs drive sales statistics without being copied to formal orders', () => {
     assert.match(appSource, /function orderUnitCostForStats/);
     assert.match(appSource, /purchaseCostCache\.get\(productId\)/);
-    assert.match(appSource, /preloadSalesStatisticsProductCosts\(salesStatisticsOrders\)/);
+    assert.match(appSource, /loadInventoryAnalysisSupport\(start, end\)/);
     const start=appSource.indexOf('window.saveMissingCostFromStats');
     const end=appSource.indexOf('function escapeAttr',start);
     const source=appSource.slice(start,end);
@@ -5257,7 +5257,8 @@ test('admin inventory-sales dashboard presents one unified management view', () 
     const adminSource=indexSource.slice(adminStart,adminEnd);
     assert.match(adminSource,/id="invAnalysisSales"/);
     assert.match(adminSource,/id="invAnalysisPurchases"/);
-    assert.match(adminSource,/id="invAnalysisGrossProfit"/);
+    assert.match(adminSource,/id="invAnalysisPending"/);
+    assert.doesNotMatch(adminSource,/id="invAnalysisGrossProfit"/);
     assert.match(adminSource,/id="invAnalysisStockValue"/);
     assert.match(adminSource,/id="invAnalysisIncoming"/);
     assert.match(adminSource,/id="unifiedBrandAnalyticsBody"/);

@@ -25,8 +25,11 @@ jobs:
           node --check modules/workflow-core.js
           node --check modules/procurement-demand-core.js
           node --check modules/purchasing-analytics-core.js
+          node --check modules/trade-analysis-core.js
           node --check functions/purchase-email-core.js
           node --check functions/index.js
+      - name: Trade analysis tests
+        run: node --test tests/trade-analysis.test.js
       - name: Phase 1 regression tests
         run: node --test tests/phase1.test.js
       - name: Purchasing workflow tests

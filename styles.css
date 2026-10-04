@@ -3152,3 +3152,24 @@ html[data-app-environment="preview"] body { border-top: 0; }
         grid-template-columns: 1fr 1fr;
     }
 }
+
+/* Simplified trade analysis: five tappable totals and one detail table. */
+.trade-analysis-cards { grid-template-columns:repeat(5,minmax(0,1fr)); }
+button.sales-stat-card { text-align:left; color:inherit; font:inherit; cursor:pointer; background:#fff; }
+button.sales-stat-card:hover { border-color:#2563eb; }
+button.sales-stat-card:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
+button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
+.trade-analysis-detail { width:calc(100vw - 32px); max-width:1200px; }
+.trade-analysis-detail-scroll { overflow:auto; max-height:55vh; }
+.trade-analysis-detail-scroll table { min-width:1050px; }
+.trade-analysis-filters label { display:flex; align-items:center; gap:6px; }
+#tradeAnalysisStatus { color:#555; font-size:13px; }
+@media(max-width:1000px) { .trade-analysis-cards { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:600px) {
+ .trade-analysis-filters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .trade-analysis-filters select, .trade-analysis-filters input, .trade-analysis-filters button { width:100%; min-width:0; box-sizing:border-box; }
+ .trade-analysis-filters label { flex-wrap:wrap; }
+ .trade-analysis-filters button { grid-column:1/-1; }
+ .trade-analysis-cards strong { font-size:20px; overflow-wrap:anywhere; }
+ .trade-analysis-detail { width:calc(100vw - 20px); padding:14px; }
+}

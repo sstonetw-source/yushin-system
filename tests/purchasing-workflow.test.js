@@ -2020,15 +2020,16 @@ test('purchase history separates PO document status from receipt progress', () =
     assert.match(source,/data-th="到貨進度"/);
 });
 
-test('unified brand analysis keeps purchase values after duplicate purchase dashboard removal', () => {
-    const start=app.indexOf('function renderUnifiedBrandAnalytics()');
-    const end=app.indexOf('\nwindow.renderSalesStatistics',start);
+test('simplified trade analysis derives brand totals and export from the same report', () => {
+    const start=app.indexOf('window.renderSalesStatistics = function()');
+    const end=app.indexOf('function salesStatsMetricExportRows',start);
     const source=app.slice(start,end);
-    assert.ok(start>=0&&end>start);
-    assert.match(source,/purchasingAnalyticsMetrics\(/);
-    assert.match(source,/purchase\.orderedAmount/);
-    assert.match(source,/purchase\.receivedAmount/);
-    assert.match(source,/purchase\.incomingAmount/);
+    assert.match(source,/buildTradeAnalysisReport\(rows\)/);
+    assert.match(source,/report\.brands/);
+    assert.match(source,/incoming:'invAnalysisIncoming'/);
+    assert.match(source,/purchases:'invAnalysisPurchases'/);
+    assert.match(source,/pending:'invAnalysisPending'/);
+    assert.match(app,/tradeAnalysisExportRows\(report,kind\)/);
 });
 
 test('removed purchase dashboard leaves no duplicate aging UI', () => {
