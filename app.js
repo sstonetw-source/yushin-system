@@ -8199,16 +8199,24 @@ window.openInventoryReplenishment = async function(inventoryId) {
     if (button && !buttonState) return;
 
     try {
-        const item = inventoryCache.find(x => x.id === inventoryId)
-            || inventorySearchResults.find(x => x.id === inventoryId)
-            || inventoryReplenishmentCache.find(x => x.id === inventoryId);
-        if (!item) { alert('找不到庫存品項。'); return; }
+        // 庫存異動會清除補貨快取，但畫面上的列仍可能存在。點擊時以文件識別碼讀取，
+        // 不依賴其他頁是否已載入這個品項，也重新確認目前的庫存策略。
+        const snapshot=await firestoreReadWithTimeout(db.collection('inventory').doc(inventoryId).get(),'讀取補貨品項');
+        if(!snapshot.exists){
+            showActionFeedback('這筆庫存品項已不存在，正在重新載入補貨清單。','warning');
+            await loadInventoryReplenishmentCenter(true);
+            return;
+        }
+        const item={...snapshot.data(),id:snapshot.id};
         if (inventoryStockPolicy(item) !== INVENTORY_STOCK_POLICIES.SAFETY_STOCK) {
             alert('這個品項目前不是「安全庫存」策略，不會建立主動補庫採購。');
             return;
         }
 
         await loadSupplierWarehouseMasters();
+        const productKey=String(item.productKey||item.productId||'').trim();
+        if(productKey)[...warehouseStockCache.keys()].filter(key=>key.endsWith('||'+productKey)).forEach(key=>warehouseStockCache.delete(key));
+        await loadWarehouseStocksForInventoryPage([item]);
         const stock = inventoryAggregateStock(item);
         const safetyStock = Math.max(0, Number(item.safetyStock || 0));
         if (!(safetyStock > 0)) {
@@ -8247,7 +8255,7 @@ window.openInventoryReplenishment = async function(inventoryId) {
             invalidateProcurementDemandQueue();
         }
 
-        const match = await findProductByCode(item.itemCode || '');
+        const match = await findProductByCode(item.itemCode || '',item.brand || '');
         let unitPrice = 0;
         if (match) {
             const secureCost = await loadVisibleProductCost(match);

@@ -5075,7 +5075,8 @@ test('inventory projected stock and replenishment center avoid duplicate repleni
     assert.match(appSource,/Math\.max\(0,safetyStock-projected\)/);
     assert.match(appSource,/window\.loadInventoryReplenishmentCenter=loadInventoryReplenishmentCenter/);
     assert.match(appSource,/where\('stockPolicy','==',INVENTORY_STOCK_POLICIES\.SAFETY_STOCK\)/);
-    assert.match(appSource,/inventoryReplenishmentCache\.find\(x => x\.id === inventoryId\)/);
+    assert.match(appSource,/collection\('inventory'\)\.doc\(inventoryId\)\.get\(\)/);
+    assert.match(appSource,/await loadWarehouseStocksForInventoryPage\(\[item\]\)/);
     assert.match(indexSource,/id="purchaseReplenishmentBody"/);
     assert.match(indexSource,/預計庫存 = 可用庫存 \+ 在途/);
     assert.match(indexSource,/<th>預計庫存<\/th>/);
