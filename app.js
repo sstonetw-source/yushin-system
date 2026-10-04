@@ -1285,6 +1285,12 @@ window.switchViewRole = function(role) {
     myQuotesPaginationState = null;
     ordersCache = [];
     orderPaginationState = null;
+    // 讓前一視角的讀取失效，避免舊 Promise 回報錯誤或卡住新視角。
+    orderLoadGeneration++;
+    orderPageLoading = false;
+    orderReloadRequested = false;
+    orderLoadErrorMessage = '';
+    orderWorkQueueError = '';
     invalidateVisibleProductCosts();
     orderWorkQueueCache = []; orderWorkQueueReady = false; orderWorkQueueGeneration++; orderWorkQueuePromise = null;
     forecastCache = [];
