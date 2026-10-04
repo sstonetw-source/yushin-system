@@ -9427,6 +9427,7 @@ function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByI
 const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
+    if(orderInventorySyncIncomplete(order))return {ordered:Number(item.orderedQty||item.qty||0),reserved:0,prepared:0,delivered:0,grossDelivered:0,returned:0,shippable:0,pending:0};
     // deliveryRecords / returnRecords 仍由頁面層整理；所有物流數量公式交給 fulfillment-core。
     // 這樣訂單頁、採購頁與實際送貨動作不會各自維護一套「待打單／可出貨」算法。
     const hasSnapshot = item?.__fulfillmentSnapshot === true;
@@ -9473,6 +9474,7 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
 }
 
 function dispatchActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
+    if(orderInventorySyncIncomplete(order))return '';
     if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return '';
     if (normalizedOrderStatus(order) !== 'normal') return '';
     return (normalizedItems || normalizedOrderItems(order))
@@ -9539,7 +9541,7 @@ function canBusinessSelfOrder(order = null) {
 }
 
 function selfOrderActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
-    if (!canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
+    if (orderInventorySyncIncomplete(order) || !canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
     return (normalizedItems || normalizedOrderItems(order))
         .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
         .map(item => {
@@ -9554,7 +9556,7 @@ function selfOrderActionHtml(order, normalizedItems = null, dispatchStateByItem 
 window.openSelfOrderModal = function(orderId,itemId) {
     const order=ordersCache.find(row=>row.id===orderId);
     const item=normalizedOrderItems(order||{}).find(row=>row.itemId===itemId);
-    if(!order||!item||!canBusinessSelfOrder(order))return;
+    if(!order||!item||orderInventorySyncIncomplete(order)||!canBusinessSelfOrder(order))return;
     const remaining=remainingProcurementQty(order,item);
     if(remaining<=0){alert('此品項目前沒有尚未訂貨的缺貨數量。');return;}
     document.getElementById('selfOrderOrderId').value=orderId;
@@ -9595,6 +9597,7 @@ window.saveSelfOrder = async function() {
             const snap=await tx.get(orderRef);
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
+            if(orderInventorySyncIncomplete(order))throw new Error('訂單庫存尚未同步完成');
             if(!canBusinessSelfOrder(order))throw new Error('只有此訂單負責人可自行訂貨。');
             if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
             const items=normalizedOrderItems(order);
@@ -10353,9 +10356,10 @@ window.renderOrdersList = function() {
             </td>
             <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
+                ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
                     
-                    ${canConfirmOrderDelivery ? `<button type="button" class="btn-small ${deliveryPending ? 'btn-secondary' : deliveryProgress.state === 'complete' ? 'status-ok' : deliveryProgress.state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : deliveryProgress.state === 'complete' ? '已送貨' : fulfillmentProgress.shippable>0 ? '已送貨' : '待打單'}</button>` : ''}
+                    ${canConfirmOrderDelivery ? `<button type="button" class="btn-small ${deliveryPending ? 'btn-secondary' : deliveryProgress.state === 'complete' ? 'status-ok' : deliveryProgress.state === 'partial' ? 'status-soon' : 'btn-secondary'}" onclick="quickCompleteDelivery('${o.id}')" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : deliveryProgress.state === 'complete' ? '已送貨' : fulfillmentProgress.shippable>0 ? '已送貨' : '待打單'}</button>` : ''}
                     ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'status-ok' : 'btn-secondary'}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
@@ -10371,7 +10375,6 @@ window.renderOrdersList = function() {
                                     : ''}
                             ${dispatchActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
-                            ${canManageOrderOps && o.inventoryReservationStatus==='failed' ? `<button type="button" onclick="retryOrderInventoryReservation('${o.id}')">重新同步庫存占用</button>` : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                             ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteOrder('${escapeAttr(o.id)}')">永久刪除</button>` : ''}
@@ -10398,29 +10401,90 @@ window.renderOrdersList = function() {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 };
 
+async function syncNewOrderSourceDocuments(orderId,data,actorUid) {
+    if(currentUser?.uid!==actorUid)return new Error('登入身份已變更，來源文件同步待確認');
+    let quoteSyncError = null;
+    if (data.sourceType === DOCUMENT_TYPES.QUOTE && data.sourceId) try {
+        const closedAt=localDateString();
+        await db.collection('quotes').doc(data.sourceId).set({
+            dealClosed:true,
+            dealClosedAt:closedAt,
+            status:BUSINESS_STATUS.COMPLETED,
+            linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderId,'created'))
+        },{merge:true});
+        if(currentUser?.uid!==actorUid)return new Error('登入身份已變更');
+        const patch={dealClosed:true,dealClosedAt:closedAt,status:BUSINESS_STATUS.COMPLETED};
+        const cachedQuote=myQuotesCache.find(q=>q.quoteNo===data.sourceId);if(cachedQuote)Object.assign(cachedQuote,patch);
+        const searchedQuote=quoteHistorySearchResults.find(q=>q.quoteNo===data.sourceId);if(searchedQuote)Object.assign(searchedQuote,patch);
+        writeAppDataCache('quotes',myQuotesCache);
+    } catch (err) {
+        quoteSyncError = err;
+        console.error('訂單已建立，但估價單狀態更新失敗：', err);
+    }
+    if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
+        db.collection('forecasts').doc(data.sourceId).set({
+            linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, orderId, 'created')),
+            updatedAt: new Date().toISOString()
+        }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
+    }
+    return quoteSyncError;
+}
+
+const pendingOrderReservationIds = new Set();
+function orderInventorySyncIncomplete(order) {
+    return ['pending','failed'].includes(order?.inventoryReservationStatus);
+}
+function canRetryOrderInventorySync(order) {
+    return currentUserRole==='admin'||currentUserRole==='purchaser'
+        ||(currentUserRole==='sales'&&!!currentUser?.uid&&(order?.createdByUid===currentUser.uid||order?.ownerUid===currentUser.uid));
+}
+function orderInventorySyncStatusHtml(order) {
+    if(!orderInventorySyncIncomplete(order))return '';
+    const running=pendingOrderReservationIds.has(order.id);
+    const label=running?'庫存同步中…':order.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步待確認';
+    return `<div class="inline-status" role="status">${label}${!running&&canRetryOrderInventorySync(order)?` <button type="button" class="btn-small" onclick="retryOrderInventoryReservation('${escapeAttr(order.id)}')">重試同步</button>`:''}</div>`;
+}
+window.addEventListener('beforeunload',event=>{
+    if(pendingOrderReservationIds.size){event.preventDefault();event.returnValue='';}
+});
 window.retryOrderInventoryReservation = async function(orderId) {
-    if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser')) { alert('只有管理員或採購可以重新同步庫存占用。'); return; }
-    const order=ordersCache.find(row=>row.id===orderId);
-    if(!order){alert('找不到這筆訂單，請重新整理後再試。');return;}
-    if(order.inventoryReservationStatus!=='failed'){alert('只有庫存占用失敗的訂單可以重新同步。');return;}
-    if(normalizedOrderStatus(order)!=='normal'){alert('已取消／作廢的訂單不可重新同步庫存占用。');return;}
+    const cachedOrder=ordersCache.find(row=>row.id===orderId);
+    if(!cachedOrder||!canRetryOrderInventorySync(cachedOrder)||!orderInventorySyncIncomplete(cachedOrder)||pendingOrderReservationIds.has(orderId))return;
+    const uid=currentUser?.uid;
+    pendingOrderReservationIds.add(orderId);
+    renderOrdersList();
+    let order=null;
     try{
-        const now=new Date().toISOString();
-        await db.collection('orders').doc(orderId).set({inventoryReservationStatus:'pending',inventoryReservationError:'',inventoryReservationUpdatedAt:now},{merge:true});
-        order.inventoryReservationStatus='pending';order.inventoryReservationError='';order.inventoryReservationUpdatedAt=now;renderOrdersList();
-        const reservation=await reserveInventoryForNewOrder(orderId,order);
-        const completedAt=new Date().toISOString();
-        const updates={inventoryReservationStatus:'completed',inventoryReservationError:'',inventoryReservationUpdatedAt:completedAt};
-        await db.collection('orders').doc(orderId).set(updates,{merge:true});
-        Object.assign(order,updates);
-        renderOrdersList();
-        alert('庫存占用已重新同步完成。');
+        const snap=await firestoreReadWithTimeout(db.collection('orders').doc(orderId).get(),'讀取待同步訂單');
+        if(!snap.exists)throw new Error('訂單已不存在');
+        order={id:snap.id,...snap.data()};
+        if(currentUser?.uid!==uid||!canRetryOrderInventorySync(order))throw new Error('登入身份或權限已變更');
+        if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消／作廢的訂單不可同步庫存');
+        if(order.inventoryReservationStatus!=='completed'){
+            const now=new Date().toISOString();
+            await db.collection('orders').doc(orderId).set({inventoryReservationStatus:'pending',inventoryReservationError:'',inventoryReservationUpdatedAt:now},{merge:true});
+            order.inventoryReservationStatus='pending';
+            await reserveInventoryForNewOrder(orderId,order);
+            const updates={inventoryReservationStatus:'completed',inventoryReservationError:'',inventoryReservationUpdatedAt:new Date().toISOString()};
+            await db.collection('orders').doc(orderId).set(updates,{merge:true});
+            Object.assign(order,updates);
+        }
+        if(currentUser?.uid===uid){
+            ordersCache=ordersCache.map(row=>row.id===orderId?order:row);
+            syncOrderIntoPurchasingCaches(order);
+            const sourceError=await syncNewOrderSourceDocuments(orderId,order,uid);
+            if(currentUser?.uid===uid)showActionFeedback(sourceError?'庫存已同步；來源文件更新待確認：'+sourceError.message:'訂單庫存同步完成。',sourceError?'warning':'success');
+        }
     }catch(err){
-        const failedAt=new Date().toISOString();
-        const updates={inventoryReservationStatus:'failed',inventoryReservationError:String(err?.message||err),inventoryReservationUpdatedAt:failedAt};
-        await db.collection('orders').doc(orderId).set(updates,{merge:true}).catch(markErr=>console.error('重新同步失敗狀態寫入失敗：',markErr));
-        Object.assign(order,updates);renderOrdersList();
-        alert('重新同步庫存占用失敗：'+(err?.message||err));
+        if(order&&normalizedOrderStatus(order)==='normal'&&currentUser?.uid===uid&&canRetryOrderInventorySync(order)){
+            const updates={inventoryReservationStatus:'failed',inventoryReservationError:String(err?.message||err),inventoryReservationUpdatedAt:new Date().toISOString()};
+            await db.collection('orders').doc(orderId).set(updates,{merge:true}).catch(markErr=>console.error('標記同步失敗：',markErr));
+            Object.assign(cachedOrder,order,updates);
+        }
+        if(currentUser?.uid===uid)showActionFeedback('庫存同步未完成，可在同一筆訂單重試：'+(err.message||err),'warning');
+    }finally{
+        pendingOrderReservationIds.delete(orderId);
+        if(currentUser?.uid===uid){writeAppDataCache('orders',ordersCache);renderOrdersList();}
     }
 };
 
@@ -11271,6 +11335,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
 }
 
 function pendingPurchaseLines(order) {
+    if(orderInventorySyncIncomplete(order))return [];
     // 這個函式只代表「採購人員可以建立正式 PO 的品項」；
     // 顯示使用 pendingProcurementDisplayLines()，成本與供應商只在真正操作時解析。
     const displayByIndex = new Map(
@@ -14554,6 +14619,7 @@ function formalSupplyOrderId(purchaseOrderId, itemIndex) {
 }
 
 function assertPurchaseLinesAvailable(order, lines) {
+    if(orderInventorySyncIncomplete(order))throw new Error('來源訂單庫存尚未同步完成，請稍後再採購。');
     if (normalizedOrderStatus(order) !== 'normal') throw new Error('來源訂單已取消或作廢。');
     const sourceItems = normalizedOrderItems(order);
     const requestedByIndex = new Map();
@@ -15422,6 +15488,7 @@ function dateInUnifiedPeriod(value, key = 'this-year') {
 window.openDeliveryModal = function(orderId) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order) return;
+    if(orderInventorySyncIncomplete(order)){showActionFeedback('這筆訂單庫存尚未同步完成，請先完成或重試同步。','warning');return;}
     currentDeliveryOrderId = orderId;
     currentLifecycleOrderId = orderId;
     deliveryPartialFormOpen = false;
@@ -15572,6 +15639,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if (!['normal', 'cancelled'].includes(nextStatus)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder) return;
+    if(cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
     if (pendingLifecycleOrderIds.has(orderId) || normalizedOrderStatus(cachedOrder) === nextStatus) return;
     const optimisticBefore = {
         orderStatus: cachedOrder.orderStatus,
@@ -17299,19 +17367,41 @@ window.saveNewOrder = function() {
     data.inventoryReservationUpdatedAt = new Date().toISOString();
 
     const saveButton = document.getElementById('saveNewOrderBtn');
+    const savingGeneration=orderModalOpenGeneration;
+    const savingUid=currentUser?.uid;
+    const savedDraftKey=orderDraftStorageKey();
+    const savedPendingKey=pendingOrderCreateKey();
     saveOrderDraft();
     newOrderSaveInProgress = true;
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     let createdOrderId = '';
-    createOrResumeNewOrder(data).then(async docRef => {
+    return createOrResumeNewOrder(data).then(async docRef => {
         createdOrderId = docRef.id;
         data=docRef.data;
+        newOrderSaveInProgress=false;
+        if(saveButton){saveButton.disabled=false;saveButton.innerText='💾 儲存';}
+        // 正式文件確認寫入後即釋放表單；庫存與來源文件同步使用這份獨立快照。
+        pendingOrderReservationIds.add(docRef.id);
+        if(currentUser?.uid===savingUid){
+            rememberRecentCustomerName(data.customerName);
+            const savedOrder = { id:docRef.id, ...data };
+            ordersCache = [savedOrder, ...ordersCache.filter(order=>order.id!==docRef.id)]
+                .sort((a,b)=>(b.orderDate||'').localeCompare(a.orderDate||''));
+            writeAppDataCache('orders',ordersCache);
+            renderOrdersList();
+            if(localStorage.getItem(savedPendingKey)===docRef.id)localStorage.removeItem(savedPendingKey);
+            if(savingGeneration===orderModalOpenGeneration){
+                localStorage.removeItem(savedDraftKey);
+                closeOrderModal();
+            }
+            showActionFeedback('訂單已建立，庫存正在背景同步；可繼續建立其他訂單。','success');
+        }
         let reservation;
         try {
+            if(currentUser?.uid!==savingUid)throw new Error('登入身份已變更，請以原帳號重試同步');
             if(data.inventoryReservationStatus==='completed'){
                 reservation=orderReservationSummary(data);
             }else{
-                if (saveButton) saveButton.innerText = '同步庫存中…';
                 reservation = await reserveInventoryForNewOrder(docRef.id, data);
                 const completedAt = new Date().toISOString();
                 await db.collection('orders').doc(docRef.id).set({
@@ -17330,59 +17420,43 @@ window.saveNewOrder = function() {
                 inventoryReservationError:String(reservationErr?.message||reservationErr),
                 inventoryReservationUpdatedAt:failedAt
             },{merge:true}).catch(markErr=>console.error('標記訂單庫存占用失敗：',markErr));
-            throw new Error(`訂單已建立，但庫存占用未完成：${reservationErr?.message||reservationErr}。可按儲存重試同一張訂單。`);
+            Object.assign(data,{inventoryReservationStatus:'failed',inventoryReservationError:String(reservationErr?.message||reservationErr),inventoryReservationUpdatedAt:failedAt});
+            throw new Error(`訂單已建立，但庫存占用未完成：${reservationErr?.message||reservationErr}。請從訂單清單重試同步，勿重複建立。`);
         }
         data.inventoryProductKey = inventoryProductKey(data);
         rememberRecentCustomerName(data.customerName);
-        const quoteContext=window._orderModalQuoteContext;
-        let quoteSyncError = null;
-        if (data.sourceType === DOCUMENT_TYPES.QUOTE && data.sourceId) try {
-            const closedAt=localDateString();
-            await db.collection('quotes').doc(data.sourceId).set({
-                dealClosed:true,
-                dealClosedAt:closedAt,
-                status:BUSINESS_STATUS.COMPLETED,
-                linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,docRef.id,'created'))
-            },{merge:true});
-            const patch={dealClosed:true,dealClosedAt:closedAt,status:BUSINESS_STATUS.COMPLETED};
-            const cachedQuote=myQuotesCache.find(q=>q.quoteNo===data.sourceId);if(cachedQuote)Object.assign(cachedQuote,patch);
-            const searchedQuote=quoteHistorySearchResults.find(q=>q.quoteNo===data.sourceId);if(searchedQuote)Object.assign(searchedQuote,patch);
-            writeAppDataCache('quotes',myQuotesCache);
-        } catch (err) {
-            quoteSyncError = err;
-            console.error('訂單已建立，但估價單狀態更新失敗：', err);
-        }
-        if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
-            db.collection('forecasts').doc(data.sourceId).set({
-                linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, docRef.id, 'created')),
-                updatedAt: new Date().toISOString()
-            }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
-        }
-        window._orderModalSourceLink = null; window._orderModalProductId = ''; window._orderModalQuoteContext = null;
-        closeOrderModal({ preserveSource:true });
-        // 新增成功後只把這一筆放進本機快取，不為單筆新增重新查詢整個訂單頁。
+        const quoteSyncError=await syncNewOrderSourceDocuments(docRef.id,data,savingUid);
+        pendingOrderReservationIds.delete(docRef.id);
+        if(currentUser?.uid!==savingUid)return;
+        // 單筆回填已完成的庫存資料，不重新查詢整份清單，也不碰下一張訂單的表單。
         const savedOrder = { id: docRef.id, ...data };
         ordersCache = [savedOrder, ...ordersCache.filter(order => order.id !== docRef.id)]
             .sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         syncOrderIntoPurchasingCaches(savedOrder);
-        clearSavedOrderDraft({ silent:true,clearPending:true });
-        if (saveButton) saveButton.innerText = '已完成';
         if (quoteSyncError) {
-            alert('訂單已建立，庫存占用已同步，但來源估價單未標記成交。請勿重複建立訂單，請管理員檢查這筆關聯：' + quoteSyncError.message);
+            showActionFeedback('訂單已建立，庫存占用已同步，但來源估價單未標記成交。請勿重複建立訂單，請檢查來源估價單：' + quoteSyncError.message,'warning');
         } else {
             showActionFeedback('訂單已建立，庫存占用已同步。', 'success');
         }
     }).catch(err => {
+        pendingOrderReservationIds.delete(createdOrderId);
+        if(currentUser?.uid!==savingUid)return;
         if (createdOrderId) {
-            alert(`訂單編號 ${createdOrderId} 後續處理未完成。按儲存會重試同一張訂單，請勿另開新單：${err.message}`);
+            const cachedOrder=ordersCache.find(order=>order.id===createdOrderId);
+            if(cachedOrder)Object.assign(cachedOrder,data);
+            writeAppDataCache('orders',ordersCache);
+            renderOrdersList();
+            showActionFeedback(`訂單已建立，但庫存同步未完成。請在該筆訂單按「重試同步」，不要另建一張：${err.message}`,'warning');
         } else {
             alert('儲存狀態尚未確認；請按儲存重試同一張訂單，勿另開新單：' + err.message);
         }
     }).finally(() => {
-        newOrderSaveInProgress = false;
-        if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存'; }
+        if(!createdOrderId){
+            newOrderSaveInProgress = false;
+            if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存'; }
+        }
     });
 };
 

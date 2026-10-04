@@ -453,6 +453,8 @@ test('new order reports committed success even when source quote update fails', 
     const elements = new Map();
     const context = vm.createContext({
         window:{_orderModalQuoteContext:null},
+        pendingOrderReservationIds:new Set(),currentUser:{uid:'USER-1'},savingUid:'USER-1',savingGeneration:1,orderModalOpenGeneration:1,
+        savedDraftKey:'draft',savedPendingKey:'pending',localStorage:{getItem:()=> 'NEW-1',removeItem(){}},
         document:{getElementById:id=>elements.get(id)||null,createElement:()=>({setAttribute(){}}),body:{appendChild:node=>elements.set(node.id,node)}},
         setTimeout:()=>1,clearTimeout:()=>{},
         db:{collection:name=>name==='orders'?{
@@ -471,12 +473,12 @@ test('new order reports committed success even when source quote update fails', 
         alert:message=>messages.push(message),console:{error:()=>{}}
     });
     vm.runInContext(appSource.slice(feedbackStart, feedbackEnd), context);
+    vm.runInContext(appSource.slice(appSource.indexOf('async function syncNewOrderSourceDocuments'),appSource.indexOf('const pendingOrderReservationIds = new Set();')),context);
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
     assert.equal(context.ordersCache[0].id,'NEW-1');
     assert.equal(context.newOrderSaveInProgress,false);
-    assert.equal(messages.length,1);
-    assert.match(messages[0],/訂單已建立.*估價單未標記成交.*請勿重複建立/);
-    assert.doesNotMatch(messages[0],/新增失敗/);
+    assert.equal(messages.length,0);
+    assert.match(elements.get('actionFeedback').textContent,/訂單已建立.*估價單未標記成交.*請勿重複建立/);
     context.data={sourceType:'',customerName:'Customer',orderDate:'2026-09-27'};
     messages.length=0;
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
@@ -485,9 +487,9 @@ test('new order reports committed success even when source quote update fails', 
     context.data={sourceType:'',customerName:'Customer',orderDate:'2026-09-27'};
     context.reserveInventoryForNewOrder=async()=>{throw new Error('庫存同步失敗');};
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
-    assert.equal(messages.length,1);
-    assert.match(messages[0],/訂單編號 NEW-1.*重試同一張訂單.*庫存同步失敗/);
-    assert.doesNotMatch(messages[0],/新增失敗/);
+    assert.equal(messages.length,0);
+    assert.match(elements.get('actionFeedback').textContent,/訂單已建立.*庫存同步未完成.*重試同步.*庫存同步失敗/);
+    assert.equal(context.ordersCache[0].inventoryReservationStatus,'failed');
 });
 
 test('new order creation keeps one document ID across uncertain writes and retries', async () => {
@@ -1071,7 +1073,7 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
     const deal = appSource.slice(dealStart, dealEnd);
     assert.match(deal, /DOCUMENT_TYPES\.QUOTE/);
     assert.match(deal, /sourceType:DOCUMENT_TYPES\.QUOTE/);
-    assert.match(appSource, /linkedDocuments:firebase\.firestore\.FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.ORDER,docRef\.id,'created'\)\)/);
+    assert.match(appSource, /linkedDocuments:firebase\.firestore\.FieldValue\.arrayUnion\(documentLink\(DOCUMENT_TYPES\.ORDER,orderId,'created'\)\)/);
 
     const poStart = appSource.indexOf('window.printPurchaseOrder =');
     const poEnd = appSource.indexOf("window.addEventListener('afterprint'", poStart);

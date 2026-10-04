@@ -16,7 +16,8 @@ const validationStart = app.indexOf('function assertPurchaseLinesAvailable(order
 const validationEnd = app.indexOf('\n}\n\nfunction poPdfFileName', validationStart) + 2;
 const validation = validationStart >= 0 && validationEnd > validationStart ? app.slice(validationStart, validationEnd) : '';
 assert.ok(validation, 'The PO transaction must validate the live source order');
-const validate = vm.runInNewContext(`${validation}\nassertPurchaseLinesAvailable`, {
+const syncGuard=app.slice(app.indexOf('function orderInventorySyncIncomplete(order)'),app.indexOf('function canRetryOrderInventorySync(order)'));
+const validate = vm.runInNewContext(`${syncGuard}\n${validation}\nassertPurchaseLinesAvailable`, {
     normalizedOrderStatus: order => order.status === 'cancelled' ? 'cancelled' : 'normal',
     normalizedOrderItems: order => order.items,
     remainingProcurementQty: (order, item) => workflow.procurementQuantities({
@@ -284,7 +285,7 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
         YushinWorkflow:workflow,YushinFulfillment:fulfillment,
         window:{YushinFulfillment:fulfillment}
     });
-    vm.runInContext(source,ctx);
+    vm.runInContext(syncGuard+"\n"+source,ctx);
     const order={items:[{itemId:'I1',qty:3,orderedQty:3,shortageQty:0,
         fulfillmentType:'WAREHOUSE',reservedQty:3,dispatchPreparedQty:0}],isBilled:false,deliveryRecords:[]};
     const current=()=>ctx.orderItemDisplayCategory(order,order.items[0]);
@@ -316,7 +317,7 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
         YushinWorkflow:workflow,YushinFulfillment:fulfillment,
         window:{YushinFulfillment:fulfillment}
     });
-    vm.runInContext(source,context);
+    vm.runInContext(syncGuard+"\n"+source,context);
     const order={items:[{itemId:'I1',qty:10,orderedQty:10,shortageQty:5,
         fulfillmentType:'WAREHOUSE',reservedQty:5,dispatchPreparedQty:0}]};
     const item=order.items[0];
@@ -1120,7 +1121,7 @@ test('dispatch readiness uses live reservation and supports later receipt batche
         YushinFulfillment:fulfillment,
         window:{YushinFulfillment:fulfillment}
     });
-    vm.runInContext(source,context);
+    vm.runInContext(syncGuard+"\n"+source,context);
     const item={itemId:'I1',orderedQty:10,qty:10,reservedQty:5,dispatchPreparedQty:5};
     const afterFirstShipment=context.itemDispatchState({items:[item],deliveryRecords:[{itemId:'I1',qty:5}]},item);
     assert.equal(afterFirstShipment.pending,5);
