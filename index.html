@@ -460,6 +460,9 @@
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
       <div class="section-header no-print"><h2>庫存管理</h2><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
+      <div class="toolbar no-print"><button onclick="switchInventoryWorkView(false)">庫存明細</button><button onclick="switchInventoryWorkView(true)">待收貨</button></div>
+      <div id="inventoryReceivingPanel" style="display:none"><p id="inventoryReceivingStatus" role="status"></p><div class="table-wrap"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
+      <div id="inventoryStockPanel">
       <div class="toolbar no-print inventory-toolbar">
         <input id="inventorySearch" type="search" placeholder="搜尋庫存／產品：貨號 / 品名 / 廠牌 / 批號" oninput="scheduleInventorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();runInventoryUnifiedSearchNow();}">
         <span id="inventorySearchStatus" role="status"></span>
@@ -479,6 +482,7 @@
       <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>在途數量</th><th>供應商</th><th>狀態</th></tr></thead><tbody id="pendingInventoryBody"></tbody></table></div>
       <div class="empty-hint" id="pendingInventoryEmptyHint" style="display:none;">目前沒有待建檔品項。</div>
       <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>品項</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
+      </div>
     </div>
     <div class="eq-modal-overlay no-print" id="inventoryAdjustmentOverlay" onclick="if(event.target===this) closeInventoryAdjustment()">
       <div class="eq-modal-box" style="max-width:1100px;">
@@ -735,7 +739,6 @@
             <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
             <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
             <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 批量下載 Excel</button>
-            <button type="button" id="equipmentRefreshBtn" class="btn-secondary" onclick="loadEquipmentFromCloud()">↻ 更新</button>
             <span style="font-size:12px;color:#666;">（批量上傳會依「儀器編號」比對：有既有紀錄就更新、沒有就新增，不會刪除任何既有資料，維修保養紀錄也會保留；一般業務只能新增/更新自己名下的儀器）</span>
         </div>
 
@@ -1323,7 +1326,6 @@
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
             <div class="toolbar no-print">
-                <button class="btn-secondary" onclick="reloadSalesFromUsers()">↻ 更新</button>
                 <span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span>
             </div>
             <table>
@@ -1339,6 +1341,7 @@
                 <p style="font-size:12px;color:#666;margin:6px 0 14px;">
                     Product Master 的新增、待補、停用與批次匯入集中在這裡；一般「產品」頁只負責搜尋、依廠牌瀏覽與加入估價單／訂單。
                 </p>
+                <section aria-label="廠牌與匯入批量管理"><h3>已建檔廠牌／匯入批次</h3><p>選擇廠牌或批次後可預覽產品並批量停用／恢復；保留歷史單據。舊資料沒有匯入批次，新匯入才會記錄。批次顯示產品最近一次匯入，不提供覆寫前版本還原。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="productOverviewLimit=200;renderProductManagementOverview()"></select><button onclick="bulkSetProductActive(false,this)">停用勾選產品</button><button class="btn-secondary" onclick="bulkSetProductActive(true,this)">恢復勾選產品</button></div><div class="table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="全選目前預覽" onchange="document.querySelectorAll('#productOverviewBody input[type=checkbox]').forEach(el=>el.checked=this.checked)"></th><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th><th>最近匯入檔案</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="productOverviewLimit+=200;renderProductManagementOverview()">顯示更多產品</button></section>
                 <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
             <!-- Product Master 管理（舊稱，保留供回歸測試辨識） -->
             <div class="product-management-tools-title">產品管理</div>
@@ -1441,7 +1444,6 @@
                 <select id="salesStatsTypeFilter" onchange="renderAdminStatistics()"><option value="">全部類型</option></select>
                 <select id="salesStatsLineFilter" onchange="renderAdminStatistics()"><option value="">全部產品線</option></select>
                 <button type="button" onclick="exportSalesStatisticsExcel()">⬇️ 匯出季報 Excel</button>
-                <button class="btn-secondary" onclick="loadSalesStatistics()">↻ 更新</button>
                 <span style="font-size:12px;color:#666;">實際送貨依送貨日期計算，退貨依退貨日期負數沖銷；待出貨為截至迄日的未交餘額。</span>
             </div>
 
@@ -1708,7 +1710,7 @@
     <script src="modules/procurement-demand-core.js?v=20261002-9"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
-    <script src="app.js?v=20261003-21"></script>
+    <script src="app.js?v=20261004-22"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

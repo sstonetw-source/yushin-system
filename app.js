@@ -10492,7 +10492,7 @@ function refreshPurchasingOrderCache(reset = true, options = {}) {
 }
 
 async function loadActiveReceivingSupplyCache(reset = true) {
-    if (!canAccessPage('orders.po')) return [];
+    if (!canAccessPage('orders.po') && !(canAccessPage('inventory') && canReceiveInventoryCapability())) return [];
     if (activeReceivingSupplyLoadPromise) return activeReceivingSupplyLoadPromise;
     const requestedRole = currentUserRole;
     activeReceivingSupplyLoadPromise = (async () => {
@@ -10509,7 +10509,7 @@ async function loadActiveReceivingSupplyCache(reset = true) {
             if (snapshot.size < DEFAULT_LIST_LIMIT) break;
             cursor = snapshot.docs[snapshot.docs.length - 1];
         }
-        if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return [];
+        if (requestedRole !== currentUserRole || (!canAccessPage('orders.po') && !(canAccessPage('inventory') && canReceiveInventoryCapability()))) return [];
 
         const rows = [...records.values()]
             .sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
@@ -10541,7 +10541,7 @@ async function loadActiveReceivingSupplyCache(reset = true) {
                 nextSourceStatuses.set(doc.id,normalizedOrderStatus(order));
             });
         }
-        if (requestedRole !== currentUserRole || !canAccessPage('orders.po')) return [];
+        if (requestedRole !== currentUserRole || (!canAccessPage('orders.po') && !(canAccessPage('inventory') && canReceiveInventoryCapability()))) return [];
         receivingSourceOrderCache = nextSourceOrders;
         receivingSourceOrderStatusCache = nextSourceStatuses;
         return rows;
@@ -10562,7 +10562,7 @@ function loadPurchasingReceivingQueue(reset = true, options = {}) {
     }
     purchasingReceivingLoadPromise = Promise.allSettled([
         loadActiveReceivingSupplyCache(reset),
-        refreshPurchasingOrderCache(reset, options)
+        getDataScope('orders') !== 'none' ? refreshPurchasingOrderCache(reset, options) : Promise.resolve()
     ]).then(results => {
         purchasingReceivingReady = true;
         const failed = results.filter(result => result.status === 'rejected');
@@ -10570,6 +10570,7 @@ function loadPurchasingReceivingQueue(reset = true, options = {}) {
         // 造成 supplyOrders 沒有真正查到、卻被誤標成已載入的 0 筆狀態。
         mergeReceivingSourceOrdersIntoOrderCache();
         renderPurchasingView();
+        if (document.getElementById('inventory-system')?.classList.contains('active') && inventoryReceivingVisible) renderPurchasingReceivingWorkList(null, null, null, null, true);
         if (failed.length) throw failed[0].reason;
     }).finally(() => {
         purchasingReceivingLoadPromise = null;
@@ -11770,6 +11771,7 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
             closePurchaseOrderModal();
             throw new Error('此品項已無待採購數量');
         }
+        await preloadPurchaseCostsForItems(items);
         poItems = items;
         poAllItems = items;
         document.getElementById('poVendorName').value = '';
@@ -11818,6 +11820,7 @@ window.openSelectedPurchaseDraft = async function() {
             return {...row,item};
         });
         const items=refreshedRows.map(row=>row.item);
+        await preloadPurchaseCostsForItems(items);
         const selectedOrders=[...new Map(refreshedRows.map(row=>[row.order.id,row.order])).values()];
 
         if(items.some(item=>String(item.fulfillmentType||'WAREHOUSE').toUpperCase()==='DIRECT_SHIP')){
@@ -12449,17 +12452,17 @@ function receivingWorkProgress(order, item) {
     return { target, received:Math.min(target, received), remaining:Math.max(0, target - received), directShip };
 }
 
-function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null) {
-    const tbody = document.getElementById('poListBody');
-    const head = document.getElementById('poListHeadRow');
-    const emptyHint = document.getElementById('poListEmptyHint');
-    const status = document.getElementById('poHistorySearchStatus');
+function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null, inventory = false) {
+    const tbody = document.getElementById(inventory ? 'inventoryReceivingBody' : 'poListBody');
+    const head = document.getElementById(inventory ? 'inventoryReceivingHead' : 'poListHeadRow');
+    const emptyHint = document.getElementById(inventory ? 'inventoryReceivingEmpty' : 'poListEmptyHint');
+    const status = document.getElementById(inventory ? 'inventoryReceivingStatus' : 'poHistorySearchStatus');
     if (!tbody) return;
     if (head) head.innerHTML = '<th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待到貨品項</th><th>到貨進度</th><th class="no-print">操作</th>';
     tbody.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
-    const filters = filterContext || purchaseFilterContext();
+    const filters = inventory ? { ...purchaseFilterContext(), selectedSales:'', selectedBrand:'', start:'', end:'' } : (filterContext || purchaseFilterContext());
     let workCount = 0;
     let missingEvidence = 0;
     let evidenceCount = 0;
@@ -12595,6 +12598,10 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     sortedRows.forEach(row => fragment.appendChild(row));
     tbody.appendChild(fragment);
 
+    if (!inventory) tbody.querySelectorAll('button[onclick^="openSupplyReceipt"]').forEach(button => {
+        button.setAttribute('onclick', 'openInventoryReceiving()');
+        button.textContent = '前往庫存收貨';
+    });
     const totalRows = workCount + standaloneSupplyCount;
     if (emptyHint) {
         emptyHint.style.display = totalRows === 0 ? 'block' : 'none';
@@ -13898,6 +13905,7 @@ window.savePoReceiptBatch = async function() {
         alert(`已完成 ${completed} 個品項的到貨確認。`);
         Promise.allSettled([
             loadMyPurchaseOrders(),
+            inventoryReceivingVisible ? loadPurchasingReceivingQueue(true) : Promise.resolve(),
             getDataScope('orders') !== 'none' ? refreshAffectedOrderCaches([...affectedOrderIds]) : Promise.resolve(),
             (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
                 ? loadInventory(true) : Promise.resolve()
@@ -13920,6 +13928,7 @@ window.savePoReceiptBatch = async function() {
         }
         Promise.allSettled([
             loadMyPurchaseOrders(),
+            inventoryReceivingVisible ? loadPurchasingReceivingQueue(true) : Promise.resolve(),
             getDataScope('orders') !== 'none' ? refreshAffectedOrderCaches([...affectedOrderIds]) : Promise.resolve(),
             (canAccessPage('inventory') && document.getElementById('inventory-system')?.classList.contains('active'))
                 ? loadInventory(true) : Promise.resolve()
@@ -13963,7 +13972,7 @@ function purchaseItemsFromOrder(order) {
         const brand = item.brand || item.manufacturer || order.brand || '';
         const qtyValue = item.qty ?? item.quantity ?? item.count ?? (sourceItems.length === 1 ? order.qty ?? order.quantity : 1);
         let cost = parseFloat(item.costPrice ?? item.cost ?? item.purchasePrice ?? (sourceItems.length === 1 ? order.costPrice : NaN));
-        if (!Number.isFinite(cost) || cost <= 0) {
+        {
             const savedProductId = item.productId || order.productId || '';
             const normalizedCode = normalizeItemCode(itemCode);
             const normalizedBrand = String(brand || '').trim().toLocaleLowerCase();
@@ -13973,7 +13982,7 @@ function purchaseItemsFromOrder(order) {
             const productId = savedProductId || priceMatch?.productId || (priceMatch ? stableProductId(priceMatch) : '');
             const secureCost = productId ? purchaseCostCache.get(productId) : null;
             if (secureCost !== undefined && secureCost !== null) cost = Number(secureCost);
-            else if (priceMatch) {
+            else if ((!Number.isFinite(cost) || cost <= 0) && priceMatch) {
                 cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
             }
         }
@@ -18188,6 +18197,7 @@ window.switchAdminTab = function(tab, el) {
     document.getElementById(`admin-${tab}`).style.display = 'block';
 
     if (tab === 'sales') reloadSalesFromUsers();
+    if (tab === 'products') loadProductManagementOverview();
     // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
     if (tab === 'agencies') Promise.all([ensureBrandSettingsLoaded(), loadSupplierWarehouseMasters()]).then(() => {
         renderKeyStatisticBrands();
@@ -18204,6 +18214,108 @@ window.switchAdminTab = function(tab, el) {
     }).catch(err => console.error('進銷存分析載入失敗：', err));
     if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
+};
+
+let inventoryReceivingVisible = false;
+let activeProductImportBatch = null;
+let productManagementOverviewRows = [];
+let productOverviewLimit = 200;
+let productOverviewLoading = false;
+
+window.openInventoryReceiving = function() {
+    if (!canAccessPage('inventory')) return alert('需要庫存頁權限才能收貨。');
+    switchMainTab('inventory-system', document.querySelector('[data-main-nav="inventory"]'));
+    switchInventoryWorkView(true);
+};
+window.switchInventoryWorkView = async function(receiving) {
+    inventoryReceivingVisible = receiving;
+    document.getElementById('inventoryStockPanel').style.display = receiving ? 'none' : '';
+    document.getElementById('inventoryReceivingPanel').style.display = receiving ? '' : 'none';
+    if (!receiving) return;
+    renderPurchasingReceivingWorkList(null, null, null, null, true);
+    try {
+        await loadPurchasingReceivingQueue(true);
+        renderPurchasingReceivingWorkList(null, null, null, null, true);
+    } catch (err) {
+        const status = document.getElementById('inventoryReceivingStatus');
+        status.textContent = '待收貨載入失敗：' + err.message;
+        const retry = document.createElement('button');
+        retry.textContent = '重試';
+        retry.onclick = () => switchInventoryWorkView(true);
+        status.appendChild(retry);
+    }
+};
+
+window.loadProductManagementOverview = async function() {
+    if (currentUserRole !== 'admin' || productOverviewLoading) return;
+    productOverviewLoading = true;
+    const status = document.getElementById('productOverviewStatus');
+    if (status) status.textContent = '正在整理全部已建檔廠牌…';
+    try {
+        productManagementOverviewRows = await readCollectionInBatches('products');
+        const groups = new Map();
+        productManagementOverviewRows.forEach(row => {
+            const brand = row.brandName || row.brand || '未分類';
+            const key = 'brand:' + brand;
+            const group = groups.get(key) || { label:brand, count:0, date:'' };
+            group.count++;
+            group.date = [group.date, row.lastImportedAt || ''].sort().pop();
+            groups.set(key, group);
+            if (row.lastImportBatch) {
+                const batchKey = 'batch:' + row.lastImportBatch;
+                const batch = groups.get(batchKey) || { label:'匯入：' + (row.lastImportFile || row.lastImportBatch), count:0, date:row.lastImportedAt || '' };
+                batch.count++;
+                groups.set(batchKey, batch);
+            }
+        });
+        const select = document.getElementById('productOverviewScope');
+        const previous = select.value;
+        select.innerHTML = '<option value="">全部已建檔產品（' + productManagementOverviewRows.length + '）</option>' + [...groups.entries()].sort((a,b) => a[0].localeCompare(b[0])).map(([key,group]) => `<option value="${escapeAttr(key)}">${escapeHtml(group.label)}（${group.count}）${group.date ? ' · ' + escapeHtml(group.date.slice(0,10)) : ''}</option>`).join('');
+        if (groups.has(previous)) select.value = previous;
+        renderProductManagementOverview();
+    } catch (err) {
+        if (status) {
+            status.textContent = '產品總覽載入失敗：' + err.message;
+            const retry = document.createElement('button');
+            retry.textContent = '重試'; retry.onclick = loadProductManagementOverview; status.appendChild(retry);
+        }
+    } finally { productOverviewLoading = false; }
+};
+window.renderProductManagementOverview = function() {
+    const scope = document.getElementById('productOverviewScope').value;
+    const rows = productManagementOverviewRows.filter(row => !scope || (scope.startsWith('brand:') ? (row.brandName || row.brand || '未分類') === scope.slice(6) : row.lastImportBatch === scope.slice(6)));
+    document.getElementById('productOverviewStatus').textContent = `${rows.length} 個產品，啟用 ${rows.filter(row=>row.active!==false && row.status!=='INACTIVE').length} 個；目前顯示 ${Math.min(rows.length,productOverviewLimit)} 個。`;
+    document.getElementById('productOverviewBody').innerHTML = rows.slice(0,productOverviewLimit).map(row => `<tr><td><input type="checkbox" value="${escapeAttr(row.id)}" aria-label="選取 ${escapeAttr(row.manufacturerPartNo || row.sku || row.id)}"></td><td>${escapeHtml(row.brandName || row.brand || '')}</td><td>${escapeHtml(row.manufacturerPartNo || row.sku || '')}</td><td>${escapeHtml(row.productName || row.nameCn || row.nameEn || '')}</td><td>${row.active===false || row.status==='INACTIVE' ? '停用' : '啟用'}</td><td>${escapeHtml(row.lastImportFile || '舊資料未記錄')} ${escapeHtml((row.lastImportedAt || '').slice(0,10))}</td></tr>`).join('');
+    document.getElementById('productOverviewMore').style.display = rows.length > productOverviewLimit ? '' : 'none';
+};
+window.bulkSetProductActive = async function(active, button) {
+    if (currentUserRole !== 'admin') return;
+    const ids = [...document.querySelectorAll('#productOverviewBody input:checked')].map(el=>el.value);
+    if (!ids.length) return alert('請先勾選要處理的產品。');
+    if (!confirm(`確定${active ? '恢復' : '停用'}勾選的 ${ids.length} 個產品？不會刪除舊訂單或成本資料。`)) return;
+    button.disabled = true;
+    let completed = 0;
+    try {
+        for (let offset=0; offset<ids.length; offset+=200) {
+            const slice = ids.slice(offset,offset+200);
+            const batch = db.batch();
+            slice.forEach(id=>batch.update(db.collection('products').doc(id), {active, status:active?'ACTIVE':'INACTIVE', updatedAt:new Date().toISOString(), updatedBy:currentUser.uid}));
+            await batch.commit();
+            completed += slice.length;
+            slice.forEach(id=>{
+                const row = productManagementOverviewRows.find(item=>item.id===id);
+                if (row) {row.active=active;row.status=active?'ACTIVE':'INACTIVE';}
+                priceList.forEach(item=>{if(item.productId===id){item.active=active;item.status=active?'ACTIVE':'INACTIVE';}});
+            });
+        }
+        refreshPriceDatalists();
+        renderProductManagementOverview();
+        if (productBrandBrowseCurrent) reloadCurrentProductBrand();
+        alert(`已${active ? '恢復' : '停用'} ${completed} 個產品，可重新匯入修正資料。`);
+    } catch(err) {
+        renderProductManagementOverview();
+        alert(`已完成 ${completed} 個；剩餘處理失敗：${err.message}`);
+    } finally { button.disabled=false; }
 };
 
 function renderBrandAliasManager() {
@@ -18975,6 +19087,13 @@ async function preloadPurchaseCostsForItems(purchaseItems = []) {
         const cost = await loadVisibleProductCost(item);
         if (cost !== null && Number.isFinite(cost)) purchaseCostCache.set(id, cost);
     }));
+    resolved.forEach(({item, product}) => {
+        if (!product) return;
+        const id = product.productId || item.productId || stableProductId(product);
+        item.productId = id;
+        const cost = purchaseCostCache.get(id);
+        if (cost !== undefined && cost !== null && Number.isFinite(Number(cost))) item.unitPrice = Number(cost);
+    });
 }
 
 function productMasterDocToPriceItem(doc) {
@@ -21132,6 +21251,7 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
             if (Object.keys(changed).length) productPatch = { ...changed, updatedAt:now, updatedBy };
         }
 
+        if (activeProductImportBatch) productPatch = { ...(productPatch || {}), lastImportBatch:activeProductImportBatch.id, lastImportFile:activeProductImportBatch.file, lastImportedAt:activeProductImportBatch.date };
         let costPatch = null;
         if (item.standardCostProvided === true) {
             const standardCost = Number(item.standardCost);
@@ -21768,6 +21888,7 @@ window.handlePriceExcelUpload = async function(input) {
                 return;
             }
 
+            activeProductImportBatch = { id:`import-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, file:file.name, date:new Date().toISOString() };
             const savedBrands = [];
             const imported = brandGroups.flatMap(group => group.imported);
             const itemsByBrand = new Map();
@@ -21816,12 +21937,14 @@ window.handlePriceExcelUpload = async function(input) {
             }
             refreshPriceDatalists();
             renderCompanyAgencyBrandSettings();
+            loadProductManagementOverview();
             setPriceUploadProgress(100, `完成：檢查 ${imported.length} 筆；產品寫入 ${totalProductWrites}、標準成本寫入 ${totalCostWrites}、完全無變動 ${totalUnchangedRows} 筆。`);
-            alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n只寫入實際有變動的資料；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。`);
+            alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n已記錄本次匯入批次；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。`);
         } catch (err) {
             setPriceUploadProgress(0, '儲存雲端失敗，請稍後再試。');
             alert('上傳失敗：' + err.message);
         } finally {
+            activeProductImportBatch = null;
             productMasterMigrationRunning = false;
             setProductBatchMaintenanceBusy(false);
             input.value = '';
