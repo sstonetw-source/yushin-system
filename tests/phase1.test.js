@@ -1865,7 +1865,7 @@ test('Product Management is the single daily Product Import entry', () => {
     assert.doesNotMatch(indexSource, /id="admin-prices"/);
     assert.match(indexSource, /id="productManagementTools"/);
     assert.match(indexSource, /id="productBatchMaintenance"/);
-    assert.match(indexSource, />上傳廠牌 Product Master</);
+    assert.match(indexSource, />Excel 匯入／更新</);
     assert.match(indexSource, /下載標準範本/);
     assert.match(indexSource, /查看欄位規則/);
     assert.match(indexSource, /只處理本次檔案中的品項/);
@@ -4283,7 +4283,7 @@ test('Product page stays mobile-safe while Product Management lives in admin', (
     assert.doesNotMatch(productSource,/id="productManagementTools"/);
     assert.ok(adminProductStart>=0&&adminAgencyStart>adminProductStart);
     assert.match(adminProductSource,/id="productManagementTools"/);
-    assert.match(adminProductSource,/新增單個 Product Master/);
+    assert.match(adminProductSource,/＋ 新增產品/);
     assert.doesNotMatch(adminProductSource,/id="pendingProductMasterBtn"/);
     assert.match(indexSource.slice(indexSource.indexOf('id="admin-health"')),/id="pendingProductMasterBtn"/);
     assert.match(adminProductSource,/id="priceUploadProgress"/);
@@ -4793,9 +4793,9 @@ test('admin can remove a pending product reminder without deleting source docume
 test('Product Management is admin-only while guarded permanent delete remains available', () => {
     assert.match(indexSource, /id="admin-sub-products"/);
     assert.match(indexSource, /id="admin-products"/);
-    assert.match(indexSource, /product-management-tools-title">產品管理/);
-    assert.match(indexSource, /id="productManagementShowInactive"/);
-    assert.match(indexSource, /永久刪除僅限管理員/);
+    assert.match(indexSource, /admin-product-heading/);
+    assert.match(indexSource, /id="productOverviewInactive"/);
+    assert.match(indexSource, /有單據或庫存關聯的產品保留並停用/);
     const rowStart=appSource.indexOf('function productManagementRow(product)');
     const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);

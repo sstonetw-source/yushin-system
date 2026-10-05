@@ -3246,3 +3246,12 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .dispatch-list-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .dispatch-list-fields label { display:flex; flex-direction:column; gap:5px; }
 @media(max-width:768px) { .dispatch-list-fields { grid-template-columns:1fr; } }
+
+.admin-product-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.admin-product-heading h3{margin:0}
+.admin-product-filters{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.admin-product-filters input[type="search"]{flex:1;min-width:220px}
+.admin-product-filters label{display:flex;align-items:center;gap:6px;white-space:nowrap}
+#admin-products #productOverviewStatus{font-size:14px;color:#526575;margin:12px 0}
+#admin-products #productManagementTools{margin-top:20px}
+@media(max-width:600px){.admin-product-heading{flex-wrap:wrap}.admin-product-filters input[type="search"]{width:100%;min-width:0;flex-basis:100%}}

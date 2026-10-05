@@ -2730,6 +2730,7 @@ window.saveProductMasterEditor = async function() {
         renderProductManagementResults();
         const overviewIndex = productManagementOverviewRows.findIndex(item => (item.id || item.productId) === productId);
         if (overviewIndex >= 0) productManagementOverviewRows[overviewIndex] = { ...productManagementOverviewRows[overviewIndex], ...record, id:productId };
+        else if (!originalId) productManagementOverviewRows.unshift({ ...record, id:productId });
         if (document.getElementById('productOverviewScope')) renderProductManagementOverview();
         closeProductMasterEditor();
         const statusEl = document.getElementById('productManagementSearchStatus');
@@ -18930,9 +18931,12 @@ window.switchInventoryWorkView = async function(receiving) {
 let productOverviewCursor=null, productOverviewHasMore=false, productOverviewGeneration=0, productOverviewReloadRequested=false;
 window.loadProductManagementOverview = async function(reset = true) {
     if(currentUserRole!=='admin')return;
+    if(reset===false && !productOverviewHasMore){productOverviewLimit+=200;renderProductManagementOverview();return;}
     if(productOverviewLoading){if(reset!==false){productOverviewReloadRequested=true;productOverviewGeneration++;}return;}
     const generation=++productOverviewGeneration, uid=currentUser?.uid;
     const scope=document.getElementById('productOverviewScope').value || '';
+    const keyword=String(document.getElementById('productOverviewSearch')?.value || '').normalize('NFKC').trim().toLocaleLowerCase();
+    const terms=keyword.split(/\s+/).filter(Boolean);
     const status=document.getElementById('productOverviewStatus');
     productOverviewLoading=true;
     if(reset!==false){productOverviewCursor=null;productManagementOverviewRows=[];productOverviewLimit=200;}
@@ -18943,14 +18947,24 @@ window.loadProductManagementOverview = async function(reset = true) {
         if(scope.startsWith('batch:'))query=query.where('lastImportBatch','==',scope.slice(6));
         query=query.orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
         if(productOverviewCursor)query=query.startAfter(productOverviewCursor);
-        const snapshot=await firestoreReadWithTimeout(query.get(),'產品總覽');
-        if(generation!==productOverviewGeneration || uid!==currentUser?.uid || currentUserRole!=='admin')return;
         const records=new Map(productManagementOverviewRows.map(row=>[row.id,row]));
-        snapshot.docs.forEach(doc=>records.set(doc.id,{...doc.data(),id:doc.id}));
+        let checked=0, snapshot;
+        do {
+            snapshot=await firestoreReadWithTimeout(query.get(),'產品總覽');
+            if(generation!==productOverviewGeneration || uid!==currentUser?.uid || currentUserRole!=='admin')return;
+            checked+=snapshot.size;
+            snapshot.docs.forEach(doc=>{
+                const row={...doc.data(),id:doc.id};
+                const text=[row.manufacturerPartNo,row.sku,row.productName,row.nameCn,row.nameEn,row.specification,row.brandName].join(' ').normalize('NFKC').toLocaleLowerCase();
+                if(!keyword || terms.every(term=>text.includes(term)))records.set(doc.id,row);
+            });
+            productOverviewCursor=snapshot.docs[snapshot.docs.length-1]||productOverviewCursor;
+            productOverviewHasMore=snapshot.size===200;
+            if(keyword && status)status.textContent=`搜尋中：已檢查 ${checked} 筆，找到 ${records.size} 筆…`;
+            if(keyword && productOverviewHasMore)query=query.startAfter(productOverviewCursor);
+        } while(keyword && productOverviewHasMore);
         productManagementOverviewRows=[...records.values()];
-        productOverviewCursor=snapshot.docs[snapshot.docs.length-1]||productOverviewCursor;
-        productOverviewHasMore=snapshot.size===200;
-        productOverviewLimit=productManagementOverviewRows.length;
+        productOverviewLimit=keyword ? 200 : productManagementOverviewRows.length;
         const select=document.getElementById('productOverviewScope');
         const options=new Map([...select.options].filter(option=>option.value.startsWith('brand:')).map(option=>[option.value,option.textContent]));
         getUnifiedBrandEntries(false).forEach(entry=>options.set('brand:'+entry.name,entry.name));
@@ -18958,7 +18972,7 @@ window.loadProductManagementOverview = async function(reset = true) {
             const brand=row.brandName||row.brand||'未分類';options.set('brand:'+brand,brand);
 
         });
-        select.innerHTML='<option value="">全部產品（分頁讀取）</option>'+[...options].map(([key,label])=>`<option value="${escapeAttr(key)}">${escapeHtml(label)}</option>`).join('');
+        select.innerHTML='<option value="">全部廠牌</option>'+[...options].map(([key,label])=>`<option value="${escapeAttr(key)}">${escapeHtml(label)}</option>`).join('');
         select.value=scope;
         renderProductManagementOverview();
     }catch(err){
@@ -18974,10 +18988,12 @@ window.renderProductManagementOverview = function() {
     const scope = document.getElementById('productOverviewScope').value;
     const deleteButton = document.getElementById('deleteBrandProductsBtn');
     if (deleteButton) deleteButton.disabled = brandProductDeleteRunning || !scope.startsWith('brand:') || currentUserRole !== 'admin';
-    const rows = productManagementOverviewRows.filter(row => !scope || (scope.startsWith('brand:') ? (row.brandName || row.brand || '未分類') === scope.slice(6) : row.lastImportBatch === scope.slice(6)));
-    document.getElementById('productOverviewStatus').textContent = `${productOverviewHasMore ? "目前已載入" : "共"} ${rows.length} 個產品，啟用 ${rows.filter(row=>row.active!==false && row.status!=='INACTIVE').length} 個；目前顯示 ${Math.min(rows.length,productOverviewLimit)} 個。`;
-    document.getElementById('productOverviewBody').innerHTML = rows.slice(0,productOverviewLimit).map(row => `<tr><td>${escapeHtml(row.brandName || row.brand || '')}</td><td>${escapeHtml(row.manufacturerPartNo || row.sku || '')}</td><td>${escapeHtml(row.productName || row.nameCn || row.nameEn || '')}</td><td>${row.active===false || row.status==='INACTIVE' ? '停用' : '啟用'}</td><td>${canManagePendingProductMaster() ? `<button type="button" onclick="openProductMasterEditor(${inlineJsValue(row.id || row.productId)})">編輯主檔</button>` : ''}</td></tr>`).join('');
-    document.getElementById('productOverviewMore').style.display = productOverviewHasMore ? '' : 'none';
+    const scopedRows = productManagementOverviewRows.filter(row => !scope || (scope.startsWith('brand:') ? (row.brandName || row.brand || '未分類') === scope.slice(6) : row.lastImportBatch === scope.slice(6)));
+    const inactive = row => row.active === false || row.status === 'INACTIVE';
+    const rows = scopedRows.filter(row => document.getElementById('productOverviewInactive')?.checked || !inactive(row));
+    document.getElementById('productOverviewStatus').textContent = `已載入 ${scopedRows.length} 筆｜啟用 ${scopedRows.filter(row=>!inactive(row)).length}｜停用 ${scopedRows.filter(inactive).length}｜顯示 ${Math.min(rows.length,productOverviewLimit)} 筆`;
+    document.getElementById('productOverviewBody').innerHTML = rows.slice(0,productOverviewLimit).map(row => `<tr><td>${escapeHtml(row.brandName || row.brand || '')}</td><td>${escapeHtml(row.manufacturerPartNo || row.sku || '')}</td><td>${escapeHtml(row.productName || row.nameCn || row.nameEn || '')}</td><td>${escapeHtml(row.specification || row.spec || '—')}</td><td>${row.active===false || row.status==='INACTIVE' ? '停用' : '啟用'}</td><td>${canManagePendingProductMaster() ? `<button type="button" onclick="openProductMasterEditor(${inlineJsValue(row.id || row.productId)})">編輯主檔</button>` : ''}</td></tr>`).join('');
+    document.getElementById('productOverviewMore').style.display = productOverviewHasMore || rows.length > productOverviewLimit ? '' : 'none';
 };
 window.bulkSetProductActive = async function(active, button) {
     if (currentUserRole !== 'admin' || brandProductDeleteRunning) return;
