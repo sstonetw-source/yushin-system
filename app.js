@@ -7950,6 +7950,25 @@ window.changeOrderPeriod = function(value) {
 };
 
 let inventoryLoadGeneration=0, inventoryReloadRequested=false, inventoryPendingSupplyError='', inventoryPendingSupplyLoading=false;
+let inventoryReceivingWorkCount = 0;
+function updateInventoryReceivingCount(count = inventoryReceivingWorkCount) {
+    inventoryReceivingWorkCount = Math.max(0, Number(count) || 0);
+    const button = document.getElementById('inventoryReceivingTabBtn');
+    if (!button) return;
+    const error = inventoryPendingSupplyError || activeReceivingSupplyError || orderWorkQueueError;
+    const loading = inventoryPendingSupplyLoading || !purchasingReceivingReady || !activeReceivingSupplyReady;
+    button.textContent = error ? '待收貨（讀取失敗）' : loading ? '待收貨（讀取中…）' : `待收貨（${inventoryReceivingWorkCount} 筆）`;
+}
+async function loadInventoryReceivingSummary() {
+    // Reuse the receiving queue, including active work older than the 50-row history page.
+    await Promise.all([
+        loadPurchasingReceivingQueue(true, {reuseOrders:true}),
+        loadOrderWorkQueue(false)
+    ]);
+    if (!orderWorkQueueReady) throw new Error(orderWorkQueueError || '未完成訂單尚未載入');
+    mergeReceivingSourceOrdersIntoOrderCache();
+    return supplyReceivingCache;
+}
 let inventoryCache=[], inventoryCursor=null, inventoryHasMore=true, inventoryLoading=false, inventoryLedgerCache=[], pendingSupplyCache=[];
 let inventoryReplenishmentCache=[], inventoryReplenishmentLoading=false;
 let warehouseStockCache = new Map();
@@ -8035,15 +8054,15 @@ window.loadInventory=async function(reset=true){
    freshRows.forEach(x=>{const i=inventoryCache.findIndex(v=>v.id===x.id);if(i>=0)inventoryCache[i]=x;else inventoryCache.push(x);});
  }
  inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
- if(reset){inventoryPendingSupplyError='';inventoryPendingSupplyLoading=true;renderPendingInventoryItems();}
+ if(reset){inventoryPendingSupplyError='';inventoryPendingSupplyLoading=true;updateInventoryReceivingCount();renderPendingInventoryItems();}
  const auxiliary = reset ? Promise.allSettled([
    firestoreReadWithTimeout(db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),'庫存異動'),
-   canReceiveInventoryCapability() ? readQueryInBatches(db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']),200) : Promise.resolve([])
+   canReceiveInventoryCapability() ? loadInventoryReceivingSummary() : Promise.resolve([])
  ]).then(([ledger,supplies])=>{
    if(!isCurrent())return;inventoryPendingSupplyLoading=false;
    if(ledger.status==='fulfilled'){inventoryLedgerCache=ledger.value.docs.map(d=>({id:d.id,...d.data()}));renderInventoryLedger();}
    else console.error('庫存異動讀取失敗',ledger.reason);
-   if(supplies.status==='fulfilled'){pendingSupplyCache=supplies.value.filter(row=>(row.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');renderPendingInventoryItems();}
+   if(supplies.status==='fulfilled'){pendingSupplyCache=supplies.value.filter(row=>(row.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');renderPurchasingReceivingWorkList(null,null,null,null,true);renderPendingInventoryItems();}
    else { mainPageLoadFailed('inventory'); inventoryPendingSupplyError='在途供應讀取失敗，無法確認待到貨資料。'; renderPendingInventoryItems(); }
  }) : Promise.resolve();
 
@@ -8314,7 +8333,7 @@ window.renderInventoryList=function(){
  inventoryRows.forEach(x=>{if(brandFilter&&orderBrandFilterValue(x.brand,brands)!==brandFilter)return;const lots=fefoLots(x),productKey=x.productKey||x.productId||'',warehouseState=inventoryAggregateStock(x),warehouseRows=warehouseState.rows,warehouseSearch=warehouseRows.map(row=>row.warehouse.warehouseName||'').join(' '),text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(!inventorySearchActive&&k&&!text.includes(k))return;const archived=globalThis.YushinInventory.isListArchived(x,warehouseState);if(stateFilter==='archived'?!archived:archived)return;const n=warehouseState,stockPolicy=inventoryStockPolicy(x),safetyStock=Number(x.safetyStock||0),plan=inventoryReplenishmentPlan(x,n);if(policyFilter&&stockPolicy!==policyFilter)return;if(stateFilter==='low'&&!plan.needsReplenishment)return;if(stateFilter==='out'&&n.available>0)return;if(stateFilter==='reserved'&&n.reserved<=0)return;
  const visibleWarehouseRows=warehouseRows.filter(row=>row.n.onHand||row.n.reserved||row.n.incoming),showWarehouseDetail=activeWarehouseCount>1&&visibleWarehouseRows.length>0,warehouseHtml=showWarehouseDetail?visibleWarehouseRows.map(row=>`<div><strong>${escapeHtml(row.warehouse.warehouseName||row.warehouse.id)}</strong>：現有 ${row.n.onHand}／占用 ${row.n.reserved}／可用 ${row.n.available}／在途 ${row.n.incoming}</div>`).join(''):'－';
  const productMaster=productMasterForRecord({productId:x.productId||productKey,itemCode:x.itemCode||'',brand:x.brand||''}),showLotDetail=!!(productMaster?.lotTracked||productMaster?.expiryTracked||lots.length),lotHtml=showLotDetail?(lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>')||'尚無批號／效期資料'):'－',reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails(${inlineJsValue(x.productKey||x.id||'')})">${n.reserved}</button>`:'0';
- rowsHtml.push(`<tr class="inventory-list-row"><td data-th="貨號" class="inventory-detail-field">${escapeHtml(x.itemCode||'')}</td><td data-th="品名" class="inventory-primary-cell"><strong class="inventory-item-name">${escapeHtml(x.itemName||x.itemCode||'未命名品項')}${archived?'（已移出）':''}</strong><span class="inventory-mobile-brand">${escapeHtml(x.brand||'')}</span><div class="inventory-mobile-summary"><div><span>可用</span><strong>${n.available}</strong></div><div><span>在途</span><strong>${n.incoming}</strong></div><div><span>預計</span><strong>${plan.projected}</strong></div></div></td><td data-th="廠牌" class="inventory-brand-cell">${escapeHtml(x.brand||'')}</td><td data-th="倉庫位置" class="inventory-detail-field inventory-optional-detail ${showWarehouseDetail?'':'inventory-no-detail'}">${warehouseHtml}</td><td data-th="現有庫存" class="inventory-detail-field">${n.onHand}</td><td data-th="已占用" class="inventory-detail-field">${reserved}</td><td data-th="可用庫存" class="inventory-desktop-metric">${n.available}</td><td data-th="庫存策略" class="inventory-policy-cell">${inventoryStockPolicyBadge(x)}</td><td data-th="安全庫存" class="inventory-detail-field inventory-optional-detail ${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'':'inventory-no-detail'}">${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?safetyStock:'－'}</td><td data-th="在途" class="inventory-desktop-metric">${n.incoming}</td><td data-th="預計庫存" class="inventory-desktop-metric"><strong>${plan.projected}</strong></td><td data-th="批號／效期" class="inventory-detail-field inventory-optional-detail ${showLotDetail?'':'inventory-no-detail'}">${lotHtml}</td><td data-th="操作" class="no-print inventory-actions-cell">${canEditPage('inventory')?`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><button type="button" class="btn-small" onclick="openInventoryQuantityEditor(${inlineJsValue(x.id)})">修改庫存</button>${activeWarehouseCount>1&&!showLotDetail?`<button type="button" class="btn-small btn-secondary" onclick="openInventoryTransfer(${inlineJsValue(x.id)})">移動庫存</button>`:''}${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary" onclick="openInventoryPolicySettings(${inlineJsValue(x.id)})">⚙️ 庫存設定</button>`:''}${canManageInventoryList()?`<button type="button" class="btn-small btn-secondary" onclick="setInventoryListArchived(${inlineJsValue(x.id)},${!archived},this)">${archived?'恢復至庫存列表':'移出庫存列表'}</button>`:''}</div>`:`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><span>僅可查看</span></div>`}</td></tr>`);
+ rowsHtml.push(`<tr class="inventory-list-row"><td data-th="貨號" class="inventory-detail-field">${escapeHtml(x.itemCode||'')}</td><td data-th="品名" class="inventory-primary-cell"><strong class="inventory-item-name">${escapeHtml(x.itemName||x.itemCode||'未命名品項')}${archived?'（已移出）':''}</strong><span class="inventory-mobile-brand">${escapeHtml(x.brand||'')}</span><div class="inventory-mobile-summary"><div><span>可用</span><strong>${n.available}</strong></div><div><span>在途</span><strong>${n.incoming}</strong></div><div><span>預計</span><strong>${plan.projected}</strong></div></div></td><td data-th="廠牌" class="inventory-brand-cell">${escapeHtml(x.brand||'')}</td><td data-th="倉庫位置" class="inventory-detail-field inventory-optional-detail ${showWarehouseDetail?'':'inventory-no-detail'}">${warehouseHtml}</td><td data-th="現有庫存" class="inventory-detail-field">${n.onHand}</td><td data-th="已占用" class="inventory-detail-field">${reserved}</td><td data-th="可用庫存" class="inventory-desktop-metric">${n.available}</td><td data-th="庫存策略" class="inventory-policy-cell">${inventoryStockPolicyBadge(x)}</td><td data-th="安全庫存" class="inventory-detail-field inventory-optional-detail ${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'':'inventory-no-detail'}">${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?safetyStock:'－'}</td><td data-th="在途" class="inventory-desktop-metric">${n.incoming}</td><td data-th="預計庫存" class="inventory-desktop-metric"><strong>${plan.projected}</strong></td><td data-th="批號／效期" class="inventory-detail-field inventory-optional-detail ${showLotDetail?'':'inventory-no-detail'}">${lotHtml}</td><td data-th="操作" class="no-print inventory-actions-cell">${canEditPage('inventory')?`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><button type="button" class="btn-small inventory-action-quantity" onclick="openInventoryQuantityEditor(${inlineJsValue(x.id)})">修改庫存</button>${activeWarehouseCount>1&&!showLotDetail?`<button type="button" class="btn-small btn-secondary inventory-action-transfer" onclick="openInventoryTransfer(${inlineJsValue(x.id)})">移動庫存</button>`:''}${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary inventory-action-policy" onclick="openInventoryPolicySettings(${inlineJsValue(x.id)})">⚙️ 庫存設定</button>`:''}${canManageInventoryList()?`<button type="button" class="btn-small btn-secondary inventory-action-archive" onclick="setInventoryListArchived(${inlineJsValue(x.id)},${!archived},this)">${archived?'恢復至庫存列表':'移出庫存列表'}</button>`:''}</div>`:`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><span>僅可查看</span></div>`}</td></tr>`);
  });body.innerHTML=rowsHtml.join('');
 };
 window.toggleInventoryRowDetails=function(button){const row=button?.closest?.('tr');if(!row)return;const expanded=row.classList.toggle('inventory-expanded');button.textContent=expanded?'收合詳細':'詳細資料';};
@@ -8506,6 +8525,7 @@ window.onInventoryPolicySettingChange=function(){const policy=document.getElemen
 window.closeInventoryPolicySettings=function(){inventoryPolicyEditingId='';document.getElementById('inventoryPolicyOverlay')?.classList.remove('active');};
 window.saveInventoryPolicySettings=async function(){if(!inventoryPolicyEditingId)return;const policy=document.getElementById('inventoryPolicySettingSelect')?.value||INVENTORY_STOCK_POLICIES.ORDER_ONLY,safetyStock=Number(document.getElementById('inventorySafetyStockSetting')?.value||0),button=document.getElementById('saveInventoryPolicySettingsBtn');if(button){button.disabled=true;button.textContent='儲存中…';}try{await saveInventoryPlanningSettings(inventoryPolicyEditingId,policy,safetyStock);closeInventoryPolicySettings();showActionFeedback('庫存設定已更新。');}catch(err){alert('庫存設定儲存失敗：'+err.message);}finally{if(button){button.disabled=false;button.textContent='儲存設定';}}};
 window.renderPendingInventoryItems=function(){
+    updateInventoryReceivingCount();
     const body=document.getElementById('pendingInventoryBody');
     const hint=document.getElementById('pendingInventoryEmptyHint');
     if(!body)return;
@@ -13045,6 +13065,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         button.textContent = '前往庫存收貨';
     });
     const totalRows = workCount + standaloneSupplyCount;
+    if (inventory) updateInventoryReceivingCount(totalRows);
     if (emptyHint) {
         emptyHint.style.display = totalRows === 0 ? 'block' : 'none';
         emptyHint.textContent = !purchasingReceivingReady ? '正在載入待到貨工作…' : '目前沒有待到貨品項。';

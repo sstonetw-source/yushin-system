@@ -30,7 +30,7 @@ jobs:
           node --check functions/purchase-email-core.js
           node --check functions/index.js
       - name: Trade analysis tests
-        run: node --test tests/inventory-list-archive.test.js tests/order-role-read.test.js tests/document-downloads.test.js tests/order-cost-reminder.test.js tests/quick-delivery-item.test.js tests/replenishment-entry.test.js tests/order-background.test.js tests/system-audit-shortcuts.test.js tests/receipt-background.test.js tests/trade-analysis.test.js
+        run: node --test tests/inventory-receiving-count.test.js tests/inventory-list-archive.test.js tests/order-role-read.test.js tests/document-downloads.test.js tests/order-cost-reminder.test.js tests/quick-delivery-item.test.js tests/replenishment-entry.test.js tests/order-background.test.js tests/system-audit-shortcuts.test.js tests/receipt-background.test.js tests/trade-analysis.test.js
       - name: Phase 1 regression tests
         run: node --test tests/phase1.test.js
       - name: Purchasing workflow tests

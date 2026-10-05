@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261004-5">
+        <link rel="stylesheet" href="styles.css?v=20261005-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -450,7 +450,7 @@
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
       <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
-      <div class="toolbar no-print"><button onclick="switchInventoryWorkView(false)">庫存明細</button><button onclick="switchInventoryWorkView(true)">待收貨</button></div>
+      <div class="toolbar no-print"><button onclick="switchInventoryWorkView(false)">庫存明細</button><button id="inventoryReceivingTabBtn" onclick="switchInventoryWorkView(true)">待收貨（讀取中…）</button></div>
       <div id="inventoryReceivingPanel" style="display:none"><p id="inventoryReceivingStatus" role="status"></p><div class="table-wrap"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
       <div id="inventoryStockPanel">
       <div class="toolbar no-print inventory-toolbar">
@@ -1655,7 +1655,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261005-1"></script>
+    <script src="app.js?v=20261005-2"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
