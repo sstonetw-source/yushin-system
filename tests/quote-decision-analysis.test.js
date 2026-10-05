@@ -9,12 +9,17 @@ const source = fs.readFileSync(path.join(root, 'modules/quote-decision-analysis.
 
 test('quote page offers decision price analysis PDF using the existing quote renderer', () => {
     assert.match(indexSource, /id="decisionPriceAnalysisBtn"[^>]*onclick="exportDecisionPriceAnalysisPdf\(\)"/);
-    assert.match(indexSource, /modules\/quote-decision-analysis\.js\?v=20261005-4/);
+    assert.match(indexSource, /modules\/quote-decision-analysis\.js\?v=20261005-5/);
     assert.match(source, /collectCurrentQuoteRecord\(\)/);
     assert.match(source, /createQuotePdfStage\(quoteData\)/);
     assert.match(source, /querySelector\('\.quote-pdf-title'\)/);
     assert.match(source, /title\.textContent = DOCUMENT_TITLE/);
     assert.match(source, /querySelectorAll\('\.stamp-section'\)\.forEach\(section => section\.remove\(\)\)/);
+    assert.match(indexSource, /id="validDays"[^>]*value="90"/);
+    assert.match(indexSource, /本估價單有效期限/);
+    assert.match(source, /querySelectorAll\('\.footer-note'\)/);
+    assert.match(source, /本估價單有效期限/);
+    assert.match(source, /validityNote\?\.remove\(\)/);
     assert.match(source, /決標分析單價單號：/);
     assert.match(source, /querySelector\('\.quote-pdf-no'\)/);
     assert.match(source, /paginateQuotePdfDocument/);

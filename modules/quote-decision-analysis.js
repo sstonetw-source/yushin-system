@@ -80,6 +80,11 @@
             // 決標單價分析是分析／標價清單，不是正式對外估價文件，因此不顯示公司印章。
             documentNode.querySelectorAll('.stamp-section').forEach(section => section.remove());
 
+            // 決標單價分析不顯示估價單有效期限；正式估價單仍保留原本的有效期限。
+            const validityNote = [...documentNode.querySelectorAll('.footer-note')]
+                .find(note => note.textContent.includes('本估價單有效期限'));
+            validityNote?.remove();
+
             await waitForPdfImages(documentNode);
             const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
             const scale = isMobile ? 1.15 : 1.65;

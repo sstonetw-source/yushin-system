@@ -975,6 +975,8 @@ function ensureQuoteFormInitialized() {
     const draft = loadQuoteDraft();
     if (draft) restoreQuoteDraft(draft);
     else {
+        const savedValidDays = localStorage.getItem('quote_valid_days');
+        if (savedValidDays) document.getElementById('validDays').value = savedValidDays;
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
         switchCompany('yushin');
     }
@@ -5729,8 +5731,10 @@ window.onOrderItemCodeInput = function(input) {
 };
 
 // 客戶名稱自動完成：僅抓「最近 10 筆」估價單取樣，避免隨估價單累積而讀取量無上限增長
-// Legacy compatibility for older cached quote pages; validity period is no longer used.
-window.saveToStorage = function() {};
+window.saveToStorage = function() {
+    const validDays = document.getElementById('validDays').value;
+    localStorage.setItem('quote_valid_days', validDays);
+};
 
 
 function quoteExtraDataFromRow(row) {
@@ -6099,6 +6103,7 @@ function saveQuoteDraft() {
             quoteDate: document.getElementById('quoteDate')?.value || '',
             quoteNo: document.getElementById('quoteNo')?.value || '',
             discountRate: document.getElementById('discountRateInput')?.value || '0',
+            validDays: document.getElementById('validDays')?.value || '90',
             remarks: document.getElementById('quoteRemarks')?.value || '',
             editingQuoteNo,
             items
@@ -6129,6 +6134,7 @@ function restoreQuoteDraft(draft) {
     document.getElementById('ordererName').value = draft.ordererName || '';
     document.getElementById('quoteDate').value = draft.quoteDate || '';
     document.getElementById('discountRateInput').value = draft.discountRate || 0;
+    document.getElementById('validDays').value = draft.validDays || 90;
     document.getElementById('quoteRemarks').value = draft.remarks || '';
 
     document.getElementById('quoteItems').innerHTML = '';
@@ -6191,7 +6197,7 @@ function collectCurrentQuoteRecord() {
         salesName, salesCode: resolvedSalesCode,
         ownerUid: resolvedOwnerUid,
         quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), ...commercialCreatorFields(),
-        ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []),
+        ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         remarks: document.getElementById('quoteRemarks')?.value.trim() || '',
         discountRate: document.getElementById('discountRateInput').value, grandTotal: document.getElementById('grandTotal').innerText,
         items: []
@@ -6403,6 +6409,7 @@ window.openSavedThreeQuoteRecord = async function(quoteNo) {
         document.getElementById('quoteNo').value = baseQuote.quoteNo || quoteNo;
         setQuoteEditingContext(baseQuote.quoteNo || quoteNo);
         setQuoteOutputStatus('');
+        document.getElementById('validDays').value = baseQuote.validDays ?? 90;
         document.getElementById('discountRateInput').value = baseQuote.discountRate || 0;
         document.getElementById('quoteRemarks').value = baseQuote.remarks || '';
         updateSalesPhoneDisplay();
@@ -6647,6 +6654,7 @@ function renderQuotePdfDocument(quoteData = {}) {
     const subtotal = Math.round(total / 1.05);
     const tax = Math.round(total - total / 1.05);
     const discountRate = parseFloat(quoteData.discountRate) || 0;
+    const validDays = String(quoteData.validDays ?? '').trim();
     const remarks = String(quoteData.remarks || '').trim();
     const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(quoteData.salesName));
     const salesPhone = selectedSales?.phone || '';
@@ -6701,7 +6709,8 @@ function renderQuotePdfDocument(quoteData = {}) {
             </div>
         </div>
         <div class="quote-summary-block">
-                <div class="quote-pdf-bottom">
+            ${validDays ? `<div class="footer-note">* 本估價單有效期限 ${escapeHtml(validDays)} 天。</div>` : ''}
+            <div class="quote-pdf-bottom">
                 <div class="quote-pdf-footer-left">
                     ${remarks ? `<div class="quote-pdf-remarks"><b>備註：</b><span>${escapeHtml(remarks)}</span></div>` : ''}
                     <div class="stamp-section">${stamp ? `<img src="${escapeAttr(stamp)}" alt="${escapeAttr(info?.title || '')} 估價單章">` : ''}</div>
@@ -7024,6 +7033,7 @@ async function fetchAndFillQuote(qNo) {
         document.getElementById('salesName').value = data.salesName || '';
         updateSalesPhoneDisplay();
         document.getElementById('quoteDate').value = data.quoteDate || '';
+        document.getElementById('validDays').value = data.validDays ?? 90;
         document.getElementById('discountRateInput').value = data.discountRate || 0;
         document.getElementById('quoteRemarks').value = data.remarks || '';
         document.getElementById('quoteItems').innerHTML = '';
@@ -7086,6 +7096,7 @@ window.openQuoteFromAdmin = async function(quoteNo) {
         document.getElementById('quoteNo').value = source.quoteNo || quoteNo;
         setQuoteEditingContext(source.quoteNo || quoteNo);
         setQuoteOutputStatus('');
+        document.getElementById('validDays').value = source.validDays ?? 90;
         document.getElementById('discountRateInput').value = source.discountRate || 0;
         document.getElementById('quoteRemarks').value = source.remarks || '';
         updateSalesPhoneDisplay();
@@ -7136,6 +7147,7 @@ window.copyQuoteAsNew = async function(quoteNo) {
         document.getElementById('clientName').value = source.clientName || '';
         document.getElementById('ordererName').value = source.ordererName || '';
         document.getElementById('discountRateInput').value = source.discountRate || 0;
+        document.getElementById('validDays').value = source.validDays || 90;
         document.getElementById('quoteRemarks').value = source.remarks || '';
         initDate();
 
@@ -15692,6 +15704,7 @@ function resetQuoteFormForNextOne() {
     document.getElementById('clientName').value = '';
     document.getElementById('ordererName').value = '';
     document.getElementById('discountRateInput').value = 0;
+    document.getElementById('validDays').value = 90;
     document.getElementById('quoteRemarks').value = '';
 
     document.getElementById('quoteItems').innerHTML = '';
