@@ -69,6 +69,9 @@
             if (!title) throw new Error('找不到估價單文件標題');
             title.textContent = DOCUMENT_TITLE;
 
+            // 決標單價分析是分析／標價清單，不是正式對外估價文件，因此不顯示公司印章。
+            documentNode.querySelectorAll('.stamp-section').forEach(section => section.remove());
+
             await waitForPdfImages(documentNode);
             const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
             const scale = isMobile ? 1.15 : 1.65;

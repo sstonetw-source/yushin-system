@@ -9,11 +9,12 @@ const source = fs.readFileSync(path.join(root, 'modules/quote-decision-analysis.
 
 test('quote page offers decision price analysis PDF using the existing quote renderer', () => {
     assert.match(indexSource, /id="decisionPriceAnalysisBtn"[^>]*onclick="exportDecisionPriceAnalysisPdf\(\)"/);
-    assert.match(indexSource, /modules\/quote-decision-analysis\.js\?v=20261005-1/);
+    assert.match(indexSource, /modules\/quote-decision-analysis\\.js\\?v=20261005-2/);
     assert.match(source, /collectCurrentQuoteRecord\(\)/);
     assert.match(source, /createQuotePdfStage\(quoteData\)/);
     assert.match(source, /querySelector\('\.quote-pdf-title'\)/);
     assert.match(source, /title\.textContent = DOCUMENT_TITLE/);
+    assert.match(source, /querySelectorAll\('\.stamp-section'\)\.forEach\(section => section\.remove\(\)\)/);
     assert.match(source, /paginateQuotePdfDocument/);
     assert.match(source, /addDocumentPagesToPdf/);
     assert.match(source, /DocumentDownloads\.savePdf\('quote', pdf, fileName\)/);
