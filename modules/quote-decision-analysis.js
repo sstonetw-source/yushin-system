@@ -98,6 +98,7 @@
             });
             await addDocumentPagesToPdf(pdf, pages, {
                 scale,
+                isolateRoot: stage,
                 onProgress: (pageNo, pageCount) => {
                     if (button) button.innerText = `正在建立${DOCUMENT_TITLE}… ${pageNo}/${pageCount}`;
                 }
