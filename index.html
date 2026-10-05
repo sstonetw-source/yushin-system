@@ -1315,7 +1315,7 @@
                 <p style="font-size:12px;color:#666;margin:6px 0 14px;">
                     上傳／移除整個廠牌的 Product Master，或新增單個產品。待補主檔請到「資料健康」查看。
                 </p>
-                <section aria-label="廠牌與匯入批量管理"><h3>廠牌 Product Master</h3><p>選擇廠牌查看主檔；下方可上傳標準產品檔，或新增單個產品。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="loadProductManagementOverview(true)"></select></div><details><summary>查看產品清單</summary><div class="table-wrap"><table><thead><tr><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="loadProductManagementOverview(false)">載入更多產品</button></details></section>
+                <section aria-label="廠牌與匯入批量管理"><h3>廠牌 Product Master</h3><p>選擇廠牌查看或直接編輯主檔；貨號請在 Excel 以文字保存，保留前導 0。下方可上傳標準產品檔，或新增單個產品。</p><p id="productOverviewStatus" role="status"></p><div class="toolbar"><select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="loadProductManagementOverview(true)"></select></div><details><summary>查看產品清單</summary><div class="table-wrap"><table><thead><tr><th>廠牌</th><th>貨號</th><th>品名</th><th>狀態</th><th>操作</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div><button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="loadProductManagementOverview(false)">載入更多產品</button></details></section>
                 <div class="toolbar no-print"><button id="deleteBrandProductsBtn" type="button" class="btn-danger" disabled onclick="deleteEntireBrandProducts(this)">刪除整個廠牌的產品</button><span>請先選擇單一廠牌；包含未顯示及已停用產品。刪除前檢查作業關聯並下載備份，無關聯產品與成本會刪除；有單據或庫存關聯的產品保留並停用。</span></div>
                 <section id="productManagementTools" class="product-management-tools no-print" style="display:none;" aria-label="產品管理工具">
             <!-- Product Master 管理（舊稱，保留供回歸測試辨識） -->
@@ -1655,7 +1655,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261005-2"></script>
+    <script src="app.js?v=20261005-3"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;

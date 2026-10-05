@@ -2728,6 +2728,9 @@ window.saveProductMasterEditor = async function() {
         if (resultIndex >= 0) productManagementResults[resultIndex] = { id:productId, ...record };
         else productManagementResults.unshift({ id:productId, ...record });
         renderProductManagementResults();
+        const overviewIndex = productManagementOverviewRows.findIndex(item => (item.id || item.productId) === productId);
+        if (overviewIndex >= 0) productManagementOverviewRows[overviewIndex] = { ...productManagementOverviewRows[overviewIndex], ...record, id:productId };
+        if (document.getElementById('productOverviewScope')) renderProductManagementOverview();
         closeProductMasterEditor();
         const statusEl = document.getElementById('productManagementSearchStatus');
         if (statusEl) statusEl.textContent = status === 'INACTIVE'
@@ -18946,7 +18949,7 @@ window.renderProductManagementOverview = function() {
     if (deleteButton) deleteButton.disabled = brandProductDeleteRunning || !scope.startsWith('brand:') || currentUserRole !== 'admin';
     const rows = productManagementOverviewRows.filter(row => !scope || (scope.startsWith('brand:') ? (row.brandName || row.brand || '未分類') === scope.slice(6) : row.lastImportBatch === scope.slice(6)));
     document.getElementById('productOverviewStatus').textContent = `${productOverviewHasMore ? "目前已載入" : "共"} ${rows.length} 個產品，啟用 ${rows.filter(row=>row.active!==false && row.status!=='INACTIVE').length} 個；目前顯示 ${Math.min(rows.length,productOverviewLimit)} 個。`;
-    document.getElementById('productOverviewBody').innerHTML = rows.slice(0,productOverviewLimit).map(row => `<tr><td>${escapeHtml(row.brandName || row.brand || '')}</td><td>${escapeHtml(row.manufacturerPartNo || row.sku || '')}</td><td>${escapeHtml(row.productName || row.nameCn || row.nameEn || '')}</td><td>${row.active===false || row.status==='INACTIVE' ? '停用' : '啟用'}</td></tr>`).join('');
+    document.getElementById('productOverviewBody').innerHTML = rows.slice(0,productOverviewLimit).map(row => `<tr><td>${escapeHtml(row.brandName || row.brand || '')}</td><td>${escapeHtml(row.manufacturerPartNo || row.sku || '')}</td><td>${escapeHtml(row.productName || row.nameCn || row.nameEn || '')}</td><td>${row.active===false || row.status==='INACTIVE' ? '停用' : '啟用'}</td><td>${canManagePendingProductMaster() ? `<button type="button" onclick="openProductMasterEditor(${inlineJsValue(row.id || row.productId)})">編輯主檔</button>` : ''}</td></tr>`).join('');
     document.getElementById('productOverviewMore').style.display = productOverviewHasMore ? '' : 'none';
 };
 window.bulkSetProductActive = async function(active, button) {
@@ -22412,6 +22415,26 @@ async function confirmProductMasterImport(groups, errors = []) {
     return confirm(preview + '\n\n確認後才會寫入雲端；未出現在檔案中的產品不會被刪除或停用。確定執行匯入嗎？');
 }
 
+// Preserve formatted identifiers without converting numeric prices or costs to display text.
+function productImportSheetRows(sheet) {
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:true });
+    const displayed = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:false });
+    const identifierHeaders = new Set(['貨號', '型號', 'catno.', 'catno', 'catalogno.', 'catalogno']);
+    return rows.map((row, index) => {
+        const result = { ...row };
+        Object.keys(row).forEach(header => {
+            const key = String(header).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+            if (!identifierHeaders.has(key)) return;
+            const raw = row[header];
+            const formatted = String(displayed[index]?.[header] ?? '').trim();
+            result[header] = typeof raw === 'number'
+                ? (/^\d+$/.test(formatted) ? formatted : String(raw))
+                : String(raw ?? '').trim();
+        });
+        return result;
+    });
+}
+
 window.downloadProductMasterTemplate = async function() {
     try {
         await ensureXlsxLoaded();
@@ -22422,6 +22445,7 @@ window.downloadProductMasterTemplate = async function() {
     const headers = ['廠牌','產品線','貨號','中文品名','英文品名','規格','產品類型','單位','建議售價（含稅）','標準成本（含稅）','啟用','庫存管理','批號管理','效期管理'];
     const example = ['Beckman Coulter','Centrifuge','EXAMPLE-001','範例中文品名','Example Product','96 tests','Consumable','EA','1000','600','是','是','否','否'];
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+    ws.C2.z = '@';
     ws['!cols'] = [22,20,18,28,32,24,14,10,16,16,10,12,12,12].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '產品資料');
@@ -22438,6 +22462,7 @@ window.downloadProductPriceUpdateTemplate = async function() {
         ['貨號','建議售價（含稅）'],
         ['EXAMPLE-001','1200']
     ]);
+    ws.A2.z = '@';
     ws['!cols'] = [{ wch:20 }, { wch:18 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '價格更新');
@@ -22456,6 +22481,7 @@ window.downloadProductCostUpdateTemplate = async function() {
         ['貨號','標準成本（含稅）'],
         ['EXAMPLE-001','600']
     ]);
+    ws.A2.z = '@';
     ws['!cols'] = [{ wch:20 }, { wch:18 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '成本更新');
@@ -22489,7 +22515,7 @@ window.handleProductPriceExcelUpload = async function(input) {
         const normalizeHeader = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
         const rows = [];
         workbook.SheetNames.forEach(sheetName => {
-            XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval:'' }).forEach(row => {
+            productImportSheetRows(workbook.Sheets[sheetName]).forEach(row => {
                 const entries = Object.entries(row);
                 const find = names => {
                     const wanted = new Set(names.map(normalizeHeader));
@@ -22606,7 +22632,7 @@ window.handleProductCostExcelUpload = async function(input) {
         const normalizeHeader = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
         const rows = [];
         workbook.SheetNames.forEach(sheetName => {
-            XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval:'' }).forEach(row => {
+            productImportSheetRows(workbook.Sheets[sheetName]).forEach(row => {
                 const entries = Object.entries(row);
                 const find = names => {
                     const wanted = new Set(names.map(normalizeHeader));
@@ -22772,7 +22798,7 @@ window.handlePriceExcelUpload = async function(input) {
             const importErrors = [];
             workbook.SheetNames.forEach(sheetName => {
                 const sheet = workbook.Sheets[sheetName];
-                const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+                const rows = productImportSheetRows(sheet);
 
                 rows.forEach(row => {
                     const nameCn = String(getField(row, ['中文品名', '品名', '中文名稱'])).trim();
