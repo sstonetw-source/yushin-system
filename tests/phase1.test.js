@@ -5489,3 +5489,9 @@ test('quote and decision-analysis output have no mandatory user-entered fields',
     assert.match(appSource, /selfOwnedBlankSales/);
 });
 
+
+
+test('quote validity period is removed from form, draft, cloud record, and PDF output', () => {
+    assert.doesNotMatch(indexSource, /id="validDays"|本估價單有效期限/);
+    assert.doesNotMatch(appSource, /\bvalidDays\b|quote_valid_days|本估價單有效期限/);
+});
