@@ -656,6 +656,7 @@
 
         <div class="no-print quote-primary-actions" style="text-align: center; margin-top: 25px;">
             <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;" class="btn-secondary">📄 匯出 PDF（自動同步雲端）</button>
+            <button type="button" id="decisionPriceAnalysisBtn" class="btn-secondary" style="background:#003366;font-size:16px;padding:10px 24px;" onclick="exportDecisionPriceAnalysisPdf()">📊 建立決標單價分析表</button>
             <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
             <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
         </div>
@@ -1656,6 +1657,7 @@
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
     <script src="app.js?v=20261005-3"></script>
+    <script src="modules/quote-decision-analysis.js?v=20261005-1"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
