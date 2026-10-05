@@ -3255,3 +3255,6 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 #admin-products #productOverviewStatus{font-size:14px;color:#526575;margin:12px 0}
 #admin-products #productManagementTools{margin-top:20px}
 @media(max-width:600px){.admin-product-heading{flex-wrap:wrap}.admin-product-filters input[type="search"]{width:100%;min-width:0;flex-basis:100%}}
+#admin-products .table-wrap{overflow-x:auto}
+#admin-products .table-wrap table{min-width:720px;width:100%}
+#admin-products #productOverviewBody button{white-space:nowrap}
