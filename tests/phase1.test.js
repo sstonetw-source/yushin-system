@@ -4931,7 +4931,7 @@ test('quote and order brand entry share primary brands plus an explicit Other br
     assert.match(appSource, /<select class="item-brand" onchange="onQuoteBrandSelectChange\(this, true\)"/);
     assert.match(appSource, /class="item-brand-other" placeholder="輸入實際廠牌名稱"/);
     assert.match(appSource, /function quoteRowBrandValue/);
-    assert.match(appSource, /missingOtherBrand/);
+    assert.doesNotMatch(appSource, /missingOtherBrand/);
     assert.match(appSource, /function quoteBrandRestrictionText/);
     assert.match(appSource, /hasRestrictedBrand/);
     assert.doesNotMatch(appSource, /placeholder="搜尋或輸入廠牌"/);
@@ -5475,3 +5475,17 @@ test('customer suggestions stay bounded while full Customer Master remains lazy-
     assert.match(appSource, /queueCustomerMasterSuggestions/);
     assert.match(appSource, /\.limit\(20\)[\s\S]*Customer Master 客戶建議/);
 });
+
+test('quote and decision-analysis output have no mandatory user-entered fields', () => {
+    const start = appSource.indexOf('function currentQuoteOutputValidation()');
+    const end = appSource.indexOf('\nfunction collectCurrentQuoteRecord()', start);
+    const source = appSource.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    assert.doesNotMatch(source, /請先填寫估價單號|請先從下拉選單選擇負責業務|請至少填寫一個品項|missingOtherBrand|含稅總金額必須大於 0/);
+    assert.match(source, /hasRestrictedBrand/);
+    assert.match(appSource, /populateBrandSelect\(quoteBrandSelect, '廠牌（選填）'/);
+    assert.match(appSource, /function quoteOutputCanSync\(quoteData = \{\}\)/);
+    assert.match(appSource, /syncResult = 'skipped'/);
+    assert.match(appSource, /selfOwnedBlankSales/);
+});
+

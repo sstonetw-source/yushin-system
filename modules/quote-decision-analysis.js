@@ -69,6 +69,14 @@
             if (!title) throw new Error('找不到估價單文件標題');
             title.textContent = DOCUMENT_TITLE;
 
+            const numberValue = documentNode.querySelector('.quote-pdf-no');
+            const numberLabel = numberValue?.parentElement?.querySelector('label');
+            if (numberLabel) {
+                numberLabel.textContent = '決標分析單價單號：';
+                numberLabel.style.width = 'auto';
+                numberLabel.style.whiteSpace = 'nowrap';
+            }
+
             // 決標單價分析是分析／標價清單，不是正式對外估價文件，因此不顯示公司印章。
             documentNode.querySelectorAll('.stamp-section').forEach(section => section.remove());
 

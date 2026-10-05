@@ -5520,7 +5520,7 @@ function populateQuoteBrandDropdowns() {
     document.querySelectorAll('#quoteItems .item-brand').forEach(select => {
         const row = select.closest('tr');
         const currentValue = quoteRowBrandValue(row);
-        populateBrandSelect(select, '請選擇廠牌', true, getPrimaryBrandNames());
+        populateBrandSelect(select, '廠牌（選填）', true, getPrimaryBrandNames());
         if (currentValue) selectBrandInDropdown(select, currentValue);
         onQuoteBrandSelectChange(select);
     });
@@ -5892,7 +5892,7 @@ window.addQuoteRow = function(itemData = {}) {
 
     tbody.appendChild(tr);
     const quoteBrandSelect = tr.querySelector('.item-brand');
-    populateBrandSelect(quoteBrandSelect, '請選擇廠牌', true, getPrimaryBrandNames());
+    populateBrandSelect(quoteBrandSelect, '廠牌（選填）', true, getPrimaryBrandNames());
     if (itemData.brand) selectBrandInDropdown(quoteBrandSelect, itemData.brand);
     onQuoteBrandSelectChange(quoteBrandSelect);
     const extraDetails = tr.querySelector('.quote-extra-fields');
@@ -6167,32 +6167,34 @@ function numberToChineseWords(num) {
 }
 
 function currentQuoteOutputValidation() {
-    if (!document.getElementById('quoteNo').value.trim()) return '請先填寫估價單號。';
-    if (!document.getElementById('salesName').value) return '請先從下拉選單選擇負責業務。';
+    // 估價單與決標單價分析沒有必填欄位；空白單號、業務、品項、廠牌與金額都可直接輸出。
+    // 只有「已實際填入」且違反公司報價限制的廠牌仍需阻擋，避免錯用公司抬頭。
     const rows = [...document.querySelectorAll('#quoteItems tr')];
-    if (!rows.some(row => (row.querySelector('.item-cn')?.value || row.querySelector('.item-en')?.value || row.querySelector('.item-model')?.value).trim())) return '請至少填寫一個品項。';
-    const missingOtherBrand = rows.some(row =>
-        row.querySelector('.item-brand')?.value === '其他' && !quoteRowBrandValue(row)
-    );
-    if (missingOtherBrand) return '已選擇「其他廠牌」，請輸入實際廠牌名稱。';
     const hasRestrictedBrand = rows.some(row => {
         const brand = quoteRowBrandValue(row);
         return brand && !isCompanyBrandAllowed(currentCompany, brand);
     });
     if (hasRestrictedBrand) return '此估價單含有目前公司抬頭不可使用的廠牌，請改用允許的公司抬頭或更換廠牌。';
-    const total = parseFloat((document.getElementById('grandTotal').innerText || '').replace(/,/g, '')) || 0;
-    if (total <= 0) return '含稅總金額必須大於 0。';
     return '';
 }
 
 function collectCurrentQuoteRecord() {
     const salesName = document.getElementById('salesName').value;
     const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(salesName));
+    // 負責業務可以留白；業務／工程師本人輸出時仍在背景保留自己的 ownerUid / salesCode，
+    // 讓權限與歷史歸屬不因畫面欄位留白而遺失。
+    const selfOwnedBlankSales = !salesName && (currentUserRole === 'sales' || currentUserRole === 'engineer');
+    const resolvedSalesCode = selectedSales?.code
+        || (selfOwnedBlankSales ? currentUserCode : salesCodeForName(salesName));
+    const resolvedOwnerUid = selectedSales?.uid
+        || (selfOwnedBlankSales
+            ? (currentUser?.uid || '')
+            : (belongsToCurrentUser(salesName, '', resolvedSalesCode) ? currentUser?.uid || '' : ''));
     const record = {
         quoteNo: document.getElementById('quoteNo').value.trim(), company: currentCompany,
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
-        salesName, salesCode: selectedSales?.code || salesCodeForName(salesName),
-        ownerUid: selectedSales?.uid || (belongsToCurrentUser(salesName, '', selectedSales?.code || salesCodeForName(salesName)) ? currentUser?.uid || '' : ''),
+        salesName, salesCode: resolvedSalesCode,
+        ownerUid: resolvedOwnerUid,
         quoteDate: document.getElementById('quoteDate').value, createdAt: new Date().toISOString(), ...commercialCreatorFields(),
         ...linkedDocumentFields(window._pendingForecastQuoteLink ? DOCUMENT_TYPES.FORECAST : '', window._pendingForecastQuoteLink?.forecastId || '', window._pendingForecastQuoteLink ? [documentLink(DOCUMENT_TYPES.FORECAST, window._pendingForecastQuoteLink.forecastId, 'source')] : []), validDays: document.getElementById('validDays').value,
         remarks: document.getElementById('quoteRemarks')?.value.trim() || '',
@@ -6867,6 +6869,12 @@ async function addDocumentPagesToPdf(pdf, pages, options = {}) {
     }
 }
 
+function quoteOutputCanSync(quoteData = {}) {
+    if (!String(quoteData.quoteNo || '').trim()) return false;
+    if (currentUserRole === 'admin') return true;
+    return !!String(quoteData.ownerUid || '').trim() && !!String(quoteData.salesCode || '').trim();
+}
+
 window.exportCurrentQuotePdf = async function() {
     const validationMessage = currentQuoteOutputValidation();
     if (validationMessage) {
@@ -6886,8 +6894,20 @@ window.exportCurrentQuotePdf = async function() {
     const updateOutput = () => {
         if (exportFailed) return;
         setQuoteOutputStatus(pdfDownloaded
-            ? (syncResult === true ? '✓ PDF 已產生，估價單已同步' : syncResult === false ? 'PDF 已產生，但雲端同步失敗，請重試' : 'PDF 已產生；估價單同步中…')
-            : (syncResult === false ? '雲端同步失敗；PDF 製作中…' : syncResult === true ? '已同步雲端；PDF 製作中…' : '估價單同步中；PDF 製作中…'), syncResult === false);
+            ? (syncResult === true
+                ? '✓ PDF 已產生，估價單已同步'
+                : syncResult === false
+                    ? 'PDF 已產生，但雲端同步失敗，請重試'
+                    : syncResult === 'skipped'
+                        ? '✓ PDF 已產生；此文件未設定可同步雲端的單號或資料歸屬，因此未同步'
+                        : 'PDF 已產生；估價單同步中…')
+            : (syncResult === false
+                ? '雲端同步失敗；PDF 製作中…'
+                : syncResult === true
+                    ? '已同步雲端；PDF 製作中…'
+                    : syncResult === 'skipped'
+                        ? '沒有必填欄位；此文件將直接產生 PDF，不強制同步雲端'
+                        : '估價單同步中；PDF 製作中…'), syncResult === false);
     };
     try {
         await window.DocumentDownloads.prepare('quote');
@@ -6900,8 +6920,15 @@ window.exportCurrentQuotePdf = async function() {
         quoteData.lastOutputType = 'PDF';
         rememberQuoteCustomerPreferences(quoteData.ordererName || quoteData.clientName, quoteData.items);
         const isNewQuote = !editingQuoteNo || editingQuoteNo !== quoteData.quoteNo;
+        const canSyncQuote = quoteOutputCanSync(quoteData);
         let syncPromise;
-        if (isNewQuote) {
+        if (!canSyncQuote) {
+            // PDF 本身沒有必填欄位；只有雲端紀錄需要安全的文件 ID 與權限歸屬。
+            // 缺少這些背景識別時只略過同步，不阻擋使用者產生文件。
+            syncResult = 'skipped';
+            syncPromise = Promise.resolve('skipped');
+            updateOutput();
+        } else if (isNewQuote) {
             // 新估價單先原子確認並建立雲端文件，避免撞號時先產出一份會與舊單重號的 PDF。
             if (button) button.innerText = '正在確認估價單號…';
             await persistQuoteOutputRecord(quoteData, 'PDF');
