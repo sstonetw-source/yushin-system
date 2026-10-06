@@ -10781,7 +10781,6 @@ window.renderOrdersList = function() {
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
                             ${orderLifecycleActionButtons(o, lifecycle, deliveryProgress, contextActions)}
-                            ${dispatchActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${canAccessPage('orders.po') ? [...new Set(allOrderItems.flatMap(item=>item.purchaseDocumentNos||[]))].map(number=>`<button type="button" class="btn-secondary" onclick="openRelatedOrderPurchase(${inlineJsValue(number)})">採購單 ${escapeHtml(number)}</button>`).join('') : ''}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
