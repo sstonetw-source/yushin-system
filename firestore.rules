@@ -839,6 +839,7 @@ service cloud.firestore {
         && nextNotice.get('itemId', '') == record.get('itemId', '')
         && nextNotice.get('warehouseId', '') == record.get('warehouseId', '')
         && nextNotice.get('deliveryRecordId', '') == record.get('id', '')
+        && nextNotice.get('movementId', '') == record.get('movementId', '')
         && nextNotice.get('shippedByUid', '') == request.auth.uid
         && record.get('sourceType', '') == 'EXTERNAL_WAREHOUSE_SHIP'
         && record.get('createdByUid', '') == request.auth.uid
@@ -890,11 +891,13 @@ service cloud.firestore {
       let orderPath = /databases/$(database)/documents/orders/$(resource.data.orderId);
       let records = getAfter(orderPath).data.get('deliveryRecords', []);
       let record = records[records.size() - 1];
+      let movementId = request.resource.data.get('movementId', '');
+      let movementPath = /databases/$(database)/documents/inventoryMovements/$(movementId);
       return (admin() || purchaser() || warehouse())
         && resource.data.get('status', '') == 'NOTIFIED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'status', 'shippedAt', 'shippedBy', 'shippedByUid',
-          'deliveryRecordId', 'updatedAt'
+          'deliveryRecordId', 'movementId', 'updatedAt'
         ])
         && request.resource.data.get('status', '') == 'SHIPPED'
         && request.resource.data.get('shippedByUid', '') == request.auth.uid
@@ -906,7 +909,14 @@ service cloud.firestore {
         && record.get('itemId', '') == resource.data.itemId
         && record.get('warehouseId', '') == resource.data.warehouseId
         && record.get('qty', 0) == resource.data.qty
-        && record.get('sourceType', '') == 'EXTERNAL_WAREHOUSE_SHIP';
+        && record.get('sourceType', '') == 'EXTERNAL_WAREHOUSE_SHIP'
+        && movementId != ''
+        && record.get('movementId', '') == movementId
+        && !exists(movementPath)
+        && getAfter(movementPath).data.get('type', '') == 'ship'
+        && getAfter(movementPath).data.get('sourceId', '') == resource.data.orderId
+        && getAfter(movementPath).data.get('warehouseId', '') == resource.data.warehouseId
+        && getAfter(movementPath).data.get('qty', 0) == -resource.data.qty;
     }
 
     function orderUpdateAllowed(id) {
