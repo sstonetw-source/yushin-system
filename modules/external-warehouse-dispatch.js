@@ -363,6 +363,7 @@
                 const stock=await applyInventoryDeliveryDeltaInTransaction(tx,itemOrder,qty,actor,draft.orderId);
                 record.lotAllocations=stock?.lotAllocations || [];
                 record.cogs=Number(stock?.cogs || 0);
+                record.movementId=stock?.movementId || '';
                 existingRecords.push(record);
                 items[idx]={...item,dispatchPreparedQty:Math.max(Number(item.dispatchPreparedQty||0),state.delivered+qty),
                     reservedQty:Number(stock?.newReservedQty ?? item.reservedQty ?? 0)};
@@ -376,7 +377,8 @@
                 tx.update(orderRef,updates);
                 tx.update(noticeRef,{
                     status:'SHIPPED',shippedByUid:currentUser?.uid || '',
-                    shippedBy:actor,shippedAt:now,deliveryRecordId:record.id,updatedAt:now
+                    shippedBy:actor,shippedAt:now,deliveryRecordId:record.id,
+                    movementId:record.movementId,updatedAt:now
                 });
                 savedOrder={id:draft.orderId,...order,...updates};
             });
