@@ -715,9 +715,12 @@ function applyPermissionVisibility() {
         inventoryReceivingVisible = false;
         const stockPanel = document.getElementById('inventoryStockPanel');
         const receivingPanel = document.getElementById('inventoryReceivingPanel');
+        const shippingPanel = document.getElementById('inventoryShippingPanel');
+        if(shippingPanel)shippingPanel.style.display='none';
         if (stockPanel) stockPanel.style.display = '';
         if (receivingPanel) receivingPanel.style.display = 'none';
     }
+    globalThis.updateInventoryWorkspaceBadges?.();
     updateReadonlyNotice();
 }
 
@@ -988,6 +991,7 @@ function initializePageData(mainKey, options = {}) {
     }
     if (mainKey === 'inventory') {
         jobs.push(loadInventory(true));
+        if (canReceiveInventoryCapability()) jobs.push(window.loadInventoryWorkspace?.(force));
         // Brand Master 已由上方 ensureBrandSettingsLoaded() 共用載入；
         // 完成後會統一 renderInventoryList，不再額外重畫一次。
     }
@@ -8081,6 +8085,7 @@ function updateInventoryReceivingCount(count = inventoryReceivingWorkCount) {
     const error = inventoryPendingSupplyError || activeReceivingSupplyError || orderWorkQueueError;
     const loading = inventoryPendingSupplyLoading || !purchasingReceivingReady || !activeReceivingSupplyReady;
     button.textContent = error ? '待收貨（讀取失敗）' : loading ? '待收貨（讀取中…）' : `待收貨（${inventoryReceivingWorkCount} 筆）`;
+    globalThis.updateInventoryWorkspaceBadges?.();
 }
 async function loadInventoryReceivingSummary() {
     // Reuse the receiving queue, including active work older than the 50-row history page.
@@ -10153,12 +10158,12 @@ let orderWorkQueueCache = [], orderWorkQueueReady = false, orderWorkQueueError =
 let orderWorkQueuePromise = null, orderWorkQueueGeneration = 0;
 function pendingOrderWorkQuery() {
     let query = db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE);
-    if (canViewAllData('orders')) query = query.where('workCategories','array-contains-any',OPEN_ORDER_WORK_CATEGORIES);
+    if (canViewAllData('orders') || canReceiveInventoryCapability()) query = query.where('workCategories','array-contains-any',OPEN_ORDER_WORK_CATEGORIES);
     else query = query.where('ownerUid','==',currentUser?.uid || '');
     return query.orderBy('orderDate','desc');
 }
 async function loadOrderWorkQueue(force = false) {
-    if (!canAccessPage('orders.list') && !canAccessPage('orders.po')) return;
+    if (!canAccessPage('orders.list') && !canAccessPage('orders.po') && !(canAccessPage('inventory') && canReceiveInventoryCapability())) return;
     if (orderWorkQueuePromise && !force) return orderWorkQueuePromise;
     const generation = ++orderWorkQueueGeneration, uid = currentUser?.uid, role = currentUserRole;
     orderWorkQueueReady = false; orderWorkQueueError = '';
@@ -11756,8 +11761,8 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
 window.loadPurchasingDispatchOrders=loadPurchasingDispatchOrders;
 
 let dispatchListDraft=null;
-window.openWarehouseDispatchList=async function(orderId){
-    if(!['admin','purchaser'].includes(currentUserRole))return;
+window.openWarehouseDispatchList=async function(orderId,selectedWarehouseId=''){
+    if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))return;
     try{
         const [snapshot]=await Promise.all([
             firestoreReadWithTimeout(db.collection('orders').doc(orderId).get(),'出貨清單訂單'),loadWarehouseMaster()
@@ -11770,9 +11775,10 @@ window.openWarehouseDispatchList=async function(orderId){
             if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP')return;
             const state=itemDispatchState(order,item);
             // Include prepared but unshipped items too, so lists may be downloaded again.
-            const qty=state.pending+state.shippable;
+            const qty=state.shippable;
             if(qty<=0)return;
             const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
+            if(selectedWarehouseId&&warehouseId!==selectedWarehouseId)return;
             if(!warehouseId)throw new Error('品項尚未指定出貨倉庫。');
             const warehouse=warehouseMasterCache.find(row=>row.id===warehouseId);
             if(!groups.has(warehouseId))groups.set(warehouseId,{warehouseId,name:warehouse?.warehouseName||warehouseId,items:[]});
@@ -11791,18 +11797,20 @@ window.openWarehouseDispatchList=async function(orderId){
             <p>下載後可提供給各倉庫。本清單不扣庫存、不登記送貨；批號請於實際出貨時核對。</p>
             <div class="dispatch-list-fields"><label>送貨地址<input id="dispatchListAddress" value="${escapeAttr(dispatchListDraft.address)}"></label>
             <label>聯絡人<input id="dispatchListContact" value="${escapeAttr(dispatchListDraft.contact)}"></label>
-            <label>電話<input id="dispatchListPhone" value="${escapeAttr(dispatchListDraft.phone)}"></label></div>
-            ${dispatchListDraft.groups.map((group,gi)=>`<section><h4>${escapeHtml(group.name)}</h4><div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>數量</th><th>指定批號（選填）</th></tr></thead><tbody>${group.items.map((item,ii)=>`<tr><td>${escapeHtml(item.code)}</td><td>${escapeHtml(item.name)}</td><td>${item.qty}</td><td><input aria-label="指定批號" data-dispatch-group="${gi}" data-dispatch-item="${ii}" placeholder="出貨時確認"></td></tr>`).join('')}</tbody></table></div></section>`).join('')}
+            <label>電話<input id="dispatchListPhone" value="${escapeAttr(dispatchListDraft.phone)}"></label><label>希望出貨日期<input type="date" id="dispatchListDate" value="${localDateString()}"></label><label>出貨備註<textarea id="dispatchListNotes" placeholder="例如冷藏、乾冰、指定時段"></textarea></label></div>
+            ${dispatchListDraft.groups.map((group,gi)=>`<section><h4>${escapeHtml(group.name)}</h4><div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>數量</th><th>指定批號（選填）</th></tr></thead><tbody>${group.items.map((item,ii)=>`<tr><td>${escapeHtml(item.code)}</td><td>${escapeHtml(item.name)}</td><td><input type="number" min="0" step="any" aria-label="此次出貨數量" value="${item.qty}" data-dispatch-qty-group="${gi}" data-dispatch-qty-item="${ii}"></td><td><input aria-label="指定批號" data-dispatch-group="${gi}" data-dispatch-item="${ii}" placeholder="出貨時確認"></td></tr>`).join('')}</tbody></table></div></section>`).join('')}
             <div class="toolbar"><button class="btn-secondary" onclick="exportWarehouseDispatchList('pdf',this)">下載分倉 PDF</button><button class="btn-secondary" onclick="exportWarehouseDispatchList('excel',this)">下載 Excel</button><button class="btn-secondary" onclick="closeWarehouseDispatchList()">關閉</button></div></div>`;
         overlay.classList.add('active');
     }catch(err){showActionFeedback('出貨清單無法建立：'+err.message,'warning');}
 };
 window.closeWarehouseDispatchList=function(){document.getElementById('warehouseDispatchOverlay')?.classList.remove('active');dispatchListDraft=null;};
 window.exportWarehouseDispatchList=async function(format,button){
-    if(!dispatchListDraft||!['admin','purchaser'].includes(currentUserRole))return;
+    if(!dispatchListDraft||!canReceiveInventoryCapability()||!canAccessPage('inventory'))return;
     const draft=JSON.parse(JSON.stringify(dispatchListDraft));
     draft.address=document.getElementById('dispatchListAddress').value.trim();
     draft.contact=document.getElementById('dispatchListContact').value.trim();draft.phone=document.getElementById('dispatchListPhone').value.trim();
+    draft.date=document.getElementById('dispatchListDate').value;draft.notes=document.getElementById('dispatchListNotes').value.trim();
+    document.querySelectorAll('#warehouseDispatchOverlay [data-dispatch-qty-group]').forEach(input=>{draft.groups[Number(input.dataset.dispatchQtyGroup)].items[Number(input.dataset.dispatchQtyItem)].qty=Number(input.value);});
     document.querySelectorAll('#warehouseDispatchOverlay [data-dispatch-group]').forEach(input=>{draft.groups[Number(input.dataset.dispatchGroup)].items[Number(input.dataset.dispatchItem)].lotNo=input.value.trim();});
     if((!draft.address||!draft.contact||!draft.phone)&&!confirm('送貨地址、聯絡人或電話尚未填齊，仍要下載清單嗎？'))return;
     const state=beginActionButton(button,'製作中…');if(!state)return;
@@ -11813,13 +11821,14 @@ window.exportWarehouseDispatchList=async function(format,button){
         const order=fresh.data(),items=normalizedOrderItems(order);
         for(const group of draft.groups)for(const item of group.items){
             const current=items.find(row=>row.itemId===item.itemId),stock=current&&itemDispatchState(order,current);
-            if(!current||(current.warehouseId||order.warehouseId||defaultWarehouse()?.id)!==group.warehouseId||stock.pending+stock.shippable<item.qty)throw new Error('出貨數量或倉庫已變更，請重新建立清單。');
+            if(!current||!Number.isFinite(item.qty)||item.qty<=0||(current.warehouseId||order.warehouseId||defaultWarehouse()?.id)!==group.warehouseId||stock.shippable<item.qty)throw new Error('出貨數量或倉庫已變更，請重新建立清單。');
         }
         const safe=value=>String(value).replace(/[\\/:*?"<>|]/g,'_');
         const name=`出貨清單-${safe(draft.orderNo)}-${localDateString()}`;
         if(format==='excel'){
+            await ensureXlsxLoaded();
             const wb=XLSX.utils.book_new();
-            const rows=draft.groups.flatMap(group=>group.items.map(item=>({'倉庫':group.name,'訂單號':draft.orderNo,'客戶':draft.customer,'送貨地址':draft.address,'聯絡人':draft.contact,'電話':draft.phone,'貨號':item.code,'品名':item.name,'數量':item.qty,'指定批號（出貨時核對）':item.lotNo})));
+            const rows=draft.groups.flatMap(group=>group.items.map(item=>({'倉庫':group.name,'訂單號':draft.orderNo,'客戶':draft.customer,'送貨地址':draft.address,'聯絡人':draft.contact,'電話':draft.phone,'貨號':item.code,'品名':item.name,'數量':item.qty,'指定批號（出貨時核對）':item.lotNo,'希望出貨日期':draft.date,'出貨備註':draft.notes})));
             XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'分倉出貨清單');XLSX.writeFile(wb,name+'.xlsx');
         }else if(format==='pdf'){
             if(!window.jspdf?.jsPDF||typeof window.html2canvas!=='function')throw new Error('PDF 元件尚未載入。');
@@ -11828,7 +11837,7 @@ window.exportWarehouseDispatchList=async function(format,button){
             for(const group of draft.groups){
                 for(let offset=0;offset<group.items.length;offset+=10){
                     const page=document.createElement('div');page.style.cssText='width:794px;padding:32px;box-sizing:border-box;background:white;color:#111;font-size:16px;';
-                    page.innerHTML=`<h2>出貨清單｜${escapeHtml(group.name)}</h2><p>訂單：${escapeHtml(draft.orderNo)}　日期：${localDateString()}</p><p>客戶：${escapeHtml(draft.customer)}</p><p>地址：${escapeHtml(draft.address||'未填')}</p><p>聯絡人：${escapeHtml(draft.contact||'未填')}　電話：${escapeHtml(draft.phone||'未填')}</p><table style="width:100%;table-layout:fixed;border-collapse:collapse"><thead><tr><th>貨號</th><th>品名</th><th>數量</th><th>指定批號</th></tr></thead><tbody>${group.items.slice(offset,offset+10).map(item=>`<tr>${[item.code,item.name,item.qty,item.lotNo||'出貨時確認'].map(value=>`<td style="border:1px solid #999;padding:8px;overflow-wrap:anywhere">${escapeHtml(value)}</td>`).join('')}</tr>`).join('')}</tbody></table><p>請倉庫核對實際出貨批號與數量。本清單不代表已送貨。</p><small>本倉庫第 ${Math.floor(offset/10)+1}／${Math.ceil(group.items.length/10)} 頁</small>`;
+                    page.innerHTML=`<h2>出貨清單｜${escapeHtml(group.name)}</h2><p>訂單：${escapeHtml(draft.orderNo)}　希望出貨日期：${escapeHtml(draft.date)}</p><p>出貨備註：${escapeHtml(draft.notes)}</p><p>客戶：${escapeHtml(draft.customer)}</p><p>地址：${escapeHtml(draft.address||'未填')}</p><p>聯絡人：${escapeHtml(draft.contact||'未填')}　電話：${escapeHtml(draft.phone||'未填')}</p><table style="width:100%;table-layout:fixed;border-collapse:collapse"><thead><tr><th>貨號</th><th>品名</th><th>數量</th><th>指定批號</th></tr></thead><tbody>${group.items.slice(offset,offset+10).map(item=>`<tr>${[item.code,item.name,item.qty,item.lotNo||'出貨時確認'].map(value=>`<td style="border:1px solid #999;padding:8px;overflow-wrap:anywhere">${escapeHtml(value)}</td>`).join('')}</tr>`).join('')}</tbody></table><p>請倉庫核對實際出貨批號與數量。本清單不代表已送貨。</p><small>本倉庫第 ${Math.floor(offset/10)+1}／${Math.ceil(group.items.length/10)} 頁</small>`;
                     stage.appendChild(page);pages.push(page);
                 }
             }
@@ -13071,6 +13080,7 @@ function receivingWorkProgress(order, item) {
 }
 
 function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filterContext = null, dispatchStatesByOrder = null, lifecyclesByOrder = null, inventory = false) {
+    if (inventory && window.renderInventoryPurchaseReceiving) return window.renderInventoryPurchaseReceiving();
     const tbody = document.getElementById(inventory ? 'inventoryReceivingBody' : 'poListBody');
     const head = document.getElementById(inventory ? 'inventoryReceivingHead' : 'poListHeadRow');
     const emptyHint = document.getElementById(inventory ? 'inventoryReceivingEmpty' : 'poListEmptyHint');
@@ -16340,6 +16350,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     let lotAllocations=[],cogs=0;
 
     if (deltaQty > 0) {
+        if (order.requireStockReservation === true && (!invSnap.exists || inv.onHand < deltaQty || inv.reserved < deltaQty || wh.reserved < deltaQty || currentReservation < deltaQty)) throw new Error('庫存或訂單占用數量不足，請先確認庫存資料後再出貨。');
         if (wh.onHand < deltaQty) throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
         // Web Firestore transactions accept document references, not queries.
         // Discover IDs, then re-read every candidate in the transaction so concurrent
@@ -16375,7 +16386,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand-deltaQty,reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
     const movementRef=db.collection('inventoryMovements').doc();
     transaction.set(movementRef,inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
-        warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
+        warehouseId,itemId:deliveryItemId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
         warehouseStockId:whRef.id,inventoryDocId:invRef.id,
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     }));

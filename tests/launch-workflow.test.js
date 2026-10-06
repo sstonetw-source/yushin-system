@@ -16,7 +16,7 @@ function deliveryContext(lotQuantities=[1,1]){
  const c=vm.createContext({db,window:{},console,Date,Promise,inventoryProductKey:()=> 'P',defaultWarehouse:()=>({id:'W'}),inventoryRefFor:()=>ref('inventory'),warehouseStockDocId:()=> 'stock',inventoryNumbers:x=>x,warehouseMasterCache:[],savedDeliveryRecords:o=>o.deliveryRecords||[],inventoryMovementRecord:()=>({}),inventoryReservationPayload:()=>({}),YushinInventory:inventory});
  data['warehouseStocks/stock']=data.warehouse;
  vm.runInContext(section('async function applyInventoryDeliveryDeltaInTransaction','\nfunction applyInventoryDeliveryInTransaction'),c);
- return {c,tx,writes,reads};
+ return {c,tx,writes,reads,data};
 }
 test('Web delivery reads each lot document transactionally and deducts across two batches',async()=>{
  const {c,tx,writes,reads}=deliveryContext();
@@ -49,7 +49,16 @@ test('order cancellation explains remaining quantity and PO impact; complete ord
 test('dispatch export rejects stale warehouse or quantity before exporting without writing business records',async()=>{
  let downloads=0,feedback='';
  const draft={orderId:'O',groups:[{warehouseId:'W',items:[{itemId:'I',qty:2}]}]};
- const c=vm.createContext({window:{},JSON,dispatchListDraft:draft,currentUserRole:'admin',document:{getElementById:()=>({value:'filled'}),querySelectorAll:()=>[]},beginActionButton:()=>({}),endActionButton:()=>{},firestoreReadWithTimeout:async()=>({exists:true,data:()=>({items:[{itemId:'I',warehouseId:'OTHER'}]})}),db:{collection:()=>({doc:()=>({get:()=>null})})},normalizedOrderStatus:()=> 'normal',orderInventorySyncIncomplete:()=>false,normalizedOrderItems:o=>o.items,itemDispatchState:()=>({pending:2,shippable:0}),defaultWarehouse:()=>({id:'W'}),showActionFeedback:value=>feedback=value,XLSX:{writeFile:()=>downloads++}});c.window=c;
+ const c=vm.createContext({window:{},JSON,dispatchListDraft:draft,currentUserRole:'admin',canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,document:{getElementById:()=>({value:'filled'}),querySelectorAll:()=>[]},beginActionButton:()=>({}),endActionButton:()=>{},firestoreReadWithTimeout:async()=>({exists:true,data:()=>({items:[{itemId:'I',warehouseId:'OTHER'}]})}),db:{collection:()=>({doc:()=>({get:()=>null})})},normalizedOrderStatus:()=> 'normal',orderInventorySyncIncomplete:()=>false,normalizedOrderItems:o=>o.items,itemDispatchState:()=>({pending:2,shippable:0}),defaultWarehouse:()=>({id:'W'}),showActionFeedback:value=>feedback=value,XLSX:{writeFile:()=>downloads++}});c.window=c;
  vm.runInContext(section('window.exportWarehouseDispatchList=', '\nwindow.openRelatedOrderPurchase'),c);
  await c.exportWarehouseDispatchList('excel',{});assert.equal(downloads,0);assert.match(feedback,/倉庫已變更/);
+});
+
+test('inventory workspace shipment rejects inconsistent stock reservations before writes',async()=>{
+ for(const key of ['inventory','warehouse','reservation']){
+  const {c,tx,writes,data}=deliveryContext();
+  if(key==='reservation')data.reservation.quantity=1;else data[key].reserved=1;
+  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W',requireStockReservation:true},2,'actor','O'));
+  assert.equal(writes.length,0);
+ }
 });

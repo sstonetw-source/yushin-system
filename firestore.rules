@@ -945,12 +945,88 @@ service cloud.firestore {
           && after.get('deliveredQty', 0) == before.get('deliveredQty', 0));
     }
 
+    function validInventoryShipmentItem(before, after, record) {
+      let index = record.get('itemIndex', -1);
+      let oldItem = before.items[index];
+      let newItem = after.items[index];
+      let reservationPath = /databases/$(database)/documents/inventoryReservations/$(record.orderId + '__' + record.itemId);
+      let oldReservation = get(reservationPath).data;
+      let newReservation = getAfter(reservationPath).data;
+      return index is int && index >= 0 && index < before.items.size()
+        && before.items.size() == after.items.size()
+        && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
+        && newItem.diff(oldItem).affectedKeys().hasOnly(['reservedQty', 'warehouseShippedQty'])
+        && oldItem.get('itemId', '') == record.itemId
+        && oldItem.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+        && oldItem.get('warehouseId', before.get('warehouseId', '')) == record.warehouseId
+        && oldReservation.get('orderId', '') == record.orderId
+        && oldReservation.get('itemId', '') == record.itemId
+        && oldReservation.get('productKey', '') == record.productKey
+        && newReservation.get('productKey', '') == record.productKey
+        && newReservation.get('warehouseId', '') == record.warehouseId
+        && oldReservation.get('warehouseId', '') == record.warehouseId
+        && oldReservation.get('quantity', 0) >= record.qty
+        && newReservation.get('quantity', -1) == oldReservation.quantity - record.qty
+        && newItem.get('reservedQty', -1) == newReservation.quantity
+        && newItem.get('warehouseShippedQty', 0) >= oldItem.get('warehouseShippedQty', 0) + record.qty
+        && newItem.warehouseShippedQty <= oldItem.get('dispatchPreparedQty', 0);
+    }
+
+    function validInventoryShipmentStock(record) {
+      let movementPath = /databases/$(database)/documents/inventoryMovements/$(record.movementId);
+      let movement = getAfter(movementPath).data;
+      let stockPath = /databases/$(database)/documents/warehouseStocks/$(movement.warehouseStockId);
+      let inventoryPath = /databases/$(database)/documents/inventory/$(movement.inventoryDocId);
+      return !exists(movementPath)
+        && movement.get('type', '') == 'ship'
+        && movement.get('sourceId', '') == record.orderId
+        && movement.get('itemId', '') == record.itemId
+        && movement.get('productKey', '') == record.productKey
+        && movement.get('warehouseId', '') == record.warehouseId
+        && movement.get('actorUid', '') == request.auth.uid
+        && movement.get('qty', 0) == -record.qty
+        && get(stockPath).data.get('warehouseId', '') == record.warehouseId
+        && get(stockPath).data.get('productKey', '') == movement.get('productKey', '')
+        && get(inventoryPath).data.get('productKey', '') == movement.get('productKey', '')
+        && getAfter(stockPath).data.get('onHand', -1) == get(stockPath).data.onHand - record.qty
+        && getAfter(stockPath).data.get('reserved', -1) == get(stockPath).data.reserved - record.qty
+        && getAfter(inventoryPath).data.get('onHand', -1) == get(inventoryPath).data.onHand - record.qty
+        && getAfter(inventoryPath).data.get('reserved', -1) == get(inventoryPath).data.reserved - record.qty;
+    }
+
+    function inventoryShipmentOrderUpdate(orderId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let beforeRecords = before.get('deliveryRecords', []);
+      let afterRecords = after.get('deliveryRecords', []);
+      let record = afterRecords[beforeRecords.size()];
+      return canReceiveInventory()
+        && !(before.get('status', '') in ['cancelled', 'voided'])
+        && !(before.get('orderStatus', '') in ['cancelled', 'voided'])
+        && before.get('inventoryReservationStatus', '') != 'pending'
+        && beforeRecords.size() + 1 == afterRecords.size()
+        && afterRecords.removeAll([record]) == beforeRecords
+        && record.get('id', '') == after.get('inventoryShipmentRecordId', '')
+        && record.get('sourceType', '') == 'INVENTORY_SHIPMENT'
+        && record.get('orderId', '') == orderId
+        && record.get('createdByUid', '') == request.auth.uid
+        && record.get('qty', 0) is number && record.qty > 0
+        && after.get('deliveredQty', 0) == before.get('deliveredQty', 0) + record.qty
+        && sameCommercialOwner() && preservesCreator()
+        && after.diff(before).affectedKeys().hasOnly([
+          'inventoryShipmentRecordId', 'items', 'deliveryRecords', 'deliveredQty', 'isDelivered',
+          'deliveryHistory', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+        ])
+        && validInventoryShipmentItem(before, after, record)
+        && validInventoryShipmentStock(record);
+    }
+
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole in ['sales', 'engineer'] && owns(resource.data) && owns(request.resource.data)
+        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && owns(resource.data) && owns(request.resource.data)
           && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && commercialReturnProtection();
     }
 

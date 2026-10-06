@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261005-8">
+        <link rel="stylesheet" href="styles.css?v=20261006-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -448,11 +448,25 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <section class="panel no-print" id="customerReturnPanel"><h3>客戶退貨收貨</h3><p>申請不增加庫存；確認收貨後才入庫。退貨預設結案，不自動補送。待檢或損壞商品分開保管。</p><button type="button" class="btn-secondary" onclick="loadCustomerReturnQueue()">查看待收退貨／待檢商品</button><div id="customerReturnQueue" role="status"></div></section>
-      <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
-      <div class="toolbar no-print"><button onclick="switchInventoryWorkView(false)">庫存明細</button><button id="inventoryReceivingTabBtn" onclick="switchInventoryWorkView(true)">待收貨（讀取中…）</button></div>
-      <div id="inventoryReceivingPanel" style="display:none"><p id="inventoryReceivingStatus" role="status"></p><div class="table-wrap"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
+      <div class="sub-nav inventory-work-tabs no-print" role="group" aria-label="庫存工作">
+        <button type="button" id="inventoryStockTabBtn" class="active" aria-pressed="true" onclick="switchInventoryWorkView('stock')">庫存清單</button>
+        <button type="button" id="inventoryReceivingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('receiving')">收貨（讀取中…）</button>
+        <button type="button" id="inventoryShippingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('shipping')">出貨（讀取中…）</button>
+      </div>
+      <div id="inventoryReceivingPanel" style="display:none">
+        <div class="toolbar inventory-work-subtabs no-print"><button type="button" class="active" data-inventory-receiving-kind="purchase" onclick="switchInventoryReceivingKind('purchase')">採購收貨</button><button type="button" data-inventory-receiving-kind="returns" onclick="switchInventoryReceivingKind('returns')">退貨收貨</button></div>
+        <div id="inventoryPurchaseReceivingPanel"><p id="inventoryReceivingStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
+        <section class="panel no-print" id="customerReturnPanel" style="display:none"><p>退貨申請不增加庫存；確認實收後才入庫。待檢或損壞商品分開保管。</p><div id="customerReturnQueue" role="status"></div></section>
+      </div>
+      <div id="inventoryShippingPanel" style="display:none">
+        <div class="toolbar inventory-work-subtabs no-print"><button type="button" id="inventoryShippingMainBtn" class="active" onclick="switchInventoryShippingKind('main')">主倉庫出貨</button><button type="button" id="inventoryShippingBranchBtn" onclick="switchInventoryShippingKind('branch')">分倉庫出貨</button><select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select></div>
+        <p id="inventoryShippingStatus" role="status"></p>
+        <div class="table-wrap inventory-work-table"><table><thead><tr><th>訂單／客戶</th><th>品項</th><th>倉庫</th><th>已打單待出數量</th><th>操作</th></tr></thead><tbody id="inventoryShippingBody"></tbody></table></div>
+        <button type="button" id="inventoryShippingMoreBtn" class="btn-secondary" style="display:none" onclick="loadMoreInventoryShipping()">載入更多（50）</button>
+      </div>
       <div id="inventoryStockPanel">
+      <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
+
       <div class="toolbar no-print inventory-toolbar">
         <input id="inventorySearch" type="search" placeholder="搜尋庫存／產品：貨號 / 品名 / 廠牌 / 批號" oninput="scheduleInventorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();runInventoryUnifiedSearchNow();}">
         <span id="inventorySearchStatus" role="status"></span>
@@ -1662,8 +1676,9 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261006-8"></script>
-    <script src="modules/customer-cancellations.js?v=20261006-1"></script>
+    <script src="app.js?v=20261006-9"></script>
+    <script src="modules/customer-cancellations.js?v=20261006-2"></script>
+    <script src="modules/inventory-workspace.js?v=20261006-1"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
     <script>
     (function () {

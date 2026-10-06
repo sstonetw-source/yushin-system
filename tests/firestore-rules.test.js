@@ -980,3 +980,41 @@ test('partial delivery allows remaining cancellation but preserves delivery evid
   await assertFails(updateDoc(doc(db('sales1'),'orders/partial-cancel'),{status:'cancelled',orderStatus:'cancelled',deliveryRecords:[]}));
   await assertSucceeds(updateDoc(doc(db('sales1'),'orders/partial-cancel'),{status:'cancelled',orderStatus:'cancelled'}));
 });
+
+async function seedWarehouseShipment(){
+  const item={itemId:'I1',warehouseId:'W1',productId:'p-order',qty:3,reservedQty:3,dispatchPreparedQty:3};
+  const order={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',status:'active',orderStatus:'normal',items:[item],deliveryRecords:[],deliveredQty:0};
+  await seed('orders/warehouse-ship',order);
+  await seed('inventory/p-order',{productKey:'p-order',onHand:5,reserved:3,incoming:0});
+  await seed('warehouseStocks/W1__p-order',{productKey:'p-order',warehouseId:'W1',onHand:5,reserved:3,incoming:0});
+  await seed('inventoryReservations/warehouse-ship__I1',{orderId:'warehouse-ship',itemId:'I1',productKey:'p-order',warehouseId:'W1',quantity:3});
+  return {item,order};
+}
+function warehouseShipmentBatch(client,uid,item,{stock=true,extra={},qty=1}={}){
+  const batch=writeBatch(client),record={id:'SHIP1',orderId:'warehouse-ship',itemId:'I1',itemIndex:0,productKey:'p-order',warehouseId:'W1',date:'2026-10-06',qty,sourceType:'INVENTORY_SHIPMENT',createdByUid:uid,movementId:'SHIP-M1'};
+  batch.set(doc(client,'inventoryMovements/SHIP-M1'),{type:'ship',sourceId:'warehouse-ship',itemId:'I1',warehouseId:'W1',productKey:'p-order',qty:-qty,actorUid:uid,warehouseStockId:'W1__p-order',inventoryDocId:'p-order'});
+  if(stock){batch.update(doc(client,'inventory/p-order'),{onHand:5-qty,reserved:3-qty});batch.update(doc(client,'warehouseStocks/W1__p-order'),{onHand:5-qty,reserved:3-qty});}
+  batch.update(doc(client,'inventoryReservations/warehouse-ship__I1'),{quantity:3-qty});
+  batch.update(doc(client,'orders/warehouse-ship'),{inventoryShipmentRecordId:'SHIP1',items:[{...item,reservedQty:3-qty,warehouseShippedQty:qty}],deliveryRecords:[record],deliveredQty:qty,isDelivered:qty>=3,...extra});
+  return batch;
+}
+test('warehouse shipment records physical stock and reservation in the same atomic batch for receiver roles',async()=>{
+  for(const uid of ['wh1','buyer1']){
+    const {item}=await seedWarehouseShipment();
+    await assertSucceeds(warehouseShipmentBatch(db(uid),uid,item).commit());
+    const order=await getDoc(doc(db(uid),'orders/warehouse-ship'));assert.equal(order.data().deliveredQty,1);
+    await env.withSecurityRulesDisabled(async ctx=>{await deleteDoc(doc(ctx.firestore(),'inventoryMovements/SHIP-M1'));});
+  }
+});
+test('warehouse shipment rejects stock-free writes, unprepared stock, commercial changes and cancelled orders',async()=>{
+  for(const options of [{stock:false},{extra:{unitPrice:999}},{qty:4}]){
+    const {item}=await seedWarehouseShipment();await assertFails(warehouseShipmentBatch(db('wh1'),'wh1',item,options).commit());
+  }
+  let {item}=await seedWarehouseShipment();await seed('orders/warehouse-ship',{...(await getDoc(doc(db('admin'),'orders/warehouse-ship'))).data(),items:[{...item,dispatchPreparedQty:0}]});
+  await assertFails(warehouseShipmentBatch(db('wh1'),'wh1',{...item,dispatchPreparedQty:0}).commit());
+  ({item}=await seedWarehouseShipment());await assertSucceeds(updateDoc(doc(db('admin'),'orders/warehouse-ship'),{orderStatus:'cancelled',status:'cancelled'}));
+  await assertFails(warehouseShipmentBatch(db('wh1'),'wh1',item).commit());
+});
+test('commercial owner cannot invoke warehouse shipment marker directly',async()=>{
+  const {item}=await seedWarehouseShipment();await assertFails(warehouseShipmentBatch(db('sales1'),'sales1',item).commit());
+});

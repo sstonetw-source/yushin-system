@@ -106,22 +106,30 @@ window.withdrawCustomerReturn=async function(orderId,id){
     try{await runRoleTransaction(async tx=>{const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);const order=snap.data();const requests=(order.returnRequests||[]).map(r=>r.id===id&&r.status==='PENDING'?{...r,status:'CANCELLED',cancelledAt:new Date().toISOString(),cancelledBy:currentUser.uid}:r);tx.update(ref,{returnRequests:requests,returnPending:requests.some(r=>r.status==='PENDING'),returnRequestMutationIndex:requests.findIndex(r=>r.id===id),updatedAt:new Date().toISOString()});});
     await refreshAffectedOrderCaches([orderId]);renderOrderLifecycleModal();}catch(err){alert(err.message);}
 };
+let customerReturnVisibleLimit=50;
 window.loadCustomerReturnQueue=async function(more=false){
     const target=document.getElementById('customerReturnQueue');if(!target)return;
     if(!canReceiveInventoryCapability()){target.textContent='退貨收貨由管理員、採購或倉管確認。';return;}
     target.textContent='載入待收退貨…';
+    const role=currentUserRole,uid=currentUser?.uid;
     try{
-        let query=db.collection('orders').where('returnPending','==',true).limit(50);
-        if(more&&customerReturnCursor)query=query.startAfter(customerReturnCursor);
-        const snap=await query.get();customerReturnCursor=snap.docs.at(-1)||null;customerReturnHasMore=snap.size===50;
-        const rows=snap.docs.map(d=>({id:d.id,...d.data()}));customerReturnOrders=more?[...customerReturnOrders,...rows]:rows;
+        if(!more){
+            customerReturnVisibleLimit=50;
+            const rows=await readQueryInBatches(db.collection('orders').where('returnPending','==',true).orderBy(firebase.firestore.FieldPath.documentId()),200);
+            if(role!==currentUserRole||uid!==currentUser?.uid)return;
+            customerReturnOrders=rows;
+        }else customerReturnVisibleLimit+=50;
+        const requests=customerReturnOrders.flatMap(o=>(o.returnRequests||[]).filter(r=>r.status==='PENDING'&&Number(r.qty)>Number(r.receivedQty||0)).map(r=>({o,r})));
         const holds=await db.collection('customerReturnReceipts').where('disposition','==','HOLD').limit(50).get();
-        target.innerHTML=customerReturnOrders.flatMap(o=>(o.returnRequests||[]).filter(r=>r.status==='PENDING').map(r=>{const item=normalizedOrderItems(o).find(i=>i.itemId===r.itemId);return `<p><strong>${escapeHtml(o.customerName||o.orderNo||o.id)}</strong>｜${escapeHtml(item?.itemName||r.itemId)}｜待收 ${Number(r.qty)-Number(r.receivedQty||0)} <button onclick="receiveCustomerReturn(${inlineJsValue(o.id)},${inlineJsValue(r.id)},this)">確認退貨收貨</button></p>`;})).join('')||'<p>目前沒有待收退貨。</p>';
-        if(customerReturnHasMore)target.innerHTML+='<button class="btn-secondary" onclick="loadCustomerReturnQueue(true)">載入更多待收退貨</button>';
-        target.innerHTML+='<h4>已實收・不可用商品（分開保管）</h4>'+holds.docs.map(d=>{const r=d.data();return `<p>${escapeHtml(r.itemName||r.itemId)} × ${r.qty}｜${escapeHtml({INSPECTION:'待檢查',DAMAGED:'損壞'}[r.quality]||r.quality)}｜${escapeHtml(warehouseMasterCache.find(w=>w.id===r.warehouseId)?.name||r.warehouseId)} <button onclick="releaseCustomerReturnHold(${inlineJsValue(d.id)},this)">確認可再銷售・轉庫存</button></p>`;}).join('');
+        if(role!==currentUserRole||uid!==currentUser?.uid)return;
+        target.innerHTML=requests.slice(0,customerReturnVisibleLimit).map(({o,r})=>{const item=normalizedOrderItems(o).find(i=>i.itemId===r.itemId);return `<div class="inventory-return-card"><strong>${escapeHtml(o.customerName||o.orderNo||o.id)}</strong><span>${escapeHtml(item?.itemName||r.itemId)}｜待收 ${Number(r.qty)-Number(r.receivedQty||0)}</span><button type="button" onclick="receiveCustomerReturn(${inlineJsValue(o.id)},${inlineJsValue(r.id)},this)">確認退貨收貨</button></div>`;}).join('')||'<p>目前沒有待收退貨。</p>';
+        if(requests.length>customerReturnVisibleLimit)target.innerHTML+='<button class="btn-secondary" onclick="loadCustomerReturnQueue(true)">載入更多待收退貨（50）</button>';
+        target.innerHTML+='<h4>已實收・待檢／損壞商品（不計入待收數字）</h4>'+holds.docs.map(d=>{const r=d.data();return `<div class="inventory-return-card"><span>${escapeHtml(r.itemName||r.itemId)} × ${r.qty}｜${escapeHtml({INSPECTION:'待檢查',DAMAGED:'損壞'}[r.quality]||r.quality)}｜${escapeHtml(warehouseMasterCache.find(w=>w.id===r.warehouseId)?.warehouseName||r.warehouseId)}</span><button type="button" onclick="releaseCustomerReturnHold(${inlineJsValue(d.id)},this)">確認可再銷售・轉庫存</button></div>`;}).join('');
         if(holds.size===50)target.innerHTML+='<p>待檢商品僅顯示前 50 筆，請先處理目前清單。</p>';
-    }catch(err){target.textContent='退貨收貨載入失敗：'+err.message;}
+        globalThis.inventoryReturnQueueUpdated?.();
+    }catch(err){target.textContent='退貨收貨載入失敗：'+err.message;globalThis.inventoryReturnQueueUpdated?.(err.message);throw err;}
 };
+
 async function postCustomerReturnStock(tx,order,item,qty,receiptId,warehouseId){
     const itemDeliveries=savedDeliveryRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));
     const itemReturns=savedReturnRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));
