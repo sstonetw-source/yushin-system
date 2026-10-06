@@ -449,6 +449,7 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
+      <section class="panel no-print" id="customerReturnPanel"><h3>客戶退貨收貨</h3><p>申請不增加庫存；確認收貨後才入庫。退貨預設結案，不自動補送。待檢或損壞商品分開保管。</p><button type="button" class="btn-secondary" onclick="loadCustomerReturnQueue()">查看待收退貨／待檢商品</button><div id="customerReturnQueue" role="status"></div></section>
       <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
       <div class="toolbar no-print"><button onclick="switchInventoryWorkView(false)">庫存明細</button><button id="inventoryReceivingTabBtn" onclick="switchInventoryWorkView(true)">待收貨（讀取中…）</button></div>
       <div id="inventoryReceivingPanel" style="display:none"><p id="inventoryReceivingStatus" role="status"></p><div class="table-wrap"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
@@ -892,7 +893,7 @@
     </div>
 
     <!-- ============ 採購管理系統 ============ -->
-    <div id="purchasing-system" class="content-section">
+    <div id="purchasing-system" class="content-section"><section class="panel no-print" id="customerCancellationQueue" hidden></section>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
             <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">採購單</button>
@@ -1155,13 +1156,13 @@
                 <button type="button" id="orderLifecycleSaveBtn" onclick="saveOrderLifecycleStatus()">💾 儲存狀態</button>
             </div>
 
-            <h4 style="margin:18px 0 8px;">退貨紀錄</h4>
+            <h4 style="margin:18px 0 8px;">退貨申請／實收紀錄</h4><div id="returnRequestsSummary"></div>
             <table class="log-table delivery-log-table">
                 <thead><tr><th>退貨日期</th><th>退貨數量</th><th>原因／備註</th><th>登錄人／時間</th><th>操作</th></tr></thead>
                 <tbody id="returnRecordsBody"></tbody>
             </table>
             <div class="panel" id="returnFormPanel" style="margin-top:14px;margin-bottom:0;">
-                <h4 id="returnFormTitle" style="margin:0 0 10px;">新增退貨紀錄</h4>
+                <h4 id="returnFormTitle" style="margin:0 0 10px;">新增退貨申請</h4>
                 <input type="hidden" id="returnEditId">
                 <div class="form-grid" style="margin-bottom:6px;">
                     <div><label>退貨品項</label><select id="returnItemId" onchange="updateReturnFormHint()"></select></div>
@@ -1170,7 +1171,7 @@
                     <div><label>原因／備註（選填）</label><input type="text" id="returnReason" placeholder="可不填寫"></div>
                 </div>
                 <div id="returnFormHint" style="font-size:12px;color:#666;margin-bottom:8px;"></div>
-                <button type="button" id="returnSaveBtn" onclick="saveReturnRecord()">💾 儲存退貨紀錄</button>
+                <button type="button" id="returnSaveBtn" onclick="saveReturnRecord()">建立退貨申請</button>
                 <button type="button" class="btn-secondary" id="returnCancelEditBtn" style="display:none;" onclick="resetReturnForm()">取消編輯</button>
             </div>
             </div>
@@ -1661,7 +1662,8 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261006-3"></script>
+    <script src="app.js?v=20261006-4"></script>
+    <script src="modules/customer-cancellations.js?v=20261006-1"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
     <script>
     (function () {

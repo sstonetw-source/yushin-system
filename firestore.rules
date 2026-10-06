@@ -278,6 +278,16 @@ service cloud.firestore {
         ]);
     }
 
+    function supplierReceiptDispositionAllowed() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let orderId = before.get('orderId', '');
+      return after.get('receivedQty', 0) <= before.get('receivedQty', 0) || orderId == ''
+        || (get(/databases/$(database)/documents/orders/$(orderId)).data.get('orderStatus',
+            get(/databases/$(database)/documents/orders/$(orderId)).data.get('status', 'normal')) == 'normal')
+        || before.get('customerCancellationDisposition', '') == 'KEEP_STOCK';
+    }
+
     function warehouseSupplyOperationalUpdate() {
       return warehouse()
         && validSupplyOperationalState()
@@ -732,13 +742,105 @@ service cloud.firestore {
         || request.resource.data.get('procurementType', '') == 'SALES_SELF_ORDER';
     }
 
+    function supplierCancellationResolution() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let order = get(/databases/$(database)/documents/orders/$(before.orderId)).data;
+      let remaining = before.qty - before.get('receivedQty', 0);
+      let redirect = before.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP';
+      let invPath = /databases/$(database)/documents/inventory/$(after.get('redirectInventoryId', 'unused'));
+      let whId = after.get('redirectWarehouseStockId', 'unused');
+      let whPath = /databases/$(database)/documents/warehouseStocks/$(whId);
+      return purchaser() && order.get('orderStatus', order.get('status', 'normal')) in ['cancelled', 'voided']
+        && before.get('status', '') in ['ORDERED', 'PARTIAL_RECEIPT'] && remaining > 0
+        && before.get('customerCancellationDisposition', '') != 'KEEP_STOCK'
+        && after.customerCancellationDisposition == 'KEEP_STOCK'
+        && after.customerCancellationResolvedBy == request.auth.uid
+        && after.customerCancellationResolvedAt != ''
+        && after.diff(before).affectedKeys().hasOnly([
+          'customerCancellationDisposition', 'customerCancellationResolvedAt', 'customerCancellationResolvedBy',
+          'originalFulfillmentType', 'fulfillmentType', 'warehouseId', 'redirectInventoryId', 'redirectWarehouseStockId', 'incomingRegisteredQty', 'updatedAt'
+        ])
+        && (redirect ? (
+          after.originalFulfillmentType == 'DIRECT_SHIP' && after.fulfillmentType == 'WAREHOUSE'
+          && after.warehouseId != '' && exists(/databases/$(database)/documents/warehouses/$(after.warehouseId))
+          && after.incomingRegisteredQty == remaining
+          && getAfter(invPath).data.productKey == before.productKey
+          && getAfter(whPath).data.productKey == before.productKey && getAfter(whPath).data.warehouseId == after.warehouseId
+          && getAfter(invPath).data.incoming == (exists(invPath) ? get(invPath).data.get('incoming', 0) : 0) + remaining
+          && getAfter(whPath).data.incoming == (exists(whPath) ? get(whPath).data.get('incoming', 0) : 0) + remaining
+        ) : after.get('fulfillmentType', 'WAREHOUSE') == before.get('fulfillmentType', 'WAREHOUSE')
+          && after.get('warehouseId', '') == before.get('warehouseId', '')
+          && after.get('incomingRegisteredQty', 0) == before.get('incomingRegisteredQty', 0));
+    }
+
+    function validReturnPendingFlag(requests, flag) {
+      return requests.size() <= 30 && flag == !((requests.size() <= 0 || requests[0].status != 'PENDING') && (requests.size() <= 1 || requests[1].status != 'PENDING') && (requests.size() <= 2 || requests[2].status != 'PENDING') && (requests.size() <= 3 || requests[3].status != 'PENDING') && (requests.size() <= 4 || requests[4].status != 'PENDING') && (requests.size() <= 5 || requests[5].status != 'PENDING') && (requests.size() <= 6 || requests[6].status != 'PENDING') && (requests.size() <= 7 || requests[7].status != 'PENDING') && (requests.size() <= 8 || requests[8].status != 'PENDING') && (requests.size() <= 9 || requests[9].status != 'PENDING') && (requests.size() <= 10 || requests[10].status != 'PENDING') && (requests.size() <= 11 || requests[11].status != 'PENDING') && (requests.size() <= 12 || requests[12].status != 'PENDING') && (requests.size() <= 13 || requests[13].status != 'PENDING') && (requests.size() <= 14 || requests[14].status != 'PENDING') && (requests.size() <= 15 || requests[15].status != 'PENDING') && (requests.size() <= 16 || requests[16].status != 'PENDING') && (requests.size() <= 17 || requests[17].status != 'PENDING') && (requests.size() <= 18 || requests[18].status != 'PENDING') && (requests.size() <= 19 || requests[19].status != 'PENDING') && (requests.size() <= 20 || requests[20].status != 'PENDING') && (requests.size() <= 21 || requests[21].status != 'PENDING') && (requests.size() <= 22 || requests[22].status != 'PENDING') && (requests.size() <= 23 || requests[23].status != 'PENDING') && (requests.size() <= 24 || requests[24].status != 'PENDING') && (requests.size() <= 25 || requests[25].status != 'PENDING') && (requests.size() <= 26 || requests[26].status != 'PENDING') && (requests.size() <= 27 || requests[27].status != 'PENDING') && (requests.size() <= 28 || requests[28].status != 'PENDING') && (requests.size() <= 29 || requests[29].status != 'PENDING'));
+    }
+
+    function returnReceiptOrderUpdate(id) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let receiptId = after.get('returnReceiptId', '');
+      let path = /databases/$(database)/documents/customerReturnReceipts/$(receiptId);
+      let receipt = getAfter(path).data;
+      let oldRequests = before.get('returnRequests', []);
+      let newRequests = after.get('returnRequests', []);
+      let index = receipt.requestIndex;
+      let previous = oldRequests[index];
+      let next = newRequests[index];
+      let oldRecords = before.get('returnRecords', []);
+      let newRecords = after.get('returnRecords', []);
+      return canReceiveInventory() && receiptId != '' && !exists(path)
+        && receipt.orderId == id && receipt.receivedBy == request.auth.uid
+        && previous.id == receipt.requestId && previous.status == 'PENDING'
+        && next.diff(previous).affectedKeys().hasOnly(['receivedQty', 'status'])
+        && next.receivedQty == previous.get('receivedQty', 0) + receipt.qty && next.receivedQty <= previous.qty
+        && next.status == (next.receivedQty == next.qty ? 'RECEIVED' : 'PENDING')
+        && validReturnPendingFlag(newRequests, after.returnPending)
+        && newRequests.size() == oldRequests.size()
+        && newRequests.removeAll([next]) == oldRequests.removeAll([previous])
+        && newRecords.size() == oldRecords.size() + 1
+        && newRecords[newRecords.size() - 1] == receipt.record
+        && newRecords.removeAll([receipt.record]) == oldRecords
+        && after.returnedQty == before.get('returnedQty', 0) + receipt.qty
+        && after.returnedQty <= before.get('deliveredQty', 0)
+        && after.diff(before).affectedKeys().hasOnly([
+          'returnRequests', 'returnPending', 'returnRecords', 'returnedQty', 'returnReceiptId',
+          'items', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+        ]) && operationalItemsOnly(['reservedQty']) && sameCommercialOwner();
+    }
+
+    function commercialReturnProtection() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny(['returnRecords', 'returnedQty', 'returnReceiptId'])
+        && (!changed.hasAny(['returnRequests', 'returnPending']) || validCommercialReturnRequestMutation());
+    }
+    function validCommercialReturnRequestMutation() {
+      let before = resource.data.get('returnRequests', []);
+      let after = request.resource.data.get('returnRequests', []);
+      let index = request.resource.data.returnRequestMutationIndex;
+      let next = after[index];
+      return after.size() <= 30 && validReturnPendingFlag(after, request.resource.data.returnPending) && (
+        (after.size() == before.size() + 1 && index == before.size()
+          && after.removeAll([next]) == before && next.status == 'PENDING'
+          && next.receivedQty == 0 && next.qty is number && next.qty > 0
+          && next.createdByUid == request.auth.uid && next.settlement == 'CLOSE')
+        || (after.size() == before.size() && before[index].status == 'PENDING'
+          && next.status == 'CANCELLED'
+          && next.diff(before[index]).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy'])
+          && next.cancelledBy == request.auth.uid
+          && after.removeAll([next]) == before.removeAll([before[index]]))
+      );
+    }
+
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id)
-        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id)
+        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && owns(resource.data) && owns(request.resource.data)
-          && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate();
+          && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && commercialReturnProtection();
     }
 
     match /orders/{id} {
@@ -804,10 +906,11 @@ service cloud.firestore {
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
       // from bypassing procurement and receipt workflows.
-      allow update: if admin()
+      allow update: if (admin()
         || directShipSupplyReceiptUpdate()
         || purchaserSupplyOperationalUpdate()
-        || warehouseSupplyOperationalUpdate();
+        || supplierCancellationResolution()
+        || warehouseSupplyOperationalUpdate()) && supplierReceiptDispositionAllowed();
       allow delete: if admin();
     }
 
@@ -903,6 +1006,29 @@ service cloud.firestore {
         || request.resource.data.get('sourceType', '') == 'INITIAL_STOCK'
       ));
       allow update: if admin() || purchaser();
+      allow delete: if admin();
+    }
+
+    match /customerReturnReceipts/{id} {
+      allow read: if canReceiveInventory() || (businessOwner() && owns(resource.data));
+      allow create: if canReceiveInventory()
+        && request.resource.data.receivedBy == request.auth.uid
+        && request.resource.data.qty is number && request.resource.data.qty > 0
+        && request.resource.data.quality in ['SALEABLE', 'INSPECTION', 'DAMAGED']
+        && request.resource.data.disposition == (request.resource.data.quality == 'SALEABLE' ? 'STOCK' : 'HOLD')
+        && request.resource.data.record.id == id
+        && request.resource.data.record.qty == request.resource.data.qty
+        && request.resource.data.record.requestId == request.resource.data.requestId
+        && request.resource.data.record.itemId == request.resource.data.itemId
+        && request.resource.data.record.settlement == 'CLOSE'
+        && request.resource.data.record.quality == request.resource.data.quality
+        && request.resource.data.record.warehouseId == request.resource.data.warehouseId
+        && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.returnReceiptId == id;
+      allow update: if canReceiveInventory() && resource.data.disposition == 'HOLD'
+        && request.resource.data.disposition == 'STOCK'
+        && request.resource.data.releasedBy == request.auth.uid
+        && request.resource.data.releasedAt != ''
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['disposition', 'releasedAt', 'releasedBy']);
       allow delete: if admin();
     }
 

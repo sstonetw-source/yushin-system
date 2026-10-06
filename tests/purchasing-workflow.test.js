@@ -859,7 +859,7 @@ test('receiving queue keeps standalone stock and cancelled-order warehouse suppl
     assert.ok(start>=0&&end>start);
     assert.match(source,/const representedSupplyIds = new Set\(\)/);
     assert.match(source,/supplyReceivingCache\.forEach\(supply =>/);
-    assert.match(source,/來源訂單已取消，貨到後轉為可用庫存/);
+    assert.match(source,/客戶已取消・採購待確認供應商答覆/);
     assert.match(source,/庫存補貨／非正常訂單供應/);
     assert.match(source,/來源訂單已取消，直送不可確認/);
     assert.match(source,/openSupplyReceipt\(/);
@@ -1080,7 +1080,7 @@ test('delivery progress uses net delivered quantity after returns', () => {
         orderQuantity:()=>10,
         deliveredQuantity:()=>10,
         returnedQuantity:()=>2,
-        savedDeliveryRecords:()=>[{qty:10}]
+        savedDeliveryRecords:()=>[{qty:10}],savedReturnRecords:()=>[]
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
 vm.runInContext(source,context);
@@ -1167,7 +1167,7 @@ test('cancelled-order returns go back to free stock instead of restoring reserva
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/const returnKeepsReservation=normalizedOrderStatus\(order\)==='normal'/);
-    assert.match(source,/const nextReservation=returnKeepsReservation\?Math\.max\(0,currentReservation\+deltaQty\):0/);
+    assert.match(source,/order.customerReturnSettlement==='CLOSE'\?currentReservation/);
     assert.match(source,/const reservationStatus=returnKeepsReservation\?\(nextReservation>0\?'active':'fulfilled'\):'released'/);
 });
 

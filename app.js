@@ -1428,6 +1428,7 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
 
     if (tabId === 'inventory-system') {
         if (!options.skipReload) initializePageData('inventory');
+        loadCustomerReturnQueue();
     } else if (tabId === 'forecast-system') {
         if (!options.skipReload) initializePageData('forecast');
     } else if (tabId === 'equipment-system') {
@@ -9582,7 +9583,7 @@ function normalizedOrderItems(order) {
     if (returnRecords) {
         returnRecords.forEach(row => {
             const itemId = String(row?.itemId || singleItemId || '');
-            if (!itemId) return;
+            if (!itemId || row.settlement === 'CLOSE') return;
             returnQtyByItemId.set(itemId,
                 (returnQtyByItemId.get(itemId) || 0) + Math.max(0, Number(row?.qty || 0)));
         });
@@ -9654,7 +9655,8 @@ function deliveryProgressInfo(order, normalizedItems = null) {
     const total = orderQuantity(order, normalizedItems);
     const grossDelivered = deliveredQuantity(order, normalizedItems);
     const returned = Math.min(returnedQuantity(order), grossDelivered);
-    const effectiveDelivered = Math.max(0, grossDelivered - returned);
+    const closedReturns = savedReturnRecords(order).filter(r=>r.settlement==='CLOSE').reduce((sum,r)=>sum+Number(r.qty||0),0);
+    const effectiveDelivered = Math.max(0, grossDelivered - returned + closedReturns);
     const delivered = Math.min(effectiveDelivered, total || effectiveDelivered);
     const remaining = Math.max(0, total - delivered);
     const isLegacyEstimated = !!order?.isDelivered && savedDeliveryRecords(order).length === 0;
@@ -9686,6 +9688,7 @@ function orderLifecycleInfo(order, normalizedItems = null) {
     const effectiveDelivered = Math.max(0, delivered - returned);
     const status = normalizedOrderStatus(order);
     if (status === 'cancelled') return { status, label: '已取消', css: 'invalid', delivered, returned, effectiveDelivered };
+    if (savedReturnRecords(order).some(r=>r.settlement==='CLOSE')) return {status,label:'退貨已收貨・不補送',css:'returned',delivered,returned,effectiveDelivered};
     if (returned > 0 && effectiveDelivered <= 0) return { status, label: '全數退貨・待補送', css: 'returned', delivered, returned, effectiveDelivered };
     if (returned > 0) return { status, label: '部分退貨・待補送', css: 'returned', delivered, returned, effectiveDelivered };
     return { status, label: '正常', css: 'normal', delivered, returned, effectiveDelivered };
@@ -9756,7 +9759,7 @@ function itemDispatchState(order, item) {
             .reduce((sum, r) => sum + Number(r.qty || 0), 0);
     const returned = hasSnapshot
         ? Math.max(0, Number(item.returnedQty || 0))
-        : savedReturnRecords(order).filter(r => ((!r.itemId && singleItem) || r.itemId === item.itemId))
+        : savedReturnRecords(order).filter(r => r.settlement !== 'CLOSE' && ((!r.itemId && singleItem) || r.itemId === item.itemId))
             .reduce((sum, r) => sum + Number(r.qty || 0), 0);
     if (!globalThis.YushinFulfillment?.dispatchState) {
         throw new Error('Fulfillment core 未載入，無法計算出貨狀態。');
@@ -13154,7 +13157,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         const customerLabel = sourceOrder?.customerName || sourceOrder?.customer || supply.customerName
             || (supply.orderId ? '來源訂單' : '庫存補貨');
         const sourceLabel = sourceOrder && sourceStatus !== 'normal'
-            ? '來源訂單已取消，貨到後轉為可用庫存'
+            ? (supply.customerCancellationDisposition === 'KEEP_STOCK' ? '客戶已取消・供應商不同意取消・到貨轉庫存' : '客戶已取消・採購待確認供應商答覆')
             : !supply.orderId
                 ? '庫存補貨'
                 : sourceOrder
@@ -13169,7 +13172,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             <td data-th="負責業務">${escapeHtml(salesName)}</td>
             <td data-th="待到貨品項">${escapeHtml(supply.itemCode || supply.itemName || supply.id)} × ${ordered}</td>
             <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${escapeHtml(supplyProgress.label)}${receivingWaitHtml([supply])}${receivingDueHtml(due)}</td>
-            <td data-th="操作" class="no-print">${actionHtml}</td>`;
+            <td data-th="操作" class="no-print">${sourceOrder && sourceStatus !== 'normal' && canCreatePurchaseOrderCapability() ? customerCancellationActions(supply) : actionHtml}</td>`;
         tr.dataset.receivingDueRank = String(due.sortRank);
         tr.dataset.receivingPlanRiskRank = '4';
         tr.dataset.receivingExpectedDate = due.expectedDate || '';
@@ -14302,6 +14305,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             if(orderSnap.exists){
                 order=orderSnap.data();
                 sourceOrderStatus=normalizedOrderStatus(order);
+                if(sourceOrderStatus!=='normal'&&supply.customerCancellationDisposition!=='KEEP_STOCK')throw new Error('請先由採購確認供應商答覆，保留採購轉庫存後再收貨。');
                 // 倉庫型採購即使來源訂單已取消，供應商仍可能照常出貨。
                 // 此時貨照常入庫，但不可再占回已取消訂單；整批視為自由庫存。
                 items=normalizedOrderItems(order);itemIndex=items.findIndex(item=>item.itemId===supply.itemId);
@@ -16213,7 +16217,7 @@ function confirmOrderCancellation(order) {
         const documents=[...new Set(items.flatMap(item=>item.purchaseDocumentNos||[]))];
         const action=progress.delivered>0?'取消剩餘未送貨數量':'取消訂單';
         const message=[`${action}：${progress.remaining} 個。`, `釋放庫存占用：${reserved} 個；已到貨的貨仍留在庫存。`,
-            incoming>0?`尚有 ${incoming} 個採購未到貨；已建立採購單不會自動取消，請到採購單處理剩餘數量。`:'',
+            incoming>0?`尚有 ${incoming} 個採購未到貨；已建立採購單不會自動取消，請到採購待到貨確認：供應商同意取消，或保留採購轉庫存。`:'',
             documents.length?`關聯採購單：${documents.join('、')}`:'',
             progress.delivered>0?'已送貨與退貨紀錄保留，已送出的貨不會自動退回庫存。':''].filter(Boolean).join('\n\n');
         return confirm(message);
@@ -16561,7 +16565,7 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     // 已取消／作廢訂單只把退貨放回自由庫存，不能重新占住庫存；若遇到殘留占用也一併釋放。
     const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
     const returnKeepsReservation=normalizedOrderStatus(order)==='normal';
-    const nextReservation=returnKeepsReservation?Math.max(0,currentReservation+deltaQty):0;
+    const nextReservation=returnKeepsReservation?(order.customerReturnSettlement==='CLOSE'?currentReservation:Math.max(0,currentReservation+deltaQty)):0;
     const reservationDelta=nextReservation-currentReservation;
     const nextReserved=Math.max(0,inv.reserved+reservationDelta);
     const nextWarehouseReserved=Math.max(0,wh.reserved+reservationDelta);
@@ -16889,7 +16893,7 @@ window.saveDeliveryRecord = async function() {
             const targetItem=orderItems.find(item=>item.itemId===requestedItemId)||orderItems[0];
             if(!targetItem)throw new Error('找不到送貨品項。');
             const itemOtherDelivered=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
-            const itemReturned=savedReturnRecords(order).filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
+            const itemReturned=savedReturnRecords(order).filter(r=>r.settlement!=='CLOSE'&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
             // 退貨後補送必須以「有效送貨量」驗證，而不是歷史累計送貨量。
             // 例如訂購10、曾送10、退2，可再補送2；歷史送貨會成為12，但有效送貨仍是10。
             const itemGrossAfter=itemOtherDelivered+qty;
@@ -16907,7 +16911,8 @@ window.saveDeliveryRecord = async function() {
             const totalDelivered = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const total = orderQuantity(order);
             if (!total) throw new Error('訂購數量必須大於 0，才能登錄送貨。');
-            const effectiveTotalDelivered=Math.max(0,totalDelivered-returnedQuantity(order));
+            const closedReturned=savedReturnRecords(order).filter(r=>r.settlement==='CLOSE').reduce((sum,r)=>sum+Number(r.qty||0),0);
+            const effectiveTotalDelivered=Math.max(0,totalDelivered-returnedQuantity(order)+closedReturned);
             if (effectiveTotalDelivered > total + 1e-9) throw new Error(`有效送貨數量 ${effectiveTotalDelivered} 超過訂購數量 ${total}。`);
             const alreadyReturned = returnedQuantity(order);
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
@@ -17088,7 +17093,7 @@ window.updateReturnFormHint = function() {
     const item=items.find(row=>row.itemId===selectedItemId);
     const delivered=returnItemDeliveredQty(order,selectedItemId);
     const otherReturned=returnItemReturnedQty(order,selectedItemId,editId);
-    hint.innerText=`${item?.itemName||item?.itemCode||'此品項'}目前最多還可登錄 ${Math.max(0,delivered-otherReturned)} 個退貨。`;
+    hint.innerText=`${item?.itemName||item?.itemCode||'此品項'}目前最多還可登錄 ${Math.max(0,delivered-otherReturned-(typeof customerReturnPendingQty==='function'?customerReturnPendingQty(order,selectedItemId):0))} 個退貨（已扣除待收申請）。`;
 };
 
 window.resetReturnForm = function() {
@@ -17096,7 +17101,7 @@ window.resetReturnForm = function() {
     document.getElementById('returnDate').value = localDateString();
     document.getElementById('returnQty').value = '';
     document.getElementById('returnReason').value = '';
-    document.getElementById('returnFormTitle').innerText = '新增退貨紀錄';
+    document.getElementById('returnFormTitle').innerText = '新增退貨申請';
     document.getElementById('returnCancelEditBtn').style.display = 'none';
     const order=ordersCache.find(item=>item.id===currentLifecycleOrderId);
     populateReturnItemOptions(order);
@@ -17120,7 +17125,7 @@ function renderOrderLifecycleModal() {
     tbody.innerHTML = records.length ? records.map(record => `<tr>
         <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td><td>${escapeHtml(record.reason || '')}</td>
         <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-        <td>${editable ? `<button type="button" class="btn-small" onclick="editReturnRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteReturnRecord(${inlineJsValue(record.id)})">刪除</button>` : '僅可查看'}</td>
+        <td>${editable && !record.requestId ? `<button type="button" class="btn-small" onclick="editReturnRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteReturnRecord(${inlineJsValue(record.id)})">刪除</button>` : '僅可查看'}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:#888;">尚無退貨紀錄。</td></tr>';
     const editingRecord=records.find(record=>record.id===document.getElementById('returnEditId')?.value);
     populateReturnItemOptions(order,editingRecord?.itemId||'');
@@ -17214,6 +17219,7 @@ window.saveReturnRecord = async function() {
     const qty = parseFloat(document.getElementById('returnQty').value);
     const reason = document.getElementById('returnReason').value.trim();
     const editId = document.getElementById('returnEditId').value;
+    if (editId && savedReturnRecords(ordersCache.find(o=>o.id===orderId)||{}).some(r=>r.id===editId && r.requestId)) return alert('已確認收貨的退貨不可由業務更改。');
     if (!orderId || !date || !Number.isFinite(qty) || qty <= 0) { alert('請填寫退貨日期與大於 0 的退貨數量。'); return; }
     if (pendingReturnOrderIds.has(orderId)) return;
     const saveButton = document.getElementById('returnSaveBtn');
@@ -17288,6 +17294,7 @@ window.saveReturnRecord = async function() {
 };
 
 window.deleteReturnRecord = async function(recordId) {
+    if(savedReturnRecords(ordersCache.find(o=>o.id===currentLifecycleOrderId)||{}).some(r=>r.id===recordId && r.requestId))return alert('已確認收貨的退貨不可由業務刪除。');
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
     if (!confirm('確定要刪除這筆退貨紀錄嗎？異動軌跡仍會保留。')) return;
     const orderId = currentLifecycleOrderId;
@@ -20498,7 +20505,8 @@ function calculateOrderStatsContribution(order, start, end) {
     const orderExistsByCutoff = !order.orderDate || order.orderDate <= cutoff;
     const effectiveDelivered = Math.max(0, deliveredByCutoff - returnedByCutoff);
     // 取消／作廢只終止尚未履約的餘額；取消前已實際送貨、退貨仍屬正式歷史。
-    const pendingQty = !cancelled && orderExistsByCutoff ? Math.max(0, totalQty - Math.min(totalQty, effectiveDelivered)) : 0;
+    const settledReturnQty=savedReturnRecords(order).filter(r=>r.settlement==='CLOSE'&&r.date&&r.date<=cutoff).reduce((sum,r)=>sum+Number(r.qty||0),0);
+    const pendingQty = !cancelled && orderExistsByCutoff ? Math.max(0, totalQty - Math.min(totalQty, effectiveDelivered + settledReturnQty)) : 0;
     return {
         actualQty, pendingQty,
         actualSales: actualQty * unitSales,
@@ -21387,7 +21395,7 @@ window.calculateStorageUsage = async function() {
         { key: 'quotes', label: '估價單' }, { key: 'forecasts', label: 'Forecast' },
         { key: 'orders', label: '訂單' }, { key: 'purchaseOrders', label: '採購單' },
         { key: 'procurementDemands', label: '採購需求' },
-        { key: 'supplyOrders', label: '供應／訂貨紀錄' }, { key: 'receipts', label: '收貨紀錄' },
+        { key: 'supplyOrders', label: '供應／訂貨紀錄' }, { key: 'receipts', label: '收貨紀錄' }, { key: 'customerReturnReceipts', label: '客戶退貨實收紀錄' },
         { key: 'dispatchRecords', label: '出貨打單紀錄' }, { key: 'inventory', label: '庫存彙總' },
         { key: 'inventoryLots', label: '庫存批次' }, { key: 'inventoryLotCosts', label: '受保護批次成本' },
         { key: 'inventoryReservations', label: '庫存占用' }, { key: 'inventoryMovements', label: '庫存異動' },
@@ -21444,7 +21452,7 @@ window.downloadDatabaseBackup = async function() {
         'brands', 'productLines', 'products', 'productCosts', 'priceHistory', 'customers', 'salesCodes',
         'suppliers', 'brandSupplierMappings', 'warehouses', 'warehouseStocks',
         'inventory', 'inventoryLots', 'inventoryLotCosts', 'inventoryReservations',
-        'inventoryMovements', 'receipts', 'supplyOrders', 'dispatchRecords', 'deliveries', 'auditLogs', 'purchaseOrderCommunications'
+        'inventoryMovements', 'receipts', 'customerReturnReceipts', 'supplyOrders', 'dispatchRecords', 'deliveries', 'auditLogs', 'purchaseOrderCommunications'
     ];
     button.disabled = true;
     button.innerText = '正在整理備份…';
@@ -21518,7 +21526,7 @@ const RESTORABLE_BACKUP_COLLECTIONS = new Set([
     'products','productCosts','priceHistory','customers','salesCodes','suppliers',
     'brandSupplierMappings','warehouses','warehouseStocks','inventory','inventoryLots',
     'inventoryLotCosts','inventoryReservations','inventoryMovements',
-    'receipts','supplyOrders','dispatchRecords','deliveries','auditLogs','forecastProgress'
+    'receipts','customerReturnReceipts','supplyOrders','dispatchRecords','deliveries','auditLogs','forecastProgress'
 ]);
 function restoreBackupValue(value) {
     if (Array.isArray(value)) return value.map(restoreBackupValue);
@@ -21816,7 +21824,7 @@ function systemAuditProductKey(record = {}) {
 
 const TEST_DATA_RESET_DELETE_COLLECTIONS = [
     'orders','purchaseOrders','procurementDemands','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
-    'receipts','dispatchRecords','deliveries','inventoryMovements','auditLogs'
+    'receipts','customerReturnReceipts','dispatchRecords','deliveries','inventoryMovements','auditLogs'
 ];
 let testDataResetPreviewState = null;
 

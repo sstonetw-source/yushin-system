@@ -2137,7 +2137,7 @@ test('ordered action belongs to purchasing while the order list only shows progr
     assert.doesNotMatch(actions, /openOrderPurchaseDraft/);
     const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders');
     const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
-    assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?已訂購/);
+    assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?已採購/);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?產生採購單/);
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
@@ -4439,7 +4439,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const supplyEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyStart);
     const supplySource=rulesSource.slice(supplyStart,supplyEnd);
-    assert.match(supplySource,/allow update: if admin\(\)[\s\S]*?purchaserSupplyOperationalUpdate\(\)[\s\S]*?warehouseSupplyOperationalUpdate\(\)/);
+    assert.match(supplySource,/allow update: if \(admin\(\)[\s\S]*?purchaserSupplyOperationalUpdate\(\)[\s\S]*?warehouseSupplyOperationalUpdate\(\)\) && supplierReceiptDispositionAllowed\(\)/);
     assert.doesNotMatch(supplySource,/allow update: if admin\(\) \|\| purchaser\(\)/);
 });
 

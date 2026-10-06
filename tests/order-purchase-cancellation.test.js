@@ -119,3 +119,11 @@ test('successful stock or order transactions invalidate analysis, failed transac
   assert.equal(c.tradeAnalysisReady,true);assert.equal(c.tradeAnalysisLoadedKey,'existing-report');assert.deepEqual(dirty,['admin']);
  }
 });
+
+test('settlement return adds free stock while preserving reservations for remaining normal order quantities',async()=>{
+ const {c,tx,docs,order}=returnFixture();order.customerReturnSettlement='CLOSE';
+ const result=await c.applyInventoryReturnDeltaInTransaction(tx,order,1,'Receiver','O1',null);
+ assert.equal(docs.get('inventory/P1').onHand,2);
+ assert.equal(docs.get('inventory/P1').reserved,1);
+ assert.equal(result.newReservedQty,1);
+});

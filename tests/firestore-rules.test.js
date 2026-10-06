@@ -925,3 +925,32 @@ test('multi-product reservation uses the matching product movement for each stoc
   });
  },'sales1',true,'sales'));
 });
+
+test('business owner may request a return but may not record received returns directly', async () => {
+  const order={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',deliveredQty:2,returnedQty:0,items:[{itemId:'I1',qty:2}],returnRequests:[],returnRecords:[]};
+  await seed('orders/customer-return',order);
+  const request={id:'Q1',itemId:'I1',qty:1,receivedQty:0,status:'PENDING',settlement:'CLOSE',createdByUid:'sales1'};
+  await assertSucceeds(updateDoc(doc(db('sales1'),'orders/customer-return'),{returnRequests:[request],returnPending:true,returnRequestMutationIndex:0}));
+  await assertFails(updateDoc(doc(db('sales1'),'orders/customer-return'),{returnedQty:1,returnRecords:[{id:'R1',itemId:'I1',qty:1}]}));
+  await assertFails(updateDoc(doc(db('sales2'),'orders/customer-return'),{returnPending:false}));
+});
+test('warehouse return receipt must atomically settle the pending request and append its matching record',async()=>{
+  const request={id:'Q1',itemId:'I1',qty:1,receivedQty:0,status:'PENDING',settlement:'CLOSE',createdByUid:'sales1'};
+  const order={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',deliveredQty:2,returnedQty:0,items:[{itemId:'I1',qty:2}],returnRequests:[request],returnRecords:[],returnPending:true};
+  await seed('orders/customer-return',order);
+  const record={id:'R1',requestId:'Q1',itemId:'I1',qty:1,settlement:'CLOSE',quality:'INSPECTION',warehouseId:'W1'};
+  const receipt={orderId:'customer-return',requestId:'Q1',requestIndex:0,itemId:'I1',qty:1,quality:'INSPECTION',warehouseId:'W1',disposition:'HOLD',record,receivedBy:'wh1',ownerUid:'sales1',salesCode:'S01'};
+  await assertFails(setDoc(doc(db('wh1'),'customerReturnReceipts/R1'),receipt));
+  const batch=writeBatch(db('wh1'));
+  batch.set(doc(db('wh1'),'customerReturnReceipts/R1'),receipt);
+  batch.update(doc(db('wh1'),'orders/customer-return'),{returnReceiptId:'R1',returnRequests:[{...request,receivedQty:1,status:'RECEIVED'}],returnPending:false,returnedQty:1,returnRecords:[record]});
+  await assertSucceeds(batch.commit());
+  await assertFails(updateDoc(doc(db('sales1'),'customerReturnReceipts/R1'),{disposition:'STOCK',releasedBy:'sales1',releasedAt:'now'}));
+});
+test('only purchasing can keep a cancelled customer procurement as stock',async()=>{
+  await seed('orders/customer-cancelled',{...validOrderProduct,ownerUid:'sales1',salesCode:'S01',orderStatus:'cancelled'});
+  await seed('supplyOrders/keep-stock',{orderId:'customer-cancelled',productKey:'P1',status:'ORDERED',qty:2,receivedQty:0,fulfillmentType:'WAREHOUSE',warehouseId:'W1',incomingRegisteredQty:2});
+  const patch={customerCancellationDisposition:'KEEP_STOCK',customerCancellationResolvedAt:'now',customerCancellationResolvedBy:'buyer1',updatedAt:'now'};
+  await assertFails(updateDoc(doc(db('wh1'),'supplyOrders/keep-stock'),patch));
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'supplyOrders/keep-stock'),patch));
+});
