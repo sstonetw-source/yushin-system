@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261006-2">
+        <link rel="stylesheet" href="styles.css?v=20261006-3">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1301,7 +1301,7 @@
         <div class="sub-nav no-print">
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
-            <div class="sub-tab" id="admin-sub-products" onclick="switchAdminTab('products', this); if (typeof updatePendingProductMasterButton === 'function') updatePendingProductMasterButton();">📦 產品管理</div>
+            <div class="sub-tab" id="admin-sub-products" onclick="switchAdminTab('products', this)">📑 價目表管理</div>
             <div class="sub-tab" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">📊 進銷存分析</div>
             <div class="sub-tab" id="admin-sub-warehouses" onclick="switchAdminTab('warehouses', this)">🏬 倉庫管理</div>
             <div class="sub-tab" id="admin-sub-health" onclick="switchAdminTab('health', this)">🩺 資料健康</div>
@@ -1324,51 +1324,57 @@
         
         <div id="admin-products" class="admin-panel" style="display:none;">
             <div class="panel">
-                <div class="admin-product-heading"><h3>產品管理</h3><button type="button" onclick="openNewProductMasterEditor()">＋ 新增產品</button></div>
-                <section aria-label="產品查詢">
-                    <div class="admin-product-filters toolbar">
-                        <input type="search" id="productOverviewSearch" placeholder="搜尋完整產品資料：貨號／品名" aria-label="搜尋產品主檔" onkeydown="if(event.key==='Enter'){loadProductManagementOverview(true);}">
-                        <button type="button" onclick="loadProductManagementOverview(true)">搜尋</button>
-                        <select id="productOverviewScope" aria-label="廠牌或匯入批次" onchange="loadProductManagementOverview(true)"></select>
-                        <label><input type="checkbox" id="productOverviewInactive" onchange="renderProductManagementOverview()"> 顯示已停用</label>
-                    </div>
-                    <p id="productOverviewStatus" role="status" aria-live="polite"></p>
-                    <div class="table-wrap"><table><thead><tr><th>廠牌</th><th>貨號</th><th>品名</th><th>規格</th><th>狀態</th><th>操作</th></tr></thead><tbody id="productOverviewBody"></tbody></table></div>
-                    <button id="productOverviewMore" class="btn-secondary" style="display:none" onclick="loadProductManagementOverview(false)">載入更多產品</button>
-                </section>
-                <section id="productManagementTools" class="no-print" style="display:none;" aria-label="產品管理工具">
-            <!-- Product Master 管理（舊稱，保留供回歸測試辨識） -->
-            <details id="productBatchMaintenance" class="product-import-details" style="display:none;">
-                <summary>Excel 匯入／更新</summary>
-                <div class="product-import-card">
-                    <div class="product-import-actions">
-                        <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
-                        <button type="button" onclick="document.getElementById('productImportExcelInput').click()">匯入標準產品檔</button>
-                        <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                    </div>
-                    <p class="product-import-summary">一份 Excel 維護產品、建議售價與標準成本。只處理本次檔案中的品項；寫入前會先比對並顯示「新增／更新／不變／錯誤」，有錯誤時整批不寫入。</p>
-                    <details class="product-import-rules">
-                        <summary>查看欄位規則</summary>
-                        <div class="product-import-rules-grid">
-                            <div><strong>必要識別</strong><span>廠牌、貨號</span></div>
-                            <div><strong>可選填</strong><span>產品線、規格、產品類型、單位、標準成本</span></div>
-                            <div><strong>預設值</strong><span>啟用＝是；庫存／批號／效期管理＝否</span></div>
-                            <div><strong>成本</strong><span>標準成本留白不覆蓋原值；實際採購價另外保存</span></div>
+                <section id="productBatchMaintenance" class="price-list-admin" aria-label="價目表管理">
+                    <div class="admin-product-heading price-list-admin-heading">
+                        <div>
+                            <h3>價目表管理</h3>
+                            <p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一 Product Master 的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p>
                         </div>
-                    </details>
+                        <div class="price-list-admin-actions no-print">
+                            <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
+                            <button type="button" onclick="openPriceListUploadForBrand('')">＋ 上傳價目表</button>
+                            <button type="button" class="btn-secondary" onclick="loadProductManagementOverview(true)">重新整理</button>
+                        </div>
+                    </div>
+                    <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
+                    <p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價格表」再上傳新版。刪除價格表不會刪除 Product Master、歷史估價單／訂單、庫存或實際採購紀錄。</p>
                     <div id="priceUploadProgress" class="product-import-progress" style="display:none;">
                         <div class="product-import-progress-head"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
                         <div class="product-import-progress-track"><div id="priceUploadProgressBar" class="product-import-progress-bar" style="width:0;"></div></div>
                     </div>
                     <span id="productBatchMaintenanceStatus" class="inline-status" role="status" aria-live="polite"></span>
-                </div>
-            </details>
-            <details class="product-import-details"><summary>更多操作</summary><div class="product-import-card">
-                <p>選擇單一廠牌後，可移除此廠牌產品。系統會先檢查關聯並下載備份；無關聯產品與成本會刪除，有單據或庫存關聯的產品保留並停用。</p>
-                <button id="deleteBrandProductsBtn" type="button" class="btn-danger" disabled onclick="deleteEntireBrandProducts(this)">移除此廠牌產品</button>
-            </div></details>
-            <details class="product-import-rules"><summary>使用說明</summary><p>搜尋涵蓋完整產品資料。貨號請在 Excel 以文字保存，保留前導 0；相同貨號若跨不同廠牌，請先確認廠牌。待補主檔請到「資料健康」查看。</p></details>
-        </section>
+                    <p id="productOverviewStatus" role="status" aria-live="polite"></p>
+                    <div class="table-wrap">
+                        <table class="price-list-management-table">
+                            <thead><tr><th>廠牌</th><th>目前價目表</th><th>檔案品項數</th><th>最後更新</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
+                            <tbody id="productOverviewBody"><tr><td colspan="6" style="color:#888;">正在載入價目表狀態…</td></tr></tbody>
+                        </table>
+                    </div>
+                    <details id="priceListHistoryDetails" class="product-import-details">
+                        <summary>匯入／停用／刪除紀錄</summary>
+                        <div class="product-import-card">
+                            <div class="price-list-history-toolbar no-print">
+                                <span id="priceListHistoryFilterLabel">顯示全部廠牌</span>
+                                <button type="button" class="btn-small btn-secondary" onclick="showPriceListHistoryForBrand('')">顯示全部</button>
+                            </div>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead><tr><th>時間</th><th>廠牌</th><th>動作</th><th>檔案</th><th>品項數</th><th>操作者</th></tr></thead>
+                                    <tbody id="priceListHistoryBody"><tr><td colspan="6" style="color:#888;">尚未載入紀錄。</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </details>
+                    <details class="product-import-rules">
+                        <summary>欄位與安全規則</summary>
+                        <div class="product-import-rules-grid">
+                            <div><strong>必要識別</strong><span>廠牌、貨號</span></div>
+                            <div><strong>可選填</strong><span>產品線、規格、產品類型、單位、建議售價、標準成本</span></div>
+                            <div><strong>刪除價格表</strong><span>只清除建議售價與標準成本，Product Master 與交易歷史保留</span></div>
+                            <div><strong>歷史成本</strong><span>實際採購價、庫存批次成本與已完成交易不會被價目表刪除</span></div>
+                        </div>
+                    </details>
+                </section>
             </div>
         </div>
 
@@ -1672,7 +1678,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261006-10"></script>
+    <script src="app.js?v=20261006-11"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261006-1"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>

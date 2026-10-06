@@ -3286,3 +3286,56 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .trade-analysis-filters [hidden] { display:none !important; }
 #tradeAnalysisCards { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
 @media(max-width:600px) { #tradeAnalysisCards { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+
+/* 2026-10-06: 管理員後台「價目表管理」與 Product Master 日常編輯分工 */
+.price-list-admin-heading {
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.price-list-admin-heading h3 {
+    margin: 0 0 6px;
+}
+.price-list-admin-intro {
+    margin: 0;
+    max-width: 780px;
+    line-height: 1.6;
+}
+.price-list-admin-actions,
+.price-list-action-group,
+.price-list-history-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.price-list-admin-actions {
+    margin-left: auto;
+}
+.price-list-management-table td:last-child {
+    min-width: 340px;
+}
+.price-list-history-toolbar {
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+.price-list-state {
+    white-space: nowrap;
+    font-weight: 600;
+}
+@media (max-width: 720px) {
+    .price-list-admin-actions {
+        width: 100%;
+        margin-left: 0;
+    }
+    .price-list-admin-actions button {
+        flex: 1 1 140px;
+    }
+    .price-list-management-table td:last-child {
+        min-width: 0;
+    }
+    .price-list-action-group button {
+        flex: 1 1 120px;
+    }
+}

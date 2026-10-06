@@ -1896,7 +1896,8 @@ window.loadPendingProductMaster = async function() {
 
 function productManagementRow(product) {
     const productId = product.productId || product.id || '';
-    const price = Number(product.listPrice ?? product.price ?? 0);
+    const brand = resolveBrandName(product.brandName || product.brand || '');
+    const price = isBrandPriceListActive(brand) ? Number(product.listPrice ?? product.price ?? 0) : 0;
     const status = product.status || (product.active === false ? 'INACTIVE' : 'ACTIVE');
     const inactive = status === 'INACTIVE' || product.active === false;
     const selected = !!productId && productManagementSelection.has(productId);
@@ -1907,7 +1908,7 @@ function productManagementRow(product) {
       <td data-th="選取" class="no-print product-management-select-cell"><input type="checkbox" ${selected ? 'checked' : ''} ${productId && !inactive && (canQuote || canOrder) ? '' : 'disabled'} aria-label="選取 ${escapeAttr(product.productName || product.nameCn || product.nameEn || product.manufacturerPartNo || product.sku || '產品')}" onchange="toggleProductManagementSelection(${inlineJsValue(productId)}, this.checked)"></td>
       <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
       <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
-      <td data-th="廠牌">${escapeHtml(resolveBrandName(product.brandName || product.brand || ''))}</td>
+      <td data-th="廠牌">${escapeHtml(brand)}</td>
       <td data-th="產品線">${escapeHtml(product.productLine || '未分類')}</td>
       <td data-th="類型">${escapeHtml(product.productType || product.category || '未分類')}</td>
       <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
@@ -2808,6 +2809,8 @@ window.saveProductMasterEditor = async function() {
 };
 
 function productManagementSource(product) {
+    const brand = resolveBrandName(product.brandName || product.brand || '');
+    const unitPrice = isBrandPriceListActive(brand) ? Number(product.listPrice ?? product.price ?? 0) : 0;
     return {
         productId: product.productId || product.id || '',
         model: product.manufacturerPartNo || product.sku || '',
@@ -2815,11 +2818,11 @@ function productManagementSource(product) {
         nameCn: product.productName || product.nameCn || '',
         nameEn: product.nameEn || '',
         itemName: product.productName || product.nameCn || product.nameEn || '',
-        brand: resolveBrandName(product.brandName || product.brand || ''),
-        brandId: product.brandId || brandIdForName(product.brandName || product.brand || ''),
+        brand,
+        brandId: product.brandId || brandIdForName(brand),
         spec: product.specification || product.spec || '',
-        price: Number(product.listPrice ?? product.price ?? 0),
-        unitPrice: Number(product.listPrice ?? product.price ?? 0),
+        price: unitPrice,
+        unitPrice,
         qty: 1,
         productLine: product.productLine || '',
         productType: product.productType || product.category || '',
@@ -4526,15 +4529,32 @@ function defaultBrandAliasesForCanonical(value) {
 
 function normalizeBrandMasterRecord(id, data = {}) {
     const name = String(data.name || data.brand || id || '').trim();
+    const priceListProductCount = Number(data.priceListProductCount);
     return {
         id: id || '',
         name,
         aliases: dedupeBrandsCaseInsensitive(data.aliases || []),
         isKeyBrand: data.isKeyBrand === true,
         companies: Array.isArray(data.companies) ? data.companies.filter(Boolean) : [],
-        active: data.active !== false
+        active: data.active !== false,
+        priceListManaged: data.priceListManaged === true || !!data.priceListFile || !!data.priceListBatchId || !!data.priceListDeletedAt,
+        priceListFile: String(data.priceListFile || ''),
+        priceListBatchId: String(data.priceListBatchId || ''),
+        priceListUpdatedAt: String(data.priceListUpdatedAt || ''),
+        priceListProductCount: Number.isFinite(priceListProductCount) && priceListProductCount >= 0 ? priceListProductCount : 0,
+        priceListActive: data.priceListActive !== false,
+        priceListDeletedAt: String(data.priceListDeletedAt || ''),
+        priceListLastAction: String(data.priceListLastAction || '')
     };
 }
+
+function isBrandPriceListActive(brand) {
+    const canonical = resolveBrandName(brand || '');
+    if (!canonical) return true;
+    const entry = brandMasterEntryForName(canonical);
+    return entry ? entry.priceListActive !== false : true;
+}
+
 
 let unifiedBrandEntriesCache = null;
 let primaryBrandNamesCache = null;
@@ -8209,7 +8229,7 @@ window.searchBusinessProducts=async function(keyword=''){
  try{const normalized=normalizeItemCodeLoose(raw),end=raw+'\uf8ff';const [codeSnap,nameSnap]=await Promise.all([firestoreReadWithTimeout(db.collection('products').where('normalizedPartNo','==',normalized).limit(25).get(),'產品貨號搜尋'),firestoreReadWithTimeout(db.collection('products').orderBy('productName').startAt(raw).endAt(end).limit(25).get(),'產品名稱搜尋').catch(()=>({docs:[]}))]);if(generation!==businessProductSearchGeneration)return 0;
  const map=new Map();[...(codeSnap.docs||[]),...(nameSnap.docs||[])].forEach(doc=>map.set(doc.id,{id:doc.id,...doc.data()}));const products=[...map.values()].slice(0,25),productKeys=[...new Set(products.map(product=>String(product.productId||product.id||'').trim()).filter(Boolean))],stockByProduct=new Map();
  if(productKeys.length){const stockSnap=await firestoreReadWithTimeout(db.collection('warehouseStocks').where('productKey','in',productKeys).get(),'產品庫存搜尋');if(generation!==businessProductSearchGeneration)return 0;stockSnap.docs.forEach(doc=>{const row=doc.data(),key=String(row.productKey||row.productId||'').trim();if(!key)return;const current=stockByProduct.get(key)||{onHand:0,reserved:0,incoming:0},n=inventoryNumbers(row);stockByProduct.set(key,{onHand:current.onHand+n.onHand,reserved:current.reserved+n.reserved,incoming:current.incoming+n.incoming});});}
- if(generation!==businessProductSearchGeneration)return 0;body.innerHTML=products.map(product=>{const key=String(product.productId||product.id||'').trim(),n=inventoryNumbers(stockByProduct.get(key)||{}),projected=inventoryProjectedStock(n);return `<tr><td data-th="貨號">${escapeHtml(product.manufacturerPartNo||'')}</td><td data-th="品名">${escapeHtml(product.productName||'')}</td><td data-th="廠牌">${escapeHtml(product.brandName||'')}</td><td data-th="建議售價">${Number(product.listPrice||0).toLocaleString()}</td><td data-th="現有">${n.onHand}</td><td data-th="占用">${n.reserved}</td><td data-th="可用">${n.available}</td><td data-th="在途">${n.incoming}</td><td data-th="預計">${projected}</td></tr>`;}).join('');if(wrap)wrap.style.display=products.length?'':'none';if(status)status.textContent=products.length?`找到 ${products.length} 筆 Product Master`:'Product Master 無額外結果';return products.length;
+ if(generation!==businessProductSearchGeneration)return 0;body.innerHTML=products.map(product=>{const key=String(product.productId||product.id||'').trim(),n=inventoryNumbers(stockByProduct.get(key)||{}),projected=inventoryProjectedStock(n);return `<tr><td data-th="貨號">${escapeHtml(product.manufacturerPartNo||'')}</td><td data-th="品名">${escapeHtml(product.productName||'')}</td><td data-th="廠牌">${escapeHtml(product.brandName||'')}</td><td data-th="建議售價">${Number(isBrandPriceListActive(product.brandName||product.brand||'') ? (product.listPrice||0) : 0).toLocaleString()}</td><td data-th="現有">${n.onHand}</td><td data-th="占用">${n.reserved}</td><td data-th="可用">${n.available}</td><td data-th="在途">${n.incoming}</td><td data-th="預計">${projected}</td></tr>`;}).join('');if(wrap)wrap.style.display=products.length?'':'none';if(status)status.textContent=products.length?`找到 ${products.length} 筆 Product Master`:'Product Master 無額外結果';return products.length;
  }catch(err){if(generation!==businessProductSearchGeneration)return 0;if(status)status.textContent='Product Master 查詢失敗';console.error('產品查詢失敗：',err);return 0;}
 };
 let inventorySearchTimer=null;
@@ -18929,7 +18949,13 @@ window.switchAdminTab = function(tab, el) {
 
 let inventoryReceivingVisible = false;
 let activeProductImportBatch = null;
+// productManagementOverviewRows is retained for the Product Master editor compatibility layer.
+// The admin price-list page uses its own lightweight Brand Master rows instead of loading every product.
 let productManagementOverviewRows = [];
+let priceListManagementRows = [];
+let priceListHistoryRows = [];
+let priceListHistoryFilter = '';
+let pendingPriceListUploadBrand = '';
 let productOverviewLimit = 200;
 let productOverviewLoading = false;
 let brandProductDeleteRunning = false;
@@ -18960,72 +18986,119 @@ window.switchInventoryWorkView = async function(receiving) {
 };
 
 let productOverviewCursor=null, productOverviewHasMore=false, productOverviewGeneration=0, productOverviewReloadRequested=false;
-window.loadProductManagementOverview = async function(reset = true) {
-    if(currentUserRole!=='admin')return;
-    if(reset===false && !productOverviewHasMore){productOverviewLimit+=200;renderProductManagementOverview();return;}
-    if(productOverviewLoading){if(reset!==false){productOverviewReloadRequested=true;productOverviewGeneration++;}return;}
-    const generation=++productOverviewGeneration, uid=currentUser?.uid;
-    const scope=document.getElementById('productOverviewScope').value || '';
-    const keyword=String(document.getElementById('productOverviewSearch')?.value || '').normalize('NFKC').trim().toLocaleLowerCase();
-    const terms=keyword.split(/\s+/).filter(Boolean);
-    const status=document.getElementById('productOverviewStatus');
-    productOverviewLoading=true;
-    if(reset!==false){productOverviewCursor=null;productManagementOverviewRows=[];productOverviewLimit=200;}
-    if(status)status.textContent='正在讀取產品…';
-    try{
-        let query=db.collection('products');
-        if(scope.startsWith('brand:'))query=query.where('brandName','==',scope.slice(6));
-        if(scope.startsWith('batch:'))query=query.where('lastImportBatch','==',scope.slice(6));
-        query=query.orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
-        if(productOverviewCursor)query=query.startAfter(productOverviewCursor);
-        const records=new Map(productManagementOverviewRows.map(row=>[row.id,row]));
-        let checked=0, snapshot;
-        do {
-            snapshot=await firestoreReadWithTimeout(query.get(),'產品總覽');
-            if(generation!==productOverviewGeneration || uid!==currentUser?.uid || currentUserRole!=='admin')return;
-            checked+=snapshot.size;
-            snapshot.docs.forEach(doc=>{
-                const row={...doc.data(),id:doc.id};
-                const text=[row.manufacturerPartNo,row.sku,row.productName,row.nameCn,row.nameEn,row.specification,row.brandName].join(' ').normalize('NFKC').toLocaleLowerCase();
-                if(!keyword || terms.every(term=>text.includes(term)))records.set(doc.id,row);
-            });
-            productOverviewCursor=snapshot.docs[snapshot.docs.length-1]||productOverviewCursor;
-            productOverviewHasMore=snapshot.size===200;
-            if(keyword && status)status.textContent=`搜尋中：已檢查 ${checked} 筆，找到 ${records.size} 筆…`;
-            if(keyword && productOverviewHasMore)query=query.startAfter(productOverviewCursor);
-        } while(keyword && productOverviewHasMore);
-        productManagementOverviewRows=[...records.values()];
-        productOverviewLimit=keyword ? 200 : productManagementOverviewRows.length;
-        const select=document.getElementById('productOverviewScope');
-        const options=new Map([...select.options].filter(option=>option.value.startsWith('brand:')).map(option=>[option.value,option.textContent]));
-        getUnifiedBrandEntries(false).forEach(entry=>options.set('brand:'+entry.name,entry.name));
-        productManagementOverviewRows.forEach(row=>{
-            const brand=row.brandName||row.brand||'未分類';options.set('brand:'+brand,brand);
-
+window.loadProductManagementOverview = async function() {
+    if (currentUserRole !== 'admin') return;
+    if (productOverviewLoading) return;
+    const status = document.getElementById('productOverviewStatus');
+    productOverviewLoading = true;
+    if (status) status.textContent = '正在讀取價目表狀態…';
+    try {
+        const historyRequest = firestoreReadWithTimeout(
+            db.collection('priceHistory').orderBy('createdAt', 'desc').limit(100).get(),
+            '價目表操作紀錄'
+        ).catch(err => {
+            console.warn('價目表歷史讀取失敗：', err);
+            return { docs:[] };
         });
-        select.innerHTML='<option value="">全部廠牌</option>'+[...options].map(([key,label])=>`<option value="${escapeAttr(key)}">${escapeHtml(label)}</option>`).join('');
-        select.value=scope;
+        await loadBrandMaster();
+        const historySnapshot = await historyRequest;
+        priceListManagementRows = getUnifiedBrandEntries(false)
+            .filter(entry => entry?.name && entry.active !== false)
+            .sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
+        priceListHistoryRows = (historySnapshot.docs || [])
+            .map(doc => ({ id:doc.id, ...doc.data() }))
+            .filter(row => row.recordType === 'PRICE_LIST');
         renderProductManagementOverview();
-    }catch(err){
-        if(generation!==productOverviewGeneration)return;
-        if(status){status.textContent='產品讀取失敗：'+err.message;const retry=document.createElement('button');retry.textContent='重試';retry.onclick=()=>loadProductManagementOverview(true);status.appendChild(retry);}
-    }finally{
-        productOverviewLoading=false;
-        if(productOverviewReloadRequested){productOverviewReloadRequested=false;loadProductManagementOverview(true);}
+        renderPriceListHistory();
+    } catch (err) {
+        console.error('價目表管理載入失敗：', err);
+        if (status) status.textContent = '價目表狀態載入失敗：' + (err?.message || err);
+    } finally {
+        productOverviewLoading = false;
     }
 };
 
+function priceListDateLabel(value) {
+    const text = String(value || '');
+    if (!text) return '—';
+    return text.slice(0, 16).replace('T', ' ');
+}
+
+function priceListStatusLabel(row) {
+    if (row.priceListDeletedAt && !row.priceListFile) return '已刪除';
+    if (row.priceListActive === false) return '停用';
+    if (row.priceListFile || row.priceListManaged) return '啟用';
+    return '尚未上傳';
+}
+
 window.renderProductManagementOverview = function() {
-    const scope = document.getElementById('productOverviewScope').value;
-    const deleteButton = document.getElementById('deleteBrandProductsBtn');
-    if (deleteButton) deleteButton.disabled = brandProductDeleteRunning || !scope.startsWith('brand:') || currentUserRole !== 'admin';
-    const scopedRows = productManagementOverviewRows.filter(row => !scope || (scope.startsWith('brand:') ? (row.brandName || row.brand || '未分類') === scope.slice(6) : row.lastImportBatch === scope.slice(6)));
-    const inactive = row => row.active === false || row.status === 'INACTIVE';
-    const rows = scopedRows.filter(row => document.getElementById('productOverviewInactive')?.checked || !inactive(row));
-    document.getElementById('productOverviewStatus').textContent = `已載入 ${scopedRows.length} 筆｜啟用 ${scopedRows.filter(row=>!inactive(row)).length}｜停用 ${scopedRows.filter(inactive).length}｜顯示 ${Math.min(rows.length,productOverviewLimit)} 筆`;
-    document.getElementById('productOverviewBody').innerHTML = rows.slice(0,productOverviewLimit).map(row => `<tr><td>${escapeHtml(row.brandName || row.brand || '')}</td><td>${escapeHtml(row.manufacturerPartNo || row.sku || '')}</td><td>${escapeHtml(row.productName || row.nameCn || row.nameEn || '')}</td><td>${escapeHtml(row.specification || row.spec || '—')}</td><td>${row.active===false || row.status==='INACTIVE' ? '停用' : '啟用'}</td><td>${canManagePendingProductMaster() ? `<button type="button" onclick="openProductMasterEditor(${inlineJsValue(row.id || row.productId)})">編輯主檔</button>` : ''}</td></tr>`).join('');
-    document.getElementById('productOverviewMore').style.display = productOverviewHasMore || rows.length > productOverviewLimit ? '' : 'none';
+    const body = document.getElementById('productOverviewBody');
+    const status = document.getElementById('productOverviewStatus');
+    if (!body) return;
+    const rows = priceListManagementRows;
+    const activeCount = rows.filter(row => row.priceListManaged && row.priceListActive !== false && !row.priceListDeletedAt).length;
+    const disabledCount = rows.filter(row => row.priceListActive === false && !!row.priceListFile).length;
+    const deletedCount = rows.filter(row => !!row.priceListDeletedAt && !row.priceListFile).length;
+    if (status) status.textContent = `共 ${rows.length} 個廠牌｜啟用價目表 ${activeCount}｜停用 ${disabledCount}｜已刪除 ${deletedCount}`;
+    body.innerHTML = rows.length ? rows.map(row => {
+        const hasCurrent = !!row.priceListFile;
+        const state = priceListStatusLabel(row);
+        const toggleLabel = row.priceListActive === false ? '啟用' : '停用';
+        return `<tr>
+            <td data-th="廠牌"><strong>${escapeHtml(row.name)}</strong></td>
+            <td data-th="目前價目表">${escapeHtml(row.priceListFile || '尚未建立版本紀錄')}</td>
+            <td data-th="檔案品項數">${row.priceListManaged ? Number(row.priceListProductCount || 0).toLocaleString() : '—'}</td>
+            <td data-th="最後更新">${escapeHtml(priceListDateLabel(row.priceListUpdatedAt || row.priceListDeletedAt))}</td>
+            <td data-th="狀態"><span class="price-list-state">${escapeHtml(state)}</span></td>
+            <td data-th="操作" class="no-print">
+                <div class="price-list-action-group">
+                    <button type="button" class="btn-small" onclick="openPriceListUploadForBrand(${inlineJsValue(row.name)})">上傳新版</button>
+                    <button type="button" class="btn-small btn-secondary" onclick="showPriceListHistoryForBrand(${inlineJsValue(row.name)})">紀錄</button>
+                    <button type="button" class="btn-small btn-secondary" onclick="togglePriceListActive(${inlineJsValue(row.name)}, ${row.priceListActive === false ? 'true' : 'false'}, this)" ${!hasCurrent && !row.priceListManaged ? 'title="尚未有版本紀錄，仍可用來停用既有舊價目資料"' : ''}>${toggleLabel}</button>
+                    <button type="button" class="btn-small btn-danger" onclick="deleteEntirePriceList(${inlineJsValue(row.name)}, this)">刪除整個價格表</button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('') : '<tr><td colspan="6" style="color:#888;">尚未建立任何廠牌。</td></tr>';
 };
+
+function renderPriceListHistory() {
+    const body = document.getElementById('priceListHistoryBody');
+    const label = document.getElementById('priceListHistoryFilterLabel');
+    if (!body) return;
+    const filterKey = normalizeBrandLookupKey(priceListHistoryFilter || '');
+    const rows = priceListHistoryRows.filter(row => !filterKey || normalizeBrandLookupKey(row.brand || '') === filterKey);
+    if (label) label.textContent = priceListHistoryFilter ? `目前顯示：${priceListHistoryFilter}` : '顯示全部廠牌';
+    const actionLabels = { IMPORT:'上傳／更新', DISABLE:'停用', ENABLE:'啟用', DELETE:'刪除價格表' };
+    body.innerHTML = rows.length ? rows.map(row => `<tr>
+        <td data-th="時間">${escapeHtml(priceListDateLabel(row.createdAt))}</td>
+        <td data-th="廠牌">${escapeHtml(row.brand || '')}</td>
+        <td data-th="動作">${escapeHtml(actionLabels[row.action] || row.action || '')}</td>
+        <td data-th="檔案">${escapeHtml(row.file || '—')}</td>
+        <td data-th="品項數">${Number(row.productCount || 0).toLocaleString()}</td>
+        <td data-th="操作者">${escapeHtml(row.createdBy || row.createdByUid || '—')}</td>
+    </tr>`).join('') : '<tr><td colspan="6" style="color:#888;">沒有符合的價目表操作紀錄。</td></tr>';
+}
+
+window.showPriceListHistoryForBrand = function(brand) {
+    priceListHistoryFilter = resolveBrandName(brand || '');
+    renderPriceListHistory();
+    const details = document.getElementById('priceListHistoryDetails');
+    if (details) {
+        details.open = true;
+        details.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
+    }
+};
+
+window.openPriceListUploadForBrand = function(brand = '') {
+    if (currentUserRole !== 'admin') return;
+    pendingPriceListUploadBrand = resolveBrandName(brand || '');
+    const input = document.getElementById('productImportExcelInput');
+    if (!input) return;
+    input.value = '';
+    input.click();
+};
+
 window.bulkSetProductActive = async function(active, button) {
     if (currentUserRole !== 'admin' || brandProductDeleteRunning) return;
     const ids = [...document.querySelectorAll('#productOverviewBody input:checked')].map(el=>el.value);
@@ -19066,80 +19139,267 @@ async function productMasterRemovalReferences(productId) {
     return snapshots.some(snap=>snap.docs.length)?['保留歷史單據／庫存關聯']:[];
 }
 
-window.deleteEntireBrandProducts = async function(button) {
-    if (!canDeleteProductMaster() || brandProductDeleteRunning || productMasterMigrationRunning) return;
-    const scope = document.getElementById('productOverviewScope')?.value || '';
-    if (!scope.startsWith('brand:')) return alert('請選擇單一廠牌，不能刪除全部產品或匯入批次。');
-    const brand = scope.slice(6);
-    brandProductDeleteRunning = true;
-    button.disabled = true;
-    button.textContent = '讀取廠牌產品…';
-    let deletedCount = 0, inactiveCount=0;
-    const deletedIds = new Set(), inactiveIds=new Set();
-    try {
-        // 重新讀取完整名單，不以預覽的 200 筆或勾選範圍作為刪除目標。
-        const rows = (await readCollectionInBatches('products')).filter(row => (row.brandName || row.brand || '未分類') === brand);
-        if (!rows.length) return alert('這個廠牌目前沒有產品。');
-        const typed = prompt(`即將移除「${brand}」全部 ${rows.length} 個產品（包含停用產品）。無關聯產品永久刪除；有單據或庫存關聯的產品保留主檔與成本並停用。\n\n歷史估價單／訂單、價格歷史、庫存紀錄、廠牌及供應商設定不刪除；被引用產品的主檔連結仍保留。\n\n輸入完整廠牌名稱「${brand}」確認，或取消：`);
-        if (typed !== brand) return;
-        const retainedIds = new Set();
-        for (let offset=0; offset<rows.length; offset+=5) {
-            button.textContent = `檢查關聯 ${Math.min(offset+5,rows.length)}/${rows.length}…`;
-            const results = await Promise.all(rows.slice(offset,offset+5).map(async row => ({row, reasons:await productMasterRemovalReferences(row.id)})));
-            results.forEach(({row,reasons})=>{
-                if (reasons.length) retainedIds.add(row.id);
-            });
-        }
+function updateBrandPriceListCache(brand, patch) {
+    const canonical = resolveBrandName(brand);
+    const id = brandMasterDocumentId(canonical);
+    const index = brandMasterCache.findIndex(item =>
+        item.id === id || normalizeBrandLookupKey(item.name) === normalizeBrandLookupKey(canonical)
+    );
+    if (index >= 0) brandMasterCache[index] = normalizeBrandMasterRecord(id, { ...brandMasterCache[index], ...patch, name:canonical });
+    else brandMasterCache.push(normalizeBrandMasterRecord(id, { name:canonical, active:true, ...patch }));
+    invalidateBrandDerivedCaches();
+}
 
-        button.textContent = '準備產品與成本備份…';
-        const costs = [];
-        for (let offset=0; offset<rows.length; offset+=10) {
-            const snap = await firestoreReadWithTimeout(db.collection('productCosts').where(firebase.firestore.FieldPath.documentId(),'in',rows.slice(offset,offset+10).map(row=>row.id)).get(), '廠牌刪除成本備份');
-            snap.docs.forEach(doc=>costs.push({id:doc.id,...doc.data()}));
+function priceListEventRecord(brand, action, details = {}, createdAt = new Date().toISOString()) {
+    return {
+        recordType:'PRICE_LIST',
+        brand:resolveBrandName(brand),
+        action,
+        file:String(details.file || ''),
+        batchId:String(details.batchId || ''),
+        productCount:Math.max(0, Number(details.productCount || 0)),
+        productWrites:Math.max(0, Number(details.productWrites || 0)),
+        costWrites:Math.max(0, Number(details.costWrites || 0)),
+        createdAt,
+        createdByUid:currentUser?.uid || '',
+        createdBy:currentUser?.email || currentUserName || ''
+    };
+}
+
+async function commitPriceListBrandEvent(brand, action, metadata, details = {}) {
+    const canonical = resolveBrandName(brand);
+    const now = new Date().toISOString();
+    const brandRef = db.collection('brands').doc(brandMasterDocumentId(canonical));
+    const historyRef = db.collection('priceHistory').doc();
+    const patch = { name:canonical, ...metadata, updatedAt:now };
+    const batch = db.batch();
+    batch.set(brandRef, patch, { merge:true });
+    batch.set(historyRef, priceListEventRecord(canonical, action, details, now));
+    await batch.commit();
+    updateBrandPriceListCache(canonical, patch);
+    priceListHistoryRows.unshift({ id:historyRef.id, ...priceListEventRecord(canonical, action, details, now) });
+}
+
+async function markPriceListImportComplete(brand, productCount, saveResult = {}) {
+    const batchInfo = activeProductImportBatch || {};
+    await commitPriceListBrandEvent(brand, 'IMPORT', {
+        priceListManaged:true,
+        priceListFile:String(batchInfo.file || ''),
+        priceListBatchId:String(batchInfo.id || ''),
+        priceListUpdatedAt:String(batchInfo.date || new Date().toISOString()),
+        priceListProductCount:Math.max(0, Number(productCount || 0)),
+        priceListActive:true,
+        priceListDeletedAt:'',
+        priceListLastAction:'IMPORT'
+    }, {
+        file:batchInfo.file || '',
+        batchId:batchInfo.id || '',
+        productCount,
+        productWrites:saveResult.productWrites,
+        costWrites:saveResult.costWrites
+    });
+}
+
+function clearBrandPriceCaches(brand, productIds = []) {
+    const canonicalKey = normalizeBrandLookupKey(resolveBrandName(brand));
+    const idSet = new Set(productIds.filter(Boolean));
+    priceList = priceList.filter(item => {
+        const id = item.productId || stableProductId(item);
+        if (idSet.has(id)) return false;
+        return normalizeBrandLookupKey(resolveBrandName(item.brand || '')) !== canonicalKey;
+    });
+    productCodeMatchCache.clear();
+    idSet.forEach(id => purchaseCostCache.delete(id));
+    invalidateVisibleProductCosts();
+    refreshPriceDatalists();
+    rebuildPriceItemLookup();
+}
+
+window.togglePriceListActive = async function(brand, active, button) {
+    if (!canDeleteProductMaster() || brandProductDeleteRunning || productMasterMigrationRunning) return;
+    const canonical = resolveBrandName(brand);
+    if (!canonical) return;
+    const actionText = active ? '啟用' : '停用';
+    if (!confirm(`確定${actionText}「${canonical}」價目表？\n\nProduct Master、歷史單據與庫存資料不會改動；${active ? '啟用後可再次帶入目前保存的建議售價與標準成本。' : '停用期間產品仍可查詢，但不再由價目表自動帶入價格／標準成本。'}`)) return;
+    const original = button?.textContent || actionText;
+    if (button) { button.disabled = true; button.textContent = '處理中…'; }
+    try {
+        const entry = brandMasterEntryForName(canonical);
+        await commitPriceListBrandEvent(canonical, active ? 'ENABLE' : 'DISABLE', {
+            priceListManaged:true,
+            priceListActive:!!active,
+            priceListUpdatedAt:entry?.priceListUpdatedAt || '',
+            priceListLastAction:active ? 'ENABLE' : 'DISABLE'
+        }, {
+            file:entry?.priceListFile || '',
+            batchId:entry?.priceListBatchId || '',
+            productCount:entry?.priceListProductCount || 0
+        });
+        clearBrandPriceCaches(canonical);
+        renderProductManagementOverview();
+        renderPriceListHistory();
+        markMainPageDirty('products');
+    } catch (err) {
+        alert(`${actionText}價目表失敗：${err?.message || err}`);
+    } finally {
+        if (button) { button.disabled = false; button.textContent = original; }
+    }
+};
+
+async function readProductsForPriceListBrand(brand) {
+    const canonical = resolveBrandName(brand);
+    const entry = brandMasterEntryForName(canonical);
+    const names = dedupeBrandsCaseInsensitive([canonical, ...(entry?.aliases || [])]).filter(Boolean);
+    const rows = new Map();
+    for (const field of ['brandName', 'brand']) {
+        for (const name of names) {
+            try {
+                const found = await readQueryInBatches(
+                    db.collection('products').where(field, '==', name).orderBy(firebase.firestore.FieldPath.documentId()),
+                    300
+                );
+                found.forEach(row => rows.set(row.id, row));
+            } catch (err) {
+                console.warn(`讀取 ${field}=${name} 的價目表產品失敗：`, err);
+            }
         }
-        const blob = new Blob([JSON.stringify({format:'YUSHIN_BRAND_PRODUCT_BACKUP',version:1,brand,createdAt:new Date().toISOString(),products:rows,productCosts:costs},null,2)], {type:'application/json'});
+    }
+    return [...rows.values()];
+}
+
+async function readProductCostsForBackup(productIds) {
+    const costs = [];
+    for (let offset=0; offset<productIds.length; offset+=20) {
+        const docs = await Promise.all(productIds.slice(offset, offset+20).map(id =>
+            firestoreReadWithTimeout(db.collection('productCosts').doc(id).get(), '價目表成本備份')
+        ));
+        docs.forEach(doc => { if (doc.exists) costs.push({ id:doc.id, ...doc.data() }); });
+    }
+    return costs;
+}
+
+window.deleteEntirePriceList = async function(brand, button) {
+    if (!canDeleteProductMaster() || brandProductDeleteRunning || productMasterMigrationRunning) return;
+    const canonical = resolveBrandName(brand);
+    if (!canonical) return;
+    brandProductDeleteRunning = true;
+    const original = button?.textContent || '刪除整個價格表';
+    if (button) { button.disabled = true; button.textContent = '讀取價目表…'; }
+    const clearedIds = new Set();
+    try {
+        const rows = await readProductsForPriceListBrand(canonical);
+        const typed = prompt(`即將刪除「${canonical}」整個價格表。\n\n會清除：建議售價、標準成本。\n會保留：Product Master、品名／規格、歷史估價單／訂單、實際採購價、庫存批次成本、庫存與廠牌設定。\n\n目前找到 ${rows.length} 個此廠牌 Product Master。\n\n輸入完整廠牌名稱「${canonical}」確認，或取消：`);
+        if (typed !== canonical) return;
+
+        const productIds = rows.map(row => row.id).filter(Boolean);
+        if (button) button.textContent = '準備價目表備份…';
+        const costs = await readProductCostsForBackup(productIds);
+        const entry = brandMasterEntryForName(canonical);
+        const backup = {
+            format:'YUSHIN_PRICE_LIST_BACKUP',
+            version:1,
+            brand:canonical,
+            createdAt:new Date().toISOString(),
+            currentPriceList:{
+                file:entry?.priceListFile || '',
+                batchId:entry?.priceListBatchId || '',
+                updatedAt:entry?.priceListUpdatedAt || '',
+                productCount:entry?.priceListProductCount || 0
+            },
+            prices:rows.map(row => ({
+                productId:row.id,
+                manufacturerPartNo:row.manufacturerPartNo || row.sku || '',
+                productName:row.productName || row.nameCn || row.nameEn || '',
+                brandName:row.brandName || row.brand || canonical,
+                listPrice:row.listPrice ?? row.price ?? null,
+                lastImportBatch:row.lastImportBatch || '',
+                lastImportFile:row.lastImportFile || '',
+                lastImportedAt:row.lastImportedAt || ''
+            })),
+            productCosts:costs
+        };
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type:'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href=url;link.download=`產品備份-${brand.replace(/[\\/:*?"<>|]/g,'_')}-${Date.now()}.json`;
-        document.body.appendChild(link);link.click();link.remove();
-        setTimeout(()=>URL.revokeObjectURL(url),60000);
-        if (!confirm(`已觸發「${brand}」產品與成本備份下載。請確認備份檔案已下載完成，再按確定移除：刪除 ${rows.length-retainedIds.size} 個、停用並保留 ${retainedIds.size} 個有關聯產品。\n\n此操作沒有一鍵復原，請確保沒有其他人同時修改該廠牌產品或進行庫存／採購作業。`)) return;
+        link.href = url;
+        link.download = `價目表備份-${canonical.replace(/[\\/:*?"<>|]/g,'_')}-${Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+        if (!confirm(`已觸發「${canonical}」價目表備份下載。\n\n按「確定」後會清除 ${rows.length} 個 Product Master 的建議售價，並刪除 ${costs.length} 筆標準成本資料。Product Master 本身不會刪除。\n\n確定繼續嗎？`)) return;
+
+        const now = new Date().toISOString();
         for (let offset=0; offset<rows.length; offset+=200) {
-            if (!canDeleteProductMaster()) throw new Error('管理員權限已變更，已停止刪除。');
-            const slice = rows.slice(offset,offset+200);
+            if (!canDeleteProductMaster()) throw new Error('管理員權限已變更，已停止處理。');
+            const slice = rows.slice(offset, offset+200);
             const batch = db.batch();
-            slice.forEach(row=>{
-                if(retainedIds.has(row.id))batch.update(db.collection('products').doc(row.id),{active:false,status:'INACTIVE',updatedAt:new Date().toISOString(),updatedBy:currentUser.uid});
-                else{batch.delete(db.collection('products').doc(row.id));batch.delete(db.collection('productCosts').doc(row.id));}
+            slice.forEach(row => {
+                batch.set(db.collection('products').doc(row.id), {
+                    listPrice:firebase.firestore.FieldValue.delete(),
+                    price:firebase.firestore.FieldValue.delete(),
+                    priceListRemovedAt:now,
+                    updatedAt:now,
+                    updatedBy:currentUser?.uid || ''
+                }, { merge:true });
+                batch.delete(db.collection('productCosts').doc(row.id));
             });
-            button.textContent = `刪除中 ${deletedCount}/${rows.length}…`;
+            if (button) button.textContent = `清除價格 ${Math.min(offset+slice.length, rows.length)}/${rows.length}…`;
             await batch.commit();
-            slice.forEach(row=>{if(retainedIds.has(row.id)){inactiveIds.add(row.id);inactiveCount++;}else{deletedIds.add(row.id);deletedCount++;}});
+            slice.forEach(row => clearedIds.add(row.id));
         }
-        alert(`已移除「${brand}」：刪除 ${deletedCount} 個產品及標準成本；停用並保留 ${inactiveCount} 個有關聯產品。廠牌設定與歷史單據保留，可重新上傳修正後的價格表。\n請保存下載的備份；目前沒有一鍵復原功能。`);
+
+        await commitPriceListBrandEvent(canonical, 'DELETE', {
+            priceListManaged:true,
+            priceListFile:'',
+            priceListBatchId:'',
+            priceListUpdatedAt:now,
+            priceListProductCount:0,
+            priceListActive:false,
+            priceListDeletedAt:now,
+            priceListLastAction:'DELETE'
+        }, {
+            file:entry?.priceListFile || '',
+            batchId:entry?.priceListBatchId || '',
+            productCount:rows.length
+        });
+
+        clearBrandPriceCaches(canonical, productIds);
+        productManagementResults = productManagementResults.map(row =>
+            clearedIds.has(row.id || row.productId)
+                ? { ...row, listPrice:undefined, price:0, priceListRemovedAt:now }
+                : row
+        );
+        if (productManagementResults.length) renderProductManagementResults();
+        markMainPageDirty('products');
+        renderProductManagementOverview();
+        renderPriceListHistory();
+        alert(`「${canonical}」價格表已刪除。\n\n已清除建議售價與標準成本；Product Master 與歷史交易資料完整保留。之後可直接上傳新版價格表。`);
     } catch (err) {
-        alert(`廠牌刪除中斷，已刪除 ${deletedCount} 個產品：${err.message}\n尚未完成的資料保留；可重新選擇廠牌處理剩餘產品，請保留原備份。`);
+        alert(`刪除價格表中斷：已處理 ${clearedIds.size} 筆。\n${err?.message || err}\n\n已完成的批次不會自動回復；可保留剛下載的備份並重新執行此操作。`);
     } finally {
-        if(inactiveIds.size){
-            [priceList,productManagementResults].forEach(rows=>rows.forEach(item=>{if(inactiveIds.has(item.productId||item.id||stableProductId(item))){item.active=false;item.status='INACTIVE';}}));
-            markMainPageDirty('products');
-        }
-        if (deletedIds.size) {
-            priceList = priceList.filter(item=>!deletedIds.has(item.productId || stableProductId(item)));
-            productManagementResults = productManagementResults.filter(item=>!deletedIds.has(item.productId || item.id));
-            deletedIds.forEach(id=>{productManagementSelection.delete(id);purchaseCostCache.delete(id);});
-            invalidateVisibleProductCosts();
-            refreshPriceDatalists();
-            renderProductManagementResults();
+        if (clearedIds.size) {
+            const now = new Date().toISOString();
+            productManagementResults = productManagementResults.map(row =>
+                clearedIds.has(row.id || row.productId)
+                    ? { ...row, listPrice:undefined, price:0, priceListRemovedAt:now }
+                    : row
+            );
+            clearBrandPriceCaches(canonical, [...clearedIds]);
+            if (productManagementResults.length) renderProductManagementResults();
             markMainPageDirty('products');
         }
         brandProductDeleteRunning = false;
-        button.textContent = '刪除整個廠牌的產品';
-        await loadProductManagementOverview();
-        renderProductManagementOverview();
-        if (deletedIds.size && productBrandBrowseCurrent) reloadCurrentProductBrand();
+        if (button) { button.disabled = false; button.textContent = original; }
     }
 };
+
+// 舊的「移除整個廠牌產品」會刪除 Product Master，已由價目表管理流程取代。
+window.deleteEntireBrandProducts = function() {
+    alert('「移除整個廠牌產品」已停用。請使用「刪除整個價格表」；Product Master 不會再從價目表管理頁刪除。');
+};
+
 
 function renderBrandAliasManager() {
     const body = document.getElementById('brandAliasManagerBody');
@@ -19917,10 +20177,12 @@ async function preloadPurchaseCostsForItems(purchaseItems = []) {
 
 function productMasterDocToPriceItem(doc) {
     const data = doc.data ? doc.data() : doc;
+    const brand = resolveBrandName(data.brandName || data.brand || '');
+    const priceListActive = isBrandPriceListActive(brand);
     return normalizeProductMasterItem({
         productId: data.productId || doc.id || '',
         brandId: data.brandId || '',
-        brand: resolveBrandName(data.brandName || data.brand || ''),
+        brand,
         model: data.manufacturerPartNo || data.sku || '',
         sku: data.manufacturerPartNo || data.sku || '',
         nameCn: data.productName || data.nameCn || '',
@@ -19929,7 +20191,8 @@ function productMasterDocToPriceItem(doc) {
         productType: data.productType || data.category || '',
         spec: data.specification || data.spec || '',
         unit: data.unit || data.uom || '',
-        price: data.listPrice ?? data.price ?? 0,
+        price: priceListActive ? (data.listPrice ?? data.price ?? 0) : 0,
+        priceListActive,
         supplier: data.supplier || '',
         inventoryTracked: data.inventoryTracked === true,
         lotTracked: data.lotTracked === true,
@@ -19948,6 +20211,7 @@ function invalidateVisibleProductCosts() { visibleProductCostGeneration++; visib
 async function loadVisibleProductCost(item) {
     const productId = item?.productId || stableProductId(item || {});
     if (!productId) return null;
+    if (!isBrandPriceListActive(item?.brandName || item?.brand || '')) return null;
     if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser') return null;
     const cacheKey = `${currentUserRole || ''}||${productId}`;
     if (visibleProductCostCache.has(cacheKey)) return visibleProductCostCache.get(cacheKey);
@@ -22943,8 +23207,10 @@ window.handleProductCostExcelUpload = async function(input) {
 window.handlePriceExcelUpload = async function(input) {
     const file = input.files && input.files[0];
     if (!file) return;
+    const requestedBrand = pendingPriceListUploadBrand;
+    pendingPriceListUploadBrand = '';
     if (brandProductDeleteRunning) {
-        alert('正在刪除廠牌產品，請完成後再匯入。');
+        alert('正在處理價目表，請完成後再匯入。');
         input.value = '';
         return;
     }
@@ -23061,6 +23327,17 @@ window.handlePriceExcelUpload = async function(input) {
             });
             const brandGroups = [...brandGroupsMap.values()];
 
+            if (requestedBrand) {
+                const requestedKey = normalizeBrandLookupKey(resolveBrandName(requestedBrand));
+                const unexpected = brandGroups.filter(group => normalizeBrandLookupKey(resolveBrandName(group.brand)) !== requestedKey);
+                if (unexpected.length) {
+                    setPriceUploadProgress(0, `檔案廠牌與「${requestedBrand}」不一致，尚未寫入雲端。`, false);
+                    alert(`你是從「${requestedBrand}」點選上傳新版，但檔案內包含其他廠牌：${[...new Set(unexpected.map(group => group.brand))].join('、')}。\n\n請確認檔案後重新上傳。`);
+                    input.value = '';
+                    return;
+                }
+            }
+
             if (!brandGroups.length && !importErrors.length) {
                 setPriceUploadProgress(0, '找不到可上傳的產品資料。');
                 alert('無法從 Excel 辨識出有效資料。請確認每筆產品至少有廠牌與貨號。');
@@ -23088,10 +23365,17 @@ window.handlePriceExcelUpload = async function(input) {
             let totalProductWrites = 0;
             let totalCostWrites = 0;
             let totalUnchangedRows = 0;
+            const priceListMetadataWarnings = [];
             for (const { brand, items } of itemsByBrand.values()) {
                 setPriceUploadProgress(70 + (savedCount / Math.max(1, itemsByBrand.size)) * 20, `正在儲存「${brand}」的 ${items.length} 筆產品／售價／成本…`);
                 const saveResult = await saveProductMasterBrand(items, brand);
                 const storedBrand = saveResult.brand;
+                try {
+                    await markPriceListImportComplete(storedBrand, items.length, saveResult);
+                } catch (metadataErr) {
+                    console.warn('價目表版本紀錄寫入失敗：', storedBrand, metadataErr);
+                    priceListMetadataWarnings.push(`${storedBrand}：${metadataErr?.message || metadataErr}`);
+                }
                 totalProductWrites += saveResult.productWrites;
                 totalCostWrites += saveResult.costWrites;
                 totalUnchangedRows += saveResult.unchangedRows;
@@ -23126,7 +23410,7 @@ window.handlePriceExcelUpload = async function(input) {
             loadProductManagementOverview();
             const skippedText = skippedPlaceholderRows ? `；略過無正式貨號 ${skippedPlaceholderRows} 筆` : '';
             setPriceUploadProgress(100, `完成：檢查 ${imported.length} 筆；產品寫入 ${totalProductWrites}、標準成本寫入 ${totalCostWrites}、完全無變動 ${totalUnchangedRows} 筆${skippedText}。`);
-            alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n已記錄本次匯入批次；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。${skippedPlaceholderRows ? `\n已略過「Not Available/Custom Item」等無正式貨號列：${skippedPlaceholderRows} 筆。` : ''}`);
+            alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n已記錄本次匯入批次；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。${skippedPlaceholderRows ? `\n已略過「Not Available/Custom Item」等無正式貨號列：${skippedPlaceholderRows} 筆。` : ''}${priceListMetadataWarnings.length ? `\n\n注意：產品資料已匯入，但以下價目表版本紀錄失敗：\n${priceListMetadataWarnings.join('\n')}` : ''}`);
         } catch (err) {
             setPriceUploadProgress(0, '儲存雲端失敗，請稍後再試。');
             alert('上傳失敗：' + err.message);
