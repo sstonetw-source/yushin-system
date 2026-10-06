@@ -893,6 +893,9 @@ service cloud.firestore {
       let record = records[records.size() - 1];
       let movementId = request.resource.data.get('movementId', '');
       let movementPath = /databases/$(database)/documents/inventoryMovements/$(movementId);
+      let movement = getAfter(movementPath).data;
+      let stockPath = /databases/$(database)/documents/warehouseStocks/$(movement.get('warehouseStockId', ''));
+      let inventoryPath = /databases/$(database)/documents/inventory/$(movement.get('inventoryDocId', ''));
       return (admin() || purchaser() || warehouse())
         && resource.data.get('status', '') == 'NOTIFIED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -916,7 +919,14 @@ service cloud.firestore {
         && getAfter(movementPath).data.get('type', '') == 'ship'
         && getAfter(movementPath).data.get('sourceId', '') == resource.data.orderId
         && getAfter(movementPath).data.get('warehouseId', '') == resource.data.warehouseId
-        && getAfter(movementPath).data.get('qty', 0) == -resource.data.qty;
+        && movement.get('qty', 0) == -resource.data.qty
+        && movement.get('warehouseStockId', '') != ''
+        && movement.get('inventoryDocId', '') != ''
+        && getAfter(stockPath).data.get('warehouseId', '') == resource.data.warehouseId
+        && getAfter(stockPath).data.get('productKey', '') == movement.get('productKey', '')
+        && getAfter(stockPath).data.get('onHand', -1) == get(stockPath).data.get('onHand', -1) - resource.data.qty
+        && getAfter(inventoryPath).data.get('productKey', '') == movement.get('productKey', '')
+        && getAfter(inventoryPath).data.get('onHand', -1) == get(inventoryPath).data.get('onHand', -1) - resource.data.qty;
     }
 
     function orderUpdateAllowed(id) {
