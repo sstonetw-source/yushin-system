@@ -732,7 +732,7 @@ function updateReadonlyNotice() {
     notice.className = 'readonly-notice no-print';
     notice.style.display = 'block';
     if (pageKey === 'orders.po' && currentUserRole === 'warehouse' && canReceiveInventoryCapability()) {
-        notice.innerText = '📦 倉管模式：可以確認到貨與入庫；建立採購單、補庫採購與打單仍由採購或管理員處理。';
+        notice.innerText = '倉管模式：可確認到貨、入庫及外倉出貨通知；建立採購單與公司倉打單仍由採購／管理員處理。';
     } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
         notice.innerText = '產品主檔權限：採購可新增、編輯與停用 Product Master；永久刪除僅限管理員。';
     } else if (pageKey === 'products' && hasBusinessCapability()) {
@@ -11576,7 +11576,7 @@ window.changePurchasePeriod = function(value) {
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
     if (!['ordering', 'receiving', 'dispatch', 'completed', 'replenishment', 'history', 'suppliers'].includes(view)) return;
-    if (currentUserRole === 'warehouse' && !['receiving','completed'].includes(view)) return;
+    if (currentUserRole === 'warehouse' && !['receiving','dispatch','completed'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     if (view === 'suppliers' && !canCreatePurchaseOrderCapability()) return;
     const previousPurchasingView = purchasingView;
@@ -11624,7 +11624,11 @@ window.switchPurchasingView = function(view, tab) {
     if(directPanel)directPanel.style.display=view==='ordering'&&canCreatePurchaseOrderCapability()?'':'none';
     ['purchase-tab-history','purchase-tab-suppliers'].forEach(id => { const el=document.getElementById(id); if(el)el.style.display=canCreatePurchaseOrderCapability()?'':'none'; });
     const businessTab = document.getElementById('purchase-tab-work');
-    if (businessTab) businessTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    if (businessTab) {
+        businessTab.style.display = canCreatePurchaseOrderCapability() || currentUserRole === 'warehouse' ? '' : 'none';
+        businessTab.textContent = currentUserRole === 'warehouse' ? '外倉出貨' : '採購需求';
+        businessTab.setAttribute('onclick', currentUserRole === 'warehouse' ? "switchPurchasingView('dispatch')" : "switchPurchasingView('ordering')");
+    }
     const businessStages = document.getElementById('purchaseBusinessStages');
     if (businessStages) businessStages.style.display = ['ordering','receiving','dispatch','completed'].includes(view) ? '' : 'none';
     const documentStages = document.getElementById('purchaseDocumentStages');
@@ -11882,6 +11886,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
     const status=document.getElementById('purchaseDispatchStatus');
     const more=document.getElementById('purchaseDispatchMoreBtn');
     if(!body)return;
+    window.renderExternalWarehouseQueue?.();
     body.innerHTML='';
     const fragment=document.createDocumentFragment();
     let shown=0;
@@ -11899,9 +11904,11 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
         }).filter(Boolean);
         pending.forEach(({item,state})=>{
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
+            const warehouseId = item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '';
+            if (isExternalWarehouseId(warehouseId)) return;
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
             const action = canPrepareDispatch
-                ? `<button type="button" class="btn-small btn-secondary" onclick="openWarehouseDispatchList(${inlineJsValue(order.id)})">出貨清單</button> <button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">已打單 × ${state.pending}</button>`
+                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">已打單 × ${state.pending}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
