@@ -4252,8 +4252,8 @@ test('critical role matrix stays aligned between UI capabilities and Firestore r
     const equipmentRuleStart=rulesSource.indexOf('match /equipment/{id}');
     const equipmentRuleEnd=rulesSource.indexOf('\n\n    match /{document=\*\*}',equipmentRuleStart);
     const equipmentRules=rulesSource.slice(equipmentRuleStart,equipmentRuleEnd);
-    assert.match(equipmentRules,/allow read: if admin\(\) \|\| engineer\(\)/);
-    assert.match(equipmentRules,/allow update: if admin\(\) \|\| engineer\(\)/);
+    assert.match(equipmentRules,/allow read: if canManageEquipment\(\)/);
+    assert.match(equipmentRules,/allow update: if canManageEquipment\(\)/);
 });
 
 
@@ -4459,6 +4459,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
     assert.match(warehouseSource,/hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'incomingRegisteredQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
     assert.match(warehouseSource,/status', 'ORDERED'\) != 'CANCELLED'/);
+    assert.match(warehouseSource,/sameSupplyIdentity\(\)/);
     assert.doesNotMatch(warehouseSource,/'qty'/);
 
     const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
@@ -4629,6 +4630,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate()',purchaserStart);
     const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
     assert.match(purchaserSource,/affectedKeys\(\)\.hasOnly/);
+    assert.match(purchaserSource,/sameSupplyIdentity\(\)/);
     ['qty','receivedQty','incomingRegisteredQty','incomingRegisteredAt','status','supplier','unitCost','lastOrderedAt','orderEvents','cancelledQty','cancelReason','cancelledAt','cancelledByUid','cancelledBy','closedQty','closeReason','closedAt','closedByUid','closedBy','updatedAt'].forEach(field => {
         assert.match(purchaserSource,new RegExp("'"+field+"'"));
     });
