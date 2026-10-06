@@ -579,7 +579,7 @@ test('manual ordered action records supply and source item only once after an un
         procurementType:'PURCHASING_PO',supplyOrderedQty:0,shortageQty:2}],orderNo:'O1'};
     let supply, updates = 0;
     const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
-    const button={disabled:false,textContent:'已訂購',isConnected:false};
+    const button={disabled:false,textContent:'已採購',isConnected:false};
     const page={classList:{contains:()=>true}},card={};
     const switched=[];
     const context = vm.createContext({
@@ -619,7 +619,9 @@ test('manual ordered action records supply and source item only once after an un
         normalizedOrderItems:record=>record.items,orderWorkIndexFields:()=>({workCategories:['arrival']}),
         ordersCache:[],supplyReceivingCache:[],purchasingView:'ordering',
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
-        switchPurchasingView:(view,tab)=>switched.push([view,tab]),alert:()=>{}
+        switchPurchasingView:(view,tab)=>switched.push([view,tab]),
+        loadPendingPurchaseOrders:async reset=>switched.push(['reload',reset]),
+        renderPurchasingView:()=>switched.push(['render']),showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
 vm.runInContext(source,context);
@@ -629,7 +631,8 @@ vm.runInContext(source,context);
     assert.equal(supply.type,'PURCHASING_MANUAL');
     assert.equal(supply.status,'ORDERED');
     assert.equal(supply.orderDate,'2026-09-29');
-    assert.deepEqual(switched,[['receiving',card]]);
+    assert.deepEqual(switched,[['reload',true],['render']]);
+    assert.equal(context.purchasingView,'ordering');
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1,'retry must not increase ordered quantity twice');
 });
@@ -642,7 +645,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
         procurementType:'PURCHASING_PO',supplyOrderedQty:0,receivedQty:0,shortageQty:2}],orderNo:'O1'};
     let supply, updates = 0;
     const orderRef = {kind:'order'}, supplyRef = {kind:'supply',id:'manual-O1-I1'};
-    const button={disabled:false,textContent:'已訂購',isConnected:false};
+    const button={disabled:false,textContent:'已採購',isConnected:false};
     const context = vm.createContext({
         window:{},YushinReceiving:receiving,document:{getElementById:()=>null},
         db:{collection:name=>({doc:()=> name==='orders' ? orderRef : supplyRef}),
@@ -683,7 +686,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
         normalizedOrderStatus:()=> 'normal',normalizedOrderItems:record=>record.items,
         orderWorkIndexFields:()=>({workCategories:['arrival']}),ordersCache:[],supplyReceivingCache:[],
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
-        switchPurchasingView:()=>{},alert:()=>{}
+        switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
 vm.runInContext(source,context);
@@ -711,8 +714,9 @@ test('ordered action is a direct snapshot-based state change without a data-entr
     const saveEnd=app.indexOf('\nwindow.openOrderPurchaseDraft',saveStart);
     const saveSource=app.slice(saveStart,saveEnd);
     assert.ok(actionStart>=0 && actionEnd>actionStart && saveStart>=0 && saveEnd>saveStart);
-    assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>已訂購<\/button>/);
-    assert.match(saveSource, /switchPurchasingView\('receiving', document\.getElementById\('purchase-card-receiving'\)\)/);
+    assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>已採購<\/button>/);
+    assert.doesNotMatch(saveSource, /switchPurchasingView\(/);
+    assert.match(saveSource, /loadPendingPurchaseOrders\(true\)/);
     assert.match(saveSource, /const demand = procurementDemandForOrderItem\(order, item\)/);
     assert.match(saveSource, /const qty = demand\.remainingToOrderQty/);
     assert.doesNotMatch(saveSource, /findProduct|preloadPurchaseCosts|loadSupplierWarehouseMasters|supplierForProduct/);
@@ -1761,12 +1765,12 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         invalidateWarehouseStockCache:()=>{},
         ordersCache:[],supplyReceivingCache:[],
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
-        switchPurchasingView:()=>{},alert:()=>{}
+        switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
 vm.runInContext(source,context);
 
-    const button={disabled:false,textContent:'已訂購',isConnected:false};
+    const button={disabled:false,textContent:'已採購',isConnected:false};
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(docs.get('orders/O1').items[0].supplyOrderedQty,2);
     assert.equal(docs.get('supplyOrders/manual-O1-I1').incomingRegisteredQty,2);
