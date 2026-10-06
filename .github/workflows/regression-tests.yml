@@ -33,6 +33,7 @@ jobs:
           node --check modules/document-downloads.js
           node --check modules/supplier-core.js
           node --check modules/inventory-core.js
+          node --check modules/stock-permissions.js
           node --check modules/receiving-core.js
           node --check modules/fulfillment-core.js
           node --check modules/supply-core.js

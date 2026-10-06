@@ -33,7 +33,9 @@ function loadPurchaseMapper() {
             return Math.max(0, Number(item.shortageQty || 0) - Math.max(0, ordered - received));
         }
     };
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     return context.purchaseItemsFromOrder;
 }
@@ -43,7 +45,9 @@ function loadSavedPurchaseMapper() {
     const end = appSource.indexOf('\n}\n\n// 將不同時期', start) + 2;
     assert.ok(start >= 0 && end > start, 'purchaseItemsFromSavedPo must exist');
     const context = {};
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     return context.purchaseItemsFromSavedPo;
 }
@@ -254,6 +258,7 @@ test('Brand Master drives the main brand list while statistics grouping remains 
         defaultCanonicalBrandName:value => value,
         defaultBrandAliasesForCanonical:() => []
     });
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(false), item => item.name)), new Set(['Roche', 'Unlisted Excel Brand', '維修']));
     assert.deepEqual(new Set(Array.from(context.getUnifiedBrandEntries(true), item => item.name)), new Set(['Roche', 'Unlisted Excel Brand', '維修']));
@@ -302,6 +307,7 @@ test('multi-brand sales statistics split delivery and returns by item without du
         savedDeliveryRecords:order => order.deliveryRecords || [],
         savedReturnRecords:order => order.returnRecords || []
     });
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     const order = { id:'O-1', brand:'Roche', totalPrice:350,
         items:[
@@ -510,6 +516,7 @@ test('new order creation keeps one document ID across uncertain writes and retri
             if(uncertain){uncertain=false;throw new Error('連線中斷，回覆不確定');}
         }}
     });
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start,end),context);
     uncertain=true;
     const order={createdByUid:'USER-1',status:'active',inventoryReservationStatus:'pending'};
@@ -555,6 +562,7 @@ test('retrying a partly reserved order does not reserve the same stock twice', a
         salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{},
         YushinReservation:reservation
     });
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start,end),context);
     const order={customerName:'Customer',orderDate:'2026-09-28',salesCode:'S1'};
     const item={itemId:'item-1',qty:4,fulfillmentType:'WAREHOUSE',warehouseId:'W-1'};
@@ -603,6 +611,7 @@ test('moving an order reservation between warehouses releases the old stock befo
         salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{},
         YushinReservation:reservation
     });
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start,end),context);
     const order={customerName:'Customer',orderDate:'2026-10-02',salesCode:'S1'};
     const item={itemId:'item-1',qty:4,fulfillmentType:'WAREHOUSE',warehouseId:'W-2'};
@@ -673,7 +682,9 @@ test('purchase modal chooses a company that does not silently filter every item'
             yushin: ['Roche'], morningstar: ['Qiagen'], 'MULTI-LIFE': ['Beckman']
         })[company].includes(brand)
     };
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     assert.equal(context.bestPurchaseOrderCompany([], [{ brand: 'Qiagen' }], 'yushin'), 'morningstar');
     assert.equal(context.bestPurchaseOrderCompany([{ company: 'MULTI-LIFE' }], [{ brand: 'Beckman' }], 'yushin'), 'MULTI-LIFE');
@@ -705,7 +716,9 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
         },
         Date
     };
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     context.window.toggleOrderStatus('o1', 'isBilled', true);
     context.window.toggleOrderStatus('o1', 'isBilled', true);
@@ -733,7 +746,9 @@ test('failed billing write restores the previous state and unlocks the button', 
         db: { collection: () => ({ doc: () => ({}) }), runTransaction: async () => { throw new Error('offline'); } },
         Date
     };
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     context.window.toggleOrderStatus('o2', 'isBilled', true);
     assert.equal(order.isBilled, true);
@@ -1268,7 +1283,7 @@ test('inventory refreshes automatically with bounded Firestore reads and no manu
  const end=appSource.indexOf('\n};',start)+3;
  const source=appSource.slice(start,end);
  assert.match(source,/firestoreReadWithTimeout\(q\.get\(\),'庫存清單'\)/);
- assert.match(source,/firestoreReadWithTimeout\(db\.collection\('inventoryMovements'\)[\s\S]*?'庫存異動'\)/);
+ assert.match(source,/firestoreReadWithTimeout\(.*?db\.collection\('inventoryMovements'\)[\s\S]*?'庫存異動'\)/);
  assert.match(appSource,/if \(mainKey === 'inventory'\) \{[\s\S]*?loadInventory\(true\)/);
 });
 
@@ -1334,7 +1349,9 @@ test('order brand filter uses selectable brands and groups alternate spelling an
         escapeAttr: value => value,
         escapeHtml: value => value
     };
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     const brands = context.populatePurchaserOrderFilters();
     assert.deepEqual(Array.from(brands), ['Beckman', 'Bio-Rad']);
@@ -1380,7 +1397,9 @@ test('purchasing and orders share brand names and date range semantics across wo
         renderPendingPurchaseOrders: () => {}, renderPurchasingDispatchOrders: () => {}, renderPoList: () => {},
         dateOnlyFromTimestamp: value => value.slice(0, 10)
     };
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
+    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.runInContext(appSource.slice(start, end), context);
     context.populatePurchasingFilters();
     assert.match(controls.purchaseBrandFilter.innerHTML, />Bio-Rad<\/option>/);
@@ -1460,7 +1479,7 @@ test('unknown order items do not create inventory before purchase receipt', () =
     const end = appSource.indexOf('async function reserveInventoryForNewOrder', start);
     const s = appSource.slice(start, end);
     const missingProductReturn=s.indexOf('if(!productKey)return');
-    const transactionStart=s.indexOf('await db.runTransaction');
+    const transactionStart=s.indexOf('await runRoleTransaction');
     assert.ok(missingProductReturn>=0 && transactionStart>missingProductReturn);
     assert.match(s.slice(missingProductReturn,transactionStart), /reservationError:'missing_product_master'/);
     assert.match(s,/globalThis\.YushinReservation\.planReservation/);
@@ -1925,7 +1944,7 @@ test('Phase 2-6 keeps Customer Reference, Equipment Master and sales ownership c
 
 test('V2 formal purchase documents create authoritative supply lines', () => {
     assert.match(appSource, /function formalSupplyOrderId/);
-    assert.match(appSource, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
+    assert.match(appSource, /supplyOrdersCollection\(\)\.doc\(supplyId\)/);
     assert.match(appSource, /type:'PURCHASING_PO'/);
     assert.match(appSource, /method:'PURCHASING_PO'/);
     assert.match(appSource, /const sourceType=item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
@@ -2107,7 +2126,7 @@ test('stock replenishment always creates a valid warehouse supply path', () => {
     assert.match(source, /新增庫存採購單是公司庫存採購，不能設定為原廠直送/);
     assert.match(source, /新增庫存採購單必須指定入庫倉庫/);
     assert.match(source, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
-    assert.match(source, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
+    assert.match(source, /supplyOrdersCollection\(\)\.doc\(supplyId\)/);
     assert.match(source, /warehouseId:\(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\?'':/);
 });
 
@@ -2963,7 +2982,7 @@ test('new quote persistence cannot overwrite an existing quote number', () => {
     const start=appSource.indexOf('function persistQuoteOutputRecord');
     const end=appSource.indexOf('\nfunction quoteDataForPdfExport',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/db\.runTransaction\(async transaction/);
+    assert.match(source,/runRoleTransaction\(async transaction/);
     assert.match(source,/transaction\.get\(quoteRef\)/);
     assert.match(source,/snapshot\.exists && !updatingExisting/);
     assert.match(source,/quote-number-conflict/);
@@ -3979,7 +3998,7 @@ test('business reservation rules preserve reservation identity and narrow stock 
     assert.match(helper,/get\('quantity', 0\) >= 0/);
     assert.match(helper,/get\('shortageQty', 0\) >= 0/);
 
-    const inventoryStart=rulesSource.indexOf('function businessInventoryOperationalUpdate()');
+    const inventoryStart=rulesSource.indexOf('function businessInventoryOperationalUpdate(id)');
     const inventoryEnd=rulesSource.indexOf('\n\n    function businessReservationOperationalUpdate',inventoryStart);
     const inventoryHelper=rulesSource.slice(inventoryStart,inventoryEnd);
     assert.match(inventoryHelper,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'onHand'[\s\S]*?'reserved'[\s\S]*?'updatedAt'/);
@@ -4457,7 +4476,7 @@ test('supply rule tightening still covers current quick-order receipt and cancel
 
 test('direct ship delivery rule is bound to the matching atomic receipt', () => {
     const directStart=rulesSource.indexOf('function directShipReceiptOrderUpdate(orderId)');
-    const directEnd=rulesSource.indexOf('\n\n    function purchaserOrderWorkflowUpdate()',directStart);
+    const directEnd=rulesSource.indexOf('\n    function operationalItemsOnly',directStart);
     const source=rulesSource.slice(directStart,directEnd);
     assert.ok(directStart>=0&&directEnd>directStart);
     assert.match(source,/afterRecords\.size\(\) == beforeRecords\.size\(\) \+ 1/);
@@ -4484,7 +4503,8 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     const orderStart=rulesSource.indexOf('match /orders/{id}');
     const orderEnd=rulesSource.indexOf('\n\n    // Formal supplier PO',orderStart);
     const orderSource=rulesSource.slice(orderStart,orderEnd);
-    assert.match(orderSource,/directShipReceiptOrderUpdate\(id\)/);
+    assert.match(orderSource,/orderUpdateAllowed\(id\)/);
+    assert.match(rulesSource.slice(rulesSource.indexOf('function orderUpdateAllowed(id)'),rulesSource.indexOf('match /orders/{id}')),/directShipReceiptOrderUpdate\(id\)/);
 
     const supplyFastStart=rulesSource.indexOf('function directShipSupplyReceiptUpdate()');
     const supplyFastEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',supplyFastStart);

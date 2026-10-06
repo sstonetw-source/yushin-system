@@ -93,7 +93,7 @@ test('document ID batch reads deduplicate IDs and preserve actual document IDs',
 
 test('page initialization coalesces requests, retries failures and refreshes expired pages',async()=>{
  const d=deferred();let calls=0;
- const c=context({currentUser:{uid:'U'},currentUserRole:'sales',loadedMainPages:new Set(),dirtyMainPages:new Set(),mainPageRefreshAt:new Map(),mainPageLoads:new Map(),MAIN_PAGE_REFRESH_MS:60000,
+ const c=context({currentUser:{uid:'U'},permissionRulesCheckedUid:'U',currentUserRole:'sales',loadedMainPages:new Set(),dirtyMainPages:new Set(),mainPageRefreshAt:new Map(),mainPageLoads:new Map(),MAIN_PAGE_REFRESH_MS:60000,
  hydratePageFromLocalCache(){},ensureBrandSettingsLoaded:async()=>{},canViewAllData:()=>false,canViewAllEquipment:()=>false,canAccessPage:()=>false,populateEquipmentSalesDropdown(){},loadEquipmentFromCloud:()=>{calls++;return calls===1?d.promise:Promise.resolve();}});
  vm.runInContext(section('function mainPageLoadFailed(', '\nfunction refreshVisibleMainPage'),c);vm.runInContext(section('function initializePageData(', '\nfunction ensureSalesListLoaded'),c);
  const a=c.initializePageData('equipment'),b=c.initializePageData('equipment');assert.equal(a,b);assert.equal(c.loadedMainPages.has('equipment'),false);d.reject(Error('offline'));await a;assert.equal(c.dirtyMainPages.has('equipment'),true);

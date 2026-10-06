@@ -17,13 +17,17 @@ service cloud.firestore {
       return get(userPath());
     }
 
-    function active() {
-      return hasUser()
-        && (!('active' in userDoc().data) || userDoc().data.active == true);
+    function profileEnabled(data) {
+      return data.get('active', true) == true && data.get('disabled', false) != true;
     }
-
+    function active() {
+      return signedIn() && profileEnabled(userDoc().data);
+    }
     function role() {
-      return active() ? userDoc().data.role : null;
+      return signedIn() ? enabledRole(userDoc().data) : null;
+    }
+    function enabledRole(data) {
+      return profileEnabled(data) ? data.get('role', null) : null;
     }
 
     function admin() { return role() == 'admin'; }
@@ -63,9 +67,8 @@ service cloud.firestore {
     }
 
     function salesCode() {
-      return active() && userDoc().data.salesCode != null
-        ? userDoc().data.salesCode
-        : (active() && userDoc().data.code != null ? userDoc().data.code : null);
+      let data = userDoc().data;
+      return profileEnabled(data) ? data.get('salesCode', data.get('code', null)) : null;
     }
 
     function owns(data) {
@@ -105,7 +108,6 @@ service cloud.firestore {
     // Ownership remains with the salesperson; orders are intentionally not covered here.
     function engineerAssistedSalesQuote(data) {
       return engineer()
-        && validSalesOwner(data)
         && data.get('createdByUid', '') == request.auth.uid
         && data.get('createdByRole', '') == 'engineer';
     }
@@ -263,6 +265,7 @@ service cloud.firestore {
     function purchaserSupplyOperationalUpdate() {
       // Supply identity is immutable; purchasing may only change operational progress.
       return purchaser()
+        && (resource.data.get('receivedQty', 0) == 0 || request.resource.data.get('unitCost', 0) == resource.data.get('unitCost', 0))
         && validSupplyOperationalState()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'qty', 'receivedQty',
@@ -306,6 +309,7 @@ service cloud.firestore {
       let afterRecords = request.resource.data.get('deliveryRecords', []);
       return directShipReceiver()
         && afterRecords.size() == beforeRecords.size() + 1
+        && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'deliveredQty', 'directShipDeliveredQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'deliveryRecords', 'deliveredQty', 'isDelivered',
@@ -334,8 +338,24 @@ service cloud.firestore {
         && supplyAfter.get('receivedQty', 0) <= supplyBefore.get('qty', 0);
     }
 
+    // Rules cannot iterate lists; keep this bounded to stay below the evaluator limit.
+    // Larger operational item changes require an administrator.
+    function operationalItemsOnly(allowed) {
+      let before = resource.data.get('items', []);
+      let after = request.resource.data.get('items', []);
+      return before == after || (before.size() == after.size() && before.size() <= 30
+        && (before.size() <= 0 ? true : after[0].diff(before[0]).affectedKeys().hasOnly(allowed) && (before.size() <= 1 ? true : after[1].diff(before[1]).affectedKeys().hasOnly(allowed) && (before.size() <= 2 ? true : after[2].diff(before[2]).affectedKeys().hasOnly(allowed) && (before.size() <= 3 ? true : after[3].diff(before[3]).affectedKeys().hasOnly(allowed) && (before.size() <= 4 ? true : after[4].diff(before[4]).affectedKeys().hasOnly(allowed) && (before.size() <= 5 ? true : after[5].diff(before[5]).affectedKeys().hasOnly(allowed) && (before.size() <= 6 ? true : after[6].diff(before[6]).affectedKeys().hasOnly(allowed) && (before.size() <= 7 ? true : after[7].diff(before[7]).affectedKeys().hasOnly(allowed) && (before.size() <= 8 ? true : after[8].diff(before[8]).affectedKeys().hasOnly(allowed) && (before.size() <= 9 ? true : after[9].diff(before[9]).affectedKeys().hasOnly(allowed) && (before.size() <= 10 ? true : after[10].diff(before[10]).affectedKeys().hasOnly(allowed) && (before.size() <= 11 ? true : after[11].diff(before[11]).affectedKeys().hasOnly(allowed) && (before.size() <= 12 ? true : after[12].diff(before[12]).affectedKeys().hasOnly(allowed) && (before.size() <= 13 ? true : after[13].diff(before[13]).affectedKeys().hasOnly(allowed) && (before.size() <= 14 ? true : after[14].diff(before[14]).affectedKeys().hasOnly(allowed) && (before.size() <= 15 ? true : after[15].diff(before[15]).affectedKeys().hasOnly(allowed) && (before.size() <= 16 ? true : after[16].diff(before[16]).affectedKeys().hasOnly(allowed) && (before.size() <= 17 ? true : after[17].diff(before[17]).affectedKeys().hasOnly(allowed) && (before.size() <= 18 ? true : after[18].diff(before[18]).affectedKeys().hasOnly(allowed) && (before.size() <= 19 ? true : after[19].diff(before[19]).affectedKeys().hasOnly(allowed) && (before.size() <= 20 ? true : after[20].diff(before[20]).affectedKeys().hasOnly(allowed) && (before.size() <= 21 ? true : after[21].diff(before[21]).affectedKeys().hasOnly(allowed) && (before.size() <= 22 ? true : after[22].diff(before[22]).affectedKeys().hasOnly(allowed) && (before.size() <= 23 ? true : after[23].diff(before[23]).affectedKeys().hasOnly(allowed) && (before.size() <= 24 ? true : after[24].diff(before[24]).affectedKeys().hasOnly(allowed) && (before.size() <= 25 ? true : after[25].diff(before[25]).affectedKeys().hasOnly(allowed) && (before.size() <= 26 ? true : after[26].diff(before[26]).affectedKeys().hasOnly(allowed) && (before.size() <= 27 ? true : after[27].diff(before[27]).affectedKeys().hasOnly(allowed) && (before.size() <= 28 ? true : after[28].diff(before[28]).affectedKeys().hasOnly(allowed) && (before.size() <= 29 ? true : after[29].diff(before[29]).affectedKeys().hasOnly(allowed) && true)))))))))))))))))))))))))))))));
+    }
+    function purchasingItemFields() {
+      return ['orderedQty', 'reservedQty', 'shortageQty', 'dispatchPreparedQty',
+        'receivedQty', 'supplyOrderedQty', 'purchaseOrderedQty', 'purchaseOrderNo', 'purchaseOrderNos',
+        'purchaseDocumentIds', 'purchaseDocumentNos', 'supplyOrderIds', 'supplyOrders',
+        'receiptEvents', 'purchaseEvents', 'reservationStatus', 'reservationError', 'inventoryProductKey',
+        'linkedDocuments', 'procurementStatus', 'perOrdered', 'perReceived'];
+    }
     function purchaserOrderWorkflowUpdate() {
       return purchaser()
+        && operationalItemsOnly(purchasingItemFields())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
@@ -349,6 +369,7 @@ service cloud.firestore {
 
     function warehouseOrderWorkflowUpdate() {
       return warehouse()
+        && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'inventoryReservedQty', 'inventoryShortageQty',
@@ -442,12 +463,76 @@ service cloud.firestore {
 
     // Client-side delivery/reservation transactions need narrowly-scoped stock writes.
     // Business owners cannot alter product identity, cost, incoming quantities or master data.
-    function businessInventoryOperationalUpdate() {
+    // A commercial stock write must carry a fresh witness linked to its own order,
+    // the reservation changed in this transaction, and an immutable stock movement.
+    function reservationDelta(op, index) {
+      return index < op.reservationIds.size() ? reservationDeltaAt(op, op.reservationIds[index]) : 0;
+    }
+    function reservationDeltaAt(op, id) {
+      let path = /databases/$(database)/documents/inventoryReservations/$(id);
+      let before = exists(path) ? get(path).data : {};
+      let after = getAfter(path).data;
+      return after.get('orderId', '') == op.orderId
+        && after.get('productKey', '') == op.productKey
+        && (op.warehouseId == '' || after.get('warehouseId', '') == op.warehouseId)
+        ? after.get('quantity', 0) - before.get('quantity', 0) : 999999999;
+    }
+    function validStockOperation(op) {
+      let orderPath = /databases/$(database)/documents/orders/$(op.orderId);
+      let before = get(orderPath).data;
+      let after = getAfter(orderPath).data;
+      let deliveryDelta = after.get('returnedQty', 0) - before.get('returnedQty', 0)
+        - after.get('deliveredQty', 0) + before.get('deliveredQty', 0);
+      let movement = getAfter(/databases/$(database)/documents/inventoryMovements/$(op.sourceMovementId)).data;
+      return businessOwner() && op.actorUid == request.auth.uid && owns(before) && owns(after)
+        && op.reservationIds is list && op.reservationIds.size() > 0 && op.reservationIds.size() <= 5
+        && op.reservationIds.toSet().size() == op.reservationIds.size()
+        && reservationDeltaAt(op, op.reservationIds[0]) != 999999999
+        && movement.get('sourceId', '') == op.orderId && movement.get('sourceType', '') == 'order'
+        && movement.get('productKey', '') == op.productKey
+        && !exists(/databases/$(database)/documents/inventoryMovements/$(op.sourceMovementId))
+        && op.qtyDelta is number && op.reservedDelta is number
+        && (op.targetPath.matches('inventoryLots/.*')
+          ? ((op.qtyDelta > 0 && deliveryDelta >= op.qtyDelta)
+            || (op.qtyDelta < 0 && deliveryDelta <= op.qtyDelta)) && op.reservedDelta == 0
+          : op.qtyDelta == deliveryDelta
+            && op.reservedDelta == reservationDelta(op, 0) + reservationDelta(op, 1)
+              + reservationDelta(op, 2) + reservationDelta(op, 3) + reservationDelta(op, 4));
+    }
+    function hasStockOperation(targetPath, quantityField, reservedField) {
+      let operationId = request.resource.data.get('stockOperationId', '');
+      let path = /databases/$(database)/documents/stockOperations/$(operationId);
+      let op = getAfter(path).data;
+      return operationId != '' && !exists(path)
+        && op.actorUid == request.auth.uid && op.targetPath == targetPath
+        && op.productKey == resource.data.get('productKey', resource.data.get('productId', ''))
+        && op.warehouseId == (targetPath.matches('inventory/.*') ? '' : resource.data.get('warehouseId', ''))
+        && op.qtyDelta == request.resource.data.get(quantityField, 0) - resource.data.get(quantityField, 0)
+        && (reservedField == '' || op.reservedDelta == request.resource.data.get(reservedField, 0) - resource.data.get(reservedField, 0))
+        && validStockOperation(op);
+    }
+
+    function businessInventoryOperationalUpdate(id) {
       return businessOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'onHand', 'reserved', 'updatedAt'
+          'onHand', 'reserved', 'updatedAt', 'stockOperationId'
         ])
-        && nonNegativeInventory(request.resource.data);
+        && nonNegativeInventory(request.resource.data)
+        && hasStockOperation('inventory/' + id, 'onHand', 'reserved');
+    }
+
+    function validBusinessReservation(id, data) {
+      let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
+      let index = data.get('orderItemIndex', -1);
+      let item = order.items[index];
+      return businessOwner() && owns(order) && owns(data)
+        && index is int && index >= 0 && index < order.items.size()
+        && data.itemId == item.get('itemId', 'item-' + string(index + 1))
+        && id == data.orderId + '__' + data.itemId
+        && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
+        && data.get('quantity', 0) is number && data.get('quantity', 0) >= 0
+        && data.get('quantity', 0) <= item.get('qty', 0)
+        && (!(order.get('status', '') in ['cancelled', 'voided']) || data.get('quantity', 0) == 0);
     }
 
     function businessReservationOperationalUpdate() {
@@ -461,26 +546,28 @@ service cloud.firestore {
         && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
         && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'quantity', 'shortageQty', 'status', 'updatedAt'
+          'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex'
         ])
         && request.resource.data.get('quantity', 0) >= 0
         && request.resource.data.get('shortageQty', 0) >= 0;
     }
 
-    function businessInventoryLotOperationalUpdate() {
+    function businessInventoryLotOperationalUpdate(id) {
       return businessOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'remainingQty', 'updatedAt'
+          'remainingQty', 'updatedAt', 'stockOperationId'
         ])
-        && request.resource.data.remainingQty >= 0;
+        && request.resource.data.remainingQty >= 0
+        && hasStockOperation('inventoryLots/' + id, 'remainingQty', '');
     }
 
-    function businessWarehouseStockOperationalUpdate() {
+    function businessWarehouseStockOperationalUpdate(id) {
       return businessOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'onHand', 'reserved', 'updatedAt'
+          'onHand', 'reserved', 'updatedAt', 'stockOperationId'
         ])
-        && nonNegativeInventory(request.resource.data);
+        && nonNegativeInventory(request.resource.data)
+        && hasStockOperation('warehouseStocks/' + id, 'onHand', 'reserved');
     }
 
     function businessProcurementDemandCreate(data) {
@@ -593,11 +680,13 @@ service cloud.firestore {
     }
 
     match /quotes/{id} {
-      allow read: if admin() || purchaser() || owns(resource.data)
+      allow get: if admin() || purchaser() || (commercialDocumentOwner() && resource == null) || owns(resource.data)
+        || engineerAssistedSalesQuote(resource.data);
+      allow list: if admin() || purchaser() || owns(resource.data)
         || engineerAssistedSalesQuote(resource.data);
       allow create: if canCreateCommercialDoc() && (
         validOwnedCommercialCreate(request.resource.data)
-        || engineerAssistedSalesQuote(request.resource.data)
+        || (engineerAssistedSalesQuote(request.resource.data) && validSalesOwner(request.resource.data))
         || (purchaser() && validQuoteOwner(request.resource.data)
           && request.resource.data.ownerUid != request.auth.uid)
       );
@@ -643,26 +732,31 @@ service cloud.firestore {
         || request.resource.data.get('procurementType', '') == 'SALES_SELF_ORDER';
     }
 
+    function orderUpdateAllowed(id) {
+      let userRole = role();
+      return userRole == 'admin' ? true
+        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id)
+        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id)
+        : userRole in ['sales', 'engineer'] && owns(resource.data) && owns(request.resource.data)
+          && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate();
+    }
+
     match /orders/{id} {
-      allow read: if admin() || purchaser() || warehouse() || owns(resource.data);
+      allow get: if admin() || purchaser() || warehouse() || (commercialDocumentOwner() && (resource == null || owns(resource.data)));
+      allow list: if admin() || purchaser() || warehouse() || owns(resource.data);
       allow create: if canCreateCommercialDoc()
         && validOwnedCommercialCreate(request.resource.data)
         && validNewOrderProductMaster(request.resource.data)
         && validOrderEmbeddedCost(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
-      allow update: if admin()
-        || directShipReceiptOrderUpdate(id)
-        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data)
-          && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate())
-        || purchaserOrderWorkflowUpdate()
-        || warehouseOrderWorkflowUpdate();
+      allow update: if orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
     // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
     match /purchaseOrders/{id} {
-      allow read: if admin() || purchaser() || warehouse();
+      allow read: if admin() || purchaser();
       allow create: if canPurchase();
       // The PO is an immutable document snapshot for warehouse users. Receiving
       // progress belongs to supplyOrders and receipts, never back on the PO.
@@ -697,7 +791,7 @@ service cloud.firestore {
 
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
-      allow read: if admin() || purchaser() || warehouse()
+      allow read: if admin() || purchaser()
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
@@ -717,6 +811,17 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    // The authoritative supply record retains cost. This derived receiving view
+    // must exactly match it, except that financial fields are absent.
+    match /receivingSupplyOrders/{id} {
+      allow read: if admin() || purchaser() || warehouse();
+      allow create, update: if canReceiveInventory()
+        && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
+        && request.resource.data.diff(getAfter(/databases/$(database)/documents/supplyOrders/$(id)).data)
+          .affectedKeys().hasOnly(['unitCost', 'cost', 'costPrice']);
+      allow delete: if admin();
+    }
+
     match /inventory/{id} {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
       // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
@@ -725,7 +830,7 @@ service cloud.firestore {
         resource == null
         || (!('unitCost' in resource.data) && !('cost' in resource.data))
       ));
-      allow list: if canReceiveInventory() && !('unitCost' in resource.data) && !('cost' in resource.data);
+      allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
       allow create: if (
           ((admin() || purchaser()) && validInventoryStockPolicy(request.resource.data))
           || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
@@ -741,7 +846,7 @@ service cloud.firestore {
           || (warehouse() && nonNegativeInventory(request.resource.data)
             && validInventoryStockPolicy(request.resource.data)
             && warehouseKeepsInventoryPlanning())
-          || businessInventoryOperationalUpdate()
+          || businessInventoryOperationalUpdate(id)
         )
         && validInventoryArchiveChange(id)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
@@ -757,7 +862,7 @@ service cloud.firestore {
       allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if ((canReceiveInventory() && nonNegativeInventory(request.resource.data))
-          || businessWarehouseStockOperationalUpdate())
+          || businessWarehouseStockOperationalUpdate(id))
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }
@@ -770,9 +875,9 @@ service cloud.firestore {
       allow list: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
       allow create: if admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(request.resource.data));
+        || validBusinessReservation(id, request.resource.data);
       allow update: if admin() || purchaser() || warehouse()
-        || businessReservationOperationalUpdate();
+        || (businessReservationOperationalUpdate() && validBusinessReservation(id, request.resource.data));
       allow delete: if admin();
     }
 
@@ -780,7 +885,7 @@ service cloud.firestore {
       // Operational lot data is readable for fulfillment, but cost must never live here.
       allow read: if admin() || purchaser() || warehouse() || (businessOwner() && !('unitCost' in resource.data));
       allow create: if canReceiveInventory() && !('unitCost' in request.resource.data);
-      allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate())
+      allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate(id))
         && !('unitCost' in request.resource.data);
       allow delete: if admin();
     }
@@ -789,7 +894,14 @@ service cloud.firestore {
     // Client-side fulfillment never requires this collection.
     match /inventoryLotCosts/{id} {
       allow read: if admin() || purchaser();
-      allow create: if canReceiveInventory();
+      allow create: if admin() || purchaser() || (warehouse() && (
+        (request.resource.data.get('sourceType', '') == 'SUPPLY_ORDER'
+          && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
+          && request.resource.data.get('costSourceSupplyId', '') == request.resource.data.get('sourceId', '')
+          && request.resource.data.get('sourceId', '') != ''
+          && getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.get('sourceId', '') == request.resource.data.sourceId)
+        || request.resource.data.get('sourceType', '') == 'INITIAL_STOCK'
+      ));
       allow update: if admin() || purchaser();
       allow delete: if admin();
     }
@@ -850,6 +962,13 @@ service cloud.firestore {
     }
 
     // Immutable operational audit trail.
+    match /stockOperations/{id} {
+      allow get: if active() && (resource == null || admin() || purchaser() || warehouse() || resource.data.actorUid == request.auth.uid);
+      allow list: if admin() || purchaser() || warehouse() || (active() && resource.data.actorUid == request.auth.uid);
+      allow create: if admin() || validStockOperation(request.resource.data);
+      allow update, delete: if false;
+    }
+
     match /auditLogs/{id} {
       allow read: if admin() || (active() && resource.data.actorUid == request.auth.uid);
       allow create: if active() && request.resource.data.actorUid == request.auth.uid;

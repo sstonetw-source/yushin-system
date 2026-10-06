@@ -111,6 +111,7 @@ test('receiving support reads actual receipts by date, all open supplies and onl
         readQueryInBatches:async q=>{calls.push(q);return q.name==='receipts'?[{id:'R',supplyOrderId:'S',lotId:'L',productId:'P'}]:q.name==='inventoryLots'?[{id:'L',remainingQty:2,productId:'P'}]:[];},
         readDocumentsByIds:async(name,ids)=>{calls.push({name,ids});return name==='supplyOrders'?[{id:'S',unitCost:25}]:[];},
         cacheProductLookupItem:()=>{},productMasterDocToPriceItem:x=>x,rebuildPriceItemLookup:()=>{}});
+    x.supplyOrdersCollection=()=>x.db.collection('supplyOrders');
     vm.runInContext('let inventoryAnalysisReceipts,inventoryAnalysisLots,inventoryAnalysisLotCosts,inventoryAnalysisSupplyOrders,inventoryAnalysisDirectShipSupplyOrders,tradeAnalysisSourceOrders;async '+fn('loadInventoryAnalysisSupport'),x);
     await x.loadInventoryAnalysisSupport(filters.start,filters.end);
     assert.deepEqual(calls.find(q=>q.name==='receipts').clauses,[['receiptDate','>=',filters.start],['receiptDate','<=',filters.end]]);
@@ -124,7 +125,8 @@ test('workbook uses every matching row with numeric totals and explicit filter s
     const saved=[];
     Object.assign(x,{currentUserRole:'admin',beginActionButton:()=>({}),endActionButton:()=>{},ensureXlsxLoaded:async()=>{},alert:message=>{throw Error(message);},
         XLSX:{utils:{book_new:()=>({sheets:[]}),json_to_sheet:rows=>({rows}),book_append_sheet:(wb,sheet,name)=>wb.sheets.push({sheet,name})},writeFile:wb=>saved.push(wb)}});
-    vm.runInContext('async '+fn('writeTradeAnalysisWorkbook'),x);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
+vm.runInContext('async '+fn('writeTradeAnalysisWorkbook'),x);
     await x.writeTradeAnalysisWorkbook(report,core.kinds,{});
     assert.equal(saved[0].sheets.length,6);
     const sales=saved[0].sheets.find(row=>row.name==='已銷貨').sheet.rows;
@@ -142,7 +144,8 @@ test('details display is bounded to 100 rows while exported report retains all r
         escapeHtml:s=>s,formatStatsMoney:n=>'NT$ '+n,
         document:{getElementById:id=>elements[id]||(elements[id]={classList:{add(){},remove(){}}})}});
     const start=source.indexOf('window.openTradeAnalysisDetail = function');const end=source.indexOf('\n};',start)+3;
-    vm.runInContext(source.slice(start,end),x);x.window.openTradeAnalysisDetail('sales');
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
+vm.runInContext(source.slice(start,end),x);x.window.openTradeAnalysisDetail('sales');
     assert.equal((elements.tradeAnalysisDetailBody.innerHTML.match(/<tr>/g)||[]).length,100);
     assert.equal(x.tradeAnalysisExportRows(report,'sales').length,101);
     assert.match(elements.tradeAnalysisDetailSummary.textContent,/匯出包含全部明細/);

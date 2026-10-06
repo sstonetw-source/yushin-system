@@ -104,10 +104,10 @@ const PERMISSION_PAGES = [
 // 固定角色權限：前端顯示/查詢與 Firestore Rules 使用同一角色邊界。
 // 不再從 settings/rolePermissions 動態載入，避免設定漂移，也減少登入時一次 Firestore 讀取。
 const rolePermissions = Object.freeze({
-    sales: Object.freeze({ forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none' }),
+    sales: Object.freeze({ forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'view', equipment:'edit', admin:'none' }),
     purchaser: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'edit', inventory:'edit', equipment:'none', admin:'none' }),
     warehouse: Object.freeze({ forecast:'none', quote:'none', 'quote.create':'none', 'quote.my':'none', products:'view', orders:'view', 'orders.list':'view', 'orders.po':'view', inventory:'edit', equipment:'none', admin:'none' }),
-    engineer: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'none', equipment:'edit', admin:'none' })
+    engineer: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'view', equipment:'edit', admin:'none' })
 });
 const roleDataScopes = Object.freeze({
     sales: Object.freeze({ quotes:'own', forecasts:'own', orders:'own', equipment:'own' }),
@@ -412,6 +412,12 @@ window.addEventListener('DOMContentLoaded', () => {
         if (!section || !section.classList.contains('active')) return;
         const pageKey = getActivePermissionPage();
         if (!pageKey || canEditPage(pageKey)) return;
+        // Products expose separately authorized commercial actions and master-data tools.
+        // Their handlers check the action capability; page-level view must not block them.
+        if (pageKey === 'products') return;
+        if(pageKey==='quote.my'&&canEditPage('quote.create')&&/^copyQuoteAsNew\b/.test(event.target.closest?.('button')?.getAttribute('onclick')||''))return;
+        const actionText = event.target.closest?.('button')?.getAttribute('onclick') || '';
+        if (/^(toggleInventoryRowDetails|loadInventory|closeInventory|downloadInventoryImportTemplate|switchInventoryWorkView)\b/.test(actionText.trim())) return;
         const control = event.target.closest('button, input, textarea, select');
         if (!control) return;
         if (control.closest('.sub-nav')) return;
@@ -541,6 +547,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function getPagePermission(pageKey, role = currentUserRole) {
+    if(pageKey==='inventory'&&['sales','engineer'].includes(role)&&!permissionRulesReady)return 'none';
     if (role === 'admin') return 'edit';
     const direct = rolePermissions[role]?.[pageKey] || 'none';
     const parentKey = pageKey.includes('.') ? pageKey.split('.')[0] : '';
@@ -559,6 +566,30 @@ function canEditPage(pageKey) {
 
 // V2 capabilities: role names are mapped once here instead of scattering role === 'sales'
 // checks throughout commercial workflows. Firestore Rules mirror these boundaries.
+let permissionRulesReady = false;
+let permissionRulesCheckedUid = '';
+let permissionRulesCheckPromise = null;
+function ensurePermissionRulesReady() {
+    const uid=currentUser?.uid||'';
+    if(!uid)return Promise.resolve(false);
+    if(permissionRulesCheckedUid===uid)return Promise.resolve(permissionRulesReady);
+    if(permissionRulesCheckPromise)return permissionRulesCheckPromise;
+    permissionRulesCheckPromise=firestoreReadWithTimeout(db.collection('stockOperations').doc('permissions-probe').get(),'權限規則版本')
+        .then(()=>{permissionRulesReady=true;return true;})
+        .catch(err=>{permissionRulesReady=false;console.warn('新版權限規則尚未確認，暫用既有交易流程。',err.code||err.message);return false;})
+        .finally(()=>{permissionRulesCheckedUid=uid;permissionRulesCheckPromise=null;applyPermissionVisibility();});
+    return permissionRulesCheckPromise;
+}
+function supplyOrdersCollection() {
+    return db.collection(currentUserRole === 'warehouse' && permissionRulesReady ? 'receivingSupplyOrders' : 'supplyOrders');
+}
+async function runRoleTransaction(callback) {
+    await ensurePermissionRulesReady();
+    if(!permissionRulesReady)return db.runTransaction(callback);
+    return globalThis.YushinStockPermissions.run(db, callback, currentUser?.uid || '',
+        currentUserRole === 'sales' || currentUserRole === 'engineer', currentUserRole);
+}
+
 function hasBusinessCapability(role = currentUserRole) {
     return role === 'admin' || role === 'sales' || role === 'engineer';
 }
@@ -633,6 +664,13 @@ function syncCustomerMaster(customerName, extra = {}) {
     return customerId;
 }
 
+function canUseQuote(record = {}) {
+    return canViewAllData('quotes')
+        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode)
+        || (currentUserRole === 'engineer' && record.createdByUid === currentUser?.uid
+            && record.createdByRole === 'engineer');
+}
+
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
     if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
@@ -665,6 +703,16 @@ function applyPermissionVisibility() {
     const purchaseAnalysisTab = document.getElementById('purchase-tab-analysis');
     if (purchaseAnalysisTab) purchaseAnalysisTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     populatePurchaserOrderFilters();
+    document.querySelectorAll('#inventory-system .inventory-header-actions').forEach(el => el.style.display = canEditPage('inventory') ? '' : 'none');
+    const receivingTab = document.getElementById('inventoryReceivingTabBtn');
+    if (receivingTab) receivingTab.style.display = canReceiveInventoryCapability() ? '' : 'none';
+    if (!canReceiveInventoryCapability()) {
+        inventoryReceivingVisible = false;
+        const stockPanel = document.getElementById('inventoryStockPanel');
+        const receivingPanel = document.getElementById('inventoryReceivingPanel');
+        if (stockPanel) stockPanel.style.display = '';
+        if (receivingPanel) receivingPanel.style.display = 'none';
+    }
     updateReadonlyNotice();
 }
 
@@ -860,6 +908,10 @@ function hydratePageFromLocalCache(mainKey) {
 }
 
 function initializePageData(mainKey, options = {}) {
+    if(permissionRulesCheckedUid!==currentUser?.uid){
+        if(currentUserRole==='warehouse')return ensurePermissionRulesReady().then(()=>initializePageData(mainKey,options));
+        ensurePermissionRulesReady();
+    }
     const wasLoaded = loadedMainPages.has(mainKey);
     const requestedUid=currentUser?.uid, requestedRole=currentUserRole;
     if(mainPageLoads.has(mainKey)) return mainPageLoads.get(mainKey);
@@ -2534,7 +2586,7 @@ async function productMasterOperationalBlockers(productId) {
         firestoreReadWithTimeout(db.collection('warehouseStocks').where('productKey', '==', id).limit(100).get(), '檢查分倉庫存'),
         firestoreReadWithTimeout(db.collection('inventoryReservations').where('productKey', '==', id).limit(100).get(), '檢查庫存占用'),
         firestoreReadWithTimeout(db.collection('procurementDemands').where('productId', '==', id).limit(100).get(), '檢查採購需求'),
-        firestoreReadWithTimeout(db.collection('supplyOrders').where('productId', '==', id).limit(100).get(), '檢查在途供應'),
+        firestoreReadWithTimeout(supplyOrdersCollection().where('productId', '==', id).limit(100).get(), '檢查在途供應'),
         firestoreReadWithTimeout(db.collection('inventoryLots').where('productId', '==', id).limit(100).get(), '檢查批號庫存')
     ]);
 
@@ -3545,7 +3597,7 @@ window.permanentlyDeleteOrder = async function(orderId) {
     if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？系統會先釋放未使用的庫存占用。此操作無法復原。`))return;
     try{
         if(normalizedOrderStatus(order)!=='cancelled'){
-            await db.runTransaction(async tx=>{
+            await runRoleTransaction(async tx=>{
                 const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);
                 if(!snap.exists)throw new Error('找不到這筆訂單。');
                 await adjustInventoryReservationForLifecycle(tx,orderId,{id:orderId,...snap.data()},'cancelled',deliveryActor());
@@ -6566,7 +6618,7 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
     const quoteRef = db.collection('quotes').doc(quoteData.quoteNo);
     const updatingExisting = !!editingQuoteNo && editingQuoteNo === quoteData.quoteNo;
 
-    return db.runTransaction(async transaction => {
+    return runRoleTransaction(async transaction => {
         const snapshot = await transaction.get(quoteRef);
         if (snapshot.exists && !updatingExisting) {
             const conflict = new Error(`估價單號 ${quoteData.quoteNo} 已存在。為避免覆蓋既有估價單，請使用「另存為新估價單」取得新單號後再輸出。`);
@@ -7013,7 +7065,7 @@ async function fetchAndFillQuote(qNo) {
             return;
         }
         const data = doc.data() || {};
-        if (!canViewAllData('quotes') && !belongsToCurrentUser(data.salesName, data.ownerUid)) {
+        if (!canUseQuote(data)) {
             alert('您只能查看自己的估價單。');
             return;
         }
@@ -7076,7 +7128,7 @@ window.openQuoteFromAdmin = async function(quoteNo) {
             source = { id: snapshot.id, ...snapshot.data() };
         }
 
-        if (!canViewAllData('quotes') && !belongsToCurrentUser(source.salesName, source.ownerUid)) {
+        if (!canUseQuote(source)) {
             throw new Error('您只能載入自己名下的估價單。');
         }
 
@@ -7137,7 +7189,7 @@ window.copyQuoteAsNew = async function(quoteNo) {
             if (!snapshot.exists) throw new Error('找不到這張估價單。');
             source = { id: snapshot.id, ...snapshot.data() };
         }
-        if (!canViewAllData('quotes') && !belongsToCurrentUser(source.salesName, source.ownerUid)) {
+        if (!canUseQuote(source)) {
             throw new Error('您只能複製自己的估價單。');
         }
         await ensureSalesListLoaded();
@@ -7221,12 +7273,16 @@ async function runQuoteHistorySearch() {
     let cursor = null;
     let checked = 0;
     let lastIntermediateRenderAt = 0;
+    let assistedSearch = false;
     updateQuoteHistorySearchUi('正在搜尋全部歷史估價單…');
     renderMyQuotesList();
 
     try {
         while (true) {
-            let query = scopedHistorySearchQuery('quotes', queryToken).limit(DEFAULT_LIST_LIMIT);
+            let query = (assistedSearch
+                ? db.collection('quotes').where('searchTokens', 'array-contains', queryToken)
+                    .where('createdByUid', '==', currentUser.uid).where('createdByRole', '==', 'engineer')
+                : scopedHistorySearchQuery('quotes', queryToken)).limit(DEFAULT_LIST_LIMIT);
             if (cursor) query = query.startAfter(cursor);
             const snapshot = await firestoreReadWithTimeout(query.get(), '估價單索引搜尋');
             if (generation !== quoteHistorySearchGeneration) return;
@@ -7245,7 +7301,12 @@ async function runQuoteHistorySearch() {
             }
             updateQuoteHistorySearchUi(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
 
-            if (snapshot.size < DEFAULT_LIST_LIMIT) break;
+            if (snapshot.size < DEFAULT_LIST_LIMIT) {
+                if (!assistedSearch && currentUserRole === 'engineer' && currentUser?.uid) {
+                    assistedSearch = true; cursor = null; continue;
+                }
+                break;
+            }
             cursor = snapshot.docs[snapshot.docs.length - 1];
             await Promise.resolve();
         }
@@ -7319,7 +7380,8 @@ function createMyQuotesPaginationState() {
     } else {
         if (currentUserCode) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesCode', '==', currentUserCode).orderBy('quoteDate', 'desc') });
         if (currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('ownerUid', '==', currentUser.uid).orderBy('quoteDate', 'desc') });
-        if (currentUserName) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesName', '>=', currentUserName).where('salesName', '<=', currentUserName + '\uf8ff').orderBy('quoteDate', 'desc') });
+        if (currentUserRole === 'engineer' && currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('createdByUid', '==', currentUser.uid).where('createdByRole', '==', 'engineer').orderBy('quoteDate', 'desc') });
+
     }
     return { sources, sourceIndex: 0 };
 }
@@ -7512,7 +7574,7 @@ window.renderMyQuotesList = function() {
         }
         const statusCell = `<div class="quote-status-badges">${statusBadges.join('')}</div>`;
 
-        const dealButton = q.dealClosed
+        const dealButton = q.dealClosed || (currentUserRole==='engineer' && !belongsToCurrentUser(q.salesName,q.ownerUid,q.salesCode))
             ? ''
             : `<button type="button" class="btn-small quote-primary-deal" onclick="markQuoteAsDeal(${inlineJsValue(q.quoteNo)})">✓ 成交</button>`;
         // ------------------------------------
@@ -7701,6 +7763,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
         );
         const q=cached || quoteSnapshot?.data();
         if(!q)throw new Error('找不到這張估價單');
+        if(currentUserRole==='engineer'&&!belongsToCurrentUser(q.salesName,q.ownerUid,q.salesCode))throw new Error('代建估價單請交由負責業務建立訂單。');
         if(q.dealClosed){alert('這張估價單已經標記過成交了。');return;}
         const sourceItems=(q.items||[]).filter(item=>item.nameCn||item.nameEn||item.model);
         if(!sourceItems.length)throw new Error('估價單沒有可建立訂單的品項。');
@@ -7777,7 +7840,7 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
 
         // 每筆來源訂單沿用正式的訂單生命週期與庫存釋放邏輯
         for (const linkedOrder of linkedOrders) {
-            await db.runTransaction(async transaction => {
+            await runRoleTransaction(async transaction => {
                 const orderRef = db.collection('orders').doc(linkedOrder.id);
                 const orderSnap = await transaction.get(orderRef);
 
@@ -8087,7 +8150,7 @@ window.loadInventory=async function(reset=true){
  inventoryHasMore=snap.size===DEFAULT_LIST_LIMIT;
  if(reset){inventoryPendingSupplyError='';inventoryPendingSupplyLoading=true;updateInventoryReceivingCount();renderPendingInventoryItems();}
  const auxiliary = reset ? Promise.allSettled([
-   firestoreReadWithTimeout(db.collection('inventoryMovements').orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),'庫存異動'),
+   firestoreReadWithTimeout((canReceiveInventoryCapability() ? db.collection('inventoryMovements') : db.collection('inventoryMovements').where('ownerUid','==',currentUser.uid)).orderBy('createdAt','desc').limit(DEFAULT_LIST_LIMIT).get(),'庫存異動'),
    canReceiveInventoryCapability() ? loadInventoryReceivingSummary() : Promise.resolve([])
  ]).then(([ledger,supplies])=>{
    if(!isCurrent())return;inventoryPendingSupplyLoading=false;
@@ -8510,7 +8573,7 @@ window.setInventoryListArchived = async function(inventoryId, archived, button) 
             db.collection('warehouseStocks').where('productKey','==',productKey).limit(201).get(), '移出前檢查倉庫庫存'
         ) : null;
         if (warehouseSnapshot?.size > 200) throw new Error('倉庫庫存紀錄超過可安全檢查的範圍，請先整理倉庫紀錄。');
-        const patch = await db.runTransaction(async transaction => {
+        const patch = await runRoleTransaction(async transaction => {
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到庫存品項，請更新清單。');
             const live = snapshot.data();
@@ -8554,7 +8617,7 @@ let inventoryPolicyEditingId='';
 window.openInventoryPolicySettings=function(inventoryId){if(!canManageInventoryStockPolicy()){alert('只有管理員或採購可以調整庫存策略。');return;}const item=inventoryItemById(inventoryId);if(!item){alert('找不到庫存品項。');return;}inventoryPolicyEditingId=inventoryId;const label=document.getElementById('inventoryPolicyItemLabel');if(label)label.textContent=`${item.itemCode||'－'}｜${item.itemName||'未命名品項'}｜${item.brand||'未指定廠牌'}`;document.getElementById('inventoryPolicySettingSelect').value=inventoryStockPolicy(item);document.getElementById('inventorySafetyStockSetting').value=Number(item.safetyStock||0);onInventoryPolicySettingChange();document.getElementById('inventoryPolicyOverlay')?.classList.add('active');};
 window.onInventoryPolicySettingChange=function(){const policy=document.getElementById('inventoryPolicySettingSelect')?.value||INVENTORY_STOCK_POLICIES.ORDER_ONLY,row=document.getElementById('inventorySafetyStockSettingRow');if(row)row.style.display=policy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'':'none';};
 window.closeInventoryPolicySettings=function(){inventoryPolicyEditingId='';document.getElementById('inventoryPolicyOverlay')?.classList.remove('active');};
-window.saveInventoryPolicySettings=async function(){if(!inventoryPolicyEditingId)return;const policy=document.getElementById('inventoryPolicySettingSelect')?.value||INVENTORY_STOCK_POLICIES.ORDER_ONLY,safetyStock=Number(document.getElementById('inventorySafetyStockSetting')?.value||0),button=document.getElementById('saveInventoryPolicySettingsBtn');if(button){button.disabled=true;button.textContent='儲存中…';}try{await saveInventoryPlanningSettings(inventoryPolicyEditingId,policy,safetyStock);closeInventoryPolicySettings();showActionFeedback('庫存設定已更新。');}catch(err){alert('庫存設定儲存失敗：'+err.message);}finally{if(button){button.disabled=false;button.textContent='儲存設定';}}};
+window.saveInventoryPolicySettings=async function(){if(!canManageInventoryStockPolicy())return alert('您沒有庫存設定權限。');if(!inventoryPolicyEditingId)return;const policy=document.getElementById('inventoryPolicySettingSelect')?.value||INVENTORY_STOCK_POLICIES.ORDER_ONLY,safetyStock=Number(document.getElementById('inventorySafetyStockSetting')?.value||0),button=document.getElementById('saveInventoryPolicySettingsBtn');if(button){button.disabled=true;button.textContent='儲存中…';}try{await saveInventoryPlanningSettings(inventoryPolicyEditingId,policy,safetyStock);closeInventoryPolicySettings();showActionFeedback('庫存設定已更新。');}catch(err){alert('庫存設定儲存失敗：'+err.message);}finally{if(button){button.disabled=false;button.textContent='儲存設定';}}};
 window.renderPendingInventoryItems=function(){
     updateInventoryReceivingCount();
     const body=document.getElementById('pendingInventoryBody');
@@ -8827,6 +8890,7 @@ window.closeInventoryQuantityEditor=function(){
 };
 
 window.saveInventoryQuantity=async function(){
+    if (!canEditPage('inventory')) return alert('您只有庫存查看權限。');
     if(!inventoryQuantityEditingId)return;
     const item=inventoryItemById(inventoryQuantityEditingId);
     if(!item){alert('找不到這個庫存品項，請重新整理後再試。');return;}
@@ -8842,7 +8906,7 @@ window.saveInventoryQuantity=async function(){
     if(button){button.disabled=true;button.textContent='儲存中…';}
     let appliedDelta=0;
     try{
-        await db.runTransaction(async tx=>{
+        await runRoleTransaction(async tx=>{
             const invSnap=await tx.get(ref);
             if(!invSnap.exists)throw new Error('庫存資料已不存在，請重新整理。');
             const whSnap=whRef?await tx.get(whRef):null;
@@ -8982,7 +9046,7 @@ window.saveInventoryTransfer=async function(){
     const button=document.getElementById('saveInventoryTransferBtn');
     if(button){button.disabled=true;button.textContent='移動中…';}
     try{
-        await db.runTransaction(async tx=>{
+        await runRoleTransaction(async tx=>{
             const [fromSnap,toSnap]=await Promise.all([tx.get(fromRef),tx.get(toRef)]);
             if(!fromSnap.exists)throw new Error('來源倉庫沒有此品項庫存。');
             const from=inventoryNumbers(fromSnap.data()||{});
@@ -9129,7 +9193,7 @@ window.saveInventoryAdjustmentBatch = async function() {
         const key=match.productId||stableProductId(match);
         const ref=db.collection('inventory').doc(encodeURIComponent(key));
         const whRef=row.warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(row.warehouseId,key)):null;
-        await db.runTransaction(async tx=>{
+        await runRoleTransaction(async tx=>{
           const invSnap=await tx.get(ref);
           const whSnap=whRef?await tx.get(whRef):null;
           const old=invSnap.exists?invSnap.data():{}, n=inventoryNumbers(old);
@@ -9201,7 +9265,7 @@ function inventoryNumbers(data = {}) {
     return globalThis.YushinInventory.normalizeStock(data);
 }
 function inventoryMovementRecord(type, qty, orderId, productKey, actor, extra = {}) {
-    return { type, qty: Number(qty || 0), productKey, sourceType: DOCUMENT_TYPES.ORDER, sourceId: orderId, createdAt: new Date().toISOString(), createdBy: actor, ...extra };
+    return { actorUid:currentUser?.uid||'',ownerUid:currentUser?.uid||'',salesCode:currentUserCode||'',type, qty: Number(qty || 0), productKey, sourceType: DOCUMENT_TYPES.ORDER, sourceId: orderId, createdAt: new Date().toISOString(), createdBy: actor, ...extra };
 }
 
 function inventoryReservationPayload(orderId, order, reservedQty, status = 'active') {
@@ -9231,7 +9295,7 @@ window.openInventoryReservationDetails = async function(productKey) {
     overlay.classList.add('active');
     try {
         const snapshot = await firestoreReadWithTimeout(
-            db.collection('inventoryReservations').where('productKey', '==', productKey).where('status','==','active').limit(100).get(),
+            (canReceiveInventoryCapability() ? db.collection('inventoryReservations') : db.collection('inventoryReservations').where('ownerUid','==',currentUser.uid)).where('productKey', '==', productKey).where('status','==','active').limit(100).get(),
             '庫存占用明細'
         );
         const rows = snapshot.docs
@@ -9276,7 +9340,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
     let result={...item,itemId,reservedQty:0,shortageQty:requested,inventoryProductKey:productKey,warehouseId};
     let releasedStock=null;
 
-    await db.runTransaction(async tx=>{
+    await runRoleTransaction(async tx=>{
         const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
         const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
         const reservationSnap=await tx.get(reservationRef);
@@ -9741,7 +9805,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
     else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingDispatchOrders();
     try{
         let saved;
-        await db.runTransaction(async tx=>{
+        await runRoleTransaction(async tx=>{
             const ref=db.collection('orders').doc(orderId);
             const snap=await tx.get(ref);
             if(!snap.exists)throw new Error('找不到訂單。');
@@ -9839,7 +9903,7 @@ window.saveSelfOrder = async function() {
     button.disabled=true;button.innerText='建立中…';
     try{
         let savedOrder,internalNo='';
-        await db.runTransaction(async tx=>{
+        await runRoleTransaction(async tx=>{
             const orderRef=db.collection('orders').doc(orderId);
             const snap=await tx.get(orderRef);
             if(!snap.exists)throw new Error('找不到訂單。');
@@ -9856,7 +9920,7 @@ window.saveSelfOrder = async function() {
             const demand=procurementDemandForOrderItem({...order,id:orderId},item);
             const remaining=demand.remainingToOrderQty;
             if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
-            const supplyRef=db.collection('supplyOrders').doc();
+            const supplyRef=supplyOrdersCollection().doc();
             internalNo=`SO-${orderDate.replace(/-/g,'')}-${supplyRef.id.slice(0,6).toUpperCase()}`;
             const now=new Date().toISOString();
             const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demand,qty);
@@ -10865,6 +10929,24 @@ function refreshPurchasingOrderCache(reset = true, options = {}) {
     return purchasingOrderRefreshPromise;
 }
 
+const receivingSupplyViewVersions = new Map();
+function syncReceivingSupplyViews(docs = []) {
+    if (!canCreatePurchaseOrderCapability() || !permissionRulesReady) return;
+    const uid=currentUser?.uid,role=currentUserRole;
+    const queue=docs.filter(doc=>!receivingSupplyViewVersions.has(doc.id)||receivingSupplyViewVersions.get(doc.id)!==doc.data().updatedAt);
+    (async()=>{
+        for(let i=0;i<queue.length;i+=5){
+            if(uid!==currentUser?.uid||role!==currentUserRole)return;
+            await Promise.all(queue.slice(i,i+5).map(async doc=>{
+                try{
+                    await db.collection('receivingSupplyOrders').doc(doc.id).set(globalThis.YushinStockPermissions.sanitizeSupply(doc.data()));
+                    receivingSupplyViewVersions.set(doc.id,doc.data().updatedAt);
+                }catch(err){console.warn('收貨資料檢視同步失敗',doc.id,err);}
+            }));
+        }
+    })();
+}
+
 async function loadActiveReceivingSupplyCache(reset = true) {
     if (!canAccessPage('orders.po') && !(canAccessPage('inventory') && canReceiveInventoryCapability())) return [];
     if (activeReceivingSupplyLoadPromise) return activeReceivingSupplyLoadPromise;
@@ -10874,12 +10956,13 @@ async function loadActiveReceivingSupplyCache(reset = true) {
         const records = new Map((reset ? [] : supplyReceivingCache).map(row => [row.id, row]));
         let cursor = null;
         while (true) {
-            let query = db.collection('supplyOrders')
+            let query = supplyOrdersCollection()
                 .where('status','in',['ORDERED','PARTIAL_RECEIPT'])
                 .orderBy(firebase.firestore.FieldPath.documentId())
                 .limit(200);
             if (cursor) query = query.startAfter(cursor);
             const snapshot = await firestoreReadWithTimeout(query.get(), '待到貨供應');
+            syncReceivingSupplyViews(snapshot.docs);
             snapshot.docs.forEach(doc => records.set(doc.id, { id:doc.id, ...doc.data() }));
             if (snapshot.size < 200) break;
             cursor = snapshot.docs[snapshot.docs.length - 1];
@@ -11357,7 +11440,7 @@ window.loadPurchasingAnalytics = async function(force = false) {
     }
     purchasingAnalyticsLoading = true;
     try {
-        let query = db.collection('supplyOrders');
+        let query = supplyOrdersCollection();
         if (filters.start) query = query.where('orderDate', '>=', filters.start);
         if (filters.end) query = query.where('orderDate', '<=', filters.end);
         query = query.orderBy('orderDate', 'desc');
@@ -11422,6 +11505,7 @@ window.changePurchasePeriod = function(value) {
 window.switchPurchasingView = function(view, tab) {
     if (!canAccessPage('orders.po')) return;
     if (!['ordering', 'receiving', 'dispatch', 'completed', 'replenishment', 'history', 'suppliers'].includes(view)) return;
+    if (currentUserRole === 'warehouse' && !['receiving','completed'].includes(view)) return;
     if (view === 'ordering' && !canCreatePurchaseOrderCapability()) return;
     if (view === 'suppliers' && !canCreatePurchaseOrderCapability()) return;
     const previousPurchasingView = purchasingView;
@@ -11467,6 +11551,7 @@ window.switchPurchasingView = function(view, tab) {
     if (directButton) directButton.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     const directPanel=document.getElementById('purchaseDirectPanel');
     if(directPanel)directPanel.style.display=view==='ordering'&&canCreatePurchaseOrderCapability()?'':'none';
+    ['purchase-tab-history','purchase-tab-suppliers'].forEach(id => { const el=document.getElementById(id); if(el)el.style.display=canCreatePurchaseOrderCapability()?'':'none'; });
     const businessTab = document.getElementById('purchase-tab-work');
     if (businessTab) businessTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     const businessStages = document.getElementById('purchaseBusinessStages');
@@ -11979,8 +12064,8 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
         let savedOrder, savedSupply, incomingProductKey='', incomingWarehouseId='';
-        const supplyRef = db.collection('supplyOrders').doc(quickPurchaseSupplyId(orderId, itemId));
-        await db.runTransaction(async tx => {
+        const supplyRef = supplyOrdersCollection().doc(quickPurchaseSupplyId(orderId, itemId));
+        await runRoleTransaction(async tx => {
             const orderRef = db.collection('orders').doc(orderId);
             const [orderSnapshot, supplySnapshot] = await Promise.all([tx.get(orderRef), tx.get(supplyRef)]);
             if (!orderSnapshot.exists) throw new Error('來源訂單已不存在。');
@@ -12421,7 +12506,7 @@ async function loadPurchaseOrderPage(reset, options = {}) {
         let supplyQuery = purchasingView === 'receiving' && supplyReceivingHasMore
             // Keep this on the single-field status index; page through mixed PO and
             // self-order documents rather than stopping at the first 50 matches.
-            ? db.collection('supplyOrders').where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(DEFAULT_LIST_LIMIT)
+            ? supplyOrdersCollection().where('status','in',['ORDERED','PARTIAL_RECEIPT']).limit(DEFAULT_LIST_LIMIT)
             : null;
         if (supplyQuery && supplyReceivingCursor) supplyQuery = supplyQuery.startAfter(supplyReceivingCursor);
         const [snapshot,supplySnapshot] = await Promise.all([
@@ -13533,8 +13618,8 @@ async function registerPurchaseIncoming(poId, poRecord) {
     if (isPurchaseTerminalStatus(poRecord?.status)) return;
     const supplyIds = Array.isArray(poRecord?.supplyOrderIds) ? poRecord.supplyOrderIds : [];
     for (const supplyId of supplyIds) {
-        await db.runTransaction(async tx => {
-            const supplyRef = db.collection('supplyOrders').doc(supplyId);
+        await runRoleTransaction(async tx => {
+            const supplyRef = supplyOrdersCollection().doc(supplyId);
             const supplySnap = await tx.get(supplyRef);
             if (!supplySnap.exists) throw new Error(`找不到供應紀錄 ${supplyId}`);
             const supply = supplySnap.data();
@@ -13595,8 +13680,8 @@ async function registerPurchaseIncoming(poId, poRecord) {
 
 async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
     let result={cancelledQty:0,receivedQty:0,terminalStatus:'',orderId:'',productKey:'',warehouseId:'',demandId:''};
-    await db.runTransaction(async tx => {
-        const supplyRef=db.collection('supplyOrders').doc(supplyId);
+    await runRoleTransaction(async tx => {
+        const supplyRef=supplyOrdersCollection().doc(supplyId);
         const supplySnap=await tx.get(supplyRef);
         if(!supplySnap.exists)throw new Error(`找不到供應紀錄 ${supplyId}`);
         const supply=supplySnap.data()||{};
@@ -13727,7 +13812,7 @@ window.cancelManualSupplyOutstanding = async function(supplyId) {
     let supply;
     try {
         const snapshot = await firestoreReadWithTimeout(
-            db.collection('supplyOrders').doc(supplyId).get(),
+            supplyOrdersCollection().doc(supplyId).get(),
             '讀取快速採購狀態'
         );
         if (!snapshot.exists) throw new Error('找不到這筆供應紀錄。');
@@ -13944,7 +14029,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             .sort((a,b)=>String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))||String(a.id).localeCompare(String(b.id)))[0];
         if(!candidate)break;
         let took=0,skipCandidate=false,stopAllocation=false;
-        await db.runTransaction(async tx=>{
+        await runRoleTransaction(async tx=>{
             const orderRef=db.collection('orders').doc(candidate.orderId);
             const reservationRef=db.collection('inventoryReservations').doc(candidate.id);
             const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
@@ -14027,8 +14112,8 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
     if(!operationKey)throw new Error('缺少到貨操作識別碼，請重新開啟待到貨視窗後再試。');
     let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',sourceOrderStatus='',reservedForSource=0,alreadyProcessed=false,processedReceipt=null;
     const affectedOrderIds = new Set();
-    await db.runTransaction(async tx=>{
-        const supplyRef=db.collection('supplyOrders').doc(supplyId);
+    await runRoleTransaction(async tx=>{
+        const supplyRef=supplyOrdersCollection().doc(supplyId);
         const receiptRef=db.collection('receipts').doc(operationKey);
         const supplySnap=await tx.get(supplyRef);
         const receiptSnap=await tx.get(receiptRef);
@@ -14252,7 +14337,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:Math.max(0,wh.incoming-incomingRelease),updatedAt:now},{merge:true});
         const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
-        tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,unitCost:Number(supply.unitCost||0),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
+        tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,...(currentUserRole==='warehouse'&&permissionRulesReady?{costSourceSupplyId:supplyId}:{unitCost:Number(supply.unitCost||0)}),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
         const autoAllocationQty=Math.max(0,Number(qty||0)-reserveQty);
         tx.set(receiptRef,buildReceipt({
             receiptId:operationKey,
@@ -14297,7 +14382,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 .filter(row=>row.type==='reserve_from_receipt')
                 .reduce((sum,row)=>sum+Math.max(0,Number(row.qty||0)),0);
             let reconciledAllocated=alreadyAllocated;
-            await db.runTransaction(async tx=>{
+            await runRoleTransaction(async tx=>{
                 const receiptRef=db.collection('receipts').doc(operationKey);
                 const receiptSnap=await tx.get(receiptRef);
                 if(!receiptSnap.exists)return;
@@ -15450,7 +15535,7 @@ window.printPurchaseOrder = async function() {
         const poDocumentId = poNo;
         let committedSourceOrders = [];
         let committedSupplyOrders = [];
-        const commitPromise = db.runTransaction(async transaction => {
+        const commitPromise = runRoleTransaction(async transaction => {
             committedSourceOrders = [];
             committedSupplyOrders = [];
             const poRef = db.collection('purchaseOrders').doc(poDocumentId);
@@ -15524,7 +15609,7 @@ window.printPurchaseOrder = async function() {
                 });
 
                 const supplyId=formalSupplyOrderId(poDocumentId,itemIndex);
-                const supplyRef=db.collection('supplyOrders').doc(supplyId);
+                const supplyRef=supplyOrdersCollection().doc(supplyId);
                 supplyOrderIds.push(supplyId);
                 const supplyRecord={
                     // ERPNext-style：採購方式與需求來源分開。
@@ -15761,7 +15846,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     renderOrdersList();
 
     let committed;
-    db.runTransaction(async transaction => {
+    runRoleTransaction(async transaction => {
         const ref = db.collection('orders').doc(orderId);
         const snapshot = await transaction.get(ref);
         if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -16137,7 +16222,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(orderId);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -16502,7 +16587,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(orderId);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -16589,7 +16674,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(orderId);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -16755,7 +16840,7 @@ window.saveDeliveryRecord = async function() {
     if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(orderId);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -16847,7 +16932,7 @@ window.deleteDeliveryRecord = async function(recordId) {
     renderOrdersList();
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(orderId);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -17032,7 +17117,7 @@ window.saveOrderLifecycleStatus = async function() {
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(order.id);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -17105,7 +17190,7 @@ window.saveReturnRecord = async function() {
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(orderId);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -17179,7 +17264,7 @@ window.deleteReturnRecord = async function(recordId) {
     pendingReturnOrderIds.add(orderId);
     try {
         let savedOrder;
-        await db.runTransaction(async transaction => {
+        await runRoleTransaction(async transaction => {
             const ref = db.collection('orders').doc(orderId);
             const snapshot = await transaction.get(ref);
             if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -17245,6 +17330,11 @@ window.updateOrderField = function(orderId, field, value) {
 };
 
 window.deleteOrder = function(orderId) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
+        if (canManageOrderLifecycleCapability()) prepareOrderLifecycle(orderId, 'cancelled');
+        else alert('只有管理員可永久刪除訂單。');
+        return;
+    }
     const order = ordersCache.find(item => item.id === orderId);
     if (!order || !canEditPage('orders.list')) return;
     if (!isDeletableOrderDraft(order)) {
@@ -17253,7 +17343,7 @@ window.deleteOrder = function(orderId) {
         return;
     }
     if (!confirm('確定要刪除這筆尚未進入流程的草稿訂單嗎？')) return;
-    db.runTransaction(async transaction => {
+    runRoleTransaction(async transaction => {
         const ref = db.collection('orders').doc(orderId);
         const snapshot = await transaction.get(ref);
         if (!snapshot.exists) throw new Error('找不到這筆訂單。');
@@ -17300,7 +17390,7 @@ async function createOrResumeNewOrder(data) {
     }
     const ref=db.collection('orders').doc(orderId);
     let savedData;
-    await db.runTransaction(async tx=>{
+    await runRoleTransaction(async tx=>{
         const snap=await tx.get(ref);
         if(snap.exists){
             savedData=snap.data();
@@ -18910,6 +19000,7 @@ window.openInventoryReceiving = function() {
     switchInventoryWorkView(true);
 };
 window.switchInventoryWorkView = async function(receiving) {
+    if (receiving && !canReceiveInventoryCapability()) return;
     inventoryReceivingVisible = receiving;
     document.getElementById('inventoryStockPanel').style.display = receiving ? 'none' : '';
     document.getElementById('inventoryReceivingPanel').style.display = receiving ? '' : 'none';
@@ -19489,7 +19580,7 @@ async function readDocumentsByIds(collectionName, ids, chunkSize = 30) {
     for(let i=0;i<uniqueIds.length;i+=chunkSize){
         const batch=uniqueIds.slice(i,i+chunkSize);
         jobs.push(async()=>{
-            const snap=await firestoreReadWithTimeout(db.collection(collectionName).where(firebase.firestore.FieldPath.documentId(),'in',batch).get(),collectionName+' 指定文件');
+            const snap=await firestoreReadWithTimeout(db.collection(collectionName==='supplyOrders'&&currentUserRole==='warehouse'&&permissionRulesReady?'receivingSupplyOrders':collectionName).where(firebase.firestore.FieldPath.documentId(),'in',batch).get(),collectionName+' 指定文件');
             return snap.docs.map(doc=>({...doc.data(),id:doc.id}));
         });
     }
@@ -19501,7 +19592,7 @@ async function loadInventoryAnalysisSupport(start, end) {
     const receiptQuery = db.collection('receipts')
         .where('receiptDate','>=',start).where('receiptDate','<=',end).orderBy('receiptDate','desc');
     const activeLotsQuery = db.collection('inventoryLots').where('remainingQty','>',0).orderBy('remainingQty');
-    const openSupplyQuery = db.collection('supplyOrders')
+    const openSupplyQuery = supplyOrdersCollection()
         .where('status','in',['ORDERED','PARTIAL_RECEIPT']);
     const [receipts,lots,openSupplies] = await Promise.all([
         readQueryInBatches(receiptQuery),readQueryInBatches(activeLotsQuery),readQueryInBatches(openSupplyQuery)
@@ -19521,7 +19612,16 @@ async function loadInventoryAnalysisSupport(start, end) {
     tradeAnalysisSourceOrders = new Map(sourceOrders.map(row=>[row.id,row]));
     inventoryAnalysisReceipts = receipts;
     inventoryAnalysisLots = lots;
-    inventoryAnalysisLotCosts = new Map(lotCosts.map(row=>[row.id,row]));
+    const unresolvedCostSources = await readDocumentsByIds('supplyOrders',lotCosts.filter(row=>row.costSourceSupplyId&&row.unitCost===undefined).map(row=>row.costSourceSupplyId));
+    const costSources = new Map(unresolvedCostSources.map(row=>[row.id,row]));
+    inventoryAnalysisLotCosts = new Map(lotCosts.map(row=>{
+        if(row.unitCost===undefined&&row.costSourceSupplyId){
+            const source=costSources.get(row.costSourceSupplyId);
+            if(!source||!Number.isFinite(Number(source.unitCost)))throw new Error('收貨成本來源缺失，無法正確計算庫存價值。');
+            return [row.id,{...row,unitCost:Number(source.unitCost)}];
+        }
+        return [row.id,row];
+    }));
     inventoryAnalysisSupplyOrders = [...supplies.values()];
     inventoryAnalysisDirectShipSupplyOrders = inventoryAnalysisSupplyOrders.filter(row=>row.fulfillmentType==='DIRECT_SHIP');
 }
@@ -21456,7 +21556,7 @@ window.restoreMissingDatabaseBackupDocuments = async function() {
         for (const row of docs) {
             const ref = db.doc(row.path);
             // A transaction makes repeat clicks and retries safe even if another user writes concurrently.
-            const inserted = await db.runTransaction(async transaction => {
+            const inserted = await runRoleTransaction(async transaction => {
                 const existing = await transaction.get(ref);
                 if (existing.exists) return false;
                 transaction.set(ref, row.data);

@@ -28,3 +28,21 @@ test('role switch invalidates pending order reads and clears failed loading stat
  assert.equal(context.orderWorkQueuePromise,null);
  assert.equal(context.orderPaginationState,null);
 });
+
+test('blank quote salesperson keeps self ownership only for sales and engineers', () => {
+ const expression=src.match(/const selfOwnedBlankSales = ([^;]+);/)[1];
+ for(const role of ['sales','engineer','purchaser','warehouse','admin']){
+  assert.equal(vm.runInNewContext(expression,{salesName:'',currentUserRole:role}),['sales','engineer'].includes(role));
+  assert.equal(vm.runInNewContext(expression,{salesName:'Someone',currentUserRole:role}),false);
+ }
+});
+test('engineer quote access includes own assisted quotes and excludes another engineer assistance',()=>{
+ const start=src.indexOf('function canUseQuote('),end=src.indexOf('function belongsToCurrentUser(',start);
+ const context=vm.createContext({currentUserRole:'engineer',currentUser:{uid:'eng1'},canViewAllData:()=>false,belongsToCurrentUser:(_name,uid)=>uid==='eng1'});
+ vm.runInContext(src.slice(start,end),context);
+ assert.equal(context.canUseQuote({ownerUid:'eng1'}),true);
+ assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),true);
+ assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng2',createdByRole:'engineer'}),false);
+ context.currentUserRole='sales';
+ assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),false);
+});

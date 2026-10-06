@@ -28,7 +28,8 @@ function setup({live={},warehouses=[],role='admin',fail=false}={}){
     events.push(...writes);for(const [kind,patch]of writes)if(kind==='update')Object.assign(storage,patch);return result;}},
   applyInventoryPlanningPatchToCaches:(id,patch)=>Object.assign(item,patch),loadInventory:async()=>events.push('refresh'),
   writeAppDataCache(){},inventoryCache:[],markMainPageDirty(){},renderInventoryList(){},renderInventoryReplenishmentCenter(){},showActionFeedback:message=>events.push(['success',message])});
- vm.runInContext(code,x);return {x,events,item,storage,release,run:archived=>x.window.setInventoryListArchived('I1',archived,{})};
+ vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
+vm.runInContext(code,x);return {x,events,item,storage,release,run:archived=>x.window.setInventoryListArchived('I1',archived,{})};
 }
 test('archive atomically records audit and suppresses double click',async()=>{
  const a=setup(),p=a.run(true);await a.run(true);a.release();await p;
@@ -66,7 +67,8 @@ test('archived zero stock suspends replenishment until restored or stock returns
  const x=vm.createContext({YushinInventory:core,inventoryStockPolicy:item=>item.stockPolicy,
   inventoryProjectedStock:stock=>(stock.onHand||0)-(stock.reserved||0)+(stock.incoming||0),
   INVENTORY_STOCK_POLICIES:{SAFETY_STOCK:'SAFETY_STOCK'}});
- vm.runInContext(src.slice(start,end),x);
+ vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
+vm.runInContext(src.slice(start,end),x);
  const item={listArchived:true,onHand:0,reserved:0,incoming:0,stockPolicy:'SAFETY_STOCK',safetyStock:5};
  assert.equal(x.inventoryReplenishmentPlan(item,{}).needsReplenishment,false);
  assert.equal(x.inventoryReplenishmentPlan({...item,listArchived:false},{}).suggestedQty,5);

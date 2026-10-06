@@ -36,7 +36,7 @@ test('backup upload validates project, count, duplicate paths, and collection bo
 test('restore checks each live document in a transaction and excludes permissions', () => {
   const restore = source.slice(source.indexOf('window.restoreMissingDatabaseBackupDocuments ='),
     source.indexOf('/* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */'));
-  assert.match(restore, /db\.runTransaction\(async transaction/);
+  assert.match(restore, /(?:db\.runTransaction|runRoleTransaction)\(async transaction/);
   assert.match(restore, /if \(existing\.exists\) return false;/);
   assert.match(restore, /transaction\.set\(ref, row\.data\)/);
   assert.match(source, /collection !== 'users' && collection !== 'settings'/);

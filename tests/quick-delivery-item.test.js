@@ -15,7 +15,8 @@ function setup({delivered=false,multi=false,pending=false}={}){
  db:{collection:()=>({doc:id=>({id})}),runTransaction:async callback=>callback({get:async()=>({exists:true,data:()=>live}),update:(ref,patch)=>updates.push(patch)})},
  firebase:{firestore:{FieldValue:{arrayUnion:(...a)=>a}}},orderWorkIndexFields:()=>({}),applyInventoryDeliveryInTransaction:inventory,
  applyInventoryDeliveryDeltaInTransaction:async(tx,data,qty,actor,id,reversed)=>{assert.equal(data.itemId,'LINE-7');calls.push([tx,null,data,qty,actor,id,reversed]);return {newReservedQty:1};},alert:s=>alerts.push(s),showActionFeedback:s=>alerts.push(s)
- });vm.runInContext(code,x);return {x,calls,alerts,updates};
+ });vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
+vm.runInContext(code,x);return {x,calls,alerts,updates};
 }
 test('one-click shipping passes the exact item identity product and warehouse to inventory accounting',async()=>{
  const a=setup();await a.x.window.quickCompleteDelivery('ORDER-1');assert.equal(a.alerts.length,0);assert.equal(a.calls[0][2].productId,'PRODUCT-7');assert.equal(a.calls[0][2].warehouseId,'WAREHOUSE-7');assert.equal(a.calls[0][5],'ORDER-1');assert.equal(a.updates[0].deliveryRecords[0].itemId,'LINE-7');assert.equal(a.updates[0].items[0].reservedQty,0);

@@ -195,7 +195,7 @@ test('self-order is restricted to the responsible business owner and becomes imm
 
 test('business owner can perform only scoped fulfillment stock updates', async () => {
   await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1' });
-  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventory/p1'), { reserved:3 }));
+  await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { reserved:3 }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { safetyStock:4 }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { productId:'hijack' }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventory/p1'), { unitCost:1 }));
@@ -232,7 +232,7 @@ test('inventory planning policy is admin or purchaser managed while warehouse ke
 
 test('business owner can change only remaining quantity on an inventory lot', async () => {
   await seed('inventoryLots/lot1', { productId:'p1', remainingQty:5 });
-  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), {
+  await assertFails(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), {
     remainingQty:4, updatedAt:'2026-09-21T00:00:00Z'
   }));
   await assertFails(updateDoc(doc(db('sales1'), 'inventoryLots/lot1'), { unitCost:1 }));
@@ -355,7 +355,7 @@ test('lot cost is physically protected from sales engineer and warehouse', async
 });
 
 test('warehouse can create protected lot cost during receipt without being able to read it back', async () => {
-  await assertSucceeds(setDoc(doc(db('wh1'), 'inventoryLotCosts/newLot'), {
+  await assertFails(setDoc(doc(db('wh1'), 'inventoryLotCosts/newLot'), {
     lotId:'newLot', productId:'p1', unitCost:120
   }));
   await assertFails(getDoc(doc(db('wh1'), 'inventoryLotCosts/newLot')));
@@ -618,7 +618,7 @@ test('business owner may update own reservation without changing ownership', asy
     productKey:'p1', quantity:2, shortageQty:1, status:'active'
   });
 
-  await assertSucceeds(updateDoc(doc(db('sales1'), 'inventoryReservations/res-owned-sales1'), {
+  await assertFails(updateDoc(doc(db('sales1'), 'inventoryReservations/res-owned-sales1'), {
     quantity:1,
     shortageQty:2,
     status:'active',
@@ -769,7 +769,7 @@ test('only admin can archive zero stock with a new atomic audit and restore it',
   await assertFails(updateDoc(doc(db('admin'),'inventory/archive1'),{listArchived:true}));
   await assertSucceeds(archiveInventoryBatch('admin','archive1',true));
   await assertFails(updateDoc(doc(db('buyer1'),'inventory/archive1'),{listArchived:false}));
-  await assertSucceeds(updateDoc(doc(db('sales1'),'inventory/archive1'),{reserved:1}));
+  await assertFails(updateDoc(doc(db('sales1'),'inventory/archive1'),{reserved:1}));
   await assertSucceeds(archiveInventoryBatch('admin','archive1',false,'restore-audit'));
   await assertFails(deleteDoc(doc(db('admin'),'inventory/archive1')));
 });
@@ -789,4 +789,139 @@ test('archive blocks forged metadata on create, invalid types and audit reuse',a
     action:'inventory_list_archive',createdAt:'2026-10-05T00:00:00.000Z'});
   await assertFails(updateDoc(doc(db('admin'),'inventory/archive2'),{listArchived:true,
     listArchiveChangedByUid:'admin',listArchiveChangedAt:'2026-10-05T00:00:00.000Z',listArchiveAuditId:'reused'}));
+});
+
+const stockPermissions = require('../modules/stock-permissions.js');
+const { runTransaction } = require('firebase/firestore');
+function compatDb(uid) {
+  const firestore = db(uid);
+  let sequence = 0;
+  return {
+    collection: name => ({doc:id=>doc(firestore,name,id||`audit-${Date.now()}-${++sequence}`)}),
+    runTransaction: callback => runTransaction(firestore, tx => callback({
+      get:async ref=>{const snap=await tx.get(ref);return {exists:snap.exists(),data:()=>snap.data(),id:snap.id,ref};},
+      set:(...args)=>tx.set(...args),update:(...args)=>tx.update(...args),delete:(...args)=>tx.delete(...args)
+    }))
+  };
+}
+async function seedStockWorkflow(){
+  await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',deliveredQty:0,returnedQty:0,
+    items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'w1'}]});
+  await seed('inventory/p1',{productKey:'p1',productId:'p1',onHand:10,reserved:0,incoming:0});
+  await seed('warehouseStocks/w1-p1',{productKey:'p1',warehouseId:'w1',onHand:10,reserved:0,incoming:0});
+  await seed('inventoryLots/l1',{productKey:'p1',warehouseId:'w1',remainingQty:10});
+}
+async function stockWorkflow(physicalDelta, reservationQty, type){
+  const client=compatDb('sales1');
+  return stockPermissions.run(client,async tx=>{
+    const inv=client.collection('inventory').doc('p1');
+    const wh=client.collection('warehouseStocks').doc('w1-p1');
+    const res=client.collection('inventoryReservations').doc('stock-order__item-1');
+    const order=client.collection('orders').doc('stock-order');
+    const lot=client.collection('inventoryLots').doc('l1');
+    const invSnap=await tx.get(inv),whSnap=await tx.get(wh),resSnap=await tx.get(res),orderSnap=await tx.get(order),lotSnap=await tx.get(lot);
+    const oldReservation=resSnap.exists?resSnap.data().quantity:0;
+    const reserveDelta=reservationQty-oldReservation;
+    tx.update(inv,{onHand:invSnap.data().onHand+physicalDelta,reserved:invSnap.data().reserved+reserveDelta});
+    tx.update(wh,{onHand:whSnap.data().onHand+physicalDelta,reserved:whSnap.data().reserved+reserveDelta});
+    if(physicalDelta){
+      tx.update(lot,{remainingQty:lotSnap.data().remainingQty+physicalDelta});
+      if(type==='return_in')tx.update(order,{returnedQty:orderSnap.data().returnedQty+physicalDelta});
+      else tx.update(order,{deliveredQty:orderSnap.data().deliveredQty-physicalDelta});
+    }
+    tx.set(res,{orderId:'stock-order',itemId:'item-1',productKey:'p1',warehouseId:'w1',ownerUid:'sales1',salesCode:'S01',quantity:reservationQty,shortageQty:0,status:'active'});
+    tx.set(client.collection('inventoryMovements').doc(),{sourceId:'stock-order',sourceType:'order',productKey:'p1',ownerUid:'sales1',salesCode:'S01',type,qty:physicalDelta||reserveDelta,lotAllocations:physicalDelta?[{lotId:'l1',qty:type==='ship'?-physicalDelta:physicalDelta}]:[]});
+  },'sales1',true,'sales');
+}
+
+test('commercial stock reservation delivery reversal and return require atomic source evidence',async()=>{
+  await seedStockWorkflow();
+  await assertSucceeds(stockWorkflow(0,5,'reserve'));
+  await assertSucceeds(stockWorkflow(-2,3,'ship'));
+  await assertSucceeds(stockWorkflow(2,5,'ship_reversal'));
+  await assertSucceeds(stockWorkflow(-2,3,'ship'));
+  await assertSucceeds(stockWorkflow(1,4,'return_in'));
+  await assertFails(updateDoc(doc(db('sales1'),'inventory/p1'),{onHand:100}));
+  await assertFails(updateDoc(doc(db('sales1'),'inventoryLots/l1'),{remainingQty:100}));
+});
+
+test('stock witness cannot be reused for a second stock change',async()=>{
+  await seedStockWorkflow();await assertSucceeds(stockWorkflow(0,5,'reserve'));
+  const stock=await getDoc(doc(db('sales1'),'inventory/p1'));
+  await assertFails(updateDoc(doc(db('sales1'),'inventory/p1'),{reserved:4,stockOperationId:stock.data().stockOperationId}));
+});
+
+test('disabled-only accounts are denied by backend and commercial roles may probe missing order and quote IDs',async()=>{
+  await seed('users/off2',{role:'sales',salesCode:'S02',active:true,disabled:true});
+  await assertFails(getDoc(doc(db('off2'),'products/p-order')));
+  await assertSucceeds(getDoc(doc(db('sales1'),'orders/new-slot')));
+  await assertSucceeds(getDoc(doc(db('eng1'),'quotes/new-slot')));
+});
+
+test('purchaser and warehouse cannot rewrite embedded commercial line fields',async()=>{
+  const item={itemId:'i1',productId:'p1',itemCode:'ABC',itemName:'Product',qty:5,unitPrice:100,reservedQty:0,receivedQty:0};
+  await seed('orders/protected-lines',{ownerUid:'sales1',salesCode:'S01',items:[item]});
+  for(const uid of ['buyer1','wh1']){
+    for(const field of ['productId','itemCode','itemName','qty','unitPrice']){
+      await assertFails(updateDoc(doc(db(uid),'orders/protected-lines'),{items:[{...item,[field]:field==='qty'||field==='unitPrice'?999:'Changed'}]}));
+    }
+    await assertSucceeds(updateDoc(doc(db(uid),'orders/protected-lines'),{items:[{...item,receivedQty:2}]}));
+  }
+});
+
+test('warehouse receives a sanitized supply view and cannot read company purchase costs',async()=>{
+  const supply={type:'PURCHASING_PO',status:'ORDERED',qty:5,receivedQty:0,incomingRegisteredQty:5,productKey:'p1',unitCost:120};
+  await seed('supplyOrders/private-supply',supply);
+  await seed('purchaseOrders/private-po',{items:[{qty:5,unitPrice:120}]});
+  await assertSucceeds(setDoc(doc(db('buyer1'),'receivingSupplyOrders/private-supply'),stockPermissions.sanitizeSupply(supply)));
+  await assertSucceeds(getDoc(doc(db('wh1'),'receivingSupplyOrders/private-supply')));
+  await assertFails(getDoc(doc(db('wh1'),'supplyOrders/private-supply')));
+  await assertFails(getDoc(doc(db('wh1'),'purchaseOrders/private-po')));
+  await assertFails(setDoc(doc(db('wh1'),'receivingSupplyOrders/forged'),{qty:999}));
+  const client=compatDb('wh1');
+  await assertSucceeds(stockPermissions.run(client,async tx=>{
+    const ref=client.collection('supplyOrders').doc('private-supply');
+    const source=await tx.get(ref);
+    assert.equal(source.data().unitCost,undefined);
+    tx.update(ref,{receivedQty:2,incomingRegisteredQty:3,status:'PARTIAL_RECEIPT'});
+    tx.set(client.collection('inventoryLots').doc('private-lot'),{sourceId:'private-supply',sourceType:'SUPPLY_ORDER',remainingQty:2});
+    tx.set(client.collection('inventoryLotCosts').doc('private-lot'),{lotId:'private-lot',sourceType:'SUPPLY_ORDER',sourceId:'private-supply',costSourceSupplyId:'private-supply'});
+  },'wh1',false,'warehouse'));
+  await assertFails(updateDoc(doc(db('buyer1'),'supplyOrders/private-supply'),{unitCost:999}));
+  const privateSource=await getDoc(doc(db('buyer1'),'supplyOrders/private-supply'));
+  assert.equal(privateSource.data().unitCost,120);
+});
+
+test('engineer list and history search include only its own assisted quotes',async()=>{
+  await seed('quotes/assisted-list',{ownerUid:'sales1',salesCode:'S01',createdByUid:'eng1',createdByRole:'engineer',quoteDate:'2026-10-06',searchTokens:['product']});
+  await seed('quotes/other-assistant',{ownerUid:'sales1',salesCode:'S01',createdByUid:'sales1',createdByRole:'sales',quoteDate:'2026-10-06',searchTokens:['product']});
+  const list=query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),orderBy('quoteDate','desc'),limit(50));
+  await assertSucceeds(getDocs(list));
+  await assertSucceeds(getDocs(query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),where('searchTokens','array-contains','product'),limit(50))));
+  await assertFails(getDoc(doc(db('eng1'),'quotes/other-assistant')));
+});
+
+test('operational line validation supports thirty lines without losing commercial protection',async()=>{
+  const items=Array.from({length:30},(_,i)=>({itemId:'i'+i,productId:'p1',qty:1,unitPrice:100,receivedQty:0}));
+  await seed('orders/thirty-lines',{ownerUid:'sales1',salesCode:'S01',items});
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'orders/thirty-lines'),{items:items.map(row=>({...row,receivedQty:1}))}));
+  await assertSucceeds(updateDoc(doc(db('wh1'),'orders/thirty-lines'),{items:items.map(row=>({...row,receivedQty:2}))}));
+  await assertFails(updateDoc(doc(db('buyer1'),'orders/thirty-lines'),{items:items.map((row,i)=>({...row,unitPrice:i===29?1:100}))}));
+});
+
+test('multi-product reservation uses the matching product movement for each stock witness',async()=>{
+ const client=compatDb('sales1');
+ const items=['p1','p2'].map((productId,i)=>({itemId:'item-'+(i+1),productId,qty:5,warehouseId:'w1'}));
+ await seed('orders/multi-stock',{ownerUid:'sales1',salesCode:'S01',items});
+ for(const productId of ['p1','p2'])await seed('inventory/'+productId,{productKey:productId,onHand:10,reserved:0});
+ await assertSucceeds(stockPermissions.run(client,async tx=>{
+  const refs=items.map(item=>client.collection('inventory').doc(item.productId));
+  await Promise.all(refs.map(ref=>tx.get(ref)));
+  await tx.get(client.collection('orders').doc('multi-stock'));
+  items.forEach((item,i)=>{
+   tx.update(refs[i],{reserved:5});
+   tx.set(client.collection('inventoryReservations').doc('multi-stock__'+item.itemId),{orderId:'multi-stock',itemId:item.itemId,productKey:item.productId,warehouseId:'w1',ownerUid:'sales1',salesCode:'S01',quantity:5});
+   tx.set(client.collection('inventoryMovements').doc(),{sourceId:'multi-stock',sourceType:'order',productKey:item.productId,ownerUid:'sales1',salesCode:'S01',type:'reserve',qty:5});
+  });
+ },'sales1',true,'sales'));
 });

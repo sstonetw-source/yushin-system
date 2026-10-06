@@ -132,7 +132,7 @@ test('repeating an incoming-stock update does not count the same supply twice', 
             });
         }
     };
-    const register = vm.runInNewContext(`${source}\nregisterPurchaseIncoming`, {
+    const register = vm.runInNewContext(`function runRoleTransaction(callback){return db.runTransaction(callback);}function supplyOrdersCollection(){return db.collection('supplyOrders');}\n${source}\nregisterPurchaseIncoming`, {
         db,
         defaultWarehouse:()=>({id:'W1'}),
         warehouseStockDocId:(warehouse,key)=>`${warehouse}__${key}`,
@@ -188,7 +188,8 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
     assert.equal(printCalls, 1);
     assert.equal(registrationCalls, 0);
 
-    vm.runInContext('poIncomingSyncPending=true', context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext('poIncomingSyncPending=true', context);
     const pendingPrint = context.window.printPurchaseOrder();
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(button.disabled, true);
@@ -201,7 +202,8 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
     assert.equal(button.disabled, false);
     assert.match(messages.at(-1), /正在產生 PDF/);
 
-    vm.runInContext('poIncomingSyncPending=true', context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext('poIncomingSyncPending=true', context);
     context.registerPurchaseIncoming = async () => { throw new Error('網路中斷'); };
     await context.window.printPurchaseOrder();
     assert.equal(printCalls, 2, 'failed sync must not silently print an unsynchronized PO');
@@ -286,7 +288,8 @@ test('stock order shows dispatch, shipping, billing and complete as work advance
         YushinWorkflow:workflow,YushinFulfillment:fulfillment,
         window:{YushinFulfillment:fulfillment}
     });
-    vm.runInContext(syncGuard+"\n"+source,ctx);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", ctx);
+vm.runInContext(syncGuard+"\n"+source,ctx);
     const order={items:[{itemId:'I1',qty:3,orderedQty:3,shortageQty:0,
         fulfillmentType:'WAREHOUSE',reservedQty:3,dispatchPreparedQty:0}],isBilled:false,deliveryRecords:[]};
     const current=()=>ctx.orderItemDisplayCategory(order,order.items[0]);
@@ -318,7 +321,8 @@ test('a partly stocked order keeps its shortage and exposes reserved stock to di
         YushinWorkflow:workflow,YushinFulfillment:fulfillment,
         window:{YushinFulfillment:fulfillment}
     });
-    vm.runInContext(syncGuard+"\n"+source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(syncGuard+"\n"+source,context);
     const order={items:[{itemId:'I1',qty:10,orderedQty:10,shortageQty:5,
         fulfillmentType:'WAREHOUSE',reservedQty:5,dispatchPreparedQty:0}]};
     const item=order.items[0];
@@ -439,10 +443,10 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     const printStart = app.indexOf('window.printPurchaseOrder = async function()');
     const printEnd = app.indexOf("window.addEventListener('afterprint'", printStart);
     const printSource = app.slice(printStart, printEnd);
-    const transactionStart = printSource.indexOf('const commitPromise = db.runTransaction');
+    const transactionStart = printSource.indexOf('const commitPromise = runRoleTransaction');
     const transactionEnd = printSource.indexOf('await commitPromise');
     const coreTransaction = printSource.slice(transactionStart, transactionEnd);
-    assert.match(coreTransaction, /db\.collection\('supplyOrders'\)\.doc\(supplyId\)/);
+    assert.match(coreTransaction, /(?:db\.collection\('supplyOrders'\)|supplyOrdersCollection\(\))\.doc\(supplyId\)/);
     assert.match(coreTransaction, /type:'PURCHASING_PO'/);
     assert.match(coreTransaction, /method:'PURCHASING_PO'/);
     assert.match(coreTransaction, /const sourceType=item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
@@ -557,7 +561,7 @@ test('receiving queue reads every open supply type and follows the source order 
     const page=app.slice(pageStart,pageEnd);
     assert.match(page,/const freshSupply=supplySnapshot\.docs\.map\(doc=>\(\{id:doc\.id,\.\.\.doc\.data\(\)\}\)\)/);
     assert.doesNotMatch(page,/freshSupply=supplySnapshot\.docs[\s\S]{0,180}filter\(row=>row\.type/);
-    assert.match(page,/db\.collection\('supplyOrders'\)\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
+    assert.match(page,/(?:db\.collection\('supplyOrders'\)|supplyOrdersCollection\(\))\.where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)/);
     assert.match(page,/receivingSourceOrderCache=nextSourceOrders/);
 
     const listStart=app.indexOf('function renderPurchasingReceivingWorkList(');
@@ -617,7 +621,8 @@ test('manual ordered action records supply and source item only once after an un
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:(view,tab)=>switched.push([view,tab]),alert:()=>{}
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1);
     assert.equal(order.items[0].supplyOrderedQty,2);
@@ -680,7 +685,8 @@ test('manual ordered action can add a later genuine shortage without duplicating
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:()=>{},alert:()=>{}
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(supply.qty,2);
     assert.equal(supply.orderEvents.length,1);
@@ -814,7 +820,8 @@ test('receiving card counts standalone stock replenishment and does not hide it 
         YushinSupply:supply,
         window:{YushinReceiving:receiving,YushinSupply:supply}
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
     const result=context.standaloneReceivingSupplyMetrics();
     assert.deepEqual(JSON.parse(JSON.stringify(result)),{count:1,amount:800});
     assert.equal(seenFilters.selectedSales,'');
@@ -1028,7 +1035,8 @@ test('cancelled orders keep actual delivered sales but no pending sales', () => 
         localDateString:()=> '2026-09-30',
         dateInStatsRange:(date,start,end)=>!!date&&(!start||date>=start)&&(!end||date<=end)
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
     const result=context.calculateOrderStatsContribution({costPrice:50,orderDate:'2026-09-01'},'2026-09-01','2026-09-30');
     assert.equal(result.actualQty,4);
     assert.equal(result.actualSales,400);
@@ -1052,7 +1060,8 @@ test('completion date includes a later return date when the order is still net c
         savedReturnRecords:()=>[{date:'2026-09-10',qty:2}],
         dateOnlyFromTimestamp:value=>String(value||'').slice(0,10)
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
     assert.equal(context.orderCompletionDate({isBilled:true}),'2026-09-10');
 });
 
@@ -1067,7 +1076,8 @@ test('delivery progress uses net delivered quantity after returns', () => {
         returnedQuantity:()=>2,
         savedDeliveryRecords:()=>[{qty:10}]
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
     const progress=context.deliveryProgressInfo({isDelivered:true});
     assert.equal(progress.grossDelivered,10);
     assert.equal(progress.returned,2);
@@ -1088,7 +1098,8 @@ test('normalized order items derive fulfillment from delivery and return records
         brandIdentityForRecord:item=>({brand:String(item?.brand||''),brandId:String(item?.brandId||'')}),
         parseMoney:value=>Number(value||0)
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
     const [item]=context.normalizedOrderItems({
         items:[{itemId:'I1',qty:10,reservedQty:2,shortageQty:0,deliveredQty:0,returnedQty:0,fulfillmentType:'WAREHOUSE'}],
         deliveryRecords:[{itemId:'I1',qty:10}],
@@ -1122,7 +1133,8 @@ test('dispatch readiness uses live reservation and supports later receipt batche
         YushinFulfillment:fulfillment,
         window:{YushinFulfillment:fulfillment}
     });
-    vm.runInContext(syncGuard+"\n"+source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(syncGuard+"\n"+source,context);
     const item={itemId:'I1',orderedQty:10,qty:10,reservedQty:5,dispatchPreparedQty:5};
     const afterFirstShipment=context.itemDispatchState({items:[item],deliveryRecords:[{itemId:'I1',qty:5}]},item);
     assert.equal(afterFirstShipment.pending,5);
@@ -1237,7 +1249,7 @@ test('warehouse receiving no longer mutates purchase-order receipt state', () =>
     const end=app.indexOf('window.openSupplyReceipt',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/collection\('supplyOrders'\)/);
+    assert.match(source,/(?:collection\('supplyOrders'\)|supplyOrdersCollection\(\))/);
     assert.match(source,/collection\('receipts'\)/);
     assert.match(source,/warehouseStocks/);
     assert.doesNotMatch(source,/pendingInventoryItems/);
@@ -1749,7 +1761,8 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:()=>{},alert:()=>{}
     });
-    vm.runInContext(source,context);
+    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+vm.runInContext(source,context);
 
     const button={disabled:false,textContent:'已訂購',isConnected:false};
     await context.window.markPurchaseItemOrdered('O1','I1',button);
