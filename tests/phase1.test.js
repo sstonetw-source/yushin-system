@@ -2870,7 +2870,9 @@ test('order list calculates row progress summaries once', () => {
     assert.match(source,/const displayCategoriesByItem = new Map/);
     assert.match(source,/const deliveryPending = pendingDeliveryOrderIds\.has\(o\.id\)/);
     assert.match(source,/const billingPending = pendingOrderStatusKeys\.has\(o\.id \+ ':isBilled'\)/);
-    assert.match(source,/const lifecyclePending = pendingLifecycleOrderIds\.has\(o\.id\)/);
+    assert.match(source,/orderLifecycleActionButtons\(o, lifecycle, deliveryProgress, contextActions\)/);
+    const lifecycleButtons=appSource.slice(appSource.indexOf('function orderLifecycleActionButtons'),appSource.indexOf('function orderContextActionState'));
+    assert.equal((lifecycleButtons.match(/pendingLifecycleOrderIds\.has\(order\.id\)/g)||[]).length,1);
 });
 
 test('order work cards reuse normalized order items', () => {
@@ -3560,7 +3562,7 @@ test('procurement views reuse dispatch state while calculating quantities', () =
     assert.match(remainingSource,/procurementDemandForOrderItem\(order,item,dispatchOverride\)\.remainingToOrderQty/);
 
     const pendingStart=appSource.indexOf('function pendingProcurementDisplayLines');
-    const pendingEnd=appSource.indexOf('\nfunction standaloneReceivingSupplyMetrics',pendingStart);
+    const pendingEnd=appSource.indexOf('\nfunction receivingSupplyMetrics',pendingStart);
     const pendingSource=appSource.slice(pendingStart,pendingEnd);
     assert.match(pendingSource,/const lifecycle = lifecycleOverride \|\| orderLifecycleInfo\(order, items\)/);
     assert.match(pendingSource,/const dispatch = dispatchStateByItem\?\.get\(item\) \|\| itemDispatchState\(order, item\)/);
@@ -4174,8 +4176,10 @@ test('order lifecycle actions are hidden from purchaser and guarded by business 
     const renderEnd=appSource.indexOf('\nwindow.retryOrderInventoryReservation',renderStart);
     const renderSource=appSource.slice(renderStart,renderEnd);
     assert.match(renderSource,/const canManageOrderLifecycle = canManageOrderLifecycleCapability\(\)/);
-    assert.match(renderSource,/canManageOrderLifecycle[\s\S]*?quickSetOrderLifecycle/);
-    assert.match(renderSource,/canManageOrderLifecycle[\s\S]*?openReturnManagement/);
+    assert.match(renderSource,/orderLifecycleActionButtons\(o, lifecycle, deliveryProgress, contextActions\)/);
+    const actions=appSource.slice(appSource.indexOf('function orderLifecycleActionButtons'),appSource.indexOf('function orderContextActionState'));
+    assert.match(actions,/canManageOrderLifecycleCapability\(\)[\s\S]*?quickSetOrderLifecycle/);
+    assert.match(actions,/canManageOrderLifecycleCapability\(\)[\s\S]*?openReturnManagement/);
 
     ['quickSetOrderLifecycle','quickCompleteDelivery','quickCancelAllDelivery','saveDeliveryRecord','deleteDeliveryRecord','saveOrderLifecycleStatus','saveReturnRecord','deleteReturnRecord','toggleOrderStatus'].forEach(name => {
         const start=appSource.indexOf('window.'+name+' =');

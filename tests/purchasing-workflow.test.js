@@ -803,7 +803,7 @@ test('cancelled warehouse source still receives into free stock while direct shi
 });
 
 test('receiving card counts standalone stock replenishment and does not hide it by salesperson', () => {
-    const start=app.indexOf('function standaloneReceivingSupplyMetrics');
+    const start=app.indexOf('function receivingSupplyMetrics');
     const end=app.indexOf('\nfunction renderPurchasingWorkCards',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
@@ -816,21 +816,23 @@ test('receiving card counts standalone stock replenishment and does not hide it 
         ],
         purchaseFilterContext:()=>({start:'',end:'',selectedSales:'Sales A',selectedBrand:'',selectableBrands:['Beckman']}),
         purchaseLineMatchesFilters:(date,sales,brand,filters)=>{seenFilters=filters;return true;},
+        receivingSourceOrderForItem:()=>null,
+        tradeAnalysisCost:value=>value==null?null:Number(value),
         YushinReceiving:receiving,
         YushinSupply:supply,
         window:{YushinReceiving:receiving,YushinSupply:supply}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
 vm.runInContext(source,context);
-    const result=context.standaloneReceivingSupplyMetrics();
-    assert.deepEqual(JSON.parse(JSON.stringify(result)),{count:1,amount:800});
-    assert.equal(seenFilters.selectedSales,'');
+    const result=context.receivingSupplyMetrics();
+    assert.deepEqual(JSON.parse(JSON.stringify(result)),{count:2,amount:1800,missingCost:0,quantity:13});
+    assert.equal(seenFilters.selectedSales,'Sales A');
     const cardsStart=app.indexOf('function renderPurchasingWorkCards');
     const cardsEnd=app.indexOf('\nfunction purchasingCompletedRows',cardsStart);
     const cards=app.slice(cardsStart,cardsEnd);
-    assert.match(cards,/const standaloneReceiving = standaloneReceivingSupplyMetrics\(filters\)/);
-    assert.match(cards,/baseCount \+ extraCount/);
-    assert.match(cards,/baseAmount \+ extraAmount/);
+    assert.match(cards,/const receiving = receivingSupplyMetrics\(filters\)/);
+    assert.match(cards,/category === 'arrival' \? receiving.count/);
+    assert.match(cards,/category === 'arrival' \? receiving.amount/);
 });
 
 test('formal purchase order commit immediately hydrates the receiving supply cache', () => {
@@ -1806,28 +1808,28 @@ test('quick ordered action writes incoming inside the same transaction', () => {
 
 
 test('quick manual supply can cancel outstanding quantity from the receiving queue', () => {
-    const helperStart=app.indexOf('function manualSupplyCancelActionHtml');
+    const helperStart=app.indexOf('function supplyCancelActionHtml');
     const helperEnd=app.indexOf('\nfunction receivingWorkProgress',helperStart);
     const helperSource=app.slice(helperStart,helperEnd);
     assert.ok(helperStart>=0&&helperEnd>helperStart);
-    assert.match(helperSource,/supply\.type !== 'PURCHASING_MANUAL'/);
+    assert.match(helperSource,/\['PURCHASING_MANUAL', 'PURCHASING_PO'\]\.includes\(supply\.type\)/);
     assert.match(helperSource,/canCreatePurchaseOrderCapability\(\)/);
     assert.match(helperSource,/purchaseCancellationInProgress\.has\(key\)/);
-    assert.match(helperSource,/cancelManualSupplyOutstanding/);
+    assert.match(helperSource,/cancelSupplyOutstanding/);
 
     const listStart=app.indexOf('function renderPurchasingReceivingWorkList');
     const listEnd=app.indexOf('\nwindow.renderPoList',listStart);
     const listSource=app.slice(listStart,listEnd);
     assert.match(listSource,/const supplyById = new Map\(supplyReceivingCache\.map/);
-    assert.match(listSource,/manualSupplyCancelActionHtml\(supply\)/);
-    assert.equal((listSource.match(/manualSupplyCancelActionHtml\(/g)||[]).length,2);
+    assert.match(listSource,/supplyCancelActionHtml\(supply\)/);
+    assert.equal((listSource.match(/supplyCancelActionHtml\(/g)||[]).length,2);
 
-    const cancelStart=app.indexOf('window.cancelManualSupplyOutstanding = async function');
+    const cancelStart=app.indexOf('window.cancelSupplyOutstanding = async function');
     const cancelEnd=app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',cancelStart);
     const cancelSource=app.slice(cancelStart,cancelEnd);
     assert.ok(cancelStart>=0&&cancelEnd>cancelStart);
     assert.match(cancelSource,/canCreatePurchaseOrderCapability\(\)/);
-    assert.match(cancelSource,/supply\.type !== 'PURCHASING_MANUAL'/);
+    assert.match(cancelSource,/\['PURCHASING_MANUAL', 'PURCHASING_PO'\]\.includes\(supply\.type\)/);
     assert.match(cancelSource,/const actionKey = `supply:\$\{supplyId\}`/);
     assert.match(cancelSource,/purchaseCancellationInProgress\.add\(actionKey\)/);
     assert.match(cancelSource,/await cancelOutstandingSupplyRecord\(/);
@@ -1838,7 +1840,7 @@ test('quick manual supply can cancel outstanding quantity from the receiving que
 
 test('quick manual cancellation reuses the same audited cancellation transaction as formal PO cancellation', () => {
     const coreStart=app.indexOf('async function cancelOutstandingSupplyRecord');
-    const coreEnd=app.indexOf('\nwindow.cancelManualSupplyOutstanding',coreStart);
+    const coreEnd=app.indexOf('\nwindow.cancelSupplyOutstanding',coreStart);
     const coreSource=app.slice(coreStart,coreEnd);
     assert.match(coreSource,/incoming:Math\.max\(0,inv\.incoming-registeredIncoming\)/);
     assert.match(coreSource,/incoming:Math\.max\(0,wh\.incoming-registeredIncoming\)/);
@@ -1855,21 +1857,21 @@ test('quick manual cancellation reuses the same audited cancellation transaction
 
 
 test('quick purchase outstanding cancellation reuses safe supply cancellation', () => {
-    const actionStart=app.indexOf('function manualSupplyCancelActionHtml');
+    const actionStart=app.indexOf('function supplyCancelActionHtml');
     const actionEnd=app.indexOf('\nfunction receivingWorkProgress',actionStart);
     const actionSource=app.slice(actionStart,actionEnd);
     assert.ok(actionStart>=0&&actionEnd>actionStart);
-    assert.match(actionSource,/supply\.type !== 'PURCHASING_MANUAL'/);
+    assert.match(actionSource,/\['PURCHASING_MANUAL', 'PURCHASING_PO'\]\.includes\(supply\.type\)/);
     assert.match(actionSource,/isPurchaseTerminalStatus\(supply\.status\)/);
     assert.match(actionSource,/const remaining = Math\.max\(0, Number\(supply\.qty \|\| 0\) - Number\(supply\.receivedQty \|\| 0\)\)/);
-    assert.match(actionSource,/cancelManualSupplyOutstanding/);
+    assert.match(actionSource,/cancelSupplyOutstanding/);
 
-    const cancelStart=app.indexOf('window.cancelManualSupplyOutstanding = async function');
+    const cancelStart=app.indexOf('window.cancelSupplyOutstanding = async function');
     const cancelEnd=app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',cancelStart);
     const cancelSource=app.slice(cancelStart,cancelEnd);
     assert.ok(cancelStart>=0&&cancelEnd>cancelStart);
     assert.match(cancelSource,/canCreatePurchaseOrderCapability\(\)/);
-    assert.match(cancelSource,/supply\.type !== 'PURCHASING_MANUAL'/);
+    assert.match(cancelSource,/\['PURCHASING_MANUAL', 'PURCHASING_PO'\]\.includes\(supply\.type\)/);
     assert.match(cancelSource,/purchaseCancellationInProgress\.add\(actionKey\)/);
     assert.match(cancelSource,/await cancelOutstandingSupplyRecord\(/);
     assert.match(cancelSource,/supplyReceivingCache = supplyReceivingCache\.filter/);
@@ -1879,7 +1881,7 @@ test('quick purchase outstanding cancellation reuses safe supply cancellation', 
 
 test('ERP close semantics distinguish partial receipt from zero-receipt cancellation', () => {
     const coreStart=app.indexOf('async function cancelOutstandingSupplyRecord');
-    const coreEnd=app.indexOf('\nwindow.cancelManualSupplyOutstanding',coreStart);
+    const coreEnd=app.indexOf('\nwindow.cancelSupplyOutstanding',coreStart);
     const core=app.slice(coreStart,coreEnd);
     assert.match(core,/const terminalStatus=received>0\?'CLOSED':'CANCELLED'/);
     assert.match(core,/closedQty:remaining/);

@@ -585,9 +585,16 @@ function supplyOrdersCollection() {
 }
 async function runRoleTransaction(callback) {
     await ensurePermissionRulesReady();
-    if(!permissionRulesReady)return db.runTransaction(callback);
-    return globalThis.YushinStockPermissions.run(db, callback, currentUser?.uid || '',
-        currentUserRole === 'sales' || currentUserRole === 'engineer', currentUserRole);
+    const result = !permissionRulesReady
+        ? await db.runTransaction(callback)
+        : await globalThis.YushinStockPermissions.run(db, callback, currentUser?.uid || '',
+            currentUserRole === 'sales' || currentUserRole === 'engineer', currentUserRole);
+    // A successful transaction can change orders, receipts, stock or purchasing.
+    // The next analysis visit must read fresh sources instead of reusing the old report.
+    tradeAnalysisReady = false;
+    tradeAnalysisLoadedKey = '';
+    markMainPageDirty('admin');
+    return result;
 }
 
 function hasBusinessCapability(role = currentUserRole) {
@@ -9762,6 +9769,21 @@ function itemDispatchState(order, item) {
     });
 }
 
+function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return '';
+    if (pendingLifecycleOrderIds.has(order.id)) return '<button type="button" disabled>處理中…</button>';
+    const id = inlineJsValue(order.id);
+    const buttons = [];
+    if (lifecycle.status === 'normal') {
+        if (actions.showPartialDelivery) buttons.push(`<button type="button" onclick="openPartialDeliveryForOrder(${id})">分批交貨</button>`);
+        if (progress.remaining > 0) buttons.push(`<button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle(${id}, 'cancelled')">${progress.delivered > 0 ? '取消剩餘未送貨數量' : '取消訂單'}</button>`);
+    } else {
+        buttons.push(`<button type="button" onclick="quickSetOrderLifecycle(${id}, 'normal')">恢復訂單</button>`);
+    }
+    if (actions.showReturn) buttons.push(`<button type="button" onclick="openReturnManagement(${id})">退貨</button>`);
+    return buttons.join('');
+}
+
 function orderContextActionState(order, normalizedItems = null, dispatchStateByItem = null) {
     const items = normalizedItems || normalizedOrderItems(order);
     const states = items.map(item => dispatchStateByItem?.get(item) || itemDispatchState(order, item));
@@ -10697,7 +10719,6 @@ window.renderOrdersList = function() {
         const contextActions = orderContextActionState(o, allOrderItems, dispatchStateByItem);
         const deliveryPending = pendingDeliveryOrderIds.has(o.id);
         const billingPending = pendingOrderStatusKeys.has(o.id + ':isBilled');
-        const lifecyclePending = pendingLifecycleOrderIds.has(o.id);
         if (lifecycle.status !== 'normal') {
             tr.classList.add('order-row-closed');
         }
@@ -10730,15 +10751,7 @@ window.renderOrdersList = function() {
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
-                            ${lifecyclePending
-                                ? (canManageOrderLifecycle ? '<button type="button" disabled>處理中…</button>' : '')
-                                : canManageOrderLifecycle
-                                    ? (lifecycle.status === 'normal'
-                                        ? `${contextActions.showPartialDelivery ? `<button type="button" onclick="openPartialDeliveryForOrder('${o.id}')">分批交貨</button>` : ''}
-                            ${deliveryProgress.remaining>0 ? `<button type="button" class="danger-menu-item" onclick="quickSetOrderLifecycle('${o.id}', 'cancelled')">${deliveryProgress.delivered > 0 ? '取消剩餘未送貨數量' : '取消訂單'}</button>` : ''}
-                            ${contextActions.showReturn ? `<button type="button" onclick="openReturnManagement('${o.id}')">退貨</button>` : ''}`
-                                        : `<button type="button" onclick="quickSetOrderLifecycle('${o.id}', 'normal')">恢復訂單</button>`)
-                                    : ''}
+                            ${orderLifecycleActionButtons(o, lifecycle, deliveryProgress, contextActions)}
                             ${lifecycle.status==='normal'&&['admin','purchaser'].includes(currentUserRole)&&allOrderItems.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&((dispatchStateByItem.get(item)?.pending||0)+(dispatchStateByItem.get(item)?.shippable||0)>0)) ? `<button type="button" class="btn-secondary" onclick="openWarehouseDispatchList(${inlineJsValue(o.id)})">出貨清單</button>` : ''}
                             ${dispatchActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
@@ -11198,22 +11211,25 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
     }).filter(Boolean);
 }
 
-function standaloneReceivingSupplyMetrics(filters = purchaseFilterContext()) {
-    const metrics = { count:0, amount:0 };
+function receivingSupplyMetrics(filters = purchaseFilterContext()) {
+    const metrics = { count:0, amount:0, missingCost:0, quantity:0 };
+    const seen = new Set();
     supplyReceivingCache.forEach(supply => {
-        // 公司備庫沒有客戶訂單，不應被業務篩選隱藏；日期與廠牌篩選仍照常套用。
-        if (supply.orderId) return;
-        if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
+        if (seen.has(supply.id)) return;
+        seen.add(supply.id);
         const progress = globalThis.YushinSupply?.receiptProgress(supply);
-        if (!progress || !['ORDERED', 'PARTIAL_RECEIPT'].includes(progress.status)) return;
-        const remaining = progress.remainingQty;
-        if (!(remaining > 0)) return;
-        if (!purchaseLineMatchesFilters(supply.orderDate || supply.createdAt, '', supply.brand, {
-            ...filters,
-            selectedSales:''
-        })) return;
+        if (!progress || !['ORDERED', 'PARTIAL_RECEIPT'].includes(progress.status) || !(progress.remainingQty > 0)) return;
+        const order = receivingSourceOrderForItem(supply);
+        // Standalone company stock is shared; linked supplies retain their sales filter.
+        // A cancelled customer order does not cancel the real supplier commitment.
+        const effectiveFilters = supply.orderId ? filters : {...filters, selectedSales:''};
+        if (!purchaseLineMatchesFilters(order?.orderDate || supply.orderDate || supply.createdAt,
+            order?.salesName || supply.salesName || '', supply.brand, effectiveFilters)) return;
         metrics.count += 1;
-        metrics.amount += remaining * Math.max(0, Number(supply.unitCost || 0));
+        metrics.quantity += progress.remainingQty;
+        const cost = tradeAnalysisCost(supply.unitCost);
+        if (cost === null) metrics.missingCost += 1;
+        else metrics.amount += progress.remainingQty * cost;
     });
     return metrics;
 }
@@ -11265,7 +11281,7 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         stateMap,
         lifecycleMap
     );
-    const standaloneReceiving = standaloneReceivingSupplyMetrics(filters);
+    const receiving = receivingSupplyMetrics(filters);
     const demandOrderingRows=purchaseDemandSummaryReady ? purchaseDemandSummaryRows.filter(demand=>{
         if(!(Number(demand.remainingToOrderQty||0)>0))return false;
         const order=demand.sourceType==='SALES_ORDER'
@@ -11287,12 +11303,12 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         const count = document.getElementById(countId);
         const amount = document.getElementById(amountId);
         const useDemand=category==='ordering'&&demandOrderingRows;
-        const baseCount=useDemand?demandOrderingRows.length:metrics[category].count;
-        const baseAmount=useDemand?demandOrderingAmount:metrics[category].amount;
-        const extraCount = category === 'arrival' ? standaloneReceiving.count : 0;
-        const extraAmount = category === 'arrival' ? standaloneReceiving.amount : 0;
-        if (count) count.textContent = category === 'ordering' && !purchaseDemandSummaryReady ? (purchaseDemandSummaryError || '讀取中…') : category==='arrival' && !activeReceivingSupplyReady ? (activeReceivingSupplyError || '讀取中…') : !orderWorkQueueReady && category !== 'ordering' ? (orderWorkQueueError || '讀取中…') : `${baseCount + extraCount} 筆`;
-        if (amount) amount.textContent = formatStatsMoney(baseAmount + extraAmount);
+        const baseCount=category === 'arrival' ? receiving.count : useDemand?demandOrderingRows.length:metrics[category].count;
+        const baseAmount=category === 'arrival' ? receiving.amount : useDemand?demandOrderingAmount:metrics[category].amount;
+        if (count) count.textContent = category === 'ordering' && !purchaseDemandSummaryReady ? (purchaseDemandSummaryError || '讀取中…') : category==='arrival' && !activeReceivingSupplyReady ? (activeReceivingSupplyError || '讀取中…') : !orderWorkQueueReady && category === 'dispatch' ? (orderWorkQueueError || '讀取中…') : `${baseCount} 筆`;
+        if (amount) amount.textContent = category === 'arrival' && !activeReceivingSupplyReady ? (activeReceivingSupplyError || '讀取中…') : category === 'arrival' && !canCreatePurchaseOrderCapability()
+            ? '成本不顯示'
+            : formatStatsMoney(baseAmount) + (category === 'arrival' && receiving.missingCost ? `（${receiving.missingCost} 筆待補成本）` : '');
     });
     const stockingSummary = document.getElementById('purchaseStockingSummary');
     if (stockingSummary) {
@@ -13008,15 +13024,15 @@ function receivingEvidenceForWorkItem(order, item, itemIndex, evidenceIndex = nu
     return evidence;
 }
 
-function manualSupplyCancelActionHtml(supply) {
-    if (!supply || supply.type !== 'PURCHASING_MANUAL') return '';
+function supplyCancelActionHtml(supply) {
+    if (!supply || !['PURCHASING_MANUAL', 'PURCHASING_PO'].includes(supply.type)) return '';
     if (!canCreatePurchaseOrderCapability()) return '';
     if (isPurchaseTerminalStatus(supply.status)) return '';
     const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
     if (remaining <= 0) return '';
     const key = `supply:${supply.id}`;
     const pending = purchaseCancellationInProgress.has(key);
-    return `<button type="button" class="btn-small danger-menu-item" onclick="cancelManualSupplyOutstanding(${inlineJsValue(supply.id)})" ${pending ? 'disabled' : ''}>${pending ? '取消中…' : '取消未到貨'}</button>`;
+    return `<button type="button" class="btn-small danger-menu-item" onclick="cancelSupplyOutstanding(${inlineJsValue(supply.id)})" ${pending ? 'disabled' : ''}>${pending ? '取消中…' : '取消未到貨'}</button>`;
 }
 
 function receivingWorkProgress(order, item) {
@@ -13079,7 +13095,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                         const suffix = evidence.length > 1 ? ` ${index + 1}/${evidence.length}` : '';
                         const supply = supplyById.get(entry.id);
                         const receiveButton = `<button type="button" class="btn-small btn-secondary" data-receipt-supply="${escapeAttr(entry.id)}" onclick="openSupplyReceipt(${inlineJsValue(entry.id)})">📥 到貨入庫${suffix}</button>`;
-                        return [receiveButton, manualSupplyCancelActionHtml(supply)].filter(Boolean).join(' ');
+                        return [receiveButton, supplyCancelActionHtml(supply)].filter(Boolean).join(' ');
                     }).join(' ')
                     : '<span class="order-progress-badge order-progress-warning">找不到採購紀錄</span>';
 
@@ -13124,7 +13140,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
 
         // 已取消訂單的原廠直送沒有倉庫可承接，因此只能顯示警示、不可確認到貨。
         const blockedDirectShip = directShip && sourceOrder && sourceStatus !== 'normal';
-        const cancelAction = manualSupplyCancelActionHtml(supply);
+        const cancelAction = supplyCancelActionHtml(supply);
         const actionHtml = !canReceiveInventoryCapability()
             ? '<span class="order-progress-badge">唯讀</span>'
             : blockedDirectShip
@@ -13181,7 +13197,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         button.textContent = '前往庫存收貨';
     });
     const totalRows = workCount + standaloneSupplyCount;
-    if (inventory) updateInventoryReceivingCount(totalRows);
+    const supplyMetrics = receivingSupplyMetrics(filters);
+    if (inventory) updateInventoryReceivingCount(supplyMetrics.count);
     if (emptyHint) {
         emptyHint.style.display = totalRows === 0 ? 'block' : 'none';
         emptyHint.textContent = !purchasingReceivingReady ? '正在載入待到貨工作…' : '目前沒有待到貨品項。';
@@ -13189,7 +13206,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     if (status) {
         if (!purchasingReceivingReady) status.textContent = `待到貨工作 ${workCount} 個；採購資料載入中…`;
         else {
-            const parts = [`待到貨 ${workCount} 個訂單品項`];
+            const parts = [`待到貨 ${supplyMetrics.count} 筆採購供應（${supplyMetrics.quantity} 個）`, `${workCount} 個正常訂單品項`];
             if (overdueCount) parts.push(`逾期 ${overdueCount} 筆已置頂`);
             if (planRiskCount) parts.push(`另有 ${planRiskCount} 筆預計晚於需求日`);
             if (standaloneSupplyCount) parts.push(`另有 ${standaloneSupplyCount} 筆庫存補貨／非正常訂單供應`);
@@ -13801,9 +13818,9 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason) {
     return result;
 }
 
-window.cancelManualSupplyOutstanding = async function(supplyId) {
+window.cancelSupplyOutstanding = async function(supplyId) {
     if (!canCreatePurchaseOrderCapability()) {
-        alert('只有管理員或採購可以停止快速採購的未到貨數量。');
+        alert('只有管理員或採購可以取消採購的未到貨數量。');
         return;
     }
     const actionKey = `supply:${supplyId}`;
@@ -13813,32 +13830,32 @@ window.cancelManualSupplyOutstanding = async function(supplyId) {
     try {
         const snapshot = await firestoreReadWithTimeout(
             supplyOrdersCollection().doc(supplyId).get(),
-            '讀取快速採購狀態'
+            '讀取採購品項狀態'
         );
         if (!snapshot.exists) throw new Error('找不到這筆供應紀錄。');
         supply = { id:snapshot.id, ...snapshot.data() };
     } catch (err) {
-        alert('無法讀取快速採購紀錄：' + (err?.message || err));
+        alert('無法讀取採購品項：' + (err?.message || err));
         return;
     }
 
-    if (supply.type !== 'PURCHASING_MANUAL') {
-        alert('這筆供應紀錄不是快速採購，請從對應的正式採購單處理。');
+    if (!['PURCHASING_MANUAL', 'PURCHASING_PO'].includes(supply.type)) {
+        alert('此採購方式不支援在這裡取消。');
         return;
     }
     if (isPurchaseTerminalStatus(supply.status)) {
         const label=String(supply.status||'').toUpperCase()==='CLOSED'?'已結案':'已取消';
-        showActionFeedback(`這筆快速採購${label}，沒有待處理的未到貨數量。`, 'success');
+        showActionFeedback(`這筆採購${label}，沒有待處理的未到貨數量。`, 'success');
         return;
     }
     const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
     if (remaining <= 0) {
-        alert('這筆快速採購已全部到貨，沒有可取消的未到貨數量。');
+        alert('這筆採購已全部到貨，沒有可取消的未到貨數量。');
         return;
     }
 
     const reasonRaw = prompt(
-        `停止快速採購 ${supply.internalNo || supply.id} 尚未到貨的 ${remaining} 個。\n已實際到貨的數量不會回沖；若已有到貨紀錄，這筆供應會標示為「已結案」。\n原訂單會重新出現尚需採購的數量。\n\n請輸入原因：`
+        `取消品項 ${supply.itemCode || supply.itemName || supply.id} 尚未到貨的 ${remaining} 個。\n採購單：${supply.purchaseDocumentNo || supply.internalNo || supply.id}\n只取消此品項，其他品項不受影響；已到貨的數量不回沖。\n來源訂單仍有效時，未滿足的數量會重新列入待採購。\n\n請輸入原因：`
     );
     if (reasonRaw === null) return;
     const reason = String(reasonRaw || '').trim();
@@ -13851,23 +13868,33 @@ window.cancelManualSupplyOutstanding = async function(supplyId) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
     try {
         const result = await cancelOutstandingSupplyRecord(
-            supply.internalNo || supply.id,
+            supply.purchaseDocumentId || supply.internalNo || supply.id,
             supply.id,
             reason
         );
+        purchaseHistorySupplyCache.set(supply.id, {...supply, status:result.terminalStatus,
+            incomingRegisteredQty:0, ...(result.terminalStatus === 'CLOSED' ? {closedQty:result.cancelledQty} : {cancelledQty:result.cancelledQty})});
         supplyReceivingCache = supplyReceivingCache.filter(row => row.id !== supply.id);
-        if (result.orderId) await refreshAffectedOrderCaches([result.orderId]);
-        else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+        try {
+            await loadActiveReceivingSupplyCache(true);
+            if (result.orderId) await refreshAffectedOrderCaches([result.orderId]);
+        } catch (refreshError) {
+            markMainPageDirty('orders.po');
+            showActionFeedback('取消已完成，但清單更新失敗；請重新開啟採購頁確認。', 'warning');
+            console.warn('取消後更新清單失敗', refreshError);
+        }
+        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
         showActionFeedback(
-            `${result.terminalStatus==='CLOSED'?'已結案':'已取消'}快速採購 ${supply.internalNo || supply.id}；停止未到貨數量 ${result.cancelledQty || remaining}，在途庫存已同步。`,
+            `${result.terminalStatus==='CLOSED'?'已結案':'已取消'}採購品項 ${supply.itemCode || supply.itemName || supply.id}；取消未到貨數量 ${result.cancelledQty || remaining}，在途庫存已同步。`,
             'success'
         );
     } catch (err) {
-        console.error('停止快速採購未到貨失敗：', err);
-        alert('停止快速採購失敗：' + (err?.message || err) + '。可以重新執行；已成功的異動不會重複扣除。');
+        console.error('取消採購品項未到貨失敗：', err);
+        alert('取消採購品項失敗：' + (err?.message || err) + '。可以重新執行；已成功的異動不會重複扣除。');
     } finally {
         purchaseCancellationInProgress.delete(actionKey);
         if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+        if (document.getElementById('inventory-system')?.classList.contains('active') && inventoryReceivingVisible) renderPurchasingReceivingWorkList(null, null, null, null, true);
     }
 };
 
@@ -16503,7 +16530,10 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const now=new Date().toISOString();
     let lotAllocations=[],cogs=0;
     if(deltaQty>0){
-        const available=globalThis.YushinInventory.availableReturnAllocations(savedDeliveryRecords(order),savedReturnRecords(order));
+        // Editing a return increases only the new delta; its original lots are already returned.
+        const priorReturns = savedReturnRecords(order).filter(record => !previousReturnRecord || record.id !== previousReturnRecord.id);
+        if (previousReturnRecord) priorReturns.push(previousReturnRecord);
+        const available=globalThis.YushinInventory.availableReturnAllocations(savedDeliveryRecords(order),priorReturns);
         const plan=globalThis.YushinInventory.reverseLotAllocations([{qty:available.reduce((sum,row)=>sum+Number(row.qty||0),0),lotAllocations:available}],deltaQty);
         lotAllocations=plan.allocations;cogs=plan.totalCost;
         const lotContexts=await Promise.all(lotAllocations.map(async row=>{
@@ -17079,7 +17109,7 @@ function renderOrderLifecycleModal() {
     const info = orderLifecycleInfo(order);
     document.getElementById('orderStatusEditPanel').style.display = editable ? '' : 'none';
     const isEditingReturn = !!document.getElementById('returnEditId').value;
-    document.getElementById('returnFormPanel').style.display = editable && (info.status === 'normal' || isEditingReturn) ? '' : 'none';
+    document.getElementById('returnFormPanel').style.display = editable && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';
     document.getElementById('orderLifecycleSummary').innerHTML = `
         <strong>${escapeHtml(order.itemName || '未命名品項')}</strong>（${escapeHtml(order.itemCode || '無貨號')}）<br>
         目前狀態：<span class="order-validity-badge order-validity-${info.css}">${info.label}</span>　
@@ -20395,7 +20425,7 @@ function salesStatisticOrderLines(order) {
         totalPrice: Number(item.totalPrice || 0), costPrice: item.costPrice, costSource: item.costSource || order.costSource || '',
         deliveryRecords: savedDeliveryRecords(order).filter(row => row.itemId === item.itemId),
         returnRecords: savedReturnRecords(order).filter(row => row.itemId === item.itemId),
-        isDelivered: false
+        isDelivered: !!order.isDelivered && savedDeliveryRecords(order).length === 0
     }));
 }
 
@@ -20559,7 +20589,11 @@ function buildTradeAnalysisRows() {
         const common={customer:order.customerName||'',supplier:'',documentNo:order.orderNo||order.quoteNo||order.id,orderId:order.id,
             sales:stripPhoneSuffix(order.salesName)||'未指定業務',sourceId:order.id,itemId:order.itemId||''};
         const unit=orderUnitSalesAmount(order);
-        savedDeliveryRecords(order).forEach(record=>push('sales',order,Number(record.qty||0),unit,{...common,date:record.date,event:'送貨',eventId:record.id||'',status:'已送貨'}));
+        const deliveries = savedDeliveryRecords(order);
+        deliveries.forEach(record=>push('sales',order,Number(record.qty||0),unit,{...common,date:record.date,event:'送貨',eventId:record.id||'',status:'已送貨'}));
+        if (!deliveries.length && order.isDelivered) {
+            push('sales',order,orderQuantity(order),unit,{...common,date:order.orderDate || '',event:'舊資料推估送貨',eventId:'legacy-delivery',status:'已送貨（日期推估）',estimated:true});
+        }
         savedReturnRecords(order).forEach(record=>push('sales',order,-Number(record.qty||0),unit,{...common,date:record.date,event:'退貨',eventId:record.id||'',status:'已退貨'}));
         const contribution=calculateOrderStatsContribution(order,'',localDateString());
         if(contribution.pendingQty>0)push('pending',order,contribution.pendingQty,unit,{...common,date:order.orderDate||'',event:'未送貨餘額',status:'待送貨'});

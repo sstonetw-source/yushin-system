@@ -150,3 +150,26 @@ vm.runInContext(source.slice(start,end),x);x.window.openTradeAnalysisDetail('sal
     assert.equal(x.tradeAnalysisExportRows(report,'sales').length,101);
     assert.match(elements.tradeAnalysisDetailSummary.textContent,/匯出包含全部明細/);
 });
+
+test('legacy delivered flags contribute estimated sales and exclude already delivered pending quantities',()=>{
+ const c=fixture();const order=c.salesStatisticsOrders.find(o=>o.id==='O2');
+ Object.assign(order,{isDelivered:true,orderDate:'2026-10-02'});
+ const rows=c.buildTradeAnalysisRows();const report=core.summarize(rows,filters);
+ assert.equal(report.totals.sales,400);assert.equal(report.totals.pending,700);
+ const legacy=report.details.sales.find(row=>row.orderId==='O2');
+ assert.equal(legacy.qty,2);assert.equal(legacy.date,'2026-10-02');assert.equal(legacy.estimated,true);assert.match(legacy.status,/推估/);
+ order.deliveryRecords=[{id:'D2',date:'2026-10-03',qty:2}];
+ const actual=c.buildTradeAnalysisRows().filter(row=>row.kind==='sales'&&row.orderId==='O2');
+ assert.equal(actual.length,1);assert.equal(actual[0].event,'送貨');assert.equal(actual[0].estimated,undefined);
+});
+test('legacy multi-item delivered flags preserve line amounts and cancellation keeps actual historical sales',()=>{
+ const c=fixture();const order=c.salesStatisticsOrders.find(o=>o.id==='O2');
+ Object.assign(order,{isDelivered:true,status:'cancelled',orderDate:'2026-10-02',items:[
+  {itemId:'A',qty:1,unitPrice:40,totalPrice:40},{itemId:'B',qty:1,unitPrice:60,totalPrice:60}
+ ]});
+ const rows=c.buildTradeAnalysisRows().filter(row=>row.orderId==='O2');
+ assert.equal(rows.filter(row=>row.kind==='pending').length,0);
+ assert.equal(rows.filter(row=>row.kind==='sales').length,2);
+ assert.equal(rows.filter(row=>row.kind==='sales').reduce((sum,row)=>sum+row.amount,0),100);
+ assert.equal(rows.every(row=>row.estimated),true);
+});
