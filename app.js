@@ -22325,6 +22325,48 @@ function productImportValueEqual(field, currentValue, nextValue) {
     return String(currentValue ?? '') === String(nextValue ?? '');
 }
 
+const LARGE_PRODUCT_IMPORT_COMPARE_THRESHOLD = 1000;
+
+async function loadExistingProductImportState(productIds = [], costProductIds = []) {
+    const uniqueProductIds = [...new Set((productIds || []).map(id => String(id || '').trim()).filter(Boolean))];
+    const uniqueCostProductIds = [...new Set((costProductIds || []).map(id => String(id || '').trim()).filter(Boolean))];
+    const existingProducts = new Map();
+    const existingCosts = new Map();
+
+    if (uniqueProductIds.length >= LARGE_PRODUCT_IMPORT_COMPARE_THRESHOLD) {
+        // Large brand files (for example Bio-Rad with tens of thousands of rows) must not
+        // perform one Firestore "in" query per 10 products. Current master data is finite,
+        // so scan products/costs in 500-row pages once and compare locally.
+        const [productRows, costRows] = await Promise.all([
+            readCollectionInBatches('products', 500),
+            uniqueCostProductIds.length ? readCollectionInBatches('productCosts', 500) : Promise.resolve([])
+        ]);
+        const productIdSet = new Set(uniqueProductIds);
+        const costIdSet = new Set(uniqueCostProductIds);
+        productRows.forEach(row => { if (productIdSet.has(row.id)) existingProducts.set(row.id, row); });
+        costRows.forEach(row => { if (costIdSet.has(row.id)) existingCosts.set(row.id, row); });
+        return { existingProducts, existingCosts };
+    }
+
+    for (let i = 0; i < uniqueProductIds.length; i += 10) {
+        const ids = uniqueProductIds.slice(i, i + 10);
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('products').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
+            'Product Import 產品比對'
+        );
+        snapshot.docs.forEach(doc => existingProducts.set(doc.id, doc.data() || {}));
+    }
+    for (let i = 0; i < uniqueCostProductIds.length; i += 10) {
+        const ids = uniqueCostProductIds.slice(i, i + 10);
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('productCosts').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
+            'Product Import 成本比對'
+        );
+        snapshot.docs.forEach(doc => existingCosts.set(doc.id, doc.data() || {}));
+    }
+    return { existingProducts, existingCosts };
+}
+
 async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
     const canWriteFormalMaster = currentUserRole === 'admin' || currentUserRole === 'purchaser';
     if (!canWriteFormalMaster) return { productWrites:0, costWrites:0, unchangedRows:0 };
@@ -22332,25 +22374,7 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
     const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand: storedBrand })));
     const productIds = [...new Set(normalizedItems.map(item => item.productId).filter(Boolean))];
     const costProductIds = [...new Set(normalizedItems.filter(item => item.standardCostProvided === true).map(item => item.productId).filter(Boolean))];
-    const existingProducts = new Map();
-    const existingCosts = new Map();
-
-    for (let i = 0; i < productIds.length; i += 10) {
-        const ids = productIds.slice(i, i + 10);
-        const snapshot = await firestoreReadWithTimeout(
-            db.collection('products').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
-            'Product Import 產品比對'
-        );
-        snapshot.docs.forEach(doc => existingProducts.set(doc.id, doc.data() || {}));
-    }
-    for (let i = 0; i < costProductIds.length; i += 10) {
-        const ids = costProductIds.slice(i, i + 10);
-        const snapshot = await firestoreReadWithTimeout(
-            db.collection('productCosts').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
-            'Product Import 成本比對'
-        );
-        snapshot.docs.forEach(doc => existingCosts.set(doc.id, doc.data() || {}));
-    }
+    const { existingProducts, existingCosts } = await loadExistingProductImportState(productIds, costProductIds);
 
     const now = new Date().toISOString();
     const updatedBy = currentUser?.uid || '';
@@ -22446,29 +22470,7 @@ async function summarizeProductMasterImport(groups, errors = []) {
     const rows = groups.flatMap(group => group.imported.map(raw => normalizeProductMasterItem({ ...raw, brand: group.brand })));
     const uniqueProductIds = [...new Set(rows.map(item => String(item.productId || '').trim()).filter(Boolean))];
     const costProductIds = [...new Set(rows.filter(item => item.standardCostProvided === true).map(item => String(item.productId || '').trim()).filter(Boolean))];
-    const existingProducts = new Map();
-    const existingCosts = new Map();
-
-    for (let i = 0; i < uniqueProductIds.length; i += 10) {
-        const ids = uniqueProductIds.slice(i, i + 10);
-        const snapshot = await firestoreReadWithTimeout(
-            db.collection('products')
-                .where(firebase.firestore.FieldPath.documentId(), 'in', ids)
-                .get(),
-            'Product Master 匯入比對'
-        );
-        snapshot.docs.forEach(doc => existingProducts.set(doc.id, doc.data() || {}));
-    }
-    for (let i = 0; i < costProductIds.length; i += 10) {
-        const ids = costProductIds.slice(i, i + 10);
-        const snapshot = await firestoreReadWithTimeout(
-            db.collection('productCosts')
-                .where(firebase.firestore.FieldPath.documentId(), 'in', ids)
-                .get(),
-            'Product Master 成本匯入比對'
-        );
-        snapshot.docs.forEach(doc => existingCosts.set(doc.id, doc.data() || {}));
-    }
+    const { existingProducts, existingCosts } = await loadExistingProductImportState(uniqueProductIds, costProductIds);
 
     const labels = {
         brandId:'廠牌', brandName:'廠牌', manufacturerPartNo:'貨號', normalizedPartNo:'貨號',
@@ -22558,6 +22560,20 @@ async function summarizeProductMasterImport(groups, errors = []) {
 }
 
 async function confirmProductMasterImport(groups, errors = []) {
+    if (errors.length) {
+        const errorLines = errors.slice(0, 10).map((message, index) => `錯誤 ${index + 1}｜${message}`);
+        const moreErrors = errors.length - errorLines.length;
+        setPriceUploadProgress(0, `匯入檔有 ${errors.length} 筆錯誤；尚未讀取或寫入雲端。`, false);
+        alert([
+            '又鑫標準 Product Import 匯入檢查',
+            '',
+            ...errorLines,
+            moreErrors > 0 ? `…另有 ${moreErrors} 筆錯誤未展開` : '',
+            '',
+            '有錯誤的匯入檔不會寫入雲端。請修正 Excel 後重新選擇檔案。'
+        ].filter(Boolean).join('\n'));
+        return false;
+    }
     setPriceUploadProgress(62, '正在比對現有 Product Master，產生匯入差異預覽…');
     const summary = await summarizeProductMasterImport(groups, errors);
     pendingPriceImportPreview = summary;
@@ -22602,6 +22618,23 @@ async function confirmProductMasterImport(groups, errors = []) {
 }
 
 // Preserve formatted identifiers without converting numeric prices or costs to display text.
+function isProductImportPlaceholderCode(value) {
+    const key = String(value || '').normalize('NFKC').trim().toLocaleLowerCase()
+        .replace(/\s*\/\s*/g, '/')
+        .replace(/\s+/g, ' ');
+    return key === 'not available/custom item';
+}
+
+function normalizeImportedProductCode(brand, value) {
+    const code = String(value ?? '').normalize('NFKC').trim();
+    if (!code) return '';
+    const canonicalBrand = normalizeBrandLookupKey(resolveBrandName(brand || ''));
+    // Roche material numbers are 11 digits. Excel commonly stores a leading-zero code
+    // as a number, turning e.g. 03654672103 into 3654672103 before import.
+    if (canonicalBrand === normalizeBrandLookupKey('Roche') && /^\d{10}$/.test(code)) return `0${code}`;
+    return code;
+}
+
 function productImportSheetRows(sheet) {
     const rows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:true });
     const displayed = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:false });
@@ -22982,6 +23015,7 @@ window.handlePriceExcelUpload = async function(input) {
             const brandGroupsMap = new Map();
             const seenProductIds = new Set();
             const importErrors = [];
+            let skippedPlaceholderRows = 0;
             workbook.SheetNames.forEach(sheetName => {
                 const sheet = workbook.Sheets[sheetName];
                 const rows = productImportSheetRows(sheet);
@@ -22989,13 +23023,18 @@ window.handlePriceExcelUpload = async function(input) {
                 rows.forEach(row => {
                     const nameCn = String(getField(row, ['中文品名', '品名', '中文名稱'])).trim();
                     const nameEn = String(getField(row, ['英文品名', '英文名稱'])).trim();
-                    const model = String(getField(row, ['貨號', '型號'])).trim();
-                    if (!model) return;
+                    const rawModel = String(getField(row, ['貨號', '型號'])).trim();
+                    if (!rawModel) return;
+                    if (isProductImportPlaceholderCode(rawModel)) {
+                        skippedPlaceholderRows += 1;
+                        return;
+                    }
 
                     const rawBrand = toHalfWidth(getField(row, ['廠牌', '品牌', 'Brand']) || fallbackBrand);
                     const brand = resolveBrandName(rawBrand);
+                    if (!brand) { importErrors.push(`貨號「${rawModel}」缺少廠牌。請填寫「廠牌」欄位。`); return; }
+                    const model = normalizeImportedProductCode(brand, rawModel);
                     const productLine = toHalfWidth(getField(row, ['產品線', 'Product Line', 'ProductLine']));
-                    if (!brand) { importErrors.push(`貨號「${model}」缺少廠牌。請填寫「廠牌」欄位。`); return; }
 
                     const productType = normalizeProductTypeValue(getField(row, ['類型', '產品類型', '品項類型', '機器/耗材', '仪器/耗材', 'Type']));
                     const spec = String(getField(row, ['規格', '规格', 'Spec', 'Specification'])).trim();
@@ -23095,8 +23134,9 @@ window.handlePriceExcelUpload = async function(input) {
             refreshPriceDatalists();
             renderCompanyAgencyBrandSettings();
             loadProductManagementOverview();
-            setPriceUploadProgress(100, `完成：檢查 ${imported.length} 筆；產品寫入 ${totalProductWrites}、標準成本寫入 ${totalCostWrites}、完全無變動 ${totalUnchangedRows} 筆。`);
-            alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n已記錄本次匯入批次；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。`);
+            const skippedText = skippedPlaceholderRows ? `；略過無正式貨號 ${skippedPlaceholderRows} 筆` : '';
+            setPriceUploadProgress(100, `完成：檢查 ${imported.length} 筆；產品寫入 ${totalProductWrites}、標準成本寫入 ${totalCostWrites}、完全無變動 ${totalUnchangedRows} 筆${skippedText}。`);
+            alert(`Product Import 完成：\n${savedBrands.join('\n')}\n\n已記錄本次匯入批次；未出現在檔案中的產品不會被刪除或停用。標準成本與實際採購價分開保存。${skippedPlaceholderRows ? `\n已略過「Not Available/Custom Item」等無正式貨號列：${skippedPlaceholderRows} 筆。` : ''}`);
         } catch (err) {
             setPriceUploadProgress(0, '儲存雲端失敗，請稍後再試。');
             alert('上傳失敗：' + err.message);

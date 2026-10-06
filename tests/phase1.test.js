@@ -4122,6 +4122,24 @@ test('Product Master product line is optional in manual editor', () => {
     assert.match(saveSource,/if \(!brand \|\| !code \|\| !productName\)/);
     assert.doesNotMatch(saveSource,/!productLine\)/);
 });
+
+
+test('Product Import preserves Roche leading-zero codes and accepts large Bio-Rad master files', () => {
+    assert.match(appSource, /function normalizeImportedProductCode\(brand, value\)/);
+    assert.match(appSource, /normalizeBrandLookupKey\('Roche'\).*?\/\^\\d\{10\}\$\/\.test\(code\).*?return \`0\\\$\{code\}\`/s);
+    assert.match(appSource, /function isProductImportPlaceholderCode\(value\)/);
+    assert.match(appSource, /not available\/custom item/);
+    assert.match(appSource, /skippedPlaceholderRows \+= 1/);
+    assert.match(appSource, /const LARGE_PRODUCT_IMPORT_COMPARE_THRESHOLD = 1000/);
+    assert.match(appSource, /readCollectionInBatches\('products', 500\)/);
+    assert.match(appSource, /readCollectionInBatches\('productCosts', 500\)/);
+    const confirmStart = appSource.indexOf('async function confirmProductMasterImport');
+    const confirmEnd = appSource.indexOf('\n\nfunction isProductImportPlaceholderCode', confirmStart);
+    const confirmSource = appSource.slice(confirmStart, confirmEnd);
+    assert.match(confirmSource, /if \(errors\.length\)/);
+    assert.match(confirmSource, /尚未讀取或寫入雲端/);
+});
+
 test('Product Import is incremental, splits standard cost securely, and never removes omitted products', () => {
     const syncStart=appSource.indexOf('async function syncImportedBrandToFormalProductMaster');
     const syncEnd=appSource.indexOf('\nasync function saveProductMasterBrand',syncStart);
