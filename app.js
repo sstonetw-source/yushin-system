@@ -11712,6 +11712,9 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'dispatch') {
+        // 外倉清單只需要倉庫類型及最近 50 筆通知；不掃描整份通知歷史。
+        Promise.allSettled([loadWarehouseMaster(), window.loadRecentExternalWarehouseNotices?.()])
+            .then(() => window.renderExternalWarehouseQueue?.());
         renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
         if (!purchasingViewLoaded.has('dispatch')) {
             purchasingViewLoaded.add('dispatch');
