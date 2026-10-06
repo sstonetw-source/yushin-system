@@ -187,6 +187,26 @@
         }
     };
 
+    let recentNoticesLoadPromise = null;
+    root.loadRecentExternalWarehouseNotices = function(force = false) {
+        if (!canOperate()) return Promise.resolve([]);
+        if (recentNoticesLoadPromise && !force) return recentNoticesLoadPromise;
+        recentNoticesLoadPromise = firestoreReadWithTimeout(
+            db.collection('externalDispatchNotices').orderBy('updatedAt', 'desc').limit(50).get(),
+            '外倉通知紀錄'
+        ).then(snapshot => {
+            snapshot.docs.forEach(doc => noticeCache.set(doc.id, {id:doc.id, ...doc.data()}));
+            root.renderExternalWarehouseQueue();
+            return snapshot.docs;
+        }).catch(err => {
+            recentNoticesLoadPromise = null;
+            const status = document.getElementById('externalWarehouseQueueStatus');
+            if (status) status.textContent = '外倉通知狀態讀取失敗，請重新開啟：' + (err?.message || err);
+            return [];
+        });
+        return recentNoticesLoadPromise;
+    };
+
     root.closeExternalWarehouseNotice = function() {
         if (busy.has('notify') || busy.has('ship') || busy.has('pdf')) return;
         document.getElementById('externalWarehouseNoticeOverlay')?.classList.remove('active');
