@@ -6579,7 +6579,7 @@ window.printThreeQuotes = async function() {
         await waitForPdfImages(first.stage);
 
         const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
-        await addDocumentPagesToPdf(pdf, firstPages, { scale });
+        await addDocumentPagesToPdf(pdf, firstPages, { scale, isolateRoot:firstStage });
         firstStage.remove();
         firstStage = null;
 
@@ -6594,6 +6594,7 @@ window.printThreeQuotes = async function() {
         const comparisonPages = [...comparisonStage.querySelectorAll('.comparison-quote-page')];
         await addDocumentPagesToPdf(pdf, comparisonPages, {
             scale,
+            isolateRoot:comparisonStage,
             addPageBeforeFirst: true,
             onProgress: (pageNo, pageCount) => {
                 if (button) button.innerText = `正在產生三家估價單… ${pageNo}/${pageCount}`;
@@ -7031,6 +7032,7 @@ window.exportCurrentQuotePdf = async function() {
         const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: !isSinglePage });
         await addDocumentPagesToPdf(pdf, pages, {
             scale,
+            isolateRoot:stage,
             onProgress: (pageNo, pageCount) => {
                 if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
             }
