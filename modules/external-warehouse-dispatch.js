@@ -207,6 +207,54 @@
         return recentNoticesLoadPromise;
     };
 
+    root.viewExternalWarehouseStatus = async function(orderId) {
+        if (!canAccessPage('orders.list')) return;
+        const overlay = document.getElementById('externalWarehouseNoticeOverlay');
+        if (!overlay) return;
+        overlay.classList.add('active');
+        overlay.innerHTML = '<div class="eq-modal-box">正在讀取外倉通知狀態…</div>';
+        try {
+            const [orderSnapshot] = await Promise.all([
+                firestoreReadWithTimeout(db.collection('orders').doc(orderId).get(), '外倉通知查詢'),
+                loadWarehouseMaster()
+            ]);
+            if (!orderSnapshot.exists) throw new Error('找不到訂單。');
+            const order = orderSnapshot.data();
+            const lines = normalizedOrderItems(order).filter(item => {
+                if ((item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return false;
+                const warehouseId = item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '';
+                return warehouseType(findWarehouse(warehouseId)) === 'EXTERNAL';
+            });
+            const results = await Promise.all(lines.map(async item => {
+                const warehouseId = item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '';
+                const noticeSnapshot = await firestoreReadWithTimeout(
+                    db.collection('externalDispatchNotices').doc(noticeId(orderId, item.itemId)).get(),
+                    '單筆外倉通知查詢'
+                );
+                return {item,warehouseId,notice:noticeSnapshot.exists ? noticeSnapshot.data() : null};
+            }));
+            overlay.innerHTML = `<div class="eq-modal-box" style="max-width:820px">
+                <h3>外倉通知狀態｜${escapeHtml(order.orderNo || order.quoteNo || orderId)}</h3>
+                <p style="font-size:13px;color:#555">此頁僅顯示通知及實際出貨紀錄，沒有修改庫存的操作。</p>
+                ${results.length ? `<div class="table-wrap"><table><thead><tr><th>外倉</th><th>貨號／品名</th><th>數量</th><th>進度</th></tr></thead><tbody>
+                    ${results.map(({item,warehouseId,notice})=>`<tr>
+                        <td>${escapeHtml(findWarehouse(warehouseId)?.warehouseName || warehouseId)}</td>
+                        <td>${escapeHtml(item.itemCode || '')} ${escapeHtml(item.itemName || '')}</td>
+                        <td>${Number(notice?.qty || item.qty || 0)}</td>
+                        <td>${notice?.status === 'SHIPPED'
+                            ? '外倉已出貨：'+escapeHtml(notice.shippedAt || '')
+                            : notice?.status === 'NOTIFIED'
+                                ? '已通知：'+escapeHtml(notice.notifiedAt || '')
+                                : '尚未通知'}</td></tr>`).join('')}
+                    </tbody></table></div>` : '<p>這張訂單目前沒有指定外部倉庫的品項。</p>'}
+                <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeExternalWarehouseNotice()">關閉</button></div>
+            </div>`;
+        } catch (err) {
+            overlay.innerHTML = `<div class="eq-modal-box"><p>查詢失敗：${escapeHtml(err?.message || String(err))}</p>
+                <button type="button" onclick="closeExternalWarehouseNotice()">關閉</button></div>`;
+        }
+    };
+
     root.closeExternalWarehouseNotice = function() {
         if (busy.has('notify') || busy.has('ship') || busy.has('pdf')) return;
         document.getElementById('externalWarehouseNoticeOverlay')?.classList.remove('active');
