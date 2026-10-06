@@ -810,11 +810,110 @@ service cloud.firestore {
       );
     }
 
+
+    // 外倉送貨僅能由已通知的外倉通知單觸發，且必須與同一次
+    // Firestore transaction 中的 notice SHIPPED 寫入互相對應。
+    function externalWarehouseOrderShipmentUpdate(orderId) {
+      let beforeRecords = resource.data.get('deliveryRecords', []);
+      let afterRecords = request.resource.data.get('deliveryRecords', []);
+      let record = afterRecords[beforeRecords.size()];
+      let id = record.get('externalNoticeId', '');
+      let noticePath = /databases/$(database)/documents/externalDispatchNotices/$(id);
+      let notice = get(noticePath).data;
+      let nextNotice = getAfter(noticePath).data;
+      return (purchaser() || warehouse())
+        && id != ''
+        && beforeRecords.size() + 1 == afterRecords.size()
+        && afterRecords.hasAll(beforeRecords)
+        && resource.data.get('orderStatus', resource.data.get('status', 'normal')) == 'normal'
+        && sameCommercialOwner()
+        && preservesCreator()
+        && operationalItemsOnly(['dispatchPreparedQty', 'reservedQty'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'items', 'deliveryRecords', 'deliveredQty', 'isDelivered',
+          'deliveryHistory', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+        ])
+        && notice.get('status', '') == 'NOTIFIED'
+        && nextNotice.get('status', '') == 'SHIPPED'
+        && nextNotice.get('orderId', '') == orderId
+        && nextNotice.get('itemId', '') == record.get('itemId', '')
+        && nextNotice.get('warehouseId', '') == record.get('warehouseId', '')
+        && nextNotice.get('deliveryRecordId', '') == record.get('id', '')
+        && nextNotice.get('shippedByUid', '') == request.auth.uid
+        && record.get('sourceType', '') == 'EXTERNAL_WAREHOUSE_SHIP'
+        && record.get('createdByUid', '') == request.auth.uid
+        && record.get('qty', 0) is number
+        && record.get('qty', 0) > 0
+        && record.get('qty', 0) == nextNotice.get('qty', 0)
+        && request.resource.data.get('deliveredQty', 0) == resource.data.get('deliveredQty', 0) + record.get('qty', 0);
+    }
+
+    function validExternalNoticeCreate(id) {
+      let data = request.resource.data;
+      let orderId = data.get('orderId', '');
+      let orderPath = /databases/$(database)/documents/orders/$(orderId);
+      let order = get(orderPath).data;
+      let index = data.get('itemIndex', -1);
+      let warehouseId = data.get('warehouseId', '');
+      let whPath = /databases/$(database)/documents/warehouses/$(warehouseId);
+      return (admin() || purchaser() || warehouse())
+        && orderId != '' && warehouseId != ''
+        && data.get('itemId', '') != ''
+        && id == orderId + '__' + data.itemId
+        && data.keys().hasOnly([
+          'orderId', 'itemId', 'itemIndex', 'warehouseId', 'orderNo',
+          'ownerUid', 'salesCode', 'customerName', 'itemCode', 'itemName',
+          'qty', 'status', 'shippingAddress', 'contactName', 'contactPhone',
+          'expectedDate', 'notes', 'notifiedByUid', 'notifiedBy',
+          'notifiedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.get('status', '') == 'NOTIFIED'
+        && data.get('notifiedByUid', '') == request.auth.uid
+        && data.get('notifiedAt', '') is string
+        && data.get('notifiedAt', '') != ''
+        && order.get('orderStatus', order.get('status', 'normal')) == 'normal'
+        && order.get('ownerUid', '') == data.get('ownerUid', '')
+        && order.get('salesCode', '') == data.get('salesCode', '')
+        && index is int && index >= 0
+        && index < order.get('items', []).size()
+        && order.items[index].get('itemId', '') == data.itemId
+        && order.items[index].get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+        && order.items[index].get('warehouseId', order.get('warehouseId', '')) == warehouseId
+        && data.get('qty', 0) is number
+        && data.get('qty', 0) > 0
+        && data.get('qty', 0) <= order.items[index].get('qty', order.items[index].get('orderedQty', 0))
+        && get(whPath).data.get('active', true) == true
+        && get(whPath).data.get('warehouseType', 'INTERNAL') == 'EXTERNAL';
+    }
+
+    function validExternalNoticeShipment(id) {
+      let orderPath = /databases/$(database)/documents/orders/$(resource.data.orderId);
+      let records = getAfter(orderPath).data.get('deliveryRecords', []);
+      let record = records[records.size() - 1];
+      return (admin() || purchaser() || warehouse())
+        && resource.data.get('status', '') == 'NOTIFIED'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'shippedAt', 'shippedBy', 'shippedByUid',
+          'deliveryRecordId', 'updatedAt'
+        ])
+        && request.resource.data.get('status', '') == 'SHIPPED'
+        && request.resource.data.get('shippedByUid', '') == request.auth.uid
+        && request.resource.data.get('shippedAt', '') is string
+        && request.resource.data.get('shippedAt', '') != ''
+        && records.size() > 0
+        && record.get('externalNoticeId', '') == id
+        && record.get('id', '') == request.resource.data.get('deliveryRecordId', '')
+        && record.get('itemId', '') == resource.data.itemId
+        && record.get('warehouseId', '') == resource.data.warehouseId
+        && record.get('qty', 0) == resource.data.qty
+        && record.get('sourceType', '') == 'EXTERNAL_WAREHOUSE_SHIP';
+    }
+
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id) || externalWarehouseOrderShipmentUpdate(id)
+        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id) || externalWarehouseOrderShipmentUpdate(id)
         : userRole in ['sales', 'engineer'] && owns(resource.data) && owns(request.resource.data)
           && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && commercialReturnProtection();
     }
@@ -1023,6 +1122,19 @@ service cloud.firestore {
         && request.resource.data.get('autoAllocatedQty', 0) >= resource.data.get('autoAllocatedQty', 0)
         && request.resource.data.get('autoAllocatedQty', 0) <= resource.data.get('autoAllocationQty', 0);
       allow delete: if admin();
+    }
+
+
+    // 外倉出貨通知：資料與訂單分離；下載 PDF 不寫入狀態。
+    // 只有實際確認通知時建立 NOTIFIED；SHIPPED 需與訂單/庫存交易同時提交。
+    match /externalDispatchNotices/{id} {
+      allow get: if admin() || purchaser() || warehouse()
+        || (businessOwner() && (resource == null || owns(resource.data)));
+      allow list: if admin() || purchaser() || warehouse()
+        || (businessOwner() && owns(resource.data));
+      allow create: if validExternalNoticeCreate(id);
+      allow update: if validExternalNoticeShipment(id);
+      allow delete: if false;
     }
 
     // Purchaser records completion of the company's existing shipping paperwork.
