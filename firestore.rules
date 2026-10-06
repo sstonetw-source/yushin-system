@@ -125,35 +125,15 @@ service cloud.firestore {
     }
 
     function sameSupplyIdentity() {
-      return request.resource.data.get('type', '') == resource.data.get('type', '')
-        && request.resource.data.get('method', '') == resource.data.get('method', '')
-        && request.resource.data.get('sourceType', '') == resource.data.get('sourceType', '')
-        && request.resource.data.get('sourceId', '') == resource.data.get('sourceId', '')
-        && request.resource.data.get('sourceItemId', '') == resource.data.get('sourceItemId', '')
-        && request.resource.data.get('internalNo', '') == resource.data.get('internalNo', '')
-        && request.resource.data.get('purchaseDocumentId', '') == resource.data.get('purchaseDocumentId', '')
-        && request.resource.data.get('purchaseDocumentNo', '') == resource.data.get('purchaseDocumentNo', '')
-        && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
-        && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
-        && request.resource.data.get('orderItemIndex', 0) == resource.data.get('orderItemIndex', 0)
-        && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
-        && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
-        && request.resource.data.get('salesName', '') == resource.data.get('salesName', '')
-        && request.resource.data.get('customerName', '') == resource.data.get('customerName', '')
-        && request.resource.data.get('company', '') == resource.data.get('company', '')
-        && request.resource.data.get('productId', '') == resource.data.get('productId', '')
-        && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
-        && request.resource.data.get('itemCode', '') == resource.data.get('itemCode', '')
-        && request.resource.data.get('itemName', '') == resource.data.get('itemName', '')
-        && request.resource.data.get('brand', '') == resource.data.get('brand', '')
-        && request.resource.data.get('productLine', '') == resource.data.get('productLine', '')
-        && request.resource.data.get('fulfillmentType', 'WAREHOUSE') == resource.data.get('fulfillmentType', 'WAREHOUSE')
-        && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
-        && request.resource.data.get('orderDate', '') == resource.data.get('orderDate', '')
-        && request.resource.data.get('createdAt', '') == resource.data.get('createdAt', '')
-        && request.resource.data.get('createdByUid', '') == resource.data.get('createdByUid', '')
-        && request.resource.data.get('createdBy', '') == resource.data.get('createdBy', '')
-        && request.resource.data.get('createdByRole', '') == resource.data.get('createdByRole', '');
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'type', 'method', 'sourceType', 'sourceId', 'sourceItemId',
+        'internalNo', 'purchaseDocumentId', 'purchaseDocumentNo',
+        'orderId', 'itemId', 'orderItemIndex',
+        'ownerUid', 'salesCode', 'salesName', 'customerName', 'company',
+        'productId', 'productKey', 'itemCode', 'itemName', 'brand', 'productLine',
+        'fulfillmentType', 'warehouseId', 'orderDate',
+        'createdAt', 'createdByUid', 'createdBy', 'createdByRole'
+      ]);
     }
 
     function validSupplyOperationalState() {

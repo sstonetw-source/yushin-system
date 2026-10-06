@@ -4436,9 +4436,9 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const identityEnd=rulesSource.indexOf('\n\n    function validSupplyOperationalState()',identityStart);
     const identitySource=rulesSource.slice(identityStart,identityEnd);
     assert.ok(identityStart>=0&&identityEnd>identityStart);
+    assert.match(identitySource,/affectedKeys\(\)\.hasAny\(\[/);
     ['type','orderId','itemId','ownerUid','salesCode','productId','productKey','fulfillmentType','warehouseId','purchaseDocumentId'].forEach(field => {
-        assert.match(identitySource,new RegExp("request\\.resource\\.data\\.get\\('"+field+"'"));
-        assert.match(identitySource,new RegExp("resource\\.data\\.get\\('"+field+"'"));
+        assert.match(identitySource,new RegExp("'"+field+"'"));
     });
 
     const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
@@ -4624,8 +4624,9 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
       'fulfillmentType','warehouseId','orderDate',
       'createdAt','createdByUid','createdBy','createdByRole'
     ].forEach(field => {
-        assert.match(identitySource,new RegExp("request\\.resource\\.data\\.get\\('"+field+"'"));
+        assert.match(identitySource,new RegExp("'"+field+"'"));
     });
+    assert.match(identitySource,/affectedKeys\(\)\.hasAny\(\[/);
 
     const purchaserStart=rulesSource.indexOf('function purchaserSupplyOperationalUpdate()');
     const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate()',purchaserStart);
