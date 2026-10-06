@@ -11177,7 +11177,7 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
     if (normalizedOrderStatus(order) !== 'normal') return [];
     // 工作卡與明細只讀訂單本身；不要在 render 階段解析成本／Product Master。
     // 同一輪採購頁 render 可直接沿用已 normalize 的品項快照。
-    // 真正按「已訂購／產生採購單」時，pendingPurchaseLines() 才補齊正式採購資料。
+    // 真正按「已採購／產生採購單」時，pendingPurchaseLines() 才補齊正式採購資料。
     const items = normalizedItems || normalizedOrderItems(order);
     const lifecycle = lifecycleOverride || orderLifecycleInfo(order, items);
     return items.map((item, index) => {
@@ -11988,7 +11988,7 @@ function renderPendingPurchaseOrders() {
                 ? (canBusinessSelfOrder(order)
                     ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">登記自行訂貨</button>`
                     : '<span class="order-progress-badge">自行訂貨・由訂單負責人處理</span>')
-                : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')},this)">已訂購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">產生採購單</button>`;
+                : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')},this)">已採購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">產生採購單</button>`;
         }else{
             actionHtml='<span class="order-progress-badge">來源訂單待同步</span>';
         }
@@ -12076,7 +12076,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     const actionKey = `${orderId}::${itemId}`;
     if (pendingPurchaseOrderKeys.has(actionKey)) return;
     pendingPurchaseOrderKeys.add(actionKey);
-    const originalLabel = button?.textContent || '已訂購';
+    const originalLabel = button?.textContent || '已採購';
     if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
         let savedOrder, savedSupply, incomingProductKey='', incomingWarehouseId='';
@@ -12302,11 +12302,12 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         invalidateProcurementDemandQueue();
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
-            switchPurchasingView('receiving', document.getElementById('purchase-card-receiving'));
+            if (purchasingView === 'ordering') await loadPendingPurchaseOrders(true);
+            renderPurchasingView();
         }
-        alert('已更新為「待到貨」。');
+        showActionFeedback('已採購，品項已列入待到貨，可繼續處理下一筆。', 'success');
     } catch (err) {
-        alert('切換為已訂購失敗：' + err.message);
+        alert('切換為已採購失敗：' + err.message);
     } finally {
         pendingPurchaseOrderKeys.delete(actionKey);
         if (button?.isConnected) { button.disabled = false; button.textContent = originalLabel; }
