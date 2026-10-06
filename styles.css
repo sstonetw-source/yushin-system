@@ -3282,3 +3282,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
  .inventory-return-card { align-items:stretch; flex-direction:column; gap:8px; }
  .dispatch-list-fields { grid-template-columns:minmax(0,1fr); }
 }
+
+.trade-analysis-filters [hidden] { display:none !important; }
+#tradeAnalysisCards { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+@media(max-width:600px) { #tradeAnalysisCards { grid-template-columns:repeat(2,minmax(0,1fr)); } }

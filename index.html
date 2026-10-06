@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261006-1">
+        <link rel="stylesheet" href="styles.css?v=20261006-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1421,33 +1421,29 @@
 
         </div>
 
-        <!-- 五項數字與交易明細共用同一份分析結果 -->
         <div id="admin-statistics" class="admin-panel" style="display:none;">
+            <div class="sub-tabs" role="tablist" aria-label="進銷存分析">
+                <button type="button" role="tab" class="sub-tab active" data-analysis-tab="purchasing" aria-selected="true" onclick="switchTradeAnalysisTab('purchasing')">採購分析</button>
+                <button type="button" role="tab" class="sub-tab" data-analysis-tab="selling" aria-selected="false" onclick="switchTradeAnalysisTab('selling')">銷售分析</button>
+                <button type="button" role="tab" class="sub-tab" data-analysis-tab="inventory" aria-selected="false" onclick="switchTradeAnalysisTab('inventory')">庫存分析</button>
+            </div>
             <div class="toolbar no-print trade-analysis-filters">
                 <select id="salesStatsPeriod" aria-label="日期區間" onchange="setSalesStatisticsPeriod(this.value)">
                     <option value="month">本月</option><option value="ytd">今年累計</option><option value="custom">自訂日期</option>
                 </select>
                 <label>起日 <input type="date" id="salesStatsStart" onchange="document.getElementById('salesStatsPeriod').value='custom';renderAdminStatistics()"></label>
                 <label>迄日 <input type="date" id="salesStatsEnd" onchange="document.getElementById('salesStatsPeriod').value='custom';renderAdminStatistics()"></label>
-                <select id="salesStatsSalesFilter" aria-label="業務" onchange="renderAdminStatistics()"><option value="">全部業務</option></select>
+                <select hidden id="salesStatsSalesFilter" aria-label="業務" onchange="renderAdminStatistics()"><option value="">全部業務</option></select>
                 <select id="salesStatsBrandFilter" aria-label="廠牌" onchange="renderAdminStatistics()"><option value="">全部廠牌</option></select>
                 <select id="salesStatsLineFilter" aria-label="產品線" onchange="renderAdminStatistics()"><option value="">全部產品線</option></select>
-                <select id="salesStatsTypeFilter" aria-label="產品類型" onchange="renderAdminStatistics()"><option value="">全部類型</option></select>
-                <button type="button" onclick="exportTradeAnalysis()" class="btn-secondary">匯出全部明細 Excel</button>
+                <select hidden id="salesStatsTypeFilter" aria-label="產品類型" onchange="renderAdminStatistics()"><option value="">全部類型</option></select>
+                <button type="button" onclick="exportTradeAnalysis()" class="btn-secondary">匯出此分頁 Excel</button>
             </div>
-            <p class="inventory-summary-note">進＝實際收貨；銷＝實際送貨，退貨扣回。下訂與核銷不計入進、銷。已進貨、已銷貨依所選期間的實際交易日期；待到貨、待送貨與庫存為目前數字。銷售為含稅金額，採購與庫存按紀錄成本計算。</p>
             <p id="tradeAnalysisStatus" role="status" aria-live="polite"></p>
             <p id="tradeAnalysisScope" class="inventory-summary-note"></p>
-            <div class="sales-stat-cards admin-overview-cards trade-analysis-cards">
-                <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('incoming')"><span>待到貨採購金額</span><strong id="invAnalysisIncoming">讀取中…</strong><small>目前全部未到貨餘額・點選明細</small></button>
-                <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('purchases')"><span>已進貨（收貨）金額</span><strong id="invAnalysisPurchases">讀取中…</strong><small>期間實際到貨成本・點選明細</small></button>
-                <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('pending')"><span>待送貨訂單金額</span><strong id="invAnalysisPending">讀取中…</strong><small>目前全部未送貨餘額・點選明細</small></button>
-                <button type="button" class="sales-stat-card sales-stat-card-total" onclick="openTradeAnalysisDetail('sales')"><span>已銷貨（送貨）金額</span><strong id="invAnalysisSales">讀取中…</strong><small>期間送貨減退貨・點選明細</small></button>
-                <button type="button" class="sales-stat-card" onclick="openTradeAnalysisDetail('stock')"><span>目前庫存金額</span><strong id="invAnalysisStockValue">讀取中…</strong><small>現有批次餘量 × 成本・點選明細</small></button>
-            </div>
-            <div class="panel" style="overflow-x:auto;">
-                <h3>依廠牌彙總</h3>
-                <table class="sales-stats-table"><thead><tr><th>廠牌</th><th>待到貨</th><th>已進貨</th><th>待送貨</th><th>已銷貨</th><th>目前庫存</th></tr></thead><tbody id="unifiedBrandAnalyticsBody"></tbody></table>
+            <div id="tradeAnalysisCards" class="sales-stat-cards admin-overview-cards trade-analysis-cards"></div>
+            <div class="panel" style="overflow-x:auto;"><h3>品項明細</h3>
+                <table class="sales-stats-table"><thead id="tradeAnalysisTableHead"></thead><tbody id="unifiedBrandAnalyticsBody"></tbody></table>
             </div>
         </div>
         <div class="eq-modal-overlay no-print" id="tradeAnalysisDetailOverlay" onclick="if(event.target===this) closeTradeAnalysisDetail()">
@@ -1676,7 +1672,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261006-9"></script>
+    <script src="app.js?v=20261006-10"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261006-1"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>

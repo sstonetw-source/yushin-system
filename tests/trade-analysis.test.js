@@ -173,3 +173,31 @@ test('legacy multi-item delivered flags preserve line amounts and cancellation k
  assert.equal(rows.filter(row=>row.kind==='sales').reduce((sum,row)=>sum+row.amount,0),100);
  assert.equal(rows.every(row=>row.estimated),true);
 });
+
+function simpleFixture(tab){
+ const x=fixture();Object.assign(x,{tradeAnalysisTab:tab,salesStatisticsQueryWindow:()=>filters,
+ document:{getElementById:()=>({value:''})},tradeAnalysisWarehouseStocks:[{id:'W',productKey:'P1',productId:'P1',warehouseId:'WH',onHand:2,reserved:1}]});
+ x.inventoryAnalysisLots[0].productKey='P1';x.inventoryAnalysisLots[0].warehouseId='WH';
+ vm.runInContext(fn('buildSimpleTradeAnalysis'),x);return x;
+}
+test('purchase cohort balances partial receipt and excludes cancelled outstanding quantities',()=>{
+ const x=simpleFixture('purchasing');x.inventoryAnalysisSupplyOrders.forEach(s=>s.orderDate='2026-10-01');
+ const rows=x.buildSimpleTradeAnalysis();
+ assert.deepEqual(Array.from(rows[0].values),[200,80,120]);
+ assert.deepEqual(Array.from(rows[2].values),[198,198,0]);
+ for(const r of rows)assert.equal(r.values[0],r.values[1]+r.values[2]);
+ x.inventoryAnalysisSupplyOrders[0].status='CLOSED';assert.deepEqual(Array.from(x.buildSimpleTradeAnalysis()[0].values),[80,80,0]);
+});
+test('sales cohort uses actual shipment costs, net returns and explicit unknown costs',()=>{
+ const x=simpleFixture('selling');x.salesStatisticsOrders[0].orderDate='2026-10-01';
+ x.salesStatisticsOrders[0].deliveryRecords[0].lotAllocations=[{lotId:'L1',qty:4}];
+ x.salesStatisticsOrders[0].returnRecords[0].lotAllocations=[{lotId:'L1',qty:1}];
+ assert.deepEqual(Array.from(x.buildSimpleTradeAnalysis()[0].values),[1000,300,700,210]);
+ x.inventoryAnalysisLotCosts.clear();assert.equal(x.buildSimpleTradeAnalysis()[0].values[3],null);
+ x.salesStatisticsOrders[0].status='cancelled';assert.deepEqual(Array.from(x.buildSimpleTradeAnalysis()[0].values).slice(0,3),[300,300,0]);
+});
+test('inventory quantity and weighted valuation use warehouse stock and detect missing batch quantities',()=>{
+ const x=simpleFixture('inventory');const row=x.buildSimpleTradeAnalysis()[0];
+ assert.deepEqual(Array.from(row.quantities),[2,1,1]);assert.deepEqual(Array.from(row.values),[60,30,30]);
+ x.tradeAnalysisWarehouseStocks[0].onHand=3;assert.deepEqual(Array.from(x.buildSimpleTradeAnalysis()[0].values),[null,null,null]);
+});

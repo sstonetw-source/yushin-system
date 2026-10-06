@@ -2024,16 +2024,14 @@ test('purchase history separates PO document status from receipt progress', () =
     assert.match(source,/data-th="到貨進度"/);
 });
 
-test('simplified trade analysis derives brand totals and export from the same report', () => {
+test('tabbed analysis uses the same item calculations for screen and workbook', () => {
     const start=app.indexOf('window.renderSalesStatistics = function()');
-    const end=app.indexOf('function salesStatsMetricExportRows',start);
-    const source=app.slice(start,end);
-    assert.match(source,/buildTradeAnalysisReport\(rows\)/);
-    assert.match(source,/report\.brands/);
-    assert.match(source,/incoming:'invAnalysisIncoming'/);
-    assert.match(source,/purchases:'invAnalysisPurchases'/);
-    assert.match(source,/pending:'invAnalysisPending'/);
-    assert.match(app,/tradeAnalysisExportRows\(report,kind\)/);
+    const source=app.slice(start,app.indexOf('function salesStatsMetricExportRows',start));
+    assert.match(source,/buildSimpleTradeAnalysis\(\)/);
+    assert.match(source,/rows.slice\(0,100\)/);
+    const exportSource=app.slice(app.indexOf('window.exportTradeAnalysis ='),app.indexOf('function populateSalesStatisticsFilters'));
+    assert.match(exportSource,/buildSimpleTradeAnalysis\(\)/);
+    assert.match(exportSource,/currentUserRole!=='admin'/);
 });
 
 test('removed purchase dashboard leaves no duplicate aging UI', () => {

@@ -5321,18 +5321,13 @@ test('consolidated supplier editor reuses existing suppliers without renaming a 
 });
 
 
-test('admin inventory-sales dashboard presents one unified management view', () => {
+test('admin trade analysis exposes three responsive tabs and shared item details', () => {
     const adminStart=indexSource.indexOf('<div id="admin-statistics"');
-    const adminEnd=indexSource.indexOf('<div id="admin-warehouses"',adminStart);
-    const adminSource=indexSource.slice(adminStart,adminEnd);
-    assert.match(adminSource,/id="invAnalysisSales"/);
-    assert.match(adminSource,/id="invAnalysisPurchases"/);
-    assert.match(adminSource,/id="invAnalysisPending"/);
-    assert.doesNotMatch(adminSource,/id="invAnalysisGrossProfit"/);
-    assert.match(adminSource,/id="invAnalysisStockValue"/);
-    assert.match(adminSource,/id="invAnalysisIncoming"/);
+    const adminSource=indexSource.slice(adminStart,indexSource.indexOf('id="tradeAnalysisDetailOverlay"',adminStart));
+    for(const tab of ['purchasing','selling','inventory'])assert.ok(adminSource.includes(`data-analysis-tab="${tab}"`));
+    assert.match(adminSource,/id="tradeAnalysisCards"/);
     assert.match(adminSource,/id="unifiedBrandAnalyticsBody"/);
-    assert.doesNotMatch(adminSource,/id="purchaseAnalyticsPanel"/);
+    assert.match(adminSource,/select hidden id="salesStatsSalesFilter"/);
 });
 
 test('sales and purchasing analytics share primary plus other brand buckets', () => {
