@@ -1884,19 +1884,19 @@ test('database backup includes formal Product Master and cost collections', () =
     assert.match(appSource, /'brands'/);
 });
 
-test('Product Management is the single daily Product Import entry', () => {
+
+test('admin price-list management is the single bulk Product Import entry', () => {
     assert.doesNotMatch(indexSource, /Product Master v2 遷移/);
     assert.doesNotMatch(indexSource, /id="productMasterMigrationPreviewBtn"/);
     assert.doesNotMatch(indexSource, /id="admin-sub-prices"/);
     assert.doesNotMatch(indexSource, /id="admin-prices"/);
-    assert.match(indexSource, /id="productManagementTools"/);
+    assert.doesNotMatch(indexSource, /id="productManagementTools"/);
     assert.match(indexSource, /id="productBatchMaintenance"/);
-    assert.match(indexSource, />Excel 匯入／更新</);
+    assert.match(indexSource, /📑 價目表管理/);
+    assert.match(indexSource, /＋ 上傳價目表/);
     assert.match(indexSource, /下載標準範本/);
-    assert.match(indexSource, /查看欄位規則/);
-    assert.match(indexSource, /只處理本次檔案中的品項/);
+    assert.match(indexSource, /新增／更新／不變／錯誤/);
 });
-
 
 test('Phase 2-6 completion integrates supplier mapping, warehouses and direct ship', () => {
     assert.match(appSource, /db\.collection\('suppliers'\)/);
@@ -2081,12 +2081,13 @@ test('V2 backup and storage audit include fulfillment and protected cost collect
 });
 
 
+
 test('V2 admin UI no longer exposes the legacy migration deployment panel', () => {
     assert.doesNotMatch(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
     assert.doesNotMatch(indexSource, /庫存成本隔離，直到顯示 0/);
-    assert.match(indexSource, /匯入標準產品檔/);
+    assert.match(indexSource, /＋ 上傳價目表/);
+    assert.match(indexSource, /handlePriceExcelUpload\(this\)/);
 });
-
 
 test('warehouse master save has immediate feedback and duplicate-submit guard', () => {
     const start = appSource.indexOf('window.saveWarehouseMaster');
@@ -3487,7 +3488,8 @@ test('delivery history reuses normalized item lookup', () => {
 });
 
 
-test('order row summaries reuse normalized items', () => {
+
+test('order row summaries reuse normalized items without exposing pending-dispatch as an order action', () => {
     const quantityStart=appSource.indexOf('function orderQuantity(order, normalizedItems = null)');
     const lifecycleEnd=appSource.indexOf('\nfunction purchaseProgressInfo',quantityStart);
     const progressSource=appSource.slice(quantityStart,lifecycleEnd);
@@ -3512,7 +3514,7 @@ test('order row summaries reuse normalized items', () => {
     assert.match(renderSource,/deliveryProgressInfo\(o, allOrderItems\)/);
     assert.match(renderSource,/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/);
     assert.match(renderSource,/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/);
-    assert.match(renderSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.doesNotMatch(renderSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
     assert.match(renderSource,/selfOrderActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
 });
 
@@ -3544,6 +3546,7 @@ test('work metrics reuse one dispatch state per item', () => {
     assert.match(metricsSource,/orderItemWorkAmount\(order,item,category,totalQty,dispatch\)/);
 });
 
+
 test('order rows reuse one dispatch snapshot across status summaries', () => {
     const fulfillmentStart=appSource.indexOf('function fulfillmentProgressInfo');
     const fulfillmentEnd=appSource.indexOf('\nconst pendingDispatchOrderIds',fulfillmentStart);
@@ -3559,7 +3562,7 @@ test('order rows reuse one dispatch snapshot across status summaries', () => {
     assert.match(listSource,/const displayCategoriesByItem = new Map/);
     assert.match(listSource,/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/);
     assert.match(listSource,/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/);
-    assert.match(listSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.doesNotMatch(listSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
 });
 
 test('procurement views reuse dispatch state while calculating quantities', () => {
@@ -4326,7 +4329,8 @@ test('mobile order list stays card based', () => {
 });
 
 
-test('Product page stays mobile-safe while Product Management lives in admin', () => {
+
+test('Product page stays mobile-safe while admin only manages price lists', () => {
     const productStart=indexSource.indexOf('id="product-system"');
     const forecastStart=indexSource.indexOf('<!-- ============ Forecast 系統 ============ -->',productStart);
     const productSource=indexSource.slice(productStart,forecastStart);
@@ -4337,8 +4341,10 @@ test('Product page stays mobile-safe while Product Management lives in admin', (
     assert.match(productSource,/id="productManagementSearch"/);
     assert.doesNotMatch(productSource,/id="productManagementTools"/);
     assert.ok(adminProductStart>=0&&adminAgencyStart>adminProductStart);
-    assert.match(adminProductSource,/id="productManagementTools"/);
-    assert.match(adminProductSource,/＋ 新增產品/);
+    assert.match(adminProductSource,/id="productBatchMaintenance"/);
+    assert.match(adminProductSource,/價目表管理/);
+    assert.doesNotMatch(adminProductSource,/openNewProductMasterEditor/);
+    assert.doesNotMatch(adminProductSource,/＋ 新增產品/);
     assert.doesNotMatch(adminProductSource,/id="pendingProductMasterBtn"/);
     assert.match(indexSource.slice(indexSource.indexOf('id="admin-health"')),/id="pendingProductMasterBtn"/);
     assert.match(adminProductSource,/id="priceUploadProgress"/);
@@ -4371,7 +4377,8 @@ test('Product Master import cost helper stays removed', () => {
 });
 
 
-test('legacy standalone price and cost helpers stay isolated while UI uses unified Product Import', () => {
+
+test('legacy standalone price and cost helpers stay isolated while price-list UI uses unified Product Import', () => {
     const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
     const priceEnd=appSource.indexOf('\nwindow.handleProductCostExcelUpload',priceStart);
     const priceSource=appSource.slice(priceStart,priceEnd);
@@ -4391,7 +4398,7 @@ test('legacy standalone price and cost helpers stay isolated while UI uses unifi
     assert.doesNotMatch(costSource,/collection\('products'\)\.doc\([^)]*\)\.set/);
 
     const productImportStart=appSource.indexOf('window.handlePriceExcelUpload = async function');
-    const productImportSource=appSource.slice(productImportStart,productImportStart+16000);
+    const productImportSource=appSource.slice(productImportStart,productImportStart+18000);
     assert.match(productImportSource,/standardCostRaw/);
     assert.match(productImportSource,/標準成本格式不正確/);
     assert.match(productImportSource,/標準成本與實際採購價分開保存/);
@@ -4399,7 +4406,8 @@ test('legacy standalone price and cost helpers stay isolated while UI uses unifi
     assert.match(indexSource,/id="productBatchMaintenance"/);
     assert.match(indexSource,/handlePriceExcelUpload\(this\)/);
     assert.match(indexSource,/下載標準範本/);
-    assert.match(indexSource,/一份 Excel 維護產品、建議售價與標準成本/);
+    assert.match(indexSource,/建議售價與標準成本/);
+    assert.match(indexSource,/新增／更新／不變／錯誤/);
     assert.doesNotMatch(indexSource,/handleProductPriceExcelUpload\(this\)/);
     assert.doesNotMatch(indexSource,/handleProductCostExcelUpload\(this\)/);
 });
@@ -4849,12 +4857,18 @@ test('admin can remove a pending product reminder without deleting source docume
     assert.match(clearSource,/仍會保持不再出現在待補清單/);
 });
 
-test('Product Management is admin-only while guarded permanent delete remains available', () => {
+
+test('price-list administration is separated while Product page retains guarded permanent delete', () => {
     assert.match(indexSource, /id="admin-sub-products"/);
     assert.match(indexSource, /id="admin-products"/);
-    assert.match(indexSource, /admin-product-heading/);
-    assert.match(indexSource, /id="productOverviewInactive"/);
-    assert.match(indexSource, /有單據或庫存關聯的產品保留並停用/);
+    assert.match(indexSource, /價目表管理/);
+    const adminProductStart=indexSource.indexOf('id="admin-products"');
+    const adminAgencyStart=indexSource.indexOf('id="admin-agencies"',adminProductStart);
+    const adminProductSource=indexSource.slice(adminProductStart,adminAgencyStart);
+    assert.doesNotMatch(adminProductSource,/productOverviewInactive/);
+    assert.doesNotMatch(adminProductSource,/openProductMasterEditor|openNewProductMasterEditor/);
+    assert.match(appSource,/window\.deleteEntirePriceList = async function/);
+
     const rowStart=appSource.indexOf('function productManagementRow(product)');
     const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);

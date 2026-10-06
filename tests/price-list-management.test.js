@@ -15,8 +15,8 @@ test('admin backend separates price-list management from Product Master editing'
   assert.match(html,/admin-sub-products[^>]*>📑 價目表管理</);
   const panel=sliceBetween(html,'<div id="admin-products"','<div id="admin-agencies"');
   assert.match(panel,/價目表管理/);
-  assert.match(panel,/deleteEntirePriceList/);
   assert.match(panel,/productImportExcelInput/);
+  assert.match(app,/window\.deleteEntirePriceList = async function/);
   assert.doesNotMatch(panel,/openNewProductMasterEditor/);
   assert.doesNotMatch(panel,/編輯主檔/);
 });

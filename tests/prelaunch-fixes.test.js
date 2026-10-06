@@ -118,12 +118,13 @@ test('sales order exports are scoped in the query and validate date ranges',asyn
  controls.exportStartDate.value='2027-01-01';await c.exportOrdersByDate();assert.match(alerts.at(-1),/起日不可晚於/);
 });
 
-test('product overview reads at most 200 products per request and continues with a cursor',async()=>{
- const reads=[],controls={productOverviewScope:{value:'',options:[]},productOverviewStatus:{}};let renders=0;
- const c=context({currentUserRole:'admin',currentUser:{uid:'U'},productOverviewLoading:false,productManagementOverviewRows:[],productOverviewLimit:200,document:{getElementById:id=>controls[id]},firebase:{firestore:{FieldPath:{documentId:()=> '__name__'}}},firestoreReadWithTimeout:p=>p,getUnifiedBrandEntries:()=>[],escapeAttr:x=>x,escapeHtml:x=>x,renderProductManagementOverview:()=>renders++});
- c.db={collection:()=>{const read={};return {where(){return this;},orderBy(){return this;},limit(n){read.limit=n;return this;},startAfter(cursor){read.cursor=cursor.id;return this;},get(){reads.push(read);return Promise.resolve({docs:Array.from({length:reads.length===1?200:1},(_,i)=>({id:reads.length===1?'P'+i:'last',data:()=>({brandName:'A'})})),size:reads.length===1?200:1});}};}};
- vm.runInContext(section('let productOverviewCursor=', '\nwindow.renderProductManagementOverview'),c);
- await c.loadProductManagementOverview();assert.equal(c.productManagementOverviewRows.length,200);await c.loadProductManagementOverview(false);assert.equal(c.productManagementOverviewRows.length,201);assert.equal(reads[1].cursor,'P199');assert.ok(reads.every(r=>r.limit===200));assert.equal(renders,2);
+
+test('admin price-list overview uses Brand Master metadata instead of paging through Product Master',()=>{
+  const loader=section('window.loadProductManagementOverview = async function', '\nfunction priceListDateLabel');
+  assert.match(loader,/loadBrandMaster\(\)/);
+  assert.match(loader,/collection\('priceHistory'\)[\s\S]*?limit\(100\)/);
+  assert.match(loader,/getUnifiedBrandEntries\(false\)/);
+  assert.doesNotMatch(loader,/collection\('products'\)/);
 });
 
 test('inventory first paint does not await ledger and supply reads, and supply errors remain visible',async()=>{

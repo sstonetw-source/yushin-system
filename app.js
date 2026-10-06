@@ -20211,7 +20211,7 @@ function invalidateVisibleProductCosts() { visibleProductCostGeneration++; visib
 async function loadVisibleProductCost(item) {
     const productId = item?.productId || stableProductId(item || {});
     if (!productId) return null;
-    if (!isBrandPriceListActive(item?.brandName || item?.brand || '')) return null;
+    if (typeof isBrandPriceListActive === 'function' && !isBrandPriceListActive(item?.brandName || item?.brand || '')) return null;
     if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser') return null;
     const cacheKey = `${currentUserRole || ''}||${productId}`;
     if (visibleProductCostCache.has(cacheKey)) return visibleProductCostCache.get(cacheKey);
