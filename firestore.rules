@@ -9,10 +9,6 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
-    function hasUser() {
-      return signedIn() && exists(userPath());
-    }
-
     function userDoc() {
       return get(userPath());
     }
@@ -60,10 +56,6 @@ service cloud.firestore {
 
     function canReceiveInventory() {
       return admin() || purchaser() || warehouse();
-    }
-
-    function canManageEquipment() {
-      return admin() || engineer();
     }
 
     function salesCode() {
@@ -126,38 +118,6 @@ service cloud.firestore {
     function sameCommercialOwner() {
       return request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.salesCode == resource.data.salesCode;
-    }
-
-    function sameSupplyIdentity() {
-      return request.resource.data.get('type', '') == resource.data.get('type', '')
-        && request.resource.data.get('method', '') == resource.data.get('method', '')
-        && request.resource.data.get('sourceType', '') == resource.data.get('sourceType', '')
-        && request.resource.data.get('sourceId', '') == resource.data.get('sourceId', '')
-        && request.resource.data.get('sourceItemId', '') == resource.data.get('sourceItemId', '')
-        && request.resource.data.get('internalNo', '') == resource.data.get('internalNo', '')
-        && request.resource.data.get('purchaseDocumentId', '') == resource.data.get('purchaseDocumentId', '')
-        && request.resource.data.get('purchaseDocumentNo', '') == resource.data.get('purchaseDocumentNo', '')
-        && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
-        && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
-        && request.resource.data.get('orderItemIndex', 0) == resource.data.get('orderItemIndex', 0)
-        && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
-        && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
-        && request.resource.data.get('salesName', '') == resource.data.get('salesName', '')
-        && request.resource.data.get('customerName', '') == resource.data.get('customerName', '')
-        && request.resource.data.get('company', '') == resource.data.get('company', '')
-        && request.resource.data.get('productId', '') == resource.data.get('productId', '')
-        && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
-        && request.resource.data.get('itemCode', '') == resource.data.get('itemCode', '')
-        && request.resource.data.get('itemName', '') == resource.data.get('itemName', '')
-        && request.resource.data.get('brand', '') == resource.data.get('brand', '')
-        && request.resource.data.get('productLine', '') == resource.data.get('productLine', '')
-        && request.resource.data.get('fulfillmentType', 'WAREHOUSE') == resource.data.get('fulfillmentType', 'WAREHOUSE')
-        && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
-        && request.resource.data.get('orderDate', '') == resource.data.get('orderDate', '')
-        && request.resource.data.get('createdAt', '') == resource.data.get('createdAt', '')
-        && request.resource.data.get('createdByUid', '') == resource.data.get('createdByUid', '')
-        && request.resource.data.get('createdBy', '') == resource.data.get('createdBy', '')
-        && request.resource.data.get('createdByRole', '') == resource.data.get('createdByRole', '');
     }
 
     function validSupplyOperationalState() {
@@ -789,8 +749,6 @@ service cloud.firestore {
       let index = receipt.requestIndex;
       let previous = oldRequests[index];
       let next = newRequests[index];
-      let oldRecords = before.get('returnRecords', []);
-      let newRecords = after.get('returnRecords', []);
       return canReceiveInventory() && receiptId != '' && !exists(path)
         && receipt.orderId == id && receipt.receivedBy == request.auth.uid
         && previous.id == receipt.requestId && previous.status == 'PENDING'
@@ -800,9 +758,9 @@ service cloud.firestore {
         && validReturnPendingFlag(newRequests, after.returnPending)
         && newRequests.size() == oldRequests.size()
         && newRequests.removeAll([next]) == oldRequests.removeAll([previous])
-        && newRecords.size() == oldRecords.size() + 1
-        && newRecords[newRecords.size() - 1] == receipt.record
-        && newRecords.removeAll([receipt.record]) == oldRecords
+        && after.get('returnRecords', []).size() == before.get('returnRecords', []).size() + 1
+        && after.get('returnRecords', [])[after.get('returnRecords', []).size() - 1] == receipt.record
+        && after.get('returnRecords', []).removeAll([receipt.record]) == before.get('returnRecords', [])
         && after.returnedQty == before.get('returnedQty', 0) + receipt.qty
         && after.returnedQty <= before.get('deliveredQty', 0)
         && after.diff(before).affectedKeys().hasOnly([
