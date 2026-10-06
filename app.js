@@ -4650,8 +4650,18 @@ function warehouseStockDocId(warehouseId, productKey) {
     return encodeURIComponent(String(warehouseId || '')) + '__' + encodeURIComponent(String(productKey || ''));
 }
 
+function warehouseKind(item) {
+    // 舊倉庫沒有類型欄位時，延用公司倉庫行為。
+    return item?.warehouseType === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+}
+
+function isExternalWarehouseId(warehouseId) {
+    return warehouseKind(warehouseMasterCache.find(item => item.id === warehouseId && item.active !== false)) === 'EXTERNAL';
+}
+
 function defaultWarehouse() {
-    return warehouseMasterCache.find(item => item.active !== false && item.isDefault) || warehouseMasterCache.find(item => item.active !== false) || null;
+    const internal = warehouseMasterCache.filter(item => item.active !== false && warehouseKind(item) === 'INTERNAL');
+    return internal.find(item => item.isDefault) || internal[0] || null;
 }
 
 let warehouseMasterLoadPromise = null;
@@ -4668,6 +4678,7 @@ async function loadWarehouseMaster(force = false) {
             .sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
+        window.renderExternalWarehouseQueue?.();
         return warehouseMasterCache;
     }).catch(err => {
         warehouseMasterLoadPromise = null;
@@ -4975,11 +4986,40 @@ function renderWarehouseMasterAdmin() {
     if (!body) return;
     body.innerHTML = warehouseMasterCache.length ? warehouseMasterCache.map(item => `<tr>
         <td>${escapeHtml(item.warehouseName || '')}</td>
+        <td>${warehouseKind(item) === 'EXTERNAL' ? '外部倉庫' : '公司倉庫'}</td>
         <td>${item.isDefault ? '是' : ''}</td>
         <td>${item.active === false ? '停用' : '啟用'}</td>
-        <td><button type="button" class="btn-small btn-danger" onclick="disableWarehouseMaster(${inlineJsValue(item.id)})">停用</button></td>
-    </tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚未建立倉庫。</td></tr>';
+        <td><button type="button" class="btn-small btn-secondary" onclick="editWarehouseMaster(${inlineJsValue(item.id)})">編輯</button>
+            <button type="button" class="btn-small btn-danger" onclick="disableWarehouseMaster(${inlineJsValue(item.id)})">停用</button></td>
+    </tr>`).join('') : '<tr><td colspan="5" style="color:#888;">尚未建立倉庫。</td></tr>';
 }
+
+window.editWarehouseMaster = function(id) {
+    if (trueUserRole !== 'admin') return;
+    const item = warehouseMasterCache.find(row => row.id === id);
+    if (!item) return;
+    document.getElementById('warehouseMasterEditingId').value = id;
+    document.getElementById('warehouseMasterName').value = item.warehouseName || '';
+    document.getElementById('warehouseMasterType').value = warehouseKind(item);
+    document.getElementById('warehouseMasterDefault').checked = !!item.isDefault;
+    const status = document.getElementById('warehouseMasterStatus');
+    if (status) status.textContent = '編輯倉庫：' + (item.warehouseName || id);
+    const button = document.getElementById('warehouseMasterSaveBtn');
+    if (button) button.textContent = '儲存倉庫';
+};
+
+window.clearWarehouseMasterEditor = function() {
+    for (const id of ['warehouseMasterEditingId', 'warehouseMasterName']) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    }
+    const type = document.getElementById('warehouseMasterType');
+    if (type) type.value = 'INTERNAL';
+    const isDefault = document.getElementById('warehouseMasterDefault');
+    if (isDefault) isDefault.checked = false;
+    const button = document.getElementById('warehouseMasterSaveBtn');
+    if (button) button.textContent = '＋ 新增倉庫';
+};
 
 window.clearSupplierMasterEditor = function() {
     const editing=document.getElementById('supplierMasterEditingId');
@@ -5136,27 +5176,37 @@ window.saveWarehouseMaster = async function() {
         return;
     }
     const name = String(document.getElementById('warehouseMasterName')?.value || '').trim();
+    const editingId = String(document.getElementById('warehouseMasterEditingId')?.value || '').trim();
+    const warehouseType = document.getElementById('warehouseMasterType')?.value === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
     const makeDefault = !!document.getElementById('warehouseMasterDefault')?.checked;
     if (!name) { if (status) status.innerText = '請輸入倉庫名稱。'; return; }
+    if (makeDefault && warehouseType === 'EXTERNAL') {
+        if (status) status.innerText = '外部倉庫不能設為公司預設倉庫。';
+        return;
+    }
     if (button?.disabled) return;
     if (button) button.disabled = true;
     if (status) status.innerText = '儲存中…';
     try {
-        const id = stableMasterId('wh', name);
+        const id = editingId || stableMasterId('wh', name);
+        const previous = warehouseMasterCache.find(item => item.id === id);
         const now = new Date().toISOString();
+        const values = { warehouseId:id, warehouseName:name, warehouseType, isDefault:makeDefault,
+            active:true, updatedAt:now, createdAt:previous?.createdAt || now };
         if (makeDefault) {
             const defaults = warehouseMasterCache.filter(item => item.isDefault && item.id !== id);
             const batch = db.batch();
             defaults.forEach(item => batch.set(db.collection('warehouses').doc(item.id), { isDefault:false, updatedAt:now }, { merge:true }));
-            batch.set(db.collection('warehouses').doc(id), { warehouseId:id, warehouseName:name, isDefault:true, active:true, updatedAt:now }, { merge:true });
+            batch.set(db.collection('warehouses').doc(id), values, { merge:true });
             await batch.commit();
         } else {
-            await db.collection('warehouses').doc(id).set({ warehouseId:id, warehouseName:name, isDefault:false, active:true, updatedAt:now }, { merge:true });
+            await db.collection('warehouses').doc(id).set(values, { merge:true });
         }
         supplierWarehouseLoadPromise = null;
+        warehouseMasterLoadPromise = null;
         await loadSupplierWarehouseMasters(true);
+        window.clearWarehouseMasterEditor();
         if (status) status.innerText = '倉庫已儲存。';
-        const input=document.getElementById('warehouseMasterName'); if(input) input.value='';
     } catch (err) {
         console.error('儲存倉庫失敗：', err);
         if (status) status.innerText = '儲存失敗：' + (err.code === 'permission-denied' ? 'Firestore 權限不足，請確認目前帳號為管理員並已部署最新 Rules。' : err.message);
