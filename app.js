@@ -39,9 +39,7 @@ if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.firestore();
-const cloudFunctions = APP_ENVIRONMENT === 'production' && typeof firebase.app().functions === 'function'
-    ? firebase.app().functions('asia-east1')
-    : null;
+
 // 這套系統在部分實際使用網路環境持續出現 Firestore WebChannel transport error。
 // Firebase 官方提供 forceLongPolling 用於避開 Proxy／防毒／網路設備對長連線的相容性問題。
 // 必須在任何 Firestore 讀寫前設定；不要同時啟用 autoDetectLongPolling。
@@ -4678,7 +4676,6 @@ async function loadWarehouseMaster(force = false) {
             .sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
-        window.renderExternalWarehouseQueue?.();
         return warehouseMasterCache;
     }).catch(err => {
         warehouseMasterLoadPromise = null;
@@ -4759,35 +4756,8 @@ function purchaseOrderSupplierContact(po={}) {
     return globalThis.YushinSupplier.purchaseOrderContact(po,supplierMasterCache);
 }
 
-async function recordPurchaseOrderCommunication(po,contact,channel) {
-    if (!globalThis.YushinSupplier?.communicationEvent) {
-        throw new Error('Supplier core 未載入，無法記錄採購單聯絡事件。');
-    }
-    const now=new Date().toISOString();
-    const event=globalThis.YushinSupplier.communicationEvent(po,contact,{
-        channel,
-        preparedAt:now,
-        createdByUid:currentUser?.uid||'',
-        createdBy:currentUserName||currentUser?.email||''
-    });
-    await db.collection('purchaseOrderCommunications').add(event);
-    await db.collection('purchaseOrders').doc(po.id).set({
-        lastShareAt:now,
-        lastShareType:channel,
-        lastShareEmail:contact.email,
-        lastCommunicationState:event.state
-    },{merge:true});
-}
 
-window.updatePoSupplierEmailHint = function(po=null) {
-    const hint=document.getElementById('poSupplierEmailHint');
-    if(!hint)return;
-    const contact=po
-        ? purchaseOrderSupplierContact(po)
-        : purchaseOrderSupplierContact({vendorName:document.getElementById('poVendorName')?.value||''});
-    hint.textContent=contact.email ? `Email：${contact.email}` : '尚未設定供應商 Email';
-    hint.style.color=contact.email ? '#555' : '#9a6700';
-};
+
 
 
 function renderSupplierMasterAdmin() {
@@ -4855,14 +4825,13 @@ function renderSupplierSettingsAdmin() {
             <td>${escapeHtml(mapping.productLine||'預設')}</td>
             <td>${escapeHtml(supplier.supplierName||'找不到供應商')}</td>
             <td>${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</td>
-            <td>${escapeHtml(supplier.email||'')}</td>
             <td>${leadTimeDays?leadTimeDays+' 天':'－'}</td>
             <td>
                 <button type="button" class="btn-small btn-secondary" onclick="loadSupplierSettingToEditor(${inlineJsValue(mapping.id||mapping.mappingId||'')})">編輯</button>
                 <button type="button" class="btn-small btn-danger" onclick="disableSupplierSetting(${inlineJsValue(mapping.id||mapping.mappingId||'')})">停用</button>
             </td>
         </tr>`;
-    }).join(''):'<tr><td colspan="7" style="color:#888;">尚未設定供應商。</td></tr>';
+    }).join(''):'<tr><td colspan="6" style="color:#888;">尚未設定供應商。</td></tr>';
 }
 
 window.fillSupplierSettingFromName = function() {
@@ -4914,7 +4883,7 @@ window.saveSupplierSetting = async function() {
     const productLine=String(document.getElementById('supplierSettingLine')?.value||'').trim();
     const supplierName=String(document.getElementById('supplierSettingName')?.value||'').trim();
     const purchaseHeaderName=String(document.getElementById('supplierSettingHeader')?.value||'').trim()||supplierName;
-    const supplierEmail=normalizeSupplierEmail(document.getElementById('supplierSettingEmail')?.value||'');
+    const supplierEmail=normalizeSupplierEmail(supplierMasterCache.find(item=>item.id===editingSupplierId)?.email||'');
     const leadTimeDays=Math.max(0,Math.floor(Number(document.getElementById('supplierSettingLeadTime')?.value||0)));
     if(!brandName||!supplierName){
         if(status)status.textContent=!brandName?'請選擇廠牌。':'請輸入供應商名稱。';
@@ -10807,7 +10776,6 @@ window.renderOrdersList = function() {
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
                             ${orderLifecycleActionButtons(o, lifecycle, deliveryProgress, contextActions)}
-                            ${allOrderItems.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP') ? `<button type="button" class="btn-secondary" onclick="viewExternalWarehouseStatus(${inlineJsValue(o.id)})">查看外倉通知狀態</button>` : ''}
                             ${dispatchActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${canAccessPage('orders.po') ? [...new Set(allOrderItems.flatMap(item=>item.purchaseDocumentNos||[]))].map(number=>`<button type="button" class="btn-secondary" onclick="openRelatedOrderPurchase(${inlineJsValue(number)})">採購單 ${escapeHtml(number)}</button>`).join('') : ''}
@@ -11712,9 +11680,7 @@ window.switchPurchasingView = function(view, tab) {
             });
         }
     } else if (view === 'dispatch') {
-        // 外倉清單只需要倉庫類型及最近 50 筆通知；不掃描整份通知歷史。
-        Promise.allSettled([loadWarehouseMaster(), window.loadRecentExternalWarehouseNotices?.()])
-            .then(() => window.renderExternalWarehouseQueue?.());
+        loadWarehouseMaster();
         renderPurchasingDispatchOrders(normalizedItemsByOrder, filters, dispatchStatesByOrder, lifecyclesByOrder);
         if (!purchasingViewLoaded.has('dispatch')) {
             purchasingViewLoaded.add('dispatch');
@@ -11889,7 +11855,6 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
     const status=document.getElementById('purchaseDispatchStatus');
     const more=document.getElementById('purchaseDispatchMoreBtn');
     if(!body)return;
-    window.renderExternalWarehouseQueue?.();
     body.innerHTML='';
     const fragment=document.createDocumentFragment();
     let shown=0;
@@ -11908,7 +11873,6 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
         pending.forEach(({item,state})=>{
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
             const warehouseId = item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '';
-            if (isExternalWarehouseId(warehouseId)) return;
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
             const action = canPrepareDispatch
                 ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">已打單 × ${state.pending}</button>`
@@ -12775,12 +12739,7 @@ window.openPurchaseOrderTimeline = async function(poId) {
             db.collection('receipts').where('purchaseDocumentId','==',po.id).get(),
             '採購單到貨歷程'
         );
-        const communicationPromise=canCreatePurchaseOrderCapability()
-            ? firestoreReadWithTimeout(
-                db.collection('purchaseOrderCommunications').where('purchaseOrderId','==',po.id).get(),
-                '採購單聯絡歷程'
-            )
-            : Promise.resolve(null);
+        const communicationPromise=Promise.resolve(null);
 
         const [supplies,receiptSnapshot,communicationSnapshot]=await Promise.all([
             supplyPromise,receiptPromise,communicationPromise
@@ -13340,7 +13299,6 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                         <button type="button" class="btn-small" onclick="reprintPurchaseOrder(${inlineJsValue(po.id)})">載入</button>
                         <button type="button" class="btn-small btn-secondary" onclick="exportPurchaseOrderFromHistory(${inlineJsValue(po.id)})">PDF</button>
                         <button type="button" class="btn-small btn-secondary" onclick="openPurchaseOrderTimeline(${inlineJsValue(po.id)})">追蹤</button>
-                        ${supplierContact.email?`<button type="button" class="btn-small btn-secondary" onclick="emailPurchaseOrder(${inlineJsValue(po.id)})">郵件</button>`:''}
                         <details class="po-more-menu">
                             <summary class="btn-small btn-secondary">更多</summary>
                             <div class="po-more-menu-popover">
@@ -13397,7 +13355,6 @@ window.reprintPurchaseOrder = async function(poId) {
     switchPoCompany(po.company || 'yushin', null, true);
 
     document.getElementById('poVendorName').value = po.vendorName || '';
-    window.updatePoSupplierEmailHint?.(po);
     document.getElementById('poBuyerName').innerText = po.buyerName || '';
     document.getElementById('poDate').value = po.poDate || '';
     const poExpectedDateInput=document.getElementById('poExpectedDate');
@@ -13462,7 +13419,6 @@ window.copySavedPurchaseOrderAsNew = async function(poId) {
     populatePoVendorSuggestions();
     switchPoCompany(po.company || 'yushin', null, true);
     document.getElementById('poVendorName').value = po.vendorName || '';
-    window.updatePoSupplierEmailHint?.({vendorName:po.vendorName,supplierId:po.supplierId,supplierEmail:po.supplierEmail});
     document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
     document.getElementById('poDate').value = localDateString();
     clearPoExpectedDate();
@@ -13486,148 +13442,6 @@ window.exportPurchaseOrderFromHistory = async function(poId) {
         alert('重新匯出採購單 PDF 失敗：' + (err?.message || err));
     } finally {
         endActionButton(button, buttonState);
-    }
-};
-
-async function purchaseOrderPdfBase64(blob) {
-    if(!blob || typeof blob.arrayBuffer !== 'function') throw new Error('採購單 PDF 無法讀取。');
-    const bytes=new Uint8Array(await blob.arrayBuffer());
-    let binary='';
-    const chunkSize=0x8000;
-    for(let offset=0;offset<bytes.length;offset+=chunkSize){
-        binary+=String.fromCharCode(...bytes.subarray(offset,offset+chunkSize));
-    }
-    return btoa(binary);
-}
-
-async function sendPurchaseOrderEmailViaBackend(po,attachment) {
-    if(!cloudFunctions) throw Object.assign(new Error('後端寄信尚未啟用。'),{code:'functions/not-configured'});
-    const callable=cloudFunctions.httpsCallable('sendPurchaseOrderEmail');
-    const pdfBase64=await purchaseOrderPdfBase64(attachment.blob);
-    const response=await callable({
-        purchaseOrderId:po.id,
-        pdfBase64,
-        fileName:attachment.fileName
-    });
-    return response?.data||{};
-}
-
-window.emailPurchaseOrder = async function(poId) {
-    if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-    const button=actionButtonFromEventOrSelector();
-    const buttonState=beginActionButton(button,'準備郵件…');
-    if(button && !buttonState)return;
-    try{
-        await loadSupplierWarehouseMasters();
-        let po=poListCache.find(row=>row.id===poId)||poHistorySearchResults.find(row=>row.id===poId);
-        if(!po){
-            const snap=await firestoreReadWithTimeout(db.collection('purchaseOrders').doc(poId).get(),'採購單郵件');
-            if(!snap.exists)throw new Error('找不到這張採購單。');
-            po={id:snap.id,...snap.data()};
-        }
-        if(!poListCache.some(row=>row.id===po.id))poListCache.push(po);
-
-        const contact=purchaseOrderSupplierContact(po);
-        if(!contact.email){
-            alert('這個供應商尚未設定 Email。請到「採購 → 供應商」補上訂購 Email。');
-            return;
-        }
-
-        await reprintPurchaseOrder(po.id);
-        if(poIncomingSyncPending){
-            updatePoSaveStatus('寄送前正在確認在途庫存同步…');
-            await registerPurchaseIncoming(po.id,po);
-            poIncomingSyncPending=false;
-        }
-
-        const attachment=await printSavedPoDocument(po.poNo,po.vendorName,{download:false});
-        const company=companyData[po.company]||companyData.yushin||{};
-        const subject=`採購單 ${po.poNo||''}｜${company.title||'又鑫生物科技有限公司'}`;
-        const body=`${contact.supplierName||po.vendorName||'您好'} 您好：
-
-附件為採購單 ${po.poNo||''}，請查收，謝謝。
-
-${company.title||''}
-採購人員：${po.buyerName||currentUserName||''}`;
-
-        if(cloudFunctions){
-            updatePoSaveStatus(`正在寄送 ${po.poNo||''} 至 ${contact.email}…`);
-            try{
-                const sent=await sendPurchaseOrderEmailViaBackend(po,attachment);
-                const sentAt=new Date().toISOString();
-                Object.assign(po,{
-                    lastShareAt:sentAt,
-                    lastShareType:'SMTP',
-                    lastShareEmail:sent.recipientEmail||contact.email,
-                    lastCommunicationState:'SENT',
-                    lastEmailSentAt:sentAt,
-                    lastEmailMessageId:sent.messageId||''
-                });
-                updatePoSaveStatus(`✓ 已寄出至 ${sent.recipientEmail||contact.email}${sent.messageId?'｜'+sent.messageId:''}`);
-                renderPoList();
-                return;
-            }catch(sendErr){
-                const code=String(sendErr?.code||'');
-                const reason=String(sendErr?.details?.reason||'');
-                const canFallback=reason==='SMTP_NOT_CONFIGURED'||code==='functions/not-found'||code==='functions/unimplemented';
-                if(!canFallback)throw sendErr;
-                console.warn('後端寄信尚未就緒，改用本機郵件草稿：',sendErr);
-                updatePoSaveStatus('後端寄信尚未設定，改用下載 PDF＋郵件草稿。');
-            }
-        }
-
-        const canShareFile=typeof File==='function'&&navigator.share&&navigator.canShare;
-        let shared=false;
-        if(canShareFile){
-            const file=new File([attachment.blob],attachment.fileName,{type:'application/pdf'});
-            if(navigator.canShare({files:[file]})){
-                try{
-                    try{await navigator.clipboard?.writeText(contact.email);}catch(_){}
-                    await navigator.share({
-                        title:subject,
-                        text:`收件人：${contact.email}\n\n${body}`,
-                        files:[file]
-                    });
-                    shared=true;
-                    updatePoSaveStatus(`✓ 已開啟分享；供應商 Email：${contact.email}`);
-                }catch(err){
-                    if(err?.name==='AbortError'){
-                        updatePoSaveStatus('已取消郵件／分享。');
-                        return;
-                    }
-                    console.warn('檔案分享不可用，改用郵件草稿：',err);
-                }
-            }
-        }
-
-        let mailtoUrl='';
-        if(!shared){
-            const url=URL.createObjectURL(attachment.blob);
-            const link=document.createElement('a');
-            link.href=url;
-            link.download=attachment.fileName;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            setTimeout(()=>URL.revokeObjectURL(url),30000);
-            mailtoUrl=`mailto:${contact.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body+'\\n\\nPDF 已下載，請將 '+attachment.fileName+' 加入附件。')}`;
-        }
-
-        const communicationChannel=shared?'WEB_SHARE':'MAILTO';
-        await recordPurchaseOrderCommunication(po,contact,communicationChannel);
-        if(mailtoUrl){
-            window.location.href=mailtoUrl;
-            updatePoSaveStatus(`✓ PDF 已下載並開啟郵件草稿：${contact.email}（系統僅記錄已準備，無法確認實際寄出）`);
-        }else{
-            updatePoSaveStatus(`✓ 已完成分享流程：${contact.email}（系統不宣稱已寄出）`);
-        }
-    }catch(err){
-        console.error('準備採購單郵件失敗：',err);
-        updatePoSaveStatus('準備採購單郵件失敗：'+(err?.message||err),true);
-        alert('準備採購單郵件失敗：'+(err?.message||err));
-    }finally{
-        endActionButton(button,buttonState);
-        updatePoSaveButton();
     }
 };
 
@@ -14892,7 +14706,6 @@ window.onDirectPoCodeChange = async function(idx, value) {
         );
         if (!document.getElementById('poVendorName').value && mappedSupplier) {
             document.getElementById('poVendorName').value = mappedSupplier.purchaseHeaderName || mappedSupplier.supplierName || '';
-            window.updatePoSupplierEmailHint?.();
         } else if (!document.getElementById('poVendorName').value && match.supplier) {
             document.getElementById('poVendorName').value = match.supplier;
         }
@@ -14927,7 +14740,6 @@ function updatePoModeUI() {
     const existingBanner = document.getElementById('poExistingBanner');
     const existingNumber = document.getElementById('poExistingNumber');
     const copyBtn = document.getElementById('poCopyAsNewBtn');
-    const emailBtn = document.getElementById('emailPurchaseOrderBtn');
     if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
 
     const viewingExisting = !!poEditingId;
@@ -14940,8 +14752,6 @@ function updatePoModeUI() {
     const canCopySafely = !!savedPo && (savedPo.purchaseType === 'stock' || purchaseItemsFromSavedPo(savedPo).every(item => !item.orderId));
     if (copyBtn) copyBtn.style.display = canCopySafely ? '' : 'none';
     const supplierContact = savedPo ? purchaseOrderSupplierContact(savedPo) : purchaseOrderSupplierContact({vendorName:document.getElementById('poVendorName')?.value||''});
-    if (emailBtn) emailBtn.style.display = viewingExisting && supplierContact.email ? '' : 'none';
-    window.updatePoSupplierEmailHint?.(savedPo || null);
 
     if (addBtn) addBtn.style.display = !viewingExisting && poDirectStockMode ? '' : 'none';
     if (hint) hint.textContent = viewingExisting
@@ -15073,7 +14883,6 @@ async function autoFillPoSupplier(items) {
     const input = document.getElementById('poVendorName');
     if (input && header) input.value = header;
     window.autoFillPoExpectedDate(rows,ids[0]);
-    window.updatePoSupplierEmailHint?.();
     return header;
 }
 
@@ -16879,7 +16688,7 @@ function renderDeliveryModal() {
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
             <td>${record.itemId ? escapeHtml(deliveryItemNameById.get(record.itemId)||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-            <td>${editable ? `<button type="button" class="btn-small" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">刪除</button>` : '僅可查看'}</td>
+            <td>${editable ? `<button type="button" class="btn-small" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button>` : '僅可查看'}</td>
         </tr>`).join('');
     } else if (progress.isLegacyEstimated) {
         tbody.innerHTML = `<tr><td>${escapeHtml(order.orderDate || '')}<br><span class="delivery-estimated">歷史推估</span></td><td>${progress.total}</td><td>舊版已送貨資料</td><td>－</td><td>${editable ? '<button type="button" class="btn-secondary" onclick="clearLegacyDelivery()">取消此推估</button>' : '僅可查看'}</td></tr>`;
@@ -17025,7 +16834,8 @@ window.saveDeliveryRecord = async function() {
 
 window.deleteDeliveryRecord = async function(recordId) {
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限負責業務、工程師或管理員。'); return; }
-    if (!confirm('確定要刪除這筆送貨紀錄嗎？異動軌跡仍會保留。')) return;
+    const correctionReason = prompt('僅限更正誤登的送貨紀錄，會同步回補原出貨庫存並保留異動軌跡。實際已送出的貨請申請退貨。\n\n請輸入誤登更正原因：');
+    if (!correctionReason || !correctionReason.trim()) return;
     const orderId = currentDeliveryOrderId;
     if (!orderId || pendingDeliveryOrderIds.has(orderId)) return;
     pendingDeliveryOrderIds.add(orderId);
@@ -17046,7 +16856,7 @@ window.deleteDeliveryRecord = async function(recordId) {
             if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`刪除後的送貨數量會低於已登錄的退貨數量 ${alreadyReturned}，請先更正退貨紀錄。`);
             const actor = deliveryActor();
             const now = new Date().toISOString();
-            const history = { action: 'delete', recordId, before: removed, after: null, by: actor, at: now };
+            const history = { action: 'delete', recordId, before: removed, after: null, reason: correctionReason.trim(), by: actor, at: now };
             const orderItems=normalizedOrderItems(order);
             const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
             if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
@@ -17172,11 +16982,29 @@ window.resetReturnForm = function() {
     updateReturnFormHint();
 };
 
+function renderOrderLifecycleStatusOptions(order) {
+    const select = document.getElementById('orderLifecycleStatus');
+    const progress = deliveryProgressInfo(order);
+    const currentStatus = normalizedOrderStatus(order);
+    const selected = select.value || currentStatus;
+    const canCancel = progress.remaining > 0;
+    const cancelLabel = currentStatus === 'cancelled' ? '已取消'
+        : progress.grossDelivered > 0 ? '取消剩餘未送貨數量' : '取消訂單';
+    select.innerHTML = '<option value="normal">正常</option>'
+        + (canCancel || currentStatus === 'cancelled' ? `<option value="cancelled">${cancelLabel}</option>` : '');
+    select.value = selected === 'cancelled' && (canCancel || currentStatus === 'cancelled') ? 'cancelled' : 'normal';
+    const hint = document.getElementById('orderLifecycleStatusHint');
+    if (hint) hint.innerText = canCancel
+        ? (progress.grossDelivered > 0 ? '僅取消剩餘未送貨數量；已送貨部分請申請退貨。' : '')
+        : '已無剩餘未送貨數量，不能取消訂單；已送貨部分請申請退貨。';
+}
+
 function renderOrderLifecycleModal() {
     const order = ordersCache.find(item => item.id === currentLifecycleOrderId);
     if (!order) return;
     const editable = canManageOrderLifecycleCapability() && canEditPage('orders.list');
     const info = orderLifecycleInfo(order);
+    renderOrderLifecycleStatusOptions(order);
     document.getElementById('orderStatusEditPanel').style.display = editable ? '' : 'none';
     const isEditingReturn = !!document.getElementById('returnEditId').value;
     document.getElementById('returnFormPanel').style.display = editable && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';

@@ -12,7 +12,6 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
         <link rel="stylesheet" href="styles.css?v=20261005-8">
@@ -975,17 +974,10 @@
             <div class="po-load-more-row no-print"><button type="button" id="poLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMorePurchaseOrders()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseDispatchPanel" style="display:none">
-            <section class="panel" id="externalWarehousePanel">
-                <div class="purchase-section-heading"><strong>外倉出貨通知</strong>
-                    <p>僅顯示外部倉庫的品項。採購／倉管可下載通知、確認已通知與實際出貨。</p></div>
-                <span id="externalWarehouseQueueStatus" role="status"></span>
-                <div class="table-wrap"><table><thead><tr><th>訂單號</th><th>客戶</th><th>外倉</th><th>品項</th><th>操作</th></tr></thead>
-                <tbody id="externalWarehouseBody"><tr><td colspan="5">正在讀取外倉品項…</td></tr></tbody></table></div>
-            </section>
             <div class="toolbar no-print">
                 <span id="purchaseDispatchStatus" role="status"></span>
             </div>
-            <div class="inventory-summary-note">以下為公司倉庫待打單品項；外部倉庫請使用上方「外倉出貨通知」，不必重複打單。</div>
+            <div class="inventory-summary-note">以下為倉庫待打單品項。</div>
             <div class="table-wrap"><table>
                 <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待打單品項</th><th>操作</th></tr></thead>
                 <tbody id="purchaseDispatchBody"></tbody>
@@ -999,7 +991,7 @@
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseSupplierPanel" style="display:none">
-            <div class="inventory-summary-note">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭、Email 與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div>
+            <div class="inventory-summary-note">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div>
             <div class="panel supplier-setting-panel" style="margin-top:16px;">
                 <strong>供應商設定</strong>
                 <p style="font-size:12px;color:#666;margin:6px 0 12px;">同一供應商可對應多個廠牌；產品線留白代表該廠牌的預設供應商。</p>
@@ -1011,7 +1003,6 @@
                     <label>產品線（選填）<input id="supplierSettingLine" type="text" placeholder="留白＝廠牌預設"></label>
                     <label>供應商<input id="supplierSettingName" type="text" list="supplierSettingSuggestions" placeholder="供應商名稱" onchange="fillSupplierSettingFromName()"></label>
                     <label>採購單抬頭<input id="supplierSettingHeader" type="text" placeholder="留白＝供應商名稱"></label>
-                    <label>訂購 Email<input id="supplierSettingEmail" type="email" placeholder="orders@supplier.com"></label>
                     <label>預設交期<input id="supplierSettingLeadTime" type="number" min="0" step="1" value="0" placeholder="天數"></label>
                     <div class="supplier-setting-actions">
                         <button type="button" onclick="saveSupplierSetting()">儲存</button>
@@ -1021,7 +1012,7 @@
                 <div id="supplierSettingStatus" class="inline-status" role="status" aria-live="polite"></div>
                 <div class="table-wrap" style="margin-top:12px;">
                     <table>
-                        <thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>採購單抬頭</th><th>訂購 Email</th><th>預設交期</th><th>操作</th></tr></thead>
+                        <thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>採購單抬頭</th><th>預設交期</th><th>操作</th></tr></thead>
                         <tbody id="supplierSettingsBody"></tbody>
                     </table>
                 </div>
@@ -1156,7 +1147,7 @@
             <div class="panel" id="orderStatusEditPanel">
                 <h4 style="margin:0 0 10px;">訂單有效狀態</h4>
                 <div class="form-grid" style="margin-bottom:8px;">
-                    <div><label>狀態</label><select id="orderLifecycleStatus" onchange="onOrderLifecycleStatusChange()"><option value="normal">正常</option><option value="cancelled">已取消</option></select></div>
+                    <div><label>狀態</label><select id="orderLifecycleStatus" onchange="onOrderLifecycleStatusChange()"><option value="normal">正常</option><option value="cancelled">取消訂單</option></select><div id="orderLifecycleStatusHint" class="form-hint" role="status"></div></div>
                     <div><label>日期</label><input type="date" id="orderLifecycleDate"></div>
                     <div><label>原因</label><input type="text" id="orderLifecycleReason" placeholder="取消原因（選填）"></div>
                 </div>
@@ -1224,7 +1215,7 @@
                 <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">採 購 單</h2>
 
                 <div class="meta-row-three">
-                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;" oninput="updatePoSupplierEmailHint()" onchange="updatePoSupplierEmailHint(); autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist><small id="poSupplierEmailHint" class="no-print" style="display:block;margin-top:3px;color:#9a6700;">尚未設定供應商 Email</small></div>
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;" onchange="autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist></div>
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
                     <div><label>訂購日期：</label><input type="date" id="poDate" onchange="autoFillPoExpectedDate()"></div>
                 </div>
@@ -1261,7 +1252,6 @@
 
             <div class="no-print" style="margin-top:16px;text-align:right;border-top:1px solid #eee;padding-top:12px;">
                 <p id="poSaveStatus" role="status" aria-live="polite" style="text-align:left;margin:0 0 10px;"></p>
-                <button type="button" id="emailPurchaseOrderBtn" class="btn-secondary" style="display:none;" onclick="emailPurchaseOrder(poEditingId)">📧 郵件／分享</button>
                 <div class="document-download-settings no-print">
                     <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
                     <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
@@ -1672,10 +1662,9 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261006-7"></script>
+    <script src="app.js?v=20261006-8"></script>
     <script src="modules/customer-cancellations.js?v=20261006-1"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
-    <script src="modules/external-warehouse-dispatch.js?v=20261006-1"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
@@ -1764,6 +1753,5 @@
     })();
     </script>
 
-    <div id="externalWarehouseNoticeOverlay" class="eq-modal-overlay no-print" onclick="if(event.target===this)closeExternalWarehouseNotice()"></div>
 </body>
 </html>

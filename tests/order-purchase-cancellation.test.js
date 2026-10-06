@@ -69,7 +69,7 @@ test('cancelled delivered order displays the new return form but never exposes i
  for(const business of [true,false]){
   const elements=new Map();const get=id=>{if(!elements.has(id))elements.set(id,{style:{},value:'',innerHTML:''});return elements.get(id);};
   const c=vm.createContext({ordersCache:[{id:'O1',returnRecords:[]}],currentLifecycleOrderId:'O1',canManageOrderLifecycleCapability:()=>business,canEditPage:()=>business,
-   orderLifecycleInfo:()=>({status:'cancelled',effectiveDelivered:1,delivered:2,returned:1}),document:{getElementById:get},escapeHtml:String,savedReturnRecords:o=>o.returnRecords,populateReturnItemOptions:()=>{},updateReturnFormHint:()=>{},onOrderLifecycleStatusChange:()=>{}});
+   orderLifecycleInfo:()=>({status:'cancelled',effectiveDelivered:1,delivered:2,returned:1}),document:{getElementById:get},escapeHtml:String,savedReturnRecords:o=>o.returnRecords,populateReturnItemOptions:()=>{},updateReturnFormHint:()=>{},renderOrderLifecycleStatusOptions:()=>{},onOrderLifecycleStatusChange:()=>{}});
   vm.runInContext(fn('renderOrderLifecycleModal'),c);c.renderOrderLifecycleModal();
   assert.equal(get('returnFormPanel').style.display,business?'':'none');
  }
@@ -127,3 +127,19 @@ test('settlement return adds free stock while preserving reservations for remain
  assert.equal(docs.get('inventory/P1').reserved,1);
  assert.equal(result.newReservedQty,1);
 });
+
+ test('lifecycle select blocks completed and legacy delivered orders, labels partial cancellation and preserves old cancelled records',()=>{
+  for(const row of [
+   {remaining:0,grossDelivered:1,status:'normal',expected:false},
+   {remaining:2,grossDelivered:1,status:'normal',expected:true,label:'取消剩餘未送貨數量'},
+   {remaining:2,grossDelivered:0,status:'normal',expected:true,label:'取消訂單'},
+   {remaining:0,grossDelivered:1,status:'cancelled',expected:true,label:'已取消'}
+  ]){
+   const elements={orderLifecycleStatus:{value:'cancelled'},orderLifecycleStatusHint:{}};
+   const c=vm.createContext({document:{getElementById:id=>elements[id]},deliveryProgressInfo:()=>row,normalizedOrderStatus:()=>row.status});
+   vm.runInContext(fn('renderOrderLifecycleStatusOptions'),c);c.renderOrderLifecycleStatusOptions({});
+   assert.equal(elements.orderLifecycleStatus.innerHTML.includes('value="cancelled"'),row.expected);
+   if(row.label)assert.ok(elements.orderLifecycleStatus.innerHTML.includes(row.label));
+   if(!row.expected)assert.equal(elements.orderLifecycleStatus.value,'normal');
+  }
+ });

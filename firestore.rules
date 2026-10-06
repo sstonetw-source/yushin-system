@@ -929,11 +929,27 @@ service cloud.firestore {
         && getAfter(inventoryPath).data.get('onHand', -1) == get(inventoryPath).data.get('onHand', -1) - resource.data.qty;
     }
 
+    // Completed delivery must be corrected separately or returned, never cancelled.
+    // Check both snapshots so a combined flag/status update cannot bypass this guard.
+    function validOrderCancellationTransition() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let wasCancelled = before.get('orderStatus', '') in ['cancelled', 'voided']
+        || before.get('status', '') in ['cancelled', 'voided'];
+      let isCancelled = after.get('orderStatus', '') in ['cancelled', 'voided']
+        || after.get('status', '') in ['cancelled', 'voided'];
+      return !isCancelled || wasCancelled
+        || (before.get('isDelivered', false) != true && after.get('isDelivered', false) != true
+          && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
+          && after.get('returnRecords', []) == before.get('returnRecords', [])
+          && after.get('deliveredQty', 0) == before.get('deliveredQty', 0));
+    }
+
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id) || externalWarehouseOrderShipmentUpdate(id)
-        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id) || externalWarehouseOrderShipmentUpdate(id)
+        : userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole == 'warehouse' ? warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && owns(resource.data) && owns(request.resource.data)
           && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && commercialReturnProtection();
     }
@@ -947,7 +963,8 @@ service cloud.firestore {
         && validOrderEmbeddedCost(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
-      allow update: if orderUpdateAllowed(id);
+      allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'orderStatus'])
+        || validOrderCancellationTransition()) && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -965,13 +982,7 @@ service cloud.firestore {
     // the handoff was prepared, not that an email was actually delivered.
     match /purchaseOrderCommunications/{id} {
       allow read: if admin() || purchaser();
-      allow create: if canPurchase()
-        && request.resource.data.get('purchaseOrderId', '') != ''
-        && request.resource.data.get('createdByUid', '') == request.auth.uid
-        && request.resource.data.get('state', '') == 'PREPARED'
-        && request.resource.data.get('verifiedSent', true) == false;
-      allow update: if false;
-      allow delete: if admin();
+      allow write: if false;
     }
 
     // ERP Material Request-like purchasing demand. Demand identity is stable and
@@ -1152,8 +1163,8 @@ service cloud.firestore {
         || (businessOwner() && (resource == null || owns(resource.data)));
       allow list: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if validExternalNoticeCreate(id);
-      allow update: if validExternalNoticeShipment(id);
+      allow create: if false;
+      allow update: if false;
       allow delete: if false;
     }
 

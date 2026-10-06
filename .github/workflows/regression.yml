@@ -16,7 +16,6 @@ jobs:
       - name: JavaScript syntax check
         run: |
           node --check app.js
-          node --check modules/external-warehouse-dispatch.js
           node --check modules/document-downloads.js
           node --check modules/supplier-core.js
           node --check modules/inventory-core.js

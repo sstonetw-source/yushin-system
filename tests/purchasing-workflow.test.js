@@ -1900,26 +1900,9 @@ test('ERP close semantics distinguish partial receipt from zero-receipt cancella
     assert.match(app,/if\(status==='CLOSED'\)return '已結案'/);
 });
 
-test('purchase order email prefers secure callable SMTP and only falls back when backend is unavailable', () => {
-    assert.match(app,/firebase\.app\(\)\.functions\('asia-east1'\)/);
-    assert.match(app,/async function sendPurchaseOrderEmailViaBackend\(po,attachment\)/);
-    assert.match(app,/httpsCallable\('sendPurchaseOrderEmail'\)/);
-    assert.match(app,/purchaseOrderId:po\.id/);
-    assert.match(app,/lastCommunicationState:'SENT'/);
-    assert.match(app,/reason==='SMTP_NOT_CONFIGURED'/);
-    assert.match(app,/code==='functions\/not-found'/);
-    assert.match(app,/code==='functions\/unimplemented'/);
-});
 
-test('purchase order email/share uses supplier core contact and generated PDF blob', () => {
-    assert.match(app, /function purchaseOrderSupplierContact\(po=\{\}\)/);
-    assert.match(app, /YushinSupplier\.purchaseOrderContact\(po,supplierMasterCache\)/);
-    assert.match(app, /window\.emailPurchaseOrder = async function\(poId\)/);
-    assert.match(app, /printSavedPoDocument\(po\.poNo,po\.vendorName,\{download:false\}\)/);
-    assert.match(app, /navigator\.canShare\(\{files:\[file\]\}\)/);
-    assert.match(app, /mailto:\$\{contact\.email\}/);
-    assert.match(app, /recordPurchaseOrderCommunication\(po,contact,communicationChannel\)/);
-});
+
+
 
 test('purchase order PDF renderer can return a blob without downloading', () => {
     const start=app.indexOf('async function printSavedPoDocument(poNo, vendorName)');
@@ -1932,7 +1915,7 @@ test('purchase order PDF renderer can return a blob without downloading', () => 
 });
 
 test('supplier settings keep canonical Supplier Master contact fields and PO snapshots supplier contact', () => {
-    assert.match(html,/id="supplierSettingEmail"/);
+    assert.doesNotMatch(html,/id="supplierSettingEmail"/);
     assert.match(html,/id="supplierSettingsBody"/);
     const start=app.indexOf('window.saveSupplierSetting = async function');
     const end=app.indexOf('\nwindow.disableSupplierSetting',start);
@@ -1949,7 +1932,7 @@ test('supplier settings keep canonical Supplier Master contact fields and PO sna
 test('consolidated supplier setting writes Supplier Master and brand mapping atomically', () => {
     assert.match(html,/id="supplierSettingBrand"/);
     assert.match(html,/id="supplierSettingName"/);
-    assert.match(html,/id="supplierSettingEmail"/);
+    assert.doesNotMatch(html,/id="supplierSettingEmail"/);
     const start=app.indexOf('window.saveSupplierSetting = async function');
     const end=app.indexOf('\nwindow.disableSupplierSetting',start);
     const source=app.slice(start,end);
@@ -2064,14 +2047,14 @@ test('purchase order freezes supplier snapshot and records communication events'
     assert.match(app, /snapshotForPurchaseOrder/);
     assert.match(app, /supplierSnapshot,/);
     assert.match(app, /purchaseOrderCommunications/);
-    assert.match(app, /communicationEvent\(po,contact/);
-    assert.match(app, /lastCommunicationState:event\.state/);
+    assert.doesNotMatch(app, /communicationEvent\(po,contact/);
+    assert.doesNotMatch(app, /lastCommunicationState:event\.state/);
     assert.doesNotMatch(app, /verifiedSent:\s*true/);
 });
 
 test('purchase order email contact is delegated to supplier core', () => {
     const start=app.indexOf('function purchaseOrderSupplierContact(po={})');
-    const end=app.indexOf('\nasync function recordPurchaseOrderCommunication',start);
+    const end=app.indexOf('\n}',start)+2;
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/YushinSupplier\?\.purchaseOrderContact/);
@@ -2145,7 +2128,7 @@ test('purchase history exposes a read-only ERP-style purchase timeline', () => {
     assert.ok(start>=0&&end>start);
     assert.match(source,/readDocumentsByIds\('supplyOrders',supplyIds\)/);
     assert.match(source,/collection\('receipts'\)\.where\('purchaseDocumentId','==',po\.id\)/);
-    assert.match(source,/canCreatePurchaseOrderCapability\(\)[\s\S]*?collection\('purchaseOrderCommunications'\)\.where\('purchaseOrderId','==',po\.id\)/);
+    assert.doesNotMatch(source,/collection\('purchaseOrderCommunications'\)\.where/);
     assert.match(source,/purchaseTimelineSourceLabel\(supply\.sourceType\)/);
     assert.doesNotMatch(source,/\b(?:tx|transaction)\.(?:set|update|delete)\(/);
     assert.doesNotMatch(source,/db\.collection\([^\n]+\)\.(?:add|set|update)\(/);
@@ -2159,7 +2142,7 @@ test('lead-time PO date controls preserve manual overrides and recompute automat
     assert.match(source, /expectedDateSource==='manual'/);
     assert.match(source, /YushinSupplier\.purchaseExpectedDate/);
     assert.match(source, /expectedDateSource='lead-time'/);
-    assert.match(html, /id="poVendorName"[^>]+onchange="updatePoSupplierEmailHint\(\); autoFillPoExpectedDate\(\); renderPoItemsTable\(\)"/);
+    assert.match(html, /id="poVendorName"[^>]+onchange="autoFillPoExpectedDate\(\); renderPoItemsTable\(\)"/);
     assert.match(html, /id="poDate"[^>]+onchange="autoFillPoExpectedDate\(\)"/);
     assert.match(html, /id="poExpectedDate"[^>]+onchange="markPoExpectedDateManual\(\)"/);
     assert.match(app, /window\.removePoItem = function[\s\S]*?autoFillPoExpectedDate\(poItems\)/);

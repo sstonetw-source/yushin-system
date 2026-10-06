@@ -713,7 +713,8 @@ test('purchase communication timeline is purchaser-only and immutable', async ()
     createdByUid:'buyer1',
     createdBy:'Buyer'
   };
-  await assertSucceeds(setDoc(doc(db('buyer1'),'purchaseOrderCommunications/c1'),event));
+  await assertFails(setDoc(doc(db('buyer1'),'purchaseOrderCommunications/c1'),event));
+  await seed('purchaseOrderCommunications/c1',event);
   await assertFails(setDoc(doc(db('sales1'),'purchaseOrderCommunications/c2'),{...event,createdByUid:'sales1'}));
   await assertFails(setDoc(doc(db('buyer1'),'purchaseOrderCommunications/c3'),{...event,verifiedSent:true}));
   await assertFails(updateDoc(doc(db('buyer1'),'purchaseOrderCommunications/c1'),{state:'SENT'}));
@@ -941,9 +942,10 @@ test('warehouse return receipt must atomically settle the pending request and ap
   const record={id:'R1',requestId:'Q1',itemId:'I1',qty:1,settlement:'CLOSE',quality:'INSPECTION',warehouseId:'W1'};
   const receipt={orderId:'customer-return',requestId:'Q1',requestIndex:0,itemId:'I1',qty:1,quality:'INSPECTION',warehouseId:'W1',disposition:'HOLD',record,receivedBy:'wh1',ownerUid:'sales1',salesCode:'S01'};
   await assertFails(setDoc(doc(db('wh1'),'customerReturnReceipts/R1'),receipt));
-  const batch=writeBatch(db('wh1'));
-  batch.set(doc(db('wh1'),'customerReturnReceipts/R1'),receipt);
-  batch.update(doc(db('wh1'),'orders/customer-return'),{returnReceiptId:'R1',returnRequests:[{...request,receivedQty:1,status:'RECEIVED'}],returnPending:false,returnedQty:1,returnRecords:[record]});
+  const client=db('wh1');
+  const batch=writeBatch(client);
+  batch.set(doc(client,'customerReturnReceipts/R1'),receipt);
+  batch.update(doc(client,'orders/customer-return'),{returnReceiptId:'R1',returnRequests:[{...request,receivedQty:1,status:'RECEIVED'}],returnPending:false,returnedQty:1,returnRecords:[record]});
   await assertSucceeds(batch.commit());
   await assertFails(updateDoc(doc(db('sales1'),'customerReturnReceipts/R1'),{disposition:'STOCK',releasedBy:'sales1',releasedAt:'now'}));
 });
@@ -955,55 +957,26 @@ test('only purchasing can keep a cancelled customer procurement as stock',async(
   await assertSucceeds(updateDoc(doc(db('buyer1'),'supplyOrders/keep-stock'),patch));
 });
 
-test('external warehouse notice requires receiving role and shipment plus immutable movement in one batch', async () => {
-  const warehouseId='ext-1', orderId='external-order', itemId='i1', noticeId=orderId+'__'+itemId;
-  const item={itemId,warehouseId,fulfillmentType:'WAREHOUSE',qty:2,orderedQty:2,reservedQty:2,dispatchPreparedQty:0};
-  await seed('warehouses/'+warehouseId,{warehouseId,warehouseName:'Outside',warehouseType:'EXTERNAL',active:true});
-  await seed('warehouseStocks/'+warehouseId+'__p-order',{warehouseId,productKey:'p-order',onHand:4,reserved:2,incoming:0});
-  await seed('inventory/p-order',{productKey:'p-order',onHand:4,reserved:2,incoming:0});
-  await seed('orders/'+orderId,{
-    ownerUid:'sales1',salesCode:'S01',orderStatus:'normal',items:[item],
-    deliveryRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false
-  });
-  const notice={
-    orderId,itemId,itemIndex:0,warehouseId,orderNo:'O-01',
-    ownerUid:'sales1',salesCode:'S01',customerName:'Customer',itemCode:'P-ORDER',
-    itemName:'Product',qty:2,status:'NOTIFIED',
-    shippingAddress:'Address',contactName:'Contact',contactPhone:'0123456789',
-    expectedDate:'2026-10-07',notes:'',notifiedByUid:'buyer1',notifiedBy:'Buyer',
-    notifiedAt:'2026-10-06',createdAt:'2026-10-06',updatedAt:'2026-10-06'
-  };
-  await assertFails(setDoc(doc(db('sales1'),'externalDispatchNotices/'+noticeId),notice));
-  await assertSucceeds(setDoc(doc(db('buyer1'),'externalDispatchNotices/'+noticeId),notice));
-  await assertSucceeds(getDoc(doc(db('sales1'),'externalDispatchNotices/'+noticeId)));
-  await assertFails(updateDoc(doc(db('wh1'),'externalDispatchNotices/'+noticeId),{
-    status:'SHIPPED',shippedByUid:'wh1',shippedBy:'WH',
-    shippedAt:'2026-10-06',deliveryRecordId:'d1',movementId:'m1',updatedAt:'2026-10-06'
-  }));
-  const client=db('wh1');
-  const batch=writeBatch(client);
-  const record={
-    id:'d1',itemId,date:'2026-10-06',qty:2,
-    sourceType:'EXTERNAL_WAREHOUSE_SHIP',externalNoticeId:noticeId,
-    warehouseId,createdByUid:'wh1',createdBy:'WH',createdAt:'2026-10-06',
-    movementId:'m1'
-  };
-  batch.set(doc(client,'inventoryMovements/m1'),{
-    type:'ship',qty:-2,sourceId:orderId,warehouseId,
-    productKey:'p-order',sourceType:'order',ownerUid:'sales1',salesCode:'S01',
-    warehouseStockId:warehouseId+'__p-order',inventoryDocId:'p-order'
-  });
-  batch.update(doc(client,'warehouseStocks/'+warehouseId+'__p-order'),{onHand:2,reserved:0});
-  batch.update(doc(client,'inventory/p-order'),{onHand:2,reserved:0});
-  batch.update(doc(client,'orders/'+orderId),{
-    items:[{...item,reservedQty:0,dispatchPreparedQty:2}],
-    deliveryRecords:[record],deliveredQty:2,isDelivered:true,deliveryHistory:[{action:'create',after:record}]
-  });
-  batch.update(doc(client,'externalDispatchNotices/'+noticeId),{
-    status:'SHIPPED',shippedByUid:'wh1',shippedBy:'WH',
-    shippedAt:'2026-10-06',deliveryRecordId:'d1',movementId:'m1',updatedAt:'2026-10-06'
-  });
-  await assertSucceeds(batch.commit());
-  await assertFails(updateDoc(doc(db('wh1'),'externalDispatchNotices/'+noticeId),{status:'NOTIFIED'}));
-  await assertFails(updateDoc(doc(db('sales1'),'externalDispatchNotices/'+noticeId),{status:'NOTIFIED'}));
+test('removed external notice feature rejects new notices and updates for all roles',async()=>{
+  await seed('externalDispatchNotices/old',{ownerUid:'sales1',salesCode:'S01',status:'NOTIFIED'});
+  for(const uid of ['admin','buyer1','wh1','sales1']){
+    await assertFails(setDoc(doc(db(uid),'externalDispatchNotices/new'),{status:'NOTIFIED'}));
+    await assertFails(updateDoc(doc(db(uid),'externalDispatchNotices/old'),{status:'SHIPPED'}));
+  }
+});
+
+test('completed delivery blocks cancellation including combined flag reset, for admin and owner', async () => {
+  for (const uid of ['admin', 'sales1']) {
+    await seed('orders/completed', {ownerUid:'sales1',salesCode:'S01',status:'active',orderStatus:'normal',isDelivered:true,deliveredQty:1,deliveryRecords:[{id:'D1',qty:1}]});
+    const ref=doc(db(uid),'orders/completed');
+    await assertFails(updateDoc(ref,{status:'cancelled',orderStatus:'cancelled'}));
+    await assertFails(updateDoc(ref,{status:'cancelled',orderStatus:'cancelled',isDelivered:false,deliveredQty:0,deliveryRecords:[]}));
+    await assertSucceeds(updateDoc(ref,{orderStatusReason:'Delivery note correction'}));
+  }
+});
+
+test('partial delivery allows remaining cancellation but preserves delivery evidence', async () => {
+  await seed('orders/partial-cancel', {ownerUid:'sales1',salesCode:'S01',status:'active',orderStatus:'normal',isDelivered:false,deliveredQty:1,deliveryRecords:[{id:'D1',qty:1}]});
+  await assertFails(updateDoc(doc(db('sales1'),'orders/partial-cancel'),{status:'cancelled',orderStatus:'cancelled',deliveryRecords:[]}));
+  await assertSucceeds(updateDoc(doc(db('sales1'),'orders/partial-cancel'),{status:'cancelled',orderStatus:'cancelled'}));
 });

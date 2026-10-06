@@ -5300,7 +5300,7 @@ test('duplicate purchase analytics UI is removed while purchase data still feeds
 test('supplier settings use one consolidated brand supplier email editor', () => {
     assert.match(indexSource,/id="supplierSettingBrand"/);
     assert.match(indexSource,/id="supplierSettingName"/);
-    assert.match(indexSource,/id="supplierSettingEmail"/);
+    assert.doesNotMatch(indexSource,/id="supplierSettingEmail"/);
     assert.match(indexSource,/id="supplierSettingsBody"/);
     assert.doesNotMatch(indexSource,/<strong>供應商主檔<\/strong>/);
     assert.doesNotMatch(indexSource,/<strong>廠牌 → 供應商對應<\/strong>/);
