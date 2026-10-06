@@ -975,10 +975,17 @@
             <div class="po-load-more-row no-print"><button type="button" id="poLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMorePurchaseOrders()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseDispatchPanel" style="display:none">
+            <section class="panel" id="externalWarehousePanel">
+                <div class="purchase-section-heading"><strong>外倉出貨通知</strong>
+                    <p>僅顯示外部倉庫的品項。採購／倉管可下載通知、確認已通知與實際出貨。</p></div>
+                <span id="externalWarehouseQueueStatus" role="status"></span>
+                <div class="table-wrap"><table><thead><tr><th>訂單號</th><th>客戶</th><th>外倉</th><th>品項</th><th>操作</th></tr></thead>
+                <tbody id="externalWarehouseBody"><tr><td colspan="5">正在讀取外倉品項…</td></tr></tbody></table></div>
+            </section>
             <div class="toolbar no-print">
                 <span id="purchaseDispatchStatus" role="status"></span>
             </div>
-            <div class="inventory-summary-note">顯示已到貨、尚有待打單數量的訂單。完成出貨單後按「已打單」，訂單即進入可出貨狀態。</div>
+            <div class="inventory-summary-note">以下為公司倉庫待打單品項；外部倉庫請使用上方「外倉出貨通知」，不必重複打單。</div>
             <div class="table-wrap"><table>
                 <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待打單品項</th><th>操作</th></tr></thead>
                 <tbody id="purchaseDispatchBody"></tbody>
@@ -1466,14 +1473,17 @@
         <div id="admin-warehouses" class="admin-panel" style="display:none;">
             <div class="panel" style="margin-top:16px;">
                 <strong>倉庫管理</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">建立公司實際倉庫。訂單可選倉庫出貨，或選原廠直送；原廠直送不會進入庫存。</p>
+                <p style="font-size:12px;color:#666;margin:6px 0;">既有倉庫預設為公司倉庫。只有指定為「外部倉庫」的品項才使用外倉通知流程。</p>
+                <input id="warehouseMasterEditingId" type="hidden">
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
-                    <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：台北倉"></div>
-                    <label style="font-size:13px;"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫</label>
-                    <button type="button" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
+                    <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：又鑫倉庫"></div>
+                    <div><label>倉庫類型</label><select id="warehouseMasterType" onchange="if(this.value==='EXTERNAL')document.getElementById('warehouseMasterDefault').checked=false"><option value="INTERNAL">公司倉庫</option><option value="EXTERNAL">外部倉庫</option></select></div>
+                    <label style="font-size:13px;"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫（限公司倉庫）</label>
+                    <button type="button" id="warehouseMasterSaveBtn" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
+                    <button type="button" class="btn-secondary" onclick="clearWarehouseMasterEditor()">取消編輯</button>
                 </div>
-                <div id="warehouseMasterStatus" style="font-size:12px;color:#666;margin-top:8px;"></div>
-                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>倉庫</th><th>預設</th><th>狀態</th><th>操作</th></tr></thead><tbody id="warehouseMasterBody"></tbody></table></div>
+                <div id="warehouseMasterStatus" role="status" style="font-size:12px;color:#666;margin-top:8px;"></div>
+                <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>倉庫</th><th>類型</th><th>預設</th><th>狀態</th><th>操作</th></tr></thead><tbody id="warehouseMasterBody"></tbody></table></div>
             </div>
         </div>
 
@@ -1662,9 +1672,10 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261006-6"></script>
+    <script src="app.js?v=20261006-7"></script>
     <script src="modules/customer-cancellations.js?v=20261006-1"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
+    <script src="modules/external-warehouse-dispatch.js?v=20261006-1"></script>
     <script>
     (function () {
         let otherProductBrandsExpanded = false;
@@ -1753,5 +1764,6 @@
     })();
     </script>
 
+    <div id="externalWarehouseNoticeOverlay" class="eq-modal-overlay no-print" onclick="if(event.target===this)closeExternalWarehouseNotice()"></div>
 </body>
 </html>
