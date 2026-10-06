@@ -16567,6 +16567,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     const movementRef=db.collection('inventoryMovements').doc();
     transaction.set(movementRef,inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
         warehouseId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
+        warehouseStockId:whRef.id,inventoryDocId:invRef.id,
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     }));
 
