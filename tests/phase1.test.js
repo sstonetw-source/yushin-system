@@ -2741,13 +2741,20 @@ test('admin maintenance reads are bounded', () => {
     const migrationEnd=appSource.indexOf('function recordContainsEmbeddedCost',migrationStart);
     assert.match(appSource.slice(migrationStart,migrationEnd),/firestoreReadWithTimeout\([\s\S]*?遷移資料/);
 
+    const importStateStart=appSource.indexOf('async function loadExistingProductImportState');
+    const importStateEnd=appSource.indexOf('async function syncImportedBrandToFormalProductMaster',importStateStart);
+    const importStateSource=appSource.slice(importStateStart,importStateEnd);
+    assert.match(importStateSource,/readCollectionInBatches\('products', 500\)/);
+    assert.match(importStateSource,/readCollectionInBatches\('productCosts', 500\)/);
+    assert.match(importStateSource,/firestoreReadWithTimeout\([\s\S]*?'Product Import 產品比對'/);
+    assert.match(importStateSource,/FieldPath\.documentId\(\), 'in', ids/);
+    assert.doesNotMatch(importStateSource,/Promise\.all\(chunk\.map/);
+
     const importStart=appSource.indexOf('async function summarizeProductMasterImport');
     const importEnd=appSource.indexOf('async function confirmProductMasterImport',importStart);
     const importSource=appSource.slice(importStart,importEnd);
-    assert.match(importSource,/firestoreReadWithTimeout\([\s\S]*?'Product Master 匯入比對'/);
-    assert.match(importSource,/FieldPath\.documentId\(\), 'in', ids/);
+    assert.match(importSource,/loadExistingProductImportState\(uniqueProductIds, costProductIds\)/);
     assert.match(importSource,/uniqueProductIds/);
-    assert.doesNotMatch(importSource,/Promise\.all\(chunk\.map/);
 });
 
 
@@ -4126,7 +4133,7 @@ test('Product Master product line is optional in manual editor', () => {
 
 test('Product Import preserves Roche leading-zero codes and accepts large Bio-Rad master files', () => {
     assert.match(appSource, /function normalizeImportedProductCode\(brand, value\)/);
-    assert.match(appSource, /normalizeBrandLookupKey\('Roche'\).*?\/\^\\d\{10\}\$\/\.test\(code\).*?return \`0\\\$\{code\}\`/s);
+    assert.ok(appSource.includes("if (canonicalBrand === normalizeBrandLookupKey('Roche') && /^\\d{10}$/.test(code)) return `0${code}`;"));
     assert.match(appSource, /function isProductImportPlaceholderCode\(value\)/);
     assert.match(appSource, /not available\/custom item/);
     assert.match(appSource, /skippedPlaceholderRows \+= 1/);
