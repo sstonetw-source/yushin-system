@@ -959,6 +959,8 @@ test('external warehouse notice requires receiving role and shipment plus immuta
   const warehouseId='ext-1', orderId='external-order', itemId='i1', noticeId=orderId+'__'+itemId;
   const item={itemId,warehouseId,fulfillmentType:'WAREHOUSE',qty:2,orderedQty:2,reservedQty:2,dispatchPreparedQty:0};
   await seed('warehouses/'+warehouseId,{warehouseId,warehouseName:'Outside',warehouseType:'EXTERNAL',active:true});
+  await seed('warehouseStocks/'+warehouseId+'__p-order',{warehouseId,productKey:'p-order',onHand:4,reserved:2,incoming:0});
+  await seed('inventory/p-order',{productKey:'p-order',onHand:4,reserved:2,incoming:0});
   await seed('orders/'+orderId,{
     ownerUid:'sales1',salesCode:'S01',orderStatus:'normal',items:[item],
     deliveryRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false
@@ -988,8 +990,11 @@ test('external warehouse notice requires receiving role and shipment plus immuta
   };
   batch.set(doc(client,'inventoryMovements/m1'),{
     type:'ship',qty:-2,sourceId:orderId,warehouseId,
-    productKey:'p-order',sourceType:'order',ownerUid:'sales1',salesCode:'S01'
+    productKey:'p-order',sourceType:'order',ownerUid:'sales1',salesCode:'S01',
+    warehouseStockId:warehouseId+'__p-order',inventoryDocId:'p-order'
   });
+  batch.update(doc(client,'warehouseStocks/'+warehouseId+'__p-order'),{onHand:2,reserved:0});
+  batch.update(doc(client,'inventory/p-order'),{onHand:2,reserved:0});
   batch.update(doc(client,'orders/'+orderId),{
     items:[{...item,reservedQty:0,dispatchPreparedQty:2}],
     deliveryRecords:[record],deliveredQty:2,isDelivered:true,deliveryHistory:[{action:'create',after:record}]
