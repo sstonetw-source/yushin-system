@@ -948,6 +948,10 @@ test('primary quote export generates PDF directly without browser print', () => 
     assert.match(appSource, /new window\.jspdf\.jsPDF/);
     assert.match(appSource, /DocumentDownloads\.savePdf\('quote', pdf, quotePdfFileName\(quoteData\)\)/);
     assert.match(appSource, /persistQuoteOutputRecord\(quoteData, 'PDF'\)/);
+    const start = appSource.indexOf('window.exportCurrentQuotePdf = async function()');
+    const end = appSource.indexOf('\n};', start) + 3;
+    const source = appSource.slice(start, end);
+    assert.match(source, /isolateRoot:\s*stage/);
     assert.match(cssSource, /\.quote-pdf-stage/);
     assert.match(cssSource, /width: 190mm/);
 });
@@ -962,6 +966,8 @@ test('three-quote export uses the same direct PDF engine', () => {
     assert.match(source, /paginateQuotePdfDocument/);
     assert.match(source, /comparisonStage\.querySelectorAll\('\.comparison-quote-page'\)/);
     assert.match(source, /addDocumentPagesToPdf\(pdf, comparisonPages/);
+    assert.match(source, /isolateRoot:\s*firstStage/);
+    assert.match(source, /isolateRoot:\s*comparisonStage/);
     assert.match(source, /-三家估價\.pdf/);
     assert.doesNotMatch(source, /window\.print\(\)/);
 });
