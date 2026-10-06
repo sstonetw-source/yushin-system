@@ -954,3 +954,51 @@ test('only purchasing can keep a cancelled customer procurement as stock',async(
   await assertFails(updateDoc(doc(db('wh1'),'supplyOrders/keep-stock'),patch));
   await assertSucceeds(updateDoc(doc(db('buyer1'),'supplyOrders/keep-stock'),patch));
 });
+
+test('external warehouse notice requires receiving role and shipment plus immutable movement in one batch', async () => {
+  const warehouseId='ext-1', orderId='external-order', itemId='i1', noticeId=orderId+'__'+itemId;
+  const item={itemId,warehouseId,fulfillmentType:'WAREHOUSE',qty:2,orderedQty:2,reservedQty:2,dispatchPreparedQty:0};
+  await seed('warehouses/'+warehouseId,{warehouseId,warehouseName:'Outside',warehouseType:'EXTERNAL',active:true});
+  await seed('orders/'+orderId,{
+    ownerUid:'sales1',salesCode:'S01',orderStatus:'normal',items:[item],
+    deliveryRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false
+  });
+  const notice={
+    orderId,itemId,itemIndex:0,warehouseId,orderNo:'O-01',
+    ownerUid:'sales1',salesCode:'S01',customerName:'Customer',itemCode:'P-ORDER',
+    itemName:'Product',qty:2,status:'NOTIFIED',
+    shippingAddress:'Address',contactName:'Contact',contactPhone:'0123456789',
+    expectedDate:'2026-10-07',notes:'',notifiedByUid:'buyer1',notifiedBy:'Buyer',
+    notifiedAt:'2026-10-06',createdAt:'2026-10-06',updatedAt:'2026-10-06'
+  };
+  await assertFails(setDoc(doc(db('sales1'),'externalDispatchNotices/'+noticeId),notice));
+  await assertSucceeds(setDoc(doc(db('buyer1'),'externalDispatchNotices/'+noticeId),notice));
+  await assertSucceeds(getDoc(doc(db('sales1'),'externalDispatchNotices/'+noticeId)));
+  await assertFails(updateDoc(doc(db('wh1'),'externalDispatchNotices/'+noticeId),{
+    status:'SHIPPED',shippedByUid:'wh1',shippedBy:'WH',
+    shippedAt:'2026-10-06',deliveryRecordId:'d1',movementId:'m1',updatedAt:'2026-10-06'
+  }));
+  const client=db('wh1');
+  const batch=writeBatch(client);
+  const record={
+    id:'d1',itemId,date:'2026-10-06',qty:2,
+    sourceType:'EXTERNAL_WAREHOUSE_SHIP',externalNoticeId:noticeId,
+    warehouseId,createdByUid:'wh1',createdBy:'WH',createdAt:'2026-10-06',
+    movementId:'m1'
+  };
+  batch.set(doc(client,'inventoryMovements/m1'),{
+    type:'ship',qty:-2,sourceId:orderId,warehouseId,
+    productKey:'p-order',sourceType:'order',ownerUid:'sales1',salesCode:'S01'
+  });
+  batch.update(doc(client,'orders/'+orderId),{
+    items:[{...item,reservedQty:0,dispatchPreparedQty:2}],
+    deliveryRecords:[record],deliveredQty:2,isDelivered:true,deliveryHistory:[{action:'create',after:record}]
+  });
+  batch.update(doc(client,'externalDispatchNotices/'+noticeId),{
+    status:'SHIPPED',shippedByUid:'wh1',shippedBy:'WH',
+    shippedAt:'2026-10-06',deliveryRecordId:'d1',movementId:'m1',updatedAt:'2026-10-06'
+  });
+  await assertSucceeds(batch.commit());
+  await assertFails(updateDoc(doc(db('wh1'),'externalDispatchNotices/'+noticeId),{status:'NOTIFIED'}));
+  await assertFails(updateDoc(doc(db('sales1'),'externalDispatchNotices/'+noticeId),{status:'NOTIFIED'}));
+});
