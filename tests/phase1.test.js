@@ -1610,7 +1610,8 @@ test('phase 19 Firestore rules enforce role boundaries for PO inventory reservat
     assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
     assert.match(rulesSource, /businessReservationOperationalUpdate\(\)/);
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
-    assert.match(rulesSource, /admin\(\) \|\| engineer\(\) \|\| \(businessOwner\(\) && owns\(resource\.data\)\)/);
+    assert.match(rulesSource, /function canManageEquipment\(\)[\s\S]*?return admin\(\) \|\| engineer\(\)/);
+    assert.match(rulesSource, /allow read: if canManageEquipment\(\) \|\| \(businessOwner\(\) && owns\(resource\.data\)\)/);
     assert.match(rulesSource, /allow read, write: if false/);
 });
 
@@ -4032,9 +4033,9 @@ test('equipment data scope agrees with engineer all-company access', () => {
     const ruleStart=rulesSource.indexOf('match /equipment/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /',ruleStart+10);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
-    assert.match(ruleSource,/allow read: if admin\(\) \|\| engineer\(\)/);
-    assert.match(ruleSource,/allow create: if admin\(\) \|\| engineer\(\)/);
-    assert.match(ruleSource,/allow update: if admin\(\) \|\| engineer\(\)/);
+    assert.match(ruleSource,/allow read: if canManageEquipment\(\)/);
+    assert.match(ruleSource,/allow create: if canManageEquipment\(\)/);
+    assert.match(ruleSource,/allow update: if canManageEquipment\(\)/);
 });
 
 
