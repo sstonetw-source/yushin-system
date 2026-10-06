@@ -16,6 +16,7 @@ jobs:
       - name: JavaScript syntax check
         run: |
           node --check app.js
+          node --check modules/external-warehouse-dispatch.js
           node --check modules/document-downloads.js
           node --check modules/supplier-core.js
           node --check modules/inventory-core.js
@@ -33,7 +34,7 @@ jobs:
       - name: Trade analysis tests
         run: node --test tests/inventory-receiving-count.test.js tests/inventory-list-archive.test.js tests/order-role-read.test.js tests/document-downloads.test.js tests/order-cost-reminder.test.js tests/quick-delivery-item.test.js tests/replenishment-entry.test.js tests/order-background.test.js tests/system-audit-shortcuts.test.js tests/receipt-background.test.js tests/trade-analysis.test.js tests/order-purchase-cancellation.test.js
       - name: Phase 1 regression tests
-        run: node --test tests/phase1.test.js
+        run: node --test tests/phase1.test.js tests/external-warehouse-dispatch.test.js
       - name: Purchasing workflow tests
         if: always()
         run: node --test --test-reporter=spec tests/purchasing-workflow.test.js
