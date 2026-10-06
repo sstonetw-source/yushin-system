@@ -10807,7 +10807,7 @@ window.renderOrdersList = function() {
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
                             ${orderLifecycleActionButtons(o, lifecycle, deliveryProgress, contextActions)}
-                            ${lifecycle.status==='normal'&&['admin','purchaser'].includes(currentUserRole)&&allOrderItems.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&((dispatchStateByItem.get(item)?.pending||0)+(dispatchStateByItem.get(item)?.shippable||0)>0)) ? `<button type="button" class="btn-secondary" onclick="openWarehouseDispatchList(${inlineJsValue(o.id)})">出貨清單</button>` : ''}
+                            ${allOrderItems.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP') ? `<button type="button" class="btn-secondary" onclick="viewExternalWarehouseStatus(${inlineJsValue(o.id)})">查看外倉通知狀態</button>` : ''}
                             ${dispatchActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                             ${canAccessPage('orders.po') ? [...new Set(allOrderItems.flatMap(item=>item.purchaseDocumentNos||[]))].map(number=>`<button type="button" class="btn-secondary" onclick="openRelatedOrderPurchase(${inlineJsValue(number)})">採購單 ${escapeHtml(number)}</button>`).join('') : ''}
