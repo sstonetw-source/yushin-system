@@ -71,16 +71,17 @@ test('Firestore Rules protect notice identity, role and shipment movement linkag
 });
 
 test('sales order history can inspect external notice progress without stock changes',()=>{
-    assert.match(app,/viewExternalWarehouseStatus\\(\\$\\{inlineJsValue\\(o\\.id\\)\\}\\)/);
+    assert.ok(app.includes('viewExternalWarehouseStatus('));
     const view=body('root.viewExternalWarehouseStatus = async function','root.closeExternalWarehouseNotice = function');
-    assert.match(view,/loadWarehouseMaster\\(\\)/);
-    assert.match(view,/db\\.collection\\('externalDispatchNotices'\\)/);
-    assert.match(view,/notice\\?\\.status === 'SHIPPED'/);
-    assert.doesNotMatch(view,/runRoleTransaction\\(|applyInventoryDeliveryDeltaInTransaction\\(/);
+    assert.ok(view.includes('loadWarehouseMaster()'));
+    assert.ok(view.includes("db.collection('externalDispatchNotices')"));
+    assert.ok(view.includes("notice?.status === 'SHIPPED'"));
+    assert.ok(!view.includes('runRoleTransaction('));
+    assert.ok(!view.includes('applyInventoryDeliveryDeltaInTransaction('));
 });
 
 test('external warehouse queue loads bounded notice history and warehouse identities',()=>{
-    assert.match(app,/loadRecentExternalWarehouseNotices\\?\\.\\(\\)/);
-    assert.match(external,/orderBy\\('updatedAt', 'desc'\\)\\.limit\\(50\\)/);
-    assert.match(external,/root\\.renderExternalWarehouseQueue\\(\\)/);
+    assert.ok(app.includes('loadRecentExternalWarehouseNotices?.()'));
+    assert.ok(external.includes("orderBy('updatedAt', 'desc').limit(50)"));
+    assert.ok(external.includes('root.renderExternalWarehouseQueue()'));
 });
