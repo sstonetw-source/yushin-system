@@ -625,6 +625,7 @@ test('manual ordered action records supply and source item only once after an un
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
 vm.runInContext(source,context);
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1);
     assert.equal(order.items[0].supplyOrderedQty,2);
@@ -633,6 +634,7 @@ vm.runInContext(source,context);
     assert.equal(supply.orderDate,'2026-09-29');
     assert.deepEqual(switched,[['reload',true],['render']]);
     assert.equal(context.purchasingView,'ordering');
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1,'retry must not increase ordered quantity twice');
 });
@@ -690,15 +692,18 @@ test('manual ordered action can add a later genuine shortage without duplicating
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
 vm.runInContext(source,context);
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(supply.qty,2);
     assert.equal(supply.orderEvents.length,1);
     assert.equal(updates,1);
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(supply.qty,2,'plain retry must remain idempotent');
     assert.equal(supply.orderEvents.length,1);
     assert.equal(updates,1);
     order.items[0].shortageQty=5;
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(supply.qty,5,'new uncovered shortage is added to the existing manual supply');
     assert.equal(supply.orderEvents.length,2);
@@ -1771,6 +1776,7 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
 vm.runInContext(source,context);
 
     const button={disabled:false,textContent:'已採購',isConnected:false};
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(docs.get('orders/O1').items[0].supplyOrderedQty,2);
     assert.equal(docs.get('supplyOrders/manual-O1-I1').incomingRegisteredQty,2);
@@ -1779,6 +1785,7 @@ vm.runInContext(source,context);
     assert.equal(movements.length,1);
     assert.equal(movements[0].qty,2);
 
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(docs.get('inventory/P1').incoming,2,'plain retry must not duplicate incoming');
     assert.equal(docs.get('warehouseStocks/W1__P1').incoming,2);
@@ -1786,6 +1793,7 @@ vm.runInContext(source,context);
     assert.equal(movements.length,1);
 
     docs.get('orders/O1').items[0].shortageQty=5;
+    context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(docs.get('orders/O1').items[0].supplyOrderedQty,5);
     assert.equal(docs.get('supplyOrders/manual-O1-I1').qty,5);

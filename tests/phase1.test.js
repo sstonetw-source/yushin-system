@@ -3917,7 +3917,7 @@ test('self-order capability is aligned between frontend and Firestore rules', ()
     const ruleStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /inventory/{id}',ruleStart);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
-    assert.match(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
+    assert.match(ruleSource,/allow create: if \(\(admin\(\) \|\| purchaser\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
     assert.match(ruleSource,/request\.resource\.data\.ownerUid == request\.auth\.uid/);
     assert.match(ruleSource,/request\.resource\.data\.salesCode == salesCode\(\)/);
     assert.doesNotMatch(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?\|\| \(sales\(\)/);

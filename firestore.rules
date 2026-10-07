@@ -1073,13 +1073,32 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    function validQuickPurchaseCost() {
+      let data = request.resource.data;
+      return data.get('type', '') != 'PURCHASING_MANUAL'
+        || (data.get('supplier', '') is string && data.get('supplier', '').size() > 0
+          && data.get('unitCost', 0) is number && data.get('unitCost', 0) > 0);
+    }
+
+    function validQuickPurchaseUpdate() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return after.get('type', '') != 'PURCHASING_MANUAL'
+        || (after.get('qty', 0) <= before.get('qty', 0)
+          && !after.diff(before).affectedKeys().hasAny(['supplier', 'unitCost']))
+        || (validQuickPurchaseCost()
+          && (after.get('qty', 0) <= before.get('qty', 0)
+            || (after.get('supplier', '') == before.get('supplier', '')
+              && after.get('unitCost', 0) == before.get('unitCost', 0))));
+    }
+
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser()
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if admin() || purchaser()
+      allow create: if ((admin() || purchaser()) && validQuickPurchaseCost())
         || (businessOwner()
           && request.resource.data.type == 'SALES_SELF_ORDER'
           && request.resource.data.ownerUid == request.auth.uid
@@ -1092,7 +1111,7 @@ service cloud.firestore {
         || directShipSupplyReceiptUpdate()
         || purchaserSupplyOperationalUpdate()
         || supplierCancellationResolution()
-        || warehouseSupplyOperationalUpdate()) && supplierReceiptDispositionAllowed();
+        || warehouseSupplyOperationalUpdate()) && supplierReceiptDispositionAllowed() && validQuickPurchaseUpdate();
       allow delete: if admin();
     }
 

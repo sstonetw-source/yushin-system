@@ -12165,6 +12165,76 @@ function quickPurchaseSupplyId(orderId, itemId) {
     return `manual-${encodeURIComponent(String(orderId || ''))}-${encodeURIComponent(String(itemId || ''))}`;
 }
 
+let quickPurchaseConfirmation = null;
+let quickPurchaseConfirmationGeneration = 0;
+
+window.closeQuickPurchaseConfirmation = function() {
+    quickPurchaseConfirmationGeneration++;
+    document.getElementById('quickPurchaseConfirmationOverlay')?.classList.remove('active');
+    if (quickPurchaseConfirmation) { quickPurchaseConfirmation(null); quickPurchaseConfirmation = null; }
+};
+
+window.confirmQuickPurchase = function() {
+    const supplier = String(document.getElementById('quickPurchaseSupplier').value || '').trim();
+    const unitCost = Number(document.getElementById('quickPurchaseCost').value);
+    const expectedQty = Number(document.getElementById('quickPurchaseQty').value);
+    if (!supplier || !Number.isFinite(unitCost) || unitCost <= 0 || !Number.isFinite(expectedQty) || expectedQty <= 0) {
+        alert('請填寫供應商與大於 0 的實際單位成本。'); return;
+    }
+    const resolve = quickPurchaseConfirmation;
+    quickPurchaseConfirmation = null;
+    document.getElementById('quickPurchaseConfirmationOverlay').classList.remove('active');
+    if (resolve) resolve({ supplier, unitCost, expectedQty });
+};
+
+async function requestQuickPurchaseDetails(orderId, itemId) {
+    closeQuickPurchaseConfirmation();
+    const generation = quickPurchaseConfirmationGeneration;
+    const orderSnap = await firestoreReadWithTimeout(db.collection('orders').doc(orderId).get(), '讀取待採購品項');
+    if (!orderSnap.exists) throw new Error('來源訂單已不存在。');
+    const order = { id:orderId, ...orderSnap.data() };
+    if (normalizedOrderStatus(order) !== 'normal') throw new Error('來源訂單已取消或作廢。');
+    const item = normalizedOrderItems(order).find(row => row.itemId === itemId);
+    if (!item || (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER') throw new Error('此品項不能由採購直接訂貨。');
+    const qty = procurementDemandForOrderItem(order, item).remainingToOrderQty;
+    if (!(qty > 0)) throw new Error('此品項已無待採購數量，請重新整理。');
+    const productId = String(item.productId || order.productId || '').trim();
+    const [supplySnap, costSnap] = await Promise.all([
+        firestoreReadWithTimeout(supplyOrdersCollection().doc(quickPurchaseSupplyId(orderId,itemId)).get(), '讀取既有採購紀錄'),
+        productId ? firestoreReadWithTimeout(db.collection('productCosts').doc(productId).get(), '讀取標準成本') : Promise.resolve(null)
+    ]);
+    if (generation !== quickPurchaseConfirmationGeneration) return null;
+    const existing = supplySnap.exists ? supplySnap.data() : null;
+    const cost = existing?.unitCost ?? (costSnap?.exists ? costSnap.data().standardCost : null);
+    let overlay = document.getElementById('quickPurchaseConfirmationOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'quickPurchaseConfirmationOverlay'; overlay.className = 'eq-modal-overlay no-print';
+        overlay.innerHTML = `<div class="eq-modal-box" style="max-width:560px;">
+            <h3>確認已採購</h3><p id="quickPurchaseSummary"></p>
+            <div class="form-grid">
+                <div><label for="quickPurchaseSupplier">供應商 *</label><input id="quickPurchaseSupplier" type="text" autocomplete="off"></div>
+                <div><label for="quickPurchaseQty">本次採購數量</label><input id="quickPurchaseQty" type="number" readonly></div>
+                <div><label for="quickPurchaseCost">實際含稅單位成本 *</label><input id="quickPurchaseCost" type="number" min="0.01" step="any" inputmode="decimal"></div>
+            </div><p id="quickPurchaseHint" style="color:#666;font-size:13px;"></p>
+            <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
+                <button type="button" onclick="confirmQuickPurchase()">確認已採購</button>
+                <button type="button" class="btn-secondary" onclick="closeQuickPurchaseConfirmation()">取消</button>
+            </div></div>`;
+        overlay.addEventListener('click', event => { if (event.target === overlay) closeQuickPurchaseConfirmation(); });
+        document.body.appendChild(overlay);
+    }
+    document.getElementById('quickPurchaseSummary').textContent = `${item.itemCode || ''} ${item.itemName || ''}`;
+    document.getElementById('quickPurchaseSupplier').value = existing?.supplier || item.supplier || order.supplier || '';
+    document.getElementById('quickPurchaseQty').value = qty;
+    document.getElementById('quickPurchaseCost').value = Number.isFinite(Number(cost)) && Number(cost) > 0 ? cost : '';
+    document.getElementById('quickPurchaseHint').textContent = existing
+        ? '追加採購沿用原紀錄的供應商與單價；不同供應商或單價請使用「產生採購單」另建紀錄。'
+        : '成本由產品標準成本帶入，請確認本次實際進貨價。確認後列入待到貨，不產生 PDF。';
+    overlay.classList.add('active');
+    return new Promise(resolve => { quickPurchaseConfirmation = resolve; });
+}
+
 window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const actionKey = `${orderId}::${itemId}`;
@@ -12173,6 +12243,10 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     const originalLabel = button?.textContent || '已採購';
     if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
+        const purchaseDetails = await requestQuickPurchaseDetails(orderId, itemId);
+        if (!purchaseDetails) return;
+        if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
+        if (!purchaseDetails.supplier || !Number.isFinite(purchaseDetails.unitCost) || purchaseDetails.unitCost <= 0) throw new Error('請確認供應商與有效的實際單位成本。');
         let savedOrder, savedSupply, incomingProductKey='', incomingWarehouseId='';
         const supplyRef = supplyOrdersCollection().doc(quickPurchaseSupplyId(orderId, itemId));
         await runRoleTransaction(async tx => {
@@ -12187,6 +12261,8 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const item = items[itemIndex];
             const demand = procurementDemandForOrderItem(order, item);
             const qty = demand.remainingToOrderQty;
+            if (qty > 0 && qty !== purchaseDetails.expectedQty) throw new Error('待採購數量已變更，請重新開啟確認。');
+            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER') throw new Error('此品項為業務自行訂貨。');
             const demandId = demand.demandId || '';
             const existingSupply = supplySnapshot.exists ? { id:supplyRef.id, ...supplySnapshot.data() } : null;
             if (!(qty > 0) && !existingSupply) throw new Error('此品項已無待採購數量，請重新整理。');
@@ -12201,6 +12277,9 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             const warehouseId = directShip ? '' : (existingSupply?.warehouseId || currentWarehouseId);
 
             if (existingSupply) {
+                if (qty > 0 && (existingSupply.supplier !== purchaseDetails.supplier || Number(existingSupply.unitCost) !== purchaseDetails.unitCost)) {
+                    throw new Error('追加採購的供應商或單價不同，請使用「產生採購單」另建紀錄，保留原採購金額。');
+                }
                 if (existingSupply.productKey && currentProductKey && existingSupply.productKey !== currentProductKey) {
                     throw new Error('此品項已建立供應紀錄，產品識別不可在追加採購前變更。');
                 }
@@ -12267,7 +12346,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             // 單純重試時不增加訂購量或事件，但仍會修復曾中斷的 incoming 同步。
             const orderEvents = Array.isArray(existingSupply?.orderEvents) ? existingSupply.orderEvents.slice() : [];
             if (qty > 0) {
-                orderEvents.push({ qty, orderDate, createdAt:now, createdByUid:currentUser?.uid||'', createdBy:currentUserName||currentUser?.email||'' });
+                orderEvents.push({ qty, supplier:purchaseDetails.supplier, unitCost:purchaseDetails.unitCost, orderDate, createdAt:now, createdByUid:currentUser?.uid||'', createdBy:currentUserName||currentUser?.email||'' });
             }
 
             savedSupply = {
@@ -12300,8 +12379,8 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                 receivedQty,
                 incomingRegisteredQty:targetIncomingQty,
                 incomingRegisteredAt:incomingDelta !== 0 ? now : (existingSupply?.incomingRegisteredAt||''),
-                supplier:item.supplier||order.supplier||existingSupply?.supplier||'',
-                unitCost:Number(item.costPrice??item.unitCost??item.purchasePrice??order.costPrice??existingSupply?.unitCost??0),
+                supplier:existingSupply?.supplier || purchaseDetails.supplier,
+                unitCost:existingSupply?.unitCost ?? purchaseDetails.unitCost,
                 orderDate:existingSupply?.orderDate||orderDate,
                 lastOrderedAt:qty > 0 ? orderDate : (existingSupply?.lastOrderedAt||existingSupply?.orderDate||orderDate),
                 orderEvents,
