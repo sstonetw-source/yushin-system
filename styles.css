@@ -3366,3 +3366,5 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #deliveryModalOverlay .delivery-section-heading { align-items:flex-start; flex-wrap:wrap; }
     #deliveryModalOverlay .delivery-summary { padding:12px; }
 }
+
+.product-selection-actions button[hidden], #pmEditCostField[hidden] { display:none !important; }

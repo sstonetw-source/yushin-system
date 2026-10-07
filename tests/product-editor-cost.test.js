@@ -1,0 +1,17 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
+const code=source.slice(source.indexOf('window.saveProductMasterEditor ='),source.indexOf('function productManagementSource('));
+function setup(role='admin',cost='50',original='20',fail=false){
+ const nodes={};for(const id of ['pmEditBrand','pmEditCode','pmEditNameCn','pmEditProductLine','pmEditProductId','pmEditStatus','pmEditCost'])nodes[id]={value:({pmEditBrand:'Brand',pmEditCode:'001',pmEditNameCn:'Product',pmEditProductId:'p',pmEditStatus:'ACTIVE',pmEditCost:cost})[id]||'',dataset:{originalValue:original}};
+ const writes=[],alerts=[];let invalidated=0;
+ const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]||(nodes[id]={value:'',checked:false})},currentUserRole:role,trueUserRole:role,currentUser:{uid:'admin-id'},
+ canManagePendingProductMaster:()=>true,resolveBrandName:x=>x,brandMasterEntryForName:()=>({id:'brand'}),normalizeItemCodeLoose:x=>x,normalizeBrandLookupKey:x=>x,normalizeProductTypeValue:x=>x,
+ beginActionButton:()=>({}),endActionButton:()=>{},alert:m=>alerts.push(m),firestoreReadWithTimeout:p=>p,
+ db:{collection:name=>({where:()=>({limit:()=>({get:async()=>({docs:[]})})}),doc:id=>({name,id})}),runTransaction:async fn=>{const pending=[];await fn({get:async()=>({exists:true,data:()=>({standardCost:20})}),set:(ref,data)=>pending.push({ref,data})});if(fail)throw Error('write denied');writes.push(...pending);}},
+ invalidateVisibleProductCosts:()=>invalidated++,purchaseCostCache:new Map(),productMasterDocToPriceItem:()=>({}),cacheProductLookupItem:()=>{},productManagementResults:[],productManagementOverviewRows:[],renderProductManagementResults:()=>{},renderProductManagementOverview:()=>{},closeProductMasterEditor:()=>{},console:{error:()=>{}}});
+ vm.runInContext(code,c);return {c,writes,alerts,invalidated:()=>invalidated};
+}
+test('admin saves protected cost and audit with product in one transaction',async()=>{const x=setup();await x.c.window.saveProductMasterEditor();assert.deepEqual(x.writes.map(w=>w.ref.name),['products','productCosts','priceHistory']);assert.equal(x.writes[1].data.standardCost,50);assert.equal(x.writes[2].data.previousCost,20);assert.equal(x.writes[2].data.updatedBy,'admin-id');assert.equal(x.invalidated(),1);assert.equal(x.c.purchaseCostCache.get('p'),50);assert.equal('standardCost' in x.writes[0].data,false);});
+test('unchanged cost and purchaser edits do not write cost',async()=>{for(const x of [setup('admin','20','20'),setup('purchaser')]){await x.c.window.saveProductMasterEditor();assert.deepEqual(x.writes.map(w=>w.ref.name),['products']);}});
+test('invalid costs do not write, zero is accepted',async()=>{for(const value of ['-1','NaN','']){const x=setup('admin',value);await x.c.window.saveProductMasterEditor();assert.equal(x.writes.length,0);assert.equal(x.alerts.length,1);}const x=setup('admin','0');await x.c.window.saveProductMasterEditor();assert.equal(x.writes[1].data.standardCost,0);});
+test('failed transaction cannot change cache or publish partial writes',async()=>{const x=setup('admin','50','20',true);await x.c.window.saveProductMasterEditor();assert.equal(x.writes.length,0);assert.equal(x.invalidated(),0);assert.equal(x.c.purchaseCostCache.size,0);assert.equal(x.alerts.length,1);});

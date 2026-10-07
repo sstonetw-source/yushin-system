@@ -1905,7 +1905,7 @@ function productManagementRow(product) {
     const canOrder = !inactive && canEditPage('orders.list');
     const canDelete = !!productId && canDeleteProductMaster();
     return `<tr class="${selected ? 'is-selected' : ''}${inactive ? ' is-inactive' : ''}">
-      <td data-th="選取" class="no-print product-management-select-cell"><input type="checkbox" ${selected ? 'checked' : ''} ${productId && !inactive && (canQuote || canOrder) ? '' : 'disabled'} aria-label="選取 ${escapeAttr(product.productName || product.nameCn || product.nameEn || product.manufacturerPartNo || product.sku || '產品')}" onchange="toggleProductManagementSelection(${inlineJsValue(productId)}, this.checked)"></td>
+      <td data-th="選取" class="no-print product-management-select-cell"><input type="checkbox" ${selected ? 'checked' : ''} ${productId && !inactive && (canQuote || canOrder || canEditPage('orders.po')) ? '' : 'disabled'} aria-label="選取 ${escapeAttr(product.productName || product.nameCn || product.nameEn || product.manufacturerPartNo || product.sku || '產品')}" onchange="toggleProductManagementSelection(${inlineJsValue(productId)}, this.checked)"></td>
       <td data-th="貨號">${escapeHtml(product.manufacturerPartNo || product.sku || '')}</td>
       <td data-th="品名">${escapeHtml(product.productName || product.nameCn || product.nameEn || '')}</td>
       <td data-th="廠牌">${escapeHtml(brand)}</td>
@@ -2158,6 +2158,7 @@ function updateProductManagementSelectionBar() {
     const countEl = document.getElementById('productManagementSelectionCount');
     const quoteBtn = document.getElementById('productManagementBatchQuoteBtn');
     const orderBtn = document.getElementById('productManagementBatchOrderBtn');
+    const purchaseBtn = document.getElementById('productManagementBatchPurchaseBtn');
     const head = document.getElementById('productManagementHead');
     const productMode = !head || head.dataset.mode !== 'pending';
     const count = productManagementSelection.size;
@@ -2165,6 +2166,7 @@ function updateProductManagementSelectionBar() {
     if (bar) bar.hidden = !productMode || count === 0;
     if (quoteBtn) quoteBtn.hidden = !canEditPage('quote.create');
     if (orderBtn) orderBtn.hidden = !canEditPage('orders.list');
+    if (purchaseBtn) purchaseBtn.hidden = !canEditPage('orders.po');
 
     const visible = productManagementResults.slice(0, productManagementVisibleLimit)
         .filter(product => product.productId || product.id);
@@ -2454,6 +2456,7 @@ function ensureProductMasterEditor() {
             <option value="Accessory"></option><option value="Service"></option>
           </datalist>
           <div><label>建議售價（含稅）</label><input id="pmEditListPrice" type="number" min="0" step="0.01"></div>
+          <div id="pmEditCostField" hidden><label>標準成本</label><input id="pmEditCost" type="number" min="0" step="0.01"><small>選填；只帶入新採購單，既有單據保留原價。</small></div>
           <div><label>狀態</label>
             <select id="pmEditStatus"><option value="ACTIVE">啟用</option><option value="INACTIVE">停用</option></select>
           </div>
@@ -2496,6 +2499,10 @@ function populateProductMasterEditor(product = {}, options = {}) {
     document.getElementById('pmEditProductLine').value = product.productLine || '';
     document.getElementById('pmEditProductType').value = product.productType || product.category || '';
     document.getElementById('pmEditListPrice').value = product.listPrice ?? product.price ?? '';
+    const costInput = document.getElementById('pmEditCost');
+    costInput.value = options.standardCost ?? '';
+    costInput.dataset.originalValue = costInput.value;
+    document.getElementById('pmEditCostField').hidden = !(trueUserRole === 'admin' && currentUserRole === 'admin');
     document.getElementById('pmEditStatus').value = product.status === 'INACTIVE' || product.active === false ? 'INACTIVE' : 'ACTIVE';
     document.getElementById('pmEditInventoryTracked').checked = product.inventoryTracked === true;
     document.getElementById('pmEditLotTracked').checked = product.lotTracked === true;
@@ -2524,7 +2531,12 @@ window.openProductMasterEditor = async function(productId) {
             if (snap.exists) product = { id:snap.id, ...snap.data() };
         }
         if (!product) { alert('找不到這筆 Product Master。'); return; }
-        populateProductMasterEditor(product);
+        let standardCost = null;
+        if (trueUserRole === 'admin' && currentUserRole === 'admin') {
+            const costSnap = await firestoreReadWithTimeout(db.collection('productCosts').doc(productId).get(), '讀取產品成本');
+            if (costSnap.exists) standardCost = costSnap.data().standardCost ?? null;
+        }
+        populateProductMasterEditor(product, { standardCost });
     } catch (err) {
         alert('讀取 Product Master 失敗：' + (err?.message || err));
     } finally {
@@ -2734,6 +2746,14 @@ window.saveProductMasterEditor = async function() {
         return;
     }
 
+    const costInput = document.getElementById('pmEditCost');
+    const costText = String(costInput?.value || '').trim();
+    const costChanged = trueUserRole === 'admin' && currentUserRole === 'admin'
+        && costText !== String(costInput?.dataset.originalValue || '');
+    if (costChanged && (!costText || !Number.isFinite(Number(costText)) || Number(costText) < 0)) {
+        alert('標準成本請輸入零或正數；若不修改，請保留原值。');
+        return;
+    }
     const state = beginActionButton(button, '檢查中…');
     if (!state) return;
     try {
@@ -2784,7 +2804,23 @@ window.saveProductMasterEditor = async function() {
     };
 
         if (button) button.textContent = '儲存中…';
-        await db.collection('products').doc(productId).set(record, { merge:true });
+        await db.runTransaction(async transaction => {
+            const costRef = db.collection('productCosts').doc(productId);
+            const previousCost = costChanged ? await transaction.get(costRef) : null;
+            transaction.set(db.collection('products').doc(productId), record, { merge:true });
+            if (costChanged) {
+                const standardCost = Number(costText);
+                transaction.set(costRef, { productId, productLineId:productLine, standardCost, salesVisible:false,
+                    source:'PRODUCT_EDITOR', updatedAt:now, updatedBy:currentUser?.uid || '' }, { merge:true });
+                transaction.set(db.collection('priceHistory').doc(), { productId, type:'STANDARD_COST_UPDATE',
+                    previousCost:previousCost.exists ? previousCost.data().standardCost ?? null : null,
+                    standardCost, source:'PRODUCT_EDITOR', updatedAt:now, updatedBy:currentUser?.uid || '' });
+            }
+        });
+        if (costChanged) {
+            invalidateVisibleProductCosts();
+            purchaseCostCache.set(productId, Number(costText));
+        }
         const cached = productMasterDocToPriceItem({ id:productId, data:() => record });
         cacheProductLookupItem(cached);
         const resultIndex = productManagementResults.findIndex(item => (item.productId || item.id) === productId);
@@ -14618,21 +14654,47 @@ function bestPurchaseOrderCompany(selectedOrders, items, preferredCompany) {
         .sort((a, b) => b.count - a.count)[0]?.company || 'yushin';
 }
 
+async function openProductManagementProductsInPurchase(products) {
+    if (!canEditPage('orders.po') || !products.length) return false;
+    const button = actionButtonFromEventOrSelector();
+    const state = beginActionButton(button, '載入採購品項…');
+    if (button && !state) return false;
+    try {
+        // Refresh only selected products; never trust a stale selection or scan all costs.
+        const refreshed = await Promise.all(products.map(async selected => {
+            const id = selected.productId || selected.id;
+            const [productSnap, costSnap] = await Promise.all([
+                firestoreReadWithTimeout(db.collection('products').doc(id).get(), '讀取採購產品'),
+                firestoreReadWithTimeout(db.collection('productCosts').doc(id).get(), '讀取標準成本')
+            ]);
+            if (!productSnap.exists || productSnap.data().active === false || productSnap.data().status === 'INACTIVE') {
+                throw new Error('所選產品已停用或不存在，請重新選取。');
+            }
+            const cost = Number(costSnap.exists ? costSnap.data().standardCost ?? costSnap.data().costPrice ?? 0 : 0);
+            return { ...productSnap.data(), productId:id, purchaseCost:Number.isFinite(cost) && cost >= 0 ? cost : 0 };
+        }));
+        // The modal opens synchronously before warehouse suggestions finish loading.
+        const opening = openDirectStockPurchase(refreshed[0]);
+        poItems = refreshed.map(product => ({ ...emptyDirectPoItem(),
+            ...productManagementSource(product), unitPrice:product.purchaseCost }));
+        poAllItems = poItems;
+        renderPoItemsTable();
+        updatePoModeUI();
+        await opening;
+        return true;
+    } catch (err) {
+        showActionFeedback('加入採購單失敗：' + err.message, 'warning');
+        return false;
+    } finally { endActionButton(button, state); }
+}
+
 window.addProductManagementToPurchase = async function(productId) {
-    if(!canEditPage('orders.po'))return;
-    try{
-    const snapshot=await firestoreReadWithTimeout(db.collection('products').doc(productId).get(),'讀取採購產品');
-    const product=snapshot.exists?{...snapshot.data(),productId}:null;
-    if(!product||product.active===false||product.status==='INACTIVE'){alert('此產品已停用或不存在。');return;}
-    await openDirectStockPurchase({...product,productId});
-    const item=poItems[0];
-    if(!poDirectStockMode||poEditingId||item?.productId!==productId)return;
-    const costSnapshot=await firestoreReadWithTimeout(db.collection('productCosts').doc(productId).get(),'讀取標準成本');
-    const cost=costSnapshot.exists?costSnapshot.data():null;
-    if(poDirectStockMode&&!poEditingId&&poItems[0]===item&&item.unitPrice===0){
-        item.unitPrice=Number(cost?.standardCost??cost?.costPrice??0);renderPoItemsTable();
-    }
-    }catch(err){showActionFeedback('加入採購單失敗：'+err.message,'warning');}
+    await openProductManagementProductsInPurchase([{ productId }]);
+};
+
+window.addProductManagementSelectionToPurchase = async function() {
+    const products = selectedProductManagementProducts();
+    if (await openProductManagementProductsInPurchase(products)) clearProductManagementSelection();
 };
 
 window.openDirectStockPurchase = async function(product = null) {
