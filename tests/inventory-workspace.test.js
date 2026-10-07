@@ -42,3 +42,44 @@ test('export entry stays read-only and renders the selected warehouse with edita
  const app=fs.readFileSync('app.js','utf8'),start=app.indexOf('window.openWarehouseDispatchList='),end=app.indexOf('window.openRelatedOrderPurchase',start),section=app.slice(start,end);
  assert.match(section,/selectedWarehouseId&&warehouseId!==selectedWarehouseId/);assert.match(section,/const qty=state.shippable/);assert.match(section,/dispatchListDate/);assert.match(section,/dispatchListNotes/);assert.match(section,/stock.shippable<item.qty/);assert.doesNotMatch(section,/runRoleTransaction|db[\s\S]*?\.doc\([^)]*\)\.(set|update|add)\(/);
 });
+
+function workspaceUiFixture({returnsFail=false,purchaseFail=false}={}){
+ const nodes=new Map(),classes=()=>({toggle(){}});
+ const el=id=>{if(!nodes.has(id))nodes.set(id,{id,style:{},dataset:{},classList:classes(),textContent:'',innerHTML:'',value:'',hidden:false,setAttribute(){}});return nodes.get(id);};
+ const cards=['purchase','returns'].map(kind=>({...el(kind+'Card'),dataset:{inventoryReceivingKind:kind}}));
+ const calls=[];
+ const c=vm.createContext({document:{getElementById:el,querySelectorAll:()=>cards},
+   canReceiveInventoryCapability:()=>true,currentUserRole:'admin',currentUser:{uid:'A'},
+   defaultWarehouse:()=>({id:'MAIN'}),warehouseMasterCache:[{id:'MAIN',warehouseName:'又鑫'}],
+   orderWorkQueueCache:[],orderWorkQueueReady:true,orderWorkQueueError:'',
+   activeReceivingSupplyReady:!purchaseFail,activeReceivingSupplyError:'',supplyReceivingCache:[],customerReturnOrders:[],
+   normalizedOrderStatus:()=> 'normal',orderInventorySyncIncomplete:()=>false,normalizedOrderItems:o=>o.items||[],itemDispatchState:()=>({shippable:1}),
+   escapeHtml:String,escapeAttr:String,receivingSourceOrderForItem:()=>null,
+   loadWarehouseMaster:async()=>calls.push('warehouse'),loadOrderWorkQueue:async()=>calls.push('shipping'),
+   loadCustomerReturnQueue:async()=>{calls.push('returns');c.inventoryReturnQueueUpdated(returnsFail?'退貨服務離線':'');if(returnsFail)throw Error('退貨服務離線');},
+   loadActiveReceivingSupplyCache:async()=>{calls.push('purchase');c.activeReceivingSupplyError=purchaseFail?'採購服務離線':'';if(purchaseFail)throw Error('採購服務離線');c.activeReceivingSupplyReady=true;},
+   showActionFeedback:()=>calls.push('toast')});
+ vm.runInContext(code,c);return {c,el,cards,calls};
+}
+test('return loading failure does not mark purchase or shipping as empty or block their work; errors stay in the selected panel',async()=>{
+ const {c,el,cards,calls}=workspaceUiFixture({returnsFail:true});
+ await c.loadInventoryWorkspace();
+ assert.equal(el('inventoryReceivingTabBtn').textContent,'收貨（—）');
+ assert.equal(el('inventoryShippingTabBtn').textContent,'出貨（0）');
+ assert.match(cards[0].innerHTML,/0 筆/);assert.match(cards[1].innerHTML,/—/);
+ assert.equal(el('inventoryReceivingError').hidden,true);
+ c.switchInventoryReceivingKind('returns');
+ assert.equal(el('inventoryReceivingError').hidden,false);assert.match(el('inventoryReceivingError').innerHTML,/重試收貨資料/);
+ assert.equal(el('inventoryShippingError').hidden,true);assert.equal(calls.includes('toast'),false);
+});
+test('retry refreshes failed queues and reuses successful receiving data on ordinary visits',async()=>{
+ const f=workspaceUiFixture({purchaseFail:true});await f.c.loadInventoryWorkspace();
+ assert.equal(f.el('inventoryReceivingError').hidden,false);assert.match(f.cards[0].innerHTML,/—/);
+ f.c.loadActiveReceivingSupplyCache=async()=>{f.calls.push('purchase');f.c.activeReceivingSupplyError='';f.c.activeReceivingSupplyReady=true;};
+ await f.c.loadInventoryWorkspace(true);
+ assert.equal(f.el('inventoryReceivingError').hidden,true);assert.equal(f.el('inventoryReceivingTabBtn').textContent,'收貨（0）');
+ const before=f.calls.filter(x=>x==='purchase').length;await f.c.loadInventoryWorkspace();
+ assert.equal(f.calls.filter(x=>x==='purchase').length,before);
+ f.c.currentUserRole='purchaser';await f.c.loadInventoryWorkspace();
+ assert.equal(f.calls.filter(x=>x==='purchase').length,before+1);
+});

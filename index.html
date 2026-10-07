@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261006-3">
+        <link rel="stylesheet" href="styles.css?v=20261007-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -448,19 +448,21 @@
 </div>
     <!-- ============ 庫存管理 ============ -->
     <div id="inventory-system" class="content-section">
-      <div class="sub-nav inventory-work-tabs no-print" role="group" aria-label="庫存工作">
+      <div class="purchase-view-tabs inventory-work-tabs no-print" role="group" aria-label="庫存工作">
         <button type="button" id="inventoryStockTabBtn" class="active" aria-pressed="true" onclick="switchInventoryWorkView('stock')">庫存清單</button>
-        <button type="button" id="inventoryReceivingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('receiving')">收貨（讀取中…）</button>
-        <button type="button" id="inventoryShippingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('shipping')">出貨（讀取中…）</button>
+        <button type="button" id="inventoryReceivingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('receiving')">收貨（…）</button>
+        <button type="button" id="inventoryShippingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('shipping')">出貨（…）</button>
       </div>
       <div id="inventoryReceivingPanel" style="display:none">
-        <div class="toolbar inventory-work-subtabs no-print"><button type="button" class="active" data-inventory-receiving-kind="purchase" onclick="switchInventoryReceivingKind('purchase')">採購收貨</button><button type="button" data-inventory-receiving-kind="returns" onclick="switchInventoryReceivingKind('returns')">退貨收貨</button></div>
-        <div id="inventoryPurchaseReceivingPanel"><p id="inventoryReceivingStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
+        <div class="order-work-cards inventory-work-subtabs no-print"><button type="button" class="order-work-card active" aria-pressed="true" data-inventory-receiving-kind="purchase" onclick="switchInventoryReceivingKind('purchase')">採購收貨</button><button type="button" class="order-work-card" aria-pressed="false" data-inventory-receiving-kind="returns" onclick="switchInventoryReceivingKind('returns')">退貨收貨</button></div>
+        <div id="inventoryReceivingError" class="inventory-work-error" role="status" hidden></div>
+        <div id="inventoryPurchaseReceivingPanel"><p id="inventoryReceivingStatus" class="inventory-work-status" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
         <section class="panel no-print" id="customerReturnPanel" style="display:none"><p>退貨申請不增加庫存；確認實收後才入庫。待檢或損壞商品分開保管。</p><div id="customerReturnQueue" role="status"></div></section>
       </div>
       <div id="inventoryShippingPanel" style="display:none">
-        <div class="toolbar inventory-work-subtabs no-print"><button type="button" id="inventoryShippingMainBtn" class="active" onclick="switchInventoryShippingKind('main')">主倉庫出貨</button><button type="button" id="inventoryShippingBranchBtn" onclick="switchInventoryShippingKind('branch')">分倉庫出貨</button><select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select></div>
-        <p id="inventoryShippingStatus" role="status"></p>
+        <div class="order-work-cards inventory-work-subtabs no-print"><button type="button" id="inventoryShippingMainBtn" class="order-work-card active" aria-pressed="true" onclick="switchInventoryShippingKind('main')">主倉庫出貨</button><button type="button" id="inventoryShippingBranchBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('branch')">分倉庫出貨</button><select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select></div>
+        <div id="inventoryShippingError" class="inventory-work-error" role="status" hidden></div>
+        <p id="inventoryShippingStatus" class="inventory-work-status" role="status"></p>
         <div class="table-wrap inventory-work-table"><table><thead><tr><th>訂單／客戶</th><th>品項</th><th>倉庫</th><th>已打單待出數量</th><th>操作</th></tr></thead><tbody id="inventoryShippingBody"></tbody></table></div>
         <button type="button" id="inventoryShippingMoreBtn" class="btn-secondary" style="display:none" onclick="loadMoreInventoryShipping()">載入更多（50）</button>
       </div>
@@ -1694,7 +1696,7 @@
     <script src="modules/document-downloads.js?v=20261004-2"></script>
     <script src="app.js?v=20261006-12"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
-    <script src="modules/inventory-workspace.js?v=20261006-1"></script>
+    <script src="modules/inventory-workspace.js?v=20261007-2"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
     <script>
     (function () {
