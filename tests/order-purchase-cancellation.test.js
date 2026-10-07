@@ -65,11 +65,11 @@ test('cancelled order retains a customer-return entry while commercial role rest
   assert.equal(html.includes('取消訂單'),false);
  }
 });
-test('cancelled delivered order displays the new return form but never exposes it to purchaser',()=>{
+test('cancelled delivered order opens requested return form only for authorized staff',()=>{
  for(const business of [true,false]){
   const elements=new Map();const get=id=>{if(!elements.has(id))elements.set(id,{style:{},value:'',innerHTML:''});return elements.get(id);};
   const c=vm.createContext({ordersCache:[{id:'O1',returnRecords:[]}],currentLifecycleOrderId:'O1',canManageOrderLifecycleCapability:()=>business,canEditPage:()=>business,
-   orderLifecycleInfo:()=>({status:'cancelled',effectiveDelivered:1,delivered:2,returned:1}),document:{getElementById:get},escapeHtml:String,savedReturnRecords:o=>o.returnRecords,populateReturnItemOptions:()=>{},updateReturnFormHint:()=>{},renderOrderLifecycleStatusOptions:()=>{},onOrderLifecycleStatusChange:()=>{}});
+   orderReturnFormOpen:true,orderLifecycleFormOpen:false,deliveryProgressInfo:()=>({remaining:0,grossDelivered:2}),normalizedOrderStatus:()=> 'cancelled',normalizedOrderItems:()=>[{itemId:'I1'}],returnItemDeliveredQty:()=>2,returnItemReturnedQty:()=>1,customerReturnPendingQty:()=>0,labelOrderProgressRecords:()=>{},orderLifecycleInfo:()=>({status:'cancelled',effectiveDelivered:1,delivered:2,returned:1}),document:{getElementById:get},escapeHtml:String,savedReturnRecords:o=>o.returnRecords,populateReturnItemOptions:()=>{},updateReturnFormHint:()=>{},renderOrderLifecycleStatusOptions:()=>{},onOrderLifecycleStatusChange:()=>{}});
   vm.runInContext(fn('renderOrderLifecycleModal'),c);c.renderOrderLifecycleModal();
   assert.equal(get('returnFormPanel').style.display,business?'':'none');
  }
@@ -143,3 +143,16 @@ test('settlement return adds free stock while preserving reservations for remain
    if(!row.expected)assert.equal(elements.orderLifecycleStatus.value,'normal');
   }
  });
+
+
+test('fulfilled warehouse orders show completion while a partial delivery remains pending',()=>{
+ const c=vm.createContext({normalizedOrderItems:o=>o.items,itemDispatchState:(_o,item)=>item.state});
+ vm.runInContext(fn('fulfillmentProgressInfo'),c);
+ const order={items:[{qty:2,state:{delivered:2,reserved:0,prepared:0,shippable:0,pending:0}}]};
+ assert.equal(c.fulfillmentProgressInfo(order).state,'complete');
+ assert.equal(c.fulfillmentProgressInfo(order).label,'出貨完成');
+ order.items[0].state.delivered=1;
+ assert.equal(c.fulfillmentProgressInfo(order).state,'pending');
+ order.items[0].fulfillmentType='DIRECT_SHIP';
+ assert.equal(c.fulfillmentProgressInfo(order).state,'direct');
+});

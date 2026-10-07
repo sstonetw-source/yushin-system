@@ -3339,3 +3339,24 @@ button:disabled { opacity:.48; cursor:not-allowed; }
         flex: 1 1 120px;
     }
 }
+
+/* Shared order progress workspace, with readable mobile records. */
+#deliveryModalOverlay [hidden] { display:none !important; }
+.order-progress-tabs { display:flex; gap:6px; border-bottom:1px solid #d5dde5; padding-bottom:8px; }
+.order-progress-tabs button { flex:1; padding:9px 6px; background:#edf1f5; color:#334; }
+.order-progress-tabs button[aria-selected="true"] { background:#003366; color:#fff; }
+#deliveryModalOverlay .order-progress-secondary { margin-top:14px; padding-top:0; border-top:0; }
+#deliveryModalOverlay .workflow-step { padding:6px; background:#edf1f5; color:#334; border-radius:16px; font-size:12px; }
+#deliveryModalOverlay .workflow-step.done { background:#e8f3e9; color:#25652a; }
+#deliveryModalOverlay .workflow-step span { display:none; }
+#deliveryModalOverlay .workflow-step:disabled { opacity:1; }
+#deliveryModalOverlay input, #deliveryModalOverlay select { box-sizing:border-box; max-width:100%; min-width:0; }
+@media(max-width:600px) {
+    #deliveryModalOverlay .log-table, #deliveryModalOverlay .log-table tbody { display:block; width:100%; }
+    #deliveryModalOverlay .log-table thead { display:none; }
+    #deliveryModalOverlay .log-table tr { display:block; margin-bottom:10px; border:1px solid #d5dde5; border-radius:8px; padding:8px 12px; }
+    #deliveryModalOverlay .log-table td { display:block; border:0; text-align:left; padding:5px 0; overflow-wrap:anywhere; }
+    #deliveryModalOverlay .log-table td[data-label]::before { content:attr(data-label) '：'; color:#666; font-size:12px; margin-right:6px; }
+    #deliveryModalOverlay .delivery-section-heading { align-items:flex-start; flex-wrap:wrap; }
+    #deliveryModalOverlay .delivery-summary { padding:12px; }
+}

@@ -5204,7 +5204,7 @@ test('replenishment center derives projected stock from authoritative warehouse 
 });
 
 test('order progress modal exposes a complete timeline including order creation', () => {
-    assert.match(indexSource,/完整時間軸/);
+    assert.match(indexSource,/操作紀錄/);
     assert.match(appSource,/action:'建立訂單'/);
     assert.match(appSource,/const deliveryHistoryRecordIds=new Set/);
     assert.match(appSource,/action:'送貨紀錄'/);

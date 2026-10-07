@@ -9786,6 +9786,7 @@ function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByI
     const shippable=states.reduce((s,state)=>s+state.shippable,0);
     const pendingDispatch=states.reduce((s,state)=>s+state.pending,0);
     if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
+    if(total>0 && delivered>=total)return {state:'complete',label:'出貨完成',total,ready,prepared,delivered,shippable:0,pendingDispatch:0};
     if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     if(pendingDispatch>0)return {state:ready>=Math.max(0,total-delivered)?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     return {state:'pending',label:`待備貨 0/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
@@ -15959,12 +15960,63 @@ function dateInUnifiedPeriod(value, key = 'this-year') {
     return !!date && (!start || date >= start) && (!end || date <= end);
 }
 
+let orderProgressHistoryExpanded = false;
+let orderLifecycleFormOpen = false;
+let orderReturnFormOpen = false;
+window.selectOrderProgressTab = function(tab) {
+    if (!['delivery', 'returns', 'history'].includes(tab)) return;
+    ['delivery', 'returns', 'history'].forEach(name => {
+        document.getElementById(`orderProgressPanel-${name}`).hidden = name !== tab;
+        const button = document.getElementById(`orderProgressTab-${name}`);
+        button.setAttribute('aria-selected', String(name === tab));
+    });
+};
+window.showAllOrderProgressHistory = function() {
+    orderProgressHistoryExpanded = true;
+    const order = ordersCache.find(o => o.id === currentDeliveryOrderId);
+    if (order) renderOrderStatusHistory(order);
+};
+function labelOrderProgressRecords(bodyId, labels) {
+    const body = document.getElementById(bodyId);
+    if (!body) return;
+    Array.from(body.rows).forEach(row => Array.from(row.cells).forEach((cell, i) => {
+        if (cell.colSpan === 1) cell.dataset.label = labels[i];
+    }));
+}
+window.closeOrderLifecycleForm = function() {
+    orderLifecycleFormOpen = false;
+    document.getElementById('orderStatusEditPanel').style.display = 'none';
+};
+window.openOrderLifecycleForm = function() {
+    const order = ordersCache.find(o => o.id === currentLifecycleOrderId);
+    if (!order || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
+    if (normalizedOrderStatus(order) === 'normal' && deliveryProgressInfo(order).remaining <= 0) return;
+    selectOrderProgressTab('returns');
+    orderLifecycleFormOpen = true;
+    document.getElementById('orderLifecycleStatus').value = normalizedOrderStatus(order) === 'normal' ? 'cancelled' : 'normal';
+    renderOrderLifecycleModal();
+};
+window.openReturnForm = function() {
+    const order = ordersCache.find(o => o.id === currentLifecycleOrderId);
+    if (!order || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
+    if (!normalizedOrderItems(order).some(item => returnItemDeliveredQty(order, item.itemId) - returnItemReturnedQty(order, item.itemId) - customerReturnPendingQty(order, item.itemId) > 0)) return;
+    selectOrderProgressTab('returns');
+    orderReturnFormOpen = true;
+    document.getElementById('returnCancelEditBtn').style.display = '';
+    renderOrderLifecycleModal();
+    document.getElementById('returnDate').focus();
+};
+
 window.openDeliveryModal = function(orderId) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order) return;
     if(orderInventorySyncIncomplete(order)){showActionFeedback('這筆訂單庫存尚未同步完成，請先完成或重試同步。','warning');return;}
     currentDeliveryOrderId = orderId;
     currentLifecycleOrderId = orderId;
+    orderProgressHistoryExpanded = false;
+    orderLifecycleFormOpen = false;
+    orderReturnFormOpen = false;
+    selectOrderProgressTab('delivery');
     deliveryPartialFormOpen = false;
     document.getElementById('deliveryModalTitle').innerText = `訂單進度：${order.customerName || order.itemName || '訂單'}`;
     document.getElementById('orderLifecycleStatus').value = normalizedOrderStatus(order);
@@ -15986,6 +16038,8 @@ window.closeDeliveryModal = function() {
 
 window.prepareOrderLifecycle = function(orderId, status) {
     openDeliveryModal(orderId);
+    openOrderLifecycleForm();
+    if (!orderLifecycleFormOpen) return;
     document.getElementById('orderLifecycleStatus').value = status;
     document.getElementById('orderLifecycleDate').value = localDateString();
     document.getElementById('orderLifecycleReason').value = '';
@@ -16224,6 +16278,7 @@ window.toggleOrderProgressStatus = function(field, newValue) {
 
 window.resetDeliveryForm = function() {
     deliveryPartialFormOpen = false;
+    document.getElementById('deliveryFormPanel').style.display = 'none';
     document.getElementById('deliveryEditId').value = '';
     document.getElementById('deliveryDate').value = localDateString();
     document.getElementById('deliveryQty').value = '';
@@ -16243,6 +16298,7 @@ window.openPartialDeliveryForm = function() {
     if (normalizedOrderStatus(order) !== 'normal') { alert('已取消的訂單不能新增送貨紀錄。'); return; }
     const progress = deliveryProgressInfo(order);
     if (progress.remaining <= 0) { alert('這筆訂單已全數送貨。'); return; }
+    selectOrderProgressTab('delivery');
     deliveryPartialFormOpen = true;
     document.getElementById('deliveryFormPanel').style.display = '';
     document.getElementById('deliveryQty').value = '';
@@ -16258,6 +16314,8 @@ window.openPartialDeliveryForOrder = function(orderId) {
 window.openReturnManagement = function(orderId) {
     if (!canManageOrderLifecycleCapability()) return;
     openDeliveryModal(orderId);
+    openReturnForm();
+    if (!orderReturnFormOpen) return;
     const form = document.getElementById('returnFormPanel');
     form.scrollIntoView({ behavior: 'smooth', block: 'center' });
     document.getElementById('returnDate').focus();
@@ -16265,6 +16323,7 @@ window.openReturnManagement = function(orderId) {
 
 window.openOrderStatusHistory = function(orderId) {
     openDeliveryModal(orderId);
+    selectOrderProgressTab('history');
     document.getElementById('orderStatusHistorySection').scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
@@ -16342,7 +16401,9 @@ function renderOrderStatusHistory(order) {
         entries.push({ at: order.orderDate || '', action: '送貨（歷史推估）', by: '舊資料未記錄', detail: '依目前訂單狀態推估，日期暫用訂單日期' });
     }
     entries.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
-    tbody.innerHTML = entries.length ? entries.map(item => `<tr><td>${escapeHtml(formatOrderStatusTime(item.at))}</td><td>${escapeHtml(item.action || '')}</td><td>${escapeHtml(item.by || '')}</td><td>${escapeHtml(item.detail || '')}</td></tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚無操作紀錄。</td></tr>';
+    tbody.innerHTML = entries.length ? (orderProgressHistoryExpanded ? entries : entries.slice(0, 5)).map(item => `<tr><td>${escapeHtml(formatOrderStatusTime(item.at))}</td><td>${escapeHtml(item.action || '')}</td><td>${escapeHtml(item.by || '')}</td><td>${escapeHtml(item.detail || '')}</td></tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚無操作紀錄。</td></tr>';
+    document.getElementById('orderHistoryMoreBtn').hidden = orderProgressHistoryExpanded || entries.length <= 5;
+    labelOrderProgressRecords('orderStatusHistoryBody', ['時間', '動作', '操作人', '說明']);
 }
 
 async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, reversalRecords) {
@@ -16674,7 +16735,7 @@ function renderDeliveryModal() {
     const fulfillment=fulfillmentProgressInfo(order);
     document.getElementById('orderWorkflowSteps').innerHTML = `
         <button type="button" class="workflow-step ${['ordered','not_required','direct'].includes(purchase.state)?'done':purchase.state==='partial'?'partial':''}" disabled><span>1</span>${escapeHtml(purchase.label)}</button>
-        <button type="button" class="workflow-step ${['ready','direct'].includes(fulfillment.state)?'done':fulfillment.state==='partial'?'partial':''}" disabled><span>2</span>${escapeHtml(fulfillment.label)}</button>
+        <button type="button" class="workflow-step ${['ready','direct','complete'].includes(fulfillment.state)?'done':fulfillment.state==='partial'?'partial':''}" disabled><span>2</span>${escapeHtml(fulfillment.label)}</button>
         <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
         <button type="button" class="workflow-step ${order.isBilled?'done':''}" ${editableSteps?`onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"`:'disabled'}><span>4</span>${order.isBilled?'已報帳':'未報帳'}</button>`;
     const deliveryItems=normalizedOrderItems(order);
@@ -16687,11 +16748,10 @@ function renderDeliveryModal() {
             .filter(r=>(r.itemId||((deliveryItems.length===1&&deliveryItems[0]?.itemId)||''))===item.itemId)
             .reduce((sum,r)=>sum+Number(r.qty||0),0);
         const delivered=Math.max(0,grossDelivered-returned);
-        const returnLabel=returned>0?`（已退 ${returned}）`:'';
-        return `<div><strong>${escapeHtml(item.itemName||'未命名品項')}</strong>（${escapeHtml(item.itemCode||'無貨號')}） ${delivered}/${Number(item.qty||0)}${returnLabel}</div>`;
+        return `<div><strong>${escapeHtml(item.itemName||'未命名品項')}</strong>（${escapeHtml(item.itemCode||'無貨號')}）<br>訂購 ${Number(item.qty||0)}｜已送 ${grossDelivered}｜退貨 ${returned}｜有效已送 ${delivered}</div>`;
     }).join('');
     document.getElementById('deliveryOrderSummary').innerHTML = itemSummary + `
-        <div style="margin-top:6px;">整張訂單：${progress.delivered}/${progress.total}</div>
+        <div style="margin-top:6px;">目前狀態：${escapeHtml(lifecycle.label)}｜已送 ${progress.delivered}/${progress.total}｜未送 ${progress.remaining}</div>
         ${progress.isLegacyEstimated ? '<br><span class="delivery-estimated">這是舊版「已送貨」資料，日期暫以訂單日期推估。</span>' : ''}`;
     const deliveryForm=document.getElementById('deliveryFormPanel');
     if(deliveryForm&&deliveryItems.length>1){
@@ -16718,13 +16778,14 @@ function renderDeliveryModal() {
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
             <td>${record.itemId ? escapeHtml(deliveryItemNameById.get(record.itemId)||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-            <td>${editable ? `<button type="button" class="btn-small" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button>` : '僅可查看'}</td>
+            <td>${editable ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : '僅可查看'}</td>
         </tr>`).join('');
     } else if (progress.isLegacyEstimated) {
         tbody.innerHTML = `<tr><td>${escapeHtml(order.orderDate || '')}<br><span class="delivery-estimated">歷史推估</span></td><td>${progress.total}</td><td>舊版已送貨資料</td><td>－</td><td>${editable ? '<button type="button" class="btn-secondary" onclick="clearLegacyDelivery()">取消此推估</button>' : '僅可查看'}</td></tr>`;
     } else {
         tbody.innerHTML = '<tr><td colspan="5" style="color:#888;">尚無送貨紀錄。</td></tr>';
     }
+    labelOrderProgressRecords('deliveryRecordsBody', ['送貨日期', '數量', '備註', '登錄人／時間', '操作']);
     document.getElementById('deliveryFormHint').innerText = progress.isLegacyEstimated
         ? '請先取消舊資料推估，再登錄正確的分批送貨紀錄。'
         : `目前最多還可登錄 ${progress.remaining} 個。`;
@@ -17001,6 +17062,8 @@ window.updateReturnFormHint = function() {
 };
 
 window.resetReturnForm = function() {
+    orderReturnFormOpen = false;
+    document.getElementById('returnFormPanel').style.display = 'none';
     document.getElementById('returnEditId').value = '';
     document.getElementById('returnDate').value = localDateString();
     document.getElementById('returnQty').value = '';
@@ -17035,20 +17098,25 @@ function renderOrderLifecycleModal() {
     const editable = canManageOrderLifecycleCapability() && canEditPage('orders.list');
     const info = orderLifecycleInfo(order);
     renderOrderLifecycleStatusOptions(order);
-    document.getElementById('orderStatusEditPanel').style.display = editable ? '' : 'none';
+    const canCancel = deliveryProgressInfo(order).remaining > 0;
+    const cancelled = normalizedOrderStatus(order) !== 'normal';
+    document.getElementById('orderStatusEditPanel').style.display = editable && orderLifecycleFormOpen && (canCancel || cancelled) ? '' : 'none';
+    const lifecycleButton = document.getElementById('openLifecycleFormBtn');
+    lifecycleButton.hidden = !editable || (!canCancel && !cancelled);
+    lifecycleButton.textContent = cancelled ? '恢復訂單' : deliveryProgressInfo(order).grossDelivered > 0 ? '取消剩餘未送數量' : '取消訂單';
+    const canReturn = normalizedOrderItems(order).some(item => returnItemDeliveredQty(order, item.itemId) - returnItemReturnedQty(order, item.itemId) - customerReturnPendingQty(order, item.itemId) > 0);
+    document.getElementById('openReturnFormBtn').hidden = !editable || !canReturn;
+    document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由庫存頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
     const isEditingReturn = !!document.getElementById('returnEditId').value;
-    document.getElementById('returnFormPanel').style.display = editable && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';
-    document.getElementById('orderLifecycleSummary').innerHTML = `
-        <strong>${escapeHtml(order.itemName || '未命名品項')}</strong>（${escapeHtml(order.itemCode || '無貨號')}）<br>
-        目前狀態：<span class="order-validity-badge order-validity-${info.css}">${info.label}</span>　
-        累計已送：${info.delivered}　累計退貨：${info.returned}　有效送貨數量：${info.effectiveDelivered}`;
+    document.getElementById('returnFormPanel').style.display = editable && (orderReturnFormOpen || isEditingReturn) && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';
     const records = savedReturnRecords(order).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     const tbody = document.getElementById('returnRecordsBody');
     tbody.innerHTML = records.length ? records.map(record => `<tr>
         <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td><td>${escapeHtml(record.reason || '')}</td>
         <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-        <td>${editable && !record.requestId ? `<button type="button" class="btn-small" onclick="editReturnRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteReturnRecord(${inlineJsValue(record.id)})">刪除</button>` : '僅可查看'}</td>
+        <td>僅可查看</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:#888;">尚無退貨紀錄。</td></tr>';
+    labelOrderProgressRecords('returnRecordsBody', ['退貨日期', '數量', '原因／備註', '登錄人／時間', '操作']);
     const editingRecord=records.find(record=>record.id===document.getElementById('returnEditId')?.value);
     populateReturnItemOptions(order,editingRecord?.itemId||'');
     updateReturnFormHint();
