@@ -3406,7 +3406,10 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .quote-create-more-menu {
     position: absolute;
     right: 0;
-    top: calc(100% + 8px);
+    top: auto;
+    bottom: calc(100% + 8px);
+    max-height: min(360px, 65vh);
+    overflow-y: auto;
     z-index: 20;
     width: min(280px, 80vw);
     padding: 12px;
