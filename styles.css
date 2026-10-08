@@ -3587,3 +3587,14 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .order-product-check-status { display:flex; align-items:center; gap:8px; margin-top:4px; font-size:13px; }
 .order-product-status[data-status="matched"] { color:#267239; }
 .order-product-status[data-status="missing"], .order-product-status[data-status="error"], .order-product-status[data-status="ambiguous"] { color:#9a5b00; font-weight:600; }
+
+/* Warehouse work: explicit recipients, printable batches and mobile row labels. */
+.warehouse-logistics-modal{max-width:840px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));overflow:auto;padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+.warehouse-logistics-modal .form-grid,.order-shipping-details .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.warehouse-logistics-modal label,.order-shipping-details label{display:flex;flex-direction:column;gap:5px;min-width:0}
+.warehouse-logistics-modal input,.warehouse-logistics-modal select,.order-shipping-details input,.order-shipping-details select{box-sizing:border-box;width:100%;min-width:0}
+.logistics-wide{grid-column:1/-1}.order-shipping-details{padding:10px;border:1px solid #d9e2ed;border-radius:8px}.order-shipping-details summary{cursor:pointer;font-weight:600}.order-shipping-details[open] summary{margin-bottom:12px}
+.inventory-action-reason{display:block;flex-basis:100%;color:#687787}.inventory-row-actions button:disabled{opacity:.55;cursor:not-allowed}
+.warehouse-print-frame{position:fixed;width:1px;height:1px;left:-10000px;bottom:0;border:0}
+.inventory-work-table td{overflow-wrap:anywhere}.inventory-work-table input[type=checkbox]{width:22px;height:22px}
+@media(max-width:600px){.warehouse-logistics-modal .form-grid,.order-shipping-details .form-grid{grid-template-columns:1fr}.warehouse-logistics-modal .toolbar{display:flex;flex-wrap:wrap;gap:8px}.warehouse-logistics-modal .toolbar button{flex:1 1 45%}.inventory-work-subtabs{flex-wrap:wrap}}

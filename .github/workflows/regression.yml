@@ -17,6 +17,7 @@ jobs:
         run: |
           node --check modules/order-self-order-required.js
           node --check modules/inventory-workspace.js
+          node --check modules/warehouse-logistics.js
           node --check app.js
           node --check modules/document-downloads.js
           node --check modules/supplier-core.js
@@ -33,7 +34,7 @@ jobs:
           node --check functions/purchase-email-core.js
           node --check functions/index.js
       - name: Trade analysis tests
-        run: node --test tests/inventory-workspace.test.js tests/inventory-receiving-count.test.js tests/inventory-list-archive.test.js tests/order-role-read.test.js tests/document-downloads.test.js tests/order-cost-reminder.test.js tests/quick-delivery-item.test.js tests/replenishment-entry.test.js tests/order-background.test.js tests/system-audit-shortcuts.test.js tests/receipt-background.test.js tests/trade-analysis.test.js tests/order-purchase-cancellation.test.js
+        run: node --test tests/warehouse-logistics.test.js tests/inventory-workspace.test.js tests/inventory-receiving-count.test.js tests/inventory-list-archive.test.js tests/order-role-read.test.js tests/document-downloads.test.js tests/order-cost-reminder.test.js tests/quick-delivery-item.test.js tests/replenishment-entry.test.js tests/order-background.test.js tests/system-audit-shortcuts.test.js tests/receipt-background.test.js tests/trade-analysis.test.js tests/order-purchase-cancellation.test.js
       - name: Phase 1 regression tests
         run: node --test tests/order-partial-print-flow.test.js tests/order-self-order-required.test.js tests/self-order-at-creation.test.js tests/phase1.test.js tests/external-warehouse-dispatch.test.js
       - name: Purchasing workflow tests

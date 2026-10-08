@@ -833,7 +833,7 @@ async function seedStockWorkflow(){
   await seed('warehouseStocks/w1-p1',{productKey:'p1',warehouseId:'w1',onHand:10,reserved:0,incoming:0});
   await seed('inventoryLots/l1',{productKey:'p1',warehouseId:'w1',remainingQty:10});
 }
-async function stockWorkflow(physicalDelta, reservationQty, type){
+async function stockWorkflow(physicalDelta, reservationQty, type, warehouseId='w1'){
   const client=compatDb('sales1');
   return stockPermissions.run(client,async tx=>{
     const inv=client.collection('inventory').doc('p1');
@@ -851,7 +851,7 @@ async function stockWorkflow(physicalDelta, reservationQty, type){
       if(type==='return_in')tx.update(order,{returnedQty:orderSnap.data().returnedQty+physicalDelta});
       else tx.update(order,{deliveredQty:orderSnap.data().deliveredQty-physicalDelta});
     }
-    tx.set(res,{orderId:'stock-order',itemId:'item-1',productKey:'p1',warehouseId:'w1',ownerUid:'sales1',salesCode:'S01',quantity:reservationQty,shortageQty:0,status:'active'});
+    tx.set(res,{orderId:'stock-order',itemId:'item-1',productKey:'p1',warehouseId,ownerUid:'sales1',salesCode:'S01',quantity:reservationQty,shortageQty:0,status:'active'});
     tx.set(client.collection('inventoryMovements').doc(),{sourceId:'stock-order',sourceType:'order',productKey:'p1',ownerUid:'sales1',salesCode:'S01',type,qty:physicalDelta||reserveDelta,lotAllocations:physicalDelta?[{lotId:'l1',qty:type==='ship'?-physicalDelta:physicalDelta}]:[]});
   },'sales1',true,'sales');
 }
@@ -1054,4 +1054,54 @@ test('quick manual purchase requires supplier and nonnegative actual cost for ad
     await assertFails(updateDoc(ref,{qty:3,unitCost:60}));
     await assertSucceeds(updateDoc(ref,{qty:3,incomingRegisteredQty:3}));
   }
+});
+
+async function seedWarehouseLogistics(){
+ await seed('warehouses/MAIN',{warehouseName:'又鑫',active:true});await seed('warehouses/EXT',{warehouseName:'勝力',active:true});
+ await seed('inventory/P',{productKey:'P',productId:'P',onHand:10,reserved:4,incoming:0,stockPolicy:'ORDER_ONLY',safetyStock:0});
+ await seed('warehouseStocks/MAIN__P',{productKey:'P',warehouseId:'MAIN',onHand:10,reserved:4,incoming:0});
+ await seed('orders/logistics',{ownerUid:'sales1',salesCode:'S01',status:'active',createdByUid:'sales1',createdByRole:'sales',deliveryRecords:[],items:[{itemId:'A',productId:'P',qty:4,reservedQty:4,warehouseId:'MAIN',dispatchPreparedQty:4}]});
+ await seed('inventoryReservations/logistics__A',{orderId:'logistics',itemId:'A',quantity:4,warehouseId:'MAIN',productKey:'P',ownerUid:'sales1',salesCode:'S01'});
+}
+function transferData({linked=false,handoff=false}={}){
+ return {id:'T',inventoryId:'P',productKey:'P',fromStockId:'MAIN__P',toStockId:handoff?'custody-sales1__P':'EXT__P',fromWarehouseId:'MAIN',toWarehouseId:handoff?'custody-sales1':'EXT',qty:linked?4:3,reservedQty:linked?4:0,kind:handoff?'HANDOFF':'TRANSFER',status:handoff?'RECEIVED':'IN_TRANSIT',createdByUid:'buyer1',orderId:linked?'logistics':'',itemId:linked?'A':'',itemIndex:linked?0:-1,allocations:[{lotId:'L',targetLotId:'T-0',qty:linked?4:3,costLotId:'L'}]};
+}
+test('warehouse recipient plan cannot change commercial values or another item',async()=>{
+ await seedWarehouseLogistics();const old=(await getDoc(doc(db('buyer1'),'orders/logistics'))).data(),p={mode:'SALES_SHIP',warehouseId:'',contact:'Luke',phone:'123',address:'台南',packages:1,condition:'常溫',notes:'',tracking:''};
+ const update={items:[{...old.items[0],deliveryPlan:p}],logisticsPlanItemIndex:0,logisticsPlanActorUid:'buyer1',logisticsHistory:[{id:'plan',action:'交付設定'}],updatedAt:'2026-10-09'};
+ await assertFails(updateDoc(doc(db('sales2'),'orders/logistics'),update));
+ await assertFails(updateDoc(doc(db('buyer1'),'orders/logistics'),{...update,customerName:'changed'}));
+ await assertSucceeds(updateDoc(doc(db('buyer1'),'orders/logistics'),update));
+});
+test('stock transfer requires matching source stock and aggregate transit evidence and denies commercial API writes',async()=>{
+ await seedWarehouseLogistics();const data=transferData();
+ await assertFails(setDoc(doc(db('buyer1'),'stockTransfers/T'),data));await assertFails(setDoc(doc(db('sales1'),'stockTransfers/T'),data));
+ const client=db('buyer1'),b=writeBatch(client);b.set(doc(client,'stockTransfers/T'),data);b.update(doc(client,'warehouseStocks/MAIN__P'),{onHand:7,reserved:4});b.update(doc(client,'inventory/P'),{transferInTransit:3,transferFreeInTransit:3});await assertSucceeds(b.commit());
+ await assertFails(updateDoc(doc(client,'stockTransfers/T'),{qty:4}));await assertFails(deleteDoc(doc(db('admin'),'stockTransfers/T')));
+ const receipt=writeBatch(client);receipt.update(doc(client,'stockTransfers/T'),{status:'RECEIVED',receivedByUid:'buyer1',receivedAt:'2026-10-09'});receipt.set(doc(client,'warehouseStocks/EXT__P'),{productKey:'P',warehouseId:'EXT',onHand:3,reserved:0,incoming:0});receipt.update(doc(client,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});await assertSucceeds(receipt.commit());
+});
+test('order-linked transfer preserves customer delivery and cannot be cancelled or have its pending fields bypassed',async()=>{
+ await seedWarehouseLogistics();const client=db('buyer1'),data=transferData({linked:true});
+ const old=(await getDoc(doc(client,'orders/logistics'))).data();
+ const b=writeBatch(client);b.set(doc(client,'stockTransfers/T'),data);b.update(doc(client,'warehouseStocks/MAIN__P'),{onHand:6,reserved:0});b.update(doc(client,'inventory/P'),{transferInTransit:4,transferFreeInTransit:0});b.update(doc(client,'orders/logistics'),{items:[{...old.items[0],transferPendingId:'T'}],warehouseLogisticsId:'T',logisticsTransfersPending:1,logisticsHistory:[{id:'T'}],workCategories:['delivery'],updatedAt:'2026-10-09'});await assertSucceeds(b.commit());
+ await assertFails(updateDoc(doc(db('sales1'),'orders/logistics'),{status:'cancelled'}));await assertFails(updateDoc(doc(db('admin'),'orders/logistics'),{status:'cancelled'}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/logistics'),{logisticsTransfersPending:0,items:old.items}));
+ const receipt=writeBatch(client);receipt.update(doc(client,'stockTransfers/T'),{status:'RECEIVED',receivedByUid:'buyer1',receivedAt:'2026-10-09'});receipt.set(doc(client,'warehouseStocks/EXT__P'),{productKey:'P',warehouseId:'EXT',onHand:4,reserved:4,incoming:0});receipt.update(doc(client,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});receipt.update(doc(client,'orders/logistics'),{items:[{...old.items[0],warehouseId:'EXT',transferPendingId:''}],warehouseLogisticsId:'T',warehouseLogisticsEventId:'T-received',logisticsTransfersPending:0,logisticsHistory:[{id:'T'},{id:'received'}],updatedAt:'2026-10-09'});await assertSucceeds(receipt.commit());
+});
+test('handoff creates scoped custody location without broadening warehouse master permission and remains unfulfilled',async()=>{
+ await seedWarehouseLogistics();const client=db('buyer1'),data=transferData({linked:true,handoff:true}),old=(await getDoc(doc(client,'orders/logistics'))).data();
+ await assertFails(setDoc(doc(client,'warehouses/arbitrary'),{warehouseName:'Arbitrary',active:true}));
+ const b=writeBatch(client);b.set(doc(client,'stockTransfers/T'),data);b.update(doc(client,'warehouseStocks/MAIN__P'),{onHand:6,reserved:0});b.set(doc(client,'warehouseStocks/custody-sales1__P'),{productKey:'P',warehouseId:'custody-sales1',onHand:4,reserved:4,incoming:0});b.set(doc(client,'warehouses/custody-sales1'),{warehouseName:'業務保管',active:true,isDefault:false,systemCustody:true,warehouseType:'CUSTODY',ownerUid:'sales1',sourceTransferId:'T'});b.update(doc(client,'orders/logistics'),{items:[{...old.items[0],warehouseId:'custody-sales1',custodyTransferId:'T'}],warehouseLogisticsId:'T',logisticsTransfersPending:0,logisticsHistory:[{id:'T'}],updatedAt:'2026-10-09'});await assertSucceeds(b.commit());
+ const order=(await getDoc(doc(client,'orders/logistics'))).data();assert.deepEqual(order.deliveryRecords,[]);
+ await assertFails(updateDoc(doc(db('sales1'),'orders/logistics'),{status:'cancelled'}));await assertFails(updateDoc(doc(db('sales1'),'orders/logistics'),{items:old.items}));
+});
+
+
+test('responsible salesperson retains scoped stock access after warehouse handoff',async()=>{
+ await seedStockWorkflow();
+ await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',deliveredQty:0,returnedQty:0,warehouseLogisticsId:'H',logisticsTransfersPending:0,logisticsHistory:[{id:'H'}],items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'custody-sales1'}]});
+ await seed('warehouseStocks/w1-p1',{productKey:'p1',warehouseId:'custody-sales1',onHand:10,reserved:0,incoming:0});
+ await seed('inventoryLots/l1',{productKey:'p1',warehouseId:'custody-sales1',remainingQty:10});
+ await assertSucceeds(stockWorkflow(0,5,'reserve','custody-sales1'));
+ await assertSucceeds(stockWorkflow(-2,3,'ship','custody-sales1'));
 });

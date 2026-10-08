@@ -1413,6 +1413,7 @@ window.switchViewRole = function(role) {
     poHistorySearchActive = false;
     poHistorySearchLoading = false;
     purchaseHistorySupplyCache = new Map();
+    window.resetWarehouseLogistics?.();
     supplyReceivingCache = [];
     supplyReceivingCursor = null;
     supplyReceivingHasMore = true;
@@ -4647,7 +4648,7 @@ function isExternalWarehouseId(warehouseId) {
 }
 
 function defaultWarehouse() {
-    const internal = warehouseMasterCache.filter(item => item.active !== false && warehouseKind(item) === 'INTERNAL');
+    const internal = warehouseMasterCache.filter(item => item.active !== false && !item.systemCustody && warehouseKind(item) === 'INTERNAL');
     return internal.find(item => item.isDefault) || internal[0] || null;
 }
 
@@ -4665,6 +4666,7 @@ async function loadWarehouseMaster(force = false) {
             .sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderWarehouseMasterAdmin();
         populateOrderWarehouseOptions();
+        window.refreshOrderShippingWarehouses?.();
         return warehouseMasterCache;
     }).catch(err => {
         warehouseMasterLoadPromise = null;
@@ -4944,11 +4946,11 @@ function renderWarehouseMasterAdmin() {
     if (!body) return;
     body.innerHTML = warehouseMasterCache.length ? warehouseMasterCache.map(item => `<tr>
         <td>${escapeHtml(item.warehouseName || '')}</td>
-        <td>${warehouseKind(item) === 'EXTERNAL' ? '外部倉庫' : '公司倉庫'}</td>
+        <td>${item.systemCustody?'業務保管位置':warehouseKind(item) === 'EXTERNAL' ? '外部倉庫' : '公司倉庫'}</td>
         <td>${item.isDefault ? '是' : ''}</td>
         <td>${item.active === false ? '停用' : '啟用'}</td>
-        <td><button type="button" class="btn-small btn-secondary" onclick="editWarehouseMaster(${inlineJsValue(item.id)})">編輯</button>
-            <button type="button" class="btn-small btn-danger" onclick="disableWarehouseMaster(${inlineJsValue(item.id)})">停用</button></td>
+        <td>${item.systemCustody?'由交付作業維護':`<button type="button" class="btn-small btn-secondary" onclick="editWarehouseMaster(${inlineJsValue(item.id)})">編輯</button>
+            <button type="button" class="btn-small btn-danger" onclick="disableWarehouseMaster(${inlineJsValue(item.id)})">停用</button>`}</td>
     </tr>`).join('') : '<tr><td colspan="5" style="color:#888;">尚未建立倉庫。</td></tr>';
 }
 
@@ -4958,6 +4960,7 @@ window.editWarehouseMaster = function(id) {
     if (!item) return;
     document.getElementById('warehouseMasterEditingId').value = id;
     document.getElementById('warehouseMasterName').value = item.warehouseName || '';
+    for(const [id,key] of [['warehouseMasterContact','contact'],['warehouseMasterPhone','phone'],['warehouseMasterAddress','address']]){const field=document.getElementById(id);if(field)field.value=item[key]||'';}
     document.getElementById('warehouseMasterType').value = warehouseKind(item);
     document.getElementById('warehouseMasterDefault').checked = !!item.isDefault;
     const status = document.getElementById('warehouseMasterStatus');
@@ -4967,7 +4970,7 @@ window.editWarehouseMaster = function(id) {
 };
 
 window.clearWarehouseMasterEditor = function() {
-    for (const id of ['warehouseMasterEditingId', 'warehouseMasterName']) {
+    for (const id of ['warehouseMasterEditingId', 'warehouseMasterName','warehouseMasterContact','warehouseMasterPhone','warehouseMasterAddress']) {
         const el = document.getElementById(id);
         if (el) el.value = '';
     }
@@ -5150,6 +5153,7 @@ window.saveWarehouseMaster = async function() {
         const previous = warehouseMasterCache.find(item => item.id === id);
         const now = new Date().toISOString();
         const values = { warehouseId:id, warehouseName:name, warehouseType, isDefault:makeDefault,
+            contact:document.getElementById('warehouseMasterContact')?.value.trim()||'',phone:document.getElementById('warehouseMasterPhone')?.value.trim()||'',address:document.getElementById('warehouseMasterAddress')?.value.trim()||'',
             active:true, updatedAt:now, createdAt:previous?.createdAt || now };
         if (makeDefault) {
             const defaults = warehouseMasterCache.filter(item => item.isDefault && item.id !== id);
@@ -5183,7 +5187,7 @@ window.disableWarehouseMaster = async function(id) {
 function populateOrderWarehouseOptions(selected = '') {
     const field = document.getElementById('orderWarehouse');
     if (!field) return;
-    const activeWarehouses = warehouseMasterCache.filter(item => item.active !== false);
+    const activeWarehouses = warehouseMasterCache.filter(item => item.active !== false && !item.systemCustody);
     const current = selected || field.value;
     const nextValue = activeWarehouses.some(item => item.id === current)
         ? current
@@ -8361,13 +8365,13 @@ function inventoryProjectedStock(stock = {}) {
 
 function inventoryAggregateStock(item = {}) {
  const productKey=String(item.productKey||item.productId||'').trim();
- if(productKey && warehouseMasterCache.filter(row=>row.active!==false).every(row=>warehouseStockCache.has(row.id+'||'+productKey)) && warehouseMasterCache.length)return warehouseStockTotals(productKey);
+ if(!Number(item.transferInTransit||0) && productKey && warehouseMasterCache.filter(row=>row.active!==false).every(row=>warehouseStockCache.has(row.id+'||'+productKey)) && warehouseMasterCache.length)return warehouseStockTotals(productKey);
  const n=inventoryNumbers(item);
  const onHand=Number(n.onHand||0);
  const reserved=Number(n.reserved||0);
  const incoming=Number(n.incoming||0);
- const available=onHand-reserved;
- return {rows:[],onHand,reserved,available,incoming,projected:available+incoming};
+ const available=n.available;
+ return {rows:productKey?warehouseStockRowsForProduct(productKey):[],onHand,reserved,available,incoming,projected:available+incoming};
 }
 
 function inventoryReplenishmentPlan(item = {}, stock = {}) {
@@ -8470,9 +8474,9 @@ function inventoryStockPolicyBadge(item = {}) {const policy=inventoryStockPolicy
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase(),stateFilter=document.getElementById('inventoryStateFilter')?.value||'all',policyFilter=document.getElementById('inventoryPolicyFilter')?.value||'',brands=populateInventoryBrandFilter(),brandFilter=document.getElementById('inventoryBrandFilter')?.value||'',rowsHtml=[],inventoryRows=inventorySearchActive?inventorySearchResults:inventoryCache,activeWarehouseCount=warehouseMasterCache.filter(warehouse=>warehouse.active!==false).length;
  inventoryRows.forEach(x=>{if(brandFilter&&orderBrandFilterValue(x.brand,brands)!==brandFilter)return;const lots=fefoLots(x),productKey=x.productKey||x.productId||'',warehouseState=inventoryAggregateStock(x),warehouseRows=warehouseState.rows,warehouseSearch=warehouseRows.map(row=>row.warehouse.warehouseName||'').join(' '),text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(!inventorySearchActive&&k&&!text.includes(k))return;const archived=globalThis.YushinInventory.isListArchived(x,warehouseState);if(stateFilter==='archived'?!archived:archived)return;const n=warehouseState,stockPolicy=inventoryStockPolicy(x),safetyStock=Number(x.safetyStock||0),plan=inventoryReplenishmentPlan(x,n);if(policyFilter&&stockPolicy!==policyFilter)return;if(stateFilter==='low'&&!plan.needsReplenishment)return;if(stateFilter==='out'&&n.available>0)return;if(stateFilter==='reserved'&&n.reserved<=0)return;
- const visibleWarehouseRows=warehouseRows.filter(row=>row.n.onHand||row.n.reserved||row.n.incoming),showWarehouseDetail=activeWarehouseCount>1&&visibleWarehouseRows.length>0,warehouseHtml=showWarehouseDetail?visibleWarehouseRows.map(row=>`<div><strong>${escapeHtml(row.warehouse.warehouseName||row.warehouse.id)}</strong>：現有 ${row.n.onHand}／占用 ${row.n.reserved}／可用 ${row.n.available}／在途 ${row.n.incoming}</div>`).join(''):'－';
+ const visibleWarehouseRows=warehouseRows.filter(row=>row.n.onHand||row.n.reserved||row.n.incoming),showWarehouseDetail=activeWarehouseCount>1&&visibleWarehouseRows.length>0,warehouseHtml=showWarehouseDetail?visibleWarehouseRows.map(row=>`<div><strong>${escapeHtml(row.warehouse.warehouseName||row.warehouse.id)}</strong>：現有 ${row.n.onHand}／占用 ${row.n.reserved}／可用 ${row.n.available}／在途 ${row.n.incoming}</div>`).join('')+(Number(x.transferInTransit||0)>0?`<div>調撥途中：${Number(x.transferInTransit)}</div>`:''):'－';
  const productMaster=productMasterForRecord({productId:x.productId||productKey,itemCode:x.itemCode||'',brand:x.brand||''}),showLotDetail=!!(productMaster?.lotTracked||productMaster?.expiryTracked||lots.length),lotHtml=showLotDetail?(lots.slice(0,3).map(l=>`${escapeHtml(l.lotNo||'無批號')} ${escapeHtml(l.expiryDate||'')} ${lotStatus(l)?'['+lotStatus(l)+']':''}`).join('<br>')||'尚無批號／效期資料'):'－',reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails(${inlineJsValue(x.productKey||x.id||'')})">${n.reserved}</button>`:'0';
- rowsHtml.push(`<tr class="inventory-list-row"><td data-th="貨號" class="inventory-detail-field">${escapeHtml(x.itemCode||'')}</td><td data-th="品名" class="inventory-primary-cell"><strong class="inventory-item-name">${escapeHtml(x.itemName||x.itemCode||'未命名品項')}${archived?'（已移出）':''}</strong><span class="inventory-mobile-brand">${escapeHtml(x.brand||'')}</span><div class="inventory-mobile-summary"><div><span>可用</span><strong>${n.available}</strong></div><div><span>在途</span><strong>${n.incoming}</strong></div><div><span>預計</span><strong>${plan.projected}</strong></div></div></td><td data-th="廠牌" class="inventory-brand-cell">${escapeHtml(x.brand||'')}</td><td data-th="倉庫位置" class="inventory-detail-field inventory-optional-detail ${showWarehouseDetail?'':'inventory-no-detail'}">${warehouseHtml}</td><td data-th="現有庫存" class="inventory-detail-field">${n.onHand}</td><td data-th="已占用" class="inventory-detail-field">${reserved}</td><td data-th="可用庫存" class="inventory-desktop-metric">${n.available}</td><td data-th="庫存策略" class="inventory-policy-cell">${inventoryStockPolicyBadge(x)}</td><td data-th="安全庫存" class="inventory-detail-field inventory-optional-detail ${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'':'inventory-no-detail'}">${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?safetyStock:'－'}</td><td data-th="在途" class="inventory-desktop-metric">${n.incoming}</td><td data-th="預計庫存" class="inventory-desktop-metric"><strong>${plan.projected}</strong></td><td data-th="批號／效期" class="inventory-detail-field inventory-optional-detail ${showLotDetail?'':'inventory-no-detail'}">${lotHtml}</td><td data-th="操作" class="no-print inventory-actions-cell">${canEditPage('inventory')?`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><button type="button" class="btn-small inventory-action-quantity" onclick="openInventoryQuantityEditor(${inlineJsValue(x.id)})">修改庫存</button>${activeWarehouseCount>1&&!showLotDetail?`<button type="button" class="btn-small btn-secondary inventory-action-transfer" onclick="openInventoryTransfer(${inlineJsValue(x.id)})">移動庫存</button>`:''}${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary inventory-action-policy" onclick="openInventoryPolicySettings(${inlineJsValue(x.id)})">⚙️ 庫存設定</button>`:''}${canManageInventoryList()?`<button type="button" class="btn-small btn-secondary inventory-action-archive" onclick="setInventoryListArchived(${inlineJsValue(x.id)},${!archived},this)">${archived?'恢復至庫存列表':'移出庫存列表'}</button>`:''}</div>`:`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><span>僅可查看</span></div>`}</td></tr>`);
+ rowsHtml.push(`<tr class="inventory-list-row"><td data-th="貨號" class="inventory-detail-field">${escapeHtml(x.itemCode||'')}</td><td data-th="品名" class="inventory-primary-cell"><strong class="inventory-item-name">${escapeHtml(x.itemName||x.itemCode||'未命名品項')}${archived?'（已移出）':''}</strong><span class="inventory-mobile-brand">${escapeHtml(x.brand||'')}</span><div class="inventory-mobile-summary"><div><span>可用</span><strong>${n.available}</strong></div><div><span>在途</span><strong>${n.incoming}</strong></div><div><span>預計</span><strong>${plan.projected}</strong></div></div></td><td data-th="廠牌" class="inventory-brand-cell">${escapeHtml(x.brand||'')}</td><td data-th="倉庫位置" class="inventory-detail-field inventory-optional-detail ${showWarehouseDetail?'':'inventory-no-detail'}">${warehouseHtml}</td><td data-th="現有庫存" class="inventory-detail-field">${n.onHand}</td><td data-th="已占用" class="inventory-detail-field">${reserved}</td><td data-th="可用庫存" class="inventory-desktop-metric">${n.available}</td><td data-th="庫存策略" class="inventory-policy-cell">${inventoryStockPolicyBadge(x)}</td><td data-th="安全庫存" class="inventory-detail-field inventory-optional-detail ${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'':'inventory-no-detail'}">${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?safetyStock:'－'}</td><td data-th="在途" class="inventory-desktop-metric">${n.incoming}</td><td data-th="預計庫存" class="inventory-desktop-metric"><strong>${plan.projected}</strong></td><td data-th="批號／效期" class="inventory-detail-field inventory-optional-detail ${showLotDetail?'':'inventory-no-detail'}">${lotHtml}</td><td data-th="操作" class="no-print inventory-actions-cell">${canEditPage('inventory')?`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><button type="button" class="btn-small inventory-action-quantity" onclick="openInventoryQuantityEditor(${inlineJsValue(x.id)})">修改庫存</button><button type="button" class="btn-small btn-secondary inventory-action-transfer" onclick="openInventoryTransfer(${inlineJsValue(x.id)})" ${activeInventoryWarehouses().length<2?'disabled title="至少需要兩個實體倉庫"':''}>移動庫存</button>${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary inventory-action-policy" onclick="openInventoryPolicySettings(${inlineJsValue(x.id)})">⚙️ 庫存設定</button>`:''}${canManageInventoryList()?`<button type="button" class="btn-small btn-secondary inventory-action-archive" onclick="setInventoryListArchived(${inlineJsValue(x.id)},${!archived},this)" ${!archived&&!globalThis.YushinInventory.stockIsEmpty({...x,...n,lots:[]})?'disabled title="現有、占用、在途及調撥數量必須為零"':''}>${archived?'恢復至庫存列表':'移出庫存列表'}</button>${!archived&&!globalThis.YushinInventory.stockIsEmpty({...x,...n,lots:[]})?'<small class="inventory-action-reason">仍有庫存／占用／在途／調撥，無法移出</small>':''}`:''}</div>`:`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><span>僅可查看</span></div>`}</td></tr>`);
  });body.innerHTML=rowsHtml.join('');
 };
 window.toggleInventoryRowDetails=function(button){const row=button?.closest?.('tr');if(!row)return;const expanded=row.classList.toggle('inventory-expanded');button.textContent=expanded?'收合詳細':'詳細資料';};
@@ -8601,7 +8605,7 @@ window.setInventoryListArchived = async function(inventoryId, archived, button) 
     if (inventoryListArchiveInProgress.has(inventoryId)) return;
     const item = inventoryItemById(inventoryId);
     if (!item || typeof archived !== 'boolean') return;
-    if (archived && (!globalThis.YushinInventory.stockIsEmpty(item)
+    if (archived && (!globalThis.YushinInventory.stockIsEmpty({...item,lots:[]})
         || !globalThis.YushinInventory.stockIsEmpty(inventoryAggregateStock(item)))) {
         alert('現有庫存、占用、在途及批號剩餘數量都必須為 0，才能移出庫存列表。'); return;
     }
@@ -8617,6 +8621,8 @@ window.setInventoryListArchived = async function(inventoryId, archived, button) 
         const warehouseSnapshot = archived ? await firestoreReadWithTimeout(
             db.collection('warehouseStocks').where('productKey','==',productKey).limit(201).get(), '移出前檢查倉庫庫存'
         ) : null;
+        const lotSnapshot=archived?await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',productKey).limit(201).get(),'移出前檢查實際批次'):null;
+        if(lotSnapshot?.size>200)throw new Error('批次超過安全檢查上限。');
         if (warehouseSnapshot?.size > 200) throw new Error('倉庫庫存紀錄超過可安全檢查的範圍，請先整理倉庫紀錄。');
         const patch = await runRoleTransaction(async transaction => {
             const snapshot = await transaction.get(ref);
@@ -8626,7 +8632,8 @@ window.setInventoryListArchived = async function(inventoryId, archived, button) 
             if ((live.listArchived === true) === archived) return null;
             if (archived) {
                 if ((live.productKey || live.productId || inventoryId) !== productKey) throw new Error('品項資料已變更，請更新清單。');
-                if (!globalThis.YushinInventory.stockIsEmpty(live)) throw new Error('庫存、占用、在途或批號數量已變更，不能移出。');
+                if (!globalThis.YushinInventory.stockIsEmpty({...live,lots:[]})) throw new Error('庫存、占用、在途或批號數量已變更，不能移出。');
+                for(const lotDoc of lotSnapshot.docs){const lot=await transaction.get(lotDoc.ref);if(lot.exists&&(!Number.isFinite(Number(lot.data().remainingQty||0))||Number(lot.data().remainingQty||0)!==0))throw new Error('仍有實際批次剩餘量，不能移出。');}
                 for (const warehouseDoc of warehouseSnapshot.docs) {
                     const stock = await transaction.get(warehouseDoc.ref);
                     if (stock.exists && !globalThis.YushinInventory.stockIsEmpty(stock.data())) throw new Error('仍有倉庫庫存、占用或在途數量，不能移出。');
@@ -8991,7 +8998,7 @@ window.saveInventoryQuantity=async function(){
 let inventoryTransferEditingId='';
 
 function activeInventoryWarehouses() {
-    return warehouseMasterCache.filter(warehouse=>warehouse.active!==false);
+    return warehouseMasterCache.filter(warehouse=>warehouse.active!==false&&!warehouse.systemCustody);
 }
 
 function inventoryWarehouseState(item, warehouseId) {
@@ -9004,10 +9011,7 @@ window.openInventoryTransfer=async function(inventoryId){
     const item=inventoryItemById(inventoryId);
     if(!item){alert('找不到這個庫存品項，請重新整理後再試。');return;}
     const productMaster=productMasterForRecord({productId:item.productId||item.productKey||'',itemCode:item.itemCode||'',brand:item.brand||''});
-    if(productMaster?.lotTracked||productMaster?.expiryTracked||fefoLots(item).length){
-        alert('批號／效期品項目前不提供跨倉移動，避免批號與倉庫數量不同步。');
-        return;
-    }
+    if(Number(item.transferInTransit||0)>0){alert('此品項尚有調撥途中貨品，請先完成收貨。');return;}
 
     inventoryTransferEditingId=inventoryId;
     const overlay=document.getElementById('inventoryTransferOverlay');
@@ -9083,40 +9087,18 @@ window.saveInventoryTransfer=async function(){
     if(!Number.isFinite(qty)||qty<=0){alert('移動數量必須大於 0。');return;}
     const key=String(item.productKey||item.productId||'').trim();
     if(!key){alert('此庫存缺少產品識別，請先修正 Product Master。');return;}
-    const fromRef=db.collection('warehouseStocks').doc(warehouseStockDocId(fromWarehouseId,key));
-    const toRef=db.collection('warehouseStocks').doc(warehouseStockDocId(toWarehouseId,key));
-    const outRef=db.collection('inventoryMovements').doc();
-    const inRef=db.collection('inventoryMovements').doc();
-    const transferId=outRef.id;
     const button=document.getElementById('saveInventoryTransferBtn');
-    if(button){button.disabled=true;button.textContent='移動中…';}
+    const operationId=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());
+    const state=beginActionButton(button,'調撥中…');
     try{
-        await runRoleTransaction(async tx=>{
-            const [fromSnap,toSnap]=await Promise.all([tx.get(fromRef),tx.get(toRef)]);
-            if(!fromSnap.exists)throw new Error('來源倉庫沒有此品項庫存。');
-            const from=inventoryNumbers(fromSnap.data()||{});
-            const to=inventoryNumbers(toSnap.exists?toSnap.data():{});
-            const movable=Math.max(0,Number(from.onHand||0)-Number(from.reserved||0));
-            if(qty>movable)throw new Error(`最多只能移動 ${movable}；已占用的庫存不能移出。`);
-            const now=new Date().toISOString();
-            const canonicalBrand=resolveBrandName(item.brand||'');
-            const common={productKey:key,productId:item.productId||key,itemCode:item.itemCode||'',itemName:item.itemName||'',brand:canonicalBrand,brandId:item.brandId||brandIdForName(canonicalBrand),updatedAt:now};
-            tx.set(fromRef,{...common,warehouseId:fromWarehouseId,onHand:Number(from.onHand||0)-qty,reserved:from.reserved,incoming:from.incoming},{merge:true});
-            tx.set(toRef,{...common,warehouseId:toWarehouseId,onHand:Number(to.onHand||0)+qty,reserved:to.reserved,incoming:to.incoming},{merge:true});
-            const movement={productKey:key,productId:item.productId||key,itemCode:item.itemCode||'',itemName:item.itemName||'',brand:canonicalBrand,brandId:item.brandId||brandIdForName(canonicalBrand),sourceType:'manual',sourceId:`warehouse-transfer:${transferId}`,transferId,fromWarehouseId,toWarehouseId,createdAt:now,createdBy:currentUserName||currentUser?.email||''};
-            tx.set(outRef,{...movement,type:'warehouse_transfer_out',warehouseId:fromWarehouseId,qty:-qty});
-            tx.set(inRef,{...movement,type:'warehouse_transfer_in',warehouseId:toWarehouseId,qty});
-        });
-        invalidateWarehouseStockCache(key,fromWarehouseId);
-        invalidateWarehouseStockCache(key,toWarehouseId);
-        closeInventoryTransfer();
-        await loadInventory(true);
-        showActionFeedback('庫存已移動，公司總庫存不變。');
-    }catch(err){
-        alert('移動庫存失敗：'+(err?.message||err));
-    }finally{
-        if(button){button.disabled=false;button.textContent='確認移動';}
-    }
+        await commitWarehouseTransfer({id:operationId,inventoryId:inventoryTransferEditingId,fromWarehouseId,toWarehouseId,qty});
+        delete button.dataset.operationId;
+        invalidateWarehouseStockCache(key,fromWarehouseId);invalidateWarehouseStockCache(key,toWarehouseId);
+        closeInventoryTransfer();await loadInventory(true);await loadWarehouseTransferQueue(true);
+        showActionFeedback('已移出並列為調撥途中；目的倉確認收貨後才入庫，公司總庫存不變。');
+    }catch(err){alert('移動庫存失敗：'+(err?.message||err));}
+    finally{endActionButton(button,state);}
+
 };
 
 window.downloadInventoryImportTemplate=async function(){
@@ -9804,12 +9786,13 @@ function itemDispatchState(order, item) {
     if (!globalThis.YushinFulfillment?.dispatchState) {
         throw new Error('Fulfillment core 未載入，無法計算出貨狀態。');
     }
-    return globalThis.YushinFulfillment.dispatchState({
+    const dispatchState=globalThis.YushinFulfillment.dispatchState({
         ...item,
         orderedQty: item.orderedQty ?? item.qty,
         deliveredQty: grossDelivered,
         returnedQty: returned
     });
+    return item.transferPendingId?{...dispatchState,shippable:0,pending:0,transferring:dispatchState.reserved}:dispatchState;
 }
 
 function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
@@ -16608,6 +16591,7 @@ function renderOrderStatusHistory(order) {
     if (order.isDelivered && !savedDeliveryRecords(order).length && !(order.deliveryHistory || []).length) {
         entries.push({ at: order.orderDate || '', action: '送貨（歷史推估）', by: '舊資料未記錄', detail: '依目前訂單狀態推估，日期暫用訂單日期' });
     }
+    for(const h of order.logisticsHistory||[])entries.push({at:h.at,action:h.action,by:h.by,detail:h.detail||''});
     entries.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
     tbody.innerHTML = entries.length ? (orderProgressHistoryExpanded ? entries : entries.slice(0, 5)).map(item => `<tr><td>${escapeHtml(formatOrderStatusTime(item.at))}</td><td>${escapeHtml(item.action || '')}</td><td>${escapeHtml(item.by || '')}</td><td>${escapeHtml(item.detail || '')}</td></tr>`).join('') : '<tr><td colspan="4" style="color:#888;">尚無操作紀錄。</td></tr>';
     document.getElementById('orderHistoryMoreBtn').hidden = orderProgressHistoryExpanded || entries.length <= 5;
@@ -16615,6 +16599,7 @@ function renderOrderStatusHistory(order) {
 }
 
 async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, reversalRecords) {
+    if(order.transferPendingId)throw new Error('此品項尚在倉庫調撥途中，請目的倉先確認收貨。');
     if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0,newReservedQty:Math.max(0,Number(order.reservedQty||0)),lotAllocations:[],cogs:0 };
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
@@ -17656,6 +17641,7 @@ function collectOrderDraft() {
         fulfillmentType:orderDraftFieldValue('orderFulfillmentType')||'WAREHOUSE',warehouseId:orderDraftFieldValue('orderWarehouse'),
         transactionType:orderDraftFieldValue('orderTransactionType'),invoiceTitle:orderDraftFieldValue('orderInvoiceTitle'),
         productId:window._orderModalProductId||'',items:newOrderDraftItems,
+        shippingInstructions:window.orderShippingInstructions?.()||{},
         sourceLink:window._orderModalSourceLink||null,
         quoteContext:window._orderModalQuoteContext||null
     };
@@ -17722,6 +17708,7 @@ function restoreSavedOrderDraft(){
         document.getElementById('orderDateInput').value=draft.date||'';
         document.getElementById('orderCustomer').value=draft.customerName||'';
         setOrderModalItem(draft);
+        window.setOrderShippingInstructions?.(draft.shippingInstructions||{});
         document.getElementById('orderTransactionType').value=draft.transactionType||'';
         const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';invoice.disabled=draft.transactionType!=='直';
         newOrderDraftItems=Array.isArray(draft.items)?draft.items.map(normalizeNewOrderItem):[];
@@ -17915,6 +17902,7 @@ window.openOrderModal = function(source = null) {
     newOrderDraftItems = [];
     renderNewOrderDraftItems();
 
+    window.setOrderShippingInstructions?.(source?.shippingInstructions||{});
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
     const today = new Date();
@@ -18189,10 +18177,12 @@ window.saveNewOrder = function() {
         : null;
     if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
     if(items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&(!String(item.supplier||'').trim()||item.costPrice===null||item.costPrice===undefined||String(item.costPrice).trim()===''||!Number.isFinite(Number(item.costPrice))||Number(item.costPrice)<0))){alert('自行訂貨品項請填寫供應商與含稅進價（可填 0）；建立訂單後會直接列入待到貨。');return;}
+    let shippingInstructions;try{shippingInstructions=globalThis.YushinWarehouseLogistics?.validatePlan(window.orderShippingInstructions?.()||{},false);}catch(err){alert(err.message);return;}
     items.forEach(item=>{delete item.productCheckStatus;});
     const firstItem=items[0];
     const itemCode = firstItem.itemCode;
     let data = {
+        shippingInstructions:shippingInstructions||{},
         orderDate: document.getElementById('orderDateInput').value,
         createdAt: new Date().toISOString(),
         ...commercialCreatorFields(),
@@ -20155,7 +20145,7 @@ async function loadInventoryAnalysisSupport(start, end) {
     const periodSupplies = await readQueryInBatches(supplyOrdersCollection().where('orderDate','>=',start).where('orderDate','<=',end).orderBy('orderDate','desc'));
     const supplies = new Map([...openSupplies,...sources,...periodSupplies].map(row=>[row.id,row]));
     tradeAnalysisWarehouseStocks = await readQueryInBatches(db.collection('warehouseStocks').where('onHand','>',0).orderBy('onHand'));
-    const requiredLotIds = new Set([...lots.map(row=>row.id),...receipts.map(row=>row.lotId),...salesStatisticsOrders.flatMap(salesStatisticOrderLines).flatMap(row=>[...savedDeliveryRecords(row),...savedReturnRecords(row)]).flatMap(row=>(row.lotAllocations||[]).map(a=>a.lotId))].filter(Boolean));
+    const requiredLotIds = new Set([...lots.flatMap(row=>[row.id,row.costLotId]),...receipts.map(row=>row.lotId),...salesStatisticsOrders.flatMap(salesStatisticOrderLines).flatMap(row=>[...savedDeliveryRecords(row),...savedReturnRecords(row)]).flatMap(row=>(row.lotAllocations||[]).map(a=>a.lotId))].filter(Boolean));
     const productIds = [...new Set([...receipts,...lots,...tradeAnalysisWarehouseStocks,...supplies.values(),...salesStatisticsOrders.flatMap(salesStatisticOrderLines)].map(row=>row.productId||row.productKey).filter(Boolean))];
     const [lotCosts,products,sourceOrders] = await Promise.all([
         readDocumentsByIds('inventoryLotCosts', [...requiredLotIds]),
@@ -20167,9 +20157,13 @@ async function loadInventoryAnalysisSupport(start, end) {
     tradeAnalysisSourceOrders = new Map(sourceOrders.map(row=>[row.id,row]));
     inventoryAnalysisReceipts = receipts;
     inventoryAnalysisLots = lots;
-    const unresolvedCostSources = await readDocumentsByIds('supplyOrders',lotCosts.filter(row=>row.costSourceSupplyId&&row.unitCost===undefined).map(row=>row.costSourceSupplyId));
+    const sourceLotCosts=await readDocumentsByIds('inventoryLotCosts',lotCosts.filter(row=>row.costSourceLotId).map(row=>row.costSourceLotId));
+    const costRoots=new Map([...lotCosts,...sourceLotCosts].map(row=>[row.id,row]));
+    const effectiveLotCosts=lotCosts.map(row=>row.costSourceLotId?{...costRoots.get(row.costSourceLotId),id:row.id}:row);
+    if(effectiveLotCosts.some(row=>row.unitCost===undefined&&!row.costSourceSupplyId))throw new Error('批次成本來源缺失，無法計算正確金額。');
+    const unresolvedCostSources = await readDocumentsByIds('supplyOrders',effectiveLotCosts.filter(row=>row.costSourceSupplyId&&row.unitCost===undefined).map(row=>row.costSourceSupplyId));
     const costSources = new Map(unresolvedCostSources.map(row=>[row.id,row]));
-    inventoryAnalysisLotCosts = new Map(lotCosts.map(row=>{
+    inventoryAnalysisLotCosts = new Map(effectiveLotCosts.map(row=>{
         if(row.unitCost===undefined&&row.costSourceSupplyId){
             const source=costSources.get(row.costSourceSupplyId);
             if(!source||!Number.isFinite(Number(source.unitCost)))throw new Error('收貨成本來源缺失，無法正確計算庫存價值。');

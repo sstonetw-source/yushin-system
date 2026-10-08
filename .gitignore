@@ -4,3 +4,6 @@
 tmp/
 ~$*
 價格表/
+
+node_modules/
+*-debug.log

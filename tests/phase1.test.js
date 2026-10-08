@@ -5373,9 +5373,9 @@ test('inventory actions use one adjustment entry point and returns keep their or
     assert.doesNotMatch(indexSource,/value="warehouse_allocation"/);
     assert.match(indexSource,/id="inventoryTransferOverlay"/);
     assert.match(appSource,/window\.openInventoryTransfer=async function/);
-    assert.match(appSource,/activeWarehouseCount>1&&!showLotDetail/);
-    assert.match(appSource,/type:'warehouse_transfer_out'/);
-    assert.match(appSource,/type:'warehouse_transfer_in'/);
+    assert.match(appSource,/activeInventoryWarehouses\(\)\.length<2/);
+    assert.match(fs.readFileSync('modules/warehouse-logistics.js','utf8'),/type:'warehouse_transfer_out'/);
+    assert.match(fs.readFileSync('modules/warehouse-logistics.js','utf8'),/type:'warehouse_transfer_in'/);
     assert.match(appSource,/公司總庫存不變/);
     assert.doesNotMatch(appSource,/type==='warehouse_allocation'/);
     assert.doesNotMatch(appSource,/type==='decrease'/);

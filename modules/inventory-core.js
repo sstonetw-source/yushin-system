@@ -12,13 +12,13 @@
     const onHand=n(data.onHand);
     const reserved=n(data.reserved);
     const incoming=n(data.incoming);
-    return {onHand,reserved,available:Math.max(0,onHand-reserved),incoming};
+    return {onHand,reserved,available:Math.max(0,onHand-reserved-n(data.transferFreeInTransit)),incoming};
   }
 
   function stockIsEmpty(data={}){
     const zero=value=>(typeof value==='number'||(typeof value==='string'&&value.trim()!==''))
       && Number.isFinite(Number(value)) && Number(value)===0;
-    return ['onHand','reserved','incoming'].every(key=>{
+    return ['onHand','reserved','incoming','transferInTransit'].every(key=>{
       return zero(data[key]===undefined?0:data[key]);
     }) && (data.lots===undefined||Array.isArray(data.lots)) && (data.lots||[]).every(lot=>{
       const value=lot.remainingQty??lot.qty??0;
@@ -28,7 +28,7 @@
 
   function isListArchived(item={},stock=item){
     // New receipts/reservations must make the item visible even if its archive flag remains set.
-    return item.listArchived===true && stockIsEmpty(item) && stockIsEmpty(stock);
+    return item.listArchived===true && stockIsEmpty({...item,lots:[]}) && stockIsEmpty({...stock,lots:[]});
   }
 
   function lotTime(value){
@@ -59,6 +59,7 @@
       const unitCost=n(lot.unitCost);
       allocations.push({
         lotId:lot.id||lot.lotId||'',
+        ...(lot.costLotId?{costLotId:lot.costLotId}:{}),
         lotNo:lot.lotNo||'',
         expiryDate:lot.expiryDate||'',
         qty:take,

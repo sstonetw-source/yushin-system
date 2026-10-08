@@ -419,7 +419,8 @@ service cloud.firestore {
           'listArchived', 'listArchiveChangedAt', 'listArchiveChangedByUid', 'listArchiveAuditId', 'updatedAt'
         ])
         && (!data.listArchived || (resource.data.get('onHand', 0) == 0
-          && resource.data.get('reserved', 0) == 0 && resource.data.get('incoming', 0) == 0))
+          && resource.data.get('reserved', 0) == 0 && resource.data.get('incoming', 0) == 0
+          && resource.data.get('transferInTransit', 0) == 0))
         && !exists(auditPath)
         && getAfter(auditPath).data.actorUid == request.auth.uid
         && getAfter(auditPath).data.inventoryId == id
@@ -643,7 +644,13 @@ service cloud.firestore {
 
     match /warehouses/{id} {
       allow read: if active();
-      allow create, update: if admin();
+      allow create: if admin() || (canReceiveInventory() && request.resource.data.get('systemCustody', false) == true
+        && id == 'custody-' + request.resource.data.ownerUid && request.resource.data.warehouseType == 'CUSTODY'
+        && request.resource.data.isDefault == false && request.resource.data.active == true
+        && request.resource.data.keys().hasOnly(['warehouseName','active','isDefault','warehouseType','systemCustody','ownerUid','sourceTransferId'])
+        && getAfter(/databases/$(database)/documents/stockTransfers/$(request.resource.data.sourceTransferId)).data.kind == 'HANDOFF'
+        && getAfter(/databases/$(database)/documents/stockTransfers/$(request.resource.data.sourceTransferId)).data.toWarehouseId == id);
+      allow update: if admin();
       allow delete: if false;
     }
 
@@ -939,7 +946,8 @@ service cloud.firestore {
       let isCancelled = after.get('orderStatus', '') in ['cancelled', 'voided']
         || after.get('status', '') in ['cancelled', 'voided'];
       return !isCancelled || wasCancelled
-        || (before.get('isDelivered', false) != true && after.get('isDelivered', false) != true
+        || (noCustodyForCancellation() && before.get('logisticsTransfersPending', 0) == 0 && after.get('logisticsTransfersPending', 0) == 0
+          && before.get('isDelivered', false) != true && after.get('isDelivered', false) != true
           && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
           && after.get('returnRecords', []) == before.get('returnRecords', [])
           && after.get('deliveredQty', 0) == before.get('deliveredQty', 0));
@@ -1021,13 +1029,115 @@ service cloud.firestore {
         && validInventoryShipmentStock(record);
     }
 
+
+    function appendsLogisticsHistory(before, after) {
+      let prior = before.get('logisticsHistory', []);
+      let next = after.get('logisticsHistory', []);
+      let entry = next[prior.size()];
+      return next.size() == prior.size() + 1 && next.removeAll([entry]) == prior;
+    }
+    // Warehouse instructions only change one item's recipient plan. Commercial fields stay intact.
+    function warehouseDeliveryPlanUpdate() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let index = after.get('logisticsPlanItemIndex', -1);
+      let oldItem = before.items[index];
+      let newItem = after.items[index];
+      return canReceiveInventory() && sameCommercialOwner() && preservesCreator()
+        && !(before.get('status', '') in ['cancelled', 'voided'])
+        && !(before.get('orderStatus', '') in ['cancelled', 'voided'])
+        && index is int && index >= 0 && index < before.items.size()
+        && before.items.size() == after.items.size()
+        && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
+        && newItem.diff(oldItem).affectedKeys().hasOnly(['deliveryPlan'])
+        && validDeliveryPlan(newItem.deliveryPlan)
+        && after.get('logisticsPlanActorUid', '') == request.auth.uid
+        && appendsLogisticsHistory(before, after)
+        && after.diff(before).affectedKeys().hasOnly(['items', 'logisticsPlanItemIndex',
+          'logisticsPlanActorUid', 'logisticsPlanEventId', 'logisticsHistory', 'updatedAt']);
+    }
+    function validDeliveryPlan(p) {
+      return p.keys().hasOnly(['mode','warehouseId','contact','phone','address','packages','condition','tracking','notes'])
+        && p.mode in ['PICKUP','SALES_SHIP','CUSTOMER_SHIP','TRANSFER']
+        && p.packages is int && p.packages >= 1 && p.packages <= 99
+        && p.contact is string && p.contact.size() <= 1000
+        && p.phone is string && p.phone.size() <= 1000
+        && p.address is string && p.address.size() <= 1000
+        && p.notes is string && p.notes.size() <= 1000;
+    }
+    function warehouseLogisticsOrderUpdate(orderId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let path = /databases/$(database)/documents/stockTransfers/$(after.get('warehouseLogisticsId', 'unused'));
+      let transfer = getAfter(path).data;
+      let index = transfer.itemIndex;
+      let oldItem = before.items[index];
+      let newItem = after.items[index];
+      return canReceiveInventory() && sameCommercialOwner() && preservesCreator()
+        && transfer.orderId == orderId && transfer.itemId == oldItem.itemId
+        && index is int && index >= 0 && index < before.items.size()
+        && before.items.size() == after.items.size()
+        && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
+        && newItem.diff(oldItem).affectedKeys().hasOnly(['warehouseId','custodyTransferId','transferPendingId'])
+        && !(before.get('status', '') in ['cancelled','voided'])
+        && !(before.get('orderStatus', '') in ['cancelled','voided'])
+        && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
+        && after.get('returnRecords', []) == before.get('returnRecords', [])
+        && after.diff(before).affectedKeys().hasOnly(['items','warehouseLogisticsId','warehouseLogisticsEventId','logisticsTransfersPending',
+          'logisticsHistory','workCategories','workCategoryUpdatedAt','updatedAt'])
+        && appendsLogisticsHistory(before, after)
+        && ((!exists(path) && transfer.createdByUid == request.auth.uid
+          && oldItem.get('transferPendingId', '') == ''
+          && transfer.qty == oldItem.get('reservedQty', 0)
+          && transfer.fromWarehouseId == oldItem.get('warehouseId', before.get('warehouseId', ''))
+          && (transfer.kind == 'HANDOFF'
+            ? newItem.warehouseId == transfer.toWarehouseId && newItem.custodyTransferId == transfer.id
+              && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0)
+            : newItem.get('warehouseId', '') == oldItem.get('warehouseId', '') && newItem.transferPendingId == transfer.id
+              && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0) + 1))
+          || (exists(path) && get(path).data.status == 'IN_TRANSIT' && transfer.status == 'RECEIVED'
+            && transfer.receivedByUid == request.auth.uid && oldItem.transferPendingId == transfer.id
+            && newItem.get('transferPendingId', '') == '' && newItem.warehouseId == transfer.toWarehouseId
+            && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0) - 1));
+    }
+
+    function logisticsItemProtected(oldItems, newItems, index) {
+      return index >= oldItems.size() || (index < newItems.size()
+        && newItems[index].get('warehouseId', '') == oldItems[index].get('warehouseId', '')
+        && newItems[index].get('transferPendingId', '') == oldItems[index].get('transferPendingId', '')
+        && newItems[index].get('custodyTransferId', '') == oldItems[index].get('custodyTransferId', ''));
+    }
+    function custodyItemClear(items, index) {
+      return index >= items.size() || items[index].get('reservedQty', 0) == 0
+        || !items[index].get('warehouseId', '').matches('custody-.*');
+    }
+    function logisticsLocationProtected() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return before.get('warehouseLogisticsId', '') == '' || (before.items.size() <= 30
+        && before.items.size() == after.items.size()
+        && logisticsItemProtected(before.items, after.items, 0) && logisticsItemProtected(before.items, after.items, 1) && logisticsItemProtected(before.items, after.items, 2) && logisticsItemProtected(before.items, after.items, 3) && logisticsItemProtected(before.items, after.items, 4) && logisticsItemProtected(before.items, after.items, 5) && logisticsItemProtected(before.items, after.items, 6) && logisticsItemProtected(before.items, after.items, 7) && logisticsItemProtected(before.items, after.items, 8) && logisticsItemProtected(before.items, after.items, 9) && logisticsItemProtected(before.items, after.items, 10) && logisticsItemProtected(before.items, after.items, 11) && logisticsItemProtected(before.items, after.items, 12) && logisticsItemProtected(before.items, after.items, 13) && logisticsItemProtected(before.items, after.items, 14) && logisticsItemProtected(before.items, after.items, 15) && logisticsItemProtected(before.items, after.items, 16) && logisticsItemProtected(before.items, after.items, 17) && logisticsItemProtected(before.items, after.items, 18) && logisticsItemProtected(before.items, after.items, 19) && logisticsItemProtected(before.items, after.items, 20) && logisticsItemProtected(before.items, after.items, 21) && logisticsItemProtected(before.items, after.items, 22) && logisticsItemProtected(before.items, after.items, 23) && logisticsItemProtected(before.items, after.items, 24) && logisticsItemProtected(before.items, after.items, 25) && logisticsItemProtected(before.items, after.items, 26) && logisticsItemProtected(before.items, after.items, 27) && logisticsItemProtected(before.items, after.items, 28) && logisticsItemProtected(before.items, after.items, 29));
+    }
+    function noCustodyForCancellation() {
+      let before = resource.data;
+      return before.get('warehouseLogisticsId', '') == '' || (before.get('items', []).size() <= 30
+        && custodyItemClear(before.get('items', []), 0) && custodyItemClear(before.get('items', []), 1) && custodyItemClear(before.get('items', []), 2) && custodyItemClear(before.get('items', []), 3) && custodyItemClear(before.get('items', []), 4) && custodyItemClear(before.get('items', []), 5) && custodyItemClear(before.get('items', []), 6) && custodyItemClear(before.get('items', []), 7) && custodyItemClear(before.get('items', []), 8) && custodyItemClear(before.get('items', []), 9) && custodyItemClear(before.get('items', []), 10) && custodyItemClear(before.get('items', []), 11) && custodyItemClear(before.get('items', []), 12) && custodyItemClear(before.get('items', []), 13) && custodyItemClear(before.get('items', []), 14) && custodyItemClear(before.get('items', []), 15) && custodyItemClear(before.get('items', []), 16) && custodyItemClear(before.get('items', []), 17) && custodyItemClear(before.get('items', []), 18) && custodyItemClear(before.get('items', []), 19) && custodyItemClear(before.get('items', []), 20) && custodyItemClear(before.get('items', []), 21) && custodyItemClear(before.get('items', []), 22) && custodyItemClear(before.get('items', []), 23) && custodyItemClear(before.get('items', []), 24) && custodyItemClear(before.get('items', []), 25) && custodyItemClear(before.get('items', []), 26) && custodyItemClear(before.get('items', []), 27) && custodyItemClear(before.get('items', []), 28) && custodyItemClear(before.get('items', []), 29));
+    }
+
+    function commercialKeepsPendingTransfer() {
+      return logisticsLocationProtected() && request.resource.data.get('logisticsTransfersPending', 0) == resource.data.get('logisticsTransfersPending', 0)
+        && request.resource.data.get('warehouseLogisticsId', '') == resource.data.get('warehouseLogisticsId', '')
+        && request.resource.data.get('logisticsHistory', []) == resource.data.get('logisticsHistory', [])
+        && (resource.data.get('logisticsTransfersPending', 0) == 0 || request.resource.data.items == resource.data.items);
+    }
+
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && owns(resource.data) && owns(request.resource.data)
-          && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && commercialReturnProtection();
+          && sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer());
     }
 
     match /orders/{id} {
@@ -1139,6 +1249,69 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+
+    function transferSourceStock(d) {
+      let path = /databases/$(database)/documents/warehouseStocks/$(d.fromStockId);
+      let before = get(path).data;
+      let after = getAfter(path).data;
+      return before.productKey == d.productKey && before.warehouseId == d.fromWarehouseId
+        && after.onHand == before.onHand - d.qty
+        && after.reserved == before.reserved - d.reservedQty
+        && after.get('incoming', 0) == before.get('incoming', 0)
+        && after.onHand >= after.reserved && after.reserved >= 0;
+    }
+    function transferTargetStock(d) {
+      let path = /databases/$(database)/documents/warehouseStocks/$(d.toStockId);
+      let before = exists(path) ? get(path).data : {};
+      let after = getAfter(path).data;
+      return after.productKey == d.productKey && after.warehouseId == d.toWarehouseId
+        && after.onHand == before.get('onHand', 0) + d.qty
+        && after.reserved == before.get('reserved', 0) + d.reservedQty
+        && after.get('incoming', 0) == before.get('incoming', 0);
+    }
+    function transferAggregate(d, receive) {
+      let path = /databases/$(database)/documents/inventory/$(d.inventoryId);
+      let before = get(path).data;
+      let after = getAfter(path).data;
+      let direction = receive ? -1 : 1;
+      return before.get('productKey', before.get('productId', '')) == d.productKey
+        && after.onHand == before.onHand && after.reserved == before.reserved
+        && after.get('incoming', 0) == before.get('incoming', 0)
+        && (d.kind == 'HANDOFF'
+          ? after == before
+          : after.get('transferInTransit', 0) == before.get('transferInTransit', 0) + direction * d.qty
+            && after.get('transferFreeInTransit', 0) == before.get('transferFreeInTransit', 0) + direction * (d.qty - d.reservedQty)
+            && after.get('transferInTransit', 0) >= 0 && after.get('transferFreeInTransit', 0) >= 0);
+    }
+    function transferOrderEvidence(d) {
+      let path = /databases/$(database)/documents/orders/$(d.get('orderId', 'unused'));
+      return d.get('orderId', '') == '' ? d.reservedQty == 0 && d.kind == 'TRANSFER'
+        : getAfter(path).data.get('warehouseLogisticsId', '') == d.id
+          && getAfter(path).data.items[d.itemIndex].itemId == d.itemId
+          && d.reservedQty == d.qty;
+    }
+    match /stockTransfers/{id} {
+      allow get, list: if canReceiveInventory();
+      allow create: if canReceiveInventory() && request.resource.data.id == id
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.qty is number && request.resource.data.qty > 0
+        && request.resource.data.reservedQty is number && request.resource.data.reservedQty >= 0
+        && request.resource.data.reservedQty <= request.resource.data.qty
+        && request.resource.data.allocations is list && request.resource.data.allocations.size() > 0 && request.resource.data.allocations.size() <= 200
+        && request.resource.data.fromWarehouseId != request.resource.data.toWarehouseId
+        && request.resource.data.kind in ['TRANSFER','HANDOFF']
+        && request.resource.data.status == (request.resource.data.kind == 'HANDOFF' ? 'RECEIVED' : 'IN_TRANSIT')
+        && transferOrderEvidence(request.resource.data) && transferSourceStock(request.resource.data)
+        && transferAggregate(request.resource.data, false)
+        && (request.resource.data.kind != 'HANDOFF' || transferTargetStock(request.resource.data));
+      allow update: if canReceiveInventory() && resource.data.status == 'IN_TRANSIT'
+        && request.resource.data.status == 'RECEIVED' && request.resource.data.receivedByUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','receivedAt','receivedByUid'])
+        && transferTargetStock(request.resource.data) && transferAggregate(request.resource.data, true)
+        && transferOrderEvidence(request.resource.data);
+      allow delete: if false;
+    }
+
     match /inventory/{id} {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
       // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
@@ -1217,6 +1390,11 @@ service cloud.firestore {
           && request.resource.data.get('costSourceSupplyId', '') == request.resource.data.get('sourceId', '')
           && request.resource.data.get('sourceId', '') != ''
           && getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.get('sourceId', '') == request.resource.data.sourceId)
+        || (request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+          && !request.resource.data.keys().hasAny(['unitCost','cost','costPrice'])
+          && request.resource.data.costSourceLotId == getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.costLotId
+          && request.resource.data.sourceId == getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.sourceId
+          && getAfter(/databases/$(database)/documents/stockTransfers/$(request.resource.data.sourceId)).data.status == 'RECEIVED')
         || request.resource.data.get('sourceType', '') == 'INITIAL_STOCK'
       ));
       allow update: if admin() || purchaser();

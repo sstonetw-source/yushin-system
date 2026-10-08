@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261009-1">
+        <link rel="stylesheet" href="styles.css?v=20261009-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -444,16 +444,19 @@
         <button type="button" id="inventoryShippingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('shipping')">出貨（…）</button>
       </div>
       <div id="inventoryReceivingPanel" style="display:none">
-        <div class="order-work-cards inventory-work-subtabs no-print"><button type="button" class="order-work-card active" aria-pressed="true" data-inventory-receiving-kind="purchase" onclick="switchInventoryReceivingKind('purchase')">採購收貨</button><button type="button" class="order-work-card" aria-pressed="false" data-inventory-receiving-kind="returns" onclick="switchInventoryReceivingKind('returns')">退貨收貨</button></div>
+        <div class="order-work-cards inventory-work-subtabs no-print"><button type="button" class="order-work-card active" aria-pressed="true" data-inventory-receiving-kind="purchase" onclick="switchInventoryReceivingKind('purchase')">採購收貨</button><button type="button" class="order-work-card" aria-pressed="false" data-inventory-receiving-kind="returns" onclick="switchInventoryReceivingKind('returns')">退貨收貨</button><button type="button" id="inventoryTransferReceivingTab" class="order-work-card" aria-pressed="false" onclick="switchInventoryReceivingKind('transfers')">調撥收貨</button></div>
         <div id="inventoryReceivingError" class="inventory-work-error" role="status" hidden></div>
         <div id="inventoryPurchaseReceivingPanel"><p id="inventoryReceivingStatus" class="inventory-work-status" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr id="inventoryReceivingHead"></tr></thead><tbody id="inventoryReceivingBody"></tbody></table></div><p id="inventoryReceivingEmpty"></p></div>
+        <div id="inventoryTransferReceivingPanel" style="display:none"><p id="inventoryTransferReceivingStatus" class="inventory-work-status" role="status"></p><button class="btn-secondary" onclick="loadWarehouseTransferQueue(true)">重試調撥資料</button><div class="table-wrap inventory-work-table"><table><thead><tr><th>來源</th><th>寄出方／目的倉</th><th>品項</th><th>待收數量</th><th>操作</th></tr></thead><tbody id="inventoryTransferReceivingBody"></tbody></table></div></div>
         <section class="panel no-print" id="customerReturnPanel" style="display:none"><p>退貨申請不增加庫存；確認實收後才入庫。待檢或損壞商品分開保管。</p><div id="customerReturnQueue" role="status"></div></section>
       </div>
       <div id="inventoryShippingPanel" style="display:none">
         <div class="order-work-cards inventory-work-subtabs no-print"><button type="button" id="inventoryShippingMainBtn" class="order-work-card active" aria-pressed="true" onclick="switchInventoryShippingKind('main')">主倉庫出貨</button><button type="button" id="inventoryShippingBranchBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('branch')">分倉庫出貨</button><select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select></div>
         <div id="inventoryShippingError" class="inventory-work-error" role="status" hidden></div>
+        <div class="toolbar no-print"><select id="inventoryDeliveryModeFilter" aria-label="交付方式" onchange="renderInventoryShipping()"><option value="">全部交付方式</option><option value="PICKUP">業務自取／親送</option><option value="SALES_SHIP">寄給業務</option><option value="CUSTOMER_SHIP">直接寄客戶</option><option value="TRANSFER">轉送倉庫</option></select><button class="btn-secondary" onclick="printSelectedWarehouseShipping('list',this)">勾選品項併單清單</button><button class="btn-secondary" onclick="printSelectedWarehouseShipping('labels',this)">勾選品項地址貼紙</button></div>
         <p id="inventoryShippingStatus" class="inventory-work-status" role="status"></p>
-        <div class="table-wrap inventory-work-table"><table><thead><tr><th>訂單／客戶</th><th>品項</th><th>倉庫</th><th>已打單待出數量</th><th>操作</th></tr></thead><tbody id="inventoryShippingBody"></tbody></table></div>
+        <div class="table-wrap inventory-work-table"><table><thead><tr><th>選取</th><th>訂單／業務／客戶</th><th>品項</th><th>出貨倉庫</th><th>交付方式／收件資訊</th><th>待出數量</th><th>操作</th></tr></thead><tbody id="inventoryShippingBody"></tbody></table></div>
+        <div id="warehouseCustodyQueue"></div>
         <button type="button" id="inventoryShippingMoreBtn" class="btn-secondary" style="display:none" onclick="loadMoreInventoryShipping()">載入更多（50）</button>
       </div>
       <div id="inventoryStockPanel">
@@ -562,9 +565,9 @@
           <label for="inventoryTransferQty">移動數量</label>
           <input id="inventoryTransferQty" type="number" min="0" step="any" inputmode="decimal">
         </div>
-        <div id="inventoryTransferHint" class="inventory-summary-note">只移動庫存位置，公司總庫存不變；已被訂單占用的數量不能移出。</div>
+        <div id="inventoryTransferHint" class="inventory-summary-note">移出後列為調撥途中，目的倉確認收貨才入庫；公司總庫存不變。訂單占用貨品請由出貨分頁轉倉。</div>
         <div class="eq-modal-close-row">
-          <button type="button" id="saveInventoryTransferBtn" onclick="saveInventoryTransfer()">確認移動</button>
+          <button type="button" id="saveInventoryTransferBtn" onclick="saveInventoryTransfer()">確認調撥寄出</button>
           <button type="button" class="btn-secondary" onclick="closeInventoryTransfer()">取消</button>
         </div>
       </div>
@@ -1102,6 +1105,7 @@
                     </select>
                 </div>
                 <input type="hidden" id="orderWarehouse" value="">
+                <details class="order-shipping-details" style="grid-column:1/-1"><summary>交付方式與收件資訊</summary><div id="orderShippingFields"></div></details>
                 <div id="orderWarehouseStockHint" style="grid-column:1/-1;font-size:12px;color:#666;"></div>
                 <div>
                     <label>交易方式</label>
@@ -1501,10 +1505,11 @@
         <div id="admin-warehouses" class="admin-panel" style="display:none;">
             <div class="panel" style="margin-top:16px;">
                 <strong>倉庫管理</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">既有倉庫預設為公司倉庫。只有指定為「外部倉庫」的品項才使用外倉通知流程。</p>
+                <p style="font-size:12px;color:#666;margin:6px 0;">既有倉庫預設為公司倉庫。外倉從分倉庫出貨清單處理；收件資訊可自動帶入轉倉設定。</p>
                 <input id="warehouseMasterEditingId" type="hidden">
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
                     <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：又鑫倉庫"></div>
+                    <div><label>收件人</label><input id="warehouseMasterContact" type="text"></div><div><label>電話</label><input id="warehouseMasterPhone" type="tel"></div><div><label>收貨地址</label><input id="warehouseMasterAddress" type="text"></div>
                     <div><label>倉庫類型</label><select id="warehouseMasterType" onchange="if(this.value==='EXTERNAL')document.getElementById('warehouseMasterDefault').checked=false"><option value="INTERNAL">公司倉庫</option><option value="EXTERNAL">外部倉庫</option></select></div>
                     <label style="font-size:13px;"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫（限公司倉庫）</label>
                     <button type="button" id="warehouseMasterSaveBtn" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
@@ -1690,7 +1695,7 @@
     </script>
     <script src="modules/supplier-core.js?v=20261002-7"></script>
 <script src="modules/stock-permissions.js?v=20261006-permissions"></script>
-    <script src="modules/inventory-core.js?v=20261005-1"></script>
+    <script src="modules/inventory-core.js?v=20261009-2"></script>
     <script src="modules/receiving-core.js?v=20261002-8"></script>
     <script src="modules/fulfillment-core.js?v=20261002-5"></script>
     <script src="modules/supply-core.js?v=20261008-1"></script>
@@ -1700,10 +1705,11 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261009-1"></script>
+    <script src="app.js?v=20261009-2"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
-    <script src="modules/inventory-workspace.js?v=20261007-2"></script>
+    <script src="modules/inventory-workspace.js?v=20261009-2"></script>
+    <script src="modules/warehouse-logistics.js?v=20261009-2"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 
 
