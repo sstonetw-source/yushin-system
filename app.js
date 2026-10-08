@@ -14735,7 +14735,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
             brandId: match.brandId || brandIdForName(match.brand || ''),
             unitPrice: secureCost !== null && Number.isFinite(secureCost)
                 ? secureCost
-                : Number(match.cost || 0),
+                : match.cost !== null && match.cost !== undefined && match.cost !== '' && Number.isFinite(Number(match.cost)) ? Number(match.cost) : null,
             supplier: match.supplier || '',
             productLine: match.productLine || '',
             fulfillmentType: poItems[idx].fulfillmentType || 'WAREHOUSE',
