@@ -6172,6 +6172,8 @@ let editingQuoteNo = '';
 function updateQuoteEditingBanner() {
     const banner = document.getElementById('quoteEditingBanner');
     const number = document.getElementById('quoteEditingNumber');
+    const saveAsNewButton = document.getElementById('saveLoadedQuoteAsNewBtn');
+    if (saveAsNewButton) saveAsNewButton.style.display = editingQuoteNo ? '' : 'none';
     if (!banner || !number) return;
     if (editingQuoteNo) {
         number.innerText = editingQuoteNo;

@@ -611,7 +611,6 @@
         <div id="quoteCreatePanel">
         <div id="quoteEditingBanner" class="quote-editing-banner no-print" style="display:none;">
             <div><span>正在編輯：</span><strong id="quoteEditingNumber"></strong></div>
-            <button type="button" class="btn-secondary" onclick="saveLoadedQuoteAsNew()">另存為新估價單</button>
         </div>
         <div class="sub-nav company-sub-nav no-print">
             <div class="sub-tab active" id="sub-yushin" onclick="switchCompany('yushin', this)">又鑫 (YS)</div>
@@ -648,7 +647,8 @@
             </div>
             <div class="no-print quote-item-actions" style="margin-bottom: 8px;">
                 <button type="button" onclick="addQuoteRow()">＋ 新增品項</button>
-                <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依目前價目表更新所有品項單價</button>
+                <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依最新價目表更新所有品項單價</button>
+                <button type="button" id="saveLoadedQuoteAsNewBtn" class="btn-secondary" style="display:none;" onclick="saveLoadedQuoteAsNew()">另存為新估價單</button>
             </div>
             <div class="quote-summary-block">
                 <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
@@ -1700,7 +1700,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261008-3"></script>
+    <script src="app.js?v=20261008-4"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261007-2"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
