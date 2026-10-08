@@ -4925,7 +4925,7 @@ test('sales can use Product Master for quote and order while Product Master itse
     assert.match(appSource,/Product Master 僅可查看；您可以把產品加入估價單或建立訂單/);
 });
 
-test('Product 360 shows stock procurement and recent commercial activity without full database scans', () => {
+test('Product stock detail reads only inventory and warehouse data', () => {
     assert.match(indexSource,/id="product360Overlay"/);
     assert.match(indexSource,/id="product360Title">庫存狀態/);
     const rowStart=appSource.indexOf('function productManagementRow(product)');
@@ -4937,9 +4937,7 @@ test('Product 360 shows stock procurement and recent commercial activity without
     const source=appSource.slice(start,end);
     assert.match(source,/collection\('inventory'\)\.doc\(encodeURIComponent\(id\)\)/);
     assert.match(source,/collection\('warehouseStocks'\)\.where\('productKey','==',id\)\.limit\(50\)/);
-    assert.match(source,/collection\('procurementDemands'\)\.where\('productId','==',id\)\.limit\(100\)/);
-    assert.match(appSource,/where\('productIds', 'array-contains', productId\)\.limit\(12\)/);
-    assert.match(appSource,/where\('ownerUid', '==', currentUser\.uid\)\.limit\(50\)/);
+    assert.doesNotMatch(source, /procurementDemands|product360CommercialRecords/);
     assert.doesNotMatch(source,/collection\('quotes'\)\.get\(\)|collection\('orders'\)\.get\(\)/);
 });
 

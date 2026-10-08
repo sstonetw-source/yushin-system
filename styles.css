@@ -3465,3 +3465,5 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     margin: 3px;
     padding: 8px 12px;
 }
+
+#product360Content .product-360-grid { grid-template-columns: minmax(0, 1fr); }
