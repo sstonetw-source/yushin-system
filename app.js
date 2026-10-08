@@ -3881,6 +3881,7 @@ async function createForecastOrdersDirectly(forecast, items) {
         itemName:firstItem.itemName||'',
         productLine:firstItem.productLine||'',
         productType:firstItem.productType||'',
+        selfOrderAtCreation:true,
         procurementType:firstItem.procurementType||'PURCHASING_PO',
         fulfillmentType:firstItem.fulfillmentType||'WAREHOUSE',
         warehouseId:firstItem.warehouseId||'',
@@ -9498,6 +9499,7 @@ async function reserveInventoryForNewOrder(orderId, order) {
         Object.assign(updates,orderWorkIndexFields(order));
         await db.collection('orders').doc(orderId).set(updates,{merge:true});
         await persistOrderProcurementDemands(orderId,order,[item]);
+        await registerInitialSelfOrders(orderId,order);
         return {reservedQty:Number(item.reservedQty||0),shortageQty:Number(item.shortageQty||0),items:[item]};
     }
     const reservedItems=[];
@@ -9509,6 +9511,7 @@ async function reserveInventoryForNewOrder(orderId, order) {
     Object.assign(updates,orderWorkIndexFields(order));
     await db.collection('orders').doc(orderId).set(updates,{merge:true});
     await persistOrderProcurementDemands(orderId,order,reservedItems);
+    await registerInitialSelfOrders(orderId,order);
     return {reservedQty,shortageQty,items:reservedItems};
 }
 
@@ -9828,17 +9831,95 @@ function canBusinessSelfOrder(order = null) {
         || (order.salesCode && currentUserCode && order.salesCode === currentUserCode);
 }
 
+
+async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitCost,orderDate,notes=''}) {
+        let savedOrder,internalNo='';
+        await runRoleTransaction(async tx=>{
+            const orderRef=db.collection('orders').doc(orderId);
+            const snap=await tx.get(orderRef);
+            if(!snap.exists)throw new Error('找不到訂單。');
+            const order=snap.data();
+
+            if(!canBusinessSelfOrder(order)&&!canCreatePurchaseOrderCapability())throw new Error('只有此訂單負責人可自行訂貨。');
+            if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
+            const items=normalizedOrderItems(order);
+            const index=items.findIndex(row=>row.itemId===itemId);
+            if(index<0)throw new Error('找不到訂單品項。');
+            const item=items[index];
+            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購訂貨，不能自行訂貨。');
+            const supplyRef=supplyOrdersCollection().doc(`self-${encodeURIComponent(orderId)}-${encodeURIComponent(itemId)}`);
+            const existingSupply=await tx.get(supplyRef);
+            if(existingSupply.exists){savedOrder=order;return;}
+            const already=Math.max(0,Number(item.supplyOrderedQty||0));
+            const demand=procurementDemandForOrderItem({...order,id:orderId},item);
+            const remaining=demand.remainingToOrderQty;
+            if(qty>remaining+1e-9)throw new Error(`目前尚未訂貨數量只有 ${remaining}。`);
+            internalNo=`SO-${orderDate.replace(/-/g,'')}-${`${orderId.slice(-6)}-${itemId.slice(-6)}`.toUpperCase()}`;
+            const now=new Date().toISOString();
+            const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demand,qty);
+            if(demandOrderPlan.appliedQty!==qty)throw new Error('採購需求數量已變更，請重新整理後再試。');
+            const demandRef=procurementDemandRef(demand.demandId);
+            const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
+                productId:item.productId||'',
+                productKey:inventoryProductKey(item),
+                itemCode:item.itemCode||'',
+                itemName:item.itemName||'',
+                brand:item.brand||'',
+                fulfillmentType:item.fulfillmentType||'WAREHOUSE',
+                warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
+                ownerUid:order.ownerUid||currentUser?.uid||'',
+                salesCode:order.salesCode||currentUserCode||'',
+                salesName:order.salesName||currentUserName||'',
+                scheduleDate:item.scheduleDate||order.expectedDate||''
+            },{
+                createdAt:order.createdAt||now,
+                updatedAt:now
+            });
+            const record={
+                type:'SALES_SELF_ORDER',method:'SALES_SELF_ORDER',
+                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,demandId:demand.demandId||'',
+                internalNo,status:'ORDERED',orderId,itemId,
+                ownerUid:order.ownerUid||currentUser?.uid||'',salesCode:order.salesCode||currentUserCode||'',
+                salesName:order.salesName||currentUserName||'',
+                customerName:order.customerName||'',productId:item.productId||'',productKey:inventoryProductKey(item),
+                itemCode:item.itemCode||'',itemName:item.itemName||'',brand:item.brand||'',
+                qty,receivedQty:0,supplier,unitCost,orderDate,notes,
+                fulfillmentType:item.fulfillmentType||'WAREHOUSE',
+                warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP' ? '' : (item.warehouseId||defaultWarehouse()?.id||''),
+                createdAt:now,createdByUid:currentUser?.uid||'',createdBy:deliveryActor(),createdByRole:currentUserRole
+            };
+            const validation=window.YushinSupply?.validate(record);
+            if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
+            tx.set(supplyRef,record);
+            if(demandRef)tx.set(demandRef,demandDoc,{merge:true});
+            items[index]={
+                ...item,
+                supplyOrderedQty:already+qty,
+                selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],
+                orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate,
+                orderEvents:[
+                    ...(item.orderEvents||[]).filter(event=>event.id!==supplyRef.id),
+                    {id:supplyRef.id,type:'SALES_SELF_ORDER',at:now,date:orderDate,qty,documentNo:internalNo,by:deliveryActor()}
+                ]
+            };
+            savedOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
+            tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(savedOrder),updatedAt:now});
+        });
+    return savedOrder;
+}
+
+async function registerInitialSelfOrders(orderId,order) {
+    if(order.selfOrderAtCreation!==true)return;
+    for(const item of normalizedOrderItems(order)){
+        if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER')continue;
+        const qty=remainingProcurementQty(order,item);
+        if(qty<=0)continue;
+        const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate});
+        Object.assign(order,saved);
+    }
+}
 function selfOrderActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
-    if (orderInventorySyncIncomplete(order) || !canBusinessSelfOrder(order) || normalizedOrderStatus(order) !== 'normal') return '';
-    return (normalizedItems || normalizedOrderItems(order))
-        .filter(item => (item.procurementType || order.procurementType || 'PURCHASING_PO') === 'SALES_SELF_ORDER')
-        .map(item => {
-            const remaining=remainingProcurementQty(order,item,dispatchStateByItem?.get(item) || null);
-            return {item,remaining};
-        })
-        .filter(row=>row.remaining>0)
-        .map(({item,remaining})=>`<button type="button" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">自行訂貨：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${remaining}</button>`)
-        .join('');
+    return '';
 }
 
 window.openSelfOrderModal = function(orderId,itemId) {
@@ -17456,7 +17537,7 @@ function collectOrderDraft() {
         date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
         itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),itemNameEn:orderDraftFieldValue('orderItemNameEn'),productLine:orderDraftFieldValue('orderProductLine'),spec:orderDraftFieldValue('orderSpec'),
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
-        unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
+        supplier:orderDraftFieldValue('orderSelfSupplier'),unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
         procurementType:orderDraftFieldValue('orderProcurementType')||'PURCHASING_PO',
         fulfillmentType:orderDraftFieldValue('orderFulfillmentType')||'WAREHOUSE',warehouseId:orderDraftFieldValue('orderWarehouse'),
         transactionType:orderDraftFieldValue('orderTransactionType'),invoiceTitle:orderDraftFieldValue('orderInvoiceTitle'),
@@ -17501,9 +17582,11 @@ function setOrderModalItem(item={}) {
     document.getElementById('orderQty').value=normalized.qty||1;
     document.getElementById('orderUnitPrice').value=normalized.unitPrice||0;
     document.getElementById('orderTotalPrice').value=normalized.totalPrice||0;
+    const supplierInput=document.getElementById('orderSelfSupplier');if(supplierInput)supplierInput.value=normalized.supplier||'';
     document.getElementById('orderCostPrice').value=normalized.costPrice??'';
     const procurement=document.getElementById('orderProcurementType');if(procurement)procurement.value=normalized.procurementType||'PURCHASING_PO';
     onOrderProcurementTypeChange();
+    if(normalized.procurementType==='SALES_SELF_ORDER')document.getElementById('orderCostPrice').value=normalized.costPrice??'';
     document.getElementById('orderFulfillmentType').value=normalized.fulfillmentType||'WAREHOUSE';
     populateOrderWarehouseOptions(normalized.warehouseId||'');
     onOrderFulfillmentChange();
@@ -17604,7 +17687,7 @@ function normalizeNewOrderItem(item = {}) {
         brand,brandId:match?.brandId||item.brandId||brandIdForName(brand),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
         productId,productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
         productMasterMatched:!!productId && (!!match || item.productMasterMatched === true),
-        supplier:match?.supplier||item.supplier||'',spec:match?.spec||item.spec||'',
+        supplier:item.supplier||match?.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
         warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' ? String(item.warehouseId||'') : ''
     };
@@ -17612,7 +17695,7 @@ function normalizeNewOrderItem(item = {}) {
 
 function currentOrderModalItem() {
     const codeInput=document.getElementById('orderItemCode');
-    const item={itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     const cost=document.getElementById('orderCostPrice').value;if(item.procurementType==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
@@ -17668,6 +17751,7 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderQty').value = 1;
     document.getElementById('orderUnitPrice').value = 0;
     document.getElementById('orderTotalPrice').value = 0;
+    const supplierInput=document.getElementById('orderSelfSupplier');if(supplierInput)supplierInput.value=source?.supplier||'';
     document.getElementById('orderCostPrice').value = '';
     delete document.getElementById('orderCostPrice').dataset.autofillCost;
     const procurement = document.getElementById('orderProcurementType');
@@ -17924,6 +18008,7 @@ window.saveNewOrder = function() {
             && person.role === 'sales' && person.active !== false && person.code)
         : null;
     if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
+    if(items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&(!String(item.supplier||'').trim()||item.costPrice===null||item.costPrice===undefined||String(item.costPrice).trim()===''||!Number.isFinite(Number(item.costPrice))||Number(item.costPrice)<0))){alert('自行訂貨品項請填寫供應商與含稅進價（可填 0）；建立訂單後會直接列入待到貨。');return;}
     const firstItem=items[0];
     const itemCode = firstItem.itemCode;
     let data = {
@@ -17940,6 +18025,7 @@ window.saveNewOrder = function() {
         itemName: firstItem.itemName,
         productLine: firstItem.productLine || '',
         productType: '',
+        selfOrderAtCreation:true,
         procurementType:firstItem.procurementType||'PURCHASING_PO',
         fulfillmentType:firstItem.fulfillmentType,warehouseId:firstItem.warehouseId||'',qty:firstItem.qty,unitPrice:firstItem.unitPrice,
         totalPrice:items.reduce((sum,item)=>sum+Number(item.totalPrice||0),0),items,itemCount:items.length,orderSchemaVersion:2,
@@ -20327,6 +20413,8 @@ function setOrderCostFieldForProduct(item) {
     const input = document.getElementById('orderCostPrice');
     if (!wrap || !input) return;
     const selfOrder = document.getElementById('orderProcurementType')?.value === 'SALES_SELF_ORDER';
+    const supplierWrap=document.getElementById('orderSelfSupplierWrap');if(supplierWrap)supplierWrap.style.display=selfOrder?'':'none';
+    const supplierInput=document.getElementById('orderSelfSupplier');if(supplierInput&&!supplierInput.value&&item?.supplier)supplierInput.value=item.supplier;
     const authorized = currentUserRole === 'admin' || currentUserRole === 'purchaser';
     wrap.style.display = selfOrder || authorized ? '' : 'none';
     input.readOnly = !selfOrder;
