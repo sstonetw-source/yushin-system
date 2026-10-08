@@ -74,7 +74,7 @@ test('brand and month summaries reuse the same procurement projection',()=>{
 
 test('missing purchase unit cost is surfaced as a data-quality count',()=>{
   const result=analytics.summarize([
-    {id:'S1',supplier:'A',brand:'Thermo',method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1',sourceItemId:'I1',qty:2,status:'ORDERED',unitCost:0,purchaseDocumentId:'P1',orderDate:'2026-10-01'}
+    {id:'S1',supplier:'A',brand:'Thermo',method:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'O1',sourceItemId:'I1',qty:2,status:'ORDERED',unitCost:null,purchaseDocumentId:'P1',orderDate:'2026-10-01'}
   ]);
   assert.equal(result.totals.missingUnitCostCount,1);
   assert.equal(result.byBrand[0].missingUnitCostCount,1);
@@ -161,3 +161,5 @@ test('late incoming purchase is surfaced by count amount and days overdue',()=>{
 });
 
 
+
+test('complimentary zero-cost supply is complete and totals zero',()=>{const row=analytics.projectSupply({method:'PURCHASING_PO',qty:2,unitCost:0});assert.equal(row.missingUnitCost,false);assert.equal(row.orderedAmount,0);});

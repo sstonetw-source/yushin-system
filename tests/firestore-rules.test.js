@@ -1019,13 +1019,15 @@ test('commercial owner cannot invoke warehouse shipment marker directly',async()
   const {item}=await seedWarehouseShipment();await assertFails(warehouseShipmentBatch(db('sales1'),'sales1',item).commit());
 });
 
-test('quick manual purchase requires supplier and positive actual cost for admin and purchaser', async () => {
+test('quick manual purchase requires supplier and nonnegative actual cost for admin and purchaser', async () => {
   for (const uid of ['admin','buyer1']) {
     const ref=doc(db(uid),'supplyOrders/quick-'+uid);
     const base={type:'PURCHASING_MANUAL',supplier:'Vendor',unitCost:50,qty:2,receivedQty:0,status:'ORDERED',incomingRegisteredQty:2};
     await assertFails(setDoc(ref,{...base,supplier:''}));
-    await assertFails(setDoc(ref,{...base,unitCost:0}));
+    await assertSucceeds(setDoc(ref,{...base,unitCost:0}));
     await assertFails(setDoc(ref,{...base,unitCost:-1}));
+    const {unitCost,...missingCost}=base;
+    await assertFails(setDoc(ref,missingCost));
     await assertFails(setDoc(ref,{...base,unitCost:'50'}));
     await assertSucceeds(setDoc(ref,base));
     await assertFails(updateDoc(ref,{qty:3,unitCost:60}));

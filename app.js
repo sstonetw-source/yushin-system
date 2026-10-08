@@ -9871,10 +9871,11 @@ window.saveSelfOrder = async function() {
     const itemId=document.getElementById('selfOrderItemId').value;
     const supplier=document.getElementById('selfOrderSupplier').value.trim();
     const qty=Number(document.getElementById('selfOrderQty').value||0);
-    const unitCost=Number(document.getElementById('selfOrderUnitCost').value||0);
+    const unitCostText=document.getElementById('selfOrderUnitCost').value.trim();
+    const unitCost=Number(unitCostText);
     const orderDate=document.getElementById('selfOrderDate').value||localDateString();
     const notes=document.getElementById('selfOrderNotes').value.trim();
-    if(!supplier||qty<=0||unitCost<=0){alert('請填寫供應商、訂貨數量與大於 0 的實際單位成本。');return;}
+    if(!supplier||!Number.isFinite(qty)||qty<=0||unitCostText===''||!Number.isFinite(unitCost)||unitCost<0){alert('請填寫供應商、有效訂貨數量與實際單位成本（可填 0）。');return;}
     const button=document.getElementById('saveSelfOrderBtn');
     if(button.disabled)return;
     button.disabled=true;button.innerText='建立中…';
@@ -12045,10 +12046,11 @@ window.closeQuickPurchaseConfirmation = function() {
 
 window.confirmQuickPurchase = function() {
     const supplier = String(document.getElementById('quickPurchaseSupplier').value || '').trim();
-    const unitCost = Number(document.getElementById('quickPurchaseCost').value);
+    const unitCostText = String(document.getElementById('quickPurchaseCost').value).trim();
+    const unitCost = Number(unitCostText);
     const expectedQty = Number(document.getElementById('quickPurchaseQty').value);
-    if (!supplier || !Number.isFinite(unitCost) || unitCost <= 0 || !Number.isFinite(expectedQty) || expectedQty <= 0) {
-        alert('請填寫供應商與大於 0 的實際單位成本。'); return;
+    if (!supplier || unitCostText === '' || !Number.isFinite(unitCost) || unitCost < 0 || !Number.isFinite(expectedQty) || expectedQty <= 0) {
+        alert('請填寫供應商與實際單位成本（可填 0）。'); return;
     }
     const resolve = quickPurchaseConfirmation;
     quickPurchaseConfirmation = null;
@@ -12084,7 +12086,7 @@ async function requestQuickPurchaseDetails(orderId, itemId) {
             <div class="form-grid">
                 <div><label for="quickPurchaseSupplier">供應商 *</label><input id="quickPurchaseSupplier" type="text" autocomplete="off"></div>
                 <div><label for="quickPurchaseQty">本次採購數量</label><input id="quickPurchaseQty" type="number" readonly></div>
-                <div><label for="quickPurchaseCost">實際含稅單位成本 *</label><input id="quickPurchaseCost" type="number" min="0.01" step="any" inputmode="decimal"></div>
+                <div><label for="quickPurchaseCost">實際含稅單位成本 *</label><input id="quickPurchaseCost" type="number" min="0" step="any" inputmode="decimal"></div>
             </div><p id="quickPurchaseHint" style="color:#666;font-size:13px;"></p>
             <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
                 <button type="button" onclick="confirmQuickPurchase()">確認已採購</button>
@@ -12096,7 +12098,7 @@ async function requestQuickPurchaseDetails(orderId, itemId) {
     document.getElementById('quickPurchaseSummary').textContent = `${item.itemCode || ''} ${item.itemName || ''}`;
     document.getElementById('quickPurchaseSupplier').value = existing?.supplier || item.supplier || order.supplier || '';
     document.getElementById('quickPurchaseQty').value = qty;
-    document.getElementById('quickPurchaseCost').value = Number.isFinite(Number(cost)) && Number(cost) > 0 ? cost : '';
+    document.getElementById('quickPurchaseCost').value = cost !== null && cost !== undefined && cost !== '' && Number.isFinite(Number(cost)) && Number(cost) >= 0 ? cost : '';
     document.getElementById('quickPurchaseHint').textContent = existing
         ? '追加採購沿用原紀錄的供應商與單價；不同供應商或單價請使用「產生採購單」另建紀錄。'
         : '成本由產品標準成本帶入，請確認本次實際進貨價。確認後列入待到貨，不產生 PDF。';
@@ -12115,7 +12117,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         const purchaseDetails = await requestQuickPurchaseDetails(orderId, itemId);
         if (!purchaseDetails) return;
         if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
-        if (!purchaseDetails.supplier || !Number.isFinite(purchaseDetails.unitCost) || purchaseDetails.unitCost <= 0) throw new Error('請確認供應商與有效的實際單位成本。');
+        if (!purchaseDetails.supplier || !Number.isFinite(purchaseDetails.unitCost) || purchaseDetails.unitCost < 0) throw new Error('請確認供應商與有效的實際單位成本。');
         let savedOrder, savedSupply, incomingProductKey='', incomingWarehouseId='';
         const supplyRef = supplyOrdersCollection().doc(quickPurchaseSupplyId(orderId, itemId));
         await runRoleTransaction(async tx => {
@@ -14558,7 +14560,7 @@ function purchaseItemsFromOrder(order) {
             const productId = savedProductId || priceMatch?.productId || (priceMatch ? stableProductId(priceMatch) : '');
             const secureCost = productId ? purchaseCostCache.get(productId) : null;
             if (secureCost !== undefined && secureCost !== null) cost = Number(secureCost);
-            else if ((!Number.isFinite(cost) || cost <= 0) && priceMatch) {
+            else if ((!Number.isFinite(cost) || cost < 0) && priceMatch) {
                 cost = parseFloat(priceMatch.cost ?? priceMatch.costPrice ?? priceMatch.purchasePrice);
             }
         }
@@ -14586,7 +14588,7 @@ function purchaseItemsFromOrder(order) {
             salesName: order.salesName || '',
             fulfillmentType: item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE',
             warehouseId: item.warehouseId || order.warehouseId || '',
-            unitPrice: Number.isFinite(cost) && cost > 0 ? cost : 0,
+            unitPrice: Number.isFinite(cost) && cost >= 0 ? cost : null,
             procurementType
         };
     }).filter(item => item && (item.itemName || item.itemCode) && Number(item.qty||0)>0);
@@ -14618,8 +14620,9 @@ async function openProductManagementProductsInPurchase(products) {
             if (!productSnap.exists || productSnap.data().active === false || productSnap.data().status === 'INACTIVE') {
                 throw new Error('所選產品已停用或不存在，請重新選取。');
             }
-            const cost = Number(costSnap.exists ? costSnap.data().standardCost ?? costSnap.data().costPrice ?? 0 : 0);
-            return { ...productSnap.data(), productId:id, purchaseCost:Number.isFinite(cost) && cost >= 0 ? cost : 0 };
+            const costValue = costSnap.exists ? costSnap.data().standardCost ?? costSnap.data().costPrice : null;
+            const cost = costValue === null || costValue === undefined ? NaN : Number(costValue);
+            return { ...productSnap.data(), productId:id, purchaseCost:Number.isFinite(cost) && cost >= 0 ? cost : null };
         }));
         // The modal opens synchronously before warehouse suggestions finish loading.
         const opening = openDirectStockPurchase(refreshed[0]);
@@ -14666,7 +14669,7 @@ window.openDirectStockPurchase = async function(product = null) {
             itemName:product.productName||product.nameCn||product.nameEn||'',
             brand:resolveBrandName(product.brandName||product.brand||''),
             brandId:product.brandId||'',productLine:product.productLine||'',productType:product.productType||'',
-            unitPrice:0};
+            unitPrice:null};
         renderPoItemsTable();
     }
     updatePoModeUI();
@@ -14688,7 +14691,7 @@ window.openDirectStockPurchase = async function(product = null) {
 function emptyDirectPoItem() {
     return {
         orderId:'', sourceType:'STOCK_REPLENISHMENT', sourceId:'',
-        itemName:'', itemCode:'', productId:'', brand:'', brandId:'', qty:1, unitPrice:0, supplier:'',
+        itemName:'', itemCode:'', productId:'', brand:'', brandId:'', qty:1, unitPrice:null, supplier:'',
         productLine:'', fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
     };
 }
@@ -14713,7 +14716,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
         productId: '',
         brand: preferredBrand,
         brandId: brandIdForName(preferredBrand),
-        unitPrice: 0,
+        unitPrice: null,
         supplier: '',
         productLine: ''
     };
@@ -15044,7 +15047,7 @@ function renderPoItemsTable() {
     const tbody = document.getElementById('poItemsBody');
     tbody.innerHTML = '';
     poItems.forEach((item, idx) => {
-        const missingPrice = !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) <= 0;
+        const missingPrice = item.unitPrice === null || item.unitPrice === undefined || item.unitPrice === '' || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0;
         const tr = document.createElement('tr');
         if (poDirectStockMode) {
             tr.innerHTML = `
@@ -15074,7 +15077,7 @@ function renderPoItemsTable() {
 
 window.updatePoItem = function(idx, field, value) {
     if (!poItems[idx]) return;
-    poItems[idx][field] = parseFloat(value) || 0;
+    poItems[idx][field] = field === 'unitPrice' && String(value).trim() === '' ? null : parseFloat(value);
     renderPoItemsTable();
 };
 
@@ -15398,7 +15401,7 @@ window.printPurchaseOrder = async function() {
         alert('請完成每個採購品項的貨號、品名與廠牌。');
         return;
     }
-    const missingPriceItems = poItems.filter(item => !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) <= 0);
+    const missingPriceItems = poItems.filter(item => item.unitPrice === null || item.unitPrice === undefined || item.unitPrice === '' || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0);
     if (missingPriceItems.length) {
         alert(`以下品項尚未填入有效的進貨單價：${missingPriceItems.map(item => item.itemName || item.itemCode || '未命名品項').join('、')}`);
         return;

@@ -114,3 +114,4 @@ test('Odoo-style receipt status is derived from receipt events',()=>{
   assert.equal(s.receiptProgress({qty:10,receivedQty:4,status:'CLOSED'}).receiptStatus,'closed');
   assert.equal(s.receiptProgress({qty:10,receivedQty:0,status:'CANCELLED'}).receiptStatus,'cancelled');
 });
+test('self-order accepts explicit zero cost but rejects missing or negative cost',()=>{const base={method:'SALES_SELF_ORDER',qty:1,supplier:'Vendor',sourceType:'SALES_ORDER',sourceId:'o',sourceItemId:'i'};assert.equal(s.validate({...base,unitCost:0}).valid,true);for(const unitCost of [null,undefined,'',-1,NaN])assert.equal(s.validate({...base,unitCost}).valid,false);});

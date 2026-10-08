@@ -70,7 +70,7 @@
       incomingAmount,
       stockAmount:isStockReplenishment?effectiveOrderedQty*unitCost:0,
       customerOrderAmount:isStockReplenishment?0:effectiveOrderedQty*unitCost,
-      missingUnitCost:effectiveOrderedQty>0&&unitCost<=0,
+      missingUnitCost:effectiveOrderedQty>0&&(record.unitCost===null||record.unitCost===undefined||String(record.unitCost).trim()===''||!Number.isFinite(Number(record.unitCost))||Number(record.unitCost)<0),
       expectedDate,
       openAgeDays,
       late,

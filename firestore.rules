@@ -1077,7 +1077,7 @@ service cloud.firestore {
       let data = request.resource.data;
       return data.get('type', '') != 'PURCHASING_MANUAL'
         || (data.get('supplier', '') is string && data.get('supplier', '').size() > 0
-          && data.get('unitCost', 0) is number && data.get('unitCost', 0) > 0);
+          && data.get('unitCost', null) is number && data.get('unitCost', null) >= 0);
     }
 
     function validQuickPurchaseUpdate() {

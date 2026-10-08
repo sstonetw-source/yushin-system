@@ -45,7 +45,7 @@
     const x=normalize(record),errors=[];
     if(x.qty<=0)errors.push('qty');
     if(!String(x.supplierId||x.supplier||'').trim())errors.push('supplier');
-    if(x.method===METHODS.SALES_SELF_ORDER&&n(x.unitCost)<=0)errors.push('unitCost');
+    if(x.method===METHODS.SALES_SELF_ORDER&&(record.unitCost===null||record.unitCost===undefined||String(record.unitCost).trim()===''||!Number.isFinite(Number(record.unitCost))||Number(record.unitCost)<0))errors.push('unitCost');
     if(x.sourceType===SOURCES.SALES_ORDER){
       if(!String(x.sourceId||'').trim())errors.push('sourceId');
       if(!String(x.sourceItemId||'').trim())errors.push('sourceItemId');
