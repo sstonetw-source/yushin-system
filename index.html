@@ -609,13 +609,13 @@
         </div>
 
         <div id="quoteCreatePanel">
-        <div id="quoteEditingBanner" class="quote-editing-banner no-print" style="display:none;">
-            <div><span>正在編輯：</span><strong id="quoteEditingNumber"></strong></div>
-        </div>
         <div class="sub-nav company-sub-nav no-print">
             <div class="sub-tab active" id="sub-yushin" onclick="switchCompany('yushin', this)">又鑫 (YS)</div>
             <div class="sub-tab" id="sub-morningstar" onclick="switchCompany('morningstar', this)">辰星 (MS)</div>
             <div class="sub-tab" id="sub-MULTI-LIFE" onclick="switchCompany('MULTI-LIFE', this)">鼎新 (DS)</div>
+        </div>
+        <div id="quoteEditingBanner" class="quote-editing-banner no-print" style="display:none;">
+            <div><span>正在編輯：</span><strong id="quoteEditingNumber"></strong></div>
         </div>
         <div id="printableQuote">
             <div class="header-container">
@@ -647,8 +647,6 @@
             </div>
             <div class="no-print quote-item-actions" style="margin-bottom: 8px;">
                 <button type="button" onclick="addQuoteRow()">＋ 新增品項</button>
-                <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依最新價目表更新所有品項單價</button>
-                <button type="button" id="saveLoadedQuoteAsNewBtn" class="btn-secondary" style="display:none;" onclick="saveLoadedQuoteAsNew()">另存為新估價單</button>
             </div>
             <div class="quote-summary-block">
                 <div class="footer-note">* 本估價單有效期限 <input type="number" id="validDays" value="90" min="0" oninput="saveToStorage()" style="width: 45px; display: inline-block;">天。</div>
@@ -677,6 +675,8 @@
             <details class="quote-more-actions">
                 <summary>更多功能</summary>
                 <div class="quote-create-more-menu">
+                    <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依最新價目表更新所有品項單價</button>
+                    <button type="button" id="saveLoadedQuoteAsNewBtn" class="btn-secondary" style="display:none;" onclick="saveLoadedQuoteAsNew()">另存為新估價單</button>
                     <button type="button" id="decisionPriceAnalysisBtn" class="btn-secondary" onclick="exportDecisionPriceAnalysisPdf()">建立決標單價分析表</button>
                     <button type="button" class="btn-secondary" onclick="openThreeQuoteDialog()">產生三家估價單</button>
                     <div class="document-download-settings">
