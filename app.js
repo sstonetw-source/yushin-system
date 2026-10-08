@@ -18214,7 +18214,7 @@ window.saveNewOrder = function() {
         if (quoteSyncError) {
             showActionFeedback('訂單已建立，庫存占用已同步，但來源估價單未標記成交。請勿重複建立訂單，請檢查來源估價單：' + quoteSyncError.message,'warning');
         } else {
-            const automaticallyOrdered = normalizedOrderItems(data).some(item=>
+            const automaticallyOrdered = Array.isArray(data.items) && data.items.some(item=>
                 item.procurementType==='SALES_SELF_ORDER' && Number(item.supplyOrderedQty||0)>0);
             showActionFeedback(automaticallyOrdered
                 ? '訂單已建立；自行訂貨已記錄為已採購，等待到貨。'
