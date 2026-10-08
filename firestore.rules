@@ -1109,12 +1109,13 @@ service cloud.firestore {
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if validSelfOrderSupplyCreate()
-        && (((admin() || purchaser()) && validQuickPurchaseCost())
-          || (businessOwner()
-            && request.resource.data.type == 'SALES_SELF_ORDER'
-            && request.resource.data.ownerUid == request.auth.uid
-            && request.resource.data.salesCode == salesCode()));
+      allow create: if ((admin() || purchaser()) && validQuickPurchaseCost())
+        && validSelfOrderSupplyCreate()
+        || (businessOwner()
+          && request.resource.data.type == 'SALES_SELF_ORDER'
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.salesCode == salesCode()
+          && validSelfOrderSupplyCreate());
       // Sales owns the commercial intent and may create/read its own self-order,
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
