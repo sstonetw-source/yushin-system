@@ -9789,6 +9789,13 @@ function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
     return buttons.join('');
 }
 
+// Only a fully ready single-item order is safe for one-click delivery.
+// Multi-item and partly printed orders must choose an exact item and quantity.
+function orderDeliveryRequiresItemForm(items, deliveryProgress, fulfillmentProgress) {
+    return (items || []).length !== 1
+        || Number(fulfillmentProgress?.shippable || 0) + 1e-9 < Number(deliveryProgress?.remaining || 0);
+}
+
 function orderContextActionState(order, normalizedItems = null, dispatchStateByItem = null) {
     const items = normalizedItems || normalizedOrderItems(order);
     const states = items.map(item => dispatchStateByItem?.get(item) || itemDispatchState(order, item));
@@ -9806,7 +9813,8 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
         return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
     return {
-        showPartialDelivery: normalizedOrderStatus(order) === 'normal' && hasPartialArrival,
+        showPartialDelivery: normalizedOrderStatus(order) === 'normal'
+            && (hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0))),
         showReturn: netDelivered > 0
     };
 }
@@ -10810,6 +10818,7 @@ window.renderOrdersList = function() {
         const deliveryProgress = deliveryProgressInfo(o, allOrderItems);
         const fulfillmentProgress = canConfirmOrderDelivery ? fulfillmentProgressInfo(o, allOrderItems, dispatchStateByItem) : null;
         const contextActions = orderContextActionState(o, allOrderItems, dispatchStateByItem);
+        const useBatchDelivery = orderDeliveryRequiresItemForm(allOrderItems, deliveryProgress, fulfillmentProgress);
         const deliveryPending = pendingDeliveryOrderIds.has(o.id);
         const billingPending = pendingOrderStatusKeys.has(o.id + ':isBilled');
         if (lifecycle.status !== 'normal') {
@@ -10839,7 +10848,7 @@ window.renderOrdersList = function() {
                 ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
                     
-                    ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="quickCompleteDelivery('${o.id}')" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : '確認送貨'}</button>` : ''}
+                    ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '分批送貨' : '確認送貨'}</button>` : ''}
                     ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>

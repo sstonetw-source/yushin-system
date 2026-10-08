@@ -61,3 +61,18 @@ test('printing stays purchaser/admin only, and reuses the existing transactional
     assert.match(slice,/tx\.update\(ref,\{items,\.\.\.orderWorkIndexFields\(nextOrder\),updatedAt:now\}\)/);
     assert.match(app,/\['shipping', '已打單'\]/);
 });
+
+test('business shipping action requires item-level form for multi-item and partial-print orders',()=>{
+    const start=app.indexOf('function orderDeliveryRequiresItemForm(');
+    const end=app.indexOf('\nfunction orderContextActionState(', start);
+    assert.ok(start>=0 && end>start);
+    const sandbox=vm.createContext({});
+    vm.runInContext(app.slice(start,end),sandbox);
+    const needsForm=sandbox.orderDeliveryRequiresItemForm;
+    assert.equal(needsForm([{itemId:'A'},{itemId:'B'}],{remaining:1},{shippable:1}),true);
+    assert.equal(needsForm([{itemId:'A'}],{remaining:5},{shippable:3}),true);
+    assert.equal(needsForm([{itemId:'A'}],{remaining:5},{shippable:5}),false);
+    assert.match(app,/const useBatchDelivery = orderDeliveryRequiresItemForm\(allOrderItems, deliveryProgress, fulfillmentProgress\)/);
+    assert.match(app,/useBatchDelivery \? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'/);
+    assert.match(app,/useBatchDelivery \? '分批送貨' : '確認送貨'/);
+});
