@@ -1813,16 +1813,20 @@ html[data-app-environment="preview"] body { border-top: 0; }
 .action-feedback.warning { background: #8a4b00; }
 /* 手機訂單更多操作：固定在可視區內，避免靠近螢幕邊緣時選單被裁切。 */
 @media screen and (max-width: 640px) {
+    body.order-menu-open { overflow: hidden; overscroll-behavior: none; }
     #ordersBody .order-more-menu { position: static; }
     #ordersBody .order-more-menu-popover {
         position: fixed;
         left: 16px;
         right: 16px;
         top: auto;
-        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(var(--order-menu-bottom, 16px) + env(safe-area-inset-bottom, 0px));
         width: auto;
         max-width: none;
         max-height: min(70vh, 520px);
+        max-height: min(calc(var(--order-menu-height, 100dvh) - 32px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px)), 520px);
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
         overflow-y: auto;
         box-sizing: border-box;
         z-index: 10020;
