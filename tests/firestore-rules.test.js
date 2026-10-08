@@ -175,16 +175,16 @@ test('purchaser may assist create order only with a responsible owner', async ()
 
 test('self-order is restricted to the responsible business owner and becomes immutable after creation', async () => {
   await assertSucceeds(setDoc(doc(db('sales1'), 'supplyOrders/sales-self-order'), {
-    type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', qty:2, receivedQty:0, status:'ORDERED', cost:100
+    type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', qty:2, receivedQty:0, status:'ORDERED', supplier:'Vendor', unitCost:100
   }));
   await assertSucceeds(setDoc(doc(db('eng1'), 'supplyOrders/engineer-self-order'), {
-    type:'SALES_SELF_ORDER', ownerUid:'eng1', salesCode:'E01', qty:2, receivedQty:0, status:'ORDERED', cost:100
+    type:'SALES_SELF_ORDER', ownerUid:'eng1', salesCode:'E01', qty:2, receivedQty:0, status:'ORDERED', supplier:'Vendor', unitCost:100
   }));
   await assertFails(setDoc(doc(db('eng1'), 'supplyOrders/engineer-impersonation'), {
-    type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', qty:1, receivedQty:0, status:'ORDERED', cost:100
+    type:'SALES_SELF_ORDER', ownerUid:'sales1', salesCode:'S01', qty:1, receivedQty:0, status:'ORDERED', supplier:'Vendor', unitCost:100
   }));
   await assertFails(setDoc(doc(db('eng1'), 'supplyOrders/engineer-wrong-code'), {
-    type:'SALES_SELF_ORDER', ownerUid:'eng1', salesCode:'S01', qty:1, receivedQty:0, status:'ORDERED', cost:100
+    type:'SALES_SELF_ORDER', ownerUid:'eng1', salesCode:'S01', qty:1, receivedQty:0, status:'ORDERED', supplier:'Vendor', unitCost:100
   }));
   await assertFails(updateDoc(doc(db('sales1'), 'supplyOrders/sales-self-order'), { qty:99 }));
   await assertFails(updateDoc(doc(db('eng1'), 'supplyOrders/engineer-self-order'), { qty:99 }));
@@ -192,6 +192,27 @@ test('self-order is restricted to the responsible business owner and becomes imm
   await assertSucceeds(updateDoc(doc(db('buyer1'), 'supplyOrders/sales-self-order'), { qty:3 }));
   await assertFails(setDoc(doc(db('eng1'), 'purchaseOrders/p1'), { status:'ORDERED' }));
 });
+
+
+test('self-order supplier and actual unit cost are required for each new supply record', async () => {
+  for (const uid of ['sales1', 'eng1', 'buyer1', 'admin']) {
+    const owner = uid === 'eng1' ? 'eng1' : 'sales1';
+    const code = owner === 'eng1' ? 'E01' : 'S01';
+    const ref=doc(db(uid), 'supplyOrders/self-required-'+uid);
+    const base={type:'SALES_SELF_ORDER',ownerUid:owner,salesCode:code,
+      supplier:'Vendor',unitCost:15,qty:1,receivedQty:0,status:'ORDERED'};
+    await assertFails(setDoc(ref,{...base,supplier:''}));
+    await assertFails(setDoc(ref,{...base,supplier:'   '}));
+    await assertFails(setDoc(ref,{...base,unitCost:-1}));
+    await assertFails(setDoc(ref,{...base,unitCost:'15'}));
+    const {unitCost,...missingCost}=base;
+    await assertFails(setDoc(ref,missingCost));
+    const {supplier,...missingSupplier}=base;
+    await assertFails(setDoc(ref,missingSupplier));
+    await assertSucceeds(setDoc(ref,{...base,unitCost:0}));
+  }
+});
+
 
 test('business owner can perform only scoped fulfillment stock updates', async () => {
   await seed('inventory/p1', { onHand:10, reserved:2, productId:'p1' });

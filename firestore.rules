@@ -1073,6 +1073,17 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    // New self-orders must carry their supplier and actual unit cost.
+    // This is independent of the quick-purchase rules and does not rewrite old documents.
+    function validSelfOrderSupplyCreate() {
+      let data = request.resource.data;
+      return data.get('type', '') != 'SALES_SELF_ORDER'
+        || (data.get('supplier', '') is string
+          && data.get('supplier', '').matches('.*\\S.*')
+          && data.get('unitCost', null) is number
+          && data.get('unitCost', null) >= 0);
+    }
+
     function validQuickPurchaseCost() {
       let data = request.resource.data;
       return data.get('type', '') != 'PURCHASING_MANUAL'
@@ -1098,11 +1109,12 @@ service cloud.firestore {
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if ((admin() || purchaser()) && validQuickPurchaseCost())
-        || (businessOwner()
-          && request.resource.data.type == 'SALES_SELF_ORDER'
-          && request.resource.data.ownerUid == request.auth.uid
-          && request.resource.data.salesCode == salesCode());
+      allow create: if validSelfOrderSupplyCreate()
+        && (((admin() || purchaser()) && validQuickPurchaseCost())
+          || (businessOwner()
+            && request.resource.data.type == 'SALES_SELF_ORDER'
+            && request.resource.data.ownerUid == request.auth.uid
+            && request.resource.data.salesCode == salesCode()));
       // Sales owns the commercial intent and may create/read its own self-order,
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
