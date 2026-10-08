@@ -1695,5 +1695,57 @@
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 
 
+<style>
+/* Forecast: keep the frequent progress action visible; collapse other actions. */
+#forecastTable td.forecast-actions.forecast-actions-collapsible { grid-template-columns:repeat(2,minmax(0,1fr)) !important; align-items:start; }
+#forecastTable .forecast-more { min-width:0; position:relative; }
+#forecastTable .forecast-more > summary { display:flex; align-items:center; justify-content:center; height:44px; box-sizing:border-box; border-radius:6px; background:#636b72; color:#fff; cursor:pointer; list-style:none; user-select:none; font-size:14px; }
+#forecastTable .forecast-more > summary::-webkit-details-marker { display:none; }
+#forecastTable .forecast-more > summary::after { content:" ▾"; white-space:pre; }
+#forecastTable .forecast-more[open] > summary::after { content:" ▴"; }
+#forecastTable .forecast-more-menu { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+#forecastTable .forecast-more-menu button { width:100% !important; }
+@media (max-width:600px) { #forecastTable .forecast-more-menu button { min-height:44px; } }
+</style>
+<script>
+/* Progressive enhancement: preserve existing Forecast button handlers and permissions. */
+(function () {
+    function collapseForecastActions() {
+        document.querySelectorAll('#forecastTable td.forecast-actions:not(.forecast-actions-collapsible)').forEach(function (cell) {
+            var buttons = Array.from(cell.children).filter(function (el) { return el.tagName === 'BUTTON'; });
+            if (buttons.length < 2) return;
+            var progress = buttons.find(function (button) { return /進度/.test(button.textContent || ''); });
+            if (!progress) return;
+            var others = buttons.filter(function (button) { return button !== progress; });
+            if (!others.length) return;
+            var details = document.createElement('details');
+            details.className = 'forecast-more';
+            var summary = document.createElement('summary');
+            summary.textContent = '更多';
+            summary.setAttribute('aria-label', '展開其他 Forecast 操作');
+            var menu = document.createElement('div');
+            menu.className = 'forecast-more-menu';
+            others.forEach(function (button) { menu.appendChild(button); });
+            details.append(summary, menu);
+            progress.after(details);
+            cell.classList.add('forecast-actions-collapsible');
+        });
+    }
+    function initForecastActions() {
+        var table = document.getElementById('forecastTable');
+        if (!table) return;
+        collapseForecastActions();
+        var queued = false;
+        new MutationObserver(function () {
+            if (queued) return;
+            queued = true;
+            requestAnimationFrame(function () { queued = false; collapseForecastActions(); });
+        }).observe(table, { childList:true, subtree:true });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initForecastActions);
+    else initForecastActions();
+})();
+</script>
+
 </body>
 </html>
