@@ -1517,15 +1517,29 @@ function productBrandBrowserEntries() {
         .sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
 }
 
+function updateProductSearchControls() {
+    const selected = !!document.getElementById('productManagementSearchBrand')?.value;
+    const input = document.getElementById('productManagementSearch');
+    const button = document.getElementById('productManagementSearchBtn');
+    if (input) input.disabled = !selected;
+    if (button) button.disabled = !selected || productManagementSearchInProgress;
+}
+
+window.onProductSearchBrandChange = function() {
+    clearProductManagementSearch();
+    updateProductSearchControls();
+};
+
 window.renderProductBrandBrowser = function() {
     const container = document.getElementById('productBrandBrowserList');
-    if (!container) return;
     const searchBrand = document.getElementById('productManagementSearchBrand');
     if (searchBrand) {
         const selected = searchBrand.value;
         searchBrand.innerHTML = '<option value="">先選擇廠牌</option>' + getUnifiedBrandEntries(false).filter(entry => entry?.name && entry.active !== false).map(entry => `<option value="${escapeAttr(entry.name)}">${escapeHtml(entry.name)}</option>`).join('');
         searchBrand.value = selected;
     }
+    updateProductSearchControls();
+    if (!container) return;
     const entries = productBrandBrowserEntries();
     if (!entries.length) {
         container.innerHTML = '<span class="product-brand-browser-empty">找不到符合的廠牌。</span>';
@@ -2188,8 +2202,9 @@ window.clearProductManagementSearch = function(options = {}) {
     const button = document.getElementById('productManagementSearchBtn');
     if (input && !options.preserveInput) input.value = '';
     if (status) status.textContent = '';
-    if (body) body.innerHTML = '<tr><td colspan="10" class="empty-hint">選擇上方廠牌查看產品，或輸入貨號／品名搜尋。</td></tr>';
-    if (button) { button.disabled = false; button.textContent = '搜尋產品'; }
+    if (body) body.innerHTML = '<tr><td colspan="10" class="empty-hint">先選擇廠牌，再輸入貨號或品名，按「搜尋產品」。</td></tr>';
+    if (button) button.textContent = '搜尋產品';
+    updateProductSearchControls();
 };
 
 const productManagementSearchCache = new Map();

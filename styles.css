@@ -3476,3 +3476,11 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 #product360Content .product-360-grid { grid-template-columns: minmax(0, 1fr); }
 
 #productManagementSearchBrand { width:100%; min-width:0; padding:8px 10px; }
+
+/* One product search flow: brand, keyword, then explicit actions. */
+#product-system .product-search-toolbar { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+#product-system .product-search-brand-field,
+#product-system .product-search-toolbar #productManagementSearch { grid-column:1 / -1; }
+#product-system .product-search-brand-field { display:flex; flex-direction:column; gap:6px; font-weight:600; }
+#product-system #productManagementSearchBrand { min-height:44px; box-sizing:border-box; background:#fff; color:#243746; border:1px solid #bfcbd7; border-radius:5px; }
+#product-system .product-search-toolbar button { width:100%; min-height:44px; }

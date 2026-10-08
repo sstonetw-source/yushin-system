@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261008-7">
+        <link rel="stylesheet" href="styles.css?v=20261008-8">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -96,28 +96,15 @@
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
         <div class="toolbar no-print product-search-toolbar">
-            <select id="productManagementSearchBrand" aria-label="搜尋廠牌"><option value="">先選擇廠牌</option></select>
-            <input id="productManagementSearch" type="search" placeholder="輸入貨號、中文品名或英文品名">
-            <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋</button>
+            <label class="product-search-brand-field">廠牌<select id="productManagementSearchBrand" aria-label="搜尋廠牌" onchange="onProductSearchBrandChange()"><option value="">先選擇廠牌</option></select></label>
+            <input id="productManagementSearch" type="search" disabled placeholder="輸入貨號、中文品名或英文品名">
+            <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()" disabled>搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
         </div>
         <div class="product-search-note">先選廠牌，輸入後按「搜尋產品」才查詢；每次只檢查該廠牌 50 筆，相同搜尋會重用結果。可直接將產品加入估價單或建立訂單。</div>
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
 
         
-
-        <section id="productBrandBrowser" class="product-brand-browser no-print" aria-label="依廠牌瀏覽 Product Master">
-            <div class="product-brand-browser-head">
-                <div>
-                    <strong>依廠牌瀏覽</strong>
-                    <span>只列出「獨立統計」廠牌；其他廠牌收在「其他」。每次產品只載入 50 筆。</span>
-                </div>
-                <input type="search" id="productBrandBrowserSearch" placeholder="搜尋廠牌" oninput="renderProductBrandBrowser()">
-            </div>
-            <div id="productBrandBrowserList" class="product-brand-browser-list">
-                <span class="product-brand-browser-empty">正在載入廠牌…</span>
-            </div>
-        </section>
 
         <div id="productManagementSelectionBar" class="product-selection-bar no-print" hidden>
             <div class="product-selection-summary">
@@ -1702,97 +1689,11 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261008-9"></script>
+    <script src="app.js?v=20261008-10"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261007-2"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
-    <script>
-    (function () {
-        let otherProductBrandsExpanded = false;
 
-        function productBrandBrowserKey(value) {
-            if (typeof normalizeBrandLookupKey === 'function') return normalizeBrandLookupKey(value);
-            return String(value || '').normalize('NFKC').trim().toLocaleLowerCase();
-        }
-
-        function productBrandBrowserAllEntries() {
-            if (typeof getUnifiedBrandEntries !== 'function') return [];
-            return getUnifiedBrandEntries(false)
-                .filter(entry => entry && entry.name && entry.active !== false)
-                .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
-        }
-
-        function productBrandBrowserIndependentKeys(entries) {
-            const keys = new Set();
-            if (typeof getPrimaryBrandNames === 'function') {
-                getPrimaryBrandNames().forEach(name => {
-                    if (name) keys.add(productBrandBrowserKey(name));
-                });
-                return keys;
-            }
-            entries.forEach(entry => {
-                if (entry.isKeyBrand === true) keys.add(productBrandBrowserKey(entry.name));
-            });
-            return keys;
-        }
-
-        window.toggleOtherProductBrands = function () {
-            otherProductBrandsExpanded = !otherProductBrandsExpanded;
-            window.renderProductBrandBrowser();
-        };
-
-        window.renderProductBrandBrowser = function () {
-            const container = document.getElementById('productBrandBrowserList');
-            if (!container) return;
-
-            const query = String(document.getElementById('productBrandBrowserSearch')?.value || '')
-                .normalize('NFKC').trim().toLocaleLowerCase();
-            const entries = productBrandBrowserAllEntries();
-            const independentKeys = productBrandBrowserIndependentKeys(entries);
-            const independent = entries.filter(entry => independentKeys.has(productBrandBrowserKey(entry.name)));
-            const others = entries.filter(entry => !independentKeys.has(productBrandBrowserKey(entry.name)));
-
-            const matchesQuery = entry => !query || [entry.name, ...(entry.aliases || [])].some(name =>
-                String(name || '').normalize('NFKC').toLocaleLowerCase().includes(query)
-            );
-            const button = (entry, extraClass = '') => {
-                const active = productBrandBrowserKey(entry.name) === productBrandBrowserKey(
-                    typeof productBrandBrowseCurrent !== 'undefined' ? productBrandBrowseCurrent : ''
-                );
-                return '<button type="button" class="product-brand-button' + (active ? ' active' : '') + extraClass +
-                    '" onclick="browseProductMasterBrand(' + inlineJsValue(entry.name) + ')">' +
-                    escapeHtml(entry.name) + '</button>';
-            };
-
-            if (query) {
-                const matched = entries.filter(matchesQuery);
-                container.innerHTML = matched.length
-                    ? matched.map(entry => button(entry)).join('')
-                    : '<span class="product-brand-browser-empty">找不到符合的廠牌。</span>';
-                return;
-            }
-
-            const currentKey = productBrandBrowserKey(
-                typeof productBrandBrowseCurrent !== 'undefined' ? productBrandBrowseCurrent : ''
-            );
-            const currentIsOther = !!currentKey && others.some(entry => productBrandBrowserKey(entry.name) === currentKey);
-            let html = independent.map(entry => button(entry)).join('');
-
-            if (others.length) {
-                html += '<button type="button" class="product-brand-button' +
-                    (currentIsOther ? ' active' : '') +
-                    '" onclick="toggleOtherProductBrands()">其他' +
-                    (otherProductBrandsExpanded ? ' ▲' : ' ▼') + '</button>';
-                if (otherProductBrandsExpanded) {
-                    html += '<div class="product-brand-browser-other" style="display:contents;">' +
-                        others.map(entry => button(entry)).join('') + '</div>';
-                }
-            }
-
-            container.innerHTML = html || '<span class="product-brand-browser-empty">目前沒有可瀏覽的廠牌。</span>';
-        };
-    })();
-    </script>
 
 </body>
 </html>

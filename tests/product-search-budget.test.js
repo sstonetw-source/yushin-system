@@ -26,3 +26,14 @@ test('brand is required; input queue never reads; explicit search reads only 50 
 test('empty results are cached without rereading the database',async()=>{
  const x=setup();x.nodes.productManagementSearchBrand.value='Missing';await x.c.window.searchProductManagement();await x.c.window.searchProductManagement();assert.deepEqual(x.calls,[0]);
 });
+test('brand selector initializes without the removed browse panel and gates keyword entry',()=>{
+ const nodes={productManagementSearchBrand:{value:'',innerHTML:''},productManagementSearch:{},productManagementSearchBtn:{}};
+ const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]},productManagementSearchInProgress:false,
+  getUnifiedBrandEntries:()=>[{name:'Beckman Coulter',active:true}],escapeAttr:s=>s,escapeHtml:s=>s});
+ vm.runInContext(source.slice(source.indexOf('function updateProductSearchControls'),source.indexOf('async function ensureProductBrandBrowserLoaded')),c);
+ c.window.renderProductBrandBrowser();
+ assert.match(nodes.productManagementSearchBrand.innerHTML,/Beckman Coulter/);
+ assert.equal(nodes.productManagementSearch.disabled,true);assert.equal(nodes.productManagementSearchBtn.disabled,true);
+ nodes.productManagementSearchBrand.value='Beckman Coulter';c.updateProductSearchControls();
+ assert.equal(nodes.productManagementSearch.disabled,false);assert.equal(nodes.productManagementSearchBtn.disabled,false);
+});

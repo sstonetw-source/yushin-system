@@ -4810,29 +4810,12 @@ test('admin exposes the loaded application asset version', () => {
 });
 
 
-test('Product Master can browse products by Brand Master in 50-row pages', () => {
-    assert.match(indexSource, /id="productBrandBrowser"/);
-    assert.match(indexSource, /依廠牌瀏覽 Product Master/);
-    assert.match(appSource, /PRODUCT_BRAND_BROWSE_PAGE_SIZE = 50/);
-    assert.match(appSource, /window\.browseProductMasterBrand = async function/);
-    assert.match(appSource, /storedBrandNames = dedupeBrandsCaseInsensitive/);
-    assert.match(appSource, /where\('brandName', storedBrandNames\.length > 1 \? 'in' : '=='/);
-    assert.match(appSource, /limit\(PRODUCT_BRAND_BROWSE_PAGE_SIZE\)/);
-    assert.match(appSource, /productBrandBrowseHasMore/);
-    assert.match(indexSource, /只列出「獨立統計」廠牌；其他廠牌收在「其他」/);
-    assert.match(indexSource, /entry\.isKeyBrand === true/);
-    assert.match(indexSource, /otherProductBrandsExpanded/);
-    assert.match(indexSource, /independent\.map\(entry => button\(entry\)\)/);
-    assert.match(indexSource, /others\.map\(entry => button\(entry\)\)/);
-
-    const browseStart=appSource.indexOf('window.browseProductMasterBrand = async function(brand)');
-    const browseEnd=appSource.indexOf('\nwindow.reloadCurrentProductBrand',browseStart);
-    const browseSource=appSource.slice(browseStart,browseEnd);
-    assert.match(browseSource,/productBrandBrowseCurrent = resolveBrandName\(brand\)/);
-    assert.match(browseSource,/productManagementSourceMode = 'brand'/);
-    assert.doesNotMatch(browseSource,/productBrandBrowseCurrent = ''/);
-    assert.doesNotMatch(browseSource,/productManagementSourceMode = 'search'/);
-    assert.match(browseSource,/await fetchProductBrandBrowsePage\(true\)/);
+test('product page has a single gated brand search area', () => {
+    assert.doesNotMatch(indexSource, /id="productBrandBrowser"|otherProductBrandsExpanded|window\.renderProductBrandBrowser =/);
+    assert.match(indexSource, /id="productManagementSearchBrand"[^>]+onchange="onProductSearchBrandChange\(\)"/);
+    assert.match(indexSource, /id="productManagementSearch"[^>]+disabled/);
+    assert.match(appSource, /if \(input\) input.disabled = !selected/);
+    assert.match(appSource, /if \(button\) button.disabled = !selected \|\| productManagementSearchInProgress/);
 });
 
 test('admin can remove a pending product reminder without deleting source documents and restore it later', () => {
