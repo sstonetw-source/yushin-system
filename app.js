@@ -16995,9 +16995,10 @@ window.saveDeliveryRecord = async function() {
             const actor = deliveryActor();
             const previous = existingIndex >= 0 ? records[existingIndex] : null;
             const orderItems=normalizedOrderItems(order);
-            const requestedItemId=previous?.itemId||document.getElementById('deliveryItemId')?.value||orderItems[0]?.itemId||'item-1';
-            const targetItem=orderItems.find(item=>item.itemId===requestedItemId)||orderItems[0];
-            if(!targetItem)throw new Error('找不到送貨品項。');
+            // Select only the recorded item: never silently substitute the first item.
+            const requestedItemId=previous?.itemId||(orderItems.length===1?orderItems[0]?.itemId:document.getElementById('deliveryItemId')?.value)||'';
+            const targetItem=orderItems.find(item=>item.itemId===requestedItemId);
+            if(!targetItem)throw new Error('找不到指定送貨品項，請重新開啟訂單確認。');
             const itemOtherDelivered=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
             const itemReturned=savedReturnRecords(order).filter(r=>r.settlement!=='CLOSE'&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
             // 退貨後補送必須以「有效送貨量」驗證，而不是歷史累計送貨量。
