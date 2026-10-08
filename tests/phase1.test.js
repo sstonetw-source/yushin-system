@@ -2755,9 +2755,9 @@ test('admin maintenance reads are bounded', () => {
     const importStateStart=appSource.indexOf('async function loadExistingProductImportState');
     const importStateEnd=appSource.indexOf('async function syncImportedBrandToFormalProductMaster',importStateStart);
     const importStateSource=appSource.slice(importStateStart,importStateEnd);
-    assert.match(importStateSource,/readCollectionInBatches\('products', 500\)/);
-    assert.match(importStateSource,/readCollectionInBatches\('productCosts', 500\)/);
-    assert.match(importStateSource,/firestoreReadWithTimeout\([\s\S]*?'Product Import 產品比對'/);
+    assert.doesNotMatch(importStateSource,/readCollectionInBatches/);
+    assert.match(importStateSource,/firestoreReadWithTimeout/);
+    assert.match(importStateSource,/'Product Import 產品比對'/);
     assert.match(importStateSource,/FieldPath\.documentId\(\), 'in', ids/);
     assert.doesNotMatch(importStateSource,/Promise\.all\(chunk\.map/);
 
@@ -4150,9 +4150,9 @@ test('Product Import preserves Roche leading-zero codes and accepts large Bio-Ra
     assert.match(appSource, /function isProductImportPlaceholderCode\(value\)/);
     assert.match(appSource, /not available\/custom item/);
     assert.match(appSource, /skippedPlaceholderRows \+= 1/);
-    assert.match(appSource, /const LARGE_PRODUCT_IMPORT_COMPARE_THRESHOLD = 1000/);
-    assert.match(appSource, /readCollectionInBatches\('products', 500\)/);
-    assert.match(appSource, /readCollectionInBatches\('productCosts', 500\)/);
+    assert.doesNotMatch(appSource, /const LARGE_PRODUCT_IMPORT_COMPARE_THRESHOLD/);
+    assert.doesNotMatch(appSource, /readCollectionInBatches\('products', 500\)/);
+    assert.doesNotMatch(appSource, /readCollectionInBatches\('productCosts', 500\)/);
     const confirmStart = appSource.indexOf('async function confirmProductMasterImport');
     const confirmEnd = appSource.indexOf('\n\nfunction isProductImportPlaceholderCode', confirmStart);
     const confirmSource = appSource.slice(confirmStart, confirmEnd);

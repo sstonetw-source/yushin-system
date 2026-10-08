@@ -11024,24 +11024,7 @@ function refreshPurchasingOrderCache(reset = true, options = {}) {
     return purchasingOrderRefreshPromise;
 }
 
-const receivingSupplyViewVersions = new Map();
-function syncReceivingSupplyViews(docs = []) {
-    if (!canCreatePurchaseOrderCapability() || !permissionRulesReady) return;
-    const uid=currentUser?.uid,role=currentUserRole;
-    const queue=docs.filter(doc=>!receivingSupplyViewVersions.has(doc.id)||receivingSupplyViewVersions.get(doc.id)!==doc.data().updatedAt);
-    (async()=>{
-        for(let i=0;i<queue.length;i+=5){
-            if(uid!==currentUser?.uid||role!==currentUserRole)return;
-            await Promise.all(queue.slice(i,i+5).map(async doc=>{
-                try{
-                    await db.collection('receivingSupplyOrders').doc(doc.id).set(globalThis.YushinStockPermissions.sanitizeSupply(doc.data()));
-                    receivingSupplyViewVersions.set(doc.id,doc.data().updatedAt);
-                }catch(err){console.warn('收貨資料檢視同步失敗',doc.id,err);}
-            }));
-        }
-    })();
-}
-
+// 倉管供應檢視由 stock-permissions 在供應異動交易中同步；讀取頁面不寫資料。
 async function loadActiveReceivingSupplyCache(reset = true) {
     if (!canAccessPage('orders.po') && !(canAccessPage('inventory') && canReceiveInventoryCapability())) return [];
     if (activeReceivingSupplyLoadPromise) return activeReceivingSupplyLoadPromise;
@@ -11057,7 +11040,6 @@ async function loadActiveReceivingSupplyCache(reset = true) {
                 .limit(200);
             if (cursor) query = query.startAfter(cursor);
             const snapshot = await firestoreReadWithTimeout(query.get(), '待到貨供應');
-            syncReceivingSupplyViews(snapshot.docs);
             snapshot.docs.forEach(doc => records.set(doc.id, { id:doc.id, ...doc.data() }));
             if (snapshot.size < 200) break;
             cursor = snapshot.docs[snapshot.docs.length - 1];
@@ -22795,7 +22777,7 @@ function productImportValueEqual(field, currentValue, nextValue) {
     return String(currentValue ?? '') === String(nextValue ?? '');
 }
 
-const LARGE_PRODUCT_IMPORT_COMPARE_THRESHOLD = 1000;
+// 只核對本次匯入的文件；正式儲存仍重新讀取，避免沿用過期預覽。
 
 async function loadExistingProductImportState(productIds = [], costProductIds = []) {
     const uniqueProductIds = [...new Set((productIds || []).map(id => String(id || '').trim()).filter(Boolean))];
@@ -22803,36 +22785,23 @@ async function loadExistingProductImportState(productIds = [], costProductIds = 
     const existingProducts = new Map();
     const existingCosts = new Map();
 
-    if (uniqueProductIds.length >= LARGE_PRODUCT_IMPORT_COMPARE_THRESHOLD) {
-        // Large brand files (for example Bio-Rad with tens of thousands of rows) must not
-        // perform one Firestore "in" query per 10 products. Current master data is finite,
-        // so scan products/costs in 500-row pages once and compare locally.
-        const [productRows, costRows] = await Promise.all([
-            readCollectionInBatches('products', 500),
-            uniqueCostProductIds.length ? readCollectionInBatches('productCosts', 500) : Promise.resolve([])
-        ]);
-        const productIdSet = new Set(uniqueProductIds);
-        const costIdSet = new Set(uniqueCostProductIds);
-        productRows.forEach(row => { if (productIdSet.has(row.id)) existingProducts.set(row.id, row); });
-        costRows.forEach(row => { if (costIdSet.has(row.id)) existingCosts.set(row.id, row); });
-        return { existingProducts, existingCosts };
-    }
-
-    for (let i = 0; i < uniqueProductIds.length; i += 10) {
-        const ids = uniqueProductIds.slice(i, i + 10);
-        const snapshot = await firestoreReadWithTimeout(
-            db.collection('products').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
-            'Product Import 產品比對'
-        );
-        snapshot.docs.forEach(doc => existingProducts.set(doc.id, doc.data() || {}));
-    }
-    for (let i = 0; i < uniqueCostProductIds.length; i += 10) {
-        const ids = uniqueCostProductIds.slice(i, i + 10);
-        const snapshot = await firestoreReadWithTimeout(
-            db.collection('productCosts').where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
-            'Product Import 成本比對'
-        );
-        snapshot.docs.forEach(doc => existingCosts.set(doc.id, doc.data() || {}));
+    // 每次最多四個查詢，每個查詢最多 30 個指定 ID，避免大量檔案串行等待或無限制併發。
+    for (const [collectionName, requestedIds, target, label] of [
+        ['products', uniqueProductIds, existingProducts, 'Product Import 產品比對'],
+        ['productCosts', uniqueCostProductIds, existingCosts, 'Product Import 成本比對']
+    ]) {
+        for (let offset = 0; offset < requestedIds.length; offset += 120) {
+            const queries = [];
+            for (let i = offset; i < Math.min(offset + 120, requestedIds.length); i += 30) {
+                const ids = requestedIds.slice(i, i + 30);
+                queries.push(firestoreReadWithTimeout(
+                    db.collection(collectionName).where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
+                    label
+                ));
+            }
+            const results = await Promise.all(queries);
+            results.forEach(snapshot => snapshot.docs.forEach(doc => target.set(doc.id, doc.data() || {})));
+        }
     }
     return { existingProducts, existingCosts };
 }
@@ -22874,7 +22843,7 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
             if (Object.keys(changed).length) productPatch = { ...changed, updatedAt:now, updatedBy };
         }
 
-        if (activeProductImportBatch) productPatch = { ...(productPatch || {}), lastImportBatch:activeProductImportBatch.id, lastImportFile:activeProductImportBatch.file, lastImportedAt:activeProductImportBatch.date };
+        if (activeProductImportBatch && productPatch) productPatch = { ...(productPatch || {}), lastImportBatch:activeProductImportBatch.id, lastImportFile:activeProductImportBatch.file, lastImportedAt:activeProductImportBatch.date };
         let costPatch = null;
         if (item.standardCostProvided === true) {
             const standardCost = Number(item.standardCost);
