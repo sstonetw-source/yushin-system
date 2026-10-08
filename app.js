@@ -2042,17 +2042,7 @@ function renderProduct360(product, inventory, warehouseDocs, demands, quotes, or
         ? warehouseRows.map(row => `<div class="product-360-warehouse"><strong>${escapeHtml(row.warehouseName)}</strong><span>現有 ${row.onHand}　占用 ${row.reserved}　可用 ${row.available}　在途 ${row.incoming}　預計 ${inventoryProjectedStock(row)}</span></div>`).join('')
         : '<div class="product-360-empty">目前沒有分倉庫存。</div>';
 
-    const quickActions = [
-        canEditPage('quote.create') && product.active !== false && product.status !== 'INACTIVE'
-            ? `<button type="button" onclick="closeProduct360();addProductManagementToQuote(${inlineJsValue(id)})">加入估價單</button>` : '',
-        canEditPage('orders.list') && product.active !== false && product.status !== 'INACTIVE'
-            ? `<button type="button" class="btn-secondary" onclick="closeProduct360();addProductManagementToOrder(${inlineJsValue(id)})">建立訂單</button>` : ''
-        ,canEditPage('orders.po') && product.active !== false && product.status !== 'INACTIVE'
-            ? `<button type="button" class="btn-secondary" onclick="closeProduct360();addProductManagementToPurchase(${inlineJsValue(id)})">加入採購單</button>` : ''
-    ].filter(Boolean).join('');
-
     content.innerHTML = `
-      <div class="product-360-actions">${quickActions}</div>
       <div class="product-360-grid">
         <section class="product-360-card">
           <h4>基本資料</h4>

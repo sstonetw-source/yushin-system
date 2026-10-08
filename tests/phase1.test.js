@@ -4919,8 +4919,9 @@ test('sales can use Product Master for quote and order while Product Master itse
     const rowSource=appSource.slice(rowStart,rowEnd);
     assert.match(rowSource,/canQuote = !inactive && canEditPage\('quote\.create'\)/);
     assert.match(rowSource,/canOrder = !inactive && canEditPage\('orders\.list'\)/);
-    assert.match(rowSource,/加入估價單/);
-    assert.match(rowSource,/建立訂單/);
+    assert.doesNotMatch(rowSource, /product-360-actions/);
+    assert.match(indexSource, /id="productManagementBatchQuoteBtn"[^>]*onclick="addProductManagementSelectionToQuote\(\)"/);
+    assert.match(indexSource, /id="productManagementBatchOrderBtn"[^>]*onclick="addProductManagementSelectionToOrder\(\)"/);
     assert.match(appSource,/Product Master 僅可查看；您可以把產品加入估價單或建立訂單/);
 });
 
