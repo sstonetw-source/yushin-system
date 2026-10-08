@@ -2119,12 +2119,14 @@ test('formal purchase document derives ordered progress from supplyOrders only',
 });
 
 
-test('V2 order history presents derived purchase and fulfillment progress instead of legacy ordered/arrived truth', () => {
+test('order history shows audit events without redundant purchase and fulfillment summaries', () => {
     const start = appSource.indexOf('function renderOrderStatusHistory');
     const end = appSource.indexOf('async function applyInventoryDeliveryDeltaInTransaction', start);
     const source = appSource.slice(start, end);
-    assert.match(source, /purchaseProgressInfo\(order\)/);
-    assert.match(source, /fulfillmentProgressInfo\(order\)/);
+    assert.doesNotMatch(source, /purchaseProgressInfo\(order\)/);
+    assert.doesNotMatch(source, /fulfillmentProgressInfo\(order\)/);
+    assert.match(source, /orderEvents/);
+    assert.match(source, /receiptEvents/);
     assert.doesNotMatch(source, /\['isOrdered', '訂貨'\], \['isArrived', '到貨'\]/);
 });
 

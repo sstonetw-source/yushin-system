@@ -16103,11 +16103,12 @@ function dateInUnifiedPeriod(value, key = 'this-year') {
 }
 
 let orderProgressHistoryExpanded = false;
+let currentOrderHistoryId = null;
 let orderLifecycleFormOpen = false;
 let orderReturnFormOpen = false;
 window.selectOrderProgressTab = function(tab) {
-    if (!['delivery', 'returns', 'history'].includes(tab)) return;
-    ['delivery', 'returns', 'history'].forEach(name => {
+    if (!['delivery', 'returns'].includes(tab)) return;
+    ['delivery', 'returns'].forEach(name => {
         document.getElementById(`orderProgressPanel-${name}`).hidden = name !== tab;
         const button = document.getElementById(`orderProgressTab-${name}`);
         button.setAttribute('aria-selected', String(name === tab));
@@ -16115,7 +16116,7 @@ window.selectOrderProgressTab = function(tab) {
 };
 window.showAllOrderProgressHistory = function() {
     orderProgressHistoryExpanded = true;
-    const order = ordersCache.find(o => o.id === currentDeliveryOrderId);
+    const order = ordersCache.find(o => o.id === currentOrderHistoryId);
     if (order) renderOrderStatusHistory(order);
 };
 function labelOrderProgressRecords(bodyId, labels) {
@@ -16464,20 +16465,22 @@ window.openReturnManagement = function(orderId) {
 };
 
 window.openOrderStatusHistory = function(orderId) {
-    openDeliveryModal(orderId);
-    selectOrderProgressTab('history');
-    document.getElementById('orderStatusHistorySection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const order = ordersCache.find(item => item.id === orderId);
+    if (!order) return;
+    currentOrderHistoryId = orderId;
+    orderProgressHistoryExpanded = false;
+    document.getElementById('orderHistoryModalTitle').innerText = `操作紀錄：${order.orderNo || order.customerName || '訂單'}`;
+    renderOrderStatusHistory(order);
+    document.getElementById('orderHistoryModalOverlay').classList.add('active');
+};
+window.closeOrderStatusHistory = function() {
+    currentOrderHistoryId = null;
+    document.getElementById('orderHistoryModalOverlay').classList.remove('active');
 };
 
 function renderOrderStatusHistory(order) {
     const tbody = document.getElementById('orderStatusHistoryBody');
     if (!tbody) return;
-    const orderedBy = document.getElementById('orderStatusOrderedBy');
-    if (orderedBy) {
-        const purchase = purchaseProgressInfo(order);
-        const fulfillment = fulfillmentProgressInfo(order);
-        orderedBy.innerText = `採購：${purchase.label}｜履約：${fulfillment.label}`;
-    }
     const entries = [];
     const createdAt=order.createdAt||order.orderDate||'';
     if(createdAt){
@@ -16909,7 +16912,6 @@ function renderDeliveryModal() {
     }else{
         const select=document.getElementById('deliveryItemId');if(select)select.style.display='none';
     }
-    renderOrderStatusHistory(order);
 
     const tbody = document.getElementById('deliveryRecordsBody');
     const partialButton = document.getElementById('openPartialDeliveryBtn');
