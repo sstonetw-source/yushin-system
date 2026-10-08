@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261007-2">
+        <link rel="stylesheet" href="styles.css?v=20261008-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -671,15 +671,20 @@
             </div>
         </div>
 
-        <div class="no-print quote-primary-actions" style="text-align: center; margin-top: 25px;">
-            <button id="printBtn" style="background: #003366; font-size: 16px; padding: 10px 24px;">📄 匯出 PDF（自動同步雲端）</button>
-            <button type="button" id="decisionPriceAnalysisBtn" class="btn-secondary" style="background:#003366;font-size:16px;padding:10px 24px;" onclick="exportDecisionPriceAnalysisPdf()">📊 建立決標單價分析表</button>
-            <button type="button" onclick="openThreeQuoteDialog()" style="background:#2e7d32;font-size:16px;padding:10px 24px;">產生三家估價單</button>
-            <button type="button" class="btn-secondary" style="font-size: 16px; padding: 10px 24px;" onclick="startNextQuote()">📝 製作下一張估價單</button>
-        </div>
-        <div class="document-download-settings no-print">
-            <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('quote')">設定下載資料夾</button>
-            <span data-download-folder="quote" role="status">使用瀏覽器預設下載</span>
+        <div class="no-print quote-primary-actions">
+            <button type="button" id="printBtn">匯出 PDF</button>
+            <button type="button" class="btn-secondary" onclick="startNextQuote()">下一張估價單</button>
+            <details class="quote-more-actions">
+                <summary>更多功能</summary>
+                <div class="quote-more-menu">
+                    <button type="button" id="decisionPriceAnalysisBtn" class="btn-secondary" onclick="exportDecisionPriceAnalysisPdf()">建立決標單價分析表</button>
+                    <button type="button" class="btn-secondary" onclick="openThreeQuoteDialog()">產生三家估價單</button>
+                    <div class="document-download-settings">
+                        <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('quote')">設定下載資料夾</button>
+                        <span data-download-folder="quote" role="status">使用瀏覽器預設下載</span>
+                    </div>
+                </div>
+            </details>
         </div>
         <div id="quoteOutputStatus" class="quote-output-status no-print" style="display:none;"></div>
         </div> <!-- /#quoteCreatePanel -->

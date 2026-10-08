@@ -3368,3 +3368,53 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 }
 
 .product-selection-actions button[hidden], #pmEditCostField[hidden] { display:none !important; }
+
+/* 估價單完成後的三個主要操作，桌機與手機維持同一列。 */
+.quote-primary-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 8px;
+    margin-top: 25px;
+    width: 100%;
+}
+.quote-primary-actions > button,
+.quote-more-actions > summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 52px;
+    height: 100%;
+    margin: 0;
+    padding: 10px 6px !important;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 14px !important;
+    line-height: 1.35;
+    text-align: center;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.quote-primary-actions > #printBtn { background: #003366; color: white; }
+.quote-more-actions { position: relative; min-width: 0; }
+.quote-more-actions > summary { list-style: none; background: #546e7a; color: white; }
+.quote-more-actions > summary::-webkit-details-marker { display: none; }
+.quote-more-actions > summary:focus-visible { outline: 3px solid #90caf9; outline-offset: 2px; }
+.quote-more-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 20;
+    width: min(280px, 80vw);
+    padding: 12px;
+    box-sizing: border-box;
+    border: 1px solid #d5e1ec;
+    border-radius: 8px;
+    background: white;
+    box-shadow: 0 4px 16px #0002;
+}
+.quote-more-menu button { width: 100%; min-height: 44px; margin: 0 0 8px; white-space: normal; }
+.quote-more-menu .document-download-settings { margin: 0; }
