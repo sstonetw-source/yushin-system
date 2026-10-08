@@ -10755,7 +10755,7 @@ window.renderOrdersList = function() {
     const canManageOrderLifecycle = canManageOrderLifecycleCapability();
     const canConfirmOrderDelivery = canManageOrderLifecycle;
     const costHeader = document.getElementById('orderCostHeader');
-    if (costHeader) costHeader.style.display = canManageOrderOps ? '' : 'none';
+    if (costHeader) costHeader.style.display = '';
 
     const selectableBrands = populatePurchaserOrderFilters() || [];
     const salesFilter = document.getElementById('orderSalesFilter')?.value || '';
@@ -10833,14 +10833,20 @@ window.renderOrdersList = function() {
         }
         bindListRowSelection(tr);
         tr.innerHTML = `
-            <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
-            <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
-            <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
+            <td class="order-date-cell" data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
+            <td class="order-customer-cell" data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
+            <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
             <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂購 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂購 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
-            <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
+            <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
+            <td class="order-details-cell">
+                <div class="order-text-summary">${escapeHtml([o.transactionType ? `交易：${o.transactionType}` : '', o.invoiceTitle || '', o.isBilled && orderInvoiceDate(o) ? `開票／收款日：${orderInvoiceDate(o)}` : '', o.remarks || ''].filter(Boolean).join('・'))}</div>
+                <details class="order-detail-panel">
+                    <summary>查看明細${canEditOrders ? '／編輯' : ''}</summary>
+                    <div class="order-detail-content">
+                        <div class="order-item-prices">${allOrderItems.map(item => `<div>${escapeHtml(item.itemName || item.itemCode || '品項')}：NT$ ${escapeHtml(Number(item.unitPrice || 0).toLocaleString())} × ${escapeHtml(Number(item.orderedQty || item.qty || 0))}</div>`).join('')}</div>
             ${canManageOrderOps ? `
-            <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
-            <td data-th="交易資訊" class="order-transaction-cell">
+            <div class="no-print order-cost-profit-cell"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></div>` : ''}
+            <div class="order-transaction-cell"><label>交易資訊</label>
                 <select onchange="updateOrderField('${o.id}','transactionType',this.value)">
                     <option value="" ${!o.transactionType ? 'selected' : ''}>未選擇</option>
                     <option value="直" ${o.transactionType === '直' ? 'selected' : ''}>直</option>
@@ -10849,8 +10855,11 @@ window.renderOrdersList = function() {
                 </select>
                 ${o.transactionType === '直' ? `<input type="text" aria-label="發票抬頭" placeholder="發票抬頭" value="${escapeAttr(o.invoiceTitle || '')}" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)">` : ''}
                 ${o.isBilled ? `<label class="order-invoice-date-label">開票／收款日<input type="date" aria-label="開發票及收款日期" value="${escapeAttr(orderInvoiceDate(o))}" onchange="updateOrderInvoiceDate('${o.id}',this.value)"></label>` : ''}
+            </div>
+            <label class="order-remarks-editor">備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
+                    </div>
+                </details>
             </td>
-            <td data-th="備註"><input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></td>
             <td class="no-print" data-th="操作">
                 ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
@@ -10872,7 +10881,7 @@ window.renderOrdersList = function() {
             </td>
         `;
         if (!canEditOrders) {
-            tr.querySelectorAll('.order-transaction-cell select, .order-transaction-cell input, td[data-th="備註"] input').forEach(control => {
+            tr.querySelectorAll('.order-transaction-cell select, .order-transaction-cell input, .order-remarks-editor input').forEach(control => {
                 control.disabled = true;
                 control.setAttribute('aria-readonly', 'true');
             });

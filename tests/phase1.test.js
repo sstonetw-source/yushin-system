@@ -2925,7 +2925,7 @@ test('read-only order roles see non-editable row controls', () => {
     assert.match(source,/const canEditOrders = canEditPage\('orders\.list'\)/);
     assert.match(source,/if \(!canEditOrders\)/);
     assert.match(source,/order-transaction-cell select, \.order-transaction-cell input/);
-    assert.match(source,/td\[data-th="備註"\] input/);
+    assert.match(source,/\.order-remarks-editor input/);
     assert.match(source,/control\.disabled = true/);
     assert.match(source,/openOrderStatusHistory/);
     assert.match(source,/button\.remove\(\)/);

@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261008-10">
+        <link rel="stylesheet" href="styles.css?v=20261008-19">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -873,10 +873,8 @@
             <th>客戶名稱</th>
             <th>負責業務</th> <!-- 新增 -->
             <th>產品資訊</th>
-            <th>售價</th>
-            <th class="no-print" id="orderCostHeader" style="display:none;">成本／毛利</th>
-            <th>交易資訊</th>
-            <th>備註</th> <!-- 新增 -->
+            <th>訂單總額</th>
+            <th id="orderCostHeader">明細</th>
             <th class="no-print">操作</th>
                 </tr>
             </thead>
@@ -1693,7 +1691,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261008-18"></script>
+    <script src="app.js?v=20261008-19"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261007-2"></script>
