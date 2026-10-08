@@ -144,27 +144,33 @@ test('purchase summary is independent of the paged demand detail cache',async()=
  c.procurementDemandCache.push({id:'second'});assert.equal(vm.runInContext('purchaseDemandSummaryRows.length',c),75);
 });
 
-test('purchase history hides cancellation for fully received orders and checks every item',()=>{
- const rendered=[];
- const controls={poListBody:{appendChild:fragment=>rendered.push(...fragment.rows)},poListSearch:{value:''}};
- const c=context({purchasingView:'history',poHistorySearchActive:false,poListCache:[],companyData:{},
-  document:{getElementById:id=>controls[id],createDocumentFragment:()=>({rows:[],appendChild(row){this.rows.push(row);}}),createElement:()=>({innerHTML:''})},
-  purchaseFilterContext:()=>({}),purchaseItemsFromSavedPo:po=>po.items,purchaseOrderSupplierContact:()=>({}),
-  isPurchaseTerminalStatus:status=>['CLOSED','CANCELLED'].includes(status),purchaseLineMatchesFilters:()=>true,
-  purchaseHistoryItemReceiptProgress:(po,index)=>({remainingQty:po.items[index].remainingQty,label:'progress'}),
-  canCreatePurchaseOrderCapability:()=>true,purchaseOrderDocumentStatusLabel:()=>'',poWaitingDays:()=>0,
-  escapeHtml:x=>x,inlineJsValue:x=>JSON.stringify(x),localDateString:()=> '2026-10-04'});
- vm.runInContext(section('window.renderPoList = function(', '\n// 把「採購訂單」'),c);
- function render(items,status='ORDERED',allowed=true){
-  rendered.length=0;c.canCreatePurchaseOrderCapability=()=>allowed;c.poListCache=[{id:'PO1',status,items:items.map(remainingQty=>({qty:1,remainingQty,unitPrice:10}))}];c.renderPoList();return rendered.map(row=>row.innerHTML).join('');
+test('loaded purchase hides cancellation for fully received orders and checks every item',()=>{
+ const controls=new Map();
+ const node=id=>{if(!controls.has(id))controls.set(id,{style:{},classList:{toggle(){}},value:'',innerText:''});return controls.get(id);};
+ const c=context({poEditingId:'PO1',poDirectStockMode:false,poSaveInProgress:false,poListCache:[],
+  document:{getElementById:node},getUnifiedBrandNames:()=>[],escapeAttr:x=>x,
+  purchaseItemsFromSavedPo:po=>po.items,purchaseOrderSupplierContact:()=>({}),
+  isPurchaseTerminalStatus:status=>['CLOSED','CANCELLED'].includes(status),
+  purchaseHistoryItemReceiptProgress:(po,index)=>({remainingQty:po.items[index].remainingQty}),
+  canCreatePurchaseOrderCapability:()=>true,canEditPage:()=>true,updatePoSaveButton(){}
+ });
+ vm.runInContext(section('function updatePoModeUI()', '\nfunction clearPoExpectedDate'),c);
+ function cancellationVisible(items,status='ORDERED',allowed=true){
+  c.canCreatePurchaseOrderCapability=()=>allowed;c.poListCache=[{id:'PO1',status,items:items.map(remainingQty=>({remainingQty}))}];
+  c.updatePoModeUI();return node('poCancelOutstandingBtn').style.display!=='none';
  }
- assert.doesNotMatch(render([0]),/cancelPurchaseOrderOutstanding/);
- assert.match(render([1]),/取消剩餘未到貨數量/);
- assert.match(render([0,1]),/取消剩餘未到貨數量/);
- assert.doesNotMatch(render([0,0]),/cancelPurchaseOrderOutstanding/);
- assert.doesNotMatch(render([1],'CLOSED'),/cancelPurchaseOrderOutstanding/);
- assert.doesNotMatch(render([1],'CANCELLED'),/cancelPurchaseOrderOutstanding/);
- assert.doesNotMatch(render([1],'ORDERED',false),/cancelPurchaseOrderOutstanding/);
+ assert.equal(cancellationVisible([0]),false);
+ assert.equal(cancellationVisible([1]),true);
+ assert.equal(cancellationVisible([0,1]),true);
+ assert.equal(cancellationVisible([0,0]),false);
+ assert.equal(cancellationVisible([1],'CLOSED'),false);
+ assert.equal(cancellationVisible([1],'CANCELLED'),false);
+ assert.equal(cancellationVisible([1],'ORDERED',false),false);
+ c.canCreatePurchaseOrderCapability=()=>true;c.canEditPage=()=>false;
+ assert.equal(cancellationVisible([1]),false);
+ c.poEditingId=null;c.updatePoModeUI();
+ assert.equal(node('poViewHistoryBtn').style.display,'none');
+ assert.equal(node('poCancelOutstandingBtn').style.display,'none');
 });
 
 test('download settings keep folder selection without the default-download reset button',()=>{

@@ -12,6 +12,92 @@ const demand = require('../modules/procurement-demand-core.js');
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+
+function purchaseCopyHarness({allowed = true, editable = true, saving = false, searchOnly = false} = {}) {
+    const original = {
+        id: 'old-po', company: 'yushin', vendorName: '廠商甲', poDate: '2026-09-01', expectedDate: '2026-09-20',
+        purchaseType: 'order', status: 'ORDERED', supplyOrderIds: ['old-supply'],
+        items: [{itemName: '試劑', itemCode: 'A123', productId: 'product-1', brand: 'Brand', brandId: 'brand-1',
+            qty: 5, unitPrice: 120, warehouseId: 'warehouse-1', supplier: '廠商甲',
+            orderId: 'customer-order', itemId: 'old-item', sourceType: 'SALES_ORDER', sourceId: 'old-source',
+            demandId: 'old-demand', supplyOrderId: 'old-supply', receivedQty: 5, cancelledQty: 1,
+            fulfillmentType: 'DIRECT_SHIP', purchaseDocumentNo: 'old-number'}]
+    };
+    const nodes = new Map();
+    const getNode = id => {
+        if (!nodes.has(id)) nodes.set(id, {value: '', innerText: '', active: false,
+            classList: {add: () => {getNode(id).active = true;}}});
+        return nodes.get(id);
+    };
+    getNode('poExpectedDate').value = original.expectedDate;
+    let finishNumber;
+    const numberPromise = new Promise(resolve => {finishNumber = resolve;});
+    const context = {
+        window: {}, poSaveInProgress: saving,
+        canCreatePurchaseOrderCapability: () => allowed, canEditPage: () => editable,
+        poListCache: searchOnly ? [] : [original], poHistorySearchResults: searchOnly ? [original] : [],
+        purchaseItemsFromSavedPo: po => po.items,
+        poDirectStockOpenGeneration: 0, poDirectStockMode: false, poEditingId: original.id, poIncomingSyncPending: true,
+        defaultWarehouse: () => ({id: 'default-warehouse'}),
+        populatePoVendorSuggestions() {}, switchPoCompany() {}, renderPoItemsTable() {}, updatePoModeUI() {},
+        currentUserName: '採購乙', currentUser: {}, localDateString: () => '2026-10-08',
+        clearPoExpectedDate: () => {getNode('poExpectedDate').value = '';},
+        generatePoNo: () => numberPromise,
+        updatePoSaveStatus: text => {getNode('status').innerText = text;},
+        document: {getElementById: getNode}, alert: message => {throw new Error(message);}
+    };
+    const emptyStart = app.indexOf('function emptyDirectPoItem()');
+    const emptyEnd = app.indexOf('\nwindow.addDirectPoItem', emptyStart);
+    const copyStart = app.indexOf('window.copySavedPurchaseOrderAsNew = async function');
+    const copyEnd = app.indexOf('\nwindow.exportPurchaseOrderFromHistory', copyStart);
+    vm.runInNewContext(app.slice(emptyStart, emptyEnd) + '\n' + app.slice(copyStart, copyEnd), context);
+    return {context, original, getNode, finishNumber};
+}
+
+test('copying a customer-linked PO prepares independent inventory procurement without changing the original', async () => {
+    const {context, original, getNode, finishNumber} = purchaseCopyHarness({searchOnly: true});
+    const before = JSON.stringify(original);
+    const pending = context.window.copySavedPurchaseOrderAsNew(original.id);
+    // The editable form is visible even while the read-only number lookup is pending.
+    assert.equal(getNode('poModalOverlay').active, true);
+    assert.equal(context.poEditingId, null);
+    assert.equal(context.poIncomingSyncPending, false);
+    const line = context.poItems[0];
+    assert.equal(line.productId, 'product-1');
+    assert.equal(line.qty, 5);
+    assert.equal(line.unitPrice, 120);
+    assert.equal(line.sourceType, 'STOCK_REPLENISHMENT');
+    assert.equal(line.orderId, '');
+    assert.notEqual(line.sourceId, 'old-source');
+    assert.equal(line.fulfillmentType, 'WAREHOUSE');
+    assert.equal(line.warehouseId, 'warehouse-1');
+    for (const field of ['demandId', 'supplyOrderId', 'receivedQty', 'cancelledQty', 'purchaseDocumentNo', 'itemId']) {
+        assert.equal(line[field], undefined, `${field} must not follow the copied product`);
+    }
+    assert.equal(getNode('poVendorName').value, '廠商甲');
+    assert.equal(getNode('poDate').value, '2026-10-08');
+    assert.equal(getNode('poExpectedDate').value, '');
+    assert.equal(getNode('poBuyerName').innerText, '採購乙');
+    context.poItems[0].qty = 2;
+    assert.equal(JSON.stringify(original), before);
+    getNode('poModalOverlay').active = false;
+    finishNumber();
+    await pending;
+    assert.equal(getNode('poModalOverlay').active, false, 'a late number lookup must not reopen the form');
+    const firstSource = line.sourceId;
+    await context.window.copySavedPurchaseOrderAsNew(original.id);
+    assert.notEqual(context.poItems[0].sourceId, firstSource, 'each copy must have its own procurement demand');
+});
+
+test('copying a PO respects creation permission, page permission, and an active save', async () => {
+    for (const options of [{allowed: false}, {editable: false}, {saving: true}]) {
+        const {context, original, getNode} = purchaseCopyHarness(options);
+        await context.window.copySavedPurchaseOrderAsNew(original.id);
+        assert.equal(context.poEditingId, original.id);
+        assert.equal(getNode('poModalOverlay').active, false);
+        assert.equal(context.poItems, undefined);
+    }
+});
 const validationStart = app.indexOf('function assertPurchaseLinesAvailable(order, lines) {');
 const validationEnd = app.indexOf('\n}\n\nfunction poPdfFileName', validationStart) + 2;
 const validation = validationStart >= 0 && validationEnd > validationStart ? app.slice(validationStart, validationEnd) : '';
@@ -2127,7 +2213,9 @@ test('purchase history exposes a read-only ERP-style purchase timeline', () => {
     const renderStart=app.indexOf('window.renderPoList = function');
     const renderEnd=app.indexOf('\n// 把「採購訂單」',renderStart);
     const renderSource=app.slice(renderStart,renderEnd);
-    assert.match(renderSource,/openPurchaseOrderTimeline/);
+    assert.match(renderSource,/copySavedPurchaseOrderAsNew/);
+    assert.doesNotMatch(renderSource,/openPurchaseOrderTimeline|exportPurchaseOrderFromHistory|<details/);
+    assert.match(html,/id="poViewHistoryBtn"[^>]+onclick="openPurchaseOrderTimeline\(poEditingId\)"/);
 
     const start=app.indexOf('window.openPurchaseOrderTimeline = async function');
     const end=app.indexOf('\nfunction purchaseOrderSearchTokens',start);

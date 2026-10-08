@@ -13452,9 +13452,6 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         const companyLabel = companyInfo ? `${companyInfo.title}（${companyInfo.prefix}）` : (po.company || '');
         const supplierContact = purchaseOrderSupplierContact(po);
 
-        const poTerminal=isPurchaseTerminalStatus(po.status);
-        const poHasOutstanding = !poTerminal && items.some((_, index) =>
-            Number(purchaseHistoryItemReceiptProgress(po, index).remainingQty) > 0);
         items.forEach((item,itemIndex)=>{
             const ordered=Math.max(0,Number(item.qty||0));
             if (!purchaseLineMatchesFilters(po.poDate, item.salesName, item.brand, filters)) return;
@@ -13477,16 +13474,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="操作" class="no-print">${itemIndex===0?`
                     <div class="po-list-action-row">
                         <button type="button" class="btn-small" onclick="reprintPurchaseOrder(${inlineJsValue(po.id)})">載入</button>
-                        <button type="button" class="btn-small btn-secondary" onclick="exportPurchaseOrderFromHistory(${inlineJsValue(po.id)})">PDF</button>
-                        <button type="button" class="btn-small btn-secondary" onclick="openPurchaseOrderTimeline(${inlineJsValue(po.id)})">追蹤</button>
-                        <details class="po-more-menu">
-                            <summary class="btn-small btn-secondary">更多</summary>
-                            <div class="po-more-menu-popover">
-                                ${(po.purchaseType==='stock'||items.every(line=>!line.orderId))?`<button type="button" onclick="copySavedPurchaseOrderAsNew(${inlineJsValue(po.id)})">複製成新採購單</button>`:''}
-                                <button type="button" onclick="reprintPurchaseOrder(${inlineJsValue(po.id)})">查看正式內容</button>
-                                ${canCreatePurchaseOrderCapability()&&poHasOutstanding?`<button type="button" class="danger-menu-item" onclick="cancelPurchaseOrderOutstanding(${inlineJsValue(po.id)})">取消剩餘未到貨數量</button>`:''}
-                            </div>
-                        </details>
+                        ${canCreatePurchaseOrderCapability() && canEditPage('orders.po') ? `<button type="button" class="btn-small btn-secondary" onclick="copySavedPurchaseOrderAsNew(${inlineJsValue(po.id)})">複製新採購</button>` : ''}
                     </div>`:'—'}</td>
             `;
             fragment.appendChild(tr);
@@ -13524,7 +13512,8 @@ window.reprintPurchaseOrder = async function(poId) {
     poNoGeneration++;
     poNoLoading = false;
     poNoReady = true;
-    const po = poListCache.find(p => p.id === poId);
+    const po = poListCache.find(p => p.id === poId) || poHistorySearchResults.find(p => p.id === poId);
+    if (po && !poListCache.some(p => p.id === poId)) poListCache.push(po);
     if (!po) return;
 
     populatePoVendorSuggestions();
@@ -13572,27 +13561,34 @@ window.reprintPurchaseOrder = async function(poId) {
 };
 
 window.copySavedPurchaseOrderAsNew = async function(poId) {
-    const po = poListCache.find(item => item.id === poId);
+    if (poSaveInProgress || !canCreatePurchaseOrderCapability() || !canEditPage('orders.po')) return;
+    const po = poListCache.find(item => item.id === poId) || poHistorySearchResults.find(item => item.id === poId);
     if (!po) return alert('找不到這張採購單，請重新整理。');
-
     const sourceItems = purchaseItemsFromSavedPo(po);
-    if (po.purchaseType !== 'stock' && sourceItems.some(item => item.orderId)) {
-        alert('這張採購單連結客戶訂單，為避免重複採購，請回到「待採購」從來源訂單建立新的採購單。');
-        return;
-    }
+    if (!sourceItems.length) return alert('這張採購單沒有可複製的品項。');
 
     poDirectStockOpenGeneration++;
+    const copySourceId = `copy-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     poDirectStockMode = true;
     poEditingId = null;
     poIncomingSyncPending = false;
-    poAllItems = sourceItems.map(item => ({
-        ...item,
-        orderId: '',
-        itemId: '',
-        orderItemIndex: 0,
-        supplyOrderId: '',
-        purchaseDocumentNo: '',
-        purchaseDocumentNos: []
+    // 只複製商品與價格；新採購不沿用客戶需求、供應或到貨狀態。
+    poAllItems = sourceItems.map((item, index) => ({
+        ...emptyDirectPoItem(),
+        sourceId: `${copySourceId}-${index}`,
+        itemName: item.itemName,
+        itemCode: item.itemCode,
+        productId: item.productId,
+        brand: item.brand,
+        brandId: item.brandId,
+        productLine: item.productLine || '',
+        productType: item.productType || '',
+        spec: item.spec || '',
+        unit: item.unit || '',
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        supplier: item.supplier || '',
+        warehouseId: item.warehouseId || defaultWarehouse()?.id || ''
     }));
     poItems = poAllItems.map(item => ({ ...item }));
 
@@ -13602,12 +13598,13 @@ window.copySavedPurchaseOrderAsNew = async function(poId) {
     document.getElementById('poBuyerName').innerText = currentUserName || currentUser?.email || '';
     document.getElementById('poDate').value = localDateString();
     clearPoExpectedDate();
-    window.autoFillPoExpectedDate(poItems);
-    await generatePoNo();
     renderPoItemsTable();
+    // 先顯示表單，再讀取新單號，避免慢網路下按鈕沒有回饋。
+    const numberPromise = generatePoNo();
     updatePoModeUI();
-    updatePoSaveStatus('已複製成新的庫存採購採購單；確認數量、單價與廠商後再匯出 PDF。');
+    updatePoSaveStatus('尚未建立新採購。請確認廠商、品項、數量、單價及預計到貨日，再按「建立採購單並下載 PDF」；建立後才增加在途數量。');
     document.getElementById('poModalOverlay').classList.add('active');
+    await numberPromise;
 };
 
 window.exportPurchaseOrderFromHistory = async function(poId) {
@@ -13682,6 +13679,8 @@ function updatePoSaveButton() {
     const button = document.getElementById('printPurchaseOrderBtn');
     if (!button) return;
     const waitingForNumber = !poEditingId && !poNoReady;
+    const copyButton = document.getElementById('poCopyAsNewBtn');
+    if (copyButton) copyButton.disabled = poSaveInProgress;
     button.disabled = poSaveInProgress || waitingForNumber;
     button.textContent = waitingForNumber
         ? (poNoLoading ? '產生單號中…' : '單號未就緒')
@@ -14956,8 +14955,13 @@ function updatePoModeUI() {
     if (existingNumber) existingNumber.textContent = viewingExisting ? (document.getElementById('poNo')?.innerText || poEditingId) : '';
 
     const savedPo = viewingExisting ? poListCache.find(po => po.id === poEditingId) : null;
-    const canCopySafely = !!savedPo && (savedPo.purchaseType === 'stock' || purchaseItemsFromSavedPo(savedPo).every(item => !item.orderId));
-    if (copyBtn) copyBtn.style.display = canCopySafely ? '' : 'none';
+    const canCopySafely = !!savedPo && canCreatePurchaseOrderCapability() && canEditPage('orders.po');
+    if (copyBtn) { copyBtn.style.display = canCopySafely ? '' : 'none'; copyBtn.disabled = poSaveInProgress; }
+    const timelineBtn = document.getElementById('poViewHistoryBtn');
+    if (timelineBtn) timelineBtn.style.display = viewingExisting ? '' : 'none';
+    const cancelBtn = document.getElementById('poCancelOutstandingBtn');
+    const hasOutstanding = !!savedPo && !isPurchaseTerminalStatus(savedPo.status) && purchaseItemsFromSavedPo(savedPo).some((_, index) => Number(purchaseHistoryItemReceiptProgress(savedPo, index).remainingQty) > 0);
+    if (cancelBtn) cancelBtn.style.display = canCopySafely && hasOutstanding ? '' : 'none';
     const supplierContact = savedPo ? purchaseOrderSupplierContact(savedPo) : purchaseOrderSupplierContact({vendorName:document.getElementById('poVendorName')?.value||''});
 
     if (addBtn) addBtn.style.display = !viewingExisting && poDirectStockMode ? '' : 'none';
