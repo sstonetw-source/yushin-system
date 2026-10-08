@@ -9965,12 +9965,19 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
 
 async function registerInitialSelfOrders(orderId,order) {
     if(order.selfOrderAtCreation!==true)return;
-    for(const item of normalizedOrderItems(order)){
-        if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER')continue;
-        const qty=remainingProcurementQty(order,item);
-        if(qty<=0)continue;
-        const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate});
-        Object.assign(order,saved);
+    let changed=false;
+    try{
+        for(const item of normalizedOrderItems(order)){
+            if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER')continue;
+            const qty=remainingProcurementQty(order,item);
+            if(qty<=0)continue;
+            const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate});
+            Object.assign(order,saved);
+            changed=true;
+        }
+    }finally{
+        // Refresh the pending demand once per order, even if a later line fails.
+        if(changed)invalidateProcurementDemandQueue();
     }
 }
 function selfOrderActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
@@ -12077,11 +12084,17 @@ function renderPendingPurchaseOrders() {
             customer='備庫';
             actionHtml=`<button type="button" class="btn-small btn-secondary" onclick="openInventoryReplenishment(${inlineJsValue(demand.sourceId||demand.productKey||demand.productId||'')})">產生採購單</button>`;
         }else if(order){
-            actionHtml=selfOrder
-                ? (canBusinessSelfOrder(order)
-                    ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">登記自行訂貨</button>`
-                    : '<span class="order-progress-badge">自行訂貨・由訂單負責人處理</span>')
-                : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')},this)">已採購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">產生採購單</button>`;
+            // Creation-time self-orders are recorded automatically. Pending rows are
+            // synchronization exceptions, not a second routine ordering action.
+            const autoSelfOrder = selfOrder && order.selfOrderAtCreation === true;
+            const syncState = String(order.inventoryReservationStatus||'');
+            actionHtml=autoSelfOrder && syncState !== 'completed'
+                ? `<span class="order-progress-badge">${syncState==='failed'?'自行訂貨同步失敗，請至訂單頁重試同步':'自行訂貨自動同步中…'}</span>`
+                : selfOrder
+                    ? (canBusinessSelfOrder(order)
+                        ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">${autoSelfOrder?'補登異常訂貨':'登記自行訂貨'}</button>`
+                        : '<span class="order-progress-badge">自行訂貨・由訂單負責人處理</span>')
+                    : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')},this)">已採購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">產生採購單</button>`;
         }else{
             actionHtml='<span class="order-progress-badge">來源訂單待同步</span>';
         }
@@ -18201,7 +18214,11 @@ window.saveNewOrder = function() {
         if (quoteSyncError) {
             showActionFeedback('訂單已建立，庫存占用已同步，但來源估價單未標記成交。請勿重複建立訂單，請檢查來源估價單：' + quoteSyncError.message,'warning');
         } else {
-            showActionFeedback('訂單已建立，庫存占用已同步。', 'success');
+            const automaticallyOrdered = normalizedOrderItems(data).some(item=>
+                item.procurementType==='SALES_SELF_ORDER' && Number(item.supplyOrderedQty||0)>0);
+            showActionFeedback(automaticallyOrdered
+                ? '訂單已建立；自行訂貨已記錄為已採購，等待到貨。'
+                : '訂單已建立，庫存占用已同步。', 'success');
         }
     }).catch(err => {
         pendingOrderReservationIds.delete(createdOrderId);
