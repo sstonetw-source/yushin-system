@@ -4812,7 +4812,7 @@ test('admin exposes the loaded application asset version', () => {
 
 test('product page has a single gated brand search area', () => {
     assert.doesNotMatch(indexSource, /id="productBrandBrowser"|otherProductBrandsExpanded|window\.renderProductBrandBrowser =/);
-    assert.match(indexSource, /id="productManagementSearchBrand"[^>]+onchange="onProductSearchBrandChange\(\)"/);
+    assert.match(indexSource, /id="productSearchBrandButtons"/);
     assert.match(indexSource, /id="productManagementSearch"[^>]+disabled/);
     assert.match(appSource, /if \(input\) input.disabled = !selected/);
     assert.match(appSource, /if \(button\) button.disabled = !selected \|\| productManagementSearchInProgress/);

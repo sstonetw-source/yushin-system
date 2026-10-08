@@ -1530,25 +1530,35 @@ window.onProductSearchBrandChange = function() {
     updateProductSearchControls();
 };
 
+let productSearchOtherBrandsExpanded = false;
+window.selectProductSearchBrand = function(brand) {
+    const field = document.getElementById('productManagementSearchBrand');
+    if (!field || field.value === brand) return;
+    field.value = brand;
+    onProductSearchBrandChange();
+};
+window.toggleProductSearchOtherBrands = function() {
+    productSearchOtherBrandsExpanded = !productSearchOtherBrandsExpanded;
+    renderProductBrandBrowser();
+};
 window.renderProductBrandBrowser = function() {
-    const container = document.getElementById('productBrandBrowserList');
-    const searchBrand = document.getElementById('productManagementSearchBrand');
-    if (searchBrand) {
-        const selected = searchBrand.value;
-        searchBrand.innerHTML = '<option value="">先選擇廠牌</option>' + getUnifiedBrandEntries(false).filter(entry => entry?.name && entry.active !== false).map(entry => `<option value="${escapeAttr(entry.name)}">${escapeHtml(entry.name)}</option>`).join('');
-        searchBrand.value = selected;
-    }
+    const container = document.getElementById('productSearchBrandButtons');
+    const selected = document.getElementById('productManagementSearchBrand')?.value || '';
     updateProductSearchControls();
     if (!container) return;
-    const entries = productBrandBrowserEntries();
-    if (!entries.length) {
-        container.innerHTML = '<span class="product-brand-browser-empty">找不到符合的廠牌。</span>';
-        return;
+    const entries = getUnifiedBrandEntries(false).filter(entry => entry?.name && entry.active !== false)
+        .sort((a,b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    const primaryKeys = new Set(getPrimaryBrandNames().map(normalizeBrandLookupKey));
+    const primary = entries.filter(entry => primaryKeys.has(normalizeBrandLookupKey(entry.name)));
+    const others = entries.filter(entry => !primaryKeys.has(normalizeBrandLookupKey(entry.name)));
+    const button = entry => `<button type="button" class="product-brand-button${entry.name === selected ? ' active' : ''}" aria-pressed="${entry.name === selected}" onclick="selectProductSearchBrand(${inlineJsValue(entry.name)})">${escapeHtml(entry.name)}</button>`;
+    let html = primary.map(button).join('');
+    if (others.length) {
+        const selectedOther = others.some(entry => entry.name === selected);
+        html += `<button type="button" class="product-brand-button${selectedOther ? ' active' : ''}" aria-expanded="${productSearchOtherBrandsExpanded}" onclick="toggleProductSearchOtherBrands()">其他${productSearchOtherBrandsExpanded ? ' ▲' : ' ▼'}${selectedOther && !productSearchOtherBrandsExpanded ? '：' + escapeHtml(selected) : ''}</button>`;
+        if (productSearchOtherBrandsExpanded) html += others.map(button).join('');
     }
-    container.innerHTML = entries.map(entry => {
-        const active = normalizeBrandLookupKey(entry.name) === normalizeBrandLookupKey(productBrandBrowseCurrent);
-        return `<button type="button" class="product-brand-button${active ? ' active' : ''}" onclick="browseProductMasterBrand(${inlineJsValue(entry.name)})">${escapeHtml(entry.name)}</button>`;
-    }).join('');
+    container.innerHTML = html || '<span>目前沒有可選擇的廠牌。</span>';
 };
 
 async function ensureProductBrandBrowserLoaded() {
@@ -1558,7 +1568,7 @@ async function ensureProductBrandBrowserLoaded() {
     } catch (err) {
         mainPageLoadFailed('products');
         console.warn('Product Master 廠牌瀏覽載入失敗：', err);
-        const container = document.getElementById('productBrandBrowserList');
+        const container = document.getElementById('productSearchBrandButtons');
         if (container) container.innerHTML = '<span class="product-brand-browser-empty">廠牌載入失敗，請稍後再試。</span>';
     }
 }

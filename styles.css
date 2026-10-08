@@ -3484,3 +3484,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 #product-system .product-search-brand-field { display:flex; flex-direction:column; gap:6px; font-weight:600; }
 #product-system #productManagementSearchBrand { min-height:44px; box-sizing:border-box; background:#fff; color:#243746; border:1px solid #bfcbd7; border-radius:5px; }
 #product-system .product-search-toolbar button { width:100%; min-height:44px; }
+
+#product-system .product-search-brand-buttons { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; }
+#product-system .product-search-brand-buttons .product-brand-button { width:100%; min-height:44px; margin:0; }
+@media (max-width:600px) { #product-system .product-search-brand-buttons { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }

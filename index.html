@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261008-8">
+        <link rel="stylesheet" href="styles.css?v=20261008-9">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -96,7 +96,7 @@
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
         <div class="toolbar no-print product-search-toolbar">
-            <label class="product-search-brand-field">廠牌<select id="productManagementSearchBrand" aria-label="搜尋廠牌" onchange="onProductSearchBrandChange()"><option value="">先選擇廠牌</option></select></label>
+            <div class="product-search-brand-field"><strong>廠牌</strong><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
             <input id="productManagementSearch" type="search" disabled placeholder="輸入貨號、中文品名或英文品名">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()" disabled>搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
@@ -1689,7 +1689,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261008-10"></script>
+    <script src="app.js?v=20261008-11"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261007-2"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
