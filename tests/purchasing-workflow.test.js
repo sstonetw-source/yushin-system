@@ -1203,7 +1203,8 @@ test('editing a multi-item delivery stays bound to its original item', () => {
     const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
     const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
     const saveSource=app.slice(saveStart,saveEnd);
-    assert.match(saveSource,/const requestedItemId=previous\?\.itemId\|\|document\.getElementById\('deliveryItemId'\)\?\.value/);
+    assert.ok(saveSource.includes("const requestedItemId=previous?.itemId||(orderItems.length===1?"));
+    assert.ok(saveSource.includes("const targetItem=orderItems.find(item=>item.itemId===requestedItemId);"));
 
     const renderStart=app.indexOf('function renderDeliveryModal');
     const renderEnd=app.indexOf('window.editDeliveryRecord = function',renderStart);

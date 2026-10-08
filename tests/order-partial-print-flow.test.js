@@ -85,7 +85,7 @@ function deliveryTestHarness(selectedItem, recordToEdit=null, single=false) {
     const fields={deliveryDate:{value:'2026-10-08'},deliveryQty:{value:'1'},deliveryNotes:{value:''},
         deliveryEditId:{value:recordToEdit?.id||''},deliveryItemId:{value:selectedItem}};
     const alerts=[],updates=[],deltas=[],button={disabled:false,textContent:''};
-    const context=vm.createContext({window:{},currentDeliveryOrderId:'SO',pendingDeliveryOrderIds:new Set(),
+    const context=vm.createContext({window:{},currentDeliveryOrderId:'SO',pendingDeliveryOrderIds:new Set(),ordersCache:[order],
         canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
         document:{getElementById:id=>fields[id]||null,querySelector:()=>button},
         db:{collection:()=>({doc:id=>({id})})},
