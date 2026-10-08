@@ -261,7 +261,7 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /function pendingProcurementDisplayLines\(order, normalizedItems = null, dispatchStateByItem = null, lifecycleOverride = null\)/);
     assert.match(app, /orderItemWorkCategory\(order, item, lifecycle, dispatch\) !== 'ordering'/);
     assert.match(app, /\['dispatch', '待打單'\]/);
-    assert.match(app, /\['shipping', '待出貨'\]/);
+    assert.match(app, /\['shipping', '已打單'\]/);
     assert.match(app, /return YushinWorkflow\.itemWorkCategory\(input\);/);
 });
 
@@ -333,7 +333,7 @@ vm.runInContext(syncGuard+"\n"+source,context);
     assert.deepEqual(Array.from(context.orderWorkCategories(order)),['ordering']);
     item.supplyOrderedQty=5;
     assert.equal(context.orderItemWorkCategory(order,item),'arrival');
-    assert.deepEqual(Array.from(context.orderItemDisplayCategories(order,item)),['arrival']);
+    assert.deepEqual(Array.from(context.orderItemDisplayCategories(order,item)),['arrival','shipping']);
 });
 
 test('purchasing completed card is not capped by the visible 50-row page', () => {

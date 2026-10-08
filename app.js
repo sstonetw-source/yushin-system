@@ -10151,8 +10151,13 @@ function orderItemDisplayCategories(order, item, lifecycleOverride = null, dispa
     const dispatch = dispatchOverride || itemDispatchState(order, item);
     const category=orderItemDisplayCategory(order,item,lifecycleOverride,dispatch);
     const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
-    return warehouse && (category==='ordering'||category==='arrival') && dispatch.pending>0
-        ? [category,'dispatch'] : [category];
+    // A single line can be partly printed and partly awaiting paperwork/arrival.
+    // Keep both work queues visible, but never present unprinted quantities to sales.
+    if(!warehouse || category==='closed' || category==='billing' || category==='complete')return [category];
+    const categories=[category];
+    if(['ordering','arrival'].includes(category) && dispatch.pending>0)categories.push('dispatch');
+    if(category!=='shipping' && dispatch.shippable>0)categories.push('shipping');
+    return categories;
 }
 
 function orderWorkCategories(order) {
@@ -10182,7 +10187,11 @@ function orderItemWorkAmount(order, item, category, totalQtyOverride = null, dis
     const totalQty=totalQtyOverride === null ? orderQuantity(order) : totalQtyOverride;
     const unitSales=Number(item.unitPrice||item.salesPrice||0)||(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
     const state=dispatchOverride || itemDispatchState(order,item);
-    if(category==='delivery'||category==='dispatch'||category==='shipping')return Math.max(0,qty-state.delivered)*unitSales;
+    // Work-card amounts represent quantities in each action queue, not the full
+    // order line repeated when the same line is partly printed or partly waiting.
+    if(category==='dispatch')return Math.max(0,Number(state.pending||0))*unitSales;
+    if(category==='shipping')return Math.max(0,Number(state.shippable||0))*unitSales;
+    if(category==='delivery')return Math.max(0,qty-state.delivered)*unitSales;
     if(category==='billing'||category==='complete')return Math.min(qty,state.delivered)*unitSales;
     return qty*unitSales;
 }
@@ -10264,7 +10273,7 @@ function renderOrderWorkCards(orders, normalizedItemsByOrder = null, dispatchSta
         ['ordering', '待採購'],
         ['arrival', '待到貨'],
         ['dispatch', '待打單'],
-        ['shipping', '待出貨'],
+        ['shipping', '已打單'],
         ['billing', '待核銷'],
         ['complete', '已完成（已載入）']
     ];
@@ -10811,7 +10820,7 @@ window.renderOrdersList = function() {
             <td data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=activeOrderWorkFilter==='dispatch'&&displayCategories.includes('dispatch')?'dispatch':primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待出貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂購 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂購 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td data-th="售價" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>NT$ ${escapeHtml(Number(parseFloat(String(o.unitPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())} × ${escapeHtml(String(o.qty || 0))}</small></td>
             ${canManageOrderOps ? `
             <td class="no-print order-cost-profit-cell" data-th="成本／毛利"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></td>` : ''}
@@ -11919,8 +11928,9 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
             const warehouseId = item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '';
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
+            const preparing = pendingDispatchOrderIds.has(order.id+'__'+item.itemId);
             const action = canPrepareDispatch
-                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">已打單 × ${state.pending}</button>`
+                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':`已打單 × ${state.pending}`}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
