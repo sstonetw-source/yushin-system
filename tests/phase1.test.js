@@ -901,11 +901,12 @@ test('quote PDF document is rendered directly from quote data without cloning th
 
 
 test('quote primary actions focus on PDF delivery workflow without a print button', () => {
-    assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
+    assert.match(indexSource, /id="printBtn"[^>]*>匯出 PDF/);
     assert.match(indexSource, /產生三家估價單/);
-    assert.match(indexSource, /製作下一張估價單/);
+    assert.match(indexSource, /下一張估價單/);
     assert.doesNotMatch(indexSource, /legacyQuotePrintBtn/);
-    assert.doesNotMatch(indexSource, /quote-more-actions/);
+    assert.match(indexSource, /<details class="quote-more-actions">/);
+    assert.match(indexSource, /<summary>更多功能<\/summary>/);
 });
 
 
@@ -941,7 +942,7 @@ test('quote and purchase-order browser-print code is removed in favor of the sha
 test('primary quote export generates PDF directly without browser print', () => {
     assert.match(indexSource, /html2canvas@1\.4\.1/);
     assert.match(indexSource, /jspdf@2\.5\.2/);
-    assert.match(indexSource, /id="printBtn"[^>]*>📄 匯出 PDF/);
+    assert.match(indexSource, /id="printBtn"[^>]*>匯出 PDF/);
     assert.match(appSource, /printBtn\.addEventListener\('click', exportCurrentQuotePdf\)/);
     assert.match(appSource, /window\.exportCurrentQuotePdf = async function/);
     assert.match(appSource, /addDocumentPagesToPdf/);
