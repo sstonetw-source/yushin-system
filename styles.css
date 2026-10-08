@@ -3477,14 +3477,72 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 
 #productManagementSearchBrand { width:100%; min-width:0; padding:8px 10px; }
 
-/* One product search flow: brand, keyword, then explicit actions. */
-#product-system .product-search-toolbar { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+/* Product search: the shared .toolbar uses flex; explicitly restore grid for this page.
+   Desktop: flow brands horizontally, then keyword and compact actions.
+   Mobile: two brand columns and two equally sized search controls. */
+#product-system .product-search-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 152px) minmax(0, 120px) minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    padding: 14px;
+}
 #product-system .product-search-brand-field,
-#product-system .product-search-toolbar #productManagementSearch { grid-column:1 / -1; }
-#product-system .product-search-brand-field { display:flex; flex-direction:column; gap:6px; font-weight:600; }
-#product-system #productManagementSearchBrand { min-height:44px; box-sizing:border-box; background:#fff; color:#243746; border:1px solid #bfcbd7; border-radius:5px; }
-#product-system .product-search-toolbar button { width:100%; min-height:44px; }
-
-#product-system .product-search-brand-buttons { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; }
-#product-system .product-search-brand-buttons .product-brand-button { width:100%; min-height:44px; margin:0; }
-@media (max-width:600px) { #product-system .product-search-brand-buttons { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+#product-system .product-search-toolbar #productManagementSearch {
+    grid-column: 1 / -1;
+}
+#product-system .product-search-brand-field {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    font-weight: 600;
+}
+#product-system #productSearchBrandButtons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    gap: 8px;
+}
+#product-system #productSearchBrandButtons .product-brand-button {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 116px;
+    max-width: 100%;
+    min-height: 42px;
+    margin: 0;
+    padding: 8px 14px;
+}
+#product-system .product-search-toolbar #productManagementSearch {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 8px 12px;
+}
+#product-system .product-search-toolbar > button {
+    width: 100%;
+    min-width: 0;
+    max-width: 164px;
+    min-height: 44px;
+    margin: 0;
+}
+@media screen and (max-width: 600px) {
+    #product-system .product-search-toolbar {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 10px;
+    }
+    #product-system #productSearchBrandButtons {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    #product-system #productSearchBrandButtons .product-brand-button {
+        width: 100%;
+        min-width: 0;
+    }
+    #product-system .product-search-toolbar > button { max-width: none; }
+    #product-system .product-selection-actions button:last-child { grid-column: auto; }
+}
