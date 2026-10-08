@@ -3403,7 +3403,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .quote-more-actions > summary { list-style: none; background: #546e7a; color: white; }
 .quote-more-actions > summary::-webkit-details-marker { display: none; }
 .quote-more-actions > summary:focus-visible { outline: 3px solid #90caf9; outline-offset: 2px; }
-.quote-more-menu {
+.quote-create-more-menu {
     position: absolute;
     right: 0;
     top: calc(100% + 8px);
@@ -3416,5 +3416,34 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     background: white;
     box-shadow: 0 4px 16px #0002;
 }
-.quote-more-menu button { width: 100%; min-height: 44px; margin: 0 0 8px; white-space: normal; }
-.quote-more-menu .document-download-settings { margin: 0; }
+.quote-create-more-menu button { width: 100%; min-height: 44px; margin: 0 0 8px; white-space: normal; }
+.quote-create-more-menu .document-download-settings { margin: 0; }
+
+/* 全部估價單只顯示載入、成交、更多功能；選單樣式與建立頁分開。 */
+#myQuotesBody .quote-list-action-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 288px;
+    max-width: 100%;
+    gap: 6px;
+    align-items: stretch;
+}
+#myQuotesBody .quote-list-action-row > button,
+#myQuotesBody .quote-list-action-row > .quote-more-menu > summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 100% !important;
+    min-height: 44px;
+    height: 100%;
+    padding: 8px 6px !important;
+    margin: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.2;
+}
+#myQuotesBody .quote-list-action-row > .quote-more-menu { grid-column: 3; }
+#myQuotesBody .quote-more-menu-popover button { min-height: 44px; }
+@media screen and (max-width: 640px) {
+    #myQuotesBody .quote-list-action-row { width: 100%; }
+}

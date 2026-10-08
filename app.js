@@ -7679,11 +7679,11 @@ window.renderMyQuotesList = function() {
             <td class="no-print quote-list-actions">
                 <div class="quote-list-action-row">
                     <button type="button" class="btn-small" onclick="openQuoteFromAdmin(${inlineJsValue(q.quoteNo)})">載入</button>
-                    ${q.threeQuoteRecord ? `<button type="button" class="btn-small btn-secondary" onclick="openSavedThreeQuoteRecord(${inlineJsValue(q.quoteNo)})">三估單</button>` : ''}
                     ${dealButton}
                     <details class="quote-more-menu">
-                        <summary class="btn-small btn-secondary">更多</summary>
+                        <summary class="btn-small btn-secondary">更多功能</summary>
                         <div class="quote-more-menu-popover">
+                            ${q.threeQuoteRecord ? `<button type="button" onclick="openSavedThreeQuoteRecord(${inlineJsValue(q.quoteNo)})">三估單</button>` : ''}
                             <button type="button" onclick="copyQuoteAsNew(${inlineJsValue(q.quoteNo)})">複製成新估價單</button>
                             ${canEditPage('forecast') ? `<button type="button" onclick="createForecastFromQuote(${inlineJsValue(q.quoteNo)})">建立 Forecast</button>` : ''}
                             ${q.dealClosed ? `<button type="button" onclick="unmarkQuoteAsDeal(${inlineJsValue(q.quoteNo)})">取消成交</button>` : ''}
