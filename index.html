@@ -1696,28 +1696,92 @@
 
 
 <style>
-/* Forecast: keep the frequent progress action visible; collapse other actions. */
-#forecastTable td.forecast-actions.forecast-actions-collapsible { grid-template-columns:repeat(2,minmax(0,1fr)) !important; align-items:start; }
-#forecastTable .forecast-more { min-width:0; position:relative; }
-#forecastTable .forecast-more > summary { display:flex; align-items:center; justify-content:center; height:44px; box-sizing:border-box; border-radius:6px; background:#636b72; color:#fff; cursor:pointer; list-style:none; user-select:none; font-size:14px; }
-#forecastTable .forecast-more > summary::-webkit-details-marker { display:none; }
-#forecastTable .forecast-more > summary::after { content:" ▾"; white-space:pre; }
-#forecastTable .forecast-more[open] > summary::after { content:" ▴"; }
-#forecastTable .forecast-more-menu { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
-#forecastTable .forecast-more-menu button { width:100% !important; }
-@media (max-width:600px) { #forecastTable .forecast-more-menu button { min-height:44px; } }
+/* Forecast card/table actions: only progress + More are visible until expanded. */
+#forecastTable .forecast-primary-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    grid-column: 1 / -1;
+    box-sizing: border-box;
+}
+#forecastTable .forecast-primary-actions > button {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0 !important;
+}
+#forecastTable .forecast-more { position: relative; min-width: 0; width: 100%; }
+#forecastTable .forecast-more > summary {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 4px;
+    box-sizing: border-box;
+    border-radius: 5px;
+    background: #636b72;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+#forecastTable .forecast-more > summary::-webkit-details-marker { display: none; }
+#forecastTable .forecast-more > summary::after { content: " ▾"; white-space: pre; }
+#forecastTable .forecast-more[open] > summary::after { content: " ▴"; }
+#forecastTable .forecast-more-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 6px;
+    background: #f3f6fa;
+    border: 1px solid #dce3eb;
+    border-radius: 6px;
+}
+#forecastTable .forecast-more-menu button { width: 100% !important; min-height: 40px; margin: 0 !important; }
+@media (min-width: 769px) {
+    #forecastTable .forecast-primary-actions { gap: 5px; }
+    #forecastTable .forecast-primary-actions > button { font-size: 12px !important; padding: 6px 3px !important; }
+    #forecastTable .forecast-more > summary { font-size: 12px; padding: 6px 2px; }
+    #forecastTable .forecast-more-menu { padding: 3px; gap: 4px; }
+    #forecastTable .forecast-more-menu button { font-size: 12px !important; padding: 6px 2px !important; }
+}
 </style>
 <script>
-/* Progressive enhancement: preserve existing Forecast button handlers and permissions. */
+/* Preserve the actual action buttons and their existing handlers/role visibility. */
 (function () {
     function collapseForecastActions() {
-        document.querySelectorAll('#forecastTable td.forecast-actions:not(.forecast-actions-collapsible)').forEach(function (cell) {
-            var buttons = Array.from(cell.children).filter(function (el) { return el.tagName === 'BUTTON'; });
-            if (buttons.length < 2) return;
-            var progress = buttons.find(function (button) { return /進度/.test(button.textContent || ''); });
+        var table = document.getElementById('forecastTable');
+        if (!table) return;
+        table.querySelectorAll('tbody tr').forEach(function (row) {
+            var rowButtons = Array.from(row.querySelectorAll('button'));
+            var progress = rowButtons.find(function (button) {
+                return /進度/.test(button.textContent || '') && !button.closest('.forecast-more-menu');
+            });
             if (!progress) return;
+            var cell = progress.closest('td') || progress.parentElement;
+            if (!cell || cell.querySelector('.forecast-primary-actions')) return;
+            var buttons = Array.from(cell.querySelectorAll('button')).filter(function (button) {
+                return !button.closest('.forecast-more-menu');
+            });
             var others = buttons.filter(function (button) { return button !== progress; });
             if (!others.length) return;
+            /* Old version only checked cell.children. The existing action buttons
+               can be nested inside an inner container in both responsive layouts. */
+            var originalParent = progress.parentElement;
+            var sameParent = buttons.every(function (button) {
+                return button.parentElement === originalParent;
+            });
+            var primary = document.createElement('div');
+            primary.className = 'forecast-primary-actions';
+            if (sameParent) originalParent.insertBefore(primary, progress);
+            else cell.appendChild(primary);
+            primary.appendChild(progress);
             var details = document.createElement('details');
             details.className = 'forecast-more';
             var summary = document.createElement('summary');
@@ -1727,7 +1791,7 @@
             menu.className = 'forecast-more-menu';
             others.forEach(function (button) { menu.appendChild(button); });
             details.append(summary, menu);
-            progress.after(details);
+            primary.appendChild(details);
             cell.classList.add('forecast-actions-collapsible');
         });
     }
@@ -1739,8 +1803,11 @@
         new MutationObserver(function () {
             if (queued) return;
             queued = true;
-            requestAnimationFrame(function () { queued = false; collapseForecastActions(); });
-        }).observe(table, { childList:true, subtree:true });
+            requestAnimationFrame(function () {
+                queued = false;
+                collapseForecastActions();
+            });
+        }).observe(table, { childList: true, subtree: true });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initForecastActions);
     else initForecastActions();
