@@ -1650,7 +1650,7 @@ function setProductManagementTableMode(mode = 'products') {
     head.dataset.mode = mode;
     head.innerHTML = mode === 'pending'
         ? '<tr><th>貨號</th><th>品名</th><th>廠牌</th><th>來源</th><th>最近使用</th><th>次數</th><th class="no-print">操作</th></tr>'
-        : '<tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)"></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr>';
+        : '<tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)"></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">操作</th></tr>';
     const moreRow = document.getElementById('productManagementMoreRow');
     if (moreRow && mode === 'pending') moreRow.style.display = 'none';
     updateProductManagementSelectionBar();
@@ -1915,11 +1915,8 @@ function productManagementRow(product) {
       <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
       <td data-th="狀態">${inactive ? '停用' : escapeHtml(status === 'TEMPORARY' ? '待補主檔' : '啟用')}</td>
       <td data-th="操作" class="no-print product-management-actions">
-        ${canQuote ? `<button type="button" class="btn-small" onclick="addProductManagementToQuote(${inlineJsValue(productId)})">加入估價單</button>` : ''}
-        ${canOrder ? `<button type="button" class="btn-small" onclick="addProductManagementToOrder(${inlineJsValue(productId)})">建立訂單</button>` : ''}
+        ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="openProduct360(${inlineJsValue(productId)})">庫存</button>` : ''}
         ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="openProductMasterEditor(${inlineJsValue(productId)})">編輯</button>` : ''}
-        ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="openProduct360(${inlineJsValue(productId)})">庫存狀態</button>` : ''}
-        ${canEditPage('orders.po') && !inactive ? `<button type="button" class="btn-small" onclick="addProductManagementToPurchase(${inlineJsValue(productId)})">加入採購單</button>` : ''}
         ${canDelete ? `<button type="button" class="btn-small btn-danger" onclick="deleteProductMaster(${inlineJsValue(productId)})">刪除</button>` : ''}
       </td>
     </tr>`;
@@ -2163,7 +2160,8 @@ function updateProductManagementSelectionBar() {
     const productMode = !head || head.dataset.mode !== 'pending';
     const count = productManagementSelection.size;
     if (countEl) countEl.textContent = `已選 ${count} 項`;
-    if (bar) bar.hidden = !productMode || count === 0;
+    if (bar) bar.hidden = !productMode;
+    [quoteBtn, orderBtn, purchaseBtn].forEach(button => { if (button) button.disabled = count === 0; });
     if (quoteBtn) quoteBtn.hidden = !canEditPage('quote.create');
     if (orderBtn) orderBtn.hidden = !canEditPage('orders.list');
     if (purchaseBtn) purchaseBtn.hidden = !canEditPage('orders.po');

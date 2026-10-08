@@ -3447,3 +3447,18 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 @media screen and (max-width: 640px) {
     #myQuotesBody .quote-list-action-row { width: 100%; }
 }
+
+/* 產品頁：建立單據集中於勾選操作，逐列只保留產品管理。 */
+#product-system .product-selection-actions button:not(:last-child) {
+    background: #003366;
+    color: white;
+    min-width: 120px;
+    min-height: 44px;
+}
+#product-system .product-selection-actions button:disabled { opacity: .5; cursor: not-allowed; }
+#product-system .product-management-actions button {
+    min-width: 64px;
+    min-height: 44px;
+    margin: 3px;
+    padding: 8px 12px;
+}

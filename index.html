@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261008-2">
+        <link rel="stylesheet" href="styles.css?v=20261008-3">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -124,16 +124,16 @@
                 <span>可跨搜尋繼續選品；完成後一次帶入同一張單據。</span>
             </div>
             <div class="product-selection-actions">
-                <button type="button" id="productManagementBatchQuoteBtn" onclick="addProductManagementSelectionToQuote()">加入同一估價單</button>
-                <button type="button" id="productManagementBatchOrderBtn" class="btn-secondary" onclick="addProductManagementSelectionToOrder()">建立同一訂單</button>
-                <button type="button" id="productManagementBatchPurchaseBtn" onclick="addProductManagementSelectionToPurchase()">建立同一採購單</button>
+                <button type="button" id="productManagementBatchQuoteBtn" onclick="addProductManagementSelectionToQuote()">加入估價單</button>
+                <button type="button" id="productManagementBatchOrderBtn" onclick="addProductManagementSelectionToOrder()">加入訂單</button>
+                <button type="button" id="productManagementBatchPurchaseBtn" onclick="addProductManagementSelectionToPurchase()">加入採購單</button>
                 <button type="button" class="btn-secondary" onclick="clearProductManagementSelection()">清除已選</button>
             </div>
         </div>
 
         <div class="table-wrap product-results-wrap">
             <table class="product-management-table">
-                <thead id="productManagementHead" data-mode="products"><tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)" disabled></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">快速操作</th></tr></thead>
+                <thead id="productManagementHead" data-mode="products"><tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)" disabled></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">選擇上方廠牌查看產品，或輸入貨號／品名搜尋。</td></tr></tbody>
             </table>
         </div>
@@ -1700,7 +1700,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261002-12"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261008-2"></script>
+    <script src="app.js?v=20261008-3"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261007-2"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
