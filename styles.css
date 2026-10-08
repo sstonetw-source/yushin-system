@@ -3583,3 +3583,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     .order-detail-panel > summary, .order-detail-content .order-transaction-cell, .order-detail-content .order-remarks-editor { display:none; }
     .order-detail-panel > .order-detail-content { display:block; }
 }
+
+.order-product-check-status { display:flex; align-items:center; gap:8px; margin-top:4px; font-size:13px; }
+.order-product-status[data-status="matched"] { color:#267239; }
+.order-product-status[data-status="missing"], .order-product-status[data-status="error"], .order-product-status[data-status="ambiguous"] { color:#9a5b00; font-weight:600; }

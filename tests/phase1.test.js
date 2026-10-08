@@ -5028,7 +5028,7 @@ test('formal orders allow primary or Other brand selection but still require Pro
     assert.match(appSource, /getPrimaryBrandNames\(\)/);
     assert.match(appSource, /selectProductCodeMatch\(matches, selectedBrand\)/);
     assert.match(appSource, /clearOrderProductMatch\(input, \{ preserveBrand:true \}\)/);
-    assert.match(appSource, /正式訂單的每個品項都必須對應 Product Master/);
+    assert.match(appSource, /以下品項尚未完成產品檢查或建檔/);
     assert.match(appSource, /item\.productMasterMatched!==true/);
 });
 

@@ -5741,6 +5741,8 @@ async function applyOrderProductMatch(input, match) {
     clearQuickProductButton(input);
     clearProductMatchChoices(input);
     input.dataset.autofillStatus = 'matched';
+    input.dataset.productCheckStatus = 'matched';
+    const preservePrice = input.dataset.preserveOrderPriceCode === normalizeItemCodeLoose(input.value);
     input.value = match.model || input.value;
     window._orderModalProductId = match.productId || stableProductId(match);
     if (match.brand) {
@@ -5752,7 +5754,7 @@ async function applyOrderProductMatch(input, match) {
     const itemNameEnInput=document.getElementById('orderItemNameEn');if(itemNameEnInput)itemNameEnInput.value=match.nameEn||'';
     const specInput=document.getElementById('orderSpec');if(specInput)specInput.value=match.spec||match.specification||'';
     const priceInput = document.getElementById('orderUnitPrice');
-    if (priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') {
+    if (!preservePrice && priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') {
         priceInput.value = match.price;
         calcOrderTotal();
     }
@@ -5761,39 +5763,61 @@ async function applyOrderProductMatch(input, match) {
     const hiddenProductLine = document.getElementById('orderProductLine');
     if (hiddenProductLine) hiddenProductLine.value = match.productLine || '';
     input.dataset.productType = match.productType || '';
+    renderNewOrderDraftItems();
     await Promise.all([applyOrderProductCost(match), refreshOrderWarehouseStock()]);
 }
 
+let orderProductCheckGeneration = 0;
 window.onOrderItemCodeChange = async function(input) {
     const value = input.value.trim();
+    const selectedBrand = getBrandFieldValue('orderBrand', 'orderBrandOther');
+    const generation = ++orderProductCheckGeneration;
+    const opening = orderModalOpenGeneration;
+    clearQuickProductButton(input);
+    clearProductMatchChoices(input);
     if (!value) {
         clearOrderProductMatch(input, { preserveBrand:true });
-        clearQuickProductButton(input);
-        clearProductMatchChoices(input);
+        delete input.dataset.productCheckStatus;
+        renderNewOrderDraftItems();
         return;
     }
-    const matches = await findProductsByCode(value);
-    if (input.value.trim() !== value) return;
-    const selectedBrand = getBrandFieldValue('orderBrand', 'orderBrandOther');
-    const match = selectProductCodeMatch(matches, selectedBrand);
-    if (!match) {
-        clearOrderProductMatch(input, { preserveBrand:true });
-        input.dataset.autofillStatus = 'not-found';
-        if (matches.length > 1) showProductMatchChoices(input, matches, 'order');
-        else showQuickProductButton(input, 'order');
-        return;
+    input.dataset.productCheckStatus = 'checking';
+    renderNewOrderDraftItems();
+    const isCurrent = () => generation === orderProductCheckGeneration && opening === orderModalOpenGeneration
+        && input.value.trim() === value && getBrandFieldValue('orderBrand', 'orderBrandOther') === selectedBrand;
+    try {
+        const matches = await findProductsByCode(value, {throwOnError:true});
+        if (!isCurrent()) return;
+        const match = selectProductCodeMatch(matches, selectedBrand);
+        if (!match) {
+            clearOrderProductMatch(input, { preserveBrand:true });
+            input.dataset.autofillStatus = 'not-found';
+            const ambiguous = !selectedBrand && matches.length > 1;
+            input.dataset.productCheckStatus = ambiguous ? 'ambiguous' : 'missing';
+            if (ambiguous) showProductMatchChoices(input, matches, 'order');
+            else showQuickProductButton(input, 'order');
+            renderNewOrderDraftItems();
+            return;
+        }
+        await applyOrderProductMatch(input, match);
+    } catch (err) {
+        if (!isCurrent()) return;
+        input.dataset.productCheckStatus = 'error';
+        renderNewOrderDraftItems();
     }
-    await applyOrderProductMatch(input, match);
 };
 
 let orderItemCodeTimer = null;
 window.onOrderItemCodeInput = function(input) {
     clearTimeout(orderItemCodeTimer);
+    orderProductCheckGeneration++;
+    input.dataset.productCheckStatus=input.value.trim()?'checking':'';
     queueProductCodeSuggestions(input.value);
     clearOrderProductMatch(input, { preserveBrand:true });
     clearQuickProductButton(input);
     clearProductMatchChoices(input);
     const value = input.value.trim();
+    renderNewOrderDraftItems();
     if (!value) return;
     orderItemCodeTimer = setTimeout(() => onOrderItemCodeChange(input), 180);
 };
@@ -17666,6 +17690,8 @@ function setOrderModalItem(item={}) {
     codeInput.dataset.productLine=normalized.productLine||'';
     codeInput.dataset.productType=normalized.productType||'';
     codeInput.dataset.productMasterMatched=normalized.productMasterMatched===true?'1':'0';
+    codeInput.dataset.preserveOrderPriceCode=normalizeItemCodeLoose(normalized.itemCode);
+    codeInput.dataset.productCheckStatus=normalized.productCheckStatus||'';
     if(normalized.brand)selectBrandInDropdown(document.getElementById('orderBrand'),normalized.brand);
     else document.getElementById('orderBrand').value='';
     onOrderBrandSelectChange();
@@ -17681,6 +17707,7 @@ function setOrderModalItem(item={}) {
     populateOrderWarehouseOptions(normalized.warehouseId||'');
     onOrderFulfillmentChange();
     window._orderModalProductId=normalized.productId||'';
+    onOrderItemCodeChange(codeInput);
     refreshOrderWarehouseStock();
 }
 
@@ -17699,6 +17726,7 @@ function restoreSavedOrderDraft(){
         const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';invoice.disabled=draft.transactionType!=='直';
         newOrderDraftItems=Array.isArray(draft.items)?draft.items.map(normalizeNewOrderItem):[];
         renderNewOrderDraftItems();
+        checkNewOrderDraftProducts();
         const title=document.getElementById('orderModalTitle');if(title)title.innerText='新增訂單（續傳未完成）';
     } finally { restoringOrderDraft=false; }
 }
@@ -17785,16 +17813,69 @@ function normalizeNewOrderItem(item = {}) {
 
 function currentOrderModalItem() {
     const codeInput=document.getElementById('orderItemCode');
-    const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',productCheckStatus:codeInput.dataset.productCheckStatus||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     const cost=document.getElementById('orderCostPrice').value;if(item.procurementType==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
 
+function orderItemProductStatus(item) {
+    if (['checking','error','ambiguous','missing'].includes(item.productCheckStatus)) return item.productCheckStatus;
+    return item.productMasterMatched && item.productId ? 'matched' : 'missing';
+}
+function orderItemProductStatusLabel(item) {
+    return {checking:'檢查中…',error:'查詢失敗',ambiguous:'待選擇產品',missing:'未建檔',matched:'已建檔'}[orderItemProductStatus(item)];
+}
 function renderNewOrderDraftItems(){
     const body=document.getElementById('newOrderItemsBody'),wrap=document.getElementById('newOrderItemsWrap');if(!body||!wrap)return;
+    const current=currentOrderModalItem();
+    const currentStatus=document.getElementById('orderProductCheckStatus');
+    if(currentStatus) {
+        const status=orderItemProductStatus(current);
+        currentStatus.innerHTML=current.itemCode ? `<span>${orderItemProductStatusLabel(current)}</span>${status==='error'?`<button type="button" class="btn-small btn-secondary" onclick="onOrderItemCodeChange(document.getElementById('orderItemCode'))">重試</button>`:''}` : '';
+    }
+    const summary=document.getElementById('orderProductCheckSummary');
+    const items=[...newOrderDraftItems,...(current.itemName?[current]:[])];
+    const unfinished=items.filter(item=>orderItemProductStatus(item)!=='matched').length;
+    if(summary) summary.textContent=items.length ? `共 ${items.length} 個品項，${unfinished ? `${unfinished} 個尚待完成產品檢查或建檔` : '全部已建檔'}` : '';
     wrap.style.display=newOrderDraftItems.length?'':'none';
-    body.innerHTML=newOrderDraftItems.map((item,index)=>`<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td>${item.procurementType==='SALES_SELF_ORDER'?'業務自行訂購':'採購下單'}／${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td><button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`).join('');
+    body.innerHTML=newOrderDraftItems.map((item,index)=>{
+        const status=orderItemProductStatus(item);
+        const action=status==='missing'?`<button type="button" class="btn-small btn-secondary" onclick="quickCreateNewOrderDraftItem(${index})">快速建立</button>`
+            : ['ambiguous','error'].includes(status)?`<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">${status==='error'?'重試':'選擇產品'}</button>`:'';
+        return `<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td class="order-product-status" data-status="${status}">${orderItemProductStatusLabel(item)}</td><td>${item.procurementType==='SALES_SELF_ORDER'?'業務自行訂購':'採購下單'}／${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td>${action}<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`;
+    }).join('');
 }
+let orderDraftProductCheckGeneration=0;
+async function checkNewOrderDraftProducts() {
+    const generation=++orderDraftProductCheckGeneration;
+    const opening=orderModalOpenGeneration;
+    const items=[...newOrderDraftItems];
+    items.forEach(item=>{item.productCheckStatus='checking';});
+    renderNewOrderDraftItems();
+    // Exact code queries use the shared cache; repeated codes in the quote share one read.
+    for(const item of items) {
+        const code=item.itemCode,brand=item.brand;
+        try {
+            const matches=await findProductsByCode(code,{throwOnError:true});
+            if(opening!==orderModalOpenGeneration||generation!==orderDraftProductCheckGeneration) return;
+            if(!newOrderDraftItems.includes(item)||item.itemCode!==code||item.brand!==brand) continue;
+            const match=selectProductCodeMatch(matches,brand);
+            if(match) Object.assign(item,{productId:match.productId||stableProductId(match),productMasterMatched:true,
+                brandId:match.brandId||item.brandId,productLine:match.productLine||item.productLine,productType:match.productType||item.productType,productCheckStatus:'matched'});
+            else Object.assign(item,{productId:'',productMasterMatched:false,productCheckStatus:!brand&&matches.length>1?'ambiguous':'missing'});
+        } catch(err) {
+            if(opening!==orderModalOpenGeneration||generation!==orderDraftProductCheckGeneration) return;
+            if(newOrderDraftItems.includes(item)&&item.itemCode===code&&item.brand===brand) item.productCheckStatus='error';
+        }
+        renderNewOrderDraftItems();
+    }
+}
+window.quickCreateNewOrderDraftItem=function(index){
+    editNewOrderDraftItem(index);
+    const input=document.getElementById('orderItemCode');
+    if(input?.value.trim()) openQuickProductCreate('order',input);
+};
+
 window.editNewOrderDraftItem=function(index){
     const item=newOrderDraftItems[index];
     if(!item)return;
@@ -17802,17 +17883,20 @@ window.editNewOrderDraftItem=function(index){
     if(current.itemName)newOrderDraftItems[index]=current;else newOrderDraftItems.splice(index,1);
     setOrderModalItem(item);
     renderNewOrderDraftItems();
+    checkNewOrderDraftProducts();
 };
 window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();};
 window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();
     if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
-    if(item.productMasterMatched!==true||!item.productId){alert('正式訂單品項必須先對應 Product Master。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
+    if(item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched'){alert('正式訂單品項必須先對應 Product Master。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>(existing.productId&&item.productId&&existing.productId===item.productId)||(!existing.productId&&!item.productId&&normalizeHistoryItemCode(existing.itemCode)===normalizeHistoryItemCode(item.itemCode)));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;
+    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;
+    clearQuickProductButton(nextCodeInput);clearProductMatchChoices(nextCodeInput);
+    renderNewOrderDraftItems();
     document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
 };
 
@@ -17820,6 +17904,8 @@ window.openOrderModal = function(source = null) {
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
+    const openingCode=document.getElementById('orderItemCode');
+    if(openingCode){delete openingCode.dataset.productCheckStatus;delete openingCode.dataset.preserveOrderPriceCode;clearQuickProductButton(openingCode);clearProductMatchChoices(openingCode);}
     const recoveryBanner = document.getElementById('orderDraftRecoveryBanner');
     if (recoveryBanner) recoveryBanner.style.display = 'none';
 
@@ -17863,6 +17949,8 @@ window.openOrderModal = function(source = null) {
         codeInput.value = source.itemCode || '';
         codeInput.dataset.productLine = source.productLine || '';
         codeInput.dataset.productType = source.productType || '';
+        codeInput.dataset.preserveOrderPriceCode=normalizeItemCodeLoose(source.itemCode||'');
+        codeInput.dataset.productCheckStatus='checking';
         codeInput.dataset.productMasterMatched = (source.productMasterMatched === true || !!source.productId) ? '1' : '0';
         document.getElementById('orderItemName').value = source.itemName || '';
         const nameEn = document.getElementById('orderItemNameEn');
@@ -17900,6 +17988,8 @@ window.openOrderModal = function(source = null) {
         }
         populateOrderCustomerSuggestions();
         updateOrderDraftRecoveryBanner(source);
+        if(source?.itemCode && document.getElementById('orderItemCode').value===source.itemCode) onOrderItemCodeChange(document.getElementById('orderItemCode'));
+        checkNewOrderDraftProducts();
 
         try {
             await loadWarehouseMaster();
@@ -17915,13 +18005,6 @@ window.openOrderModal = function(source = null) {
         }
 
         if (openingGeneration !== orderModalOpenGeneration || !overlay.classList.contains('active')) return;
-        if (source?.itemCode) {
-            const sourceMatch = findPriceItemForOrder({ itemCode: source.itemCode, brand: source.brand || '' });
-            if (sourceMatch) {
-                applyOrderProductCost(sourceMatch);
-                refreshOrderWarehouseStock();
-            }
-        }
     }, '新增訂單背景初始化');
 };
 
@@ -18088,10 +18171,17 @@ function showActionFeedback(message, type = 'success') {
 window.saveNewOrder = function() {
     if (newOrderSaveInProgress) return;
     const currentItem=currentOrderModalItem();
-    const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])];
+    const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])].map(item=>({...item}));
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
-    if(items.some(item=>item.productMasterMatched!==true||!item.productId)){alert('正式訂單的每個品項都必須對應 Product Master。請先選擇既有產品，或用「快速新增產品」建立基本資料。');return;}
+    const unfinished=items.map((item,index)=>({item,index})).filter(({item})=>item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched');
+    if(unfinished.length){
+        alert('以下品項尚未完成產品檢查或建檔：\n'+unfinished.map(({item,index})=>`第 ${index+1} 項 ${item.itemCode||item.itemName}（${orderItemProductStatusLabel(item)}）`).join('\n')+'\n請先完成，再儲存訂單。');
+        const first=unfinished[0];if(first.index<newOrderDraftItems.length)editNewOrderDraftItem(first.index);
+        document.getElementById('orderItemCode')?.scrollIntoView({block:'center',behavior:'smooth'});
+        document.getElementById('orderItemCode')?.focus();
+        return;
+    }
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
     const assistedOwner = currentUserRole === 'purchaser'
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
@@ -18099,6 +18189,7 @@ window.saveNewOrder = function() {
         : null;
     if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
     if(items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&(!String(item.supplier||'').trim()||item.costPrice===null||item.costPrice===undefined||String(item.costPrice).trim()===''||!Number.isFinite(Number(item.costPrice))||Number(item.costPrice)<0))){alert('自行訂貨品項請填寫供應商與含稅進價（可填 0）；建立訂單後會直接列入待到貨。');return;}
+    items.forEach(item=>{delete item.productCheckStatus;});
     const firstItem=items[0];
     const itemCode = firstItem.itemCode;
     let data = {
@@ -20198,7 +20289,7 @@ function cacheProductLookupItem(item) {
     return next;
 }
 
-async function findProductsByCode(value) {
+async function findProductsByCode(value, options = {}) {
     const normalized = normalizeItemCodeLoose(value);
     if (!normalized) return [];
     if (productCodeMatchCache.has(normalized)) return productCodeMatchCache.get(normalized);
@@ -20218,6 +20309,7 @@ async function findProductsByCode(value) {
         return active;
     } catch (err) {
         console.warn('Product Master 貨號查詢失敗：', err);
+        if (options.throwOnError) throw err;
         return [];
     }
 }
@@ -20734,10 +20826,13 @@ window.saveQuickProduct = async function() {
         alert('這個廠牌與貨號已存在，系統會直接使用現有產品。');
         priceList = priceList.filter(item => (item.productId || stableProductId(item)) !== existing.productId).concat(existing);
         refreshPriceDatalists();
+        productCodeMatchCache.delete(normalizedPartNo);
         if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, existing);
         if (quickProductTarget?.mode === 'order') {
             quickProductTarget.input.value = existing.model || code;
-            await onOrderItemCodeChange(quickProductTarget.input);
+            orderProductCheckGeneration++;
+            await applyOrderProductMatch(quickProductTarget.input, existing);
+            checkNewOrderDraftProducts();
         }
         clearQuickProductButton(quickProductTarget?.input);
         closeQuickProductCreate();
@@ -20775,10 +20870,13 @@ window.saveQuickProduct = async function() {
         const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
         priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
         refreshPriceDatalists();
+        productCodeMatchCache.delete(normalizedPartNo);
         if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, item);
         if (quickProductTarget?.mode === 'order') {
             quickProductTarget.input.value = code;
-            await onOrderItemCodeChange(quickProductTarget.input);
+            orderProductCheckGeneration++;
+            await applyOrderProductMatch(quickProductTarget.input, item);
+            checkNewOrderDraftProducts();
         }
         clearQuickProductButton(quickProductTarget?.input);
         closeQuickProductCreate();
