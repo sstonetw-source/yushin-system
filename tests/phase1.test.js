@@ -115,7 +115,7 @@ test('order loading recovers from suspended mobile reads without blanking cached
     assert.match(indexSource, /app\.js\?v=\d{8}-\d+/);
 });
 
-test('product management uses complete paginated keyword search without exposing protected cost data', () => {
+test('product management directly queries exact brand and code without exposing protected cost data', () => {
     assert.match(indexSource, /id="product-system"/);
     assert.match(indexSource, /data-main-nav="products"/);
     const searchStart = appSource.indexOf('window.searchProductManagement =');
@@ -124,14 +124,12 @@ test('product management uses complete paginated keyword search without exposing
     assert.match(productSearch, /db\.collection\('products'\)/);
     assert.doesNotMatch(productSearch, /while \(true\)/);
     assert.match(productSearch, /where\('brandName'/);
-    assert.match(productSearch, /const pageSize = 50/);
-    assert.match(productSearch, /orderBy\(firebase\.firestore\.FieldPath\.documentId\(\)\)/);
-    assert.match(productSearch, /limit\(pageSize\)/);
-    assert.match(productSearch, /startAfter\(cursor\)/);
-    assert.match(productSearch, /firestoreReadWithTimeout\(query\.get\(\), '所選廠牌產品搜尋'\)/);
-    assert.match(productSearch, /queryTerms\.every\(term => haystack\.includes\(term\)\)/);
-    assert.match(productSearch, /partNo\.includes\(normalizedPartQuery\)/);
-    assert.match(productSearch, /generation !== productManagementSearchGeneration/);
+    assert.match(productSearch, /where\('manufacturerPartNo', '==', raw\)/);
+    assert.match(productSearch, /limit\(50\)/);
+    assert.match(productSearch, /startAfter\(state.cursor\)/);
+    assert.match(productSearch, /firestoreReadWithTimeout\(query\.get\(\), '廠牌與完整貨號搜尋'\)/);
+    assert.match(productSearch, /generation === productManagementSearchGeneration/);
+    assert.doesNotMatch(productSearch, /haystack|matchesKeyword|normalizeItemCodeLoose/);
     assert.doesNotMatch(productSearch, /slice\(0, 50\)/);
     assert.doesNotMatch(productSearch, /productCosts|loadVisibleProductCost/);
     assert.match(appSource, /window\.addProductManagementToQuote/);
@@ -214,10 +212,10 @@ test('inventory uses one debounced search for inventory and Product Master resul
 test('product management searches only on explicit action', () => {
     assert.doesNotMatch(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(indexSource, /id="productManagementSearchBrand"/);
-    assert.match(appSource, /const queryTerms = queryText\.split\(\/\\s\+\/\)\.filter\(Boolean\)/);
-    assert.match(appSource, /orderBy\(firebase\.firestore\.FieldPath\.documentId\(\)\)/);
-    assert.match(appSource, /matchesKeyword\(data\)/);
-    assert.match(indexSource, /每次只檢查該廠牌 50 筆/);
+    assert.match(appSource, /where\('manufacturerPartNo', '==', raw\)/);
+    assert.match(indexSource, /選廠牌不載入產品/);
+    assert.match(indexSource, /id="productManagementBrowseBtn"/);
+
 });
 
 test('preview host selects isolated Firebase project and exposes a visible environment banner', () => {
@@ -3140,15 +3138,12 @@ test('quote numbering fails closed and preserves editing identity', () => {
 });
 
 
-test('product master search throttles intermediate table renders', () => {
+test('product master exact search renders once after completion', () => {
     const start=appSource.indexOf('window.searchProductManagement = async function(loadMore = false)');
     const end=appSource.indexOf('\nfunction ensureProductMasterEditor',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/let lastIntermediateRenderAt = 0/);
-    assert.match(source,/const renderProgress = force =>/);
-    assert.match(source,/now - lastIntermediateRenderAt < 120/);
-    assert.match(source,/productManagementResults = \[\.\.\.map\.values\(\)\][\s\S]*?renderProductManagementResults\(\);[\s\S]*?搜尋中：已檢查/);
-    assert.match(source,/完成，已檢查 \$\{checked\} 筆，共找到 \$\{productManagementResults\.length\} 筆/);
+    assert.equal((source.match(/renderProductManagementResults\(\)/g)||[]).length,2);
+    assert.doesNotMatch(source,/renderProgress|let checked|haystack/);
 });
 
 
@@ -3204,16 +3199,13 @@ test('Product Master search renders results in 100-row UI pages', () => {
 });
 
 
-test('product master search sorts only when rendering', () => {
+test('product master search rejects stale role and user results', () => {
     const start=appSource.indexOf('window.searchProductManagement = async function(loadMore = false)');
     const end=appSource.indexOf('\nfunction ensureProductMasterEditor',start);
     const source=appSource.slice(start,end);
-    const renderStart=source.indexOf('const renderProgress = force =>');
-    const renderEnd=source.indexOf('\n    };', renderStart)+7;
-    const renderSource=source.slice(renderStart,renderEnd);
-    assert.match(renderSource,/productManagementResults = \[\.\.\.map\.values\(\)\]/);
-    assert.match(renderSource,/\.sort\(/);
-    assert.match(source,/if \(generation !== productManagementSearchGeneration\) return;\s*productManagementVisibleLimit[^;]+;\s*renderProgress\(true\)/);
+    assert.match(source,/generation === productManagementSearchGeneration && role === currentUserRole && uid === currentUser\?\.uid/);
+    assert.match(source,/if \(!isCurrent\(\)\) return/);
+    assert.match(source,/productManagementResults = \[\.\.\.state.map.values\(\)\]/);
 });
 
 

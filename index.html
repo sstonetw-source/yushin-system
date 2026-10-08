@@ -97,11 +97,12 @@
     <div id="product-system" class="content-section">
         <div class="toolbar no-print product-search-toolbar">
             <div class="product-search-brand-field"><strong>廠牌</strong><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
-            <input id="productManagementSearch" type="search" disabled placeholder="輸入貨號、中文品名或英文品名">
+            <input id="productManagementSearch" type="search" disabled placeholder="請輸入完整貨號（保留開頭 0 與符號）">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()" disabled>搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
+            <button type="button" id="productManagementBrowseBtn" class="btn-secondary" onclick="browseProductMasterBrand(document.getElementById('productManagementSearchBrand').value)" disabled>瀏覽此廠牌產品</button>
         </div>
-        <div class="product-search-note">先選廠牌，輸入後按「搜尋產品」才查詢；每次只檢查該廠牌 50 筆，相同搜尋會重用結果。可直接將產品加入估價單或建立訂單。</div>
+        <div class="product-search-note">先選廠牌，再輸入完整貨號按「搜尋產品」，直接查詢符合產品；貨號大小寫與符號須一致。選廠牌不載入產品；按「瀏覽此廠牌產品」才分批載入，每次 50 筆。</div>
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
 
         
@@ -122,7 +123,7 @@
         <div class="table-wrap product-results-wrap">
             <table class="product-management-table">
                 <thead id="productManagementHead" data-mode="products"><tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)" disabled></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
-                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">選擇上方廠牌查看產品，或輸入貨號／品名搜尋。</td></tr></tbody>
+                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">先選廠牌，再輸入完整貨號搜尋；也可按「瀏覽此廠牌產品」。</td></tr></tbody>
             </table>
         </div>
         <div id="productManagementMoreRow" class="product-load-more-row no-print" style="display:none;">
@@ -1691,7 +1692,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261008-19"></script>
+    <script src="app.js?v=20261008-20"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261007-2"></script>
