@@ -947,7 +947,7 @@ function initializePageData(mainKey, options = {}) {
         }
     }
     if (mainKey === 'quote') jobs.push(ensureQuoteFormInitialized());
-    if (mainKey === 'products' && productManagementSourceMode === 'search') { jobs.push(searchProductManagement()); }
+    if (mainKey === 'products' && productManagementSourceMode === 'search') { renderProductManagementResults(); }
     else if (mainKey === 'products' && wasLoaded && force && productBrandBrowseCurrent) { reloadCurrentProductBrand(); return; }
     else if (mainKey === 'products') {
         clearProductManagementSearch({ preserveInput: true });
@@ -1520,6 +1520,12 @@ function productBrandBrowserEntries() {
 window.renderProductBrandBrowser = function() {
     const container = document.getElementById('productBrandBrowserList');
     if (!container) return;
+    const searchBrand = document.getElementById('productManagementSearchBrand');
+    if (searchBrand) {
+        const selected = searchBrand.value;
+        searchBrand.innerHTML = '<option value="">先選擇廠牌</option>' + getUnifiedBrandEntries(false).filter(entry => entry?.name && entry.active !== false).map(entry => `<option value="${escapeAttr(entry.name)}">${escapeHtml(entry.name)}</option>`).join('');
+        searchBrand.value = selected;
+    }
     const entries = productBrandBrowserEntries();
     if (!entries.length) {
         container.innerHTML = '<span class="product-brand-browser-empty">找不到符合的廠牌。</span>';
@@ -1591,7 +1597,10 @@ async function fetchProductBrandBrowsePage(reset = false) {
 
 window.browseProductMasterBrand = async function(brand) {
     if (!canAccessPage('products')) return;
+    productManagementSearchGeneration++;
+    productManagementSearchInProgress = false;
     productBrandBrowseCurrent = resolveBrandName(brand);
+    const searchBrand = document.getElementById('productManagementSearchBrand');if (searchBrand) searchBrand.value = productBrandBrowseCurrent;
     productManagementSourceMode = 'brand';
     pendingProductMasterRows = [];
     productBrandBrowseCursor = null;
@@ -2106,6 +2115,12 @@ function updateProductManagementMoreButton() {
         return;
     }
 
+    if (productManagementSourceMode === 'search') {
+        row.style.display = productManagementActiveSearch?.hasMore ? '' : 'none';
+        button.disabled = productManagementSearchInProgress;
+        button.textContent = '繼續搜尋（下一批 50 筆）';
+        return;
+    }
     const visible = Math.min(productManagementVisibleLimit, productManagementResults.length);
     const hasMore = productManagementResults.length > visible;
     row.style.display = hasMore ? '' : 'none';
@@ -2122,12 +2137,15 @@ function renderProductManagementResults() {
     const visibleResults = productManagementResults.slice(0, productManagementVisibleLimit);
     body.innerHTML = visibleResults.length
         ? visibleResults.map(productManagementRow).join('')
-        : '<tr><td colspan="10" class="empty-hint">查無符合產品。</td></tr>';
+        : productManagementSourceMode === 'search' && productManagementActiveSearch?.hasMore
+            ? '<tr><td colspan="10" class="empty-hint">這批尚未找到符合產品；按「繼續搜尋」檢查下一批 50 筆。</td></tr>'
+            : '<tr><td colspan="10" class="empty-hint">查無符合產品。</td></tr>';
     updateProductManagementMoreButton();
     updateProductManagementSelectionBar();
 }
 
 window.loadMoreProductManagementResults = async function() {
+    if (productManagementSourceMode === 'search') { await searchProductManagement(true); return; }
     if (productManagementSourceMode === 'brand') {
         if (!productBrandBrowseHasMore) return;
         try { await fetchProductBrandBrowsePage(false); }
@@ -2174,21 +2192,15 @@ window.clearProductManagementSearch = function(options = {}) {
     if (button) { button.disabled = false; button.textContent = '搜尋產品'; }
 };
 
-window.queueProductManagementSearch = function() {
-    clearTimeout(productManagementSearchTimer);
-    const input = document.getElementById('productManagementSearch');
-    const raw = String(input?.value || '').trim();
-    if (raw.length < 2) {
-        clearProductManagementSearch({ preserveInput: true });
-        const status = document.getElementById('productManagementSearchStatus');
-        if (status && raw.length) status.textContent = '再輸入 1 個字即可搜尋。';
-        return;
-    }
-    productManagementSearchTimer = scheduleListSearch(productManagementSearchTimer, () => searchProductManagement());
-};
+const productManagementSearchCache = new Map();
+let productManagementActiveSearch = null;
+window.queueProductManagementSearch = function() {};
 
-window.searchProductManagement = async function() {
+window.searchProductManagement = async function(loadMore = false) {
+    if (productManagementSearchInProgress) return;
     if (!canAccessPage('products')) return;
+    const brand = String(document.getElementById('productManagementSearchBrand')?.value || '').trim();
+    if (!brand) { document.getElementById('productManagementSearchStatus').textContent = '請先選擇廠牌，再按搜尋產品。'; return; }
     const generation = ++productManagementSearchGeneration;
     clearTimeout(productManagementSearchTimer);
     pendingProductMasterRows = [];
@@ -2212,15 +2224,19 @@ window.searchProductManagement = async function() {
     productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
     productManagementResults = [];
     if (button) { button.disabled = true; button.textContent = '搜尋中…'; }
-    if (status) status.textContent = '正在搜尋完整 Product Master…';
+    if (status) status.textContent = '正在搜尋所選廠牌…';
 
     const queryText = raw.normalize('NFKC').toLocaleLowerCase();
     const queryTerms = queryText.split(/\s+/).filter(Boolean);
     const normalizedPartQuery = normalizeItemCodeLoose(raw);
-    const map = new Map();
-    let checked = 0;
+    const cacheKey = JSON.stringify([currentUser?.uid, currentUserRole, brand, queryText, document.getElementById('productManagementShowInactive')?.checked === true]);
+    let state = productManagementSearchCache.get(cacheKey);
+    if (!state || Date.now() - state.at > 300000) state = { map:new Map(), checked:0, cursor:null, hasMore:true, at:Date.now() };
+    productManagementActiveSearch = state;
+    const map = new Map(state.map);
+    let checked = state.checked;
     let lastIntermediateRenderAt = 0;
-    const pageSize = 200;
+    const pageSize = 50;
     const canSeeInactive = canManagePendingProductMaster()
         && document.getElementById('productManagementShowInactive')?.checked === true;
 
@@ -2251,13 +2267,15 @@ window.searchProductManagement = async function() {
     };
 
     try {
-        let cursor = null;
-        while (true) {
+        let cursor = state.cursor;
+        if (!state.loaded || (loadMore && state.hasMore)) {
+            const storedBrandNames = dedupeBrandsCaseInsensitive([brand, ...(brandMasterEntryForName(brand)?.aliases || [])]).slice(0, 10);
             let query = db.collection('products')
+                .where('brandName', storedBrandNames.length > 1 ? 'in' : '==', storedBrandNames.length > 1 ? storedBrandNames : brand)
                 .orderBy(firebase.firestore.FieldPath.documentId())
                 .limit(pageSize);
             if (cursor) query = query.startAfter(cursor);
-            const snapshot = await firestoreReadWithTimeout(query.get(), '產品完整關鍵字搜尋');
+            const snapshot = await firestoreReadWithTimeout(query.get(), '所選廠牌產品搜尋');
             if (generation !== productManagementSearchGeneration) return;
 
             checked += snapshot.size;
@@ -2268,15 +2286,19 @@ window.searchProductManagement = async function() {
             });
             renderProgress(false);
 
-            if (snapshot.size < pageSize) break;
-            cursor = snapshot.docs[snapshot.docs.length - 1];
+            state.hasMore = snapshot.size === pageSize;
+            state.cursor = snapshot.docs[snapshot.docs.length - 1] || cursor;
+            state.map = map; state.checked = checked; state.loaded = true;
+            productManagementSearchCache.set(cacheKey, state);
+            if (productManagementSearchCache.size > 20) productManagementSearchCache.delete(productManagementSearchCache.keys().next().value);
         }
 
         if (generation !== productManagementSearchGeneration) return;
+        productManagementVisibleLimit = Math.max(PRODUCT_MANAGEMENT_RENDER_STEP, map.size);
         renderProgress(true);
         if (status) {
             const visible = Math.min(productManagementVisibleLimit, productManagementResults.length);
-            status.textContent = visible < productManagementResults.length
+            status.textContent = state.hasMore ? `${brand}：已檢查 ${checked} 筆，找到 ${productManagementResults.length} 筆；按「繼續搜尋」檢查下一批 50 筆。` : visible < productManagementResults.length
                 ? `完成，已檢查 ${checked} 筆，共找到 ${productManagementResults.length} 筆；目前顯示 ${visible} 筆。`
                 : `完成，已檢查 ${checked} 筆，共找到 ${productManagementResults.length} 筆。`;
         }

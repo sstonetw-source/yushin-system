@@ -107,7 +107,7 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 #product-system * { max-width:100%; box-sizing:border-box; }
 .product-search-toolbar {
     display:grid;
-    grid-template-columns:minmax(260px,1fr) auto auto;
+    grid-template-columns:minmax(150px,0.5fr) minmax(260px,1fr) auto auto;
     gap:8px;
     align-items:center;
 }
@@ -3474,3 +3474,5 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 }
 
 #product360Content .product-360-grid { grid-template-columns: minmax(0, 1fr); }
+
+#productManagementSearchBrand { width:100%; min-width:0; padding:8px 10px; }

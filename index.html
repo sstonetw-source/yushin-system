@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261008-6">
+        <link rel="stylesheet" href="styles.css?v=20261008-7">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -96,11 +96,12 @@
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
         <div class="toolbar no-print product-search-toolbar">
-            <input id="productManagementSearch" type="search" placeholder="搜尋貨號、中文品名或英文品名" oninput="queueProductManagementSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchProductManagement();}">
+            <select id="productManagementSearchBrand" aria-label="搜尋廠牌"><option value="">先選擇廠牌</option></select>
+            <input id="productManagementSearch" type="search" placeholder="輸入貨號、中文品名或英文品名">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()">搜尋</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
         </div>
-        <div class="product-search-note">搜尋會查完整 Product Master，不受目前畫面載入筆數限制。可直接將產品加入估價單或建立訂單。</div>
+        <div class="product-search-note">先選廠牌，輸入後按「搜尋產品」才查詢；每次只檢查該廠牌 50 筆，相同搜尋會重用結果。可直接將產品加入估價單或建立訂單。</div>
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
 
         
@@ -1701,7 +1702,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261008-8"></script>
+    <script src="app.js?v=20261008-9"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261007-2"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
