@@ -433,7 +433,7 @@ test('agency settings do not trigger a full orders statistics query', () => {
     assert.doesNotMatch(agencyLine, /loadSalesStatistics/);
     const statisticsStart = adminSwitch.indexOf("if (tab === 'statistics')");
     const statisticsSource = adminSwitch.slice(statisticsStart);
-    assert.match(statisticsSource, /loadSalesStatistics\(\)/);
+    assert.match(statisticsSource, /loadSalesStatistics\(true\)/);
     assert.doesNotMatch(statisticsSource, /loadPurchasingAnalytics/);
 });
 
@@ -657,20 +657,14 @@ test('document number generation reads only the newest matching document', () =>
     assert.match(appSource, /function findPriceItemByCodeValue\(value, preferredBrand = ''\)/);
 });
 
-test('sales statistics uses a bounded cached query and ignores stale roles', () => {
-    const start = appSource.indexOf('window.loadSalesStatistics =');
-    const end = appSource.indexOf('\n};', start) + 3;
-    const loader = appSource.slice(start, end);
-    assert.match(loader, /if \(salesStatisticsLoadPromise\) return salesStatisticsLoadPromise/);
-    assert.match(loader, /requestedRole !== currentUserRole/);
-    assert.match(loader, /salesStatisticsLoadPromise = null/);
-    assert.match(loader, /where\('orderDate', '>=', start\)/);
-    assert.match(loader, /where\('orderDate', '<=', end\)/);
-    assert.match(loader, /where\('updatedAt', '>=', startIso\)/);
-    assert.match(loader, /where\('status', '==', BUSINESS_STATUS\.ACTIVE\)/);
-    assert.match(loader, /readQueryInBatches/);
-    assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
-    assert.doesNotMatch(loader, /collection\('orders'\)\.get\(\)/);
+test('sales statistics caches bounded tab snapshots and ignores stale roles', () => {
+    const start=appSource.indexOf('window.loadSalesStatistics =');
+    const loader=appSource.slice(start,appSource.indexOf('async function readDocumentsByIds',start));
+    assert.match(loader,/if \(salesStatisticsLoadPromise\) return salesStatisticsLoadPromise/);
+    assert.match(loader,/requestedRole !== currentUserRole/);
+    assert.match(loader,/salesStatisticsLoadPromise = null/);
+    assert.match(loader,/loadTradeAnalysisSnapshot\(tab,filters\)/);
+    assert.match(loader,/tradeAnalysisSnapshots.get\(key\)/);
 });
 
 test('purchase modal chooses a company that does not silently filter every item', () => {
@@ -1303,14 +1297,14 @@ test('phase 9 analysis separates actual receipts sales stock value incoming and 
  assert.match(appSource,/collection\('receipts'\)/);
  assert.match(appSource,/difference:\s*sales\s*-\s*purchase/);
  assert.match(appSource,/stockValue/);assert.match(appSource,/incoming/);
- assert.match(appSource,/readQueryInBatches\(receiptQuery\)/);
+ assert.match(appSource,/loadTradeAnalysisSnapshot/);
 });
 test('phase 8 fixed role permissions include warehouse role without an editable permission matrix',()=>{assert.match(appSource,/warehouse:\s*Object\.freeze/);assert.doesNotMatch(appSource,/saveAdminUserCapabilities/);});
 
 
 test('phase 10 keeps inventory analysis queries bounded and server-filtered',()=>{
  assert.match(appSource,/collection\('receipts'\)/);
- assert.match(appSource,/const receiptQuery = db\.collection\('receipts'\)[\s\S]{0,500}where\('receiptDate','>=',start\)/);
+ assert.match(appSource,/where\('onHand','>',0\)/);
  assert.doesNotMatch(appSource,/collection\('inventoryMovements'\)\.get\(\)/);
 });
 test('phase 10 role model consistently documents warehouse',()=>{
@@ -1584,7 +1578,7 @@ test('phase 16 inventory analysis uses protected lot costs without copying cost 
     const start = appSource.indexOf('function inventoryAnalysisTotals');
     const end = appSource.indexOf('function renderInventoryAnalysisSummary', start);
     const source = appSource.slice(start, end);
-    assert.match(appSource, /readDocumentsByIds\('inventoryLotCosts', \[\.\.\.requiredLotIds\]\)/);
+    assert.match(appSource, /readTradeAnalysisLotCosts\(ids\)/);
     assert.match(source, /inventoryAnalysisLotCosts\.get\(receipt\.lotId\)/);
     assert.match(source, /inventoryAnalysisLotCosts\.get\(lot\.id\)/);
     assert.doesNotMatch(source, /receipt\.unitCost|receipt\.purchaseNetAmount|stock\.unitCost/);
@@ -1604,8 +1598,7 @@ test('phase 18 statistics avoid all-history downloads and important writes stamp
     const start = appSource.indexOf('window.loadSalesStatistics =');
     const end = appSource.indexOf('\n};', start) + 3;
     const loader = appSource.slice(start, end);
-    assert.match(loader, /Promise\.all\(\[periodOrders, activityOrders, openOrders\]\)/);
-    assert.match(loader, /readQueryInBatches/);
+    assert.match(loader, /loadTradeAnalysisSnapshot/);
     assert.doesNotMatch(loader, /db\.collection\('orders'\)\.get\(\)/);
     assert.match(appSource, /updatedAt:\s*(?:now|history\.at|new Date\(\)\.toISOString\(\))/);
     assert.match(appSource, /updatedAt: history\.at/);
@@ -2595,7 +2588,7 @@ test('shared batch master reads are bounded', () => {
 
 test('opening linked purchase orders and supply sync checks are bounded', () => {
     const idsStart=appSource.indexOf('async function readDocumentsByIds');
-    const idsEnd=appSource.indexOf('async function loadInventoryAnalysisSupport',idsStart);
+    const idsEnd=appSource.indexOf('async function readTradeAnalysisSuppliesByOrders',idsStart);
     const idsSource=appSource.slice(idsStart,idsEnd);
     assert.match(idsSource,/firestoreReadWithTimeout\([\s\S]*?collectionName\s*\+\s*' 指定文件'/);
 
@@ -5112,7 +5105,7 @@ test('order costs auto-fill from protected costs while preserving manual transac
 test('protected Product Master costs drive sales statistics without being copied to formal orders', () => {
     assert.match(appSource, /function orderUnitCostForStats/);
     assert.match(appSource, /purchaseCostCache\.get\(productId\)/);
-    assert.match(appSource, /loadInventoryAnalysisSupport\(start, end\)/);
+    assert.match(appSource, /loadTradeAnalysisSnapshot\(tab,filters\)/);
     const start=appSource.indexOf('window.saveMissingCostFromStats');
     const end=appSource.indexOf('function escapeAttr',start);
     const source=appSource.slice(start,end);
@@ -5320,7 +5313,7 @@ test('admin trade analysis exposes three responsive tabs and shared item details
     for(const tab of ['purchasing','selling','inventory'])assert.ok(adminSource.includes(`data-analysis-tab="${tab}"`));
     assert.match(adminSource,/id="tradeAnalysisCards"/);
     assert.match(adminSource,/id="unifiedBrandAnalyticsBody"/);
-    assert.match(adminSource,/select hidden id="salesStatsSalesFilter"/);
+    assert.match(adminSource,/id="salesStatsSalesField" hidden/);
 });
 
 test('sales and purchasing analytics share primary plus other brand buckets', () => {

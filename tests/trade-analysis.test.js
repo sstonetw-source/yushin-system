@@ -104,21 +104,6 @@ test('empty filter result has zero totals and no stale detail rows',()=>{
     const report=core.summarize(fixture().buildTradeAnalysisRows(),{...filters,type:'不存在'});
     for(const kind of core.kinds){assert.equal(report.totals[kind],0);assert.equal(report.details[kind].length,0);}
 });
-test('receiving support reads actual receipts by date, all open supplies and only active lots',async()=>{
-    const calls=[];
-    const db={collection:name=>{const query={name,clauses:[],where(...args){this.clauses.push(args);return this;},orderBy(){return this;}};return query;}};
-    const x=vm.createContext({db,salesStatisticsOrders:[],salesStatisticOrderLines:o=>[o],
-        readQueryInBatches:async q=>{calls.push(q);return q.name==='receipts'?[{id:'R',supplyOrderId:'S',lotId:'L',productId:'P'}]:q.name==='inventoryLots'?[{id:'L',remainingQty:2,productId:'P'}]:[];},
-        readDocumentsByIds:async(name,ids)=>{calls.push({name,ids});return name==='supplyOrders'?[{id:'S',unitCost:25}]:[];},
-        cacheProductLookupItem:()=>{},productMasterDocToPriceItem:x=>x,rebuildPriceItemLookup:()=>{}});
-    x.supplyOrdersCollection=()=>x.db.collection('supplyOrders');
-    vm.runInContext('let inventoryAnalysisReceipts,inventoryAnalysisLots,inventoryAnalysisLotCosts,inventoryAnalysisSupplyOrders,inventoryAnalysisDirectShipSupplyOrders,tradeAnalysisSourceOrders;async '+fn('loadInventoryAnalysisSupport'),x);
-    await x.loadInventoryAnalysisSupport(filters.start,filters.end);
-    assert.deepEqual(calls.find(q=>q.name==='receipts').clauses,[['receiptDate','>=',filters.start],['receiptDate','<=',filters.end]]);
-    assert.deepEqual(calls.find(q=>q.name==='inventoryLots').clauses,[['remainingQty','>',0]]);
-    assert.equal(calls.find(q=>q.name==='supplyOrders'&&q.clauses).clauses[0][0],'status');
-    assert.deepEqual(Array.from(calls.find(q=>q.name==='inventoryLotCosts').ids),['L']);
-});
 
 test('workbook uses every matching row with numeric totals and explicit filter scope',async()=>{
     const x=fixture();const report=core.summarize(x.buildTradeAnalysisRows(),filters);report.filters=filters;
@@ -176,7 +161,7 @@ test('legacy multi-item delivered flags preserve line amounts and cancellation k
 
 function simpleFixture(tab){
  const x=fixture();Object.assign(x,{tradeAnalysisTab:tab,salesStatisticsQueryWindow:()=>filters,
- document:{getElementById:()=>({value:''})},tradeAnalysisWarehouseStocks:[{id:'W',productKey:'P1',productId:'P1',warehouseId:'WH',onHand:2,reserved:1}]});
+ readTradeAnalysisFilters:()=>({...filters,brand:'',line:'',sales:'',type:''}),document:{getElementById:()=>({value:''})},tradeAnalysisWarehouseStocks:[{id:'W',productKey:'P1',productId:'P1',warehouseId:'WH',onHand:2,reserved:1}]});
  x.inventoryAnalysisLots[0].productKey='P1';x.inventoryAnalysisLots[0].warehouseId='WH';
  vm.runInContext(fn('buildSimpleTradeAnalysis'),x);return x;
 }
@@ -200,4 +185,153 @@ test('inventory quantity and weighted valuation use warehouse stock and detect m
  const x=simpleFixture('inventory');const row=x.buildSimpleTradeAnalysis()[0];
  assert.deepEqual(Array.from(row.quantities),[2,1,1]);assert.deepEqual(Array.from(row.values),[60,30,30]);
  x.tradeAnalysisWarehouseStocks[0].onHand=3;assert.deepEqual(Array.from(x.buildSimpleTradeAnalysis()[0].values),[null,null,null]);
+});
+
+function snapshotFixture(records={}) {
+    const calls=[];
+    const db={collection:name=>({name,clauses:[],where(...args){this.clauses.push(args);return this;},orderBy(){return this;}})};
+    const x=fixture();
+    Object.assign(x,{db,readQueryInBatches:async q=>{calls.push(q);return records[q.name]||[];},
+        readDocumentsByIds:async(name,ids)=>{
+            const unique=[...new Set(ids.filter(Boolean))];if(unique.length)calls.push({name,ids:unique});
+            return (records[name]||[]).filter(row=>unique.includes(row.id));
+        }});
+    x.supplyOrdersCollection=()=>db.collection('supplyOrders');
+    for(const name of ['readTradeAnalysisSuppliesByOrders','readTradeAnalysisLotCosts','loadTradeAnalysisSnapshot'])vm.runInContext('async '+fn(name),x);
+    return {x,calls};
+}
+test('purchase analysis reads the chosen purchase cohort and source metadata without stock, receipts or all orders',async()=>{
+    const {x,calls}=snapshotFixture({supplyOrders:[{id:'S',orderId:'O',productId:'P'}],orders:[{id:'O'}],products:[{id:'P'}]});
+    const snapshot=await x.loadTradeAnalysisSnapshot('purchasing',filters);
+    assert.deepEqual(calls.map(q=>q.name),['supplyOrders','orders','products']);
+    assert.deepEqual(Array.from(calls[0].clauses,args=>Array.from(args)),[['orderDate','>=',filters.start],['orderDate','<=',filters.end]]);
+    assert.deepEqual(Array.from(calls[1].ids),['O']);assert.equal(snapshot.supplies.length,1);assert.equal(snapshot.orders.length,0);
+});
+test('sales cohort reads delivered batch costs and only relevant direct shipment orders, including exhausted lots',async()=>{
+    const orders=[{id:'O',productId:'P',deliveryRecords:[{qty:1,lotAllocations:[{lotId:'L',qty:1}]}]},
+        {id:'D',deliveryRecords:[{qty:1}]}];
+    const {x,calls}=snapshotFixture({orders,inventoryLotCosts:[{id:'L',unitCost:25}],supplyOrders:[{id:'S',orderId:'D',fulfillmentType:'DIRECT_SHIP',unitCost:12}]});
+    const snapshot=await x.loadTradeAnalysisSnapshot('selling',filters);
+    assert.equal(calls.filter(q=>q.name==='orders').length,1);
+    assert.equal(calls.some(q=>['receipts','warehouseStocks','inventoryLots'].includes(q.name)),false);
+    assert.deepEqual(Array.from(calls.find(q=>q.name==='inventoryLotCosts').ids),['L']);
+    assert.deepEqual(Array.from(calls.find(q=>q.name==='supplyOrders').clauses[0][2]),['D']);
+    assert.equal(snapshot.lotCosts[0].unitCost,25);
+});
+test('stock snapshot uses positive warehouse and lot balances and follows transferred cost roots without order scans',async()=>{
+    const {x,calls}=snapshotFixture({warehouseStocks:[{id:'W',productId:'P',onHand:2}],
+        inventoryLots:[{id:'T',productId:'P',remainingQty:2,costLotId:'ROOT'}],
+        inventoryLotCosts:[{id:'ROOT',costSourceSupplyId:'S'}],supplyOrders:[{id:'S',unitCost:15}]});
+    const snapshot=await x.loadTradeAnalysisSnapshot('inventory',filters);
+    assert.equal(calls.some(q=>['orders','receipts'].includes(q.name)),false);
+    assert.equal(calls.filter(q=>q.name==='supplyOrders').every(q=>q.ids),true);
+    assert.deepEqual(Array.from(calls[0].clauses[0]),['onHand','>',0]);
+    assert.deepEqual(Array.from(calls[1].clauses[0]),['remainingQty','>',0]);
+    assert.equal(snapshot.lotCosts[0].id,'T');assert.equal(snapshot.lotCosts[0].unitCost,15);
+});
+test('missing costs remain unknown and zero cost remains valid through source resolution',async()=>{
+    const {x}=snapshotFixture({inventoryLotCosts:[{id:'L',costSourceLotId:'ROOT'},{id:'ZERO',costSourceSupplyId:'S'},{id:'MISSING'}],
+        supplyOrders:[{id:'S',unitCost:0}]});
+    const costs=await x.readTradeAnalysisLotCosts(['L','ZERO','MISSING']);
+    assert.equal(x.tradeAnalysisCost(costs[0].unitCost),null);
+    assert.equal(x.tradeAnalysisCost(costs[1].unitCost),0);
+    assert.equal(x.tradeAnalysisCost(costs[2].unitCost),null);
+});
+test('type and line filters consistently limit all three tab calculations, including empty results',()=>{
+    for(const tab of ['purchasing','selling','inventory']){
+        const x=simpleFixture(tab);
+        x.inventoryAnalysisSupplyOrders.forEach(row=>row.orderDate='2026-10-01');
+        x.salesStatisticsOrders.forEach(row=>row.orderDate='2026-10-01');
+        const rows=x.buildSimpleTradeAnalysis({...filters,type:'試劑',line:'試劑線'});
+        assert.ok(rows.length>0);assert.equal(rows.every(row=>row.type==='試劑'&&row.line==='試劑線'),true);
+        assert.equal(x.buildSimpleTradeAnalysis({...filters,type:'不存在'}).length,0);
+    }
+});
+
+function loaderFixture() {
+    const x=fixture(),elements={},loads=[],applied=[];
+    const element=id=>elements[id]||(elements[id]={value:'',textContent:'',innerHTML:'',hidden:false,setAttribute(){}});
+    Object.assign(x,{currentUserRole:'admin',currentUser:{uid:'admin'},tradeAnalysisTab:'purchasing',
+        tradeAnalysisAppliedFilters:{...filters},tradeAnalysisSnapshots:new Map(),tradeAnalysisRevision:0,
+        tradeAnalysisLoadedKey:'',tradeAnalysisReady:false,tradeAnalysisFiltersPending:false,salesStatisticsLoadPromise:null,
+        document:{getElementById:element,querySelectorAll:()=>[]},
+        setTradeAnalysisLoading:()=>{},renderSalesStatistics:()=>{},resetSimpleTradeAnalysisDetail:()=>{},
+        applyTradeAnalysisSnapshot:snapshot=>applied.push(snapshot),
+        loadTradeAnalysisSnapshot:(tab,range)=>new Promise((resolve,reject)=>loads.push({tab,range,resolve,reject})),
+        readTradeAnalysisFilters:()=>({...filters})});
+    vm.runInContext('window=globalThis;'+fn('tradeAnalysisQueryKey'),x);
+    const start=source.indexOf('window.loadSalesStatistics =');
+    vm.runInContext(source.slice(start,source.indexOf('\n};',start)+3),x);
+    return {x,loads,applied,elements};
+}
+const blankSnapshot=tab=>({tab,orders:[],supplies:[],lots:[],lotCosts:[],stocks:[],sourceOrders:[],products:[]});
+test('duplicate queries share one request and same-period filters reuse the tab snapshot',async()=>{
+    const {x,loads,applied}=loaderFixture();
+    const first=x.loadSalesStatistics();assert.equal(first,x.loadSalesStatistics());assert.equal(loads.length,1);
+    loads[0].resolve(blankSnapshot('purchasing'));await first;assert.equal(applied.length,1);
+    x.tradeAnalysisAppliedFilters={...filters,type:'試劑'};await x.loadSalesStatistics();assert.equal(loads.length,1);
+    const fresh=x.loadSalesStatistics(true);assert.equal(loads.length,2);
+    loads[1].resolve(blankSnapshot('purchasing'));await fresh;
+});
+test('fast tab switching discards old visual results and starts the newest tab after the in-flight request',async()=>{
+    const {x,loads,applied}=loaderFixture();const first=x.loadSalesStatistics();
+    x.tradeAnalysisTab='selling';x.loadSalesStatistics();
+    loads[0].resolve(blankSnapshot('purchasing'));await first;
+    assert.equal(applied.length,0);assert.equal(loads.length,2);assert.equal(loads[1].tab,'selling');
+    const second=x.salesStatisticsLoadPromise;loads[1].resolve(blankSnapshot('selling'));await second;
+    assert.equal(applied.length,1);assert.equal(applied[0].tab,'selling');
+});
+test('failed or stale-role reads never publish partial snapshots and invalid dates do not query',async()=>{
+    const {x,loads,applied,elements}=loaderFixture();let pending=x.loadSalesStatistics();
+    loads[0].reject(Error('network'));await pending;
+    assert.equal(applied.length,0);assert.equal(x.tradeAnalysisReady,false);assert.match(elements.tradeAnalysisStatus.textContent,/network/);
+    pending=x.loadSalesStatistics();x.currentUserRole='sales';loads[1].resolve(blankSnapshot('purchasing'));await pending;
+    assert.equal(applied.length,0);assert.equal(x.tradeAnalysisSnapshots.size,0);
+    x.currentUserRole='admin';x.tradeAnalysisAppliedFilters={start:'2026-12-01',end:'2026-01-01'};
+    await x.loadSalesStatistics();assert.equal(loads.length,2);assert.match(elements.tradeAnalysisStatus.textContent,/起日不可晚於迄日/);
+});
+test('business mutation invalidates an in-flight snapshot and forces a fresh read',async()=>{
+    const {x,loads,applied}=loaderFixture();const first=x.loadSalesStatistics();x.tradeAnalysisRevision++;
+    loads[0].resolve(blankSnapshot('purchasing'));await first;
+    assert.equal(applied.length,0);assert.equal(loads.length,2);
+    const second=x.salesStatisticsLoadPromise;loads[1].resolve(blankSnapshot('purchasing'));await second;assert.equal(applied.length,1);
+});
+test('cache is scoped to account, tab and dates; inventory ignores transaction dates',()=>{
+    const {x}=loaderFixture();const a=x.tradeAnalysisQueryKey('selling',filters);
+    assert.notEqual(a,x.tradeAnalysisQueryKey('selling',{...filters,end:'2026-11-01'}));
+    assert.notEqual(a,x.tradeAnalysisQueryKey('purchasing',filters));
+    assert.equal(x.tradeAnalysisQueryKey('inventory',filters),x.tradeAnalysisQueryKey('inventory',{start:'2000-01-01',end:'2000-01-02'}));
+    x.currentUser.uid='other';assert.notEqual(a,x.tradeAnalysisQueryKey('selling',filters));
+});
+test('new details paginate fifty rows without querying or changing totals',()=>{
+    const {x,loads,elements}=loaderFixture();
+    Object.assign(x,{tradeAnalysisTab:'selling',tradeAnalysisReady:true,tradeAnalysisSimplePage:0,
+        tradeAnalysisSimpleRows:Array.from({length:101},(_,i)=>({brand:'主要',code:String(i),name:'品名',values:[100,80,20,40]})),
+        escapeHtml:String,formatStatsMoney:String});
+    for(const name of ['simpleTradeAnalysisLabels','renderSimpleTradeAnalysisPage'])vm.runInContext(fn(name),x);
+    for(const name of ['toggleSimpleTradeAnalysisDetail','changeSimpleTradeAnalysisPage']){
+        const start=source.indexOf('window.'+name+' = function');vm.runInContext(source.slice(start,source.indexOf('\n};',start)+3),x);
+    }
+    elements.tradeAnalysisSimpleDetail={hidden:true};x.toggleSimpleTradeAnalysisDetail();
+    assert.equal((elements.unifiedBrandAnalyticsBody.innerHTML.match(/<tr>/g)||[]).length,50);
+    x.changeSimpleTradeAnalysisPage(1);assert.equal((elements.unifiedBrandAnalyticsBody.innerHTML.match(/<tr>/g)||[]).length,50);
+    x.changeSimpleTradeAnalysisPage(1);assert.equal((elements.unifiedBrandAnalyticsBody.innerHTML.match(/<tr>/g)||[]).length,1);
+    assert.equal(elements.tradeAnalysisNextBtn.disabled,true);assert.equal(loads.length,0);
+});
+test('current-tab Excel includes all filtered rows and applied product type, independent of draft inputs',async()=>{
+    const x=simpleFixture('selling'),sheets=[],elements={};
+    x.salesStatisticsOrders[0].orderDate='2026-10-01';
+    x.salesStatisticsOrders=Array.from({length:101},(_,i)=>({...x.salesStatisticsOrders[0],id:'O'+i}));
+    const applied={...filters,type:'試劑',line:'試劑線'};
+    Object.assign(x,{currentUserRole:'admin',tradeAnalysisReady:true,salesStatisticsLoadPromise:null,tradeAnalysisFiltersPending:false,
+        tradeAnalysisAppliedFilters:applied,beginActionButton:()=>({}),endActionButton:()=>{},ensureXlsxLoaded:async()=>{},
+        document:{getElementById:id=>elements[id]||(elements[id]={value:'未套用的條件',textContent:'計算方式'})},
+        alert:message=>{throw Error(message);},XLSX:{utils:{book_new:()=>({}),json_to_sheet:rows=>rows,book_append_sheet:(_wb,rows,name)=>sheets.push({rows,name})},writeFile(){}}});
+    vm.runInContext('window=globalThis',x);
+    const start=source.indexOf('window.exportTradeAnalysis = async function');vm.runInContext(source.slice(start,source.indexOf('\n};',start)+3),x);
+    const rows=x.buildSimpleTradeAnalysis(applied);await x.exportTradeAnalysis();
+    const detail=sheets.find(sheet=>sheet.name==='品項明細').rows;
+    assert.equal(detail.length,102);assert.equal(detail[0]['產品類型'],'試劑');
+    assert.equal(detail.at(-1)['銷售金額'],rows.reduce((n,row)=>n+row.values[0],0));
+    assert.equal(sheets[0].rows.find(row=>row['項目']==='產品類型')['內容'],'試劑');
 });

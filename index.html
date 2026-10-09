@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261009-2">
+        <link rel="stylesheet" href="styles.css?v=20261009-4">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1460,22 +1460,27 @@
                 <button type="button" role="tab" class="sub-tab" data-analysis-tab="inventory" aria-selected="false" onclick="switchTradeAnalysisTab('inventory')">庫存分析</button>
             </div>
             <div class="toolbar no-print trade-analysis-filters">
-                <select id="salesStatsPeriod" aria-label="日期區間" onchange="setSalesStatisticsPeriod(this.value)">
+                <label data-analysis-period>期間<select id="salesStatsPeriod" aria-label="日期區間" onchange="setSalesStatisticsPeriod(this.value)">
                     <option value="month">本月</option><option value="ytd">今年累計</option><option value="custom">自訂日期</option>
-                </select>
-                <label>起日 <input type="date" id="salesStatsStart" onchange="document.getElementById('salesStatsPeriod').value='custom';renderAdminStatistics()"></label>
-                <label>迄日 <input type="date" id="salesStatsEnd" onchange="document.getElementById('salesStatsPeriod').value='custom';renderAdminStatistics()"></label>
-                <select hidden id="salesStatsSalesFilter" aria-label="業務" onchange="renderAdminStatistics()"><option value="">全部業務</option></select>
-                <select id="salesStatsBrandFilter" aria-label="廠牌" onchange="renderAdminStatistics()"><option value="">全部廠牌</option></select>
-                <select id="salesStatsLineFilter" aria-label="產品線" onchange="renderAdminStatistics()"><option value="">全部產品線</option></select>
-                <select hidden id="salesStatsTypeFilter" aria-label="產品類型" onchange="renderAdminStatistics()"><option value="">全部類型</option></select>
-                <button type="button" onclick="exportTradeAnalysis()" class="btn-secondary">匯出此分頁 Excel</button>
+                </select></label>
+                <label data-analysis-period>起日 <input type="date" id="salesStatsStart" onchange="document.getElementById('salesStatsPeriod').value='custom';markTradeAnalysisFiltersPending()"></label>
+                <label data-analysis-period>迄日 <input type="date" id="salesStatsEnd" onchange="document.getElementById('salesStatsPeriod').value='custom';markTradeAnalysisFiltersPending()"></label>
+                <label id="salesStatsSalesField" hidden>業務<select id="salesStatsSalesFilter" aria-label="業務" onchange="markTradeAnalysisFiltersPending()"><option value="">全部業務</option></select></label>
+                <label>廠牌<select id="salesStatsBrandFilter" aria-label="廠牌" onchange="markTradeAnalysisFiltersPending()"><option value="">全部廠牌</option></select></label>
+                <label>產品線<select id="salesStatsLineFilter" aria-label="產品線" onchange="markTradeAnalysisFiltersPending()"><option value="">全部產品線</option></select></label>
+                <label>產品類型<select id="salesStatsTypeFilter" aria-label="產品類型" onchange="markTradeAnalysisFiltersPending()"><option value="">全部產品類型</option></select></label>
+                <button type="button" id="tradeAnalysisQueryBtn" onclick="renderAdminStatistics()">查詢</button>
             </div>
             <p id="tradeAnalysisStatus" role="status" aria-live="polite"></p>
-            <p id="tradeAnalysisScope" class="inventory-summary-note"></p>
             <div id="tradeAnalysisCards" class="sales-stat-cards admin-overview-cards trade-analysis-cards"></div>
-            <div class="panel" style="overflow-x:auto;"><h3>品項明細</h3>
-                <table class="sales-stats-table"><thead id="tradeAnalysisTableHead"></thead><tbody id="unifiedBrandAnalyticsBody"></tbody></table>
+            <details class="trade-analysis-method"><summary>ⓘ 計算方式</summary><p id="tradeAnalysisScope" class="inventory-summary-note"></p></details>
+            <div class="trade-analysis-detail-actions no-print">
+                <button type="button" id="tradeAnalysisToggleBtn" class="btn-secondary" aria-expanded="false" onclick="toggleSimpleTradeAnalysisDetail()" disabled>查看明細</button>
+                <button type="button" id="tradeAnalysisWorkbookBtn" onclick="exportTradeAnalysis()" class="btn-secondary" disabled>匯出此分頁 Excel</button>
+            </div>
+            <div id="tradeAnalysisSimpleDetail" class="panel" hidden>
+                <div class="trade-analysis-table-scroll"><table class="sales-stats-table"><thead id="tradeAnalysisTableHead"></thead><tbody id="unifiedBrandAnalyticsBody"></tbody></table></div>
+                <div class="trade-analysis-pagination no-print"><button type="button" id="tradeAnalysisPrevBtn" class="btn-secondary" onclick="changeSimpleTradeAnalysisPage(-1)">上一頁</button><span id="tradeAnalysisPageStatus" role="status"></span><button type="button" id="tradeAnalysisNextBtn" class="btn-secondary" onclick="changeSimpleTradeAnalysisPage(1)">下一頁</button></div>
             </div>
         </div>
         <div class="eq-modal-overlay no-print" id="tradeAnalysisDetailOverlay" onclick="if(event.target===this) closeTradeAnalysisDetail()">
@@ -1704,7 +1709,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261009-3"></script>
+    <script src="app.js?v=20261009-4"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261009-2"></script>

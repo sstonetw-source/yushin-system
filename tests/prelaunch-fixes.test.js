@@ -87,7 +87,7 @@ test('account switch prevents late work-queue results from entering the new acco
 test('document ID batch reads deduplicate IDs and preserve actual document IDs',async()=>{
  const batches=[];
  const c=context({firebase:{firestore:{FieldPath:{documentId:()=> '__name__'}}},firestoreReadWithTimeout:p=>p,db:{collection:()=>({where(field,op,ids){batches.push(ids);return {get:async()=>({docs:ids.map(id=>({id,data:()=>({id:'wrong'})}))})};}})}});
- vm.runInContext(section('async function runReadJobs(', '\nasync function loadWarehouseStocks'),c);vm.runInContext(section('async function readDocumentsByIds(', '\nasync function loadInventoryAnalysisSupport'),c);
+ vm.runInContext(section('async function runReadJobs(', '\nasync function loadWarehouseStocks'),c);vm.runInContext(section('async function readDocumentsByIds(', '\nasync function readTradeAnalysisSuppliesByOrders'),c);
  const ids=Array.from({length:65},(_,i)=>'D'+i);const rows=await c.readDocumentsByIds('orders',[...ids,...ids]);assert.equal(batches.length,3);assert.ok(batches.every(v=>v.length<=30));assert.deepEqual(Array.from(rows,x=>x.id),ids);
 });
 

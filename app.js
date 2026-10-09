@@ -627,6 +627,8 @@ async function runRoleTransaction(callback) {
     // The next analysis visit must read fresh sources instead of reusing the old report.
     tradeAnalysisReady = false;
     tradeAnalysisLoadedKey = '';
+    if(typeof tradeAnalysisSnapshots!=='undefined')tradeAnalysisSnapshots.clear();
+    if(typeof tradeAnalysisRevision!=='undefined')tradeAnalysisRevision++;
     markMainPageDirty('admin');
     return result;
 }
@@ -19279,7 +19281,9 @@ window.switchAdminTab = function(tab, el) {
     });
     // 每次進入分析頁重讀範圍內交易及目前餘額，避免過時快取。
     if (tab === 'statistics') ensureBrandSettingsLoaded().then(async () => {
-        await loadSalesStatistics();
+        tradeAnalysisFiltersPending=false;
+        tradeAnalysisAppliedFilters=readTradeAnalysisFilters();
+        await loadSalesStatistics(true);
     }).catch(err => console.error('進銷存分析載入失敗：', err));
     if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
     if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
@@ -20039,76 +20043,74 @@ async function preloadSalesStatisticsProductCosts(orders = []) {
 }
 
 // 管理員銷售統計以「訂單」為準，避免把尚未成交的估價單也算進營收。
-window.loadSalesStatistics = function() {
+function readTradeAnalysisFilters() {
+    const {start,end}=salesStatisticsQueryWindow();
+    return {start,end,sales:document.getElementById('salesStatsSalesFilter')?.value||'',
+        brand:document.getElementById('salesStatsBrandFilter')?.value||'',
+        line:document.getElementById('salesStatsLineFilter')?.value||'',
+        type:document.getElementById('salesStatsTypeFilter')?.value||''};
+}
+function tradeAnalysisQueryKey(tab, filters) {
+    return JSON.stringify([currentUser?.uid||'',tab,...(tab==='inventory'?[]:[filters.start,filters.end])]);
+}
+function applyTradeAnalysisSnapshot(snapshot) {
+    salesStatisticsOrders=snapshot.orders;
+    inventoryAnalysisSupplyOrders=snapshot.supplies;
+    inventoryAnalysisDirectShipSupplyOrders=snapshot.supplies.filter(row=>row.fulfillmentType==='DIRECT_SHIP');
+    inventoryAnalysisReceipts=[];
+    inventoryAnalysisLots=snapshot.lots;
+    inventoryAnalysisLotCosts=new Map(snapshot.lotCosts.map(row=>[row.id,row]));
+    tradeAnalysisWarehouseStocks=snapshot.stocks;
+    tradeAnalysisSourceOrders=new Map(snapshot.sourceOrders.map(row=>[row.id,row]));
+    snapshot.products.forEach(row=>cacheProductLookupItem(productMasterDocToPriceItem({id:row.id,data:()=>row})));
+    rebuildPriceItemLookup();
+}
+window.loadSalesStatistics = function(force = false) {
     if (currentUserRole !== 'admin') return Promise.resolve();
+    if(force){tradeAnalysisSnapshots.clear();tradeAnalysisRevision++;}
     if (salesStatisticsLoadPromise) return salesStatisticsLoadPromise;
-    const requestedWindow = salesStatisticsQueryWindow();
-    if (requestedWindow.start > requestedWindow.end) {
-        tradeAnalysisReady = false;
+    const filters=tradeAnalysisAppliedFilters||(tradeAnalysisAppliedFilters=readTradeAnalysisFilters());
+    const tab=tradeAnalysisTab, key=tradeAnalysisQueryKey(tab,filters);
+    if(!document.getElementById('salesStatsStart').value)document.getElementById('salesStatsStart').value=filters.start;
+    if(!document.getElementById('salesStatsEnd').value)document.getElementById('salesStatsEnd').value=filters.end;
+    if(tab!=='inventory'&&filters.start>filters.end){
+        tradeAnalysisReady=false;
+        resetSimpleTradeAnalysisDetail();
         setTradeAnalysisLoading(false);
-        document.getElementById('tradeAnalysisStatus').textContent = '起日不可晚於迄日。';
+        document.querySelectorAll('.trade-analysis-cards strong').forEach(el=>el.textContent='－');
+        document.getElementById('tradeAnalysisStatus').textContent='起日不可晚於迄日。';
         return Promise.resolve();
     }
-    setTradeAnalysisLoading(true);
-    const requestedRole = currentUserRole, requestedUid = currentUser?.uid;
-    const totalEl = document.getElementById('salesStatsSalesInc');
-    if (totalEl) totalEl.innerText = '讀取中…';
-
-    // 不掃描全部歷史訂單：只抓「本統計期間成立」、「本期間有異動」與「目前仍進行中」三群，
-    // 合併去重後再計算。這樣資料量隨年度增加時不會每次把全部舊訂單下載到瀏覽器。
-    const { start, end } = salesStatisticsQueryWindow();
-    const startIso = start + 'T00:00:00';
-    const periodOrders = readQueryInBatches(
-        db.collection('orders')
-            .where('orderDate', '>=', start)
-            .where('orderDate', '<=', end)
-            .orderBy('orderDate', 'desc')
-    );
-    const activityOrders = readQueryInBatches(
-        db.collection('orders')
-            .where('updatedAt', '>=', startIso)
-            .where('updatedAt', '<=', end + 'T23:59:59.999')
-            .orderBy('updatedAt', 'desc')
-    );
-    const openOrders = readQueryInBatches(
-        db.collection('orders')
-            .where('status', '==', BUSINESS_STATUS.ACTIVE)
-            .where('workCategories','array-contains-any',OPEN_ORDER_WORK_CATEGORIES)
-            .orderBy('orderDate','desc')
-    );
-
-    salesStatisticsLoadPromise = Promise.all([periodOrders, activityOrders, openOrders]).then(([periodRows, activityRows, openRows]) => {
-        if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid) return;
-        const records = new Map();
-        [periodRows, activityRows, openRows].forEach(rows => {
-            rows.forEach(row => records.set(row.id, row));
-        });
-        salesStatisticsOrders = [...records.values()];
-        const startInput = document.getElementById('salesStatsStart');
-        const endInput = document.getElementById('salesStatsEnd');
-        if (startInput && endInput && !startInput.value && !endInput.value) {
-            startInput.value = start;
-            endInput.value = end;
-            document.getElementById('salesStatsPeriod').value = 'month';
-        }
-        return loadInventoryAnalysisSupport(start, end).then(() => {
-            if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid) return;
-            tradeAnalysisLoadedKey = JSON.stringify([start,end]);
-            tradeAnalysisReady = true;
-            if (tradeAnalysisLoadedKey === JSON.stringify(Object.values(salesStatisticsQueryWindow()))) renderSalesStatistics();
-        });
-    }).catch(err => {
-        if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid) return;
-        console.error('讀取銷售統計失敗：', err);
-        tradeAnalysisReady = false;
-        if (totalEl) totalEl.innerText = '讀取失敗';
-        document.getElementById('tradeAnalysisStatus').textContent = '讀取失敗：' + (err.message || err) + '。請切換日期重試。';
-        document.querySelectorAll('.trade-analysis-cards strong').forEach(el => el.textContent = '讀取失敗');
-    }).finally(() => {
+    const cached=tradeAnalysisSnapshots.get(key);
+    if(cached&&Date.now()-cached.loadedAt<60000){
+        applyTradeAnalysisSnapshot(cached);
+        tradeAnalysisLoadedKey=key;tradeAnalysisReady=true;
+        renderSalesStatistics();setTradeAnalysisLoading(false);
+        return Promise.resolve();
+    }
+    tradeAnalysisReady=false;setTradeAnalysisLoading(true);
+    const requestedRole=currentUserRole, requestedUid=currentUser?.uid, revision=tradeAnalysisRevision;
+    const stillAuthorized=()=>requestedRole===currentUserRole&&requestedUid===currentUser?.uid;
+    salesStatisticsLoadPromise=loadTradeAnalysisSnapshot(tab,filters).then(snapshot=>{
+        if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || revision!==tradeAnalysisRevision) return;
+        snapshot.loadedAt=Date.now();
+        // Keep only the current period for each tab; never accumulate history in memory.
+        for(const [oldKey,value] of tradeAnalysisSnapshots)if(value.tab===tab)tradeAnalysisSnapshots.delete(oldKey);
+        tradeAnalysisSnapshots.set(key,snapshot);
+        if(key!==tradeAnalysisQueryKey(tradeAnalysisTab,tradeAnalysisAppliedFilters))return;
+        applyTradeAnalysisSnapshot(snapshot);
+        tradeAnalysisLoadedKey=key;tradeAnalysisReady=true;
+        renderSalesStatistics();
+    }).catch(err=>{
+        if(!stillAuthorized()||key!==tradeAnalysisQueryKey(tradeAnalysisTab,tradeAnalysisAppliedFilters))return;
+        tradeAnalysisReady=false;
+        document.getElementById('tradeAnalysisStatus').textContent='讀取失敗：'+(err.message||err)+'。請按查詢重試。';
+        document.querySelectorAll('.trade-analysis-cards strong').forEach(el=>el.textContent='讀取失敗');
+    }).finally(()=>{
         salesStatisticsLoadPromise = null;
+        if(!stillAuthorized())return;
         setTradeAnalysisLoading(false);
-        if (requestedRole === currentUserRole && requestedUid === currentUser?.uid && tradeAnalysisReady
-            && tradeAnalysisLoadedKey !== JSON.stringify(Object.values(salesStatisticsQueryWindow()))) loadSalesStatistics();
+        if(key!==tradeAnalysisQueryKey(tradeAnalysisTab,tradeAnalysisAppliedFilters)||revision!==tradeAnalysisRevision)loadSalesStatistics();
     });
     return salesStatisticsLoadPromise;
 };
@@ -20126,49 +20128,54 @@ async function readDocumentsByIds(collectionName, ids, chunkSize = 30) {
     return (await runReadJobs(jobs,4)).flat();
 }
 
-async function loadInventoryAnalysisSupport(start, end) {
-    // Immutable receipts include warehouse and direct shipment events, each counted once.
-    const receiptQuery = db.collection('receipts')
-        .where('receiptDate','>=',start).where('receiptDate','<=',end).orderBy('receiptDate','desc');
-    const activeLotsQuery = db.collection('inventoryLots').where('remainingQty','>',0).orderBy('remainingQty');
-    const openSupplyQuery = supplyOrdersCollection()
-        .where('status','in',['ORDERED','PARTIAL_RECEIPT']);
-    const [receipts,lots,openSupplies] = await Promise.all([
-        readQueryInBatches(receiptQuery),readQueryInBatches(activeLotsQuery),readQueryInBatches(openSupplyQuery)
-    ]);
-    const sourceIds = [...new Set([...receipts.map(row=>row.supplyOrderId),...lots.filter(row=>row.sourceType==='SUPPLY_ORDER').map(row=>row.sourceId)].filter(Boolean))];
-    const sources = await readDocumentsByIds('supplyOrders',sourceIds);
-    const periodSupplies = await readQueryInBatches(supplyOrdersCollection().where('orderDate','>=',start).where('orderDate','<=',end).orderBy('orderDate','desc'));
-    const supplies = new Map([...openSupplies,...sources,...periodSupplies].map(row=>[row.id,row]));
-    tradeAnalysisWarehouseStocks = await readQueryInBatches(db.collection('warehouseStocks').where('onHand','>',0).orderBy('onHand'));
-    const requiredLotIds = new Set([...lots.flatMap(row=>[row.id,row.costLotId]),...receipts.map(row=>row.lotId),...salesStatisticsOrders.flatMap(salesStatisticOrderLines).flatMap(row=>[...savedDeliveryRecords(row),...savedReturnRecords(row)]).flatMap(row=>(row.lotAllocations||[]).map(a=>a.lotId))].filter(Boolean));
-    const productIds = [...new Set([...receipts,...lots,...tradeAnalysisWarehouseStocks,...supplies.values(),...salesStatisticsOrders.flatMap(salesStatisticOrderLines)].map(row=>row.productId||row.productKey).filter(Boolean))];
-    const [lotCosts,products,sourceOrders] = await Promise.all([
-        readDocumentsByIds('inventoryLotCosts', [...requiredLotIds]),
-        readDocumentsByIds('products',productIds),
-        readDocumentsByIds('orders',[...supplies.values()].map(row=>row.orderId).filter(Boolean))
-    ]);
-    products.forEach(row=>cacheProductLookupItem(productMasterDocToPriceItem({id:row.id,data:()=>row})));
-    rebuildPriceItemLookup();
-    tradeAnalysisSourceOrders = new Map(sourceOrders.map(row=>[row.id,row]));
-    inventoryAnalysisReceipts = receipts;
-    inventoryAnalysisLots = lots;
-    const sourceLotCosts=await readDocumentsByIds('inventoryLotCosts',lotCosts.filter(row=>row.costSourceLotId).map(row=>row.costSourceLotId));
-    const costRoots=new Map([...lotCosts,...sourceLotCosts].map(row=>[row.id,row]));
-    const effectiveLotCosts=lotCosts.map(row=>row.costSourceLotId?{...costRoots.get(row.costSourceLotId),id:row.id}:row);
-    if(effectiveLotCosts.some(row=>row.unitCost===undefined&&!row.costSourceSupplyId))throw new Error('批次成本來源缺失，無法計算正確金額。');
-    const unresolvedCostSources = await readDocumentsByIds('supplyOrders',effectiveLotCosts.filter(row=>row.costSourceSupplyId&&row.unitCost===undefined).map(row=>row.costSourceSupplyId));
-    const costSources = new Map(unresolvedCostSources.map(row=>[row.id,row]));
-    inventoryAnalysisLotCosts = new Map(effectiveLotCosts.map(row=>{
-        if(row.unitCost===undefined&&row.costSourceSupplyId){
-            const source=costSources.get(row.costSourceSupplyId);
-            if(!source||!Number.isFinite(Number(source.unitCost)))throw new Error('收貨成本來源缺失，無法正確計算庫存價值。');
-            return [row.id,{...row,unitCost:Number(source.unitCost)}];
-        }
-        return [row.id,row];
-    }));
-    inventoryAnalysisSupplyOrders = [...supplies.values()];
-    inventoryAnalysisDirectShipSupplyOrders = inventoryAnalysisSupplyOrders.filter(row=>row.fulfillmentType==='DIRECT_SHIP');
+async function readTradeAnalysisSuppliesByOrders(ids) {
+    const unique=[...new Set(ids.filter(Boolean))],rows=[];
+    for(let i=0;i<unique.length;i+=30){
+        rows.push(...await readQueryInBatches(supplyOrdersCollection().where('orderId','in',unique.slice(i,i+30))));
+    }
+    return rows;
+}
+async function readTradeAnalysisLotCosts(ids) {
+    const costs=await readDocumentsByIds('inventoryLotCosts',ids);
+    const roots=await readDocumentsByIds('inventoryLotCosts',costs.map(row=>row.costSourceLotId));
+    const byId=new Map([...costs,...roots].map(row=>[row.id,row]));
+    const effective=costs.map(row=>row.costSourceLotId?{...byId.get(row.costSourceLotId),id:row.id}:row);
+    const sources=await readDocumentsByIds('supplyOrders',effective.filter(row=>row.unitCost===undefined).map(row=>row.costSourceSupplyId));
+    const supplies=new Map(sources.map(row=>[row.id,row]));
+    return effective.map(row=>row.unitCost===undefined&&row.costSourceSupplyId
+        ? {...row,unitCost:supplies.get(row.costSourceSupplyId)?.unitCost}:row);
+}
+async function loadTradeAnalysisSnapshot(tab, {start,end}) {
+    const snapshot={tab,orders:[],supplies:[],lots:[],lotCosts:[],stocks:[],sourceOrders:[],products:[]};
+    // Each tab reads only the sources used by its cohort/current-stock calculation.
+    if(tab==='purchasing'){
+        snapshot.supplies=await readQueryInBatches(supplyOrdersCollection()
+            .where('orderDate','>=',start).where('orderDate','<=',end).orderBy('orderDate','desc'));
+        snapshot.sourceOrders=await readDocumentsByIds('orders',snapshot.supplies.map(row=>row.orderId));
+    }else if(tab==='selling'){
+        snapshot.orders=await readQueryInBatches(db.collection('orders')
+            .where('orderDate','>=',start).where('orderDate','<=',end).orderBy('orderDate','desc'));
+        const lines=snapshot.orders.flatMap(salesStatisticOrderLines);
+        const events=line=>[...savedDeliveryRecords(line),...savedReturnRecords(line)];
+        const lotIds=lines.flatMap(line=>events(line).flatMap(row=>(row.lotAllocations||[]).map(a=>a.lotId)));
+        const directOrderIds=lines.filter(line=>events(line).some(row=>!(row.lotAllocations||[]).length)).map(line=>line.id);
+        [snapshot.lotCosts,snapshot.supplies]=await Promise.all([
+            readTradeAnalysisLotCosts(lotIds),readTradeAnalysisSuppliesByOrders(directOrderIds)
+        ]);
+    }else if(tab==='inventory'){
+        [snapshot.stocks,snapshot.lots]=await Promise.all([
+            readQueryInBatches(db.collection('warehouseStocks').where('onHand','>',0).orderBy('onHand')),
+            readQueryInBatches(db.collection('inventoryLots').where('remainingQty','>',0).orderBy('remainingQty'))
+        ]);
+        snapshot.lotCosts=await readTradeAnalysisLotCosts(snapshot.lots.map(row=>row.costLotId||row.id));
+        // Transfer lots may reference their root cost, while valuation looks up the lot ID.
+        const costs=new Map(snapshot.lotCosts.map(row=>[row.id,row]));
+        snapshot.lotCosts=snapshot.lots.map(row=>({...costs.get(row.costLotId||row.id),id:row.id}));
+    }
+    const records=[...snapshot.supplies,...snapshot.stocks,...snapshot.lots,
+        ...snapshot.orders.flatMap(salesStatisticOrderLines),...snapshot.sourceOrders.flatMap(salesStatisticOrderLines)];
+    snapshot.products=await readDocumentsByIds('products',records.map(row=>row.productId||row.productKey));
+    return snapshot;
 }
 
 function protectedAllocationCost(records) {
@@ -21077,6 +21084,12 @@ function renderSalesStatsRows(tbodyId, values, grandTotal) {
 }
 
 let tradeAnalysisLoadedKey = '';
+const tradeAnalysisSnapshots = new Map();
+let tradeAnalysisRevision = 0;
+let tradeAnalysisAppliedFilters = null;
+let tradeAnalysisSimpleRows = [];
+let tradeAnalysisSimplePage = 0;
+let tradeAnalysisFiltersPending = false;
 let tradeAnalysisReady = false;
 let tradeAnalysisReport = null;
 let tradeAnalysisDetailKind = '';
@@ -21087,13 +21100,56 @@ let tradeAnalysisWarehouseStocks = [];
 const TRADE_ANALYSIS_LABELS = {incoming:'待到貨採購',purchases:'已進貨（收貨）',pending:'待送貨訂單',sales:'已銷貨（送貨）',stock:'目前庫存'};
 
 function setTradeAnalysisLoading(loading) {
-    document.querySelectorAll('.trade-analysis-cards button').forEach(el=>el.disabled=loading||!tradeAnalysisReady);
+    const query=document.getElementById('tradeAnalysisQueryBtn');
+    if(query){query.disabled=loading;query.textContent=loading?'查詢中…':'查詢';}
+    ['tradeAnalysisToggleBtn','tradeAnalysisWorkbookBtn'].forEach(id=>{
+        const button=document.getElementById(id);if(button)button.disabled=loading||!tradeAnalysisReady||tradeAnalysisFiltersPending;
+    });
     if(loading){
         closeTradeAnalysisDetail();
-        const body=document.getElementById('unifiedBrandAnalyticsBody');if(body)body.innerHTML='<tr><td>讀取中…</td></tr>';
+        resetSimpleTradeAnalysisDetail();
         document.querySelectorAll('.trade-analysis-cards strong').forEach(el=>el.textContent='讀取中…');
-        document.getElementById('tradeAnalysisStatus').textContent='正在讀取所選期間交易、目前未完成項目及庫存…';
+        document.getElementById('tradeAnalysisStatus').textContent='正在讀取此分頁所需資料…';
     }
+}
+window.markTradeAnalysisFiltersPending = function() {
+    tradeAnalysisFiltersPending=true;
+    setTradeAnalysisLoading(!!salesStatisticsLoadPromise);
+    document.getElementById('tradeAnalysisStatus').textContent='篩選條件已變更，請按「查詢」；下方仍為上次查詢結果。';
+};
+function resetSimpleTradeAnalysisDetail() {
+    tradeAnalysisSimplePage=0;
+    const panel=document.getElementById('tradeAnalysisSimpleDetail');if(panel)panel.hidden=true;
+    const button=document.getElementById('tradeAnalysisToggleBtn');
+    if(button){button.textContent='查看明細';button.setAttribute('aria-expanded','false');}
+    const body=document.getElementById('unifiedBrandAnalyticsBody');if(body)body.innerHTML='';
+}
+window.toggleSimpleTradeAnalysisDetail = function() {
+    if(!tradeAnalysisReady||salesStatisticsLoadPromise||tradeAnalysisFiltersPending)return;
+    const panel=document.getElementById('tradeAnalysisSimpleDetail');panel.hidden=!panel.hidden;
+    document.getElementById('tradeAnalysisToggleBtn').textContent=panel.hidden?'查看明細':'收合明細';
+    document.getElementById('tradeAnalysisToggleBtn').setAttribute('aria-expanded',String(!panel.hidden));
+    if(!panel.hidden)renderSimpleTradeAnalysisPage();
+};
+window.changeSimpleTradeAnalysisPage = function(delta) {
+    if(!tradeAnalysisReady||salesStatisticsLoadPromise||tradeAnalysisFiltersPending)return;
+    const last=Math.max(0,Math.ceil(tradeAnalysisSimpleRows.length/50)-1);
+    tradeAnalysisSimplePage=Math.max(0,Math.min(last,tradeAnalysisSimplePage+delta));
+    renderSimpleTradeAnalysisPage();
+};
+function renderSimpleTradeAnalysisPage() {
+    const quantity=tradeAnalysisTab==='inventory';
+    const cols=quantity?['現有數量','預留數量','可用數量']:simpleTradeAnalysisLabels().filter(label=>label!=='毛利率');
+    document.getElementById('tradeAnalysisTableHead').innerHTML='<tr>'+['廠牌','貨號','品名',...cols].map(label=>`<th>${escapeHtml(label)}</th>`).join('')+'</tr>';
+    const rows=tradeAnalysisSimpleRows.slice(tradeAnalysisSimplePage*50,(tradeAnalysisSimplePage+1)*50);
+    document.getElementById('unifiedBrandAnalyticsBody').innerHTML=rows.map(row=>`<tr><td>${escapeHtml(row.brand)}</td><td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.name)}</td>${(quantity?row.quantities:row.values).map(value=>`<td>${value===null?'待補成本':quantity?value:formatStatsMoney(value)}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length+3}">沒有符合條件的資料。</td></tr>`;
+    const pages=Math.max(1,Math.ceil(tradeAnalysisSimpleRows.length/50));
+    document.getElementById('tradeAnalysisPageStatus').textContent=`第 ${tradeAnalysisSimplePage+1} / ${pages} 頁，共 ${tradeAnalysisSimpleRows.length} 筆`;
+    document.getElementById('tradeAnalysisPrevBtn').disabled=tradeAnalysisSimplePage===0;
+    document.getElementById('tradeAnalysisNextBtn').disabled=tradeAnalysisSimplePage>=pages-1;
+}
+function simpleTradeAnalysisLabels() {
+    return tradeAnalysisTab==='purchasing'?['採購金額','實際到貨金額','未到貨金額']:tradeAnalysisTab==='selling'?['銷售金額','實際出貨金額','未出貨金額','毛利','毛利率']:['現有庫存金額','已預留庫存金額','可用庫存金額'];
 }
 
 function tradeAnalysisCost(value) {
@@ -21231,23 +21287,24 @@ window.exportTradeAnalysisDetail = function() {
     return writeTradeAnalysisWorkbook(tradeAnalysisDetailReport,[tradeAnalysisDetailKind],document.getElementById('tradeAnalysisExport'));
 };
 window.exportTradeAnalysis = async function() {
-    if(currentUserRole!=='admin'||!tradeAnalysisReady||salesStatisticsLoadPromise)return;
-    const button=document.querySelector('.trade-analysis-filters button');
+    if(currentUserRole!=='admin'||!tradeAnalysisReady||salesStatisticsLoadPromise||tradeAnalysisFiltersPending)return;
+    const button=document.getElementById('tradeAnalysisWorkbookBtn');
     const state=beginActionButton(button,'匯出中…');if(!state)return;
     try {
-        const rows=buildSimpleTradeAnalysis();
+        const filters={...tradeAnalysisAppliedFilters},tab=tradeAnalysisTab;
+        const rows=buildSimpleTradeAnalysis(filters);
         const labels=tradeAnalysisTab==='purchasing'?['採購金額','實際到貨金額','未到貨金額']:tradeAnalysisTab==='selling'?['銷售金額','實際出貨金額','未出貨金額','毛利']:['現有庫存金額','已預留庫存金額','可用庫存金額'];
-        const data=rows.map(r=>({'單號':r.documentNo,'廠牌':r.brand,'貨號':r.code,'品名':r.name,'倉庫':r.warehouse,...Object.fromEntries(labels.map((l,i)=>[l,r.values[i]===null?'待補成本':r.values[i]])),...(r.quantities?{'現有數量':r.quantities[0],'預留數量':r.quantities[1],'可用數量':r.quantities[2]}:{})}));
+        const data=rows.map(r=>({'單號':r.documentNo,'廠牌':r.brand,'貨號':r.code,'品名':r.name,'產品線':r.line,'產品類型':r.type,'倉庫':r.warehouse,...Object.fromEntries(labels.map((l,i)=>[l,r.values[i]===null?'待補成本':r.values[i]])),...(r.quantities?{'現有數量':r.quantities[0],'預留數量':r.quantities[1],'可用數量':r.quantities[2]}:{})}));
         const totals=labels.map((_,i)=>rows.reduce((n,r)=>n+(r.values[i]??0),0));
         const missing=rows.some(r=>r.values.some(v=>v===null));
         data.push({'品名':'總計',...Object.fromEntries(labels.map((l,i)=>[l,i===3&&missing?'待補成本':totals[i]]))});
-        const {start,end}=salesStatisticsQueryWindow();
-        const scope=[{'項目':'期間','內容':tradeAnalysisTab==='inventory'?'目前庫存':`${start} 至 ${end} 成立的單據，目前履約進度`},{'項目':'廠牌','內容':document.getElementById('salesStatsBrandFilter').value||'全部'},{'項目':'產品線','內容':document.getElementById('salesStatsLineFilter').value||'全部'},{'項目':'業務','內容':tradeAnalysisTab==='selling'?(document.getElementById('salesStatsSalesFilter').value||'全部'):'公司共同數字'},{'項目':'估值說明','內容':document.getElementById('tradeAnalysisScope').textContent},{'項目':'資料完整性','內容':missing?'缺少成本的金額未計入；毛利待補成本':'完整'}];
+        const {start,end}=filters;
+        const scope=[{'項目':'期間','內容':tradeAnalysisTab==='inventory'?'目前庫存':`${start} 至 ${end} 成立的單據，目前履約進度`},{'項目':'廠牌','內容':filters.brand||'全部'},{'項目':'產品線','內容':filters.line||'全部'},{'項目':'產品類型','內容':filters.type||'全部'},{'項目':'業務','內容':tradeAnalysisTab==='selling'?(filters.sales||'全部'):'公司共同數字'},{'項目':'估值說明','內容':document.getElementById('tradeAnalysisScope').textContent},{'項目':'資料完整性','內容':missing?'缺少成本的金額未計入；毛利待補成本':'完整'}];
         if(tradeAnalysisTab==='selling')scope.push({'項目':'毛利率','內容':missing?'待補成本':totals[1]?totals[3]/totals[1]:0});
         await ensureXlsxLoaded();const wb=XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(scope),'篩選與總計');
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'品項明細');
-        XLSX.writeFile(wb,`進銷存分析_${tradeAnalysisTab}_${localDateString()}.xlsx`);
+        XLSX.writeFile(wb,`進銷存分析_${tab}_${localDateString()}.xlsx`);
     }catch(err){alert('匯出失敗：'+(err.message||err));}finally{endActionButton(button,state);}
 };
 
@@ -21257,14 +21314,14 @@ function populateSalesStatisticsFilters(rows = buildTradeAnalysisRows()) {
     const selects = [
         { id: 'salesStatsSalesFilter', label: '全部業務', values: rows.filter(row=>['sales','pending'].includes(row.kind)).map(row=>row.sales) },
         { id: 'salesStatsBrandFilter', label: '全部廠牌', values: [...getPrimaryBrandNames(), OTHER_BRAND_OPTION_KEY] },
-        { id: 'salesStatsTypeFilter', label: '全部類型', values: classified.map(row=>row.type) },
+        { id: 'salesStatsTypeFilter', label: '全部產品類型', values: classified.map(row=>row.type) },
         { id: 'salesStatsLineFilter', label: '全部產品線', values: classified.map(row=>row.line) }
     ];
     selects.forEach(({id,label,values})=>{
         const select=document.getElementById(id);
         if(!select)return;
         const selected=select.value;
-        const options=[...new Set(values.filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+        const options=[...new Set([...values,selected].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
         select.innerHTML=`<option value="">${label}</option>`+options.map(value=>`<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('');
         if(options.includes(selected))select.value=selected;
     });
@@ -21272,10 +21329,10 @@ function populateSalesStatisticsFilters(rows = buildTradeAnalysisRows()) {
 
 window.renderAdminStatistics = function() {
     if(currentUserRole!=='admin')return;
-    const {start,end}=salesStatisticsQueryWindow();
-    if(start>end){document.getElementById('tradeAnalysisStatus').textContent='起日不可晚於迄日。';tradeAnalysisReady=false;setTradeAnalysisLoading(false);return;}
-    if(tradeAnalysisLoadedKey!==JSON.stringify([start,end])||!tradeAnalysisReady){loadSalesStatistics();return;}
-    renderSalesStatistics();
+    tradeAnalysisAppliedFilters=readTradeAnalysisFilters();
+    tradeAnalysisFiltersPending=false;
+    resetSimpleTradeAnalysisDetail();
+    return loadSalesStatistics();
 };
 
 window.setSalesStatisticsPeriod = function(period) {
@@ -21299,7 +21356,7 @@ window.setSalesStatisticsPeriod = function(period) {
     }
     document.getElementById('salesStatsStart').value = start;
     document.getElementById('salesStatsEnd').value = end;
-    renderAdminStatistics();
+    markTradeAnalysisFiltersPending();
 };
 
 function buildSalesStatisticsReport() {
@@ -21349,7 +21406,8 @@ function renderUnifiedBrandAnalytics() {
 window.switchTradeAnalysisTab = function(tab) {
     if(!['purchasing','selling','inventory'].includes(tab))return;
     tradeAnalysisTab=tab;
-    document.getElementById('salesStatsSalesFilter').hidden=tab!=='selling';
+    document.getElementById('salesStatsSalesField').hidden=tab!=='selling';
+    document.querySelectorAll('[data-analysis-period]').forEach(el=>el.hidden=tab==='inventory');
     document.querySelectorAll('[data-analysis-tab]').forEach(el=>{
         el.classList.toggle('active',el.dataset.analysisTab===tab);
         el.setAttribute('aria-selected',String(el.dataset.analysisTab===tab));
@@ -21357,19 +21415,17 @@ window.switchTradeAnalysisTab = function(tab) {
     renderAdminStatistics();
 };
 
-function buildSimpleTradeAnalysis() {
-    const {start,end}=salesStatisticsQueryWindow();
-    const brand=document.getElementById('salesStatsBrandFilter').value;
-    const line=document.getElementById('salesStatsLineFilter').value;
-    const sales=document.getElementById('salesStatsSalesFilter').value;
-    const matches=row=>(!brand||statisticBrandForOrder(row)===brand)&&(!line||productLineForOrder(row)===line);
+function buildSimpleTradeAnalysis(filters = readTradeAnalysisFilters()) {
+    const {start,end,brand,line,sales,type}=filters;
+    const matches=row=>(!brand||statisticBrandForOrder(row)===brand)&&(!line||productLineForOrder(row)===line)&&(!type||productTypeForOrder(row)===type);
     const lotsByStock=new Map();
     inventoryAnalysisLots.forEach(l=>{const key=JSON.stringify([l.warehouseId,l.productKey||l.productId]);if(!lotsByStock.has(key))lotsByStock.set(key,[]);lotsByStock.get(key).push(l);});
     const rows=[];
-    const add=(record,values)=>rows.push({documentNo:record.purchaseDocumentNo||record.orderNo||record.id||'',warehouse:record.warehouseId||'',code:record.itemCode||findPriceItemForOrder(record)?.model||record.productKey||'',name:record.itemName||findPriceItemForOrder(record)?.nameCn||'',brand:statisticBrandForOrder(record),...values});
+    const add=(record,values)=>rows.push({documentNo:record.purchaseDocumentNo||record.orderNo||record.id||'',warehouse:record.warehouseId||'',code:record.itemCode||findPriceItemForOrder(record)?.model||record.productKey||'',name:record.itemName||findPriceItemForOrder(record)?.nameCn||'',brand:statisticBrandForOrder(record),line:productLineForOrder(record),type:productTypeForOrder(record),...values});
     if(tradeAnalysisTab==='purchasing')inventoryAnalysisSupplyOrders.forEach(row=>{
         const order=tradeAnalysisSourceOrders.get(row.orderId);
-        row={...order,...row};
+        const item=order?normalizedOrderItems(order).find(item=>String(item.itemId||'')===String(row.itemId||'')):null;
+        row={...order,...item,...row};
         if(!matches(row)||!dateInStatsRange(row.orderDate,start,end)||!['ORDERED','PARTIAL_RECEIPT','RECEIVED','CLOSED','CANCELLED'].includes(row.status))return;
         const ordered=Math.max(0,Number(row.qty||0)),received=Math.min(ordered,Math.max(0,Number(row.receivedQty||0)));
         const qty=isPurchaseTerminalStatus(row.status)?received:ordered;
@@ -21412,23 +21468,30 @@ function buildSimpleTradeAnalysis() {
 
 window.renderSalesStatistics = function() {
     if(currentUserRole!=='admin'||!tradeAnalysisReady)return;
-    const oldRows=buildTradeAnalysisRows();populateSalesStatisticsFilters([...oldRows,...inventoryAnalysisSupplyOrders.map(r=>({kind:'incoming',brand:statisticBrandForOrder(r),line:productLineForOrder(r)})),...tradeAnalysisWarehouseStocks.map(r=>({kind:'stock',brand:statisticBrandForOrder(r),line:productLineForOrder(r)}))]);
-    tradeAnalysisReport=buildTradeAnalysisReport(oldRows);
-    const rows=buildSimpleTradeAnalysis();
-    const labels=tradeAnalysisTab==='purchasing'?['採購金額','實際到貨金額','未到貨金額']:tradeAnalysisTab==='selling'?['銷售金額','實際出貨金額','未出貨金額','毛利','毛利率']:['現有庫存金額','已預留庫存金額','可用庫存金額'];
-    const totals=labels.map((_,i)=>rows.reduce((n,r)=>n+(r.values[i]??0),0));
-    const missing=rows.filter(r=>r.values.some(v=>v===null)).length;
+    const stockMetadata=new Map(inventoryAnalysisLots.map(lot=>[JSON.stringify([lot.warehouseId,lot.productKey||lot.productId]),lot]));
+    const records=tradeAnalysisTab==='selling'?salesStatisticsOrders.flatMap(salesStatisticOrderLines):tradeAnalysisTab==='purchasing'
+        ?inventoryAnalysisSupplyOrders.map(row=>{
+            const order=tradeAnalysisSourceOrders.get(row.orderId);
+            const item=order?normalizedOrderItems(order).find(item=>String(item.itemId||'')===String(row.itemId||'')):null;
+            return {...order,...item,...row};
+        }):tradeAnalysisWarehouseStocks.map(row=>({...stockMetadata.get(JSON.stringify([row.warehouseId,row.productKey||row.productId])),...row}));
+    populateSalesStatisticsFilters(records.map(row=>({kind:tradeAnalysisTab==='selling'?'sales':'stock',brand:statisticBrandForOrder(row),
+        sales:stripPhoneSuffix(row.salesName),line:productLineForOrder(row),type:productTypeForOrder(row)})));
+    const rows=buildSimpleTradeAnalysis(tradeAnalysisAppliedFilters);
+    tradeAnalysisSimpleRows=rows;
+    resetSimpleTradeAnalysisDetail();
+    const labels=simpleTradeAnalysisLabels();
+    const totals=labels.map((_,i)=>rows.reduce((n,row)=>n+(row.values[i]??0),0));
+    const missing=rows.filter(row=>row.values.some(value=>value===null)).length;
     document.getElementById('tradeAnalysisCards').innerHTML=labels.map((label,i)=>{
         const text=i===4?(missing?'待補成本':totals[1]?((totals[3]/totals[1])*100).toFixed(1)+'%':'－'):(i===3&&missing?'待補成本':formatStatsMoney(totals[i]));
         return `<div class="sales-stat-card"><span>${label}</span><strong>${escapeHtml(text)}</strong></div>`;
     }).join('');
     document.getElementById('tradeAnalysisScope').textContent=tradeAnalysisTab==='inventory'?'目前分倉數量；預留金額以同品項同倉批次加權平均成本估值。':'依所選期間成立日期篩選，顯示目前累計到貨／出貨進度。取消／結案未履約餘額不計入總額；退貨扣回實際出貨。銷售沿用含稅金額，毛利以可確認的實際批次／直送採購成本計算。';
-    document.getElementById('tradeAnalysisStatus').textContent=`共 ${rows.length} 筆`+(missing?`；${missing} 筆缺少成本或批次數量不一致，金額僅加總可確認成本，毛利不顯示不完整總額。`:'');
-    const quantity=tradeAnalysisTab==='inventory';
-    const cols=quantity?['現有數量','預留數量','可用數量']:labels.filter(l=>l!=='毛利率');
-    document.getElementById('tradeAnalysisTableHead').innerHTML='<tr>'+['廠牌','貨號','品名',...cols].map(l=>`<th>${l}</th>`).join('')+'</tr>';
-    document.getElementById('unifiedBrandAnalyticsBody').innerHTML=rows.slice(0,100).map(r=>`<tr><td>${escapeHtml(r.brand)}</td><td>${escapeHtml(r.code)}</td><td>${escapeHtml(r.name)}</td>${(quantity?r.quantities:r.values).map(v=>`<td>${v===null?'待補成本':quantity?v:formatStatsMoney(v)}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length+3}">沒有符合條件的資料。</td></tr>`;
-    if(rows.length>100)document.getElementById('tradeAnalysisStatus').textContent+=' 明細顯示前 100 筆。';
+    const filters=tradeAnalysisAppliedFilters;
+    const scope=tradeAnalysisTab==='inventory'?'目前庫存':`${filters.start} 至 ${filters.end} 成立的單據`;
+    document.getElementById('tradeAnalysisStatus').textContent=scope+`｜共 ${rows.length} 筆`+(missing?`；${missing} 筆缺少成本或批次數量不一致，金額僅加總可確認成本，毛利不顯示不完整總額。`:'');
+    if(tradeAnalysisFiltersPending)markTradeAnalysisFiltersPending();
 };
 
 function salesStatsMetricExportRows(values, grandTotal, label) {

@@ -3304,6 +3304,41 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 #tradeAnalysisCards { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
 @media(max-width:600px) { #tradeAnalysisCards { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
+/* Analysis filters, totals and optional paged details share one responsive layout. */
+#admin-statistics .trade-analysis-filters {
+    display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px;
+    padding:14px; align-items:end;
+}
+#admin-statistics .trade-analysis-filters label { display:flex; flex-direction:column; align-items:stretch; gap:5px; font-size:13px; color:#526171; min-width:0; }
+#admin-statistics .trade-analysis-filters select,
+#admin-statistics .trade-analysis-filters input,
+#admin-statistics .trade-analysis-filters button { width:100%; min-width:0; height:42px; margin:0; padding:8px; box-sizing:border-box; font-size:14px; }
+#admin-statistics [hidden] { display:none !important; }
+#admin-statistics .sub-tabs { display:flex; gap:6px; }
+#admin-statistics .sub-tabs button { flex:1; padding:10px 8px; margin:0; }
+#tradeAnalysisCards { gap:10px; margin:14px 0; }
+#tradeAnalysisCards .sales-stat-card { padding:14px; gap:6px; min-width:0; }
+#tradeAnalysisCards strong { font-size:22px; overflow-wrap:anywhere; }
+.trade-analysis-method { margin:12px 0; font-size:13px; color:#526171; }
+.trade-analysis-method summary { cursor:pointer; padding:8px 0; }
+.trade-analysis-method p { margin:4px 0; }
+.trade-analysis-detail-actions { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.trade-analysis-detail-actions button { margin:0; min-height:42px; }
+#tradeAnalysisSimpleDetail { margin-top:12px; padding:12px; min-width:0; }
+.trade-analysis-table-scroll { overflow-x:auto; }
+.trade-analysis-table-scroll table { min-width:650px; width:100%; font-size:13px; }
+.trade-analysis-table-scroll th,.trade-analysis-table-scroll td { padding:8px; }
+.trade-analysis-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; font-size:12px; }
+.trade-analysis-pagination button { margin:0; white-space:nowrap; }
+@media(max-width:700px) {
+    #admin-statistics .trade-analysis-filters { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    #admin-statistics .sub-tabs button { font-size:14px; }
+    #tradeAnalysisCards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    #tradeAnalysisCards .sales-stat-card { padding:12px; }
+    #tradeAnalysisCards strong { font-size:20px; }
+    .trade-analysis-detail-actions button { flex:1; }
+}
+
 
 /* 2026-10-06: 管理員後台「價目表管理」與 Product Master 日常編輯分工 */
 .price-list-admin-heading {

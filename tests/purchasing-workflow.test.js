@@ -2122,10 +2122,10 @@ test('purchase history separates PO document status from receipt progress', () =
 test('tabbed analysis uses the same item calculations for screen and workbook', () => {
     const start=app.indexOf('window.renderSalesStatistics = function()');
     const source=app.slice(start,app.indexOf('function salesStatsMetricExportRows',start));
-    assert.match(source,/buildSimpleTradeAnalysis\(\)/);
-    assert.match(source,/rows.slice\(0,100\)/);
+    assert.match(source,/buildSimpleTradeAnalysis\(tradeAnalysisAppliedFilters\)/);
+    assert.match(source,/tradeAnalysisSimpleRows=rows/);
     const exportSource=app.slice(app.indexOf('window.exportTradeAnalysis ='),app.indexOf('function populateSalesStatisticsFilters'));
-    assert.match(exportSource,/buildSimpleTradeAnalysis\(\)/);
+    assert.match(exportSource,/buildSimpleTradeAnalysis\(filters\)/);
     assert.match(exportSource,/currentUserRole!=='admin'/);
 });
 
