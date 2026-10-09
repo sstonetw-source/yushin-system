@@ -3663,10 +3663,10 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 /* Mobile lists: compact records with visible boundaries and a selection header. */
 @media screen and (max-width:768px) {
     #ordersTable, #purchasePendingPanel table, .inventory-work-table table { border:0; background:transparent; }
-    #ordersTable tbody, #purchasePendingBody, #inventoryShippingBody { background:#f1f5f9; padding:8px; box-sizing:border-box; }
+    #ordersTable tbody, #purchasePendingBody, #inventoryShippingBody { background:#e2e9f1; padding:10px; box-sizing:border-box; border-radius:10px; }
     #ordersTable tbody > tr, #purchasePendingBody > tr, #inventoryShippingBody > tr {
         width:100%; box-sizing:border-box; margin:0 0 18px; padding:12px;
-        border:1px solid #cbd7e3; border-left:4px solid #315b80; border-radius:10px;
+        border:1px solid #879db3; border-left:4px solid #315b80; border-radius:10px;
         background:#fff; box-shadow:0 2px 4px rgba(20,45,70,.08);
     }
     #ordersTable tbody > tr:last-child, #purchasePendingBody > tr:last-child, #inventoryShippingBody > tr:last-child { margin-bottom:0; }
@@ -3693,3 +3693,34 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .warehouse-custody-details{margin-top:18px;padding:12px;background:#f6f8fb;border-radius:8px}
 .warehouse-custody-details summary{cursor:pointer;font-weight:600}
 @media(max-width:768px){.inventory-shipping-batch-actions{align-items:stretch}.inventory-shipping-tabs .order-work-card{flex:1 1 40%}#inventoryShippingBody td{text-align:left!important}}
+
+/* Use the same visible record boundaries in every operational mobile list. */
+@media screen and (max-width:768px) {
+    #inventoryStockPanel > .table-wrap, #poListPanel > .table-wrap { background:#e2e9f1; padding:10px; border-radius:10px; }
+    #inventoryStockPanel > .table-wrap table, #poListPanel table { background:transparent; border:0; }
+    #inventoryStockPanel > .table-wrap table tbody > tr, #poListPanel table tbody > tr,
+    #purchaseDispatchPanel tbody > tr, #purchaseCompletedPanel tbody > tr {
+        border:1px solid #879db3; border-left:4px solid #315b80; border-radius:10px;
+        background:#fff; margin:0 0 18px; padding:12px; box-shadow:0 2px 4px rgba(20,45,70,.12);
+    }
+    #purchaseDispatchPanel tbody, #purchaseCompletedPanel tbody { background:#e2e9f1; padding:10px; border-radius:10px; }
+    #inventoryStockPanel > .table-wrap table tbody > tr:last-child, #poListPanel table tbody > tr:last-child { margin-bottom:0; }
+    #ordersTable td[data-th]::before, #purchasePendingBody td[data-th]::before,
+    #purchaseDispatchPanel td[data-th]::before, #purchaseCompletedPanel td[data-th]::before,
+    #poListPanel td[data-th]::before, #inventory-system td[data-th]::before { color:#40546a; }
+    #ordersTable td, #purchasePendingBody td, #inventoryShippingBody td, #inventoryListBody td { border-bottom-color:#d1dbe5; }
+    #inventoryListBody .inventory-mobile-summary > div { background:#e4edf6; border:1px solid #b0c3d5; }
+    #inventoryListBody .inventory-mobile-summary span { color:#40546a; }
+    #ordersTable .record-reference, #purchasePendingBody .record-reference, #inventoryShippingBody .record-reference { color:#40546a; }
+    #admin-statistics .trade-analysis-filters { background:#e2e9f1; border:1px solid #b0c3d5; align-items:start; }
+    #admin-statistics .trade-analysis-filters label { color:#40546a; margin:0; }
+    #admin-statistics .trade-analysis-filters input, #admin-statistics .trade-analysis-filters select {
+        background:#fff; color:#172e45; border:1px solid #879db3; border-radius:6px;
+        height:44px; line-height:24px; font-size:16px;
+    }
+    #admin-statistics .trade-analysis-filters input[type="date"] { overflow:hidden; padding:8px; }
+    #admin-statistics .sub-tabs button { background:#e2e9f1; color:#243f5b; border:1px solid #879db3; }
+    #admin-statistics .sub-tabs button.active { background:#003366; color:#fff; border-color:#003366; }
+    #tradeAnalysisCards .sales-stat-card { background:#fff; border-color:#879db3; }
+    #tradeAnalysisCards .sales-stat-card span { color:#40546a; }
+}
