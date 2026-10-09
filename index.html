@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261009-6">
+        <link rel="stylesheet" href="styles.css?v=20261009-7">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -96,13 +96,13 @@
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
         <div class="toolbar no-print product-search-toolbar">
-            <div class="product-search-brand-field"><strong>廠牌</strong><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
-            <input id="productManagementSearch" type="search" disabled placeholder="請輸入完整貨號（保留開頭 0 與符號）">
+            <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌</strong><details class="inline-help"><summary aria-label="產品搜尋說明" title="產品搜尋說明">!</summary><div class="inline-help-content">先選擇廠牌，再輸入完整貨號，按「搜尋產品」。搜尋忽略大小寫、空白及連字號、底線、點、斜線，開頭的 0 仍須保留。選擇廠牌不會載入產品；「瀏覽此廠牌產品」每次載入 50 筆。</div></details></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
+            <input id="productManagementSearch" type="search" disabled placeholder="請輸入完整貨號">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()" disabled>搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
             <button type="button" id="productManagementBrowseBtn" class="btn-secondary" onclick="browseProductMasterBrand(document.getElementById('productManagementSearchBrand').value)" disabled>瀏覽此廠牌產品</button>
         </div>
-        <div class="product-search-note">先選廠牌，再輸入完整貨號按「搜尋產品」，直接查詢符合產品；貨號大小寫與符號須一致。選廠牌不載入產品；按「瀏覽此廠牌產品」才分批載入，每次 50 筆。</div>
+
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
 
         
@@ -110,7 +110,7 @@
         <div id="productManagementSelectionBar" class="product-selection-bar no-print" hidden>
             <div class="product-selection-summary">
                 <strong id="productManagementSelectionCount">已選 0 項</strong>
-                <span>可跨搜尋繼續選品；完成後一次帶入同一張單據。</span>
+                <details class="inline-help"><summary aria-label="選品說明" title="選品說明">!</summary><div class="inline-help-content">可跨搜尋繼續選品；完成後一次帶入同一張單據。</div></details>
             </div>
             <div class="product-selection-actions">
                 <button type="button" id="productManagementBatchQuoteBtn" onclick="addProductManagementSelectionToQuote()">加入估價單</button>
@@ -123,7 +123,7 @@
         <div class="table-wrap product-results-wrap">
             <table class="product-management-table">
                 <thead id="productManagementHead" data-mode="products"><tr><th class="no-print product-selection-head"><input id="productManagementSelectVisible" type="checkbox" aria-label="選取目前顯示的產品" onchange="toggleVisibleProductManagementSelection(this.checked)" disabled></th><th>貨號</th><th>品名</th><th>廠牌</th><th>產品線</th><th>類型</th><th>規格</th><th>建議售價</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
-                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">先選廠牌，再輸入完整貨號搜尋；也可按「瀏覽此廠牌產品」。</td></tr></tbody>
+                <tbody id="productManagementBody"><tr><td colspan="10" class="empty-hint">尚未搜尋產品。</td></tr></tbody>
             </table>
         </div>
         <div id="productManagementMoreRow" class="product-load-more-row no-print" style="display:none;">
@@ -158,7 +158,7 @@
             onclick="openForecastStageInfo()"
             aria-label="查看 Forecast Stage 說明"
             title="Stage 說明"
-        >ⓘ</button>
+        >!</button>
     </div>
 
     <div class="toolbar no-print forecast-toolbar">
@@ -271,9 +271,9 @@
                 <option value="stage4">Stage 4</option>
                 <option value="stage5">Stage 5</option>
             </select>
-            <div class="forecast-form-note">
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><div class="forecast-form-note">
                 新增後狀態自動設為「進行中」，立案日期與第一筆紀錄由系統自動建立。
-            </div>
+            </div></div></details>
         </div>
 
         <div class="modal-actions">
@@ -316,9 +316,9 @@
             placeholder="例如：老師已送明年度設備預算"
         ></textarea>
 
-        <div class="forecast-form-note">
+        <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><div class="forecast-form-note">
             儲存後系統會自動加入今天日期，例如「09/18 老師已送明年度設備預算」。
-        </div>
+        </div></div></details>
 
         <div class="forecast-form-grid">
             <div>
@@ -342,9 +342,9 @@
             </div>
         </div>
 
-        <div class="forecast-form-note">
+        <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><div class="forecast-form-note">
             Win 原則上搭配 Stage 5；Lost 會保留案件失敗前最後所在 Stage。
-        </div>
+        </div></div></details>
 
         <div class="modal-actions">
             <button
@@ -475,7 +475,7 @@
         <div class="inventory-search-subheading"><strong>Product Master／售價補充結果</strong><span id="businessProductSearchStatus"></span></div>
         <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
       </div>
-      <div class="inventory-summary-note">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div>
+      <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div></details>
       <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="no-print btn-secondary" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
       <h3>待建檔品項</h3>
@@ -582,7 +582,7 @@
           <div><label>庫存策略</label><select id="inventoryPolicySettingSelect" onchange="onInventoryPolicySettingChange()"><option value="ORDER_ONLY">依訂單採購</option><option value="SAFETY_STOCK">安全庫存</option><option value="NO_STOCK">不備庫</option></select></div>
           <div id="inventorySafetyStockSettingRow"><label>安全庫存量</label><input id="inventorySafetyStockSetting" type="number" min="0" step="any" value="0"></div>
         </div>
-        <div class="inventory-summary-note">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」在預計庫存低於門檻時，會自動顯示在採購頁的安全庫存補貨。</div>
+        <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」在預計庫存低於門檻時，會自動顯示在採購頁的安全庫存補貨。</div></details>
         <div class="eq-modal-close-row"><button type="button" id="saveInventoryPolicySettingsBtn" onclick="saveInventoryPolicySettings()">儲存設定</button><button type="button" class="btn-secondary" onclick="closeInventoryPolicySettings()">取消</button></div>
       </div>
     </div>
@@ -690,7 +690,7 @@
                 <input type="hidden" id="myQuotePeriodFilter" value="all">
                 <span id="quoteHistorySearchStatus" class="quote-history-search-status" role="status" aria-live="polite"></span>
             </div>
-            <div class="inventory-summary-note quote-history-note">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div>
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div></details>
             <table class="admin-users-table">
                 <thead><tr><th>單號</th><th>抬頭</th><th>客戶名稱</th><th id="myQuotesSalesHeader" style="display:none;">業務</th><th>日期</th><th>總計</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="myQuotesBody"></tbody>
@@ -722,7 +722,7 @@
                     <div class="three-quote-total">進位後總額 <strong id="comparisonTotal3">NT$ 0</strong></div>
                 </div>
             </div>
-            <div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張為比價用；產生三估單後會把當時設定與第一張估價內容一併保存在估價單紀錄，可從全部／我的估價單再次調出。</div>
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張為比價用；產生三估單後會把當時設定與第一張估價內容一併保存在估價單紀錄，可從全部／我的估價單再次調出。</div></div></details>
             <div class="eq-modal-close-row">
                 <button type="button" class="btn-secondary" onclick="closeThreeQuoteDialog()">取消</button>
                 <button type="button" id="threeQuotePrintBtn" onclick="printThreeQuotes()" class="btn-secondary">匯出三頁 PDF</button>
@@ -854,7 +854,7 @@
                 <span>至</span>
                 <input type="date" id="orderPeriodEnd" aria-label="訂單統計結束日期" onchange="renderOrdersList()">
             </div>
-            <span class="order-period-note">未完成工作包含跨年度；已完成依開發票日期篩選目前已載入歷史；工作筆數不受載入更多影響。</span>
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><span class="order-period-note">未完成工作包含跨年度；已完成依開發票日期篩選目前已載入歷史；工作筆數不受載入更多影響。</span></div></details>
         </div>
         <div class="toolbar no-print order-primary-toolbar">
             <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
@@ -893,7 +893,7 @@
             <div class="eq-modal-box" style="max-width:900px;">
                 <h3 id="customerOrderHistoryTitle">客戶近期交易摘要</h3>
                 <div id="customerTransactionSummary" class="customer-transaction-summary"></div>
-                <div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div>
+                <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div></div></details>
                 <h4>近期訂單</h4>
                 <table><thead><tr><th>訂單日期</th><th>廠牌</th><th>貨號</th><th>品名</th><th>數量</th><th>總價</th><th>訂購狀態</th></tr></thead><tbody id="customerOrderHistoryBody"></tbody></table>
                 <h4 style="margin-top:18px;">近期估價</h4>
@@ -933,7 +933,7 @@
                 <span>至</span>
                 <input type="date" id="purchasePeriodEnd" aria-label="採購統計結束日期" onchange="renderPurchasingView()">
             </div>
-            <span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span>
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span></div></details>
         </div>
         <section id="purchaseDirectPanel" class="panel no-print purchase-function-panel" style="display:none;">
             <div class="purchase-section-heading"><strong>直接採購</strong><p>一般備貨或其他用途，建立成功後自動列入待到貨。</p></div>
@@ -990,7 +990,7 @@
             <div class="toolbar no-print">
                 <span id="purchaseDispatchStatus" role="status"></span>
             </div>
-            <div class="inventory-summary-note">以下為倉庫待打單品項。</div>
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">以下為倉庫待打單品項。</div></details>
             <div class="table-wrap"><table>
                 <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待打單品項</th><th>操作</th></tr></thead>
                 <tbody id="purchaseDispatchBody"></tbody>
@@ -999,12 +999,12 @@
         </div>
         <div id="purchaseCompletedPanel" style="display:none">
             <div class="toolbar no-print"><span id="purchaseCompletedStatus" role="status"></span></div>
-            <div class="inventory-summary-note">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div>
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div></details>
             <div class="table-wrap"><table><thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>已完成採購品項</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseSupplierPanel" style="display:none">
-            <div class="inventory-summary-note">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div>
+            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div></details>
             <div class="panel supplier-setting-panel" style="margin-top:16px;">
                 <strong>供應商設定</strong>
                 <p style="font-size:12px;color:#666;margin:6px 0 12px;">同一供應商可對應多個廠牌；產品線留白代表該廠牌的預設供應商。</p>
@@ -1309,7 +1309,7 @@
           <h3 id="poReceiptBatchTitle" style="margin:0;">到貨入庫</h3>
           <button type="button" class="btn-secondary" onclick="closePoReceiptBatch()">✕ 關閉</button>
         </div>
-        <div class="inventory-summary-note">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單占用。</div>
+        <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單占用。</div></details>
         <div class="table-wrap">
           <table>
             <thead><tr><th>收貨</th><th>貨號</th><th>品名</th><th>訂購</th><th>已收</th><th>未收</th><th>本次到貨</th><th>批號</th><th>效期</th></tr></thead>
@@ -1340,7 +1340,7 @@
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
             <div class="toolbar no-print">
-                <span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span>
+                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span></div></details>
             </div>
             <table>
                 <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>密碼</th><th>帳號 UID</th></tr></thead>
@@ -1355,7 +1355,7 @@
                     <div class="admin-product-heading price-list-admin-heading">
                         <div>
                             <h3>價目表管理</h3>
-                            <p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一 Product Master 的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p>
+                            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一 Product Master 的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p></div></details>
                         </div>
                         <div class="price-list-admin-actions no-print">
                             <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
@@ -1364,7 +1364,7 @@
                         </div>
                     </div>
                     <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                    <p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價格表」再上傳新版。刪除價格表不會刪除 Product Master、歷史估價單／訂單、庫存或實際採購紀錄。</p>
+                    <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價格表」再上傳新版。刪除價格表不會刪除 Product Master、歷史估價單／訂單、庫存或實際採購紀錄。</p></div></details>
                     <div id="priceUploadProgress" class="product-import-progress" style="display:none;">
                         <div class="product-import-progress-head"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
                         <div class="product-import-progress-track"><div id="priceUploadProgressBar" class="product-import-progress-bar" style="width:0;"></div></div>
@@ -1392,8 +1392,8 @@
                             </div>
                         </div>
                     </details>
-                    <details class="product-import-rules">
-                        <summary>欄位與安全規則</summary>
+                    <details class="product-import-rules inline-help">
+                        <summary aria-label="匯入欄位與安全規則" title="匯入欄位與安全規則">!</summary>
                         <div class="product-import-rules-grid">
                             <div><strong>必要識別</strong><span>廠牌、貨號</span></div>
                             <div><strong>可選填</strong><span>產品線、規格、產品類型、單位、建議售價、標準成本</span></div>
@@ -1408,10 +1408,10 @@
         <div id="admin-agencies" class="admin-panel" style="display:none;">
             <div class="panel">
                 <strong>廠牌設定</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">Product Import 的新廠牌會自動加入 Brand Master，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修也當作一般廠牌管理，可自行決定是否獨立統計。</p>
+                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">Product Import 的新廠牌會自動加入 Brand Master，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修也當作一般廠牌管理，可自行決定是否獨立統計。</p></div></details>
                 <div class="toolbar no-print" style="margin:10px 0 4px;">
                     <button type="button" id="syncBrandsFromProductsBtn" class="btn-secondary" onclick="syncBrandsFromProductMaster()">↻ 從 Product Master 同步廠牌</button>
-                    <span style="font-size:12px;color:#777;">用於補齊既有 Product Master 中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span>
+                    <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><span style="font-size:12px;color:#777;">用於補齊既有 Product Master 中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span></div></details>
                 </div>
                 <div id="syncBrandsFromProductsStatus" style="font-size:12px;color:#666;margin:4px 0 10px;"></div>
                 <div class="stat-brand-manager">
@@ -1434,7 +1434,7 @@
             </div>
             <div class="panel" style="margin-top:16px;">
                 <strong>廠牌標準名稱與別名</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">Product Master、估價、訂單與進銷存分析只使用「標準名稱」。常見縮寫或舊名稱請放在別名，例如標準名稱「Beckman Coulter」，別名可填「Beckman」。輸入別名時系統會自動轉成標準名稱，不再建立第二個廠牌。</p>
+                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">Product Master、估價、訂單與進銷存分析只使用「標準名稱」。常見縮寫或舊名稱請放在別名，例如標準名稱「Beckman Coulter」，別名可填「Beckman」。輸入別名時系統會自動轉成標準名稱，不再建立第二個廠牌。</p></div></details>
                 <div style="overflow-x:auto;margin-top:10px;">
                     <table>
                         <thead><tr><th style="min-width:170px;">標準名稱</th><th style="min-width:320px;">別名（逗號分隔）</th><th class="no-print">操作</th></tr></thead>
@@ -1444,7 +1444,7 @@
             </div>
             <div class="panel" style="margin-top:16px;">
                 <strong>報價公司限制</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">只有少數簽在特定分公司的廠牌需要設定。某廠牌若完全未勾選任何公司＝三家公司都可報價；若有勾選＝只能使用勾選公司的估價單抬頭。受限制廠牌在其他公司的估價單仍會顯示，但不能選取。</p>
+                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">只有少數簽在特定分公司的廠牌需要設定。某廠牌若完全未勾選任何公司＝三家公司都可報價；若有勾選＝只能使用勾選公司的估價單抬頭。受限制廠牌在其他公司的估價單仍會顯示，但不能選取。</p></div></details>
                 <div id="companyAgencyBrandSettings"></div>
                 <button style="margin-top:12px;" onclick="saveCompanyAgencyBrands()">💾 儲存報價公司限制</button>
             </div>
@@ -1474,7 +1474,7 @@
             </div>
             <p id="tradeAnalysisStatus" role="status" aria-live="polite"></p>
             <div id="tradeAnalysisCards" class="sales-stat-cards admin-overview-cards trade-analysis-cards"></div>
-            <details class="trade-analysis-method"><summary>ⓘ 計算方式</summary><p id="tradeAnalysisScope" class="inventory-summary-note"></p></details>
+            <details class="trade-analysis-method inline-help"><summary aria-label="計算方式" title="計算方式">!</summary><p id="tradeAnalysisScope" class="inventory-summary-note"></p></details>
             <div class="trade-analysis-detail-actions no-print">
                 <button type="button" id="tradeAnalysisToggleBtn" aria-expanded="false" onclick="toggleSimpleTradeAnalysisDetail()" disabled>查看明細</button>
                 <button type="button" id="tradeAnalysisWorkbookBtn" onclick="exportTradeAnalysis()" class="btn-secondary" disabled>匯出此分頁 Excel</button>
@@ -1511,7 +1511,7 @@
         <div id="admin-warehouses" class="admin-panel" style="display:none;">
             <div class="panel" style="margin-top:16px;">
                 <strong>倉庫管理</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0;">既有倉庫預設為公司倉庫。外倉從分倉庫出貨清單處理；收件資訊可自動帶入轉倉設定。</p>
+                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">既有倉庫預設為公司倉庫。外倉從分倉庫出貨清單處理；收件資訊可自動帶入轉倉設定。</p></div></details>
                 <input id="warehouseMasterEditingId" type="hidden">
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
                     <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：又鑫倉庫"></div>
@@ -1710,7 +1710,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261009-6"></script>
+    <script src="app.js?v=20261009-7"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261009-3"></script>

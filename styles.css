@@ -3657,6 +3657,17 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .shipping-quantity{font-size:22px;color:#073868}
 .shipping-missing{color:#a12a20}
 .record-reference { display:block; margin:0 0 6px; color:#526779; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.field-help-heading { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.inline-help { display:inline-block; max-width:100%; margin:4px 0; vertical-align:middle; box-sizing:border-box; }
+.inline-help > summary { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; min-height:0; padding:0; border:1px solid #6d859b; border-radius:50%; background:#fff; color:#244c70; font-size:16px; font-weight:700; line-height:1; cursor:pointer; list-style:none; box-sizing:border-box; }
+.inline-help > summary::-webkit-details-marker { display:none; }
+.inline-help > summary::marker { content:''; }
+.inline-help > summary:focus-visible { outline:3px solid #608cb7; outline-offset:2px; }
+.inline-help[open] { display:block; width:100%; }
+.field-help-heading .inline-help[open] { flex-basis:100%; }
+.inline-help-content, .inline-help > p, .inline-help > .product-import-rules-grid { margin:8px 0; padding:12px; border:1px solid #b0c3d5; border-radius:8px; background:#f0f5fa; color:#40546a; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+.inline-help-content > div, .inline-help-content > p, .inline-help-content > span { margin:0; }
+#admin-statistics .trade-analysis-method.inline-help > summary { padding:0; }
 #inventoryShippingBody td{text-align:left;padding:12px;line-height:1.5;overflow-wrap:anywhere}
 #inventoryShippingBody td[data-th="待出數量"],#inventoryShippingBody td[data-th="選取"]{text-align:center}
 
