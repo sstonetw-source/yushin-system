@@ -9,6 +9,33 @@ test('recipient validation and grouping separate warehouse, destination and ship
  const rows=[{warehouseId:'MAIN',p},{warehouseId:'MAIN',p},{warehouseId:'MAIN',p:{...p,address:'台南'}},{warehouseId:'MAIN',p:{...p,condition:'常溫'}},{warehouseId:'EXT',p}];
  const groups=core.partition(rows,r=>r.p);assert.equal(groups.length,4);assert.equal(groups[0].rows.length,2);
 });
+test('batch retries only unfinished items, including an uncertain successful commit',async()=>{
+ const p={mode:'CUSTOMER_SHIP',contact:'Luke',phone:'123',address:'台北'};
+ const rows=[1,2,3].map(n=>({key:'O__'+n,warehouseId:'MAIN',warehouse:{id:'MAIN'},qty:n,order:{},item:{},p}));
+ const jobs=core.batchJobs(rows,r=>r.p,'B'),posted=new Set(),calls=[];let interrupted=true;
+ const commit=async j=>{calls.push(j.operationId);posted.add(j.operationId);if(j.operationId==='B-1'&&interrupted){interrupted=false;throw Error('response lost');}};
+ assert.deepEqual(await core.processBatch(jobs,commit),{completed:1,total:3,complete:false});
+ assert.equal(jobs[1].error,'response lost');assert.equal(jobs[2].done,false);
+ assert.deepEqual(await core.processBatch(jobs,commit),{completed:3,total:3,complete:true});
+ assert.deepEqual(calls,['B-0','B-1','B-1','B-2']);assert.equal(posted.size,3);
+ await core.processBatch(jobs,commit);assert.equal(calls.length,4);
+});
+test('batch preflight rejects duplicate rows, unknown warehouses and incomplete recipients',()=>{
+ const r={key:'O__A',warehouseId:'MAIN',warehouse:{id:'MAIN'},qty:1,order:{},item:{}};
+ assert.throws(()=>core.batchJobs([],()=>({}),'B'));
+ assert.throws(()=>core.batchJobs([r,r],()=>({mode:'PICKUP'}),'B'));
+ assert.throws(()=>core.batchJobs([{...r,warehouse:null}],()=>({mode:'PICKUP'}),'B'));
+ assert.throws(()=>core.batchJobs([r],()=>({mode:'CUSTOMER_SHIP',address:'台北'}),'B'),/收件人/);
+ assert.throws(()=>core.batchJobs([{...r,qty:NaN}],()=>({mode:'PICKUP'}),'B'));
+ assert.equal(core.batchJobs([r],()=>({mode:'PICKUP'}),'B')[0].qty,1);
+});
+test('export groups recipients and preserves codes, quantities, notes and quoted addresses without posting stock',()=>{
+ const p={mode:'CUSTOMER_SHIP',contact:'客戶',phone:'0912345678',address:'台北,"二樓"',condition:'冷凍',notes:'請電聯\n到貨'};
+ const r={warehouseId:'EXT',qty:2,order:{orderNo:'YS-1',salesName:'Luke',customerName:'醫院'},item:{itemCode:'00123',itemName:'=SUM(A1)'}};
+ const groups=core.partition([r,{...r,qty:1,item:{itemCode:'00456',itemName:'試劑'}}],()=>p);
+ const csv=core.csvDocument(groups);assert.equal(groups.length,1);assert.equal(groups[0].rows.length,2);
+ assert.ok(csv.startsWith('\uFEFF'));assert.match(csv,/"00123"/);assert.match(csv,/"台北,""二樓"""/);assert.match(csv,/"'\=SUM\(A1\)"/);assert.match(csv,/"冷凍"/);assert.match(csv,/"請電聯\n到貨"/);
+});
 function fixture(){
  const docs=new Map([
   ['inventory/P',{productKey:'P',productId:'P',itemCode:'001',itemName:'Product',brand:'QIAGEN',onHand:10,reserved:4,incoming:0}],
@@ -83,4 +110,56 @@ test('partial arrival cannot relocate a commercial item while later receipts sti
  const f=fixture();f.docs.get('orders/O').items[0].qty=6;
  await assert.rejects(f.c.commitWarehouseTransfer({id:'T',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'}),/全部到貨/);
  assert.equal(f.docs.has('stockTransfers/T'),false);assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,10);
+});
+test('batch transfer rejects changed destination snapshots and operation-ID collisions',async()=>{
+ for(const patch of [{expectedWarehouseId:'OTHER'},{expectedPlan:core.plan({mode:'PICKUP'})}]){
+  const f=fixture();await assert.rejects(f.c.commitWarehouseTransfer({id:'T',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT',...patch}),/已變更/);
+  assert.equal(f.docs.has('stockTransfers/T'),false);assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,10);
+ }
+ const f=fixture();await f.c.commitWarehouseTransfer({id:'T',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'});
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'T',orderId:'O',itemId:'OTHER',qty:4,toWarehouseId:'EXT'}),/識別碼衝突/);
+});
+function batchUiFixture(){
+ const nodes=new Map(),node=id=>{if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',innerHTML:'',disabled:false,dataset:{},classList:{add(){},remove(){},contains(){return false;}},remove(){}});return nodes.get(id);};
+ const p={mode:'CUSTOMER_SHIP',contact:'Customer',phone:'123',address:'台北'};
+ const list=[{key:'O__A',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'A',itemCode:'001',deliveryPlan:p},qty:3,warehouseId:'MAIN',warehouse:{id:'MAIN'}},
+ {key:'O__B',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'B',itemCode:'002',deliveryPlan:{mode:'PICKUP'}},qty:2,warehouseId:'MAIN',warehouse:{id:'MAIN'}}];
+ const inputs=list.map((r,i)=>({value:String(r.qty),dataset:{batchQty:String(i)},disabled:false})),calls=[],feedback=[];
+ const c=vm.createContext({document:{getElementById:node,querySelectorAll:selector=>selector==='[data-batch-qty]'?inputs:[...inputs,node('warehouseShippingBatchDate'),node('warehouseShippingBatchNotes')]},
+  canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,currentUser:{uid:'buyer'},currentUserRole:'purchaser',
+  orderWorkQueueCache:[],warehouseMasterCache:[{id:'MAIN',warehouseName:'又鑫'}],defaultWarehouse:()=>({id:'MAIN'}),
+  YushinInventoryWorkspace:{shippingRows:()=>list},normalizedOrderStatus(){},orderInventorySyncIncomplete(){},normalizedOrderItems(){},itemDispatchState(){},
+  loadOrderWorkQueue:async()=>{},loadWarehouseMaster:async()=>{},loadInventory:async()=>{},refreshAffectedOrderCaches:async()=>{},markMainPageDirty(){},inventoryProductKey:()=> 'P',invalidateWarehouseStockCache(){},
+  beginActionButton:b=>{b.disabled=true;return {};},endActionButton:b=>{b.disabled=false;},showActionFeedback:(...args)=>feedback.push(args),
+  escapeHtml:String,escapeAttr:String,lifecycleRecordId:()=> 'BATCH',localDateString:()=> '2026-10-09'});
+ vm.runInContext(src,c);
+ c.commitInventoryShipment=async args=>calls.push(['customer',args]);c.commitWarehouseTransfer=async args=>calls.push(['handoff',args]);c.loadWarehouseTransferQueue=async()=>{};
+ c.setWarehouseShippingVisibleRows(list);c.selectVisibleWarehouseShipping(true);
+ return {c,node,inputs,calls,feedback,list};
+}
+test('batch UI routes mixed destinations once, applies customer partial quantity and reports completion',async()=>{
+ const f=batchUiFixture();await f.c.openWarehouseShippingBatch();
+ f.node('warehouseShippingBatchDate').value='2026-10-09';f.node('warehouseShippingBatchNotes').value='物流123';f.inputs[0].value='1';
+ await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
+ assert.equal(f.calls.length,2);assert.equal(f.calls[0][0],'customer');assert.equal(f.calls[0][1].qty,1);assert.equal(f.calls[0][1].notes,'物流123');
+ assert.equal(f.calls[1][0],'handoff');assert.equal(f.calls[1][1].handoff,true);assert.equal(f.calls[1][1].qty,2);
+ assert.ok(f.feedback.some(([message])=>/本批 2 個品項已完成/.test(message)));
+ await f.c.confirmWarehouseShippingBatch(f.node('confirm'));assert.equal(f.calls.length,2);
+});
+test('batch UI keeps completed results on error and retries with the same operation ID',async()=>{
+ const f=batchUiFixture();let fail=true;f.c.commitWarehouseTransfer=async args=>{f.calls.push(['handoff',args]);if(fail){fail=false;throw Error('network');}};
+ await f.c.openWarehouseShippingBatch();f.node('warehouseShippingBatchDate').value='2026-10-09';
+ await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
+ assert.match(f.node('warehouseShippingBatchRow1').textContent,/network/);assert.match(f.node('warehouseShippingBatchProgress').textContent,/1／2/);
+ await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
+ assert.equal(f.calls.filter(x=>x[0]==='customer').length,1);assert.equal(f.calls[1][1].id,f.calls[2][1].id);
+});
+test('order status distinguishes partial delivery, custody and transfers from completed customer shipment',()=>{
+ const item={itemId:'A',qty:5,warehouseId:'MAIN'};
+ assert.equal(core.shippingStatus({},item,{delivered:2}),'部分已送貨 2／5');
+ assert.equal(core.shippingStatus({},item,{delivered:5}),'已送貨');
+ assert.equal(core.shippingStatus({},{...item,warehouseId:'custody-S'},{delivered:0}),'已交付業務・待送客戶');
+ assert.equal(core.shippingStatus({},{...item,transferPendingId:'T'},{delivered:0}),'轉倉途中');
+ assert.equal(core.shippingStatus({logisticsHistory:[{itemId:'A',action:'倉庫調撥收貨'}]},item,{delivered:0}),'已轉倉・待送客戶');
+ assert.equal(core.shippingStatus({},item,{delivered:0}),'');
 });

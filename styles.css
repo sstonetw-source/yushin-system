@@ -3641,3 +3641,19 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .warehouse-print-frame{position:fixed;width:1px;height:1px;left:-10000px;bottom:0;border:0}
 .inventory-work-table td{overflow-wrap:anywhere}.inventory-work-table input[type=checkbox]{width:22px;height:22px}
 @media(max-width:600px){.warehouse-logistics-modal .form-grid,.order-shipping-details .form-grid{grid-template-columns:1fr}.warehouse-logistics-modal .toolbar{display:flex;flex-wrap:wrap;gap:8px}.warehouse-logistics-modal .toolbar button{flex:1 1 45%}.inventory-work-subtabs{flex-wrap:wrap}}
+
+/* Warehouse picking list: destinations first, one confirmation per batch. */
+.inventory-shipping-tabs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}
+.inventory-shipping-tabs .order-work-card{display:inline-flex;align-items:center;gap:12px;width:auto;min-width:0;padding:10px 16px}
+.inventory-shipping-tabs .order-work-card strong{font-size:16px}
+.inventory-shipping-tabs select{min-height:44px;max-width:100%;padding:8px}
+.inventory-shipping-batch-actions{align-items:center}
+.shipping-mode-label{display:inline-block;color:#42566b;margin-bottom:5px;font-size:13px}
+.shipping-quantity{font-size:22px;color:#073868}
+.shipping-missing{color:#a12a20}
+#inventoryShippingBody td{text-align:left;padding:12px;line-height:1.5;overflow-wrap:anywhere}
+#inventoryShippingBody td[data-th="待出數量"],#inventoryShippingBody td[data-th="選取"]{text-align:center}
+#inventoryShippingBody input[type="checkbox"]{width:22px;height:22px}
+.warehouse-custody-details{margin-top:18px;padding:12px;background:#f6f8fb;border-radius:8px}
+.warehouse-custody-details summary{cursor:pointer;font-weight:600}
+@media(max-width:768px){.inventory-shipping-batch-actions{align-items:stretch}.inventory-shipping-tabs .order-work-card{flex:1 1 40%}#inventoryShippingBody td{text-align:left!important}}

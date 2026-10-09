@@ -31,6 +31,30 @@ test('shipment is atomic and idempotent across retries, with a unique recorded i
  await f.c.commitInventoryShipment(args);await f.c.commitInventoryShipment(args);
  assert.equal(f.posts(),1);const order=f.docs.get('orders/O');assert.equal(order.deliveryRecords.length,1);assert.equal(order.items[0].reservedQty,2);assert.equal(order.deliveryRecords[0].warehouseId,'MAIN');assert.equal(order.deliveryRecords[0].itemId,'A');assert.equal(order.inventoryShipmentRecordId,'D');
 });
+test('batch customer shipments mark only shipped items and complete the order only after every item ships',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ order.items.push({...order.items[0],itemId:'B',qty:2,reservedQty:2,dispatchPreparedQty:2});
+ f.c.orderQuantity=()=>5;
+ await f.c.commitInventoryShipment({orderId:'O',itemId:'A',qty:3,date:'2026-10-09',operationId:'B-0'});
+ let saved=f.docs.get('orders/O');assert.equal(saved.isDelivered,false);assert.equal(saved.deliveredQty,3);
+ assert.equal(saved.items[1].reservedQty,2);
+ await f.c.commitInventoryShipment({orderId:'O',itemId:'B',qty:2,date:'2026-10-09',operationId:'B-1'});
+ saved=f.docs.get('orders/O');assert.equal(saved.isDelivered,true);assert.equal(saved.deliveredQty,5);assert.equal(saved.deliveryRecords.length,2);
+ await f.c.commitInventoryShipment({orderId:'O',itemId:'B',qty:2,date:'2026-10-09',operationId:'B-1'});
+ assert.equal(f.posts(),5);assert.equal(f.docs.get('orders/O').deliveryRecords.length,2);
+});
+test('batch rejects changed warehouse or recipient and mismatched idempotency keys before posting stock',async()=>{
+ const logistics=require('../modules/warehouse-logistics');
+ for(const patch of [{expectedWarehouseId:'EXT'},{expectedPlan:logistics.plan({mode:'CUSTOMER_SHIP',contact:'Other',phone:'123',address:'台北'})}]){
+  const f=fixture();f.c.YushinWarehouseLogistics=logistics;
+  f.docs.get('orders/O').items[0].deliveryPlan={mode:'CUSTOMER_SHIP',contact:'Luke',phone:'123',address:'台北'};
+  await assert.rejects(f.c.commitInventoryShipment({orderId:'O',itemId:'A',qty:1,date:'2026-10-09',operationId:'D',...patch}),/已變更/);
+  assert.equal(f.posts(),0);
+ }
+ const f=fixture();await f.c.commitInventoryShipment({orderId:'O',itemId:'A',qty:1,date:'2026-10-09',operationId:'D'});
+ await assert.rejects(f.c.commitInventoryShipment({orderId:'O',itemId:'OTHER',qty:1,date:'2026-10-09',operationId:'D'}),/識別碼衝突/);
+ assert.equal(f.posts(),1);
+});
 test('invalid quantity, dates, missing identity, cancelled order, unsynced stock and unauthorized roles never post inventory',async()=>{
  for(const patch of [{qty:0},{qty:-1},{qty:4},{qty:NaN},{date:'2026-02-30'},{date:'bad'},{operationId:''},{itemId:'missing'}]){
   const f=fixture();await assert.rejects(f.c.commitInventoryShipment({orderId:'O',itemId:'A',qty:1,date:'2026-10-06',operationId:'D',...patch}));assert.equal(f.posts(),0);
