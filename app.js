@@ -1531,14 +1531,10 @@ function canDeleteProductMaster() {
 function updatePendingProductMasterButton() {
     const allowed = canManagePendingProductMaster();
     const tools = document.getElementById('productManagementTools');
-    const pendingButton = document.getElementById('pendingProductMasterBtn');
-    const ignoredPendingButton = document.getElementById('ignoredPendingProductBtn');
     const createButton = document.getElementById('createProductMasterBtn');
     const inactiveWrap = document.getElementById('productManagementInactiveWrap');
     const batchMaintenance = document.getElementById('productBatchMaintenance');
     if (tools) tools.style.display = allowed ? '' : 'none';
-    if (pendingButton) pendingButton.style.display = allowed ? '' : 'none';
-    if (ignoredPendingButton) ignoredPendingButton.style.display = (trueUserRole === 'admin' && currentUserRole === 'admin') ? '' : 'none';
     if (createButton) createButton.style.display = allowed ? '' : 'none';
     if (inactiveWrap) inactiveWrap.style.display = allowed ? '' : 'none';
     if (batchMaintenance) batchMaintenance.style.display = allowed ? '' : 'none';
@@ -22693,10 +22689,6 @@ window.runSystemDataAudit = async function() {
             if (!brand) issues.push({ target:{kind:'product',record:product}, type:'Product Master 缺少廠牌', detail:label });
             if (!rawCode) issues.push({ target:{kind:'product',record:product}, type:'Product Master 缺少貨號', detail:label });
             if (!name) issues.push({ target:{kind:'product',record:product}, type:'Product Master 缺少品名', detail:label });
-            const activeProduct=product.active!==false&&String(product.status||'ACTIVE').toUpperCase()!=='INACTIVE';
-            if(activeProduct&&(product.listPrice===undefined||product.listPrice===null||String(product.listPrice).trim()==='')){
-                issues.push({ target:{kind:'product',record:product}, type:'Product Master 缺少建議售價', detail:label });
-            }
             if (code) productCodes.add(code);
             const duplicateKey = normalizeBrandLookupKey(brand) + '|' + code;
             if (code) {
@@ -22847,7 +22839,7 @@ window.runSystemDataAudit = async function() {
         status.textContent = '檢查失敗：' + err.message;
     } finally {
         button.disabled = false;
-        button.textContent = '檢查系統資料';
+        button.textContent = '執行資料檢查';
     }
 };
 

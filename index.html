@@ -1556,10 +1556,9 @@
                     這是唯讀檢查，不會修改或刪除資料；因為會讀取多個集合，不會在登入時自動執行。
                 </p>
                 <div class="toolbar no-print" style="display:block;margin-top:12px;">
-                    <div class="toolbar"><button type="button" id="pendingProductMasterBtn" class="btn-secondary" style="display:none;" onclick="loadPendingProductMaster()">待補產品</button><button type="button" id="ignoredPendingProductBtn" class="btn-secondary" style="display:none;" onclick="openIgnoredPendingProducts()">已移除待補</button></div><div id="pendingProductHealthStatus" role="status"></div><div id="pendingProductHealthResults"></div>
-                    <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">執行資料健康檢查</button>
+                    <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">執行資料檢查</button>
                     <span style="display:block;margin-top:7px;font-size:12px;color:#666;">
-                        會列出 Product Master 缺少廠牌／貨號／品名／建議售價、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
+                        會列出 Product Master 缺少廠牌／貨號／品名、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
                     </span>
                     <div id="systemDataAuditStatus" style="margin-top:10px;font-size:13px;white-space:pre-line;"></div>
                     <div id="systemDataAuditResults" style="margin-top:10px;"></div>
@@ -1705,7 +1704,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261009-2"></script>
+    <script src="app.js?v=20261009-3"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261006-2"></script>
     <script src="modules/inventory-workspace.js?v=20261009-2"></script>

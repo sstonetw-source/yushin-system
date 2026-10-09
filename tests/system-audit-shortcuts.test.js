@@ -40,3 +40,31 @@ test('shortcuts are inactive when administrator is viewing as another role',asyn
  const {x,calls,issues}=setup();issues([{target:{kind:'product',record:{id:'P1'}}}]);x.currentUserRole='sales';
  await x.window.openSystemAuditIssue(0);await x.window.followSystemAuditShortcut(0,'product-new');assert.equal(calls.length,0);
 });
+
+test('data audit accepts blank optional prices and still finds required fields and duplicates without writes', async () => {
+ const {x,element}=setup();
+ const products=[
+  {id:'P1',brandName:'Roche',manufacturerPartNo:'A1',productName:'One'},
+  {id:'P2',brandName:'Roche',manufacturerPartNo:'A2',productName:'Two',listPrice:null},
+  {id:'P3',brandName:'Roche',manufacturerPartNo:'A3',productName:'Three',listPrice:''},
+  {id:'P4',brandName:'Roche',manufacturerPartNo:'A4',productName:'Four',listPrice:0},
+  {id:'P5',brandName:'Roche',manufacturerPartNo:'A1',productName:'Duplicate'},
+  {id:'P6'}
+ ];
+ const reads=[];
+ x.readCollectionInBatches=async name=>{reads.push(name);return name==='products'?products:[];};
+ x.normalizeItemCodeLoose=value=>String(value||'').toLowerCase();
+ x.normalizeBrandLookupKey=value=>String(value||'').toLowerCase();
+ x.systemAuditActionLabel=()=> '查看';
+ const start=source.indexOf('window.runSystemDataAudit = async function()');
+ vm.runInContext(source.slice(start,source.indexOf('\n};',start)+3),x);
+ await x.window.runSystemDataAudit();
+ const issues=vm.runInContext('systemDataAuditIssues',x);
+ assert.deepEqual(Array.from(issues,v=>v.type).sort(),[
+  'Product Master 缺少廠牌','Product Master 缺少貨號','Product Master 缺少品名','Product Master 重複'
+ ].sort());
+ assert.equal(reads.length,10);
+ assert.match(element('systemDataAuditStatus').textContent,/檢查完成/);
+ assert.equal(element('systemDataAuditBtn').disabled,false);
+ assert.equal(element('systemDataAuditBtn').textContent,'執行資料檢查');
+});

@@ -4343,7 +4343,7 @@ test('Product page stays mobile-safe while admin only manages price lists', () =
     assert.doesNotMatch(adminProductSource,/openNewProductMasterEditor/);
     assert.doesNotMatch(adminProductSource,/＋ 新增產品/);
     assert.doesNotMatch(adminProductSource,/id="pendingProductMasterBtn"/);
-    assert.match(indexSource.slice(indexSource.indexOf('id="admin-health"')),/id="pendingProductMasterBtn"/);
+    assert.doesNotMatch(indexSource,/id="pendingProductMasterBtn"/);
     assert.match(adminProductSource,/id="priceUploadProgress"/);
 
     assert.match(cssSource,/#product-system\s*\{[\s\S]*?overflow-x:hidden/);
@@ -4813,7 +4813,7 @@ test('product page has a single gated brand search area', () => {
 });
 
 test('admin can remove a pending product reminder without deleting source documents and restore it later', () => {
-    assert.match(indexSource, /id="ignoredPendingProductBtn"/);
+    assert.doesNotMatch(indexSource, /id="ignoredPendingProductBtn"/);
     const start=appSource.indexOf('window.ignorePendingProductMaster = async function');
     const end=appSource.indexOf('\nwindow.openIgnoredPendingProducts', start);
     const source=appSource.slice(start,end);
@@ -5146,7 +5146,7 @@ test('inventory projected stock and replenishment center avoid duplicate repleni
 test('admin data health is a dedicated read-only check and validates Product Master plus inventory policy', () => {
     assert.match(indexSource,/id="admin-sub-health"/);
     assert.match(indexSource,/id="admin-health"/);
-    assert.match(indexSource,/執行資料健康檢查/);
+    assert.match(indexSource,/執行資料檢查/);
     assert.equal((indexSource.match(/id="systemDataAuditBtn"/g)||[]).length,1);
     assert.match(appSource,/Product Master 缺少廠牌/);
     assert.match(appSource,/Product Master 缺少貨號/);
@@ -5191,11 +5191,11 @@ test('order progress modal exposes a complete timeline including order creation'
     assert.match(appSource,/action:'退貨紀錄'/);
 });
 
-test('admin data health also checks missing price, order lines and planning consistency', () => {
-    assert.match(appSource,/Product Master 缺少建議售價/);
+test('admin data health accepts optional price and checks order lines and planning consistency', () => {
+    assert.doesNotMatch(appSource,/Product Master 缺少建議售價/);
     assert.match(appSource,/訂單品項找不到 Product/);
     assert.match(appSource,/庫存策略與安全庫存不一致/);
-    assert.match(indexSource,/缺少廠牌／貨號／品名／建議售價/);
+    assert.match(indexSource,/缺少廠牌／貨號／品名/);
 });
 
 
