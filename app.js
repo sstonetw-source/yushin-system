@@ -11037,10 +11037,11 @@ let procurementDemandLoaded = false;
 let procurementDemandSourceOrderCache = new Map();
 const selectedPendingPurchaseDemandIds = new Set();
 
-function invalidateProcurementDemandQueue() {
+function invalidateProcurementDemandQueue(options = {}) {
     purchaseDemandSummaryReady=false;
     if(document.getElementById('purchasing-system')?.classList.contains('active'))loadPurchaseDemandSummary(true);
     markMainPageDirty('orders.po');
+    if (options.preserveQueue) return;
     procurementDemandCache=[];
     procurementDemandCursor=null;
     procurementDemandHasMore=true;
@@ -11048,6 +11049,20 @@ function invalidateProcurementDemandQueue() {
     procurementDemandSourceOrderCache=new Map();
     selectedPendingPurchaseDemandIds.clear();
     purchasingViewLoaded?.delete?.('ordering');
+}
+
+function syncCommittedQuickPurchaseDemand(demand, order) {
+    // Keep loaded pages and their cursor: confirming one item must not reset the queue.
+    if (demand?.id) {
+        const index = procurementDemandCache.findIndex(row => row.id === demand.id);
+        if (Number(demand.remainingToOrderQty || 0) > 0) {
+            if (index >= 0) procurementDemandCache[index] = demand;
+            else procurementDemandCache.unshift(demand);
+        } else if (index >= 0) procurementDemandCache.splice(index, 1);
+        selectedPendingPurchaseDemandIds.delete(demand.id);
+    }
+    if (order?.id) procurementDemandSourceOrderCache.set(order.id, order);
+    invalidateProcurementDemandQueue({ preserveQueue:true });
 }
 let pendingPurchaseError = '';
 let purchasingDispatchCache = [];
@@ -12287,7 +12302,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         if (!purchaseDetails) return;
         if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
         if (!purchaseDetails.supplier || !Number.isFinite(purchaseDetails.unitCost) || purchaseDetails.unitCost < 0) throw new Error('請確認供應商與有效的實際單位成本。');
-        let savedOrder, savedSupply, incomingProductKey='', incomingWarehouseId='';
+        let savedOrder, savedSupply, savedDemand, incomingProductKey='', incomingWarehouseId='';
         const supplyRef = supplyOrdersCollection().doc(quickPurchaseSupplyId(orderId, itemId));
         await runRoleTransaction(async tx => {
             const orderRef = db.collection('orders').doc(orderId);
@@ -12485,6 +12500,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
 
             tx.set(supplyRef, (({id, ...record}) => record)(savedSupply));
             if(demandRef)tx.set(demandRef,demandDoc,{merge:true});
+            savedDemand = { ...demandDoc, id:demandId };
             if (qty > 0) {
                 items[itemIndex] = {
                     ...item, supplyOrderedQty:nextOrdered,
@@ -12512,10 +12528,9 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
             else supplyReceivingCache.unshift(savedSupply);
         }
         writeAppDataCache('orders', ordersCache);
-        invalidateProcurementDemandQueue();
+        syncCommittedQuickPurchaseDemand(savedDemand, savedOrder);
         if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
-            if (purchasingView === 'ordering') await loadPendingPurchaseOrders(true);
             renderPurchasingView();
         }
         showActionFeedback('已採購，品項已列入待到貨，可繼續處理下一筆。', 'success');

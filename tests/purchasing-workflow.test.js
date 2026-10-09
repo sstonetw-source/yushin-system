@@ -704,7 +704,7 @@ test('manual ordered action records supply and source item only once after an un
         normalizedOrderStatus:()=> 'normal',
         normalizedOrderItems:record=>record.items,orderWorkIndexFields:()=>({workCategories:['arrival']}),
         ordersCache:[],supplyReceivingCache:[],purchasingView:'ordering',
-        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
+        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},syncCommittedQuickPurchaseDemand:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:(view,tab)=>switched.push([view,tab]),
         loadPendingPurchaseOrders:async reset=>switched.push(['reload',reset]),
         renderPurchasingView:()=>switched.push(['render']),showActionFeedback:()=>{},alert:()=>{}
@@ -718,7 +718,7 @@ vm.runInContext(source,context);
     assert.equal(supply.type,'PURCHASING_MANUAL');
     assert.equal(supply.status,'ORDERED');
     assert.equal(supply.orderDate,'2026-09-29');
-    assert.deepEqual(switched,[['reload',true],['render']]);
+    assert.deepEqual(switched,[['render']]);
     assert.equal(context.purchasingView,'ordering');
     context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
@@ -773,7 +773,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
         resolveBrandName:value=>value||'',brandIdForName:()=> '',
         normalizedOrderStatus:()=> 'normal',normalizedOrderItems:record=>record.items,
         orderWorkIndexFields:()=>({workCategories:['arrival']}),ordersCache:[],supplyReceivingCache:[],
-        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
+        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},syncCommittedQuickPurchaseDemand:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
@@ -807,7 +807,8 @@ test('ordered action is a direct snapshot-based state change without a data-entr
     assert.ok(actionStart>=0 && actionEnd>actionStart && saveStart>=0 && saveEnd>saveStart);
     assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>已採購<\/button>/);
     assert.doesNotMatch(saveSource, /switchPurchasingView\(/);
-    assert.match(saveSource, /loadPendingPurchaseOrders\(true\)/);
+    assert.doesNotMatch(saveSource, /loadPendingPurchaseOrders\(true\)/);
+    assert.match(saveSource, /syncCommittedQuickPurchaseDemand\(savedDemand, savedOrder\)/);
     assert.match(saveSource, /const demand = procurementDemandForOrderItem\(order, item\)/);
     assert.match(saveSource, /const qty = demand\.remainingToOrderQty/);
     assert.doesNotMatch(saveSource, /findProduct|preloadPurchaseCosts|loadSupplierWarehouseMasters|supplierForProduct/);
@@ -1856,7 +1857,7 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         buildInventorySearchTokens:()=>['p1'],
         invalidateWarehouseStockCache:()=>{},
         ordersCache:[],supplyReceivingCache:[],
-        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},renderOrdersList:()=>{},
+        syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},invalidateProcurementDemandQueue:()=>{},syncCommittedQuickPurchaseDemand:()=>{},renderOrdersList:()=>{},
         switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
@@ -2414,4 +2415,60 @@ test('receiving list surfaces quantity-aware delivery plan risk before the requi
     assert.match(renderSource,/planRiskDiff/);
     assert.match(renderSource,/planRiskCount/);
     assert.match(renderSource,/預計晚於需求日/);
+});
+
+function quickPurchaseQueueFixture() {
+    const cursor = { id:'page-three' };
+    const rows = Array.from({length:120}, (_,i)=>({id:'D'+i,remainingToOrderQty:1}));
+    const refreshes = [];
+    const context = vm.createContext({
+        procurementDemandCache:rows, procurementDemandCursor:cursor,
+        procurementDemandHasMore:true, procurementDemandLoaded:true,
+        procurementDemandSourceOrderCache:new Map(),
+        selectedPendingPurchaseDemandIds:new Set(['D51','D99']),
+        purchasingViewLoaded:new Set(['ordering']), purchaseDemandSummaryReady:true,
+        document:{getElementById:()=>({classList:{contains:()=>true}})},
+        loadPurchaseDemandSummary:force=>refreshes.push(force),markMainPageDirty:()=>{}
+    });
+    vm.runInContext(app.slice(app.indexOf('function invalidateProcurementDemandQueue('),
+        app.indexOf("let pendingPurchaseError = ''")),context);
+    return {context,cursor,rows,refreshes};
+}
+
+test('confirming an item on a later page preserves other rows, cursor and selections',()=>{
+    const {context:x,cursor,rows,refreshes}=quickPurchaseQueueFixture();
+    const order={id:'O51',items:[{itemId:'I51',supplyOrderedQty:1}]};
+    x.syncCommittedQuickPurchaseDemand({id:'D51',remainingToOrderQty:0},order);
+    assert.equal(x.procurementDemandCache.length,119);
+    assert.equal(x.procurementDemandCache.includes(rows[99]),true);
+    assert.equal(x.procurementDemandCache.some(row=>row.id==='D51'),false);
+    assert.equal(x.procurementDemandCursor,cursor);
+    assert.equal(x.procurementDemandLoaded,true);
+    assert.equal(x.procurementDemandHasMore,true);
+    assert.equal(x.purchasingViewLoaded.has('ordering'),true);
+    assert.deepEqual([...x.selectedPendingPurchaseDemandIds],['D99']);
+    assert.equal(x.procurementDemandSourceOrderCache.get('O51'),order);
+    assert.equal(x.purchaseDemandSummaryReady,false);
+    assert.deepEqual(refreshes,[true]);
+});
+
+test('partial procurement updates only its row and repeat completion is harmless',()=>{
+    const {context:x,cursor}=quickPurchaseQueueFixture();
+    x.syncCommittedQuickPurchaseDemand({id:'D51',remainingToOrderQty:2},{id:'O51'});
+    assert.equal(x.procurementDemandCache.length,120);
+    assert.equal(x.procurementDemandCache.find(row=>row.id==='D51').remainingToOrderQty,2);
+    x.syncCommittedQuickPurchaseDemand({id:'D51',remainingToOrderQty:0},{id:'O51'});
+    x.syncCommittedQuickPurchaseDemand({id:'D51',remainingToOrderQty:0},{id:'O51'});
+    assert.equal(x.procurementDemandCache.length,119);
+    assert.equal(x.procurementDemandCursor,cursor);
+});
+
+test('other invalidations still clear stale queues for a fresh load',()=>{
+    const {context:x}=quickPurchaseQueueFixture();
+    x.invalidateProcurementDemandQueue();
+    assert.equal(x.procurementDemandCache.length,0);
+    assert.equal(x.procurementDemandCursor,null);
+    assert.equal(x.procurementDemandLoaded,false);
+    assert.equal(x.selectedPendingPurchaseDemandIds.size,0);
+    assert.equal(x.purchasingViewLoaded.has('ordering'),false);
 });
