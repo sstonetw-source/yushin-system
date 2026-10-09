@@ -123,13 +123,13 @@ test('product management directly queries exact brand and code without exposing 
     const productSearch = appSource.slice(searchStart, searchEnd);
     assert.match(productSearch, /db\.collection\('products'\)/);
     assert.doesNotMatch(productSearch, /while \(true\)/);
-    assert.match(productSearch, /where\('brandName'/);
-    assert.match(productSearch, /where\('manufacturerPartNo', '==', raw\)/);
+    assert.match(productSearch, /storedBrandNames\.some/);
+    assert.match(productSearch, /where\('normalizedPartNo', '==', normalizedCode\)/);
     assert.match(productSearch, /limit\(50\)/);
     assert.match(productSearch, /startAfter\(state.cursor\)/);
     assert.match(productSearch, /firestoreReadWithTimeout\(query\.get\(\), '廠牌與完整貨號搜尋'\)/);
     assert.match(productSearch, /generation === productManagementSearchGeneration/);
-    assert.doesNotMatch(productSearch, /haystack|matchesKeyword|normalizeItemCodeLoose/);
+    assert.doesNotMatch(productSearch, /haystack|matchesKeyword/);
     assert.doesNotMatch(productSearch, /slice\(0, 50\)/);
     assert.doesNotMatch(productSearch, /productCosts|loadVisibleProductCost/);
     assert.match(appSource, /window\.addProductManagementToQuote/);
@@ -212,8 +212,8 @@ test('inventory uses one debounced search for inventory and Product Master resul
 test('product management searches only on explicit action', () => {
     assert.doesNotMatch(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(indexSource, /id="productManagementSearchBrand"/);
-    assert.match(appSource, /where\('manufacturerPartNo', '==', raw\)/);
-    assert.match(indexSource, /選廠牌不載入產品/);
+    assert.match(appSource, /where\('normalizedPartNo', '==', normalizedCode\)/);
+    assert.match(indexSource, /選擇廠牌不會載入產品/);
     assert.match(indexSource, /id="productManagementBrowseBtn"/);
 
 });
