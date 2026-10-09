@@ -2010,6 +2010,13 @@ html[data-app-environment="preview"] body { border-top: 0; }
 
 
 /* ===== Forecast：快速篩選、簡化表單、手機卡片 ===== */
+.forecast-section-header {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+}
 .forecast-section-header h2 {
     display: flex;
     align-items: center;
@@ -2019,8 +2026,9 @@ html[data-app-environment="preview"] body { border-top: 0; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
     padding: 0;
     border: 0;
     border-radius: 50%;
@@ -2174,7 +2182,7 @@ html[data-app-environment="preview"] body { border-top: 0; }
     .forecast-section-header h2 {
         font-size: 25px;
     }
-    .forecast-section-header > button {
+    .forecast-section-header > button:not(.forecast-stage-info-trigger) {
         padding: 9px 14px;
         white-space: nowrap;
     }
