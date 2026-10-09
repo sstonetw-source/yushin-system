@@ -4584,12 +4584,12 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
             ...(master.aliases || []),
             ...defaultBrandAliasesForCanonical(canonicalName),
             ...(normalizeBrandLookupKey(master.name) !== key ? [master.name] : [])
-        ]).filter(alias => normalizeBrandLookupKey(alias) !== key);
+        ]).filter(alias => String(alias).trim() !== canonicalName);
         const statisticConfig = statisticConfigForEntry(master, canonicalName, baseAliases);
         const aliases = dedupeBrandsCaseInsensitive([
             ...baseAliases,
             ...(statisticConfig ? (keyStatisticBrandAliases[statisticConfig] || []) : [])
-        ]).filter(alias => normalizeBrandLookupKey(alias) !== key);
+        ]).filter(alias => String(alias).trim() !== canonicalName);
         const companies = companyKeys.filter(company =>
             (master.companies || []).includes(company)
             || includesBrandCaseInsensitive(companyAgencyBrands[company] || [], canonicalName)
@@ -19762,7 +19762,7 @@ window.saveBrandAliases = async function(brandName, button) {
     const raw = String(row?.querySelector('.brand-alias-input')?.value || '');
     const aliases = dedupeBrandsCaseInsensitive(
         raw.split(/[,，\n]+/).map(value => String(value || '').trim()).filter(Boolean)
-    ).filter(alias => normalizeBrandLookupKey(alias) !== normalizeBrandLookupKey(canonical));
+    ).filter(alias => String(alias).trim() !== canonical);
     if (aliases.length > 9) {
         alert('每個標準廠牌最多設定 9 個別名，請刪除不必要的名稱。');
         return;
