@@ -3318,6 +3318,9 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     padding:14px; align-items:end;
 }
 #admin-statistics .trade-analysis-filters label { display:flex; flex-direction:column; align-items:stretch; gap:5px; font-size:13px; color:#526171; min-width:0; }
+#admin-statistics .trade-analysis-filters input[type="date"] { display:block; max-width:100%; min-inline-size:0; appearance:none; -webkit-appearance:none; }
+#admin-statistics .trade-analysis-filters input[type="date"]::-webkit-date-and-time-value { text-align:left; min-width:0; }
+#admin-statistics .trade-analysis-filters input[type="date"]::-webkit-datetime-edit { padding:0; }
 #admin-statistics .trade-analysis-filters select,
 #admin-statistics .trade-analysis-filters input,
 #admin-statistics .trade-analysis-filters button { width:100%; min-width:0; height:42px; margin:0; padding:8px; box-sizing:border-box; font-size:14px; }
@@ -3340,9 +3343,11 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .trade-analysis-pagination button { margin:0; white-space:nowrap; }
 @media(max-width:700px) {
     #admin-statistics .trade-analysis-filters { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    #admin-statistics .analysis-period-field, #admin-statistics .analysis-brand-field, #salesStatsSalesField { grid-column:1/-1; }
     #admin-statistics .sub-tabs button { font-size:14px; }
-    #tradeAnalysisCards { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    #tradeAnalysisCards .sales-stat-card { padding:12px; }
+    #tradeAnalysisCards { grid-template-columns:minmax(0,1fr); }
+    #tradeAnalysisCards .sales-stat-card { padding:12px; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+    #tradeAnalysisCards .sales-stat-card small { grid-column:1/-1; min-height:0; }
     #tradeAnalysisCards strong { font-size:20px; }
     .trade-analysis-detail-actions button { flex:1; }
 }
@@ -3651,8 +3656,39 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .shipping-mode-label{display:inline-block;color:#42566b;margin-bottom:5px;font-size:13px}
 .shipping-quantity{font-size:22px;color:#073868}
 .shipping-missing{color:#a12a20}
+.record-reference { display:block; margin:0 0 6px; color:#526779; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 #inventoryShippingBody td{text-align:left;padding:12px;line-height:1.5;overflow-wrap:anywhere}
 #inventoryShippingBody td[data-th="待出數量"],#inventoryShippingBody td[data-th="選取"]{text-align:center}
+
+/* Mobile lists: compact records with visible boundaries and a selection header. */
+@media screen and (max-width:768px) {
+    #ordersTable, #purchasePendingPanel table, .inventory-work-table table { border:0; background:transparent; }
+    #ordersTable tbody, #purchasePendingBody, #inventoryShippingBody { background:#f1f5f9; padding:8px; box-sizing:border-box; }
+    #ordersTable tbody > tr, #purchasePendingBody > tr, #inventoryShippingBody > tr {
+        width:100%; box-sizing:border-box; margin:0 0 18px; padding:12px;
+        border:1px solid #cbd7e3; border-left:4px solid #315b80; border-radius:10px;
+        background:#fff; box-shadow:0 2px 4px rgba(20,45,70,.08);
+    }
+    #ordersTable tbody > tr:last-child, #purchasePendingBody > tr:last-child, #inventoryShippingBody > tr:last-child { margin-bottom:0; }
+    #ordersTable td, #purchasePendingBody td, #inventoryShippingBody td { padding:8px 0; line-height:1.45; }
+    #purchasePendingBody > tr, #inventoryShippingBody > tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
+    #purchasePendingBody td, #inventoryShippingBody td { width:auto; min-width:0; box-sizing:border-box; }
+    #purchasePendingBody td[data-th="合併"], #purchasePendingBody td[data-th="客戶／用途"], #purchasePendingBody td[data-th="待採購品項"], #purchasePendingBody td[data-th="操作"],
+    #inventoryShippingBody td[data-th="選取"], #inventoryShippingBody td[data-th="業務／客戶"], #inventoryShippingBody td[data-th="貨號／品名"], #inventoryShippingBody td[data-th="寄送目的地"], #inventoryShippingBody td[data-th="設定"] { grid-column:1/-1; }
+    #ordersTable .order-customer-cell button { background:transparent; color:#063863; padding:0; margin:0; text-align:left; font-weight:700; }
+    #purchasePendingBody td[data-th="合併"], #inventoryShippingBody td[data-th="選取"] {
+        display:flex; align-items:center; justify-content:flex-start; gap:8px;
+        padding:0 0 8px; min-height:32px; text-align:left;
+    }
+    #purchasePendingBody td[data-th="合併"]::before, #inventoryShippingBody td[data-th="選取"]::before { margin:0; color:#526779; font-size:12px; }
+    #purchasePendingBody input[type="checkbox"], #inventoryShippingBody input[type="checkbox"] { width:22px; height:22px; margin:0; flex:none; }
+    #purchasePendingBody td[data-th="操作"]::before { display:none; }
+    #purchasePendingBody td[data-th="操作"] button { margin:0; }
+    #inventoryShippingBody td[data-th="待出數量"] { display:flex; align-items:center; gap:12px; text-align:left; }
+    #inventoryShippingBody td[data-th="待出數量"]::before { margin:0; }
+    #inventoryShippingBody td[data-th="設定"]::before { display:none; }
+    #inventoryShippingBody td[data-th="設定"] button { margin:0; min-height:44px; }
+}
 #inventoryShippingBody input[type="checkbox"]{width:22px;height:22px}
 .warehouse-custody-details{margin-top:18px;padding:12px;background:#f6f8fb;border-radius:8px}
 .warehouse-custody-details summary{cursor:pointer;font-weight:600}
