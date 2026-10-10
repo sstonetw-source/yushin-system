@@ -95,7 +95,7 @@ const PERMISSION_PAGES = [
     { key: 'orders', label: '📦 訂單管理系統', system: true },
     { key: 'orders.list', label: '　業務訂單' },
     { key: 'orders.po', label: '　採購訂單' },
-    { key: 'inventory', label: '📦 庫存管理', system: true },
+    { key: 'inventory', label: '📦 倉庫', system: true },
     { key: 'equipment', label: '🔬 儀器管理系統', system: true },
     { key: 'admin', label: '⚙️ 管理員雲端後台', system: true }
 ];
@@ -17342,7 +17342,7 @@ function renderOrderLifecycleModal() {
     lifecycleButton.textContent = cancelled ? '恢復訂單' : deliveryProgressInfo(order).grossDelivered > 0 ? '取消剩餘未送數量' : '取消訂單';
     const canReturn = normalizedOrderItems(order).some(item => returnItemDeliveredQty(order, item.itemId) - returnItemReturnedQty(order, item.itemId) - customerReturnPendingQty(order, item.itemId) > 0);
     document.getElementById('openReturnFormBtn').hidden = !editable || !canReturn;
-    document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由庫存頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
+    document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由倉庫頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
     const isEditingReturn = !!document.getElementById('returnEditId').value;
     document.getElementById('returnFormPanel').style.display = editable && (orderReturnFormOpen || isEditingReturn) && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';
     const records = savedReturnRecords(order).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -19348,7 +19348,7 @@ let productOverviewLoading = false;
 let brandProductDeleteRunning = false;
 
 window.openInventoryReceiving = function() {
-    if (!canAccessPage('inventory')) return alert('需要庫存頁權限才能收貨。');
+    if (!canAccessPage('inventory')) return alert('需要倉庫頁權限才能收貨。');
     switchMainTab('inventory-system', document.querySelector('[data-main-nav="inventory"]'));
     switchInventoryWorkView(true);
 };

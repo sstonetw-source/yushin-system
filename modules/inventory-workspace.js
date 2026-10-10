@@ -212,7 +212,7 @@
       delete button.dataset.operationId;
       invalidateWarehouseStockCache(inventoryProductKey(row.item),row.warehouseId);
       try{await refreshAffectedOrderCaches([orderId]);await loadOrderWorkQueue(true);}
-      catch(err){showActionFeedback('出貨已儲存，清單更新失敗；請重新開啟庫存頁。','warning');}
+      catch(err){showActionFeedback('出貨已儲存，清單更新失敗；請重新開啟倉庫頁。','warning');}
       renderInventoryShipping();markMainPageDirty('inventory','orders.list','orders.po','admin');
       showActionFeedback('已確認實際出貨，庫存與訂單送貨紀錄已同步。','success');
     }catch(err){showActionFeedback('出貨未完成：'+err.message,'warning');}
@@ -221,7 +221,7 @@
 })(typeof globalThis!=='undefined'?globalThis:this);
 
 async function commitInventoryShipment({orderId,itemId,qty,date,notes='',operationId,expectedWarehouseId='',expectedPlan=null}){
-  if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw new Error('無庫存出貨權限。');
+  if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw new Error('無倉庫出貨權限。');
   if(!operationId||!Number.isFinite(qty)||qty<=0)throw new Error('出貨數量或操作識別碼不正確。');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)throw new Error('請填寫有效的出貨日期。');
   let saved;

@@ -171,7 +171,7 @@ window.receiveCustomerReturn=async function(orderId,requestId,button){
     try{
         await commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,quality,warehouseId});
         delete button.dataset.operationId;
-        try{await refreshAffectedOrderCaches([orderId]);await loadCustomerReturnQueue();}catch(refreshError){showActionFeedback('退貨已收貨；清單更新失敗，請重新開啟庫存頁。','warning');}
+        try{await refreshAffectedOrderCaches([orderId]);await loadCustomerReturnQueue();}catch(refreshError){showActionFeedback('退貨已收貨；清單更新失敗，請重新開啟倉庫頁。','warning');}
         markMainPageDirty('inventory','orders.list','orders.po','admin');
         showActionFeedback(quality==='SALEABLE'?'退貨已收貨並入庫，不補送。':'退貨已實收，列為不可用商品，請分開保管。','success');
     }catch(err){alert('退貨收貨失敗：'+err.message);}finally{customerReturnActionsPending.delete(requestId);if(button.isConnected)button.disabled=false;}
