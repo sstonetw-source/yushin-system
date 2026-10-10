@@ -163,3 +163,44 @@ test('order status distinguishes partial delivery, custody and transfers from co
  assert.equal(core.shippingStatus({logisticsHistory:[{itemId:'A',action:'倉庫調撥收貨'}]},item,{delivered:0}),'已轉倉・待送客戶');
  assert.equal(core.shippingStatus({},item,{delivered:0}),'');
 });
+
+test('manual unbatched stock can transfer 5 of 10 atomically and retain unknown cost through receipt',async()=>{
+ const f=fixture();f.docs.delete('inventoryLots/L');f.docs.delete('inventoryLotCosts/L');
+ f.docs.get('warehouseStocks/MAIN__P').reserved=0;f.docs.get('inventory/P').reserved=0;
+ const args={id:'NOLOT',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:5};
+ await f.c.commitWarehouseTransfer(args);await f.c.commitWarehouseTransfer(args);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,5);
+ assert.equal(f.docs.get('inventory/P').onHand,10);
+ assert.equal(f.docs.get('inventory/P').transferInTransit,5);
+ const source=f.docs.get('inventoryLots/NOLOT-unbatched-source');
+ assert.equal(source.remainingQty,5);assert.equal(source.unbatched,true);assert.equal(source.sourceId,'NOLOT');
+ assert.equal(f.docs.has('inventoryLotCosts/NOLOT-unbatched-source'),false);
+ await f.c.commitWarehouseTransferReceipt('NOLOT');await f.c.commitWarehouseTransferReceipt('NOLOT');
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,5);
+ assert.equal(f.docs.get('inventoryLots/NOLOT-0').remainingQty,5);
+ assert.equal(f.docs.get('inventory/P').transferInTransit,0);
+ assert.equal(f.docs.get('inventoryLotCosts/NOLOT-0').unitCost,undefined);
+ assert.equal(f.docs.get('inventoryLotCosts/NOLOT-0').costSourceLotId,'NOLOT-unbatched-source');
+});
+test('mixed tracked and unbatched transfer preserves original cost identity and blocks inconsistent totals',async()=>{
+ const f=fixture();f.docs.get('inventoryLots/L').remainingQty=2;
+ await f.c.commitWarehouseTransfer({id:'MIX',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:5});
+ const allocations=f.docs.get('stockTransfers/MIX').allocations;
+ assert.deepEqual(allocations.map(a=>[a.lotId,a.qty]),[['L',2],['MIX-unbatched-source',3]]);
+ assert.equal(allocations[0].costLotId,'L');assert.equal(f.docs.get('inventoryLots/MIX-unbatched-source').remainingQty,5);
+ const invalid=fixture();invalid.docs.get('inventoryLots/L').remainingQty=11;
+ const before=structuredClone([...invalid.docs]);
+ await assert.rejects(invalid.c.commitWarehouseTransfer({id:'BAD',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:5}),/超過/);
+ assert.deepEqual([...invalid.docs],before);
+});
+test('unbatched transfer network failure leaves no synthetic lot or stock decrement',async()=>{
+ const f=fixture();f.docs.delete('inventoryLots/L');f.fail();const before=structuredClone([...f.docs]);
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'FAIL',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:5}),/網路/);
+ assert.deepEqual([...f.docs],before);
+});
+test('manual transfer retry cannot reuse an operation ID for another stock or warehouse',async()=>{
+ const f=fixture(),args={id:'ID',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3};
+ await f.c.commitWarehouseTransfer(args);
+ for(const patch of [{inventoryId:'OTHER'},{fromWarehouseId:'EXT'},{toWarehouseId:'OTHER'}])await assert.rejects(f.c.commitWarehouseTransfer({...args,...patch}),/識別碼衝突/);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,7);
+});

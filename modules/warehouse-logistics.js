@@ -253,7 +253,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
   const actorUid=currentUser.uid,actorRole=currentUserRole;let saved;
   await runRoleTransaction(async tx=>{
     const transferRef=db.collection('stockTransfers').doc(id),prior=await tx.get(transferRef);
-    if(prior.exists){saved=prior.data();if(saved.orderId!==orderId||saved.itemId!==itemId||Number(saved.qty)!==qty)throw Error('調撥操作識別碼衝突。');return;}
+    if(prior.exists){saved=prior.data();if(saved.orderId!==orderId||saved.itemId!==itemId||Number(saved.qty)!==qty||(!orderId&&(saved.inventoryId!==inventoryId||saved.fromWarehouseId!==fromWarehouseId||saved.toWarehouseId!==toWarehouseId)))throw Error('調撥操作識別碼衝突。');return;}
     let order=null,item=null,index=-1,orderRef=null,reservationRef=null,reservation=null;
     if(orderId){
       orderRef=db.collection('orders').doc(orderId);const orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw Error('訂單不存在。');order=orderSnap.data();
@@ -281,14 +281,23 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     const from=fromSnap.data(),reservedQty=orderId?qty:0;YushinWarehouseLogistics.transferable(from,qty,reservedQty);
     const lotQuery=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',fromWarehouseId).limit(201).get(),'調撥批次');
     if(lotQuery.size>200)throw Error('批次超過安全處理上限。');
-    const lotSnaps=await Promise.all(lotQuery.docs.map(d=>tx.get(d.ref))),lots=lotSnaps.filter(d=>d.exists).map(d=>({id:d.id,...d.data()}));
+    const lotSnaps=await Promise.all(lotQuery.docs.map(d=>tx.get(d.ref))),trackedLots=lotSnaps.filter(d=>d.exists).map(d=>({...d.data(),id:d.id}));
+    const unbatchedRef=db.collection('inventoryLots').doc(id+'-unbatched-source');
+    const unbatchedSnap=orderId?null:await tx.get(unbatchedRef);
+    if(unbatchedSnap?.exists)throw Error('未分批庫存識別碼衝突。');
+    const reconciled=orderId?{lots:trackedLots,unbatched:null}:YushinInventory.reconcileStockLots(trackedLots,Number(from.onHand),unbatchedRef.id);
+    const lots=reconciled.lots;
     const allocation=YushinInventory.allocateLots(lots,qty),now=new Date().toISOString(),who=deliveryActor();
     if(actorUid!==currentUser.uid||actorRole!==currentUserRole)throw Error('登入身分已變更。');
-    const allocations=allocation.allocations.map((a,n)=>({...a,targetLotId:id+'-'+n,costLotId:lots.find(l=>l.id===a.lotId)?.costLotId||a.lotId}));
+    const allocations=allocation.allocations.map((a,n)=>({...a,targetLotId:id+'-'+n,...(lots.find(l=>l.id===a.lotId)?.unbatched?{unbatched:true}:{}),costLotId:lots.find(l=>l.id===a.lotId)?.costLotId||a.lotId}));
     saved={id,inventoryId,productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||item?.itemCode||'',itemName:inv.itemName||item?.itemName||'',brand:inv.brand||'',brandId:inv.brandId||'',fromWarehouseId,toWarehouseId,fromStockId:fromRef.id,toStockId:toRef.id,qty,reservedQty,status:handoff?'RECEIVED':'IN_TRANSIT',kind:handoff?'HANDOFF':'TRANSFER',orderId,itemId,itemIndex:index,orderNo:order?.orderNo||order?.quoteNo||'',salesName:order?.salesName||'',ownerUid:order?.ownerUid||'',salesCode:order?.salesCode||'',allocations,createdAt:now,createdBy:who,createdByUid:actorUid,...(handoff?{receivedAt:now,receivedByUid:actorUid}:{}),deliveryPlan:order?YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}):{}};
     tx.set(transferRef,saved);
     tx.update(fromRef,{onHand:Number(from.onHand)-qty,reserved:Number(from.reserved||0)-reservedQty,updatedAt:now});
-    for(const a of allocations){const lot=lots.find(l=>l.id===a.lotId);tx.update(db.collection('inventoryLots').doc(a.lotId),{remainingQty:Number(lot.remainingQty)-a.qty,updatedAt:now});}
+    if(reconciled.unbatched){
+      const lot=reconciled.unbatched,issued=allocations.find(a=>a.lotId===lot.id)?.qty||0;
+      tx.set(unbatchedRef,{productKey:key,productId:inv.productId||key,warehouseId:fromWarehouseId,lotNo:'',expiryDate:'',receivedQty:lot.receivedQty,remainingQty:lot.remainingQty-issued,unbatched:true,sourceType:'MANUAL_STOCK_BALANCE',sourceId:id,receivedAt:now,createdBy:who});
+    }
+    for(const a of allocations){if(a.lotId===reconciled.unbatched?.id)continue;const lot=lots.find(l=>l.id===a.lotId);tx.update(db.collection('inventoryLots').doc(a.lotId),{remainingQty:Number(lot.remainingQty??lot.qty)-a.qty,updatedAt:now});}
     if(handoff){
       if(!destWh.exists)tx.set(destWhRef,{warehouseName:'業務保管｜'+(order.salesName||order.ownerUid),active:true,isDefault:false,warehouseType:'CUSTODY',systemCustody:true,ownerUid:order.ownerUid,sourceTransferId:id});
       const target=toSnap?.exists?toSnap.data():{};
@@ -307,7 +316,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
 function writeTransferLots(tx,transfer,inventory,now){
   for(const a of transfer.allocations){
     const ref=db.collection('inventoryLots').doc(a.targetLotId);
-    tx.set(ref,{productKey:transfer.productKey,productId:transfer.productId,warehouseId:transfer.toWarehouseId,lotNo:a.lotNo||'',expiryDate:a.expiryDate||'',qty:a.qty,remainingQty:a.qty,receivedAt:now,createdAt:now,sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costLotId:a.costLotId,transferId:transfer.id,itemCode:inventory.itemCode||transfer.itemCode,itemName:inventory.itemName||transfer.itemName});
+    tx.set(ref,{productKey:transfer.productKey,productId:transfer.productId,warehouseId:transfer.toWarehouseId,lotNo:a.lotNo||'',expiryDate:a.expiryDate||'',qty:a.qty,remainingQty:a.qty,...(a.unbatched?{unbatched:true}:{}),receivedAt:now,createdAt:now,sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costLotId:a.costLotId,transferId:transfer.id,itemCode:inventory.itemCode||transfer.itemCode,itemName:inventory.itemName||transfer.itemName});
     tx.set(db.collection('inventoryLotCosts').doc(a.targetLotId),{lotId:a.targetLotId,productKey:transfer.productKey,warehouseId:transfer.toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costSourceLotId:a.costLotId,createdAt:now});
   }
 }

@@ -72,6 +72,38 @@
     return {allocations,totalCost:allocations.reduce((sum,row)=>sum+row.cost,0)};
   }
 
+  // Warehouse counts may include manually counted stock without a lot record.
+  // Preserve this quantity as an explicit unbatched source, without inventing cost.
+  function reconcileStockLots(lots=[],onHand=0,unbatchedId=''){
+    if(!Number.isFinite(Number(onHand))||Number(onHand)<0)throw new Error('倉庫現有數量不正確');
+    const tracked=lots.reduce((sum,lot)=>{
+      const qty=Number(lot.remainingQty??lot.qty??0);
+      if(!Number.isFinite(qty)||qty<0)throw new Error('批次數量不正確');
+      return sum+qty;
+    },0);
+    const gap=Number(onHand)-tracked;
+    if(gap < -1e-8)throw new Error('批次數量超過倉庫現有數量，請先核對庫存');
+    if(gap<=1e-8)return {lots:[...lots],unbatched:null};
+    if(!unbatchedId||lots.some(lot=>lot.id===unbatchedId))throw new Error('未分批庫存識別碼衝突');
+    const unbatched={id:unbatchedId,lotNo:'',expiryDate:'',receivedQty:gap,remainingQty:gap,unbatched:true};
+    return {lots:[...lots,unbatched],unbatched};
+  }
+
+  function quantityAdjustmentLots(lots=[],current=0,target=0,reserved=0,unbatchedId='',adjustmentId=''){
+    if(!Number.isFinite(target)||target<0||target<Number(reserved||0))throw new Error('盤點數量不可小於已占用數量');
+    const result=reconcileStockLots(lots,current,unbatchedId);
+    const delta=target-Number(current);
+    let allocations=[];
+    if(delta<0)allocations=allocateLots(result.lots,-delta).allocations;
+    const reduced=new Map(allocations.map(row=>[row.lotId,row.qty]));
+    const next=result.lots.map(lot=>({...lot,remainingQty:Number(lot.remainingQty??lot.qty??0)-(reduced.get(lot.id)||0)}));
+    if(delta>0){
+      if(!adjustmentId||next.some(lot=>lot.id===adjustmentId))throw new Error('盤點庫存識別碼衝突');
+      next.push({id:adjustmentId,lotNo:'',expiryDate:'',receivedQty:delta,remainingQty:delta,unbatched:true});
+    }
+    return {lots:next,allocations,delta};
+  }
+
   function reverseLotAllocations(records=[],qty=0){
     let remaining=n(qty);
     const allocations=[];
@@ -139,6 +171,8 @@
     isListArchived,
     sortLotsForIssue,
     allocateLots,
+    reconcileStockLots,
+    quantityAdjustmentLots,
     reverseLotAllocations,
     allocationsAfterReversal,
     availableReturnAllocations

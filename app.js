@@ -8963,6 +8963,7 @@ window.saveInventoryQuantity=async function(){
     const button=document.getElementById('saveInventoryQuantityBtn');
     if(button){button.disabled=true;button.textContent='儲存中…';}
     let appliedDelta=0;
+    const adjustmentId=lifecycleRecordId();
     try{
         await runRoleTransaction(async tx=>{
             const invSnap=await tx.get(ref);
@@ -8977,17 +8978,34 @@ window.saveInventoryQuantity=async function(){
             const delta=target-current;
             appliedDelta=delta;
             if(delta===0)return;
+            if(!warehouseId)throw new Error('請選擇盤點倉庫。');
+            const lotQuery=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',warehouseId).limit(201).get(),'盤點批次');
+            if(lotQuery.size>200)throw new Error('批次超過安全處理上限。');
+            const lotSnaps=await Promise.all(lotQuery.docs.map(doc=>tx.get(doc.ref)));
+            const currentLots=lotSnaps.filter(doc=>doc.exists).map(doc=>({...doc.data(),id:doc.id}));
+            const balanceRef=db.collection('inventoryLots').doc(adjustmentId+'-balance');
+            const addedRef=db.collection('inventoryLots').doc(adjustmentId+'-added');
+            const balanceSnap=await tx.get(balanceRef),addedSnap=await tx.get(addedRef);
+            if(balanceSnap.exists||addedSnap.exists)throw new Error('盤點操作識別碼衝突，請重新開啟盤點視窗。');
+            const lotPlan=YushinInventory.quantityAdjustmentLots(currentLots,current,target,effectiveWarehouse.reserved,balanceRef.id,addedRef.id);
             const now=new Date().toISOString();
             const nextOnHand=Number(n.onHand||0)+delta;
             if(nextOnHand<0)throw new Error('調整後總庫存不可小於 0。');
             const canonicalBrand=resolveBrandName(item.brand||old.brand||'');
             const nextInventory={...old,productKey:key,productId:item.productId||old.productId||key,itemCode:item.itemCode||old.itemCode||'',itemName:item.itemName||old.itemName||'',brand:canonicalBrand,brandId:item.brandId||old.brandId||brandIdForName(canonicalBrand),onHand:nextOnHand,reserved:n.reserved,incoming:n.incoming,updatedAt:now};
             nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
+            for(const lot of lotPlan.lots){
+                const oldLot=currentLots.find(row=>row.id===lot.id);
+                const lotRef=db.collection('inventoryLots').doc(lot.id);
+                if(oldLot){
+                    if(Number(oldLot.remainingQty??oldLot.qty)!==lot.remainingQty)tx.update(lotRef,{remainingQty:lot.remainingQty,updatedAt:now});
+                }else tx.set(lotRef,{productKey:key,productId:item.productId||old.productId||key,warehouseId,lotNo:'',expiryDate:'',receivedQty:lot.receivedQty,remainingQty:lot.remainingQty,unbatched:true,sourceType:lot.id===balanceRef.id?'MANUAL_STOCK_BALANCE':'MANUAL_ADJUSTMENT',sourceId:adjustmentId,receivedAt:now,createdBy:currentUserName||currentUser?.email||''});
+            }
             tx.set(ref,nextInventory,{merge:true});
             if(whRef){
                 tx.set(whRef,{warehouseId,productKey:key,productId:item.productId||old.productId||key,itemCode:item.itemCode||old.itemCode||'',itemName:item.itemName||old.itemName||'',brand:canonicalBrand,brandId:item.brandId||old.brandId||brandIdForName(canonicalBrand),onHand:target,reserved:effectiveWarehouse.reserved,incoming:effectiveWarehouse.incoming,updatedAt:now},{merge:true});
             }
-            tx.set(db.collection('inventoryMovements').doc(),{type:'adjustment',qty:delta,productKey:key,productId:item.productId||old.productId||key,warehouseId,itemCode:item.itemCode||old.itemCode||'',itemName:item.itemName||old.itemName||'',brand:canonicalBrand,brandId:item.brandId||old.brandId||brandIdForName(canonicalBrand),sourceType:'manual',sourceId:'quantity-editor',note,createdAt:now,createdBy:currentUserName||currentUser?.email||''});
+            tx.set(db.collection('inventoryMovements').doc(),{type:'adjustment',qty:delta,productKey:key,productId:item.productId||old.productId||key,warehouseId,itemCode:item.itemCode||old.itemCode||'',itemName:item.itemName||old.itemName||'',brand:canonicalBrand,brandId:item.brandId||old.brandId||brandIdForName(canonicalBrand),sourceType:'manual',sourceId:adjustmentId,operation:'quantity-editor',lotAllocations:lotPlan.allocations,lotIds:lotPlan.lots.filter(lot=>!currentLots.some(row=>row.id===lot.id)).map(lot=>lot.id),note,createdAt:now,createdBy:currentUserName||currentUser?.email||''});
         });
         if(appliedDelta!==0)invalidateWarehouseStockCache(key,warehouseId);
         closeInventoryQuantityEditor();
@@ -9074,7 +9092,7 @@ window.updateInventoryTransferHint=function(){
     const movable=Math.max(0,Number(source.onHand||0)-Number(source.reserved||0));
     const fromName=activeInventoryWarehouses().find(warehouse=>warehouse.id===fromId)?.warehouseName||'來源倉庫';
     const toName=activeInventoryWarehouses().find(warehouse=>warehouse.id===toId)?.warehouseName||'目的倉庫';
-    hint.textContent=`${fromName}：現有 ${source.onHand}、已占用 ${source.reserved}，最多可移動 ${movable}；移到 ${toName} 後公司總庫存不變。`;
+    hint.textContent=`${fromName}：現有 ${source.onHand}、已占用 ${source.reserved}，最多可移動 ${movable}；移出後列為調撥途中，${toName} 確認收貨後入庫，公司總庫存不變。`;
 };
 
 window.closeInventoryTransfer=function(){

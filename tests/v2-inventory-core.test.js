@@ -74,3 +74,21 @@ test('availableReturnAllocations excludes lots already returned',()=>{
     [['A',5],['B',1]]
   );
 });
+test('count increases create only the extra unbatched quantity without altering original batch identity',()=>{
+ const lot={id:'known',remainingQty:10,lotNo:'B',unitCost:90};
+ const result=inventory.quantityAdjustmentLots([lot],10,15,4,'balance','added');
+ assert.equal(result.delta,5);assert.deepEqual(result.lots[0],lot);
+ assert.equal(result.lots[1].remainingQty,5);assert.equal(result.lots[1].unitCost,undefined);
+ assert.equal(result.lots.reduce((sum,l)=>sum+l.remainingQty,0),15);
+ assert.equal(lot.remainingQty,10);
+});
+test('count reductions preserve reservations and reconcile a manually counted unbatched balance',()=>{
+ const result=inventory.quantityAdjustmentLots([],10,5,0,'balance','added');
+ assert.equal(result.delta,-5);assert.equal(result.lots[0].remainingQty,5);
+ assert.equal(result.allocations[0].lotId,'balance');assert.equal(result.allocations[0].qty,5);
+ const mixed=inventory.quantityAdjustmentLots([{id:'known',remainingQty:2,expiryDate:'2027-01-01'}],10,7,4,'balance','added');
+ assert.equal(mixed.lots.reduce((sum,l)=>sum+l.remainingQty,0),7);
+ assert.throws(()=>inventory.quantityAdjustmentLots([],10,3,4,'balance','added'),/已占用/);
+ assert.throws(()=>inventory.quantityAdjustmentLots([{id:'known',remainingQty:11}],10,12,0,'balance','added'),/超過/);
+ assert.throws(()=>inventory.reconcileStockLots([{remainingQty:-1}],10,'balance'),/不正確/);
+});
