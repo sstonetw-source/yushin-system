@@ -4605,8 +4605,11 @@ function getUnifiedBrandEntries(includeMaintenance = false) {
         const existing = entries.get(key);
         if (existing) {
             const masterIsCanonical = normalizeBrandLookupKey(master.name) === key;
+            const priceListOwner = master.priceListManaged && (!existing.priceListManaged ||
+                String(master.priceListUpdatedAt || master.priceListDeletedAt || '') > String(existing.priceListUpdatedAt || existing.priceListDeletedAt || '')) ? master : existing;
             entries.set(key, {
                 ...existing,
+                ...Object.fromEntries(Object.entries(priceListOwner).filter(([field]) => field.startsWith('priceList'))),
                 id: masterIsCanonical ? master.id : existing.id,
                 name: canonicalName,
                 aliases: dedupeBrandsCaseInsensitive([...(existing.aliases || []), ...aliases]),
@@ -19525,9 +19528,9 @@ async function productMasterRemovalReferences(productId) {
 
 function updateBrandPriceListCache(brand, patch) {
     const canonical = resolveBrandName(brand);
-    const id = brandMasterDocumentId(canonical);
+    const id = brandMasterEntryForName(canonical)?.id || brandMasterDocumentId(canonical);
     const index = brandMasterCache.findIndex(item =>
-        item.id === id || normalizeBrandLookupKey(item.name) === normalizeBrandLookupKey(canonical)
+        item.id === id
     );
     if (index >= 0) brandMasterCache[index] = normalizeBrandMasterRecord(id, { ...brandMasterCache[index], ...patch, name:canonical });
     else brandMasterCache.push(normalizeBrandMasterRecord(id, { name:canonical, active:true, ...patch }));
@@ -19553,7 +19556,7 @@ function priceListEventRecord(brand, action, details = {}, createdAt = new Date(
 async function commitPriceListBrandEvent(brand, action, metadata, details = {}) {
     const canonical = resolveBrandName(brand);
     const now = new Date().toISOString();
-    const brandRef = db.collection('brands').doc(brandMasterDocumentId(canonical));
+    const brandRef = db.collection('brands').doc(brandMasterEntryForName(canonical)?.id || brandMasterDocumentId(canonical));
     const historyRef = db.collection('priceHistory').doc();
     const patch = { name:canonical, ...metadata, updatedAt:now };
     const batch = db.batch();
@@ -23060,11 +23063,49 @@ async function loadExistingProductImportState(productIds = [], costProductIds = 
     return { existingProducts, existingCosts };
 }
 
+// 匯入以廠牌＋貨號辨識產品，沿用雲端文件 ID，成本與訂單引用才能指向同一筆。
+async function resolveProductImportIdentities(items) {
+    const codeFor = item => normalizeItemCodeLoose(item.model || item.manufacturerPartNo || item.sku || '');
+    const rows = items.filter(item => item.model || item.manufacturerPartNo || item.sku);
+    if (!rows.length) return;
+    const keyFor = item => normalizeBrandLookupKey(resolveBrandName(item.brand || item.brandName || '')) + '::' + codeFor(item);
+    const seen = new Set();
+    rows.forEach(item => {
+        const key = keyFor(item);
+        if (seen.has(key)) throw new Error(`貨號「${item.model || item.sku}」在檔案中重複出現（忽略大小寫與符號）。尚未寫入產品或成本。`);
+        seen.add(key);
+    });
+    const codes = [...new Set(rows.map(codeFor))];
+    const matches = new Map();
+    for (let offset = 0; offset < codes.length; offset += 120) {
+        const queries = [];
+        for (let i = offset; i < Math.min(offset + 120, codes.length); i += 30) {
+            queries.push(firestoreReadWithTimeout(
+                db.collection('products').where('normalizedPartNo', 'in', codes.slice(i, i + 30)).get(),
+                'Product Import 廠牌與貨號比對'
+            ));
+        }
+        const snapshots = await Promise.all(queries);
+        snapshots.forEach(snapshot => snapshot.docs.forEach(doc => {
+            const data = doc.data() || {};
+            const key = keyFor(data);
+            if (!matches.has(key)) matches.set(key, new Map());
+            matches.get(key).set(doc.id, data);
+        }));
+    }
+    rows.forEach(item => {
+        const candidates = matches.get(keyFor(item));
+        if (candidates?.size > 1) throw new Error(`廠牌「${item.brand}」貨號「${item.model || item.sku}」已有 ${candidates.size} 筆產品，無法決定成本應更新哪一筆。請先核對重複產品；本次尚未寫入產品或成本。`);
+        if (candidates?.size === 1) item.productId = candidates.keys().next().value;
+    });
+}
+
 async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
     const canWriteFormalMaster = currentUserRole === 'admin' || currentUserRole === 'purchaser';
     if (!canWriteFormalMaster) return { productWrites:0, costWrites:0, unchangedRows:0 };
 
     const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand: storedBrand })));
+    await resolveProductImportIdentities(normalizedItems);
     const productIds = [...new Set(normalizedItems.map(item => item.productId).filter(Boolean))];
     const costProductIds = [...new Set(normalizedItems.filter(item => item.standardCostProvided === true).map(item => item.productId).filter(Boolean))];
     const { existingProducts, existingCosts } = await loadExistingProductImportState(productIds, costProductIds);
@@ -23138,7 +23179,7 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
     });
 
     await commitMigrationBatch(operations, 200);
-    return { productWrites, costWrites, unchangedRows };
+    return { productWrites, costWrites, unchangedRows, items:normalizedItems };
 }
 
 async function saveProductMasterBrand(imported, brand) {
@@ -23152,7 +23193,7 @@ async function saveProductMasterBrand(imported, brand) {
     }
     const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand })));
     const syncResult = await syncImportedBrandToFormalProductMaster(normalizedItems, brand);
-    normalizedItems.map(productItemWithoutCost).forEach(item => cacheProductLookupItem(item));
+    (syncResult.items || normalizedItems).map(productItemWithoutCost).forEach(item => cacheProductLookupItem(item));
     return { brand, ...syncResult };
 }
 
@@ -23161,6 +23202,7 @@ let pendingPriceImportPreview = null;
 
 async function summarizeProductMasterImport(groups, errors = []) {
     const rows = groups.flatMap(group => group.imported.map(raw => normalizeProductMasterItem({ ...raw, brand: group.brand })));
+    await resolveProductImportIdentities(rows);
     const uniqueProductIds = [...new Set(rows.map(item => String(item.productId || '').trim()).filter(Boolean))];
     const costProductIds = [...new Set(rows.filter(item => item.standardCostProvided === true).map(item => String(item.productId || '').trim()).filter(Boolean))];
     const { existingProducts, existingCosts } = await loadExistingProductImportState(uniqueProductIds, costProductIds);
@@ -23818,7 +23860,7 @@ window.handlePriceExcelUpload = async function(input) {
                 totalProductWrites += saveResult.productWrites;
                 totalCostWrites += saveResult.costWrites;
                 totalUnchangedRows += saveResult.unchangedRows;
-                const normalizedImported = normalizeProductMasterList(items.map(item => ({ ...item, brand: storedBrand })));
+                const normalizedImported = saveResult.items || normalizeProductMasterList(items.map(item => ({ ...item, brand: storedBrand })));
                 const visibleImported = normalizedImported.map(productItemWithoutCost);
 
                 // 以 productId 增量合併本機快取。只上傳幾筆時，不可把同廠牌其他產品從目前畫面暫時移除。
