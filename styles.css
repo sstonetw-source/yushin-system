@@ -3735,3 +3735,144 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #tradeAnalysisCards .sales-stat-card { background:#fff; border-color:#879db3; }
     #tradeAnalysisCards .sales-stat-card span { color:#40546a; }
 }
+
+/* Shared workspace appearance, based on the purchasing list. Screen only:
+   document/PDF layouts and the visibility rules for compact records stay independent. */
+@media screen {
+    #appContainer {
+        --workspace-background: #e2e9f1;
+        --workspace-border: #c9d5e1;
+        --workspace-label: #40546a;
+        --workspace-radius: 14px;
+    }
+    #appContainer .content-section button,
+    #appContainer .eq-modal-box button,
+    #appContainer .modal button,
+    #appContainer :is(.quote-more-menu, .po-more-menu, .order-more-menu) > summary {
+        box-sizing: border-box;
+        border-radius: 6px;
+        line-height: 1.4;
+        min-height: 44px;
+    }
+    #appContainer :is(.quote-more-menu, .po-more-menu) > summary {
+        background: #626a72;
+        color: #fff;
+    }
+    #appContainer button:disabled {
+        cursor: not-allowed;
+        opacity: .5;
+    }
+    #appContainer :is(.toolbar, .order-period-toolbar, .trade-analysis-filters) {
+        border-radius: 8px;
+    }
+    #appContainer :is(.sub-tabs, .purchase-view-tabs, .inventory-work-subtabs) button {
+        margin: 0;
+        border-radius: 6px;
+    }
+    #appContainer :is(.quote-list-action-row, .po-list-action-row) {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+    }
+    #appContainer :is(.quote-list-action-row, .po-list-action-row) > button,
+    #appContainer :is(.quote-list-action-row, .po-list-action-row) > details {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    #appContainer :is(.quote-list-action-row, .po-list-action-row) > details > summary {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+        min-height: 44px;
+    }
+}
+@media screen and (max-width: 768px) {
+    /* Explicit record lists avoid changing nested item editors and hidden fields. */
+    #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
+        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
+        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody) {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--workspace-background);
+        padding: 10px;
+        border-radius: var(--workspace-radius);
+    }
+    #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
+        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
+        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody) > tr {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        margin: 0 0 16px;
+        padding: 16px;
+        border: 1px solid var(--workspace-border);
+        border-radius: var(--workspace-radius);
+        background: #fff;
+        box-shadow: 0 2px 4px rgba(20,45,70,.1);
+    }
+    #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
+        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
+        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody) > tr:last-child {
+        margin-bottom: 0;
+    }
+    #appContainer :is(#inventoryStockPanel > .table-wrap, #poListPanel > .table-wrap) {
+        background: transparent;
+        padding: 0;
+    }
+    #appContainer :is(#ordersTable, #purchasePendingBody, #purchaseDispatchBody,
+        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable,
+        #poListBody, #inventoryListBody, #eqListTable, .product-management-table) td[data-th] {
+        border-bottom-color: #d1dbe5;
+        text-align: left;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+    }
+    #appContainer :is(#ordersTable, #purchasePendingBody, #purchaseDispatchBody,
+        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable,
+        #poListBody, #inventoryListBody, #eqListTable, .product-management-table) td[data-th]::before {
+        color: var(--workspace-label);
+        font-size: 12px;
+        font-weight: 700;
+    }
+    #appContainer #myQuotesBody > tr { display: block; }
+    #appContainer #myQuotesBody td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 0;
+        border: 0;
+        border-bottom: 1px solid #d1dbe5;
+    }
+    #appContainer #myQuotesBody td[data-th]::before {
+        content: attr(data-th) "：";
+        display: block;
+        margin-bottom: 3px;
+    }
+    #appContainer #myQuotesBody .quote-list-actions { border-bottom: 0; padding-top: 12px; }
+    #appContainer #myQuotesBody .quote-list-action-row { width: 100%; }
+    #appContainer .inventory-shipping-batch-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    #appContainer .inventory-shipping-batch-actions > span { grid-column: 1 / -1; }
+    #appContainer .inventory-shipping-batch-actions button { width: 100%; margin: 0; padding: 8px; }
+}
+@media screen and (max-width: 768px) {
+    #appContainer :is(#ordersTable tbody, #purchasePendingBody, #inventoryShippingBody) > tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 12px;
+    }
+    #appContainer #ordersTable :is(.order-customer-cell, .order-product-cell, .order-money-cell, .order-details-cell, td[data-th="操作"]) { grid-column: 1 / -1; }
+    #appContainer #myQuotesPanel > table { display: block; width: 100%; border: 0; background: transparent; }
+    #appContainer #myQuotesPanel > table > thead { display: none; }
+}

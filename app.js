@@ -7634,13 +7634,13 @@ window.renderMyQuotesList = function() {
         // ------------------------------------
 
         tr.innerHTML = `
-            <td>${escapeHtml(q.quoteNo || '')}</td>
-            <td>${escapeHtml(q.clientName || '')}</td>
-            <td>${escapeHtml(q.ordererName || '')}</td>
-            ${isAdminViewingAll ? `<td>${escapeHtml(stripPhoneSuffix(q.salesName))}</td>` : ''}
-            <td>${escapeHtml(q.quoteDate || '')}</td>
-            <td>${escapeHtml(q.grandTotal || '')}</td>
-            <td>${statusCell}</td>
+            <td data-th="估價單號">${escapeHtml(q.quoteNo || '')}</td>
+            <td data-th="抬頭">${escapeHtml(q.clientName || '')}</td>
+            <td data-th="客戶名稱">${escapeHtml(q.ordererName || '')}</td>
+            ${isAdminViewingAll ? `<td data-th="業務">${escapeHtml(stripPhoneSuffix(q.salesName))}</td>` : ''}
+            <td data-th="日期">${escapeHtml(q.quoteDate || '')}</td>
+            <td data-th="金額">${escapeHtml(q.grandTotal || '')}</td>
+            <td data-th="狀態">${statusCell}</td>
             <td class="no-print quote-list-actions">
                 <div class="quote-list-action-row">
                     <button type="button" class="btn-small" onclick="openQuoteFromAdmin(${inlineJsValue(q.quoteNo)})">載入</button>
