@@ -704,7 +704,7 @@ input[type="number"] {
 #printableQuote.theme-morningstar table th { background-color: #1b4d3e; color: #fff; border-bottom: none; }
 #printableQuote.theme-morningstar table tbody tr:nth-child(even) { background-color: #eef5f0; }
 
-button { padding: 8px 16px; font-size: 14px; background-color: #003366; color: white; border: none; border-radius: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; outline: none; }
+button { padding: 8px 16px; font-size: 14px; background-color: #2563EB; color: white; border: none; border-radius: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; outline: none; }
 /* 手機瀏覽器點按鈕時，預設會蓋一層半透明藍色的「點擊回饋」效果，加上按下後的焦點外框通常也是藍色，
    兩個疊在一起，會讓灰色按鈕看起來「先變深藍、點別的地方後才變回真正的顏色（例如綠色）」。
    上面已經關掉這個藍色點擊效果跟預設外框，下面改用 focus-visible，只有鍵盤操作時才會顯示外框，
@@ -3903,6 +3903,12 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     --ys-neutral: #64748B;
 }
 @media screen {
+    #authStarting { background: var(--ys-page); color: var(--ys-primary-hover); }
+    .auth-starting-nav { background: var(--ys-primary); }
+    #loginScreen { background: linear-gradient(135deg, var(--ys-primary), var(--ys-primary-hover)); }
+    .login-box h2 { color: var(--ys-primary-hover); }
+    .login-box button { background: var(--ys-primary); }
+    .login-box button:hover { background: var(--ys-primary-hover); }
     body {
         color: var(--ys-text);
         background-color: var(--ys-page);
@@ -3989,6 +3995,11 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer button.btn-danger:hover:not(:disabled),
     #appContainer button.danger-menu-item:hover:not(:disabled) {
         background: #991B1B !important;
+    }
+    #appContainer .content-section button:not([class]):hover:not(:disabled),
+    #appContainer .eq-modal-box button:not([class]):hover:not(:disabled),
+    #appContainer .modal button:not([class]):hover:not(:disabled) {
+        background-color: var(--ys-primary-hover);
     }
     #appContainer button:focus-visible, button:focus-visible {
         outline: 3px solid var(--ys-primary);
