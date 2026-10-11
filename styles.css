@@ -704,7 +704,7 @@ input[type="number"] {
 #printableQuote.theme-morningstar table th { background-color: #1b4d3e; color: #fff; border-bottom: none; }
 #printableQuote.theme-morningstar table tbody tr:nth-child(even) { background-color: #eef5f0; }
 
-button { padding: 8px 16px; font-size: 14px; background-color: #003366; color: white; border: none; border-radius: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; outline: none; }
+button { padding: 8px 16px; font-size: 14px; background-color: #2563EB; color: white; border: none; border-radius: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; outline: none; }
 /* 手機瀏覽器點按鈕時，預設會蓋一層半透明藍色的「點擊回饋」效果，加上按下後的焦點外框通常也是藍色，
    兩個疊在一起，會讓灰色按鈕看起來「先變深藍、點別的地方後才變回真正的顏色（例如綠色）」。
    上面已經關掉這個藍色點擊效果跟預設外框，下面改用 focus-visible，只有鍵盤操作時才會顯示外框，
@@ -3885,3 +3885,343 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     :is(#order-system, #purchasing-system, #inventory-system, #product-system) button:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
 }
 .delivery-settings-section{padding:16px;border:1px solid #d8e1ea;border-radius:8px;background:#f8fafc}.delivery-settings-section h4{margin:0 0 12px}.delivery-choice-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px}.delivery-choice-row>div,.delivery-choice-row>p{grid-column:1/-1}.shipping-summary{margin:12px 0;padding:12px;border:1px solid #d8e1ea;border-radius:8px}.shipping-summary section{margin:12px 0}.shipping-summary th,.shipping-summary td{text-align:left;padding:8px}.inventory-shipping-tabs{flex-wrap:wrap}@media(max-width:640px){.delivery-choice-row{grid-template-columns:1fr}.shipping-summary table{min-width:0}.shipping-summary td{overflow-wrap:anywhere}}
+
+
+/* 又鑫 UI／UX 1.0 — shared screen tokens. Keep printable documents untouched. */
+:root {
+    --ys-primary: #2563EB;
+    --ys-primary-hover: #1D4ED8;
+    --ys-selected: #EFF6FF;
+    --ys-page: #F5F7FB;
+    --ys-surface: #FFFFFF;
+    --ys-text: #0F172A;
+    --ys-muted: #475569;
+    --ys-border: #CBD5E1;
+    --ys-success: #15803D;
+    --ys-warning: #B45309;
+    --ys-danger: #B91C1C;
+    --ys-neutral: #64748B;
+}
+@media screen {
+    #authStarting { background: var(--ys-page); color: var(--ys-primary-hover); }
+    .auth-starting-nav { background: var(--ys-primary); }
+    #loginScreen { background: linear-gradient(135deg, var(--ys-primary), var(--ys-primary-hover)); }
+    .login-box h2 { color: var(--ys-primary-hover); }
+    .login-box button { background: var(--ys-primary); }
+    .login-box button:hover { background: var(--ys-primary-hover); }
+    body {
+        color: var(--ys-text);
+        background-color: var(--ys-page);
+        font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    }
+    #appContainer .nav-tabs { background-color: var(--ys-primary); }
+    #appContainer .nav-tab { background: rgba(15, 23, 42, .2); border-radius: 8px 8px 0 0; }
+    #appContainer .nav-tab.active { background: var(--ys-surface); color: var(--ys-primary-hover); }
+    #appContainer .content-section {
+        background: transparent;
+        box-shadow: none;
+    }
+    #appContainer .workspace-page-title {
+        margin: 0 0 16px;
+        color: var(--ys-text);
+        font-size: 24px;
+        font-weight: 650;
+        line-height: 1.4;
+    }
+    #appContainer .module-header .workspace-page-title { margin-bottom: 0; }
+    #appContainer .content-section .section-header h2,
+    #appContainer .content-section .module-header h2 {
+        color: var(--ys-text);
+        font-size: 22px;
+    }
+    #appContainer .content-section :is(.panel, .purchase-function-panel, .purchase-replenishment-panel) {
+        background: var(--ys-surface);
+        border: 1px solid var(--ys-border);
+        border-radius: 12px;
+    }
+    #appContainer .content-section :is(.toolbar, .order-period-toolbar, .trade-analysis-filters) {
+        background: var(--ys-surface);
+        border: 1px solid var(--ys-border);
+        border-radius: 10px;
+    }
+    #appContainer .content-section :is(.panel, .toolbar) :is(h3, h4),
+    #appContainer .content-section .purchase-section-heading strong,
+    #appContainer .content-section .purchase-replenishment-heading strong {
+        color: var(--ys-text);
+    }
+    #appContainer :is(#product-system, #forecast-system, #equipment-system, #order-system,
+        #purchasing-system, #inventory-system, #admin-system)
+        :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]), select, textarea) {
+        border-color: var(--ys-border);
+        border-radius: 8px;
+        color: var(--ys-text);
+        background-color: var(--ys-surface);
+    }
+    #appContainer :is(#product-system, #forecast-system, #equipment-system, #order-system,
+        #purchasing-system, #inventory-system, #admin-system)
+        :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]), select, textarea):focus-visible {
+        outline: 2px solid var(--ys-primary);
+        outline-offset: 1px;
+    }
+    #appContainer button, #appContainer .content-section button {
+        font-family: inherit;
+    }
+    #appContainer .content-section button:not(.order-work-card):not(.purchase-stage-button):not(.product-brand-button):not(.link-button):not(.inventory-details-toggle),
+    #appContainer .eq-modal-box button,
+    #appContainer .modal button {
+        border-radius: 8px !important;
+        font-size: 14px !important;
+        min-height: 40px;
+    }
+    #appContainer button.btn-secondary,
+    button.btn-secondary {
+        background: var(--ys-surface) !important;
+        color: var(--ys-muted) !important;
+        border: 1px solid var(--ys-border) !important;
+    }
+    #appContainer button.btn-secondary:hover:not(:disabled),
+    button.btn-secondary:hover:not(:disabled) {
+        background: var(--ys-selected) !important;
+        border-color: var(--ys-primary) !important;
+        color: var(--ys-primary-hover) !important;
+    }
+    #appContainer button.btn-danger,
+    #appContainer button.danger-menu-item,
+    button.btn-danger {
+        background: var(--ys-danger) !important;
+        color: #FFFFFF !important;
+        border: 1px solid var(--ys-danger) !important;
+    }
+    #appContainer button.btn-danger:hover:not(:disabled),
+    #appContainer button.danger-menu-item:hover:not(:disabled) {
+        background: #991B1B !important;
+    }
+    #appContainer .content-section :is(.toolbar, .module-header) > button:not([class]):hover:not(:disabled),
+    #appContainer .eq-modal-box button:not([class]):hover:not(:disabled),
+    #appContainer .modal button:not([class]):hover:not(:disabled) {
+        background-color: var(--ys-primary-hover);
+    }
+    #appContainer button:focus-visible, button:focus-visible {
+        outline: 3px solid var(--ys-primary);
+        outline-offset: 2px;
+    }
+    #appContainer button:disabled { cursor: not-allowed; opacity: .55; }
+    #appContainer :is(.purchase-view-tabs, .inventory-work-subtabs) button:not(.active) {
+        background: var(--ys-surface);
+        color: var(--ys-muted);
+        border: 1px solid var(--ys-border);
+    }
+    #appContainer :is(.purchase-view-tabs, .inventory-work-subtabs) button.active {
+        background: var(--ys-selected);
+        color: var(--ys-primary-hover);
+        border: 1px solid var(--ys-primary);
+    }
+    #appContainer .sub-nav { background: var(--ys-page); border-bottom: 1px solid var(--ys-border); }
+    #appContainer .sub-tab { background: var(--ys-surface); color: var(--ys-muted); border-radius: 8px; }
+    #appContainer .sub-tab.active { background: var(--ys-selected); color: var(--ys-primary-hover); }
+    #appContainer .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+    #appContainer .status-badge.status-ok { background: var(--ys-success); color: #FFFFFF; }
+    #appContainer .status-badge.status-soon { background: var(--ys-warning); color: #FFFFFF; }
+    #appContainer .status-badge.status-overdue { background: var(--ys-danger); color: #FFFFFF; }
+    #appContainer .status-badge:is(.status-none, .status-unknown) { background: var(--ys-neutral); color: #FFFFFF; }
+    #appContainer .inline-status,
+    #appContainer .section-subtitle,
+    #appContainer .record-reference { color: var(--ys-muted); }
+    #appContainer .inline-help > summary {
+        border-color: var(--ys-border);
+        color: var(--ys-primary-hover);
+        background: var(--ys-surface);
+        border-radius: 50%;
+    }
+    #appContainer .inline-help-content,
+    #appContainer .inline-help > p {
+        background: var(--ys-selected);
+        color: var(--ys-text);
+        border-color: var(--ys-border);
+    }
+    #appContainer .clickable-row:hover { background: var(--ys-selected); }
+    #appContainer .content-section :is(.table-wrap, .inventory-work-table) { max-width: 100%; }
+}
+@media screen and (min-width: 769px) {
+    /* Screen records only; quotation and exported PDF tables retain their print sizes. */
+    #appContainer :is(#product-system, #forecast-system, #equipment-system, #order-system,
+        #purchasing-system, #inventory-system, #admin-system) table :is(th, td) {
+        border-color: var(--ys-border);
+        padding: 8px 10px;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+    #appContainer :is(#product-system, #forecast-system, #equipment-system, #order-system,
+        #purchasing-system, #inventory-system, #admin-system) table th {
+        background: var(--ys-selected);
+        color: var(--ys-text);
+    }
+}
+@media screen and (max-width: 768px) {
+    #appContainer .workspace-page-title { font-size: 22px; margin-bottom: 12px; }
+    #appContainer .module-header .workspace-page-title { margin-bottom: 0; }
+    #appContainer .content-section { padding: 16px 12px; }
+    #appContainer :is(#product-system, #forecast-system, #equipment-system, #order-system,
+        #purchasing-system, #inventory-system, #admin-system) table td[data-th] {
+        font-size: 14px;
+        color: var(--ys-text);
+    }
+}
+@media (pointer: coarse) and (hover: none) {
+    #appContainer button:not(.mobile-nav-toggle),
+    #appContainer .inline-help > summary,
+    #appContainer :is(.quote-more-menu, .po-more-menu, .order-more-menu) > summary {
+        min-height: 44px;
+    }
+    #appContainer .inline-help > summary { min-width: 44px; }
+}
+
+
+/* UI／UX 1.0 follow-up: finish the quotation workspace without changing printableQuote. */
+@media screen {
+    #appContainer { --workspace-background: #EFF6FF; --workspace-border: #CBD5E1; --workspace-label: #475569; --workspace-radius: 12px; }
+    #appContainer .quote-module-nav,
+    #appContainer #quoteCreatePanel > .company-sub-nav {
+        border: 1px solid var(--ys-border);
+        border-radius: 10px;
+        background: var(--ys-surface);
+        gap: 8px;
+    }
+    #appContainer #quote-system .quote-primary-actions > #printBtn {
+        background: var(--ys-primary);
+        border-radius: 8px;
+        color: #FFFFFF;
+    }
+    #appContainer #quote-system .quote-primary-actions > #printBtn:hover:not(:disabled) {
+        background: var(--ys-primary-hover);
+    }
+    #appContainer #quote-system .quote-more-actions > summary {
+        background: var(--ys-surface);
+        color: var(--ys-muted);
+        border: 1px solid var(--ys-border);
+        border-radius: 8px;
+    }
+    #appContainer #quote-system .quote-more-actions > summary:hover {
+        background: var(--ys-selected);
+        border-color: var(--ys-primary);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer #quote-system .quote-more-actions > summary:focus-visible {
+        outline: 3px solid var(--ys-primary);
+        outline-offset: 2px;
+    }
+    #appContainer #myQuotesPanel > .quote-history-toolbar {
+        background: var(--ys-surface);
+        border: 1px solid var(--ys-border);
+        border-radius: 10px;
+    }
+    #appContainer #myQuotesPanel :is(input[type="search"], select) {
+        border: 1px solid var(--ys-border);
+        border-radius: 8px;
+        background: var(--ys-surface);
+        color: var(--ys-text);
+    }
+    #appContainer #myQuotesPanel :is(input[type="search"], select):focus-visible {
+        outline: 2px solid var(--ys-primary);
+        outline-offset: 1px;
+    }
+}
+@media screen and (min-width: 769px) {
+    #appContainer #myQuotesPanel > table :is(th, td) {
+        border-color: var(--ys-border);
+        padding: 8px 10px;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+    #appContainer #myQuotesPanel > table th {
+        background: var(--ys-selected);
+        color: var(--ys-text);
+    }
+    #appContainer #myQuotesPanel > table :is(th, td):nth-child(6) {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+    #appContainer #forecastTable :is(th, td):nth-child(4) {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+}
+@media screen and (max-width: 640px) {
+    html, body, #appContainer { background: var(--ys-page); }
+    #appContainer #quote-system > .quote-module-nav,
+    #appContainer #quoteCreatePanel > .company-sub-nav {
+        padding: 8px;
+        margin-bottom: 12px;
+    }
+    #appContainer #quote-system .quote-module-nav .sub-tab,
+    #appContainer #quoteCreatePanel .company-sub-nav .sub-tab {
+        min-height: 44px;
+    }
+}
+
+
+/* Shared work-stage selection and text-labelled status categories. */
+@media screen {
+    #appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button) {
+        border-radius: 8px;
+        border-color: var(--ys-border);
+    }
+    #appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button).active,
+    #appContainer .order-progress-tabs button[aria-selected="true"] {
+        background: var(--ys-selected);
+        border-color: var(--ys-primary);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button):not(.active):hover {
+        background: var(--ys-selected);
+        border-color: var(--ys-border);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer :is(.quote-status-badge, .forecast-stage-badge, .forecast-status-badge,
+        .order-validity-badge, .inventory-policy-badge) {
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+    #appContainer .quote-status-badge.is-quoted,
+    #appContainer .forecast-stage-badge,
+    #appContainer .inventory-policy-badge,
+    #appContainer .inventory-policy-badge.is-none {
+        background: #F1F5F9;
+        color: var(--ys-muted);
+    }
+    #appContainer .forecast-status-active {
+        background: var(--ys-selected);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer .quote-status-badge:is(.is-deal, .is-three),
+    #appContainer .forecast-status-won {
+        background: #F0FDF4;
+        color: var(--ys-success);
+    }
+    #appContainer .forecast-status-lost {
+        background: #F1F5F9;
+        color: var(--ys-muted);
+    }
+    #appContainer .inventory-policy-badge.is-safety {
+        background: #FFFBEB;
+        color: var(--ys-warning);
+    }
+    #appContainer .order-validity-normal { background: var(--ys-success); }
+    #appContainer .order-validity-returned { background: var(--ys-warning); }
+    #appContainer .order-validity-invalid { background: var(--ys-danger); }
+    #appContainer :is(.nav-tab, .sub-tab)[role="button"]:focus-visible {
+        outline: 3px solid var(--ys-primary);
+        outline-offset: 2px;
+    }
+}
