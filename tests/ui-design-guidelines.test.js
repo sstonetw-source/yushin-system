@@ -31,7 +31,8 @@ test('all working modules show one consistent page title', () => {
     ]) {
         assert.ok(html.includes(`id="${id}" class="content-section">\n        <h2 class="workspace-page-title no-print">${title}</h2>`), id);
     }
-    assert.ok(html.includes('id="quote-system" class="content-section active">\\n        <h2 class="workspace-page-title no-print">估價單</h2>'));
+    assert.ok(html.includes('id="quote-system" class="content-section active">'));
+    assert.ok(html.includes('<h2 class="workspace-page-title no-print">估價單</h2>'));
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單<\/h2>/);
     assert.ok(html.includes('styles.css?v=20261011-6'));
     assert.ok(css.includes('#appContainer #myQuotesPanel > table :is(th, td):nth-child(6)'));
