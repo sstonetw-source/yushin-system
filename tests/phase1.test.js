@@ -148,7 +148,7 @@ test('product identity handoffs clear stale hidden state before saving', () => {
     const directPo = appSource.slice(directPoStart, directPoEnd);
     assert.match(directPo, /productId: ''/);
     assert.match(directPo, /String\(poItems\[idx\]\.itemCode \|\| ''\)\.trim\(\) !== requestedCode/);
-    assert.match(appSource, /庫存採購的每個品項都必須對應 Product Master/);
+    assert.match(appSource, /庫存採購的每個品項都必須對應產品主檔/);
 
     const inventoryStart = appSource.indexOf('window.onInventoryAdjustmentCode = async function');
     const inventoryEnd = appSource.indexOf('\n};', inventoryStart) + 3;
@@ -1044,7 +1044,7 @@ test('phase 2 documents link to productId while retaining historical snapshots',
 });
 
 test('phase 2 Product Import supports normalized fields, cost split and preview', () => {
-    assert.match(appSource, /又鑫標準 Product Import 匯入預覽/);
+    assert.match(appSource, /產品匯入預覽/);
     assert.match(appSource, /confirmProductMasterImport\(brandGroups, importErrors\)/);
     for (const field of ['單位', '標準成本（含稅）', '庫存管理', '批號管理', '效期管理', '啟用']) {
         assert.ok(appSource.includes(field), `missing import field: ${field}`);
@@ -1881,7 +1881,7 @@ test('database backup includes formal Product Master and cost collections', () =
 
 
 test('admin price-list management is the single bulk Product Import entry', () => {
-    assert.doesNotMatch(indexSource, /Product Master v2 遷移/);
+    assert.doesNotMatch(indexSource, /產品主檔 v2 遷移/);
     assert.doesNotMatch(indexSource, /id="productMasterMigrationPreviewBtn"/);
     assert.doesNotMatch(indexSource, /id="admin-sub-prices"/);
     assert.doesNotMatch(indexSource, /id="admin-prices"/);
@@ -2109,7 +2109,7 @@ test('formal purchase document derives ordered progress from supplyOrders only',
     assert.doesNotMatch(appSource, /purchaseOrderedQty:cumulative/);
     assert.match(appSource, /function purchaseProgressInfo/);
     assert.match(appSource, /procurementQuantities/);
-    assert.match(appSource, /已訂貨・待到貨/);
+    assert.match(appSource, /已採購・待到貨/);
 });
 
 
@@ -2561,7 +2561,7 @@ test('purchase draft preloads only selected lines and bounds supporting reads', 
 
     const productStart=appSource.indexOf('async function findProductForPurchaseItem');
     const productEnd=appSource.indexOf('async function preloadPurchaseCostsForItems',productStart);
-    assert.match(appSource.slice(productStart,productEnd),/firestoreReadWithTimeout\([\s\S]*?'採購 Product Master'/);
+    assert.match(appSource.slice(productStart,productEnd),/firestoreReadWithTimeout\([\s\S]*?'採購產品主檔'/);
 
     const costStart=appSource.indexOf('async function loadVisibleProductCost');
     const costEnd=appSource.indexOf('function setOrderCostFieldForProduct',costStart);
@@ -2639,10 +2639,10 @@ test('shared brand settings reads are bounded', () => {
 
 
 test('interactive quote forecast product reads are bounded', () => {
-    assert.equal((appSource.match(/Product Master 重複貨號檢查/g) || []).length, 2);
+    assert.equal((appSource.match(/產品主檔重複貨號檢查/g) || []).length, 2);
     for (const label of [
         'Forecast 歷史紀錄',
-        'Forecast Product Master',
+        'Forecast 產品主檔',
         'Forecast 來源估價單',
         '複製估價單',
         '建立 Forecast 的估價單',
@@ -2663,14 +2663,14 @@ test('product save buttons show feedback during duplicate checks', () => {
     const editorStart=appSource.indexOf('window.saveProductMasterEditor = async function');
     const editorEnd=appSource.indexOf('\n};',editorStart)+3;
     const editorSource=appSource.slice(editorStart,editorEnd);
-    assert.match(editorSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?Product Master 重複貨號檢查/);
+    assert.match(editorSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?產品主檔重複貨號檢查/);
     assert.match(editorSource,/button\.textContent = '儲存中…'/);
     assert.match(editorSource,/endActionButton\(button, state\)/);
 
     const quickStart=appSource.indexOf('window.saveQuickProduct = async function');
     const quickEnd=appSource.indexOf('\n};',quickStart)+3;
     const quickSource=appSource.slice(quickStart,quickEnd);
-    assert.match(quickSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?Product Master 重複貨號檢查/);
+    assert.match(quickSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?產品主檔重複貨號檢查/);
     assert.match(quickSource,/button\.textContent = '儲存中…'/);
     assert.match(quickSource,/endActionButton\(button, state\)/);
 });
@@ -2751,7 +2751,7 @@ test('admin maintenance reads are bounded', () => {
     const importStateSource=appSource.slice(importStateStart,importStateEnd);
     assert.doesNotMatch(importStateSource,/readCollectionInBatches/);
     assert.match(importStateSource,/firestoreReadWithTimeout/);
-    assert.match(importStateSource,/'Product Import 產品比對'/);
+    assert.match(importStateSource,/'產品匯入產品比對'/);
     assert.match(importStateSource,/FieldPath\.documentId\(\), 'in', ids/);
     assert.doesNotMatch(importStateSource,/Promise\.all\(chunk\.map/);
 
@@ -3218,7 +3218,7 @@ test('order list skips search-string work when no keyword and batches DOM insert
 
 
 test('high frequency lookup reads are bounded', () => {
-    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'Product Master'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'產品主檔'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('quotes'\)\.doc\(forecast\.sourceId\)\.get\(\)[\s\S]*?'Forecast 來源估價單'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)[\s\S]*?\.limit\(20\)[\s\S]*?'Customer Master 客戶建議'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價偏好'/);
@@ -4895,7 +4895,7 @@ test('sales can use Product Master for quote and order while Product Master itse
     assert.doesNotMatch(rowSource, /product-360-actions/);
     assert.match(indexSource, /id="productManagementBatchQuoteBtn"[^>]*onclick="addProductManagementSelectionToQuote\(\)"/);
     assert.match(indexSource, /id="productManagementBatchOrderBtn"[^>]*onclick="addProductManagementSelectionToOrder\(\)"/);
-    assert.match(appSource,/Product Master 僅可查看；您可以把產品加入估價單或建立訂單/);
+    assert.match(appSource,/產品主檔僅可查看；您可以把產品加入估價單或建立訂單/);
 });
 
 test('Product stock detail reads only inventory and warehouse data', () => {
@@ -4957,9 +4957,9 @@ test('all statistic brands are selectable inside collapsible lists', () => {
 
 test('brand settings can sync missing brands from Product Master without changing business settings', () => {
     assert.match(indexSource, /<strong>廠牌設定<\/strong>/);
-    assert.match(indexSource, /Product Import 的新廠牌會自動加入 Brand Master/);
+    assert.match(indexSource, /產品匯入的新廠牌會自動加入廠牌主檔/);
     assert.match(indexSource, /id="syncBrandsFromProductsBtn"/);
-    assert.match(indexSource, /從 Product Master 同步廠牌/);
+    assert.match(indexSource, /從產品主檔同步廠牌/);
     const start=appSource.indexOf('window.syncBrandsFromProductMaster = async function()');
     const end=appSource.indexOf('\nwindow.saveKeyStatisticBrands',start);
     const source=appSource.slice(start,end);
@@ -5033,7 +5033,7 @@ test('Product Master and Product Import use active Brand Master brands', () => {
     const end = appSource.indexOf('\n}\n', start) + 2;
     const source = appSource.slice(start, end);
     assert.match(source, /upsertBrandMaster\(brand, \{ active:true \}\)/);
-    assert.match(source, /尚未建立 Brand Master/);
+    assert.match(source, /尚未建立廠牌主檔/);
 });
 
 
@@ -5051,7 +5051,7 @@ test('Forecast direct order conversion still requires Product Master but ignores
     const end=appSource.indexOf('\nwindow.createOrderFromForecast',start);
     const source=appSource.slice(start,end);
     assert.match(source,/productMasterMatched!==true/);
-    assert.match(source,/尚未對應 Product Master/);
+    assert.match(source,/尚未對應產品主檔/);
     assert.match(source,/company:forecast\.company\|\|''/);
     assert.doesNotMatch(source,/isCompanyBrandAllowed\(/);
 });
@@ -5063,7 +5063,7 @@ test('quick Product Master creation keeps list price optional', () => {
     const source=appSource.slice(start,end);
     assert.match(source,/if \(!brand \|\| !code \|\| !productName\)/);
     assert.doesNotMatch(source,/!brand \|\| !code \|\| !productName \|\| String\(priceRaw\)/);
-    assert.doesNotMatch(source,/此廠牌不在啟用中的 Brand Master/);
+    assert.doesNotMatch(source,/此廠牌不在啟用中的廠牌主檔/);
     assert.match(source,/brandId: brandEntry\?\.id \|\| ''/);
 });
 
@@ -5142,9 +5142,9 @@ test('admin data health is a dedicated read-only check and validates Product Mas
     assert.match(indexSource,/id="admin-health"/);
     assert.match(indexSource,/執行資料檢查/);
     assert.equal((indexSource.match(/id="systemDataAuditBtn"/g)||[]).length,1);
-    assert.match(appSource,/Product Master 缺少廠牌/);
-    assert.match(appSource,/Product Master 缺少貨號/);
-    assert.match(appSource,/Product Master 缺少品名/);
+    assert.match(appSource,/產品主檔缺少廠牌/);
+    assert.match(appSource,/產品主檔缺少貨號/);
+    assert.match(appSource,/產品主檔缺少品名/);
     assert.match(appSource,/庫存策略異常/);
     assert.match(appSource,/安全庫存設定異常/);
 });
@@ -5186,8 +5186,8 @@ test('order progress modal exposes a complete timeline including order creation'
 });
 
 test('admin data health accepts optional price and checks order lines and planning consistency', () => {
-    assert.doesNotMatch(appSource,/Product Master 缺少建議售價/);
-    assert.match(appSource,/訂單品項找不到 Product/);
+    assert.doesNotMatch(appSource,/產品主檔缺少建議售價/);
+    assert.match(appSource,/訂單品項找不到產品主檔/);
     assert.match(appSource,/庫存策略與安全庫存不一致/);
     assert.match(indexSource,/缺少廠牌／貨號／品名/);
 });
@@ -5200,7 +5200,7 @@ test('order complete timeline records purchasing and receipt events on order ite
     assert.match(appSource,/type:'PURCHASING_MANUAL'/);
     assert.match(appSource,/type:'SALES_SELF_ORDER'/);
     assert.match(appSource,/receiptEvents:\[/);
-    assert.match(appSource,/action=event\.type==='SALES_SELF_ORDER'\?'業務自行訂貨':'採購已訂貨'/);
+    assert.match(appSource,/action=event\.type==='SALES_SELF_ORDER'\?'業務自行訂貨':'已採購'/);
     assert.match(appSource,/event\.fulfillmentType==='DIRECT_SHIP'\?'原廠直送到貨':'採購入庫'/);
     assert.match(appSource,/sourceOrderStatus:'cancelled'/);
 });

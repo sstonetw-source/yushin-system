@@ -52,9 +52,9 @@ function composePurchaseOrderMail(input={}){
   if(!recipient)throw new Error('SUPPLIER_EMAIL_MISSING');
   const from=text(smtp.from);
   if(!from)throw new Error('SMTP_FROM_MISSING');
-  const subject='訂購單 '+poNo+'｜'+title;
+  const subject='採購單 '+poNo+'｜'+title;
   const body=supplierName+' 您好：\n\n'
-    +'附件為訂購單 '+poNo+'，請查收，謝謝。\n\n'
+    +'附件為採購單 '+poNo+'，請查收，謝謝。\n\n'
     +title+(buyerName?'\n採購人員：'+buyerName:'');
   return {
     to:recipient,

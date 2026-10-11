@@ -18,7 +18,7 @@ function setup(){
  return {x,calls,issues,element};
 }
 test('audit shortcuts preserve the exact product document identity',async()=>{
- const {x,calls,issues}=setup();issues([{type:'Product Master 缺少品名',target:{kind:'product',record:{id:'exact-doc',productId:'other-id'}}}]);
+ const {x,calls,issues}=setup();issues([{type:'產品主檔缺少品名',target:{kind:'product',record:{id:'exact-doc',productId:'other-id'}}}]);
  await x.window.openSystemAuditIssue(0);assert.deepEqual(calls,[['edit','exact-doc']]);
 });
 test('encoded warehouse keys yield item code for lookup and a new product draft never inherits stock ID',async()=>{
@@ -61,7 +61,7 @@ test('data audit accepts blank optional prices and still finds required fields a
  await x.window.runSystemDataAudit();
  const issues=vm.runInContext('systemDataAuditIssues',x);
  assert.deepEqual(Array.from(issues,v=>v.type).sort(),[
-  'Product Master 缺少廠牌','Product Master 缺少貨號','Product Master 缺少品名','Product Master 重複'
+  '產品主檔缺少廠牌','產品主檔缺少貨號','產品主檔缺少品名','產品主檔重複'
  ].sort());
  assert.equal(reads.length,10);
  assert.match(element('systemDataAuditStatus').textContent,/檢查完成/);
