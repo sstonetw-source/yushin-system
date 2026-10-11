@@ -21890,7 +21890,8 @@ window.reloadSalesFromUsers = function() {
         allUsersCache = rows.map(d => ({
             uid:d.id, code:d.code || '', name:d.name || '', phone:d.phone || '',
             role:d.role || 'sales', email:d.email || '', disabled:!!d.disabled,
-            active:d.active !== false, mustChangePassword:!!d.mustChangePassword
+            active:d.active !== false, mustChangePassword:!!d.mustChangePassword,
+            deliveryDefaults:d.deliveryDefaults || {}
         })).sort((a,b)=>{
             if (a.name && !b.name) return -1;
             if (!a.name && b.name) return 1;

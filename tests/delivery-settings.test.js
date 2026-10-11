@@ -37,6 +37,25 @@ test('shipping aggregation sums cross-order product demand once and separates di
  assert.equal(logistics.partition([...rows,{...rows[0],warehouseId:'OTHER'}],()=>p).length,2);
 });
 const fs=require('node:fs'),vm=require('node:vm');
+test('admin personnel reload and shared cache retain every salesperson delivery default',async()=>{
+ const src=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
+ const defaults={mode:'SALES_SHIP',contact:'南區業務',phone:'123',address:'高雄地址'};
+ const rows=[{id:'S',name:'南區業務',code:'01',deliveryDefaults:defaults},{id:'N',name:'北區業務',code:'02'}];
+ const c=vm.createContext({window:{},readCollectionInBatches:async()=>rows,trueUserRole:'admin',allUsersCache:[],salesList:[],
+  populateSalesDropdown(){},populateEquipmentSalesDropdown(){},syncSalesCodeMasterFromUsers:async()=>{},loadSalesCodeMaster:async()=>{},
+  renderAdminSalesTable(){},populateTransferDropdowns(){},console,mainPageLoadFailed(){throw Error('reload failed');}});
+ vm.runInContext(src.slice(src.indexOf('function applySalesRows('),src.indexOf('function applyCompanyTheme(')),c);
+ const start=src.indexOf('window.reloadSalesFromUsers = function()');
+ vm.runInContext(src.slice(start,src.indexOf('\n/* ----------',start)),c);
+ await c.window.reloadSalesFromUsers();
+ assert.equal(c.allUsersCache.find(u=>u.uid==='S').deliveryDefaults.address,'高雄地址');
+ assert.equal(Object.keys(c.allUsersCache.find(u=>u.uid==='N').deliveryDefaults).length,0);
+ // initSalesList uses the administrator cache instead of rereading users.
+ c.readCollectionInBatches=()=>{throw Error('unexpected extra read');};
+ await c.initSalesList();
+ const p=settings.salespersonPlan(c.salesList.find(u=>u.uid==='S'),'MAIN');
+ assert.equal(p.mode,'SALES_SHIP');assert.equal(p.address,'高雄地址');assert.equal(p.phone,'123');
+});
 function uiFixture(){
  const nodes=new Map(),reads=[];
  const node=id=>{if(!nodes.has(id))nodes.set(id,{id,value:'',textContent:'',style:{display:'',setProperty(k,v){this[k]=v;}},closest(){return {style:this.style,querySelector:()=>null};},classList:{add(){},remove(){}},remove(){nodes.delete(id);},prepend(){},set innerHTML(html){this.html=html;for(const m of html.matchAll(/id="([^"]+)"/g))node(m[1]);},get innerHTML(){return this.html||'';}});return nodes.get(id);};
