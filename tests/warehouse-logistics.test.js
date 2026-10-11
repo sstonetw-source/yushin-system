@@ -123,7 +123,7 @@ function batchUiFixture(){
  const nodes=new Map(),node=id=>{if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',innerHTML:'',disabled:false,dataset:{},classList:{add(){},remove(){},contains(){return false;}},remove(){}});return nodes.get(id);};
  const p={mode:'CUSTOMER_SHIP',contact:'Customer',phone:'123',address:'台北'};
  const list=[{key:'O__A',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'A',itemCode:'001',deliveryPlan:p},qty:3,warehouseId:'MAIN',warehouse:{id:'MAIN'}},
- {key:'O__B',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'B',itemCode:'002',deliveryPlan:{mode:'PICKUP'}},qty:2,warehouseId:'MAIN',warehouse:{id:'MAIN'}}];
+ {key:'O__B',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'B',itemCode:'002',qty:2,reservedQty:2,deliveryPlan:{mode:'PICKUP'}},qty:2,warehouseId:'MAIN',warehouse:{id:'MAIN'}}];
  const inputs=list.map((r,i)=>({value:String(r.qty),dataset:{batchQty:String(i)},disabled:false})),calls=[],feedback=[];
  const c=vm.createContext({document:{getElementById:node,querySelectorAll:selector=>selector==='[data-batch-qty]'?inputs:[...inputs,node('warehouseShippingBatchDate'),node('warehouseShippingBatchNotes')]},
   canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,currentUser:{uid:'buyer'},currentUserRole:'purchaser',
@@ -203,4 +203,16 @@ test('manual transfer retry cannot reuse an operation ID for another stock or wa
  await f.c.commitWarehouseTransfer(args);
  for(const patch of [{inventoryId:'OTHER'},{fromWarehouseId:'EXT'},{toWarehouseId:'OTHER'}])await assert.rejects(f.c.commitWarehouseTransfer({...args,...patch}),/識別碼衝突/);
  assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,7);
+});
+test('branch-to-main transfer preserves final pickup plan through receipt and allows exactly one subsequent handoff',async()=>{
+ const f=fixture();const order=f.docs.get('orders/O');order.items[0].deliveryPlan={mode:'PICKUP',warehouseId:'EXT',contact:'Sales'};
+ await f.c.commitWarehouseTransfer({id:'MOVE',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT',expectedPlan:core.plan(order.items[0].deliveryPlan)});
+ assert.equal(f.docs.get('orders/O').items[0].deliveryPlan.mode,'PICKUP');await f.c.commitWarehouseTransferReceipt('MOVE');
+ assert.equal(f.docs.get('orders/O').items[0].warehouseId,'EXT');assert.equal(f.docs.get('inventory/P').onHand,10);
+ await f.c.commitWarehouseTransfer({id:'HAND',orderId:'O',itemId:'A',qty:4,handoff:true});await f.c.commitWarehouseTransfer({id:'HAND',orderId:'O',itemId:'A',qty:4,handoff:true});
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,0);assert.equal(f.docs.get('warehouseStocks/custody-S__P').onHand,4);assert.equal(f.docs.get('orders/O').deliveryRecords.length,0);
+});
+test('partial transfer batch preflight blocks all mutations before a customer shipment can be committed',async()=>{
+ const f=batchUiFixture();f.list[1].item.qty=5;await f.c.openWarehouseShippingBatch();await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
+ assert.equal(f.calls.length,0);assert.ok(f.feedback.some(([message])=>/全部到貨/.test(message)));
 });

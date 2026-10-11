@@ -1128,3 +1128,20 @@ test('inventory quantities must be numeric rather than strings or booleans', asy
   }
   await assertSucceeds(setDoc(doc(db('admin'),'warehouseStocks/valid'),{warehouseId:'w',productKey:'p',onHand:0,reserved:0}));
 });
+test('commercial owner can edit one unhanded recipient after another item entered custody, but not custody, transit or commercial data',async()=>{
+ await seedWarehouseLogistics();const ref=doc(db('sales1'),'orders/logistics'),old=(await getDoc(ref)).data();
+ const base={...old,warehouseLogisticsId:'HAND',logisticsHistory:[{id:'HAND'}],items:[old.items[0],{...old.items[0],itemId:'B',warehouseId:'custody-sales1',custodyTransferId:'HAND',deliveryPlan:{mode:'PICKUP'}}]};await seed('orders/logistics',base);
+ const plan={mode:'CUSTOMER_SHIP',warehouseId:'',contact:'客戶',phone:'123',address:'地址',packages:1,condition:'常溫',tracking:'',notes:''};
+ const update={items:[{...base.items[0],deliveryPlan:plan},base.items[1]],logisticsPlanItemIndex:0,logisticsPlanActorUid:'sales1',logisticsPlanEventId:'PLAN',logisticsHistory:[{id:'HAND'},{id:'PLAN'}],updatedAt:'2026-10-11'};
+ await assertFails(updateDoc(doc(db('sales2'),'orders/logistics'),update));await assertFails(updateDoc(ref,{...update,customerName:'改客戶'}));
+ await assertSucceeds(updateDoc(ref,update));
+ await assertFails(updateDoc(ref,{items:[update.items[0],{...base.items[1],deliveryPlan:plan}]}));
+ await assertFails(updateDoc(ref,{...update,items:[update.items[0],{...base.items[1],deliveryPlan:plan}],logisticsPlanItemIndex:1,logisticsPlanEventId:'BAD',logisticsHistory:[...update.logisticsHistory,{id:'BAD'}]}));
+ const pending={...base,items:[{...base.items[0],transferPendingId:'T'},base.items[1]]};await seed('orders/logistics',pending);
+ await assertFails(updateDoc(ref,{...update,items:[{...pending.items[0],deliveryPlan:plan},pending.items[1]]}));
+});
+test('commercial address masters and admin salesperson pickup preferences respect role permissions',async()=>{
+ const address={shippingAddresses:[{id:'a',contact:'A',phone:'123',address:'台南'}],defaultShippingAddressId:'a',name:'客戶',active:true};
+ await assertSucceeds(setDoc(doc(db('sales1'),'customers/recipient'),address));await assertSucceeds(getDoc(doc(db('wh1'),'customers/recipient')));await assertFails(updateDoc(doc(db('wh1'),'customers/recipient'),{defaultShippingAddressId:'other'}));
+ await assertSucceeds(updateDoc(doc(db('admin'),'users/sales1'),{deliveryDefaults:{mode:'SALES_SHIP',contact:'業務',phone:'456',address:'高雄'}}));await assertFails(updateDoc(doc(db('sales1'),'users/sales1'),{deliveryDefaults:{mode:'PICKUP'}}));
+});

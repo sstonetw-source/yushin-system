@@ -4089,7 +4089,7 @@ window.createOrderFromForecast = async function(id) {
 function applySalesRows(rows) {
     const list = (rows || [])
         .filter(d => d.name && d.code && d.active !== false && d.disabled !== true)
-        .map(d => ({ uid:d.id || d.uid || '', code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', active:true }));
+        .map(d => ({ uid:d.id || d.uid || '', code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', deliveryDefaults:d.deliveryDefaults||{}, active:true }));
     list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
     salesList = list;
     populateSalesDropdown();
@@ -16278,6 +16278,7 @@ window.openDeliveryModal = function(orderId) {
     resetReturnForm();
     renderDeliveryModal();
     renderOrderLifecycleModal();
+    window.renderOrderDeliverySettingsButton?.(order);
     document.getElementById('deliveryModalOverlay').classList.add('active');
 };
 
@@ -18024,10 +18025,11 @@ window.openOrderModal = function(source = null) {
         if (openingGeneration !== orderModalOpenGeneration || !overlay.classList.contains('active')) return;
 
         populateOrderOwnerSelect();
+        window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);
         if (currentUserRole === 'purchaser') {
             ensureSalesListLoaded()
                 .then(() => {
-                    if (openingGeneration === orderModalOpenGeneration) populateOrderOwnerSelect();
+                    if (openingGeneration === orderModalOpenGeneration) {populateOrderOwnerSelect();window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);}
                 })
                 .catch(err => console.error('讀取負責業務名單失敗：', err));
         }
@@ -18051,6 +18053,7 @@ window.openOrderModal = function(source = null) {
                 if (warehouse) warehouse.value = source.warehouseId;
             }
             refreshOrderWarehouseStock();
+            window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);
         } catch (err) {
             console.warn('新增訂單：倉庫主檔載入失敗，先保留目前表單。', err);
         }
@@ -18240,7 +18243,7 @@ window.saveNewOrder = function() {
         : null;
     if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
     if(items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&(!String(item.supplier||'').trim()||item.costPrice===null||item.costPrice===undefined||String(item.costPrice).trim()===''||!Number.isFinite(Number(item.costPrice))||Number(item.costPrice)<0))){alert('自行訂貨品項請填寫供應商與含稅進價（可填 0）；建立訂單後會直接列入待到貨。');return;}
-    let shippingInstructions;try{shippingInstructions=globalThis.YushinWarehouseLogistics?.validatePlan(window.orderShippingInstructions?.()||{},false);}catch(err){alert(err.message);return;}
+    let shippingInstructions;try{shippingInstructions=globalThis.YushinWarehouseLogistics?.validatePlan(window.orderShippingInstructions?.()||{},items.some(item=>item.fulfillmentType!=='DIRECT_SHIP'));}catch(err){alert(err.message);return;}
     items.forEach(item=>{delete item.productCheckStatus;});
     const firstItem=items[0];
     const itemCode = firstItem.itemCode;
@@ -21789,6 +21792,7 @@ window.renderAdminSalesTable = function() {
             <td data-label="電話">${escapeHtml(u.phone || '—')}</td>
             <td data-label="Email">${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
             <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}" onchange="saveAdminUserRole(${inlineJsValue(u.uid)}, this)">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
+            <td data-label="領貨／地址"><button type="button" class="btn-small btn-secondary" onclick="openSalesDeliveryDefaults(${inlineJsValue(u.uid)})">${u.deliveryDefaults?.mode==='SALES_SHIP'?'寄到業務地址':'主倉領貨'}</button></td>
             <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
                     ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`

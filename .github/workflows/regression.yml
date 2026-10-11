@@ -18,6 +18,7 @@ jobs:
           node --check modules/order-self-order-required.js
           node --check modules/inventory-workspace.js
           node --check modules/warehouse-logistics.js
+          node --check modules/delivery-settings.js
           node --check app.js
           node --check modules/document-downloads.js
           node --check modules/supplier-core.js
