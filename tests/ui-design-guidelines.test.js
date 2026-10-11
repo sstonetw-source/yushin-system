@@ -32,7 +32,7 @@ test('all working modules show one consistent page title', () => {
         assert.ok(html.includes(`id="${id}" class="content-section">\n        <h2 class="workspace-page-title no-print">${title}</h2>`), id);
     }
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單<\/h2>/);
-    assert.ok(html.includes('styles.css?v=20261011-ui1'));
+    assert.ok(html.includes('styles.css?v=20261011-ui2'));
     assert.ok(html.includes('<meta name="theme-color" content="#2563EB">'));
 });
 
