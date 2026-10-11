@@ -3996,7 +3996,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer button.danger-menu-item:hover:not(:disabled) {
         background: #991B1B !important;
     }
-    #appContainer .content-section button:not([class]):hover:not(:disabled),
+    #appContainer .content-section :is(.toolbar, .module-header) > button:not([class]):hover:not(:disabled),
     #appContainer .eq-modal-box button:not([class]):hover:not(:disabled),
     #appContainer .modal button:not([class]):hover:not(:disabled) {
         background-color: var(--ys-primary-hover);
