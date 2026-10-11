@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#003366">
+    <meta name="theme-color" content="#2563EB">
     <!-- 停用 iOS Safari 自動把電話號碼變成藍色連結的行為（否則業務電話會被強制加上藍色 tel: 連結樣式，
          有時還會被重新排版空白，看起來像格式跑掉），估價單輸出時才會維持原本的純黑色文字 -->
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261011-3">
+        <link rel="stylesheet" href="styles.css?v=20261011-ui1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -95,6 +95,7 @@
 
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
+        <h2 class="workspace-page-title no-print">產品</h2>
         <div class="toolbar no-print product-search-toolbar">
             <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌</strong><details class="inline-help"><summary aria-label="產品搜尋說明" title="產品搜尋說明">!</summary><div class="inline-help-content">先選擇廠牌，再輸入完整貨號，按「搜尋產品」。搜尋忽略大小寫、空白及連字號、底線、點、斜線，開頭的 0 仍須保留。選擇廠牌不會載入產品；「瀏覽此廠牌產品」每次載入 50 筆。</div></details></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
             <input id="productManagementSearch" type="search" disabled placeholder="請輸入完整貨號">
@@ -150,6 +151,7 @@
 
     <!-- ============ Forecast 系統 ============ -->
 <div id="forecast-system" class="content-section">
+        <h2 class="workspace-page-title no-print">Forecast</h2>
     <div class="toolbar no-print forecast-section-header">
         <button type="button" onclick="openForecastModal()">新增 Forecast</button>
         <button
@@ -438,6 +440,7 @@
 </div>
     <!-- ============ 倉庫 ============ -->
     <div id="inventory-system" class="content-section">
+        <h2 class="workspace-page-title no-print">倉庫</h2>
       <div class="purchase-view-tabs inventory-work-tabs no-print" role="group" aria-label="倉庫作業">
         <button type="button" id="inventoryStockTabBtn" class="active" aria-pressed="true" onclick="switchInventoryWorkView('stock')">庫存清單</button>
         <button type="button" id="inventoryReceivingTabBtn" aria-pressed="false" onclick="switchInventoryWorkView('receiving')">收貨（…）</button>
@@ -732,6 +735,7 @@
 
     <!-- ============ 儀器管理系統：客戶儀器維修保養／校正紀錄 ============ -->
     <div id="equipment-system" class="content-section">
+        <h2 class="workspace-page-title no-print">儀器</h2>
         <div class="toolbar no-print">
             <input type="text" id="eqSearchInput" placeholder="搜尋全部儀器：客戶 / 廠牌 / 業務 / 型號 / 序號 / 編號" oninput="scheduleEquipmentSearch()">
             <span id="equipmentSearchStatus" class="inline-status" role="status"></span>
@@ -831,6 +835,7 @@
     <div id="order-system" class="content-section">
         <div id="orderListPanel">
         <div class="module-header no-print">
+            <h2 class="workspace-page-title">訂單</h2>
             <button onclick="openOrderModal()">＋ 新增訂單</button>
         </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
@@ -905,7 +910,8 @@
     </div>
 
     <!-- ============ 採購管理系統 ============ -->
-    <div id="purchasing-system" class="content-section"><section class="panel no-print" id="customerCancellationQueue" hidden></section>
+    <div id="purchasing-system" class="content-section">
+        <h2 class="workspace-page-title no-print">採購</h2><section class="panel no-print" id="customerCancellationQueue" hidden></section>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
             <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">採購單</button>
@@ -1325,6 +1331,7 @@
 
 <!-- ============ 管理員雲端後台 ============ -->
     <div id="admin-system" class="content-section">
+        <h2 class="workspace-page-title no-print">管理員後台</h2>
         <div class="sub-nav no-print">
             <div class="sub-tab active" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">👥 人員名單</div>
             <div class="sub-tab" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">🏷️ 廠牌管理</div>
