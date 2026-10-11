@@ -33,8 +33,13 @@ test('all working modules show one consistent page title', () => {
     }
     assert.ok(html.includes('id="quote-system" class="content-section active">'));
     assert.ok(html.includes('<h2 class="workspace-page-title no-print">估價單</h2>'));
+    assert.equal((html.match(/<div class="nav-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 8);
+    assert.equal((html.match(/<div class="sub-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 16);
+    assert.ok(html.includes("onkeydown=\"if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}\""));
+    assert.ok(css.includes('#appContainer .forecast-status-active'));
+    assert.ok(css.includes('#appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button).active'));
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單<\/h2>/);
-    assert.ok(html.includes('styles.css?v=20261011-6'));
+    assert.ok(html.includes('styles.css?v=20261011-7'));
     assert.ok(css.includes('#appContainer #myQuotesPanel > table :is(th, td):nth-child(6)'));
     assert.ok(css.includes('#appContainer #quote-system .quote-more-actions > summary'));
     assert.ok(css.includes('@media screen and (min-width: 769px)'));
