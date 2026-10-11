@@ -118,8 +118,8 @@
 
   function statusLabel(status){
     switch(status){
-      case STATUSES.PARTIALLY_ORDERED:return '部分已訂購';
-      case STATUSES.ORDERED:return '已訂購待到貨';
+      case STATUSES.PARTIALLY_ORDERED:return '部分已採購';
+      case STATUSES.ORDERED:return '已採購待到貨';
       case STATUSES.PARTIALLY_RECEIVED:return '部分到貨';
       case STATUSES.RECEIVED:return '已到貨';
       case STATUSES.CANCELLED:return '已取消';

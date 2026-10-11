@@ -475,7 +475,7 @@
         
       </div>
       <div id="businessProductSearchResults" class="table-wrap inventory-product-search-results" style="display:none;">
-        <div class="inventory-search-subheading"><strong>Product Master／售價補充結果</strong><span id="businessProductSearchStatus"></span></div>
+        <div class="inventory-search-subheading"><strong>產品主檔／售價補充結果</strong><span id="businessProductSearchStatus"></span></div>
         <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
       </div>
       <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div></details>
@@ -873,7 +873,7 @@
                     <input type="date" id="exportStartDate">
                     <span>至</span>
                     <input type="date" id="exportEndDate" aria-label="匯出結束日期">
-                    <button type="button" onclick="exportOrdersByDate()" class="btn-secondary">匯出 Excel（供採購下單）</button>
+                    <button type="button" onclick="exportOrdersByDate()" class="btn-secondary">匯出 Excel（供交由採購處理）</button>
                 </div>
             </details>
         </div>
@@ -901,7 +901,7 @@
                 <div id="customerTransactionSummary" class="customer-transaction-summary"></div>
                 <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div></div></details>
                 <h4>近期訂單</h4>
-                <table><thead><tr><th>訂單日期</th><th>廠牌</th><th>貨號</th><th>品名</th><th>數量</th><th>總價</th><th>訂購狀態</th></tr></thead><tbody id="customerOrderHistoryBody"></tbody></table>
+                <table><thead><tr><th>訂單日期</th><th>廠牌</th><th>貨號</th><th>品名</th><th>數量</th><th>總價</th><th>訂單狀態</th></tr></thead><tbody id="customerOrderHistoryBody"></tbody></table>
                 <h4 style="margin-top:18px;">近期估價</h4>
                 <table><thead><tr><th>估價日期</th><th>單號</th><th>品名</th><th>數量</th><th>單價</th><th>狀態</th></tr></thead><tbody id="customerQuoteHistoryBody"></tbody></table>
                 <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeCustomerOrderHistory()">關閉</button></div>
@@ -983,11 +983,11 @@
         <!-- 採購訂單：列出所有已經產生過的採購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
         <div id="poListPanel" style="display:none">
             <div class="toolbar no-print">
-                <input type="text" id="poListSearch" placeholder="搜尋全部採購單：單號 / 廠商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
+                <input type="text" id="poListSearch" placeholder="搜尋全部採購單：單號 / 供應商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
                 <span id="poHistorySearchStatus" role="status"></span>
             </div>
             <table>
-                <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>抬頭（廠商）</th><th>採購人員</th><th>訂購日期</th><th>預計到貨</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
+                <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>供應商</th><th>採購人員</th><th>採購日期</th><th>預計到貨</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="poListBody"></tbody>
             </table>
             <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何採購單。</div>
@@ -1050,7 +1050,7 @@
             <div id="purchaseTimelineSummary" class="inventory-summary-note" style="margin-top:12px;"></div>
             <div class="table-wrap" style="margin-top:12px;">
                 <table>
-                    <thead><tr><th>品項</th><th>需求來源</th><th>訂購</th><th>已到貨</th><th>未到貨</th><th>狀態</th></tr></thead>
+                    <thead><tr><th>品項</th><th>需求來源</th><th>採購數量</th><th>已到貨</th><th>未到貨</th><th>狀態</th></tr></thead>
                     <tbody id="purchaseTimelineSupplyBody"></tbody>
                 </table>
             </div>
@@ -1092,7 +1092,7 @@
                 <div>
                     <label>訂貨方式</label>
                     <select id="orderProcurementType" onchange="onOrderProcurementTypeChange()">
-                        <option value="PURCHASING_PO">交由採購訂貨</option>
+                        <option value="PURCHASING_PO">交由採購處理</option>
                         <option value="SALES_SELF_ORDER">業務自行訂貨</option>
                     </select>
                 </div>
@@ -1263,9 +1263,9 @@
                 <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">採 購 單</h2>
 
                 <div class="meta-row-three">
-                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">抬頭：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入廠商名稱" style="min-width:0;" onchange="autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist></div>
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">供應商：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入供應商名稱" style="min-width:0;" onchange="autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist></div>
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
-                    <div><label>訂購日期：</label><input type="date" id="poDate" onchange="autoFillPoExpectedDate()"></div>
+                    <div><label>採購日期：</label><input type="date" id="poDate" onchange="autoFillPoExpectedDate()"></div>
                 </div>
                 <div class="meta-row-three">
                     <div><div class="no-print"><label for="poLeadDays">預計交期（天）：</label><input type="number" id="poLeadDays" min="0" step="1" placeholder="例如 20" oninput="setPoLeadDays()"><small id="poExpectedDateHint">未設定交期</small></div><label style="display:none;">預計到貨日：</label><input type="date" id="poExpectedDate" style="display:none;" onchange="markPoExpectedDateManual()"></div>
@@ -1319,7 +1319,7 @@
         <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單占用。</div></details>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>收貨</th><th>貨號</th><th>品名</th><th>訂購</th><th>已收</th><th>未收</th><th>本次到貨</th><th>批號</th><th>效期</th></tr></thead>
+            <thead><tr><th>收貨</th><th>貨號</th><th>品名</th><th>採購數量</th><th>已到貨</th><th>未到貨</th><th>本次到貨</th><th>批號</th><th>效期</th></tr></thead>
             <tbody id="poReceiptBatchBody"></tbody>
           </table>
         </div>
@@ -1363,7 +1363,7 @@
                     <div class="admin-product-heading price-list-admin-heading">
                         <div>
                             <h3>價目表管理</h3>
-                            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一 Product Master 的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p></div></details>
+                            <details class="inline-help"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一產品主檔的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p></div></details>
                         </div>
                         <div class="price-list-admin-actions no-print">
                             <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
@@ -1372,7 +1372,7 @@
                         </div>
                     </div>
                     <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
-                    <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價格表」再上傳新版。刪除價格表不會刪除 Product Master、歷史估價單／訂單、庫存或實際採購紀錄。</p></div></details>
+                    <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價目表」再上傳新版。刪除價目表不會刪除產品主檔、歷史估價單／訂單、庫存或實際採購紀錄。</p></div></details>
                     <div id="priceUploadProgress" class="product-import-progress" style="display:none;">
                         <div class="product-import-progress-head"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
                         <div class="product-import-progress-track"><div id="priceUploadProgressBar" class="product-import-progress-bar" style="width:0;"></div></div>
@@ -1405,7 +1405,7 @@
                         <div class="product-import-rules-grid">
                             <div><strong>必要識別</strong><span>廠牌、貨號</span></div>
                             <div><strong>可選填</strong><span>產品線、規格、產品類型、單位、建議售價、標準成本</span></div>
-                            <div><strong>刪除價格表</strong><span>只清除建議售價與標準成本，Product Master 與交易歷史保留</span></div>
+                            <div><strong>刪除價目表</strong><span>只清除建議售價與標準成本，產品主檔與交易歷史保留</span></div>
                             <div><strong>歷史成本</strong><span>實際採購價、庫存批次成本與已完成交易不會被價目表刪除</span></div>
                         </div>
                     </details>
@@ -1416,10 +1416,10 @@
         <div id="admin-agencies" class="admin-panel" style="display:none;">
             <div class="panel">
                 <strong>廠牌設定</strong>
-                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">Product Import 的新廠牌會自動加入 Brand Master，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修也當作一般廠牌管理，可自行決定是否獨立統計。</p></div></details>
+                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">產品匯入的新廠牌會自動加入廠牌主檔，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修也當作一般廠牌管理，可自行決定是否獨立統計。</p></div></details>
                 <div class="toolbar no-print" style="margin:10px 0 4px;">
-                    <button type="button" id="syncBrandsFromProductsBtn" class="btn-secondary" onclick="syncBrandsFromProductMaster()">↻ 從 Product Master 同步廠牌</button>
-                    <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><span style="font-size:12px;color:#777;">用於補齊既有 Product Master 中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span></div></details>
+                    <button type="button" id="syncBrandsFromProductsBtn" class="btn-secondary" onclick="syncBrandsFromProductMaster()">↻ 從產品主檔同步廠牌</button>
+                    <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><span style="font-size:12px;color:#777;">用於補齊既有產品主檔中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span></div></details>
                 </div>
                 <div id="syncBrandsFromProductsStatus" style="font-size:12px;color:#666;margin:4px 0 10px;"></div>
                 <div class="stat-brand-manager">
@@ -1434,7 +1434,7 @@
                     </details>
                 </div>
                 <div class="stat-brand-add">
-                    <input type="text" id="newStatisticBrandName" placeholder="手動新增廠牌（沒有 Product Master 時使用）">
+                    <input type="text" id="newStatisticBrandName" placeholder="手動新增廠牌（沒有產品主檔時使用）">
                     <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="newStatisticBrandIndependent"> 獨立統計</label>
                     <button type="button" class="btn-secondary" onclick="addStatisticBrand()">＋ 新增廠牌</button>
                 </div>
@@ -1442,11 +1442,11 @@
             </div>
             <div class="panel" style="margin-top:16px;">
                 <strong>廠牌標準名稱與別名</strong>
-                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">Product Master、估價、訂單與進銷存分析只使用「標準名稱」。常見縮寫或舊名稱請放在別名，例如標準名稱「Beckman Coulter」，別名可填「Beckman」。輸入別名時系統會自動轉成標準名稱，不再建立第二個廠牌。</p></div></details>
+                <details class="inline-help no-print"><summary aria-label="操作說明" title="操作說明">!</summary><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">產品主檔、估價、訂單與進銷存分析只使用「標準名稱」。常見縮寫或舊名稱請放在別名，例如標準名稱「Beckman Coulter」，別名可填「Beckman」。輸入別名時系統會自動轉成標準名稱，不再建立第二個廠牌。</p></div></details>
                 <div style="overflow-x:auto;margin-top:10px;">
                     <table>
                         <thead><tr><th style="min-width:170px;">標準名稱</th><th style="min-width:320px;">別名（逗號分隔）</th><th class="no-print">操作</th></tr></thead>
-                        <tbody id="brandAliasManagerBody"><tr><td colspan="3" style="color:#888;">正在載入 Brand Master…</td></tr></tbody>
+                        <tbody id="brandAliasManagerBody"><tr><td colspan="3" style="color:#888;">正在載入廠牌主檔…</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -1566,13 +1566,13 @@
             <div class="panel">
                 <h3 style="margin-top:0;">資料健康</h3>
                 <p style="font-size:13px;color:#555;line-height:1.7;">
-                    手動檢查 Product Master 必填資料、重複產品、人員角色、訂單與採購關聯、庫存策略、分倉與庫存占用。
+                    手動檢查產品主檔必填資料、重複產品、人員角色、訂單與採購關聯、庫存策略、分倉與庫存占用。
                     這是唯讀檢查，不會修改或刪除資料；因為會讀取多個集合，不會在登入時自動執行。
                 </p>
                 <div class="toolbar no-print" style="display:block;margin-top:12px;">
                     <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">執行資料檢查</button>
                     <span style="display:block;margin-top:7px;font-size:12px;color:#666;">
-                        會列出 Product Master 缺少廠牌／貨號／品名、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
+                        會列出產品主檔缺少廠牌／貨號／品名、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
                     </span>
                     <div id="systemDataAuditStatus" style="margin-top:10px;font-size:13px;white-space:pre-line;"></div>
                     <div id="systemDataAuditResults" style="margin-top:10px;"></div>
@@ -1633,11 +1633,11 @@
 </div>
 
             <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
-<h4 style="margin-top:28px;">Brand Master 相容層稽核</h4>
+<h4 style="margin-top:28px;">廠牌主檔相容層稽核</h4>
             <div class="toolbar no-print" style="display:block;">
-                <button id="brandMasterAuditBtn" onclick="previewBrandMasterCompatibilityAudit()">檢查品牌主檔完整性</button>
+                <button id="brandMasterAuditBtn" onclick="previewBrandMasterCompatibilityAudit()">檢查廠牌主檔完整性</button>
                 <span style="font-size:12px;color:#666;">
-                    分頁讀取 Product Master、舊價格來源、統計／分公司／供應商設定及歷史交易品牌，確認所有正式來源品牌是否已被 Brand Master 名稱或別名涵蓋。只讀取與比對，不會修改資料。
+                    分頁讀取產品主檔、舊價格來源、統計／分公司／供應商設定及歷史交易廠牌，確認所有正式來源廠牌是否已被廠牌主檔名稱或別名涵蓋。只讀取與比對，不會修改資料。
                 </span>
                 <div id="brandMasterAuditStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
             </div>
@@ -1713,12 +1713,12 @@
     <script src="modules/fulfillment-core.js?v=20261002-5"></script>
     <script src="modules/supply-core.js?v=20261008-1"></script>
     <script src="modules/reservation-core.js?v=20261002-2"></script>
-    <script src="modules/procurement-demand-core.js?v=20261011-5"></script>
+    <script src="modules/procurement-demand-core.js?v=20261011-8"></script>
     <script src="modules/workflow-core.js?v=20261002-3"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261011-5"></script>
+    <script src="app.js?v=20261011-8"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261010-2"></script>
     <script src="modules/inventory-workspace.js?v=20261011-3"></script>

@@ -10,7 +10,7 @@ test('purchase email always targets Supplier Master email',()=>{
     fileName:'PO.pdf'
   });
   assert.equal(message.to,'orders@supplier.com');
-  assert.equal(message.subject,'訂購單 PO-YS-20261002-01-01｜又鑫生物科技有限公司');
+  assert.equal(message.subject,'採購單 PO-YS-20261002-01-01｜又鑫生物科技有限公司');
   assert.match(message.text,/正式供應商 您好/);
   assert.equal(message.attachments[0].filename,'PO.pdf');
 });
