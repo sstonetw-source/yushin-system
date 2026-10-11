@@ -1128,6 +1128,39 @@ test('inventory quantities must be numeric rather than strings or booleans', asy
   }
   await assertSucceeds(setDoc(doc(db('admin'),'warehouseStocks/valid'),{warehouseId:'w',productKey:'p',onHand:0,reserved:0}));
 });
+test('stock quantities reject over-reservation and invalid incoming on both create and update for operational roles',async()=>{
+ for(const uid of ['admin','buyer1','wh1']){
+  for(const collectionName of ['inventory','warehouseStocks']){
+   const ref=doc(db(uid),collectionName+'/'+uid);
+   const valid={productKey:'P',productId:'P',warehouseId:'MAIN',onHand:5,reserved:2,incoming:0};
+   for(const patch of [{reserved:6},{onHand:1},{incoming:-1},{incoming:'1'},{incoming:true},{reserved:'2'}]){
+    await assertFails(setDoc(ref,{...valid,...patch}));
+   }
+   await assertSucceeds(setDoc(ref,valid));
+   for(const patch of [{reserved:6},{onHand:1},{incoming:-1},{incoming:'1'},{incoming:true},{reserved:'2'}]){
+    await assertFails(updateDoc(ref,patch));
+   }
+   // Reservation release, fractional stock, and normal receipts remain valid.
+   await assertSucceeds(updateDoc(ref,{onHand:2.5,reserved:2.5,incoming:1.5}));
+   await assertSucceeds(updateDoc(ref,{reserved:0}));
+   await assertSucceeds(updateDoc(ref,{onHand:4,incoming:0}));
+  }
+ }
+});
+test('warehouse stock cannot be relabelled as another product or warehouse, including by admin',async()=>{
+ for(const uid of ['admin','buyer1','wh1']){
+  const ref=doc(db(uid),'warehouseStocks/'+uid);
+  const valid={productKey:'P',productId:'P',warehouseId:'MAIN',onHand:5,reserved:2,incoming:0};
+  for(const patch of [{productKey:''},{warehouseId:''},{productKey:1},{warehouseId:true},{productId:1}]){
+   await assertFails(setDoc(ref,{...valid,...patch}));
+  }
+  await assertSucceeds(setDoc(ref,valid));
+  for(const patch of [{productKey:'OTHER'},{warehouseId:'OTHER'},{productId:'OTHER'},{productKey:''},{warehouseId:''}]){
+   await assertFails(updateDoc(ref,patch));
+  }
+  await assertSucceeds(updateDoc(ref,{itemName:'更新顯示品名',onHand:6,reserved:3}));
+ }
+});
 test('commercial owner can edit one unhanded recipient after another item entered custody, but not custody, transit or commercial data',async()=>{
  await seedWarehouseLogistics();const ref=doc(db('sales1'),'orders/logistics'),old=(await getDoc(ref)).data();
  const base={...old,warehouseLogisticsId:'HAND',logisticsHistory:[{id:'HAND'}],items:[old.items[0],{...old.items[0],itemId:'B',warehouseId:'custody-sales1',custodyTransferId:'HAND',deliveryPlan:{mode:'PICKUP'}}]};await seed('orders/logistics',base);

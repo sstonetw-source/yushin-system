@@ -394,7 +394,23 @@ service cloud.firestore {
 
     function nonNegativeInventory(data) {
       return data.onHand is number && data.reserved is number
-        && data.onHand >= 0 && data.reserved >= 0;
+        && data.onHand >= 0 && data.reserved >= 0 && data.reserved <= data.onHand
+        && data.get('incoming', 0) is number && data.get('incoming', 0) >= 0;
+    }
+
+    // A warehouse stock row keeps the same physical product/location identity.
+    // Moving goods creates/updates another row through the transfer workflow.
+    function validWarehouseStock(data) {
+      return nonNegativeInventory(data)
+        && data.get('productKey', '') is string && data.get('productKey', '').size() > 0
+        && data.get('warehouseId', '') is string && data.get('warehouseId', '').size() > 0
+        && data.get('productId', '') is string;
+    }
+
+    function warehouseStockIdentityUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['productKey', 'warehouseId'])
+        && (resource.data.get('productId', '') == ''
+          || request.resource.data.get('productId', '') == resource.data.get('productId', ''));
     }
 
     function inventoryArchiveKeys() {
@@ -1355,10 +1371,11 @@ service cloud.firestore {
         || (!('unitCost' in resource.data) && !('cost' in resource.data))
       ));
       allow list: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
-      allow create: if canReceiveInventory() && nonNegativeInventory(request.resource.data)
+      allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
-      allow update: if ((canReceiveInventory() && nonNegativeInventory(request.resource.data))
+      allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
           || businessWarehouseStockOperationalUpdate(id))
+        && warehouseStockIdentityUnchanged()
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }
