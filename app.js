@@ -10261,7 +10261,8 @@ function orderWorkIndexFields(order) {
 function orderItemWorkAmount(order, item, category, totalQtyOverride = null, dispatchOverride = null) {
     const qty=Number(item.orderedQty||item.qty||0);
     const totalQty=totalQtyOverride === null ? orderQuantity(order) : totalQtyOverride;
-    const unitSales=Number(item.unitPrice||item.salesPrice||0)||(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
+    const explicitSales=[item.unitPrice,item.salesPrice].find(value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value)));
+    const unitSales=explicitSales!==undefined?Number(explicitSales):(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
     const state=dispatchOverride || itemDispatchState(order,item);
     // Work-card amounts represent quantities in each action queue, not the full
     // order line repeated when the same line is partly printed or partly waiting.

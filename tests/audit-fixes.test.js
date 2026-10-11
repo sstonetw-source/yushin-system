@@ -21,3 +21,14 @@ test('pending purchase value uses the same demand quantities as purchasing, incl
  item.supplyOrderedQty=10;assert.equal(c.orderItemWorkAmount(order,item,'ordering'),0);
  }
 });
+
+test('zero-priced lines never inherit a paid order average in any work card',()=>{
+ const c=vm.createContext({orderQuantity:()=>6,salesAmount:()=>667800,itemDispatchState:()=>({pending:1,shippable:1,delivered:0}),procurementDemandForOrderItem:()=>({remainingToOrderQty:1})});
+ vm.runInContext(fn('orderItemWorkAmount'),c);
+ for(const category of ['ordering','arrival','dispatch','shipping','delivery']){
+  assert.equal(c.orderItemWorkAmount({}, {qty:1,unitPrice:0},category),0);
+  assert.equal(c.orderItemWorkAmount({}, {qty:1,unitPrice:'0'},category),0);
+ }
+ assert.equal(c.orderItemWorkAmount({}, {qty:1,unitPrice:null,salesPrice:100},'ordering'),100);
+ assert.equal(c.orderItemWorkAmount({}, {qty:1},'ordering'),111300);
+});
