@@ -25,14 +25,18 @@ test('shared UI tokens follow project palette without touching printable documen
 
 test('all working modules show one consistent page title', () => {
     for (const [id, title] of [
-        ['product-system', '產品'], ['forecast-system', 'Forecast'],
+        ['quote-system', '估價單'], ['product-system', '產品'], ['forecast-system', 'Forecast'],
         ['inventory-system', '倉庫'], ['equipment-system', '儀器'],
         ['purchasing-system', '採購'], ['admin-system', '管理員後台']
     ]) {
         assert.ok(html.includes(`id="${id}" class="content-section">\n        <h2 class="workspace-page-title no-print">${title}</h2>`), id);
     }
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單<\/h2>/);
-    assert.ok(html.includes('styles.css?v=20261011-5'));
+    assert.ok(html.includes('styles.css?v=20261011-6'));
+    assert.match(css, /#appContainer #myQuotesPanel > table :is\\(th, td\\):nth-child\\(6\\)/);
+    assert.match(css, /#appContainer #quote-system \\.quote-more-actions > summary/);
+    assert.match(css, /@media screen and \\(min-width: 769px\\)/);
+    assert.match(css, /html, body, #appContainer \\{ background: var\\(--ys-page\\); \\}/);
     assert.ok(html.includes('<meta name="theme-color" content="#2563EB">'));
 });
 
