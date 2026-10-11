@@ -4167,3 +4167,61 @@ button:disabled { opacity:.48; cursor:not-allowed; }
         min-height: 44px;
     }
 }
+
+
+/* Shared work-stage selection and text-labelled status categories. */
+@media screen {
+    #appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button) {
+        border-radius: 8px;
+        border-color: var(--ys-border);
+    }
+    #appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button).active,
+    #appContainer .order-progress-tabs button[aria-selected="true"] {
+        background: var(--ys-selected);
+        border-color: var(--ys-primary);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button):not(.active):hover {
+        background: var(--ys-selected);
+        border-color: var(--ys-border);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer :is(.quote-status-badge, .forecast-stage-badge, .forecast-status-badge,
+        .order-validity-badge, .inventory-policy-badge) {
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+    #appContainer .quote-status-badge.is-quoted,
+    #appContainer .forecast-stage-badge,
+    #appContainer .inventory-policy-badge,
+    #appContainer .inventory-policy-badge.is-none {
+        background: #F1F5F9;
+        color: var(--ys-muted);
+    }
+    #appContainer .forecast-status-active {
+        background: var(--ys-selected);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer .quote-status-badge:is(.is-deal, .is-three),
+    #appContainer .forecast-status-won {
+        background: #F0FDF4;
+        color: var(--ys-success);
+    }
+    #appContainer .forecast-status-lost {
+        background: #F1F5F9;
+        color: var(--ys-muted);
+    }
+    #appContainer .inventory-policy-badge.is-safety {
+        background: #FFFBEB;
+        color: var(--ys-warning);
+    }
+    #appContainer .order-validity-normal { background: var(--ys-success); }
+    #appContainer .order-validity-returned { background: var(--ys-warning); }
+    #appContainer .order-validity-invalid { background: var(--ys-danger); }
+    #appContainer :is(.nav-tab, .sub-tab)[role="button"]:focus-visible {
+        outline: 3px solid var(--ys-primary);
+        outline-offset: 2px;
+    }
+}
