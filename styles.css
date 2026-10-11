@@ -4084,3 +4084,86 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     }
     #appContainer .inline-help > summary { min-width: 44px; }
 }
+
+
+/* UI／UX 1.0 follow-up: finish the quotation workspace without changing printableQuote. */
+@media screen {
+    #appContainer { --workspace-background: #EFF6FF; --workspace-border: #CBD5E1; --workspace-label: #475569; --workspace-radius: 12px; }
+    #appContainer .quote-module-nav,
+    #appContainer #quoteCreatePanel > .company-sub-nav {
+        border: 1px solid var(--ys-border);
+        border-radius: 10px;
+        background: var(--ys-surface);
+        gap: 8px;
+    }
+    #appContainer #quote-system .quote-primary-actions > #printBtn {
+        background: var(--ys-primary);
+        border-radius: 8px;
+        color: #FFFFFF;
+    }
+    #appContainer #quote-system .quote-primary-actions > #printBtn:hover:not(:disabled) {
+        background: var(--ys-primary-hover);
+    }
+    #appContainer #quote-system .quote-more-actions > summary {
+        background: var(--ys-surface);
+        color: var(--ys-muted);
+        border: 1px solid var(--ys-border);
+        border-radius: 8px;
+    }
+    #appContainer #quote-system .quote-more-actions > summary:hover {
+        background: var(--ys-selected);
+        border-color: var(--ys-primary);
+        color: var(--ys-primary-hover);
+    }
+    #appContainer #quote-system .quote-more-actions > summary:focus-visible {
+        outline: 3px solid var(--ys-primary);
+        outline-offset: 2px;
+    }
+    #appContainer #myQuotesPanel > .quote-history-toolbar {
+        background: var(--ys-surface);
+        border: 1px solid var(--ys-border);
+        border-radius: 10px;
+    }
+    #appContainer #myQuotesPanel :is(input[type="search"], select) {
+        border: 1px solid var(--ys-border);
+        border-radius: 8px;
+        background: var(--ys-surface);
+        color: var(--ys-text);
+    }
+    #appContainer #myQuotesPanel :is(input[type="search"], select):focus-visible {
+        outline: 2px solid var(--ys-primary);
+        outline-offset: 1px;
+    }
+}
+@media screen and (min-width: 769px) {
+    #appContainer #myQuotesPanel > table :is(th, td) {
+        border-color: var(--ys-border);
+        padding: 8px 10px;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+    #appContainer #myQuotesPanel > table th {
+        background: var(--ys-selected);
+        color: var(--ys-text);
+    }
+    #appContainer #myQuotesPanel > table :is(th, td):nth-child(6) {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+    #appContainer #forecastTable :is(th, td):nth-child(4) {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+}
+@media screen and (max-width: 640px) {
+    html, body, #appContainer { background: var(--ys-page); }
+    #appContainer #quote-system > .quote-module-nav,
+    #appContainer #quoteCreatePanel > .company-sub-nav {
+        padding: 8px;
+        margin-bottom: 12px;
+    }
+    #appContainer #quote-system .quote-module-nav .sub-tab,
+    #appContainer #quoteCreatePanel .company-sub-nav .sub-tab {
+        min-height: 44px;
+    }
+}
