@@ -9577,7 +9577,7 @@ async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStat
             if(!snapshot.exists)return;
             const current=snapshot.data();
             const cancelled=globalThis.YushinProcurementDemand.cancelDemand(current);
-            const doc=procurementDemandDocument({...current,...cancelled},{
+            const doc=procurementDemandDocument({...current,...cancelled},{sourceItemIndex:index},{
                 createdAt:current.createdAt||now,
                 updatedAt:now
             });
@@ -11299,6 +11299,7 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
     const demand = globalThis.YushinProcurementDemand?.fromSalesOrder({
         sourceId:order.id || '',
         sourceItemId:item.itemId || '',
+        sourceItemIndex:(order.items||[]).findIndex((row,index)=>String(row.itemId||`item-${index+1}`)===String(item.itemId||'')),
         fulfillmentType,
         shortageQty:quantities.requiredSupplyQty,
         inTransitQty:quantities.inTransitQty,
@@ -14305,6 +14306,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 throw new Error('採購需求收貨數量已變更，請重新整理後再試。');
             }
             const demandDoc=procurementDemandDocument(receiptDemandPlan.demand,{
+                sourceItemIndex:Number.isInteger(supply.orderItemIndex)?supply.orderItemIndex:baseDemand.sourceItemIndex,
                 productId:supply.productId||'',
                 productKey:supply.productKey||'',
                 itemCode:supply.itemCode||'',

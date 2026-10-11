@@ -592,6 +592,64 @@ service cloud.firestore {
         && data.get('receivedQty', 0) == 0;
     }
 
+    function validDemandSource(data) {
+      let order = getAfter(/databases/$(database)/documents/orders/$(data.sourceId)).data;
+      let index = data.get('sourceItemIndex', -1);
+      return index is int && index >= 0 && index < order.items.size()
+        && data.sourceItemId == order.items[index].get('itemId', 'item-' + string(index + 1))
+        && data.get('ownerUid', '') == order.get('ownerUid', '')
+        && data.get('salesCode', '') == order.get('salesCode', '')
+        && data.get('productKey', '') == order.items[index].get('productId', order.items[index].get('inventoryProductKey', ''));
+    }
+
+    function validProcurementDemand(data) {
+      return data.get('sourceId', '') is string && data.get('sourceId', '').size() > 0
+        && data.get('requestedQty', null) is number && data.requestedQty >= 0
+        && data.get('orderedQty', null) is number && data.orderedQty >= 0 && data.orderedQty <= data.requestedQty
+        && data.get('receivedQty', null) is number && data.receivedQty >= 0 && data.receivedQty <= data.orderedQty
+        && data.get('remainingToOrderQty', null) is number
+        && data.remainingToOrderQty == (data.get('status', '') == 'CANCELLED' ? 0 : data.requestedQty - data.orderedQty)
+        && data.get('remainingToReceiveQty', null) is number && data.remainingToReceiveQty == data.orderedQty - data.receivedQty
+        && data.get('status', '') == (data.get('status', '') == 'CANCELLED' ? 'CANCELLED'
+          : data.requestedQty > 0 && data.receivedQty >= data.requestedQty ? 'RECEIVED'
+          : data.receivedQty > 0 ? 'PARTIALLY_RECEIVED'
+          : data.requestedQty > 0 && data.orderedQty >= data.requestedQty ? 'ORDERED'
+          : data.orderedQty > 0 ? 'PARTIALLY_ORDERED' : 'PENDING')
+        && ((data.get('sourceType', '') == 'SALES_ORDER'
+          && data.get('sourceItemId', '') is string && data.get('sourceItemId', '').size() > 0
+          && data.get('demandId', '') == 'SALES_ORDER:' + data.sourceId + ':' + data.sourceItemId
+          && validDemandSource(data))
+          || (data.get('sourceType', '') == 'STOCK_REPLENISHMENT'
+            && data.get('sourceItemId', '') == '' && data.get('demandId', '') == 'STOCK_REPLENISHMENT:' + data.sourceId));
+    }
+
+    function demandIdentityUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'demandId','sourceType','sourceId','sourceItemId','productKey','productId','ownerUid','salesCode'
+      ]) && (resource.data.get('sourceItemIndex', -1) == -1
+        || request.resource.data.get('sourceItemIndex', -1) == resource.data.get('sourceItemIndex', -1));
+    }
+
+    function validReservationSource(id, data) {
+      let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
+      let index = data.get('orderItemIndex', -1);
+      let item = order.items[index];
+      return index is int && index >= 0 && index < order.items.size()
+        && id == data.orderId + '__' + data.itemId
+        && data.itemId == item.get('itemId', 'item-' + string(index + 1))
+        && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
+        && data.get('ownerUid', '') == order.get('ownerUid', '')
+        && data.get('salesCode', '') == order.get('salesCode', '')
+        && data.get('quantity', null) is number && data.quantity >= 0 && data.quantity <= item.get('qty', 0)
+        && data.get('shortageQty', 0) is number && data.get('shortageQty', 0) >= 0
+        && data.get('warehouseId', '') == item.get('warehouseId', order.get('warehouseId', ''))
+        && (!(order.get('status', '') in ['cancelled','voided']) || data.quantity == 0);
+    }
+
+    function reservationIdentityUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['orderId','itemId','productKey']);
+    }
+
     function businessProcurementDemandOperationalUpdate() {
       return businessOwner()
         && owns(resource.data)
@@ -607,7 +665,7 @@ service cloud.firestore {
         && request.resource.data.get('orderedQty', 0) <= request.resource.data.get('requestedQty', 0)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
-          'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt'
+          'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt', 'sourceItemIndex'
         ]);
     }
 
@@ -1198,10 +1256,10 @@ service cloud.firestore {
     match /procurementDemands/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if admin() || purchaser() || warehouse()
-        || businessProcurementDemandCreate(request.resource.data);
-      allow update: if admin() || purchaser() || warehouse()
-        || businessProcurementDemandOperationalUpdate();
+      allow create: if validProcurementDemand(request.resource.data) && (admin() || purchaser() || warehouse()
+        || businessProcurementDemandCreate(request.resource.data));
+      allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
+        && (admin() || purchaser() || warehouse() || businessProcurementDemandOperationalUpdate());
       allow delete: if admin();
     }
 
@@ -1387,10 +1445,11 @@ service cloud.firestore {
         || (businessOwner() && (resource == null || owns(resource.data)));
       allow list: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if admin() || purchaser() || warehouse()
-        || validBusinessReservation(id, request.resource.data);
-      allow update: if admin() || purchaser() || warehouse()
-        || (businessReservationOperationalUpdate() && validBusinessReservation(id, request.resource.data));
+      allow create: if validReservationSource(id, request.resource.data)
+        && (admin() || purchaser() || warehouse() || validBusinessReservation(id, request.resource.data));
+      allow update: if validReservationSource(id, request.resource.data) && reservationIdentityUnchanged()
+        && (admin() || purchaser() || warehouse()
+          || (businessReservationOperationalUpdate() && validBusinessReservation(id, request.resource.data)));
       allow delete: if admin();
     }
 

@@ -14,7 +14,7 @@
         delete(ref){ref=sourceRef(ref);writes.push({method:'delete',ref});return proxy;}
       };
       const result=await callback(proxy);
-      if(enabled){
+      {
         for(const write of writes){
           if(!write.ref.path.startsWith('inventoryReservations/')||write.method==='delete')continue;
           const reservation={...reads.get(write.ref.path)?.data,...write.data};
@@ -25,7 +25,7 @@
           const afterOrder=orderWrites.reduce((data,row)=>({...data,...row.data}),orderData);
           const index=(afterOrder.items||[]).findIndex((item,i)=>String(item.itemId||`item-${i+1}`)===reservation.itemId);
           if(index<0)throw new Error('庫存占用缺少對應的來源訂單品項。');
-          write.data={...write.data,orderItemIndex:index};
+          write.data={...write.data,orderItemIndex:index,ownerUid:afterOrder.ownerUid||'',salesCode:afterOrder.salesCode||''};
         }
       }
       const targets=new Map();

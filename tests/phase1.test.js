@@ -4018,7 +4018,7 @@ test('business reservation rules preserve reservation identity and narrow stock 
     const reservationStart=rulesSource.indexOf('match /inventoryReservations/{id}');
     const reservationEnd=rulesSource.indexOf('\n\n    match /inventoryLots/{id}',reservationStart);
     const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
-    assert.match(reservationRule,/allow update: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
+    assert.match(reservationRule,/allow update: if validReservationSource\(id, request.resource.data\) && reservationIdentityUnchanged\(\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
 
 

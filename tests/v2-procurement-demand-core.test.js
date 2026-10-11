@@ -86,6 +86,7 @@ test('demand id follows ERP-style source references',()=>{
 test('persistent demand document tracks ERP material request facts',()=>{
   const doc=d.demandDocument({
     demandId:'SALES_ORDER:o1:i1',sourceType:'SALES_ORDER',sourceId:'o1',sourceItemId:'i1',
+    sourceItemIndex:0,
     itemCode:'ABC',requestedQty:10,orderedQty:4,receivedQty:2,scheduleDate:'2026-10-15',
     ownerUid:'sales1',salesCode:'S01'
   },{createdAt:'2026-10-02T00:00:00Z',updatedAt:'2026-10-02T00:00:00Z'});
@@ -94,6 +95,9 @@ test('persistent demand document tracks ERP material request facts',()=>{
   assert.equal(doc.status,d.STATUSES.PARTIALLY_RECEIVED);
   assert.equal(doc.perOrdered,40);
   assert.equal(doc.perReceived,20);
+  assert.equal(doc.sourceItemIndex,0);
+  assert.equal(d.demandDocument(d.applyOrder(doc,1).demand).sourceItemIndex,0);
+  assert.equal(d.demandDocument(d.cancelDemand(doc)).sourceItemIndex,0);
 });
 
 test('purchase order increments only remaining demand',()=>{

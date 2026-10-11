@@ -743,9 +743,45 @@ test('purchase communication timeline is purchaser-only and immutable', async ()
   await assertFails(getDoc(doc(db('sales1'),'purchaseOrderCommunications/c1')));
 });
 
+test('procurement demands reject false sources, rewritten identities and inconsistent quantities for operational roles',async()=>{
+ await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W1'}]});
+ const base={demandId:'SALES_ORDER:source:A',sourceType:'SALES_ORDER',sourceId:'source',sourceItemId:'A',sourceItemIndex:0,
+  ownerUid:'sales1',salesCode:'S01',productId:'p-order',productKey:'p-order',requestedQty:5,orderedQty:2,receivedQty:1,
+  remainingToOrderQty:3,remainingToReceiveQty:1,perOrdered:40,perReceived:20,status:'PARTIALLY_RECEIVED'};
+ for(const uid of ['admin','buyer1','wh1']){
+  const ref=doc(db(uid),'procurementDemands/'+uid);
+  for(const patch of [{sourceId:'missing',demandId:'SALES_ORDER:missing:A'},{sourceItemId:'B',demandId:'SALES_ORDER:source:B'},
+   {sourceItemIndex:2},{productKey:'OTHER'},{ownerUid:'sales2'},{receivedQty:3},{orderedQty:6},{requestedQty:'5'},
+   {remainingToOrderQty:4},{remainingToReceiveQty:2},{status:'RECEIVED'},{status:'invalid'}])await assertFails(setDoc(ref,{...base,...patch}));
+  await assertSucceeds(setDoc(ref,base));
+  for(const patch of [{sourceId:'other'},{sourceItemId:'B'},{productId:'OTHER'},{ownerUid:'sales2'},
+   {receivedQty:3},{remainingToOrderQty:100},{orderedQty:'2'},{status:'RECEIVED'}])await assertFails(updateDoc(ref,patch));
+  await assertSucceeds(updateDoc(ref,{status:'CANCELLED',remainingToOrderQty:0}));
+  await assertSucceeds(updateDoc(ref,{receivedQty:2,remainingToReceiveQty:0}));
+ }
+});
+test('operational reservations bind to the exact source item and follow its warehouse through atomic transfer',async()=>{
+ await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W1'}]});
+ const base={orderId:'source',itemId:'A',orderItemIndex:0,productKey:'p-order',ownerUid:'sales1',salesCode:'S01',warehouseId:'W1',quantity:2,shortageQty:3};
+ for(const uid of ['admin','buyer1','wh1']){
+  const client=db(uid),ref=doc(client,'inventoryReservations/source__A');
+  for(const patch of [{orderId:'missing'},{itemId:'B'},{orderItemIndex:3},{productKey:'OTHER'},{ownerUid:'sales2'},
+   {quantity:6},{quantity:'2'},{shortageQty:-1},{warehouseId:'W2'}])await assertFails(setDoc(ref,{...base,...patch}));
+  await assertSucceeds(setDoc(ref,base));
+  for(const patch of [{orderId:'other'},{itemId:'B'},{productKey:'OTHER'},{quantity:6},{shortageQty:'3'},{warehouseId:'W2'}])await assertFails(updateDoc(ref,patch));
+ }
+ const client=db('admin'),b=writeBatch(client);
+ b.update(doc(client,'orders/source'),{items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W2'}]});
+ b.update(doc(client,'inventoryReservations/source__A'),{warehouseId:'W2'});await assertSucceeds(b.commit());
+ await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',status:'cancelled',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W2'}]});
+ await assertFails(updateDoc(doc(client,'inventoryReservations/source__A'),{quantity:1}));
+ await assertSucceeds(updateDoc(doc(client,'inventoryReservations/source__A'),{quantity:0,shortageQty:0}));
+});
 test('procurement demand permissions follow ERP ownership', async () => {
+  await seed('orders/o1',{ownerUid:'sales1',salesCode:'S01',items:[{itemId:'i1',productId:'p-order',qty:5,warehouseId:'W1'}]});
   const base={
     demandId:'SALES_ORDER:o1:i1',sourceType:'SALES_ORDER',sourceId:'o1',sourceItemId:'i1',
+    sourceItemIndex:0,productKey:'p-order',productId:'p-order',
     ownerUid:'sales1',salesCode:'S01',requestedQty:5,orderedQty:0,receivedQty:0,
     remainingToOrderQty:5,remainingToReceiveQty:0,perOrdered:0,perReceived:0,status:'PENDING',
     createdAt:'2026-10-02T00:00:00Z',updatedAt:'2026-10-02T00:00:00Z'
@@ -1012,7 +1048,7 @@ async function seedWarehouseShipment(){
   await seed('orders/warehouse-ship',order);
   await seed('inventory/p-order',{productKey:'p-order',onHand:5,reserved:3,incoming:0});
   await seed('warehouseStocks/W1__p-order',{productKey:'p-order',warehouseId:'W1',onHand:5,reserved:3,incoming:0});
-  await seed('inventoryReservations/warehouse-ship__I1',{orderId:'warehouse-ship',itemId:'I1',productKey:'p-order',warehouseId:'W1',quantity:3});
+  await seed('inventoryReservations/warehouse-ship__I1',{orderId:'warehouse-ship',itemId:'I1',orderItemIndex:0,ownerUid:'sales1',salesCode:'S01',productKey:'p-order',warehouseId:'W1',quantity:3});
   return {item,order};
 }
 function warehouseShipmentBatch(client,uid,item,{stock=true,extra={},qty=1}={}){
@@ -1065,7 +1101,7 @@ async function seedWarehouseLogistics(){
  await seed('inventory/P',{productKey:'P',productId:'P',onHand:10,reserved:4,incoming:0,stockPolicy:'ORDER_ONLY',safetyStock:0});
  await seed('warehouseStocks/MAIN__P',{productKey:'P',warehouseId:'MAIN',onHand:10,reserved:4,incoming:0});
  await seed('orders/logistics',{ownerUid:'sales1',salesCode:'S01',status:'active',createdByUid:'sales1',createdByRole:'sales',deliveryRecords:[],items:[{itemId:'A',productId:'P',qty:4,reservedQty:4,warehouseId:'MAIN',dispatchPreparedQty:4}]});
- await seed('inventoryReservations/logistics__A',{orderId:'logistics',itemId:'A',quantity:4,warehouseId:'MAIN',productKey:'P',ownerUid:'sales1',salesCode:'S01'});
+ await seed('inventoryReservations/logistics__A',{orderId:'logistics',itemId:'A',orderItemIndex:0,quantity:4,warehouseId:'MAIN',productKey:'P',ownerUid:'sales1',salesCode:'S01'});
 }
 function transferData({linked=false,handoff=false}={}){
  return {id:'T',inventoryId:'P',productKey:'P',fromStockId:'MAIN__P',toStockId:handoff?'custody-sales1__P':'EXT__P',fromWarehouseId:'MAIN',toWarehouseId:handoff?'custody-sales1':'EXT',qty:linked?4:3,reservedQty:linked?4:0,kind:handoff?'HANDOFF':'TRANSFER',status:handoff?'RECEIVED':'IN_TRANSIT',createdByUid:'buyer1',orderId:linked?'logistics':'',itemId:linked?'A':'',itemIndex:linked?0:-1,allocations:[{lotId:'L',targetLotId:'T-0',qty:linked?4:3,costLotId:'L'}]};

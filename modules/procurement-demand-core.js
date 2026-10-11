@@ -138,6 +138,7 @@
       sourceType:demand.sourceType,
       sourceId:demand.sourceId,
       sourceItemId:demand.sourceItemId,
+      sourceItemIndex:Number.isInteger(record.sourceItemIndex)?record.sourceItemIndex:-1,
       productId:String(record.productId||''),
       productKey:String(record.productKey||''),
       itemCode:String(record.itemCode||''),

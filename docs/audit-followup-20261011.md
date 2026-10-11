@@ -28,10 +28,32 @@ Continue from the latest GitHub `main`. The original audit baseline was
 - The rules require a separate Firebase deployment. A GitHub publication does
   not deploy Firestore rules. Real-role production writes have not been tested.
 
+## Next A04 increment: demand and reservation sources
+
+- Sales-order demands and reservations now carry the source item position.
+  Rules verify the order/item/product and owning salesperson against the
+  transaction's resulting order, including an atomic warehouse change.
+- Demand writes reject invalid quantities, inconsistent remaining quantities
+  and statuses. Source identities cannot be relabelled. Cancellation preserves
+  already ordered supply so a later receipt remains valid.
+- Reservation writes reject nonexistent sources, excess quantities, incorrect
+  warehouses and nonzero reservations on cancelled orders. The transaction
+  wrapper derives ownership and item position for all operational roles, using
+  the same order snapshot before committing writes.
+- Validation: 846 application tests and 80 Firestore emulator tests passed.
+  No production records were written. Authenticated production acceptance is
+  still outstanding.
+- Publish the updated frontend before manually deploying these Firestore
+  rules. GitHub publication does not deploy rules. Existing active documents
+  acquire source metadata through normal supported writes; no bulk repair ran.
+- A04 remains partial: replenishment-source evidence and atomic stock/movement
+  evidence for purchasing/warehouse reservation writes need a separate change.
+  Valid source metadata alone does not prove a matching stock mutation.
+
 ## Remaining sequence
 
-1. Finish A04 incrementally: demand/reservation identity and source-operation
-   evidence for purchasing/warehouse writes. Inspect each existing transaction
+1. Finish A04 incrementally: source-operation evidence for
+   purchasing/warehouse writes. Inspect each existing transaction
    before restricting it; preserve receipt, cancellation, return and transfer.
 2. Recheck A01/A02 against current code. Existing duplicate records and production
    totals require read-only reconciliation; never delete or merge live records
