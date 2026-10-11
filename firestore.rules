@@ -393,7 +393,8 @@ service cloud.firestore {
 
 
     function nonNegativeInventory(data) {
-      return data.onHand >= 0 && data.reserved >= 0;
+      return data.onHand is number && data.reserved is number
+        && data.onHand >= 0 && data.reserved >= 0;
     }
 
     function inventoryArchiveKeys() {
@@ -1395,7 +1396,10 @@ service cloud.firestore {
           && request.resource.data.costSourceLotId == getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.costLotId
           && request.resource.data.sourceId == getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.sourceId
           && getAfter(/databases/$(database)/documents/stockTransfers/$(request.resource.data.sourceId)).data.status == 'RECEIVED')
-        || request.resource.data.get('sourceType', '') == 'INITIAL_STOCK'
+        || (request.resource.data.get('sourceType', '') == 'INITIAL_STOCK'
+          && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
+          && request.resource.data.lotId == id
+          && getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.get('sourceType', '') == 'INITIAL_STOCK')
       ));
       allow update: if admin() || purchaser();
       allow delete: if admin();

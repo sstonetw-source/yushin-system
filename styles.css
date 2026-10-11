@@ -3876,3 +3876,11 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer #myQuotesPanel > table { display: block; width: 100%; border: 0; background: transparent; }
     #appContainer #myQuotesPanel > table > thead { display: none; }
 }
+
+/* Readable operational tables; print documents retain their own typography. */
+@media screen {
+    :is(#order-system, #purchasing-system, #inventory-system, #product-system) table { font-size:13px; line-height:1.5; }
+    :is(#order-system, #purchasing-system, #inventory-system, #product-system) th { background:#edf2f7; color:#24384d; }
+    :is(#order-system, #purchasing-system, #inventory-system, #product-system) td { vertical-align:top; }
+    :is(#order-system, #purchasing-system, #inventory-system, #product-system) button:focus-visible { outline:3px solid #2563eb; outline-offset:2px; }
+}

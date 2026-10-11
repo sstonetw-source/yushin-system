@@ -33,46 +33,8 @@ jobs:
           node --check modules/trade-analysis-core.js
           node --check functions/purchase-email-core.js
           node --check functions/index.js
-      - name: Trade analysis tests
-        run: node --test tests/warehouse-logistics.test.js tests/inventory-workspace.test.js tests/inventory-receiving-count.test.js tests/inventory-list-archive.test.js tests/order-role-read.test.js tests/document-downloads.test.js tests/order-cost-reminder.test.js tests/quick-delivery-item.test.js tests/replenishment-entry.test.js tests/order-background.test.js tests/system-audit-shortcuts.test.js tests/receipt-background.test.js tests/trade-analysis.test.js tests/order-purchase-cancellation.test.js
-      - name: Phase 1 regression tests
-        run: node --test tests/order-partial-print-flow.test.js tests/order-self-order-required.test.js tests/self-order-at-creation.test.js tests/phase1.test.js tests/external-warehouse-dispatch.test.js
-      - name: Purchasing workflow tests
-        if: always()
-        run: node --test --test-reporter=spec tests/purchasing-workflow.test.js tests/firestore-quota-budget.test.js
-      - name: Supplier core tests
-        if: always()
-        run: node --test tests/v2-supplier-core.test.js
-      - name: Inventory core tests
-        if: always()
-        run: node --test tests/v2-inventory-core.test.js
-      - name: Receiving core tests
-        if: always()
-        run: node --test tests/v2-receiving-core.test.js
-      - name: Fulfillment core tests
-        if: always()
-        run: node --test tests/v2-fulfillment-core.test.js
-      - name: Supply core tests
-        if: always()
-        run: node --test tests/v2-supply-core.test.js
-      - name: Reservation core tests
-        if: always()
-        run: node --test tests/v2-reservation-core.test.js
-      - name: Workflow core tests
-        if: always()
-        run: node --test tests/v2-workflow-core.test.js
-      - name: Procurement demand core tests
-        if: always()
-        run: node --test tests/v2-procurement-demand-core.test.js
-      - name: Purchasing analytics core tests
-        if: always()
-        run: node --test tests/v2-purchasing-analytics-core.test.js
-      - name: Purchase email core tests
-        if: always()
-        run: node --test tests/v2-purchase-email-core.test.js
-      - name: Prelaunch regression tests
-        if: always()
-        run: node --test tests/launch-workflow.test.js tests/prelaunch-fixes.test.js tests/auth-startup.test.js tests/backup-upload.test.js
+      - name: All application regression tests
+        run: node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.test.js' | sort)
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator

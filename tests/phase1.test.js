@@ -407,11 +407,12 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
 });
 
 
-test('purchase document history shows document age while arrival work uses supply timing', () => {
+test('purchase document history stops waiting when fully received while arrival work uses supply timing', () => {
     assert.match(appSource, /function poWaitingDays\(po\)/);
     assert.match(appSource, /return waitingDaysFromDate\(po\.poDate\)/);
     assert.match(appSource, /primaryStatus==='arrival'\?waitingDaysFromDate\(item\.orderedAt\)/);
-    assert.match(appSource, /data-th="建立天數"/);
+    assert.match(appSource, /data-th="等待天數"/);
+    assert.match(appSource, /receiptProgress.remainingQty > 0 \? escapeHtml\(poWaitingDays\(po\)\|\|'—'\) : '已到貨'/);
     assert.match(appSource, /function purchaseHistoryItemReceiptProgress/);
     assert.match(appSource, /YushinSupply\.receiptProgress/);
     assert.match(appSource, /data-th="文件狀態"[\s\S]{0,120}receiptProgress\.label/);
@@ -4842,7 +4843,7 @@ test('price-list administration is separated while Product page retains guarded 
     assert.doesNotMatch(adminProductSource,/openProductMasterEditor|openNewProductMasterEditor/);
     assert.match(appSource,/window\.deleteEntirePriceList = async function/);
 
-    const rowStart=appSource.indexOf('function productManagementRow(product)');
+    const rowStart=appSource.indexOf('function productManagementRow(');
     const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);
     assert.match(rowSource,/openProductMasterEditor/);
@@ -4886,7 +4887,7 @@ test('product management can batch-select products into one quote or one order',
 
 test('sales can use Product Master for quote and order while Product Master itself stays read-only', () => {
     assert.match(appSource, /sales: Object\.freeze\(\{[^}]*'quote\.create':'edit'[^}]*products:'view'[^}]*'orders\.list':'edit'/);
-    const rowStart=appSource.indexOf('function productManagementRow(product)');
+    const rowStart=appSource.indexOf('function productManagementRow(');
     const rowEnd=appSource.indexOf('\nfunction updateProductManagementSelectionBar',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);
     assert.match(rowSource,/canQuote = !inactive && canEditPage\('quote\.create'\)/);
@@ -4900,7 +4901,7 @@ test('sales can use Product Master for quote and order while Product Master itse
 test('Product stock detail reads only inventory and warehouse data', () => {
     assert.match(indexSource,/id="product360Overlay"/);
     assert.match(indexSource,/id="product360Title">庫存狀態/);
-    const rowStart=appSource.indexOf('function productManagementRow(product)');
+    const rowStart=appSource.indexOf('function productManagementRow(');
     const rowEnd=appSource.indexOf('\nlet product360LoadGeneration',rowStart);
     const rowSource=appSource.slice(rowStart,rowEnd);
     assert.match(rowSource,/openProduct360/);

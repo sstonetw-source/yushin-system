@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261010-1">
+        <link rel="stylesheet" href="styles.css?v=20261011-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1074,7 +1074,7 @@
                 <div><label>廠牌</label>
                     <select id="orderBrand" aria-label="訂單廠牌" onchange="onOrderBrandSelectChange(true)"><option value="">請選擇廠牌</option></select>
                     <input type="text" id="orderBrandOther" placeholder="輸入實際廠牌名稱" autocomplete="off" oninput="onOrderBrandOtherInput()" onchange="onOrderBrandOtherChange()" style="display:none;margin-top:4px;width:100%;box-sizing:border-box;">
-                    <small style="display:block;color:#777;margin-top:4px;">主要廠牌直接選；其他廠牌請輸入實際名稱。正式訂單仍需對應 Product Master。</small>
+                    <small style="display:block;color:#777;margin-top:4px;">主要廠牌直接選；其他廠牌請輸入實際名稱。正式訂單需選用已建立的產品主檔。</small>
                 </div>
 
                 <input type="hidden" id="orderProductLine" value="">
@@ -1710,7 +1710,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261010-4"></script>
+    <script src="app.js?v=20261011-1"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261010-2"></script>
     <script src="modules/inventory-workspace.js?v=20261010-2"></script>

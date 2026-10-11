@@ -68,12 +68,13 @@ test('failed safety-stock read stays an error after the final render and can ret
 });
 
 test('work queue includes old pending orders and updates an order that has since completed',async()=>{
- const completed={id:'old',workCategories:['complete']},pending={id:'older',workCategories:['arrival']};let batch=[{id:'old',workCategories:['ordering']}];const calls=[];
+ let reads=0;const completed={id:'old',workCategories:['complete']},pending={id:'older',workCategories:['arrival']};let batch=[{id:'old',workCategories:['ordering']}];const calls=[];
  const query={where(...v){calls.push(v);return this;},orderBy(){return this;}};
- const c=context({currentUser:{uid:'U'},currentUserRole:'admin',BUSINESS_STATUS:{ACTIVE:'active'},ordersCache:[{id:'recent',workCategories:['complete']}],canAccessPage:()=>true,canViewAllData:()=>true,db:{collection:()=>query},readQueryInBatches:async()=>batch,readDocumentsByIds:async()=>[completed],orderWorkCategories:o=>o.workCategories,writeAppDataCache(){},mainPageLoadFailed(){},document:{getElementById:()=>null}});
+ const c=context({currentUser:{uid:'U'},currentUserRole:'admin',BUSINESS_STATUS:{ACTIVE:'active'},ordersCache:[{id:'recent',workCategories:['complete']}],canAccessPage:()=>true,canViewAllData:()=>true,db:{collection:()=>query},readQueryInBatches:async()=>{reads++;return batch;},readDocumentsByIds:async()=>[completed],orderWorkCategories:o=>o.workCategories,writeAppDataCache(){},mainPageLoadFailed(){},document:{getElementById:()=>null}});
  vm.runInContext(section('const OPEN_ORDER_WORK_CATEGORIES =', '\nwindow.setOrderWorkFilter'),c);
  await c.loadOrderWorkQueue();assert.deepEqual(Array.from(c.ordersCache,x=>x.id).sort(),['old','recent']);
- batch=[pending];await c.loadOrderWorkQueue(true);assert.equal(c.ordersCache.find(x=>x.id==='old').workCategories[0],'complete');assert.equal(c.ordersCache.find(x=>x.id==='older').workCategories[0],'arrival');
+ await c.loadOrderWorkQueue();assert.equal(reads,1);
+ batch=[pending];await c.loadOrderWorkQueue(true);assert.equal(reads,2);assert.equal(c.ordersCache.find(x=>x.id==='old').workCategories[0],'complete');assert.equal(c.ordersCache.find(x=>x.id==='older').workCategories[0],'arrival');
  assert.ok(calls.some(v=>v[0]==='workCategories'&&v[1]==='array-contains-any'));
 });
 

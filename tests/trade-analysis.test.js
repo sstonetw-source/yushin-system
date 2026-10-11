@@ -335,3 +335,12 @@ test('current-tab Excel includes all filtered rows and applied product type, ind
     assert.equal(detail.at(-1)['銷售金額'],rows.reduce((n,row)=>n+row.values[0],0));
     assert.equal(sheets[0].rows.find(row=>row['項目']==='產品類型')['內容'],'試劑');
 });
+
+test('zero cost flags follow the actual cost sources while preserving valid zero amounts',()=>{
+ const p=simpleFixture('purchasing');p.inventoryAnalysisSupplyOrders[0].orderDate='2026-10-01';p.inventoryAnalysisSupplyOrders[0].unitCost=0;
+ assert.equal(p.buildSimpleTradeAnalysis()[0].zeroCost,true);assert.equal(p.buildSimpleTradeAnalysis()[0].values[0],0);
+ p.inventoryAnalysisSupplyOrders[0].unitCost=undefined;assert.equal(p.buildSimpleTradeAnalysis()[0].values[0],null);assert.equal(p.buildSimpleTradeAnalysis()[0].zeroCost,false);
+ const s=simpleFixture('selling');s.salesStatisticsOrders[0].orderDate='2026-10-01';s.salesStatisticsOrders[0].deliveryRecords[0].lotAllocations=[{lotId:'L1',qty:4}];s.salesStatisticsOrders[0].returnRecords[0].lotAllocations=[{lotId:'L1',qty:1}];s.inventoryAnalysisLotCosts.set('L1',{unitCost:0});
+ assert.equal(s.buildSimpleTradeAnalysis()[0].zeroCost,true);assert.equal(s.buildSimpleTradeAnalysis()[0].values[3],300);
+ const i=simpleFixture('inventory');i.inventoryAnalysisLotCosts.set('L1',{unitCost:0});assert.equal(i.buildSimpleTradeAnalysis()[0].zeroCost,true);assert.equal(i.buildSimpleTradeAnalysis()[0].values[0],0);
+});

@@ -1,14 +1,21 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const src=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
-const code=src.slice(src.indexOf('let productOverviewCursor=null'),src.indexOf('window.renderProductManagementOverview ='));
-test('keyword search reaches later pages and retains only matches, while ordinary browsing reads one page',async()=>{
- for(const keyword of ['target','']){
-  let reads=0;const scope={value:'',options:[],innerHTML:''},status={textContent:''};
-  const pages=[Array.from({length:200},(_,i)=>({id:'p'+i,data:()=>({productName:'Other'})})),[{id:'later',data:()=>({productName:'Target kit'})}]];
-  const query={orderBy(){return this},limit(){return this},startAfter(){return this},get:async()=>{const docs=pages[reads++];return {docs,size:docs.length}}};
-  const c=vm.createContext({window:{},currentUserRole:'admin',currentUser:{uid:'u'},productOverviewLoading:false,productManagementOverviewRows:[],productOverviewLimit:200,
-   document:{getElementById:id=>id==='productOverviewScope'?scope:id==='productOverviewSearch'?{value:keyword}:status},db:{collection:()=>query},firebase:{firestore:{FieldPath:{documentId:()=>''}}},firestoreReadWithTimeout:async p=>p,getUnifiedBrandEntries:()=>[],escapeAttr:x=>x,escapeHtml:x=>x,renderProductManagementOverview:()=>{}});
-  vm.runInContext(code,c);await c.window.loadProductManagementOverview(true);
-  assert.equal(reads,keyword?2:1);assert.equal(c.productManagementOverviewRows.length,keyword?1:200);if(keyword)assert.equal(c.productManagementOverviewRows[0].id,'later');
- }
+const code=src.slice(src.indexOf('let productOverviewCursor=null'),src.indexOf('function priceListDateLabel'));
+function fixture(failure=false){
+ let reads=0,brands=0,renders=0;const status={textContent:''};
+ const query={orderBy(){return this},limit(n){assert.equal(n,100);return this},get:async()=>{reads++;if(failure)throw Error('offline');return {docs:[{id:'h1',data:()=>({recordType:'PRICE_LIST'})},{id:'h2',data:()=>({recordType:'PRODUCT'})}]}}};
+ const c=vm.createContext({window:{},console:{error(){}},currentUserRole:'admin',productOverviewLoading:false,priceListManagementRows:[],priceListHistoryRows:[],
+  document:{getElementById:()=>status},db:{collection:name=>{assert.equal(name,'priceHistory');return query}},firestoreReadWithTimeout:async p=>p,
+  loadBrandMaster:async()=>{brands++},getUnifiedBrandEntries:()=>[{name:'B',active:true},{name:'Disabled',active:false}],renderProductManagementOverview:()=>{renders++},renderPriceListHistory:()=>{}});
+ vm.runInContext(code,c);return {c,status,counts:()=>({reads,brands,renders})};
+}
+test('price list overview reads bounded history and active brands without scanning products',async()=>{
+ const {c,counts}=fixture();await c.window.loadProductManagementOverview();assert.deepEqual(counts(),{reads:1,brands:1,renders:1});
+ assert.equal(c.priceListManagementRows.length,1);assert.equal(c.priceListHistoryRows.length,1);assert.equal(c.productOverviewLoading,false);
+});
+test('history failure is visible rather than a successful empty history',async()=>{
+ const {c,status,counts}=fixture(true);await c.window.loadProductManagementOverview();assert.match(status.textContent,/offline/);assert.equal(counts().renders,0);assert.equal(c.productOverviewLoading,false);
+});
+test('non-admin cannot fetch price list administration',async()=>{
+ const {c,counts}=fixture();c.currentUserRole='sales';await c.window.loadProductManagementOverview();assert.equal(counts().reads,0);
 });

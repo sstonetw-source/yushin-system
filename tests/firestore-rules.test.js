@@ -856,13 +856,17 @@ async function stockWorkflow(physicalDelta, reservationQty, type, warehouseId='w
   },'sales1',true,'sales');
 }
 
-test('commercial stock reservation delivery reversal and return require atomic source evidence',async()=>{
+test('commercial stock reservation delivery and reversal require atomic evidence; returns use protected receipt workflow',async()=>{
   await seedStockWorkflow();
   await assertSucceeds(stockWorkflow(0,5,'reserve'));
   await assertSucceeds(stockWorkflow(-2,3,'ship'));
   await assertSucceeds(stockWorkflow(2,5,'ship_reversal'));
   await assertSucceeds(stockWorkflow(-2,3,'ship'));
-  await assertSucceeds(stockWorkflow(1,4,'return_in'));
+  await assertFails(stockWorkflow(1,4,'return_in'));
+  const order=await getDoc(doc(db('sales1'),'orders/stock-order'));
+  const stock=await getDoc(doc(db('sales1'),'inventory/p1'));
+  assert.equal(order.data().returnedQty,0);
+  assert.equal(stock.data().onHand,8);
   await assertFails(updateDoc(doc(db('sales1'),'inventory/p1'),{onHand:100}));
   await assertFails(updateDoc(doc(db('sales1'),'inventoryLots/l1'),{remainingQty:100}));
 });
@@ -1104,4 +1108,23 @@ test('responsible salesperson retains scoped stock access after warehouse handof
  await seed('inventoryLots/l1',{productKey:'p1',warehouseId:'custody-sales1',remainingQty:10});
  await assertSucceeds(stockWorkflow(0,5,'reserve','custody-sales1'));
  await assertSucceeds(stockWorkflow(-2,3,'ship','custody-sales1'));
+});
+
+test('warehouse initial stock can link pending cost but cannot invent protected costs', async () => {
+  const client=db('wh1');
+  const pending={lotId:'initial-lot',sourceType:'INITIAL_STOCK',costPending:true};
+  await assertFails(setDoc(doc(client,'inventoryLotCosts/initial-lot'),pending));
+  await seed('inventoryLots/initial-lot',{sourceType:'INITIAL_STOCK',remainingQty:2});
+  await assertSucceeds(setDoc(doc(client,'inventoryLotCosts/initial-lot'),pending));
+  for(const field of ['unitCost','cost','costPrice']){
+    await seed('inventoryLots/initial-'+field,{sourceType:'INITIAL_STOCK',remainingQty:2});
+    await assertFails(setDoc(doc(client,'inventoryLotCosts/initial-'+field),{...pending,lotId:'initial-'+field,[field]:0}));
+  }
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'inventoryLotCosts/initial-lot'),{unitCost:0,costPending:false}));
+});
+test('inventory quantities must be numeric rather than strings or booleans', async () => {
+  for(const onHand of ['10',true,-1]){
+    await assertFails(setDoc(doc(db('admin'),'warehouseStocks/invalid'),{warehouseId:'w',productKey:'p',onHand,reserved:0}));
+  }
+  await assertSucceeds(setDoc(doc(db('admin'),'warehouseStocks/valid'),{warehouseId:'w',productKey:'p',onHand:0,reserved:0}));
 });
