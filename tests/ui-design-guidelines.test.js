@@ -29,17 +29,17 @@ test('all working modules show one consistent page title', () => {
         ['inventory-system', '倉庫'], ['equipment-system', '儀器'],
         ['purchasing-system', '採購'], ['admin-system', '管理員後台']
     ]) {
-        assert.ok(html.includes(`id="${id}" class="content-section">\n        <h2 class="workspace-page-title no-print">${title}</h2>`), id);
+        assert.ok(html.includes(`id="${id}" class="content-section">\n        <h2 class="workspace-page-title no-print">${title} <button type="button" class="page-help-trigger`), id);
     }
     assert.ok(html.includes('id="quote-system" class="content-section active">'));
-    assert.ok(html.includes('<h2 class="workspace-page-title no-print">估價單</h2>'));
+    assert.match(html, /<h2 class="workspace-page-title no-print">估價單 <button[^>]*data-page-help="quote-system"/);
     assert.equal((html.match(/<div class="nav-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 8);
     assert.equal((html.match(/<div class="sub-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 16);
     assert.ok(html.includes("onkeydown=\"if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}\""));
     assert.ok(css.includes('#appContainer .forecast-status-active'));
     assert.ok(css.includes('#appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button).active'));
-    assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單<\/h2>/);
-    assert.ok(html.includes('styles.css?v=20261011-7'));
+    assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單 <button[^>]*data-page-help="order-system"/);
+    assert.ok(html.includes('styles.css?v=20261011-9'));
     assert.ok(css.includes('#appContainer #myQuotesPanel > table :is(th, td):nth-child(6)'));
     assert.ok(css.includes('#appContainer #quote-system .quote-more-actions > summary'));
     assert.ok(css.includes('@media screen and (min-width: 769px)'));
