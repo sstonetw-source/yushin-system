@@ -724,10 +724,11 @@ button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
 .order-primary-toolbar { position:relative; }
 #orderSearch, #poListSearch, #myQuoteSearch, #eqSearchInput { flex:1 1 260px; max-width:440px; min-width:0; }
 .order-export-tools { position:relative; }
-.order-export-tools > summary { list-style:none; padding:8px 16px; border-radius:4px; background:#003366; color:#fff; font-size:14px; cursor:pointer; user-select:none; }
+.order-export-tools > summary { list-style:none; padding:8px 16px; min-height:44px; box-sizing:border-box; border:1px solid var(--ys-border); border-radius:8px; background:var(--ys-surface); color:var(--ys-muted); font-size:14px; cursor:pointer; user-select:none; }
 .order-export-tools > summary::-webkit-details-marker { display:none; }
-.order-export-tools[open] > summary { background:#00509e; }
-.order-export-panel { position:absolute; right:0; top:calc(100% + 6px); z-index:30; display:grid; grid-template-columns:auto minmax(135px,1fr) auto minmax(135px,1fr); gap:8px; align-items:center; width:max-content; max-width:calc(100vw - 40px); padding:12px; border:1px solid #bbb; border-radius:7px; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,.2); }
+.order-export-tools[open] > summary, .order-export-tools > summary:hover { background:var(--ys-selected); color:var(--ys-primary-hover); border-color:var(--ys-primary); }
+.order-export-tools > summary:focus-visible { outline:3px solid var(--ys-primary); outline-offset:2px; }
+.order-export-panel { position:absolute; right:0; top:calc(100% + 6px); z-index:30; display:grid; grid-template-columns:auto minmax(135px,1fr) auto minmax(135px,1fr); gap:8px; align-items:center; width:max-content; max-width:calc(100vw - 40px); padding:12px; border:1px solid var(--ys-border); border-radius:8px; background:var(--ys-surface); color:var(--ys-text); box-shadow:0 6px 20px rgba(0,0,0,.12); }
 .order-export-panel label, .order-export-panel span { font-size:12px; white-space:nowrap; }
 .order-export-panel button { grid-column:1 / -1; }
 .panel { border: 1px solid #ddd; border-radius: 6px; padding: 15px; margin-bottom: 15px; background: #fafbfd; }
