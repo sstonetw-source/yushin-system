@@ -4278,3 +4278,8 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 .page-help-body li + li { margin-top: 8px; }
 @media (min-height: 832px) { .page-help-body { max-height: 698px; } }
 @media (max-width: 767px) { .page-help-header, .page-help-body { padding: 16px; } }
+
+/* Keep the single help entry next to the title on every viewport. */
+#appContainer .workspace-page-title { display: flex; align-items: center; gap: 8px; }
+#appContainer .workspace-page-title > .page-help-trigger { position: relative; flex: 0 0 44px; width: 44px; height: 44px; margin: 0; padding: 0; }
+#pageHelpSources[hidden] { display: none !important; }

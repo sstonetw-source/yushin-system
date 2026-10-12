@@ -2,60 +2,39 @@
 (function () {
     'use strict';
     const pages = {
-        'quote-system': { title: '估價單', permission: 'quote', scope: 'quotes', purpose: '製作估價單、三家比價與決標單價分析，查詢既有估價紀錄。', steps: ['選擇報價公司，填寫客戶與品項，確認金額後儲存或匯出 PDF。', '在估價單清單搜尋、查看或調出既有紀錄；成交後可依權限建立客戶訂單。'] },
-        'forecast-system': { title: 'Forecast', permission: 'forecast', scope: 'forecasts', purpose: '追蹤客戶案件、預估金額及成交進度。', steps: ['新增案件後持續更新進度，成交或未成交時結案。', 'Stage 1：需求確認／Demo；2：報價／規格／方案；3：預算／經費申請；4：採購／標案／議價；5：成交／交機。', '進行中：持續追蹤；Win：成交結案；Lost：未成交結案。'] },
-        'product-system': { title: '產品', permission: 'products', purpose: '搜尋產品主檔、查看庫存狀態，選品後帶入同一張單據。', steps: ['先選廠牌，再輸入完整貨號並按「搜尋產品」；需要產品清單時使用「瀏覽此廠牌產品」。', '勾選品項後，可依權限加入估價單、訂單或採購單。'] },
-        'order-system': { title: '訂單', permission: 'orders.list', scope: 'orders', purpose: '管理客戶訂單，查看各品項採購、到貨、打單、送貨與核銷進度。', steps: ['新增訂單可一次加入多個品項；後續採購、到貨與出貨可依品項分批處理。', '已到貨品項完成打單後，業務可領貨或送貨，不必等待整張訂單全部到貨。', '核銷可先辦理，不必等所有品項完成送貨。取消與退貨請從原訂單處理，並確認畫面列出的庫存及採購影響。'] },
-        'purchasing-system': { title: '採購', permission: 'orders.po', scope: 'orders', purpose: '處理客戶訂單採購需求、備貨與安全庫存補貨，追蹤採購單及到貨進度。', steps: ['選擇待採購品項，確認供應商與成本後建立採購單，或使用既有直接採購操作。', '依品項追蹤到貨；完成打單後，客戶訂單繼續進入送貨與核銷流程。', '客戶取消訂單後，已向供應商採購的貨品仍須另行確認是否能取消採購；無法取消的貨品到貨後成為可用庫存。'] },
-        'inventory-system': { title: '倉庫', permission: 'inventory', purpose: '管理各倉庫數量，確認採購、退貨與調撥收貨，安排出貨及領貨。', steps: ['庫存清單：查看現有、已占用、可用與在途數量，依權限調整數量、庫存策略或調撥。', '收貨：點貨後確認實收數量；退貨申請本身不增加庫存，實際收貨才入庫。', '出貨：依出貨倉庫及交付方式處理主倉、分倉、調回主倉與待領貨；可列印出貨清單與地址貼紙。', '寄給業務後仍須由業務完成客戶送貨；分倉貨品可直接寄客戶，或先調回主倉。'] },
-        'equipment-system': { title: '儀器', permission: 'equipment', scope: 'equipment', purpose: '管理客戶儀器與維修、保養、校正紀錄，查詢下次到期日。', steps: ['搜尋或篩選儀器，開啟紀錄查看基本資料與維修保養歷程。', '批量匯入依儀器編號新增或更新，保留既有維修保養紀錄；匯出以目前已載入的篩選結果為範圍。'] },
-        'admin-system': { title: '管理員後台', permission: 'admin', purpose: '管理人員、廠牌、價目表、倉庫設定與進銷存分析，執行資料檢查及備份。', steps: ['選擇對應工作分頁；單一產品的日常操作使用「產品」頁面。', '資料檢查、備份與用量計算需手動執行；執行前先確認範圍與資料讀取影響。', '刪除價目表、清除資料或人員交接前，請核對預覽與確認訊息。'] }
+        'quote-system': { title: '估價單', permission: 'quote', purpose: '製作估價單、三家比價與決標單價分析，查詢既有報價。', notes: ['儲存或匯出前，核對報價公司、品項與金額。', '成交後建立訂單；估價單本身不會扣庫存。', '搜尋涵蓋授權的歷史資料，清單預設先顯示近期紀錄。'] },
+        'forecast-system': { title: 'Forecast', permission: 'forecast', purpose: '追蹤客戶案件、預估金額與成交進度。', notes: ['有新進展時更新進度，成交或未成交時結案。', 'Stage 1～5：需求確認、報價方案、預算申請、採購議價、成交交機。', '進行中持續追蹤；Win 為成交，Lost 為未成交。'] },
+        'product-system': { title: '產品', permission: 'products', purpose: '搜尋產品、查看庫存，選品後帶入估價單、訂單或採購單。', notes: ['先選廠牌，再輸入完整貨號按搜尋；開頭的 0 必須保留。', '可跨搜尋選品，再一次帶入同一張單據。', '選擇廠牌不會載入產品；需要清單時按「瀏覽此廠牌產品」。'] },
+        'order-system': { title: '訂單', permission: 'orders.list', purpose: '管理客戶訂單，追蹤採購、到貨、打單、送貨與核銷。', notes: ['可依品項分批處理；完成打單的品項可先送貨。', '核銷可先辦理，不必等待全部送貨。', '取消或退貨前，確認畫面列出的採購與庫存影響。'] },
+        'purchasing-system': { title: '採購', permission: 'orders.po', purpose: '處理訂單採購、備貨及安全庫存補貨，追蹤採購單與到貨。', notes: ['建立採購前核對供應商、數量與成本；建立後列入待到貨。', '客戶取消訂單，不代表供應商採購也已取消；無法取消的貨到貨後成為庫存。', '完成打單後，客戶訂單仍須繼續送貨與核銷。'] },
+        'inventory-system': { title: '倉庫', permission: 'inventory', purpose: '查看各倉庫庫存，辦理收貨、出貨、調撥與領貨。', notes: ['退貨申請不增加庫存，實際點收後才入庫。', '寄給業務後仍須登記送達客戶；取回貨品須先設定退回倉庫，再寄回點收。', '可用庫存＝現有庫存－已占用；在途為已採購但尚未到貨的數量。'] },
+        'equipment-system': { title: '儀器', permission: 'equipment', purpose: '管理客戶儀器與維修、保養、校正紀錄，追蹤下次到期日。', notes: ['批量匯入依儀器編號新增或更新，保留既有維修保養紀錄。', '匯出只包含目前已載入的篩選結果。', '儀器資料依歸屬維護；維修保養紀錄由工程師或管理員處理。'] },
+        'admin-system': { title: '管理員後台', permission: 'admin', purpose: '管理人員、廠牌、價目表與倉庫設定，查看分析與執行資料維護。', notes: ['單一產品的日常操作請到「產品」頁面。', '資料檢查、備份與用量計算會讀取資料，需手動執行。', '刪除、清除資料或交接前，先核對預覽與確認訊息。'] }
     };
-    const contexts = {
-        inventoryStockPanel: '庫存清單', inventoryReceivingPanel: '收貨', inventoryShippingPanel: '出貨',
-        quoteCreatePanel: '建立估價單', myQuotesPanel: '估價單清單',
-        purchasePendingPanel: '待採購', poListPanel: '採購單清單', purchaseDispatchPanel: '待打單',
-        purchaseCompletedPanel: '已完成打單', purchaseSupplierPanel: '供應商設定',
-        'admin-sales': '人員名單', 'admin-agencies': '廠牌管理', 'admin-products': '價目表管理',
-        'admin-statistics': '進銷存分析', 'admin-warehouses': '倉庫管理', 'admin-health': '資料健康',
-        'admin-transfer': '人員異動交接', 'admin-storage': '資料庫管理'
+    const adminPages = {
+        'admin-sales': { purpose: '查看人員帳號、角色與聯絡資訊，寄送密碼重設信。', notes: ['登入帳號在 Firebase Authentication 建立或停用。', '姓名、代號與角色需在使用者資料中一致設定。'] },
+        'admin-agencies': { purpose: '管理廠牌標準名稱、別名、獨立統計與報價公司限制。', notes: ['常見縮寫放在別名，避免重複建立廠牌。', '未設獨立統計的廠牌，在分析中歸入其他廠牌。', '未限制報價公司時，三家公司均可報價。'] },
+        'admin-products': { purpose: '上傳與刪除整批價目表，管理標準價格及成本。', notes: ['上傳前先核對新增、更新與錯誤預覽。', '新版只更新檔案內的品項；完全替換時先刪除舊價目表。', '刪除價目表不會刪除產品主檔、歷史單據或庫存。'] },
+        'admin-statistics': { purpose: '查看採購、銷售與庫存分析，依條件篩選及匯出。', notes: ['先確認期間、廠牌與其他篩選條件。', '毛利以系統記錄的銷售金額與成本計算；缺少成本時須先補齊。'] },
+        'admin-warehouses': { purpose: '管理倉庫、外倉及收件設定。', notes: ['出貨依實際庫存所在倉庫安排。', '外倉出貨請從倉庫出貨分頁處理。'] },
+        'admin-health': { purpose: '檢查主檔缺漏、重複資料及訂單、採購、庫存關聯。', notes: ['這是唯讀檢查，不會修改或刪除資料。', '需讀取多個資料集合，請按需手動執行。'] },
+        'admin-transfer': { purpose: '將業務代號交接給接手同仁。', notes: ['先檢查交接內容，再確認執行。', '交接依業務代號處理，保留歷史姓名與操作紀錄。'] },
+        'admin-storage': { purpose: '備份與檢查資料庫，依需求清理測試資料。', notes: ['備份與用量計算會讀取全部資料，請按需執行。', '清除前核對保留範圍；永久清除無法直接復原。', '補回缺少的文件前，先檢查上傳備份內容。'] }
     };
     const visible = node => !!node && !node.hidden && node.getClientRects().length > 0;
-    const allowed = name => typeof window[name] === 'function' && window[name]();
     function section(body, title, lines) {
-        if (!lines.length) return;
         const group = document.createElement('section');
         const heading = document.createElement('h4'); heading.textContent = title;
         const list = document.createElement('ul');
         lines.forEach(text => { const item = document.createElement('li'); item.textContent = text; list.append(item); });
         group.append(heading, list); body.append(group);
     }
-    function permissions(page) {
-        const role = typeof currentUserRole === 'undefined' ? null : currentUserRole;
-        const label = typeof ROLE_LABELS === 'undefined' ? '' : ROLE_LABELS[role];
-        const level = typeof getPagePermission === 'function' ? getPagePermission(page.permission) : 'none';
-        const lines = [`目前身份：${label || '尚未確認'}；本頁${level === 'edit' ? '可操作' : level === 'view' ? '可查看' : '無存取權限'}。`];
-        if (level === 'none') return lines;
-        if (page.scope && typeof getDataScope === 'function') {
-            const scope = getDataScope(page.scope);
-            lines.push(scope === 'all' ? '資料範圍：全部授權資料。' : scope === 'own' ? '資料範圍：自己負責或系統授權給自己的紀錄。' : '資料範圍依目前帳號的授權限制。');
-        }
-        const key = page.permission;
-        if (key === 'products') {
-            lines.push(allowed('canManagePendingProductMaster') ? '可新增與編輯產品主檔。' : '產品主檔可查看；選品建立單據仍依各單據權限。');
-            if (allowed('canDeleteProductMaster')) lines.push('可永久刪除產品主檔；執行前須確認影響。');
-        }
-        if (key === 'forecast') lines.push(allowed('canCreateForecastCapability') ? '可新增案件與更新進度。' : '無新增案件權限。');
-        if (key === 'orders.list') lines.push(allowed('canManageOrderLifecycleCapability') ? '可依訂單歸屬及品項狀態辦理自行訂貨、送貨、核銷、取消與退貨。' : '客戶送貨、取消與退貨由有訂單處理權限的人員辦理。');
-        if (key === 'orders.po') lines.push(allowed('canCreatePurchaseOrderCapability') ? '可建立採購單與處理採購需求。' : '採購單可查看；建立採購單由採購或管理員辦理。');
-        if (key === 'inventory') {
-            lines.push(allowed('canReceiveInventoryCapability') ? '可辦理收貨與倉庫作業。' : '可查看庫存，無收貨與倉庫數量異動權限。');
-            if (allowed('canManageInventoryStockPolicy')) lines.push('可設定庫存策略與安全庫存。');
-            if (allowed('canManageInventoryList')) lines.push('可移出或恢復庫存清單品項。');
-        }
-        if (key === 'equipment') lines.push(allowed('canManageEquipmentCapability') ? '可維護儀器與維修保養紀錄。' : '可依歸屬維護儀器基本資料；維修保養紀錄由工程師或管理員維護。');
-        lines.push('實際操作仍依資料歸屬、品項狀態及系統權限檢查。');
-        return lines;
+    function roleNote(page) {
+        if (typeof getPagePermission !== 'function') return '';
+        const level = getPagePermission(page.permission);
+        if (level === 'none') return '目前角色無此頁面的存取權限。';
+        if (page.permission === 'products' && typeof canManagePendingProductMaster === 'function' && canManagePendingProductMaster()) return '可新增與編輯產品主檔；永久刪除限管理員。';
+        return level === 'view' ? '目前角色可查看；資料修改由有操作權限的人員辦理。' : '';
     }
     function init() {
         const dialog = document.getElementById('pageHelpDialog');
@@ -70,15 +49,11 @@
             trigger = button;
             document.getElementById('pageHelpTitle').textContent = page.title + '｜頁面說明';
             body.replaceChildren();
-            section(body, '頁面功能', [page.purpose]);
-            const context = Object.keys(contexts).find(id => owner.contains(document.getElementById(id)) && visible(document.getElementById(id)));
-            if (context) section(body, '目前分頁', [contexts[context]]);
-            section(body, '主要操作', page.steps);
-            section(body, '目前角色權限', permissions(page));
-            const notes = Array.from(document.querySelectorAll('[data-page-help-source]'))
-                .filter(node => node.dataset.pageHelpSource === key && (!node.dataset.helpContext || visible(document.getElementById(node.dataset.helpContext))))
-                .map(node => node.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
-            section(body, '操作補充', [...new Set(notes)]);
+            const adminContext = key === 'admin-system' ? Object.keys(adminPages).find(id => visible(document.getElementById(id))) : '';
+            const content = adminContext ? adminPages[adminContext] : page;
+            section(body, '頁面功能', [content.purpose]);
+            const restriction = roleNote(page);
+            section(body, '注意事項', restriction ? [...content.notes, restriction] : content.notes);
             dialog.showModal();
             body.scrollTop = 0;
         });
