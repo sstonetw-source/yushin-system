@@ -90,7 +90,7 @@
   }
 
   function quantityAdjustmentLots(lots=[],current=0,target=0,reserved=0,unbatchedId='',adjustmentId=''){
-    if(!Number.isFinite(target)||target<0||target<Number(reserved||0))throw new Error('盤點數量不可小於已占用數量');
+    if(!Number.isFinite(target)||target<0||target<Number(reserved||0))throw new Error('盤點數量不可小於已預留數量');
     const result=reconcileStockLots(lots,current,unbatchedId);
     const delta=target-Number(current);
     let allocations=[];

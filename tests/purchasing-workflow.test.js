@@ -572,7 +572,7 @@ test('supply receipt synchronizes received quantity back to the source order ite
 test('self-order receipt uses receiving core receivedQty without adding it twice',()=>{
     assert.match(app,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
     assert.match(app,/const next=receiptPlan\.item/);
-    assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存占用紀錄/);
+    assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存預留紀錄/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
 });
 

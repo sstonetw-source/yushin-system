@@ -490,7 +490,7 @@ test('new order reports committed success even when source quote update fails', 
     messages.length=0;
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
     assert.equal(messages.length,0);
-    assert.match(elements.get('actionFeedback').textContent,/訂單已建立，庫存占用已同步/);
+    assert.match(elements.get('actionFeedback').textContent,/訂單已建立，庫存預留已同步/);
     context.data={sourceType:'',customerName:'Customer',orderDate:'2026-09-27'};
     context.reserveInventoryForNewOrder=async()=>{throw new Error('庫存同步失敗');};
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
@@ -2607,7 +2607,7 @@ test('receipt allocation and affected-order refresh use bounded batched reads', 
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
     const allocateEnd=appSource.indexOf('async function refreshAffectedOrderCaches',allocateStart);
     const allocateSource=appSource.slice(allocateStart,allocateEnd);
-    assert.match(allocateSource,/firestoreReadWithTimeout\(q\.get\(\),'庫存占用候選'\)/);
+    assert.match(allocateSource,/firestoreReadWithTimeout\(q\.get\(\),'庫存預留候選'\)/);
 
     const refreshStart=appSource.indexOf('async function refreshAffectedOrderCaches');
     const refreshEnd=appSource.indexOf('async function receiveSupplyOrderRecord',refreshStart);
@@ -2678,7 +2678,7 @@ test('product save buttons show feedback during duplicate checks', () => {
 
 test('customer preference and inventory detail reads are bounded', () => {
     assert.match(appSource,/客戶估價偏好/);
-    assert.match(appSource,/庫存占用明細/);
+    assert.match(appSource,/庫存預留明細/);
 
     const preferenceStart=appSource.indexOf('window.applyCustomerQuotePreferences = async function');
     const preferenceEnd=appSource.indexOf('\nwindow.addQuoteCustomField',preferenceStart);
@@ -3220,7 +3220,7 @@ test('order list skips search-string work when no keyword and batches DOM insert
 test('high frequency lookup reads are bounded', () => {
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'產品主檔'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('quotes'\)\.doc\(forecast\.sourceId\)\.get\(\)[\s\S]*?'Forecast 來源估價單'/);
-    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)[\s\S]*?\.limit\(20\)[\s\S]*?'Customer Master 客戶建議'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)[\s\S]*?\.limit\(20\)[\s\S]*?'客戶主檔建議'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價偏好'/);
 });
 
@@ -4606,7 +4606,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     assert.match(quickSource,/existingSupply\?\.fulfillmentType \|\| currentFulfillmentType/);
     assert.match(quickSource,/existingSupply\?\.warehouseId \|\| currentWarehouseId/);
     assert.match(quickSource,/產品識別不可在追加採購前變更/);
-    assert.match(quickSource,/訂貨方式不可在追加採購前變更/);
+    assert.match(quickSource,/採購方式不可在追加採購前變更/);
     assert.match(quickSource,/入庫倉庫不可在追加採購前變更/);
     assert.match(quickSource,/type:'PURCHASING_MANUAL'/);
     assert.match(quickSource,/method:'PURCHASING_MANUAL'/);
@@ -5514,7 +5514,7 @@ test('customer suggestions stay bounded while full Customer Master remains lazy-
     assert.doesNotMatch(source, /ordersCache\.map\(/);
     assert.doesNotMatch(source, /querySelectorAll\('#clientList option'\)/);
     assert.match(appSource, /queueCustomerMasterSuggestions/);
-    assert.match(appSource, /\.limit\(20\)[\s\S]*Customer Master 客戶建議/);
+    assert.match(appSource, /\.limit\(20\)[\s\S]*客戶主檔建議/);
 });
 
 test('quote and decision-analysis output have no mandatory user-entered fields', () => {

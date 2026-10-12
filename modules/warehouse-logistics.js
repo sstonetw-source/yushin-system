@@ -50,7 +50,7 @@
   function partition(rows,getPlan){const groups=new Map();for(const row of rows){const p=validatePlan(getPlan(row),true),key=bundleKey(row,p);if(!groups.has(key))groups.set(key,{warehouseId:row.warehouseId,plan:p,rows:[]});groups.get(key).rows.push(row);}return [...groups.values()];}
   function transferable(stock,qty,reservedQty=0){
     if(!Number.isFinite(qty)||qty<=0)throw Error('數量必須大於 0。');
-    if(!Number.isFinite(reservedQty)||reservedQty<0||reservedQty>qty)throw Error('占用數量不正確。');
+    if(!Number.isFinite(reservedQty)||reservedQty<0||reservedQty>qty)throw Error('預留數量不正確。');
     if(Number(stock.onHand||0)<qty||Number(stock.reserved||0)<reservedQty||Number(stock.onHand||0)-Number(stock.reserved||0)<qty-reservedQty)throw Error('來源倉庫可移動庫存不足。');
   }
   function batchJobs(list,getPlan,batchId){
@@ -205,7 +205,7 @@
     if(!allowed()||shippingBatch?.busy||batchOpening)return;
     if(shippingBatch?.jobs.some(j=>!j.done)){return showActionFeedback('請先完成或關閉目前的批次視窗。','warning');}
     batchOpening=true;const button=$('warehouseShippingBatchBtn'),bs=beginActionButton(button,'核對中…');
-    try{const list=await selectedRows();for(const row of list){const p=rowPlan(row),remaining=Number(row.item.qty||row.item.orderedQty||0)-Math.max(0,Number(row.item.deliveredQty||0)-Number(row.item.returnedQty||0));if(p.mode!=='CUSTOMER_SHIP'&&(row.qty!==remaining||row.qty!==Number(row.item.reservedQty)))throw Error(row.item.itemCode+'：需剩餘數量全部到貨、占用並完成打單後才可調撥或交付業務。');}const jobs=batchJobs(list,rowPlan,lifecycleRecordId());jobs.forEach(j=>j.expectedPlan=savedRowPlan(j.row));
+    try{const list=await selectedRows();for(const row of list){const p=rowPlan(row),remaining=Number(row.item.qty||row.item.orderedQty||0)-Math.max(0,Number(row.item.deliveredQty||0)-Number(row.item.returnedQty||0));if(p.mode!=='CUSTOMER_SHIP'&&(row.qty!==remaining||row.qty!==Number(row.item.reservedQty)))throw Error(row.item.itemCode+'：需剩餘數量全部到貨、預留並完成打單後才可調撥或交付業務。');}const jobs=batchJobs(list,rowPlan,lifecycleRecordId());jobs.forEach(j=>j.expectedPlan=savedRowPlan(j.row));
       if(!queueContext)queueContext=context();
       shippingBatch={jobs,uid:currentUser.uid,role:currentUserRole,busy:false};
       modal(`<h3>確認本批已出貨</h3><p>請確認實體貨品已寄出或交付。分倉庫須收到寄出確認後才登記。</p><label>本批日期<input id="warehouseShippingBatchDate" type="date" value="${localDateString()}"></label><label>物流單號／備註<input id="warehouseShippingBatchNotes" maxlength="500"></label><div class="table-wrap"><table><thead><tr><th>業務／客戶</th><th>品項／目的地</th><th>本次數量</th><th>結果</th></tr></thead><tbody>${jobs.map((j,i)=>`<tr><td>${escapeHtml(j.row.order.salesName)}<br>${escapeHtml(j.row.order.customerName)}</td><td>${escapeHtml(j.row.item.itemCode)} ${escapeHtml(j.row.item.itemName)}<br>${escapeHtml(modes[j.plan.mode])}｜${escapeHtml(j.plan.contact||j.row.order.salesName)}<br>${escapeHtml(j.plan.address)}</td><td><input aria-label="本次出貨數量" data-batch-qty="${i}" type="number" min="0" max="${j.qty}" step="any" value="${j.qty}" ${j.plan.mode==='CUSTOMER_SHIP'?'':'readonly'}></td><td id="warehouseShippingBatchRow${i}">待處理</td></tr>`).join('')}</tbody></table></div><p>寄給客戶會同步訂單已送貨數量；交付業務及轉倉保留各自狀態。轉倉／交付業務須整個品項剩餘數量到齊才能交付。</p><p id="warehouseShippingBatchProgress" role="status"></p><div class="toolbar"><button id="warehouseShippingBatchConfirm" onclick="confirmWarehouseShippingBatch(this)">確認本批已出貨</button><button class="btn-secondary" onclick="closeWarehouseShippingBatch()">關閉</button></div>`);
@@ -271,7 +271,7 @@
     if(p.mode==='SALES_SHIP'){try{validatePlan(p,true);}catch(err){return alert(err.message);}}
     if(!confirm(`${modes[p.mode]}：${row.item.itemCode} × ${row.qty}\n將轉為業務保管待送；客戶訂單不會標為已送貨。`))return;
     const id=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());const bs=beginActionButton(button,'交付中…');
-    try{await root.commitWarehouseTransfer({id,orderId,itemId,qty:row.qty,handoff:true});delete button.dataset.operationId;await refreshRows(orderId);await loadInventory(true);showActionFeedback('已交付業務，保留訂單占用；業務送達客戶時再登錄送貨。');}
+    try{await root.commitWarehouseTransfer({id,orderId,itemId,qty:row.qty,handoff:true});delete button.dataset.operationId;await refreshRows(orderId);await loadInventory(true);showActionFeedback('已交付業務，保留訂單預留；業務送達客戶時再登錄送貨。');}
     catch(err){showActionFeedback('交付未完成：'+err.message,'warning');}finally{endActionButton(button,bs);}
   };
   root.startOrderWarehouseTransfer=async function(orderId,itemId,button){
@@ -285,7 +285,7 @@
   root.receiveWarehouseTransfer=async function(id,button){
     if(!allowed()||pending.has(id))return;if(!confirm('已點收這筆調撥貨品，確認全部入庫？'))return;
     pending.add(id);const bs=beginActionButton(button,'入庫中…');
-    try{const result=await root.commitWarehouseTransferReceipt(id);await refreshRows(result.orderId);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback('調撥已入庫，原訂單占用已移到收貨倉庫。');}
+    try{const result=await root.commitWarehouseTransferReceipt(id);await refreshRows(result.orderId);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback('調撥已入庫，原訂單預留已移到收貨倉庫。');}
     catch(err){showActionFeedback('調撥收貨未完成：'+err.message,'warning');}finally{pending.delete(id);endActionButton(button,bs);}
   };
 })(typeof globalThis!=='undefined'?globalThis:this);
@@ -305,14 +305,14 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       index=order.items.findIndex(i=>i.itemId===itemId);item=normalizedOrderItems(order)[index];
       if(!item||(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'||item.transferPendingId)throw Error('品項不可調撥。');
       const remaining=Math.max(0,Number(item.qty||item.orderedQty||0)-Math.max(0,Number(item.deliveredQty||0)-Number(item.returnedQty||0)));
-      if(qty!==remaining||qty!==Number(item.reservedQty)||qty>itemDispatchState(order,item).shippable)throw Error('轉倉或交付業務須等此品項剩餘數量全部到貨、占用並完成打單，再一次交付，避免後續到貨混到不同倉庫。');
+      if(qty!==remaining||qty!==Number(item.reservedQty)||qty>itemDispatchState(order,item).shippable)throw Error('轉倉或交付業務須等此品項剩餘數量全部到貨、預留並完成打單，再一次交付，避免後續到貨混到不同倉庫。');
       fromWarehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';inventoryId=inventoryRefFor(item)?.id||'';
       if(handoff){const p=YushinWarehouseLogistics.validatePlan(item.deliveryPlan||order.shippingInstructions||{},false);if(!['PICKUP','SALES_SHIP'].includes(p.mode))throw Error('請先設定交付業務的方式。');if(p.mode==='SALES_SHIP')YushinWarehouseLogistics.validatePlan(p,true);if(!order.ownerUid)throw Error('訂單缺少負責業務。');toWarehouseId='custody-'+order.ownerUid;}
       else{const p=YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}),target=p.warehouseId||(p.mode==='PICKUP'?defaultWarehouse()?.id:'');if(!target||target!==toWarehouseId)throw Error('請先儲存正確的轉倉設定。');if(p.mode==='TRANSFER')YushinWarehouseLogistics.validatePlan(p,true);}
       if(expectedWarehouseId&&fromWarehouseId!==expectedWarehouseId)throw Error('出貨倉庫已變更，請重新核對。');
       if(expectedPlan&&JSON.stringify(YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}))!==JSON.stringify(expectedPlan))throw Error('寄送資訊已變更，請重新核對。');
-      reservationRef=db.collection('inventoryReservations').doc(orderId+'__'+itemId);const rs=await tx.get(reservationRef);if(!rs.exists)throw Error('找不到訂單占用。');reservation=rs.data();
-      if(Number(reservation.quantity)!==qty||reservation.warehouseId!==fromWarehouseId)throw Error('訂單占用已變更。');
+      reservationRef=db.collection('inventoryReservations').doc(orderId+'__'+itemId);const rs=await tx.get(reservationRef);if(!rs.exists)throw Error('找不到訂單預留。');reservation=rs.data();
+      if(Number(reservation.quantity)!==qty||reservation.warehouseId!==fromWarehouseId)throw Error('訂單預留已變更。');
     }else if(handoff)throw Error('業務交付必須有來源訂單。');
     if(!inventoryId||!fromWarehouseId||!toWarehouseId||fromWarehouseId===toWarehouseId)throw Error('請選擇不同的來源與目的倉庫。');
     const invRef=db.collection('inventory').doc(inventoryId),invSnap=await tx.get(invRef);if(!invSnap.exists)throw Error('找不到庫存。');const inv=invSnap.data(),key=String(inv.productKey||inv.productId||'');if(!key)throw Error('庫存缺少產品識別。');
@@ -372,7 +372,7 @@ async function commitWarehouseTransferReceipt(id){
     if(!invSnap.exists||!destWh.exists||destWh.data().active===false)throw Error('目的倉庫或庫存不存在。');const inv=invSnap.data(),wh=whSnap.exists?whSnap.data():{};
     if(Number(inv.transferInTransit||0)<t.qty||Number(inv.transferFreeInTransit||0)<t.qty-t.reservedQty)throw Error('調撥途中數量不一致。');
     let order=null,orderRef=null,resRef=null;
-    if(t.orderId){orderRef=db.collection('orders').doc(t.orderId);const os=await tx.get(orderRef);if(!os.exists)throw Error('來源訂單不存在。');order=os.data();const item=order.items[t.itemIndex];if(!item||item.itemId!==t.itemId||item.transferPendingId!==id||normalizedOrderStatus(order)!=='normal')throw Error('來源訂單或調撥關聯已變更。');resRef=db.collection('inventoryReservations').doc(t.orderId+'__'+t.itemId);const rs=await tx.get(resRef);if(!rs.exists||Number(rs.data().quantity)!==t.reservedQty)throw Error('來源訂單占用不一致。');}
+    if(t.orderId){orderRef=db.collection('orders').doc(t.orderId);const os=await tx.get(orderRef);if(!os.exists)throw Error('來源訂單不存在。');order=os.data();const item=order.items[t.itemIndex];if(!item||item.itemId!==t.itemId||item.transferPendingId!==id||normalizedOrderStatus(order)!=='normal')throw Error('來源訂單或調撥關聯已變更。');resRef=db.collection('inventoryReservations').doc(t.orderId+'__'+t.itemId);const rs=await tx.get(resRef);if(!rs.exists||Number(rs.data().quantity)!==t.reservedQty)throw Error('來源訂單預留不一致。');}
     const now=new Date().toISOString();tx.update(ref,{status:'RECEIVED',receivedAt:now,receivedByUid:currentUser.uid});
     tx.update(invRef,{transferInTransit:Number(inv.transferInTransit)-t.qty,transferFreeInTransit:Number(inv.transferFreeInTransit||0)-(t.qty-t.reservedQty),updatedAt:now});
     tx.set(whRef,{productKey:t.productKey,productId:t.productId,warehouseId:t.toWarehouseId,itemCode:t.itemCode,itemName:t.itemName,brand:t.brand||'',brandId:t.brandId||'',onHand:Number(wh.onHand||0)+t.qty,reserved:Number(wh.reserved||0)+t.reservedQty,incoming:Number(wh.incoming||0),updatedAt:now},{merge:true});writeTransferLots(tx,t,inv,now);

@@ -24,7 +24,7 @@
           const orderWrites=writes.filter(row=>row.ref.path===orderRef.path&&row.method!=='delete');
           const afterOrder=orderWrites.reduce((data,row)=>({...data,...row.data}),orderData);
           const index=(afterOrder.items||[]).findIndex((item,i)=>String(item.itemId||`item-${i+1}`)===reservation.itemId);
-          if(index<0)throw new Error('庫存占用缺少對應的來源訂單品項。');
+          if(index<0)throw new Error('庫存預留缺少對應的來源訂單品項。');
           write.data={...write.data,orderItemIndex:index,ownerUid:afterOrder.ownerUid||'',salesCode:afterOrder.salesCode||''};
         }
       }
@@ -52,7 +52,7 @@
         const reservations=reservationWrites.map(write=>({id:write.ref.id,...reads.get(write.ref.path)?.data,...write.data}))
           .filter(row=>row.productKey===productKey&&(!warehouseId||row.warehouseId===warehouseId));
         const orderIds=[...new Set(reservations.map(row=>row.orderId).filter(Boolean))];
-        if(orderIds.length!==1||!reservations.length||reservations.length>5)throw new Error('庫存異動缺少唯一來源訂單或同品項占用超過 5 筆，請由管理員處理。');
+        if(orderIds.length!==1||!reservations.length||reservations.length>5)throw new Error('庫存異動缺少唯一來源訂單或同品項預留超過 5 筆，請由管理員處理。');
         const orderId=orderIds[0];
         const sourceMovement=writes.find(write=>write.ref.path.startsWith('inventoryMovements/')&&write.data?.sourceId===orderId&&write.data?.productKey===productKey);
         const operationRef=db.collection('stockOperations').doc();
