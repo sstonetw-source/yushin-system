@@ -815,8 +815,8 @@ test('browser history restores internal pages without forcing Firestore reloads'
 
 
 test('quote owner wording includes both salespeople and engineers', () => {
-    assert.match(appSource, /請選擇負責人/);
-    assert.match(indexSource, /負責人：<\/label><select id="salesName"/);
+    assert.match(appSource, /請選擇負責業務/);
+    assert.match(indexSource, /負責業務：<\/label><select id="salesName"/);
 });
 
 test('quote optional item fields stay collapsed, persist, export only when filled and remember customer preferences', () => {
@@ -4784,7 +4784,7 @@ test('self-order wording stays role-neutral for business owners', () => {
     assert.ok(start>=0&&end>start);
     assert.doesNotMatch(source,/只有負責業務可自行訂貨/);
     assert.doesNotMatch(appSource,/業務自行訂貨・由負責業務處理/);
-    assert.match(appSource,/自行訂貨・由訂單負責人處理/);
+    assert.match(appSource,/自行訂貨・由訂單負責業務處理/);
 });
 
 

@@ -116,7 +116,7 @@ vm.runInContext('async '+fn('writeTradeAnalysisWorkbook'),x);
     assert.equal(saved[0].sheets.length,6);
     const sales=saved[0].sheets.find(row=>row.name==='已銷貨').sheet.rows;
     assert.equal(sales.length,3);assert.equal(sales.at(-1)['金額'],300);
-    assert.ok(saved[0].sheets[0].sheet.rows.some(row=>row['項目']==='負責人篩選範圍'));
+    assert.ok(saved[0].sheets[0].sheet.rows.some(row=>row['項目']==='負責業務篩選範圍'));
     x.currentUserRole='sales';await x.writeTradeAnalysisWorkbook(report,core.kinds,{});
     assert.equal(saved.length,1,'sales role cannot export company costs');
 });

@@ -159,7 +159,7 @@ test('order status distinguishes partial delivery, custody and transfers from co
  const item={itemId:'A',qty:5,warehouseId:'MAIN'};
  assert.equal(core.shippingStatus({},item,{delivered:2}),'部分已送貨 2／5');
  assert.equal(core.shippingStatus({},item,{delivered:5}),'已送貨');
- assert.equal(core.shippingStatus({},{...item,warehouseId:'custody-S'},{delivered:0}),'已交付負責人・待送客戶');
+ assert.equal(core.shippingStatus({},{...item,warehouseId:'custody-S'},{delivered:0}),'已交付負責業務・待送客戶');
  assert.equal(core.shippingStatus({},{...item,transferPendingId:'T'},{delivered:0}),'轉倉途中');
  assert.equal(core.shippingStatus({logisticsHistory:[{itemId:'A',action:'倉庫調撥收貨'}]},item,{delivered:0}),'已轉倉・待送客戶');
  assert.equal(core.shippingStatus({},item,{delivered:0}),'');

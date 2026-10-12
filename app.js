@@ -655,7 +655,7 @@ function canManageEquipmentCapability(role = currentUserRole) {
     return role === 'admin' || role === 'engineer';
 }
 
-// 採購代辦沿用負責人的單據歸屬；工程師也是商業單據負責人。
+// 採購代辦沿用負責業務的單據歸屬；工程師也是商業單據負責業務。
 function isSelectableCommercialOwner(person) {
     return !!person && ['sales', 'engineer'].includes(person.role)
         && person.active !== false && person.disabled !== true
@@ -984,7 +984,7 @@ function initializePageData(mainKey, options = {}) {
         }).catch(err => console.warn('廠牌設定載入失敗：', err));
     }
     if (mainKey === 'forecast') {
-        // 一般業務只看自己，不需要讀完整 users 名單；只有可看全公司 Forecast 的角色才補齊負責人篩選。
+        // 一般業務只看自己，不需要讀完整 users 名單；只有可看全公司 Forecast 的角色才補齊負責業務篩選。
         jobs.push(loadForecasts(true));
         if (canViewAllData('forecast')) {
             ensureSalesListLoaded().then(populateForecastSalesFilter).catch(err => console.warn('業務名單載入失敗：', err));
@@ -3039,7 +3039,7 @@ function populateForecastSalesFilter() {
     const signature = JSON.stringify(['all', sortedNames]);
 
     if (signature !== forecastSalesFilterSignature) {
-        select.innerHTML = '<option value="">全部負責人</option>' + sortedNames.map(name =>
+        select.innerHTML = '<option value="">全部負責業務</option>' + sortedNames.map(name =>
             `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`
         ).join('');
         forecastSalesFilterSignature = signature;
@@ -3365,7 +3365,7 @@ window.renderForecastList = function() {
                 </div>
                 <div class="forecast-card-progress">${escapeHtml(item.latestProgress || '尚未更新進度')}</div>
                 <div class="forecast-card-meta">
-                    ${escapeHtml(salesName || '未指定負責人')}${updatedDate ? ` · ${escapeHtml(updatedDate)} 更新` : ''}
+                    ${escapeHtml(salesName || '未指定負責業務')}${updatedDate ? ` · ${escapeHtml(updatedDate)} 更新` : ''}
                 </div>
             </td>
             <td data-th="客戶" class="forecast-desktop-cell">${escapeHtml(item.customerName || '')}</td>
@@ -4257,7 +4257,7 @@ function populateSalesDropdown() {
     }
 
     const currentValue = select.value;
-    select.innerHTML = '<option value="">請選擇負責人</option>';
+    select.innerHTML = '<option value="">請選擇負責業務</option>';
     visibleList.forEach(s => {
         if (s.name) {
             const option = document.createElement('option');
@@ -4297,7 +4297,7 @@ function updateSalesPhoneDisplay() {
 function populateEquipmentSalesDropdown() {
     const select = document.getElementById('eqSales');
     if (!select) return;
-    select.innerHTML = '<option value="">未指定負責人</option>';
+    select.innerHTML = '<option value="">未指定負責業務</option>';
     const visibleList = canViewAllEquipment()
         ? salesList
         : (currentUserName ? [{ name:currentUserName, code:currentUserCode, phone:currentUserPhone }] : []);
@@ -4973,7 +4973,7 @@ function renderWarehouseMasterAdmin() {
     if (!body) return;
     body.innerHTML = warehouseMasterCache.length ? warehouseMasterCache.map(item => `<tr>
         <td>${escapeHtml(item.warehouseName || '')}</td>
-        <td>${item.systemCustody?'負責人保管位置':warehouseKind(item) === 'EXTERNAL' ? '外部倉庫' : '公司倉庫'}</td>
+        <td>${item.systemCustody?'負責業務保管位置':warehouseKind(item) === 'EXTERNAL' ? '外部倉庫' : '公司倉庫'}</td>
         <td>${item.isDefault ? '是' : ''}</td>
         <td>${item.active === false ? '停用' : '啟用'}</td>
         <td>${item.systemCustody?'由交付作業維護':`<button type="button" class="btn-small btn-secondary" onclick="editWarehouseMaster(${inlineJsValue(item.id)})">編輯</button>
@@ -6307,7 +6307,7 @@ function currentQuoteOutputValidation() {
 function collectCurrentQuoteRecord() {
     const salesName = document.getElementById('salesName').value;
     const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(salesName));
-    // 負責人可以留白；業務／工程師本人輸出時仍在背景保留自己的 ownerUid / salesCode，
+    // 負責業務可以留白；業務／工程師本人輸出時仍在背景保留自己的 ownerUid / salesCode，
     // 讓權限與歷史歸屬不因畫面欄位留白而遺失。
     const selfOwnedBlankSales = !salesName && (currentUserRole === 'sales' || currentUserRole === 'engineer');
     const resolvedSalesCode = selectedSales?.code
@@ -6802,7 +6802,7 @@ function renderQuotePdfDocument(quoteData = {}) {
         <div class="meta-section">
             ${quoteData.clientName ? `<div class="meta-row"><label>抬頭：</label><span class="quote-pdf-value">${escapeHtml(quoteData.clientName)}</span></div>` : ''}
             <div class="meta-row-three">
-                <div><label>負責人：</label><span class="quote-pdf-value">${escapeHtml(quoteData.salesName || '')}${salesPhone ? '　' + escapeHtml(salesPhone) : ''}</span></div>
+                <div><label>負責業務：</label><span class="quote-pdf-value">${escapeHtml(quoteData.salesName || '')}${salesPhone ? '　' + escapeHtml(salesPhone) : ''}</span></div>
                 <div><label>估價日期：</label><span class="quote-pdf-value">${escapeHtml(quoteData.quoteDate || '')}</span></div>
                 <div><label>單號：</label><span class="quote-pdf-value quote-pdf-no">${escapeHtml(quoteData.quoteNo || '')}</span></div>
             </div>
@@ -7524,7 +7524,7 @@ async function loadMyQuotesPage(reset) {
         renderMyQuotesList();
         if (!currentUserName && myQuotesCache.length === 0) {
             hint.style.display = 'block';
-            hint.innerText = '目前找不到以此帳號建立的新式紀錄。若要顯示舊估價單，請管理員在 users 帳號資料補上姓名，以便比對舊資料的負責人。';
+            hint.innerText = '目前找不到以此帳號建立的新式紀錄。若要顯示舊估價單，請管理員在 users 帳號資料補上姓名，以便比對舊資料的負責業務。';
         }
     } catch (err) {
         if(requestedRole!==currentUserRole||requestedUid!==currentUser?.uid)return;
@@ -7593,7 +7593,7 @@ function populateMyQuoteSalesFilter() {
     ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     const signature = JSON.stringify(names);
     if (signature !== myQuoteSalesFilterSignature) {
-        select.innerHTML = '<option value="">全部負責人</option>' + names.map(name =>
+        select.innerHTML = '<option value="">全部負責業務</option>' + names.map(name =>
             `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
         myQuoteSalesFilterSignature = signature;
     }
@@ -7840,7 +7840,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
         );
         const q=cached || quoteSnapshot?.data();
         if(!q)throw new Error('找不到這張估價單');
-        if(currentUserRole==='engineer'&&!belongsToCurrentUser(q.salesName,q.ownerUid,q.salesCode))throw new Error('代建估價單請交由負責人建立訂單。');
+        if(currentUserRole==='engineer'&&!belongsToCurrentUser(q.salesName,q.ownerUid,q.salesCode))throw new Error('代建估價單請交由負責業務建立訂單。');
         if(q.dealClosed){alert('這張估價單已經標記過成交了。');return;}
         const sourceItems=(q.items||[]).filter(item=>item.nameCn||item.nameEn||item.model);
         if(!sourceItems.length)throw new Error('估價單沒有可建立訂單的品項。');
@@ -9966,7 +9966,7 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
 
-            if(!canBusinessSelfOrder(order)&&!canCreatePurchaseOrderCapability())throw new Error('只有此訂單負責人可自行訂貨。');
+            if(!canBusinessSelfOrder(order)&&!canCreatePurchaseOrderCapability())throw new Error('只有此訂單負責業務可自行訂貨。');
             if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
             const items=normalizedOrderItems(order);
             const index=items.findIndex(row=>row.itemId===itemId);
@@ -10101,7 +10101,7 @@ window.saveSelfOrder = async function() {
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
             if(orderInventorySyncIncomplete(order))throw new Error('訂單庫存尚未同步完成');
-            if(!canBusinessSelfOrder(order))throw new Error('只有此訂單負責人可自行訂貨。');
+            if(!canBusinessSelfOrder(order))throw new Error('只有此訂單負責業務可自行訂貨。');
             if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能自行訂貨。');
             const items=normalizedOrderItems(order);
             const index=items.findIndex(row=>row.itemId===itemId);
@@ -10806,7 +10806,7 @@ function populatePurchaserOrderFilters() {
     // 選項沒變時也不要每次 render 都重建 select DOM。
     if (signature !== orderFilterOptionsSignature) {
         if (enabled) {
-            salesSelect.innerHTML = '<option value="">全部負責人</option>' + sales.map(name =>
+            salesSelect.innerHTML = '<option value="">全部負責業務</option>' + sales.map(name =>
                 `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
         }
         brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
@@ -10912,7 +10912,7 @@ window.renderOrdersList = function() {
         tr.innerHTML = `
             <td class="order-date-cell" data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td class="order-customer-cell" data-th="客戶名稱"><div class="record-reference">客戶訂單${o.orderNo ? `・${escapeHtml(o.orderNo)}` : o.quoteNo ? `・來源估價單 ${escapeHtml(o.quoteNo)}` : ''}</div>${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
-            <td class="order-sales-cell" data-th="負責人">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
+            <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
             <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml((lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state))||itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td class="order-details-cell">
@@ -11248,7 +11248,7 @@ function populatePurchasingFilters() {
 
     // renderPurchasingView 會在切頁、篩選、背景更新時反覆呼叫；選項沒變就不要重建整個 select DOM。
     if (signature !== purchasingFilterOptionsSignature) {
-        salesSelect.innerHTML = '<option value="">全部負責人</option>' + sales.map(name =>
+        salesSelect.innerHTML = '<option value="">全部負責業務</option>' + sales.map(name =>
             `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
         brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
             `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('')
@@ -11546,7 +11546,7 @@ function renderPurchasingCompletedOrders(completedRows = null) {
     if (!body) return;
     const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.slice(0, purchasingCompletedVisibleLimit);
-    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責人">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項">${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">紀錄</button></td></tr>`).join('');
+    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項">${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">紀錄</button></td></tr>`).join('');
     if (status) status.textContent = rows.length
         ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
         : '目前沒有採購已完成品項';
@@ -12051,7 +12051,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
                 ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':`已打單 × ${state.pending}`}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
-            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責人">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
+            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
             fragment.appendChild(tr);
             shown++;
         });
@@ -12195,7 +12195,7 @@ function renderPendingPurchaseOrders() {
                 : selfOrder
                     ? (canBusinessSelfOrder(order)
                         ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">${autoSelfOrder?'補登異常訂貨':'登記自行訂貨'}</button>`
-                        : '<span class="order-progress-badge">自行訂貨・由訂單負責人處理</span>')
+                        : '<span class="order-progress-badge">自行訂貨・由訂單負責業務處理</span>')
                     : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')},this)">已採購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">產生採購單</button>`;
         }else{
             actionHtml='<span class="order-progress-badge">來源訂單待同步</span>';
@@ -12203,7 +12203,7 @@ function renderPendingPurchaseOrders() {
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="負責人">${escapeHtml(salesName)}</td><td data-th="待採購品項"><strong>${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}</strong><div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
+        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項"><strong>${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}</strong><div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
         fragment.appendChild(row);
         shown++;
     }
@@ -13337,7 +13337,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     const emptyHint = document.getElementById(inventory ? 'inventoryReceivingEmpty' : 'poListEmptyHint');
     const status = document.getElementById(inventory ? 'inventoryReceivingStatus' : 'poHistorySearchStatus');
     if (!tbody) return;
-    if (head) head.innerHTML = '<th>訂單日期</th><th>客戶</th><th>負責人</th><th>待到貨品項</th><th>到貨進度</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = '<th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待到貨品項</th><th>到貨進度</th><th class="no-print">操作</th>';
     tbody.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
@@ -13389,7 +13389,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             tr.innerHTML = `
                 <td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td>
                 <td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td>
-                <td data-th="負責人">${escapeHtml(order.salesName || '')}</td>
+                <td data-th="負責業務">${escapeHtml(order.salesName || '')}</td>
                 <td data-th="待到貨品項">${escapeHtml(item.itemCode || item.itemName || item.itemId || '未命名品項')} × ${progress.target}</td>
                 <td data-th="到貨進度">${progress.received > 0 ? `部分到貨 ${progress.received}/${progress.target}` : `待到貨 0/${progress.target}`}${receivingWaitHtml(evidenceSupplies)}${receivingDueHtml(due)}${receivingPlanRiskHtml(planRisk)}</td>
                 <td data-th="操作" class="no-print">${actionHtml}</td>`;
@@ -13420,7 +13420,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         if (supply.orderId) {
             if (!purchaseLineMatchesFilters(date, salesName, brand, filters)) return;
         } else {
-            // 公司備庫沒有負責人；負責人篩選不應讓真實在途採購從待到貨消失。
+            // 公司備庫沒有負責業務；負責業務篩選不應讓真實在途採購從待到貨消失。
             if (!purchaseLineMatchesFilters(date, '', brand, { ...filters, selectedSales:'' })) return;
         }
 
@@ -13451,7 +13451,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         tr.innerHTML = `
             <td data-th="訂單日期">${escapeHtml(date)}</td>
             <td data-th="客戶">${escapeHtml(customerLabel)}</td>
-            <td data-th="負責人">${escapeHtml(salesName)}</td>
+            <td data-th="負責業務">${escapeHtml(salesName)}</td>
             <td data-th="待到貨品項">${escapeHtml(supply.itemCode || supply.itemName || supply.id)} × ${ordered}</td>
             <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${escapeHtml(supplyProgress.label)}${receivingWaitHtml([supply])}${receivingDueHtml(due)}</td>
             <td data-th="操作" class="no-print">${sourceOrder && sourceStatus !== 'normal' && canCreatePurchaseOrderCapability() ? customerCancellationActions(supply) : actionHtml}</td>`;
@@ -16443,7 +16443,7 @@ function confirmOrderCancellation(order) {
 }
 
 window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
-    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責人或管理員。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     if (!['normal', 'cancelled'].includes(nextStatus)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder) return;
@@ -17097,7 +17097,7 @@ window.editDeliveryRecord = function(recordId) {
 };
 
 window.saveDeliveryRecord = async function() {
-    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責人或管理員。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     const orderId = currentDeliveryOrderId;
     const date = document.getElementById('deliveryDate').value;
     const qty = parseFloat(document.getElementById('deliveryQty').value);
@@ -17199,7 +17199,7 @@ window.saveDeliveryRecord = async function() {
 };
 
 window.deleteDeliveryRecord = async function(recordId) {
-    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責人或管理員。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     const correctionReason = prompt('僅限更正誤登的送貨紀錄，會同步回補原出貨庫存並保留異動軌跡。實際已送出的貨請申請退貨。\n\n請輸入誤登更正原因：');
     if (!correctionReason || !correctionReason.trim()) return;
     const orderId = currentDeliveryOrderId;
@@ -17256,7 +17256,7 @@ window.deleteDeliveryRecord = async function(recordId) {
 };
 
 window.clearLegacyDelivery = async function() {
-    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責人或管理員。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     if (!confirm('確定取消這筆舊資料的「已送貨」推估嗎？取消後請重新登錄正確送貨日期與數量。')) return;
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     if (!order) return;
@@ -17399,7 +17399,7 @@ function renderOrderLifecycleModal() {
 }
 
 window.saveOrderLifecycleStatus = async function() {
-    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責人或管理員。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     const order = ordersCache.find(item => item.id === currentLifecycleOrderId);
     if (!order) return;
     const nextStatus = document.getElementById('orderLifecycleStatus').value;
@@ -17478,7 +17478,7 @@ window.editReturnRecord = function(recordId) {
 };
 
 window.saveReturnRecord = async function() {
-    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責人或管理員。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     const orderId = currentLifecycleOrderId;
     const date = document.getElementById('returnDate').value;
     const qty = parseFloat(document.getElementById('returnQty').value);
@@ -17560,7 +17560,7 @@ window.saveReturnRecord = async function() {
 
 window.deleteReturnRecord = async function(recordId) {
     if(savedReturnRecords(ordersCache.find(o=>o.id===currentLifecycleOrderId)||{}).some(r=>r.id===recordId && r.requestId))return alert('已確認收貨的退貨不可由業務刪除。');
-    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責人或管理員。'); return; }
+    if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     if (!confirm('確定要刪除這筆退貨紀錄嗎？異動軌跡仍會保留。')) return;
     const orderId = currentLifecycleOrderId;
     if (!orderId || pendingReturnOrderIds.has(orderId)) return;
@@ -17670,7 +17670,7 @@ function populateOrderOwnerSelect() {
     wrap.style.display = currentUserRole === 'purchaser' ? '' : 'none';
     if (currentUserRole !== 'purchaser') return;
     const salespeople = salesList.filter(isSelectableCommercialOwner);
-    select.replaceChildren(new Option('請選擇負責人', ''));
+    select.replaceChildren(new Option('請選擇負責業務', ''));
     salespeople.forEach(person => select.add(new Option(`${person.name}（${person.code}・${ROLE_LABELS[person.role]}）`, person.uid)));
     select.value = salespeople.some(person => person.uid === requestedOrderOwnerUid) ? requestedOrderOwnerUid : '';
 }
@@ -18049,7 +18049,7 @@ window.openOrderModal = function(source = null) {
                 .then(() => {
                     if (openingGeneration === orderModalOpenGeneration) {populateOrderOwnerSelect();window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);}
                 })
-                .catch(err => console.error('讀取負責人名單失敗：', err));
+                .catch(err => console.error('讀取負責業務名單失敗：', err));
         }
 
         populateOrderBrandDropdown();
@@ -18259,7 +18259,7 @@ window.saveNewOrder = function() {
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
             && isSelectableCommercialOwner(person))
         : null;
-    if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責人。'); return; }
+    if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
     if(items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&(!String(item.supplier||'').trim()||item.costPrice===null||item.costPrice===undefined||String(item.costPrice).trim()===''||!Number.isFinite(Number(item.costPrice))||Number(item.costPrice)<0))){alert('自行訂貨品項請填寫供應商與含稅進價（可填 0）；建立訂單後會直接列入待到貨。');return;}
     let shippingInstructions;try{shippingInstructions=globalThis.YushinWarehouseLogistics?.validatePlan(window.orderShippingInstructions?.()||{},items.some(item=>item.fulfillmentType!=='DIRECT_SHIP'));}catch(err){alert(err.message);return;}
     items.forEach(item=>{delete item.productCheckStatus;});
@@ -18479,7 +18479,7 @@ window.exportOrdersByDate = async function() {
                     '抬頭': o.invoiceTitle || '',
                     '核銷日期': orderBillingDate(o),
                     '來源估價單': o.quoteNo || '',
-                    '負責人': stripPhoneSuffix(o.salesName)
+                    '負責業務': stripPhoneSuffix(o.salesName)
                 });
             });
 
@@ -18732,7 +18732,7 @@ function populateEquipmentListFilters() {
     const signature = JSON.stringify([canSeeAll, names, brands]);
     if (signature !== equipmentFilterOptionsSignature) {
         if (canSeeAll) {
-            salesSelect.innerHTML = '<option value="">全部負責人</option>' + names.map(name =>
+            salesSelect.innerHTML = '<option value="">全部負責業務</option>' + names.map(name =>
                 `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
         }
         brandSelect.innerHTML = '<option value="">全部廠牌</option>' + brands.map(brand =>
@@ -18779,7 +18779,7 @@ window.renderEquipmentList = function() {
             <td data-th="客戶">${escapeHtml(eq.customerName || '')}</td>
             <td data-th="廠牌">${escapeHtml(eq.brand || '－')}</td>
             <td data-th="型號/序號">${escapeHtml(eq.model || '')} / ${escapeHtml(eq.serialNo || '')}</td>
-            <td data-th="負責人">${escapeHtml(eq.salesName || '未指定')}</td>
+            <td data-th="負責業務">${escapeHtml(eq.salesName || '未指定')}</td>
             <td data-th="放置地點">${escapeHtml(eq.location || '')}</td>
             <td data-th="最近保養/校正">${fmtDate(eq.lastServiceDate)}</td>
             <td data-th="下次到期">${fmtDate(dueDate)}</td>
@@ -19233,9 +19233,9 @@ window.handleEquipmentExcelUpload = async function(input) {
                         brand: String(getField(row, ['廠牌', '品牌'])).trim(),
                         model: model,
                         serialNo: String(getField(row, ['序號'])).trim(),
-                        // 一般業務批量上傳一律歸在自己名下，忽略 Excel 裡填的負責人；管理員則照 Excel 內容
+                        // 一般業務批量上傳一律歸在自己名下，忽略 Excel 裡填的負責業務；管理員則照 Excel 內容
                         salesName: (currentUserRole === 'admin')
-                            ? String(getField(row, ['負責人', '業務'])).trim()
+                            ? String(getField(row, ['負責業務', '業務'])).trim()
                             : currentUserName,
                         location: String(getField(row, ['放置地點', '地點'])).trim(),
                         installDate: String(getField(row, ['安裝日期'])).trim(),
@@ -19328,7 +19328,7 @@ window.exportEquipmentExcel = async function() {
             '廠牌': eq.brand || '',
             '型號': eq.model || '',
             '序號': eq.serialNo || '',
-            '負責人': eq.salesName || '',
+            '負責業務': eq.salesName || '',
             '放置地點': eq.location || '',
             '安裝日期': eq.installDate || '',
             '保養週期': eq.noMaintenance ? '免保養' : (eq.cycleMonths || 12),
@@ -21259,7 +21259,7 @@ function buildTradeAnalysisRows() {
     };
     salesStatisticsOrders.flatMap(salesStatisticOrderLines).forEach(order=>{
         const common={customer:order.customerName||'',supplier:'',documentNo:order.orderNo||order.quoteNo||order.id,orderId:order.id,
-            sales:stripPhoneSuffix(order.salesName)||'未指定負責人',sourceId:order.id,itemId:order.itemId||''};
+            sales:stripPhoneSuffix(order.salesName)||'未指定負責業務',sourceId:order.id,itemId:order.itemId||''};
         const unit=orderUnitSalesAmount(order);
         const deliveries = savedDeliveryRecords(order);
         deliveries.forEach(record=>push('sales',order,Number(record.qty||0),unit,{...common,date:record.date,event:'送貨',eventId:record.id||'',status:'已送貨'}));
@@ -21312,7 +21312,7 @@ function buildTradeAnalysisReport(rows = buildTradeAnalysisRows()) {
 function tradeAnalysisExportRows(report,kind) {
     return report.details[kind].map(row=>({
         '交易日期':row.date||'','類別':TRADE_ANALYSIS_LABELS[kind],'交易':row.event,'客戶':row.customer||'','供應商':row.supplier||'',
-        '單號':row.documentNo||'','關聯客戶訂單':row.customerOrderNo||'','負責人':row.sales||'','統計廠牌':row.brand,'實際廠牌':row.rawBrand,
+        '單號':row.documentNo||'','關聯客戶訂單':row.customerOrderNo||'','負責業務':row.sales||'','統計廠牌':row.brand,'實際廠牌':row.rawBrand,
         '產品線':row.line,'產品類型':row.type,'貨號':row.code,'品名':row.name,'數量':row.qty,
         '單價／成本':row.unitPrice===null?'待補成本':row.unitPrice,'金額':row.amount===null?'待補成本':row.amount,
         '狀態':row.status,'到貨方式':row.fulfillment||'','預計到貨日':row.expectedDate||'','倉庫':row.warehouseId||'',
@@ -21350,9 +21350,9 @@ async function writeTradeAnalysisWorkbook(report,kinds,button) {
         const summary=[
             {'項目':'已完成交易期間','內容':`${filters.start} 至 ${filters.end}`},
             {'項目':'未完成及庫存','內容':'目前全部餘額'},
-            ...[['業務',filters.sales||'全部負責人'],['廠牌',filters.brand||'全部廠牌'],['產品線',filters.line||'全部產品線'],['產品類型',filters.type||'全部類型']].map(([name,value])=>({'項目':name,'內容':value})),
+            ...[['業務',filters.sales||'全部負責業務'],['廠牌',filters.brand||'全部廠牌'],['產品線',filters.line||'全部產品線'],['產品類型',filters.type||'全部類型']].map(([name,value])=>({'項目':name,'內容':value})),
             {'項目':'金額口徑','內容':'銷售含稅；採購及庫存依紀錄單位成本；不混合加總不同單位數量。'},
-            {'項目':'負責人篩選範圍','內容':'只篩銷貨與待送貨；進貨、待到貨、庫存為公司共同數字。'},
+            {'項目':'負責業務篩選範圍','內容':'只篩銷貨與待送貨；進貨、待到貨、庫存為公司共同數字。'},
             ...kinds.map(kind=>({'項目':TRADE_ANALYSIS_LABELS[kind],'內容':report.totals[kind],'明細筆數':report.details[kind].length,'待補成本筆數':report.missing[kind]}))
         ];
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summary),'篩選與總計');
@@ -21396,7 +21396,7 @@ function populateSalesStatisticsFilters(rows = buildTradeAnalysisRows()) {
     const brand = document.getElementById('salesStatsBrandFilter')?.value || '';
     const classified = rows.filter(row=>!brand||row.brand===brand);
     const selects = [
-        { id: 'salesStatsSalesFilter', label: '全部負責人', values: rows.filter(row=>['sales','pending'].includes(row.kind)).map(row=>row.sales) },
+        { id: 'salesStatsSalesFilter', label: '全部負責業務', values: rows.filter(row=>['sales','pending'].includes(row.kind)).map(row=>row.sales) },
         { id: 'salesStatsBrandFilter', label: '全部廠牌', values: [...getPrimaryBrandNames(), OTHER_BRAND_OPTION_KEY] },
         { id: 'salesStatsTypeFilter', label: '全部產品類型', values: classified.map(row=>row.type) },
         { id: 'salesStatsLineFilter', label: '全部產品線', values: classified.map(row=>row.line) }
@@ -21455,7 +21455,7 @@ function buildSalesStatisticsReport() {
     const details = [];
 
     salesStatisticsOrders.flatMap(salesStatisticOrderLines).forEach(order => {
-        const sales = stripPhoneSuffix(order.salesName) || '未指定負責人';
+        const sales = stripPhoneSuffix(order.salesName) || '未指定負責業務';
         const line = productLineForOrder(order);
         const type = productTypeForOrder(order);
         const brand = statisticBrandForOrder(order);
@@ -21611,7 +21611,7 @@ window.exportSalesStatisticsExcel = async function() {
         const { total } = report;
         const summaryRows = [
             { '項目': '統計期間', '內容': `${report.start} 至 ${report.end}` },
-            { '項目': '負責人篩選', '內容': report.salesFilter || '全部負責人' },
+            { '項目': '負責業務篩選', '內容': report.salesFilter || '全部負責業務' },
             { '項目': '廠牌篩選', '內容': report.brandFilter || '全部廠牌' },
             { '項目': '類型篩選', '內容': report.typeFilter || '全部類型' },
             { '項目': '產品線篩選', '內容': report.lineFilter || '全部產品線' },
@@ -21637,7 +21637,7 @@ window.exportSalesStatisticsExcel = async function() {
                     '來源估價單': order.quoteNo || '',
                     '採購單號': order.purchaseOrderNo || '',
                     '客戶名稱': order.customerName || '',
-                    '負責人': sales,
+                    '負責業務': sales,
                     '統計廠牌': brand,
                     '原始廠牌': order.brand || '',
                     '產品類型': type,
@@ -21777,7 +21777,7 @@ function escapeAttr(str) {
 }
 
 // 早期估價單/訂單的「業務」欄位存的是「姓名 電話」黏在一起的舊格式（例如「周博恩 0937-907-169」），
-// 訂單管理系統的「負責人」欄位只需要顯示姓名，這裡統一去掉後面的電話號碼
+// 訂單管理系統的「負責業務」欄位只需要顯示姓名，這裡統一去掉後面的電話號碼
 function stripPhoneSuffix(name) {
     if (!name) return '';
     return name.toString().replace(/\s+\d[\d\-]{6,}\s*$/, '').trim();
@@ -21931,7 +21931,7 @@ window.reloadSalesFromUsers = function() {
     });
 };
 
-/* ---------- 業務代號交接：資料歸屬維持 salesCode，只更換代號目前負責人 ---------- */
+/* ---------- 業務代號交接：資料歸屬維持 salesCode，只更換代號目前負責業務 ---------- */
 function populateTransferDropdowns() {
     const codeSelect = document.getElementById('transferFromSales');
     const userSelect = document.getElementById('transferToSales');
@@ -22016,7 +22016,7 @@ window.previewSalesTransfer = async function() {
         return;
     }
     if (currentHolder?.uid === target.uid) {
-        resultEl.innerText = '這位同仁目前已經是此業務代號的負責人。';
+        resultEl.innerText = '這位同仁目前已經是此業務代號的負責業務。';
         return;
     }
     if (target.code && String(target.code) !== String(salesCode)) {
@@ -22028,10 +22028,10 @@ window.previewSalesTransfer = async function() {
     try {
         const counts = await countLegacyRecordsForSalesCode(currentHolder);
         resultEl.innerText =
-            `業務代號：${salesCode}\n目前負責人：${currentHolder?.name || '未指定'}\n接手同仁：${target.name}\n\n` +
+            `業務代號：${salesCode}\n目前負責業務：${currentHolder?.name || '未指定'}\n接手同仁：${target.name}\n\n` +
             `舊資料需要補上 salesCode：${counts.total} 筆\n` +
             `・估價單 ${counts.quotes || 0}\n・訂單 ${counts.orders || 0}\n・Forecast ${counts.forecasts || 0}\n・儀器 ${counts.equipment || 0}\n\n` +
-            '交接後歷史 salesName/createdBy 不會被改寫；資料歸屬只改由此業務代號的現任負責人接手。';
+            '交接後歷史 salesName/createdBy 不會被改寫；資料歸屬只改由此業務代號的現任負責業務接手。';
         executeBtn.style.display = '';
     } catch (err) {
         resultEl.innerText = '檢查失敗：' + err.message;

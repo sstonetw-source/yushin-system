@@ -33,5 +33,5 @@ test('customer shipment labels use actual shipment evidence and do not treat cus
   assert.equal(logistics.shippingStatus(order,item,{delivered:2}),'部分已寄客戶 2／5');
   assert.equal(logistics.shippingStatus(order,{...item,itemId:'other'},{delivered:5}),'已送貨');
   assert.equal(logistics.shippingStatus({}, {...item,warehouseId:'custody-OWNER',deliveryPlan:{mode:'SALES_SHIP'}},
-    {delivered:0}),'已寄負責人・待送客戶');
+    {delivered:0}),'已寄負責業務・待送客戶');
 });
