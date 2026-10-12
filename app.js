@@ -16670,6 +16670,10 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     if(order.transferPendingId)throw new Error('此品項尚在倉庫調撥途中，請目的倉先確認收貨。');
     const deliveryPlan=globalThis.YushinWarehouseLogistics?.plan(order.deliveryPlan||order.shippingInstructions||{});
     if(deltaQty>0&&(order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&deliveryPlan?.mode==='PICKUP'&&order.warehouseId&&order.warehouseId!==defaultWarehouse()?.id&&!String(order.warehouseId).startsWith('custody-'))throw new Error('主倉自領品項仍在分倉，請先完成調回主倉與收貨。');
+    if(deltaQty>0&&globalThis.YushinWarehouseLogistics?.businessDeliveryState&&typeof canReceiveInventoryCapability==='function'&&!canReceiveInventoryCapability()){
+        const state=globalThis.YushinWarehouseLogistics.businessDeliveryState(order,order,{shippable:deltaQty},defaultWarehouse()?.id||'');
+        if(!state.shippable)throw new Error(state.deliveryWait+'，目前不能登錄已送貨。');
+    }
     if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return { reservedDelta:0,newReservedQty:Math.max(0,Number(order.reservedQty||0)),lotAllocations:[],cogs:0 };
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
