@@ -1150,7 +1150,7 @@ test('completion date includes a later return date when the order is still net c
     assert.ok(start>=0&&end>start);
     const context=vm.createContext({
         deliveryProgressInfo:()=>({state:'complete'}),
-        orderInvoiceDate:()=> '2026-09-02',
+        orderBillingDate:()=> '2026-09-02',
         savedDeliveryRecords:()=>[
             {date:'2026-09-01',qty:10},
             {date:'2026-09-05',qty:2}

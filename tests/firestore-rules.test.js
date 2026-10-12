@@ -893,12 +893,13 @@ for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','wa
     await seed('orders/receipt-order',{ownerUid:'sales1',salesCode:'S01',status:'active',items:[item]});
     const demand=demandCore.demandDocument({demandId:'SALES_ORDER:receipt-order:I1',sourceType:'SALES_ORDER',
       sourceId:'receipt-order',sourceItemId:'I1',sourceItemIndex:0,productId:productKey,productKey,
-      ownerUid:'sales1',salesCode:'S01',requestedQty:1,orderedQty:1,receivedQty:0});
+      ownerUid:'sales1',salesCode:'S01',requestedQty:1,orderedQty:1,receivedQty:0,scheduleDate:'2026-10-20'});
     await seed('procurementDemands/'+encodeURIComponent(demand.demandId),demand);
     const supply={type:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'receipt-order',sourceItemId:'I1',
       orderId:'receipt-order',itemId:'I1',orderItemIndex:0,demandId:demand.demandId,ownerUid:'sales1',salesCode:'S01',
       productId:productKey,productKey,itemCode:'52304',qty:1,receivedQty:0,incomingRegisteredQty:1,
-      status:'ORDERED',warehouseId,unitCost:10,fulfillmentType:'WAREHOUSE',supplier:'Vendor'};
+      status:'ORDERED',warehouseId,unitCost:10,fulfillmentType:'WAREHOUSE',supplier:'Vendor',
+      scheduleDate:'2026-11-01',expectedDate:'2026-11-01'};
     await seed('supplyOrders/receipt-supply',supply);
     await seed('receivingSupplyOrders/receipt-supply',stockPermissions.sanitizeSupply(supply));
     const invPath='inventory/'+encodeURIComponent(productKey);
@@ -936,6 +937,8 @@ for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','wa
     }
     assert.equal((await getDoc(doc(db('admin'),'supplyOrders/receipt-supply'))).data().receivedQty,1);
     assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent(demand.demandId)))).data().receivedQty,1);
+    assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent(demand.demandId)))).data().scheduleDate,'2026-10-20');
+    assert.equal((await getDoc(doc(db('admin'),'supplyOrders/receipt-supply'))).data().expectedDate,'2026-11-01');
     assert.equal((await getDoc(doc(db('admin'),'orders/receipt-order'))).data().items[0].receivedQty,1);
     assert.equal((await getDocs(collection(db('admin'),'receipts'))).size,1);
     assert.equal((await getDocs(collection(db('admin'),'inventoryLots'))).size,1);
@@ -953,6 +956,41 @@ test('either cancellation field blocks supplier receipt until purchasing keeps s
       status:'ORDERED',customerCancellationDisposition:'KEEP_STOCK'});
     await assertSucceeds(updateDoc(ref,{receivedQty:1,status:'RECEIVED'}));
   }
+});
+
+test('all receiving roles reject live reservations when either order status is cancelled or voided',async()=>{
+  for(const status of [{status:'cancelled',orderStatus:'normal'},{status:'voided',orderStatus:'normal'},
+    {status:'active',orderStatus:'cancelled'},{status:'active',orderStatus:'voided'}]){
+    await seed('orders/cancelled-reservation',{...status,ownerUid:'sales1',salesCode:'S01',
+      items:[{itemId:'I1',productId:'P1',qty:1,warehouseId:'W1'}]});
+    const data={orderId:'cancelled-reservation',itemId:'I1',orderItemIndex:0,productKey:'P1',warehouseId:'W1',
+      ownerUid:'sales1',salesCode:'S01',quantity:1,shortageQty:0,status:'active'};
+    for(const uid of ['admin','buyer1','wh1','sales1']){
+      const ref=doc(db(uid),'inventoryReservations/cancelled-reservation__I1');
+      await assertFails(setDoc(ref,data));
+      await assertSucceeds(setDoc(ref,{...data,quantity:0,status:'cancelled'}));
+    }
+  }
+});
+
+test('purchasing may keep cancelled supplier stock regardless of which order status field contains cancellation',async()=>{
+  for(const status of [{status:'cancelled',orderStatus:'normal'},{status:'voided',orderStatus:'normal'},
+    {status:'active',orderStatus:'cancelled'},{status:'active',orderStatus:'voided'}]){
+    await seed('orders/keep-stock-status',status);
+    const supply={type:'PURCHASING_PO',orderId:'keep-stock-status',productKey:'P1',status:'ORDERED',qty:1,
+      receivedQty:0,fulfillmentType:'WAREHOUSE',warehouseId:'W1',incomingRegisteredQty:1};
+    await seed('supplyOrders/keep-stock-status',supply);
+    const patch={customerCancellationDisposition:'KEEP_STOCK',customerCancellationResolvedAt:'now',
+      customerCancellationResolvedBy:'buyer1',updatedAt:'now'};
+    await assertFails(updateDoc(doc(db('wh1'),'supplyOrders/keep-stock-status'),patch));
+    await assertSucceeds(updateDoc(doc(db('buyer1'),'supplyOrders/keep-stock-status'),patch));
+  }
+  await seed('orders/keep-stock-status',{status:'active',orderStatus:'normal'});
+  await seed('supplyOrders/keep-stock-status',{type:'PURCHASING_PO',orderId:'keep-stock-status',productKey:'P1',
+    status:'ORDERED',qty:1,receivedQty:0,fulfillmentType:'WAREHOUSE',warehouseId:'W1',incomingRegisteredQty:1});
+  await assertFails(updateDoc(doc(db('buyer1'),'supplyOrders/keep-stock-status'),{
+    customerCancellationDisposition:'KEEP_STOCK',customerCancellationResolvedAt:'now',
+    customerCancellationResolvedBy:'buyer1',updatedAt:'now'}));
 });
 
 function compatDb(uid) {

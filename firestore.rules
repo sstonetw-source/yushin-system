@@ -252,13 +252,17 @@ service cloud.firestore {
 
     // Current orders use status=active. Match normalizedOrderStatus: either
     // cancellation field blocks receipt until purchasing explicitly keeps stock.
+    function orderIsCancelled(data) {
+      return data.get('status', '') in ['cancelled', 'voided']
+        || data.get('orderStatus', '') in ['cancelled', 'voided'];
+    }
+
     function supplierReceiptDispositionAllowed() {
       let before = resource.data;
       let after = request.resource.data;
       let orderId = before.get('orderId', '');
       return after.get('receivedQty', 0) <= before.get('receivedQty', 0) || orderId == ''
-        || (!(get(/databases/$(database)/documents/orders/$(orderId)).data.get('status', '') in ['cancelled', 'voided'])
-          && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('orderStatus', '') in ['cancelled', 'voided']))
+        || !orderIsCancelled(get(/databases/$(database)/documents/orders/$(orderId)).data)
         || before.get('customerCancellationDisposition', '') == 'KEEP_STOCK';
     }
 
@@ -345,7 +349,7 @@ service cloud.firestore {
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
           'linkedDocuments',
-          'costPrice', 'transactionType', 'invoiceTitle', 'remarks', 'invoiceDate', 'fieldEditHistory',
+          'costPrice', 'transactionType', 'invoiceTitle', 'remarks', 'billingDate', 'fieldEditHistory',
           'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt',
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
@@ -535,7 +539,7 @@ service cloud.firestore {
         && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
         && data.get('quantity', 0) is number && data.get('quantity', 0) >= 0
         && data.get('quantity', 0) <= item.get('qty', 0)
-        && (!(order.get('status', '') in ['cancelled', 'voided']) || data.get('quantity', 0) == 0);
+        && (!orderIsCancelled(order) || data.get('quantity', 0) == 0);
     }
 
     function businessReservationOperationalUpdate() {
@@ -640,7 +644,7 @@ service cloud.firestore {
         && data.get('quantity', null) is number && data.quantity >= 0 && data.quantity <= item.get('qty', 0)
         && data.get('shortageQty', 0) is number && data.get('shortageQty', 0) >= 0
         && data.get('warehouseId', '') == item.get('warehouseId', order.get('warehouseId', ''))
-        && (!(order.get('status', '') in ['cancelled','voided']) || data.quantity == 0);
+        && (!orderIsCancelled(order) || data.quantity == 0);
     }
 
     function reservationIdentityUnchanged() {
@@ -810,7 +814,7 @@ service cloud.firestore {
       let invPath = /databases/$(database)/documents/inventory/$(after.get('redirectInventoryId', 'unused'));
       let whId = after.get('redirectWarehouseStockId', 'unused');
       let whPath = /databases/$(database)/documents/warehouseStocks/$(whId);
-      return purchaser() && order.get('orderStatus', order.get('status', 'normal')) in ['cancelled', 'voided']
+      return purchaser() && orderIsCancelled(order)
         && before.get('status', '') in ['ORDERED', 'PARTIAL_RECEIPT'] && remaining > 0
         && before.get('customerCancellationDisposition', '') != 'KEEP_STOCK'
         && after.customerCancellationDisposition == 'KEEP_STOCK'
@@ -906,7 +910,7 @@ service cloud.firestore {
         && id != ''
         && beforeRecords.size() + 1 == afterRecords.size()
         && afterRecords.hasAll(beforeRecords)
-        && resource.data.get('orderStatus', resource.data.get('status', 'normal')) == 'normal'
+        && !orderIsCancelled(resource.data)
         && sameCommercialOwner()
         && preservesCreator()
         && operationalItemsOnly(['dispatchPreparedQty', 'reservedQty'])
@@ -953,7 +957,7 @@ service cloud.firestore {
         && data.get('notifiedByUid', '') == request.auth.uid
         && data.get('notifiedAt', '') is string
         && data.get('notifiedAt', '') != ''
-        && order.get('orderStatus', order.get('status', 'normal')) == 'normal'
+        && !orderIsCancelled(order)
         && order.get('ownerUid', '') == data.get('ownerUid', '')
         && order.get('salesCode', '') == data.get('salesCode', '')
         && index is int && index >= 0
@@ -1015,10 +1019,8 @@ service cloud.firestore {
     function validOrderCancellationTransition() {
       let before = resource.data;
       let after = request.resource.data;
-      let wasCancelled = before.get('orderStatus', '') in ['cancelled', 'voided']
-        || before.get('status', '') in ['cancelled', 'voided'];
-      let isCancelled = after.get('orderStatus', '') in ['cancelled', 'voided']
-        || after.get('status', '') in ['cancelled', 'voided'];
+      let wasCancelled = orderIsCancelled(before);
+      let isCancelled = orderIsCancelled(after);
       return !isCancelled || wasCancelled
         || (noCustodyForCancellation() && before.get('logisticsTransfersPending', 0) == 0 && after.get('logisticsTransfersPending', 0) == 0
           && before.get('isDelivered', false) != true && after.get('isDelivered', false) != true
@@ -1083,8 +1085,7 @@ service cloud.firestore {
       let afterRecords = after.get('deliveryRecords', []);
       let record = afterRecords[beforeRecords.size()];
       return canReceiveInventory()
-        && !(before.get('status', '') in ['cancelled', 'voided'])
-        && !(before.get('orderStatus', '') in ['cancelled', 'voided'])
+        && !orderIsCancelled(before)
         && before.get('inventoryReservationStatus', '') != 'pending'
         && beforeRecords.size() + 1 == afterRecords.size()
         && afterRecords.removeAll([record]) == beforeRecords
@@ -1121,8 +1122,7 @@ service cloud.firestore {
         && oldItem.get('transferPendingId', '') == ''
         && oldItem.get('warehouseShippedQty', oldItem.get('deliveredQty', 0)) - oldItem.get('returnedQty', 0) < oldItem.get('qty', oldItem.get('orderedQty', 0))
         && (!(oldItem.get('warehouseId', '').matches('custody-.*')) || (canReceiveInventory() && newItem.deliveryPlan.mode == 'TRANSFER'))
-        && !(before.get('status', '') in ['cancelled', 'voided'])
-        && !(before.get('orderStatus', '') in ['cancelled', 'voided'])
+        && !orderIsCancelled(before)
         && index is int && index >= 0 && index < before.items.size()
         && before.items.size() == after.items.size()
         && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
@@ -1156,8 +1156,7 @@ service cloud.firestore {
         && before.items.size() == after.items.size()
         && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
         && newItem.diff(oldItem).affectedKeys().hasOnly(['warehouseId','custodyTransferId','transferPendingId'])
-        && !(before.get('status', '') in ['cancelled','voided'])
-        && !(before.get('orderStatus', '') in ['cancelled','voided'])
+        && !orderIsCancelled(before)
         && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
         && after.get('returnRecords', []) == before.get('returnRecords', [])
         && after.diff(before).affectedKeys().hasOnly(['items','warehouseLogisticsId','warehouseLogisticsEventId','logisticsTransfersPending',

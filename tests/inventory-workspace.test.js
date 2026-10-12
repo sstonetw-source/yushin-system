@@ -90,7 +90,7 @@ test('mailing view excludes pickup and transfers, and a retained branch selectio
  c.warehouseMasterCache=[{id:'MAIN',warehouseName:'主倉'},{id:'BRANCH',warehouseName:'分倉'}];
  c.orderWorkQueueCache=[['main','MAIN','CUSTOMER_SHIP'],['mail','BRANCH','SALES_SHIP'],['pickup','MAIN','PICKUP'],['transfer','BRANCH','PICKUP'],['missing','BRANCH','']].map(([id,warehouseId,mode])=>({id,shippingInstructions:{mode},items:[{itemId:'A',warehouseId,qty:1}]}));
  c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/主倉領取/);assert.equal(el('inventoryShippingTabBtn').textContent,'出貨（2）');
- c.switchInventoryShippingKind('branch');el('inventoryShippingWarehouse').value='BRANCH';c.renderInventoryShipping();assert.match(el('inventoryShippingBody').innerHTML,/寄給業務/);
+ c.switchInventoryShippingKind('branch');el('inventoryShippingWarehouse').value='BRANCH';c.renderInventoryShipping();assert.match(el('inventoryShippingBody').innerHTML,/寄給負責人/);
  c.switchInventoryShippingKind('main');assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.match(el('inventoryShippingBody').innerHTML,/直接寄客戶/);
  el('inventoryDeliveryModeFilter').value='SALES_SHIP';c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/0 筆/);
 });

@@ -696,7 +696,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     const context = {
         window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
         canManageOrderLifecycleCapability: () => true, canEditPage: () => true, normalizedOrderStatus: () => 'normal',
-        deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
+        deliveryProgressInfo: () => ({ delivered: 0 }), orderBillingDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => { throw new Error('billing must not depend on window.prompt'); }, alert: message => { throw new Error(message); },
         currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {}, writeAppDataCache: () => {},
         orderWorkIndexFields: () => ({ workCategories:['complete'], workCategoryUpdatedAt:'2026-09-17T00:00:00.000Z' }),
@@ -721,19 +721,19 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     assert.equal(context.pendingOrderStatusKeys.has('o1:isBilled'), true);
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(updatePayload.isBilled, true);
-    assert.equal(updatePayload.invoiceDate, '2026-09-17');
+    assert.equal(updatePayload.billingDate, '2026-09-17');
     assert.equal(context.pendingOrderStatusKeys.has('o1:isBilled'), false);
 });
 
 test('failed billing write restores the previous state and unlocks the button', async () => {
     const start = appSource.indexOf('window.toggleOrderStatus =');
     const end = appSource.indexOf('\n};', start) + 3;
-    const order = { id: 'o2', isOrdered: true, isArrived: true, isBilled: false, invoiceDate: '', statusHistory: [] };
+    const order = { id: 'o2', isOrdered: true, isArrived: true, isBilled: false, billingDate: '', statusHistory: [] };
     let alertMessage = '';
     const context = {
         window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
         canManageOrderLifecycleCapability: () => true, canEditPage: () => true, normalizedOrderStatus: () => 'normal',
-        deliveryProgressInfo: () => ({ delivered: 0 }), orderInvoiceDate: () => '', localDateString: () => '2026-09-17',
+        deliveryProgressInfo: () => ({ delivered: 0 }), orderBillingDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => '2026-09-17', alert: message => { alertMessage = message; },
         currentUserName: 'Tester', currentUser: null, renderOrdersList: () => {}, writeAppDataCache: () => {},
         currentDeliveryOrderId: null, renderDeliveryModal: () => {}, renderOrderLifecycleModal: () => {},
@@ -749,7 +749,7 @@ test('failed billing write restores the previous state and unlocks the button', 
     assert.equal(order.isBilled, true);
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(order.isBilled, false);
-    assert.equal(order.invoiceDate, '');
+    assert.equal(order.billingDate, '');
     assert.equal(context.activeOrderWorkFilter, 'billing');
     assert.equal(context.pendingOrderStatusKeys.has('o2:isBilled'), false);
     assert.match(alertMessage, /已還原/);
@@ -814,9 +814,9 @@ test('browser history restores internal pages without forcing Firestore reloads'
 
 
 
-test('quote owner wording stays consistently labeled as responsible sales', () => {
-    assert.doesNotMatch(appSource, /請選擇負責人/);
-    assert.match(indexSource, /負責業務：<\/label><select id="salesName"/);
+test('quote owner wording includes both salespeople and engineers', () => {
+    assert.match(appSource, /請選擇負責人/);
+    assert.match(indexSource, /負責人：<\/label><select id="salesName"/);
 });
 
 test('quote optional item fields stay collapsed, persist, export only when filled and remember customer preferences', () => {
@@ -2829,7 +2829,7 @@ test('purchaser order edit fields match visible order UI', () => {
     const start=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
     const end=rulesSource.indexOf('function warehouseOrderWorkflowUpdate()',start);
     const source=rulesSource.slice(start,end);
-    for (const field of ['costPrice','transactionType','invoiceTitle','remarks','invoiceDate','fieldEditHistory']) {
+    for (const field of ['costPrice','transactionType','invoiceTitle','remarks','billingDate','fieldEditHistory']) {
         assert.match(source,new RegExp("'" + field + "'"));
     }
     assert.match(source,/sameCommercialOwner\(\)/);
