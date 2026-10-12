@@ -77,27 +77,22 @@ service cloud.firestore {
     }
 
     function validSalesOwner(data) {
-      return data.ownerUid != null
-        && data.salesCode != null
+      return validQuoteOwner(data)
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales';
+    }
+
+    // Both quotes and customer orders may belong to an active salesperson or engineer.
+    // Purchaser assistance preserves the owner; creator fields retain the actual operator.
+    function validQuoteOwner(data) {
+      return data.get('ownerUid', '') is string && data.get('ownerUid', '').size() > 0
+        && data.get('salesCode', '') is string && data.get('salesCode', '').size() > 0
         && exists(/databases/$(database)/documents/users/$(data.ownerUid))
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales'
+        && profileEnabled(get(/databases/$(database)/documents/users/$(data.ownerUid)).data)
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role in ['sales', 'engineer']
         && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
           'salesCode',
           get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
         ) == data.salesCode;
-    }
-
-    function validQuoteOwner(data) {
-      return validSalesOwner(data) || (
-        data.ownerUid != null
-        && data.salesCode != null
-        && exists(/databases/$(database)/documents/users/$(data.ownerUid))
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'engineer'
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
-          'salesCode',
-          get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
-        ) == data.salesCode
-      );
     }
 
     // Engineer may assist a salesperson with a quote, but only quotes the engineer created.
@@ -115,7 +110,7 @@ service cloud.firestore {
           data.salesCode != null &&
           data.salesCode == salesCode()) ||
         (businessAssistant() &&
-          validSalesOwner(data) &&
+          validQuoteOwner(data) &&
           data.ownerUid != request.auth.uid);
     }
 
@@ -255,13 +250,15 @@ service cloud.firestore {
         ]);
     }
 
+    // Current orders use status=active. Match normalizedOrderStatus: either
+    // cancellation field blocks receipt until purchasing explicitly keeps stock.
     function supplierReceiptDispositionAllowed() {
       let before = resource.data;
       let after = request.resource.data;
       let orderId = before.get('orderId', '');
       return after.get('receivedQty', 0) <= before.get('receivedQty', 0) || orderId == ''
-        || (get(/databases/$(database)/documents/orders/$(orderId)).data.get('orderStatus',
-            get(/databases/$(database)/documents/orders/$(orderId)).data.get('status', 'normal')) == 'normal')
+        || (!(get(/databases/$(database)/documents/orders/$(orderId)).data.get('status', '') in ['cancelled', 'voided'])
+          && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('orderStatus', '') in ['cancelled', 'voided']))
         || before.get('customerCancellationDisposition', '') == 'KEEP_STOCK';
     }
 
@@ -763,7 +760,9 @@ service cloud.firestore {
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
         || (engineerAssistedSalesQuote(resource.data) && sameCommercialOwner() && preservesCreator())
-        || (purchaser() && sameCommercialOwner() && preservesCreator());
+        || (purchaser() && sameCommercialOwner() && preservesCreator()
+          && (resource.data.get('dealClosed', false) != true
+            || request.resource.data.get('dealClosed', false) == true));
       allow delete: if admin();
     }
 

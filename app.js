@@ -103,7 +103,7 @@ const PERMISSION_PAGES = [
 // 不再從 settings/rolePermissions 動態載入，避免設定漂移，也減少登入時一次 Firestore 讀取。
 const rolePermissions = Object.freeze({
     sales: Object.freeze({ forecast:'edit', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'view', equipment:'edit', admin:'none' }),
-    purchaser: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'view', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'edit', inventory:'edit', equipment:'none', admin:'none' }),
+    purchaser: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'edit', inventory:'edit', equipment:'none', admin:'none' }),
     warehouse: Object.freeze({ forecast:'none', quote:'none', 'quote.create':'none', 'quote.my':'none', products:'view', orders:'view', 'orders.list':'view', 'orders.po':'view', inventory:'edit', equipment:'none', admin:'none' }),
     engineer: Object.freeze({ forecast:'none', quote:'edit', 'quote.create':'edit', 'quote.my':'edit', products:'view', orders:'edit', 'orders.list':'edit', 'orders.po':'none', inventory:'view', equipment:'edit', admin:'none' })
 });
@@ -655,6 +655,13 @@ function canManageEquipmentCapability(role = currentUserRole) {
     return role === 'admin' || role === 'engineer';
 }
 
+// 採購代辦沿用負責人的單據歸屬；工程師也是商業單據負責人。
+function isSelectableCommercialOwner(person) {
+    return !!person && ['sales', 'engineer'].includes(person.role)
+        && person.active !== false && person.disabled !== true
+        && !!person.uid && !!person.code;
+}
+
 function commercialCreatorFields() {
     return {
         createdByUid: currentUser?.uid || '',
@@ -771,7 +778,7 @@ function updateReadonlyNotice() {
     notice.className = 'readonly-notice no-print';
     notice.style.display = 'block';
     if (pageKey === 'orders.po' && currentUserRole === 'warehouse' && canReceiveInventoryCapability()) {
-        notice.innerText = '倉管模式：可確認到貨、入庫及外倉出貨通知；建立採購單與公司倉打單仍由採購／管理員處理。';
+        notice.innerText = '倉管模式：可收貨、出貨、調撥點收及盤點；採購、成本維護與打單由採購／管理員處理。';
     } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
         notice.innerText = '產品主檔權限：採購可新增、編輯與停用產品主檔；永久刪除僅限管理員。';
     } else if (pageKey === 'products' && hasBusinessCapability()) {
@@ -7666,7 +7673,7 @@ window.renderMyQuotesList = function() {
                             ${q.threeQuoteRecord ? `<button type="button" onclick="openSavedThreeQuoteRecord(${inlineJsValue(q.quoteNo)})">三估單</button>` : ''}
                             <button type="button" onclick="copyQuoteAsNew(${inlineJsValue(q.quoteNo)})">複製成新估價單</button>
                             ${canEditPage('forecast') ? `<button type="button" onclick="createForecastFromQuote(${inlineJsValue(q.quoteNo)})">建立 Forecast</button>` : ''}
-                            ${q.dealClosed ? `<button type="button" onclick="unmarkQuoteAsDeal(${inlineJsValue(q.quoteNo)})">取消成交</button>` : ''}
+                            ${q.dealClosed && canManageOrderLifecycleCapability() && (currentUserRole === 'admin' || belongsToCurrentUser(q.salesName,q.ownerUid,q.salesCode)) ? `<button type="button" onclick="unmarkQuoteAsDeal(${inlineJsValue(q.quoteNo)})">取消成交</button>` : ''}
                             ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteQuote(${inlineJsValue(q.quoteNo)})">永久刪除</button>` : ''}
                         </div>
                     </details>
@@ -7892,6 +7899,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
 };
 
 window.unmarkQuoteAsDeal = async function(quoteNo) {
+    if (!canManageOrderLifecycleCapability() || !canEditPage('quote.my')) return;
     const button=actionButtonFromEventOrSelector();
     const buttonState=beginActionButton(button,'處理中…');
     if(button && !buttonState)return;
@@ -17661,9 +17669,9 @@ function populateOrderOwnerSelect() {
     if (!wrap || !select) return;
     wrap.style.display = currentUserRole === 'purchaser' ? '' : 'none';
     if (currentUserRole !== 'purchaser') return;
-    const salespeople = salesList.filter(person => person.role === 'sales' && person.active !== false && person.uid && person.code);
+    const salespeople = salesList.filter(isSelectableCommercialOwner);
     select.replaceChildren(new Option('請選擇負責業務', ''));
-    salespeople.forEach(person => select.add(new Option(`${person.name}（${person.code}）`, person.uid)));
+    salespeople.forEach(person => select.add(new Option(`${person.name}（${person.code}・${ROLE_LABELS[person.role]}）`, person.uid)));
     select.value = salespeople.some(person => person.uid === requestedOrderOwnerUid) ? requestedOrderOwnerUid : '';
 }
 
@@ -18249,7 +18257,7 @@ window.saveNewOrder = function() {
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
     const assistedOwner = currentUserRole === 'purchaser'
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
-            && person.role === 'sales' && person.active !== false && person.code)
+            && isSelectableCommercialOwner(person))
         : null;
     if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
     if(items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&(!String(item.supplier||'').trim()||item.costPrice===null||item.costPrice===undefined||String(item.costPrice).trim()===''||!Number.isFinite(Number(item.costPrice))||Number(item.costPrice)<0))){alert('自行訂貨品項請填寫供應商與含稅進價（可填 0）；建立訂單後會直接列入待到貨。');return;}

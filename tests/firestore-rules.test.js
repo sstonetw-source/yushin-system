@@ -88,7 +88,7 @@ test('engineer may assist salesperson quotes but not salesperson orders; purchas
   }));
 });
 
-test('purchaser may create quotes for sales and engineers but not reassign commercial orders to engineer', async () => {
+test('purchaser may assist sales and engineer quotes and orders without changing their owner', async () => {
   const createdBy = { createdByUid:'buyer1', createdByName:'Buyer', createdByRole:'purchaser' };
   await assertSucceeds(setDoc(doc(db('buyer1'), 'quotes/assisted-sales'), {
     ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20', ...createdBy
@@ -99,9 +99,36 @@ test('purchaser may create quotes for sales and engineers but not reassign comme
   await assertFails(setDoc(doc(db('buyer1'), 'quotes/wrong-engineer-code'), {
     ownerUid:'eng1', salesCode:'S01', quoteDate:'2026-09-20', ...createdBy
   }));
-  await assertFails(setDoc(doc(db('buyer1'), 'orders/assisted-engineer'), { ...validOrderProduct,
+  await assertSucceeds(setDoc(doc(db('buyer1'), 'orders/assisted-engineer'), { ...validOrderProduct,
     ownerUid:'eng1', salesCode:'E01', orderDate:'2026-09-20', ...createdBy
   }));
+  await assertSucceeds(getDoc(doc(db('eng1'), 'orders/assisted-engineer')));
+  await assertFails(getDoc(doc(db('sales1'), 'orders/assisted-engineer')));
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {remarks:'代辦備註'}));
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {quoteDate:'2026-09-21'}));
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {ownerUid:'sales1',salesCode:'S01'}));
+  await assertFails(updateDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {ownerUid:'sales1',salesCode:'S01'}));
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {createdByUid:'eng1'}));
+  await assertFails(updateDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {createdByUid:'eng1'}));
+  await seed('quotes/closed-assisted-engineer',{ownerUid:'eng1',salesCode:'E01',...createdBy,dealClosed:true});
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'quotes/closed-assisted-engineer'),{quoteDate:'2026-09-21'}));
+  await assertFails(updateDoc(doc(db('buyer1'),'quotes/closed-assisted-engineer'),{dealClosed:false}));
+  for (const patch of [{isBilled:true},{isDelivered:true},{status:'cancelled',orderStatus:'cancelled'}]) {
+    await assertFails(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), patch));
+  }
+  for (const owner of [
+    {ownerUid:'eng1',salesCode:'S01'},
+    {ownerUid:'buyer1',salesCode:'P01'},
+    {ownerUid:'wh1',salesCode:'W01'},
+    {ownerUid:'off1',salesCode:'OFF'},
+    {ownerUid:'nonexistent',salesCode:'X'}
+  ]) {
+    await assertFails(setDoc(doc(db('buyer1'), 'orders/invalid-assisted-owner'), {...validOrderProduct,...owner,...createdBy}));
+    await assertFails(setDoc(doc(db('buyer1'), 'quotes/invalid-assisted-owner'), {...owner,...createdBy}));
+  }
+  await seed('users/eng1',{role:'engineer',active:true,disabled:true,salesCode:'E01'});
+  await assertFails(setDoc(doc(db('buyer1'), 'orders/disabled-engineer'), {...validOrderProduct,ownerUid:'eng1',salesCode:'E01',...createdBy}));
+  await assertFails(setDoc(doc(db('buyer1'), 'quotes/disabled-engineer'), {ownerUid:'eng1',salesCode:'E01',...createdBy}));
 });
 
 test('commercial creator audit fields cannot be rewritten by normal owner edits', async () => {
@@ -851,6 +878,83 @@ test('archive blocks forged metadata on create, invalid types and audit reuse',a
 
 const stockPermissions = require('../modules/stock-permissions.js');
 const { runTransaction } = require('firebase/firestore');
+const vm = require('node:vm');
+const receivingCore = require('../modules/receiving-core.js');
+const supplyCore = require('../modules/supply-core.js');
+const demandCore = require('../modules/procurement-demand-core.js');
+
+// Exercise the real receipt transaction, not only its individual writes. Current
+// order creation stores status=active and does not require an orderStatus field.
+for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','warehouse']]) {
+  test(`${role} receives an active customer order atomically and retries without duplicate stock`, async () => {
+    const productKey='prd:qiagen:52304', warehouseId='wh:company';
+    const item={itemId:'I1',productId:productKey,qty:1,orderedQty:1,warehouseId,
+      reservedQty:0,shortageQty:1,receivedQty:0,supplyOrderedQty:1,fulfillmentType:'WAREHOUSE'};
+    await seed('orders/receipt-order',{ownerUid:'sales1',salesCode:'S01',status:'active',items:[item]});
+    const demand=demandCore.demandDocument({demandId:'SALES_ORDER:receipt-order:I1',sourceType:'SALES_ORDER',
+      sourceId:'receipt-order',sourceItemId:'I1',sourceItemIndex:0,productId:productKey,productKey,
+      ownerUid:'sales1',salesCode:'S01',requestedQty:1,orderedQty:1,receivedQty:0});
+    await seed('procurementDemands/'+encodeURIComponent(demand.demandId),demand);
+    const supply={type:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'receipt-order',sourceItemId:'I1',
+      orderId:'receipt-order',itemId:'I1',orderItemIndex:0,demandId:demand.demandId,ownerUid:'sales1',salesCode:'S01',
+      productId:productKey,productKey,itemCode:'52304',qty:1,receivedQty:0,incomingRegisteredQty:1,
+      status:'ORDERED',warehouseId,unitCost:10,fulfillmentType:'WAREHOUSE',supplier:'Vendor'};
+    await seed('supplyOrders/receipt-supply',supply);
+    await seed('receivingSupplyOrders/receipt-supply',stockPermissions.sanitizeSupply(supply));
+    const invPath='inventory/'+encodeURIComponent(productKey);
+    const stockPath='warehouseStocks/'+encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey);
+    await seed(invPath,{productId:productKey,productKey,onHand:0,reserved:0,incoming:1});
+    await seed(stockPath,{productId:productKey,productKey,warehouseId,onHand:0,reserved:0,incoming:1});
+    await seed('inventoryReservations/receipt-order__I1',{orderId:'receipt-order',itemId:'I1',orderItemIndex:0,
+      ownerUid:'sales1',salesCode:'S01',productKey,warehouseId,quantity:0,shortageQty:1,status:'shortage'});
+    const client=compatDb(uid), nativeRun=client.runTransaction;
+    const plain=value=>JSON.parse(JSON.stringify(value));
+    client.runTransaction=callback=>nativeRun(tx=>callback({...tx,
+      set:(ref,data,options)=>options?tx.set(ref,plain(data),options):tx.set(ref,plain(data)),
+      update:(ref,data)=>tx.update(ref,plain(data))}));
+    const context=vm.createContext({db:client,currentUserRole:role,permissionRulesReady:true,
+      deliveryActor:()=>uid,localDateString:()=> '2026-10-12',YushinSupply:supplyCore,YushinReceiving:receivingCore,
+      YushinProcurementDemand:demandCore,window:{YushinReceiving:receivingCore},
+      supplyOrdersCollection:()=>client.collection(role==='warehouse'?'receivingSupplyOrders':'supplyOrders'),
+      procurementDemandRef:id=>id?client.collection('procurementDemands').doc(encodeURIComponent(id)):null,
+      procurementDemandDocument:(d,c,m)=>demandCore.demandDocument({...d,...c},m),
+      runRoleTransaction:callback=>stockPermissions.run(client,callback,uid,false,role),
+      isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),
+      normalizedOrderItems:order=>order.items.map(i=>({...i})),normalizedOrderStatus:order=>
+        [order.status,order.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
+      inventoryNumbers:i=>({onHand:Number(i.onHand||0),reserved:Number(i.reserved||0),incoming:Number(i.incoming||0)}),
+      warehouseStockDocId:(w,p)=>encodeURIComponent(w)+'__'+encodeURIComponent(p),
+      orderWorkIndexFields:()=>({workCategories:['dispatch']}),buildInventorySearchTokens:()=>[],
+      invalidateWarehouseStockCache:()=>{}});
+    const app=fs.readFileSync('app.js','utf8'),start=app.indexOf('async function receiveSupplyOrderRecord(');
+    vm.runInContext(app.slice(start,app.indexOf('\nwindow.openSupplyReceipt',start)),context);
+    await context.receiveSupplyOrderRecord('receipt-supply',1,'LOT','','receipt-operation');
+    await context.receiveSupplyOrderRecord('receipt-supply',1,'LOT','','receipt-operation');
+    for(const path of [invPath,stockPath]){
+      const data=(await getDoc(doc(db('admin'),path))).data();
+      assert.deepEqual([data.onHand,data.reserved,data.incoming],[1,1,0]);
+    }
+    assert.equal((await getDoc(doc(db('admin'),'supplyOrders/receipt-supply'))).data().receivedQty,1);
+    assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent(demand.demandId)))).data().receivedQty,1);
+    assert.equal((await getDoc(doc(db('admin'),'orders/receipt-order'))).data().items[0].receivedQty,1);
+    assert.equal((await getDocs(collection(db('admin'),'receipts'))).size,1);
+    assert.equal((await getDocs(collection(db('admin'),'inventoryLots'))).size,1);
+  });
+}
+
+test('either cancellation field blocks supplier receipt until purchasing keeps stock',async()=>{
+  for(const status of [{status:'cancelled',orderStatus:'normal'},{status:'voided',orderStatus:'normal'},
+    {status:'active',orderStatus:'cancelled'},{status:'active',orderStatus:'voided'}]){
+    await seed('orders/cancelled-receipt',status);
+    await seed('supplyOrders/cancelled-receipt',{orderId:'cancelled-receipt',qty:1,receivedQty:0,status:'ORDERED'});
+    const ref=doc(db('admin'),'supplyOrders/cancelled-receipt');
+    await assertFails(updateDoc(ref,{receivedQty:1,status:'RECEIVED'}));
+    await seed('supplyOrders/cancelled-receipt',{orderId:'cancelled-receipt',qty:1,receivedQty:0,
+      status:'ORDERED',customerCancellationDisposition:'KEEP_STOCK'});
+    await assertSucceeds(updateDoc(ref,{receivedQty:1,status:'RECEIVED'}));
+  }
+});
+
 function compatDb(uid) {
   const firestore = db(uid);
   let sequence = 0;

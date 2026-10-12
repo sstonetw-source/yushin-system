@@ -3990,7 +3990,7 @@ test('warehouse receiving capability is separate from purchase editing', () => {
 
 test('warehouse receiving UI matches Firestore receive capability', () => {
     assert.match(rulesSource,/function canReceiveInventory\(\) \{[\s\S]*?admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
-    assert.match(appSource,/倉管模式：可確認到貨、入庫及外倉出貨通知/);
+    assert.match(appSource,/倉管模式：可收貨、出貨、調撥點收及盤點/);
     assert.match(appSource,/window\.receiveSupplyOrder = function\(supplyId\) \{[\s\S]*?canReceiveInventoryCapability\(\)/);
 });
 
