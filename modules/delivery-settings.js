@@ -3,7 +3,7 @@
   function addresses(value){
     const seen=new Set();return (Array.isArray(value)?value:[]).slice(0,30).map(x=>({id:String(x.id||''),label:String(x.label||'').trim(),contact:String(x.contact||'').trim(),phone:String(x.phone||'').trim(),address:String(x.address||'').trim()})).filter(x=>x.id&&!seen.has(x.id)&&seen.add(x.id));
   }
-  function salespersonPlan(person,mainId){const d=person?.deliveryDefaults||{};return {mode:d.mode==='SALES_SHIP'?'SALES_SHIP':'PICKUP',warehouseId:d.mode==='SALES_SHIP'?'':mainId,contact:d.contact||person?.name||'',phone:d.phone||person?.phone||'',address:d.mode==='SALES_SHIP'?d.address||'':'',packages:1,condition:d.condition||'常溫',notes:d.notes||''};}
+  function salespersonPlan(person,mainId){const d=person?.deliveryDefaults||{};return {mode:d.mode==='SALES_SHIP'?'SALES_SHIP':'PICKUP',warehouseId:d.mode==='SALES_SHIP'?'':mainId,contact:d.contact||person?.name||'',phone:d.phone||person?.phone||'',address:d.mode==='SALES_SHIP'?d.address||'':'',packages:1,notes:d.notes||''};}
   function editableItem(item){return !item.transferPendingId&&!String(item.warehouseId||'').startsWith('custody-')&&Number(item.deliveredQty||0)-Number(item.returnedQty||0)<Number(item.qty||item.orderedQty||0)&&(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';}
   const api={addresses,salespersonPlan,editableItem};root.YushinDeliverySettings=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
@@ -23,7 +23,7 @@
   }
   root.setOrderShippingInstructions=function(value={}){customerGeneration++;customerRows=[];customerKey='';changed=Object.keys(value).length>0;previousSet(value);controls(root.YushinWarehouseLogistics.plan(value));};
   root.orderShippingInstructions=function(){
-    const p={};for(const key of ['contact','phone','address','packages','condition','tracking','notes'])p[key]=$('orderShipping'+key[0].toUpperCase()+key.slice(1))?.value||'';
+    const p={};for(const key of ['contact','phone','address','notes'])p[key]=$('orderShipping'+key[0].toUpperCase()+key.slice(1))?.value||'';
     p.mode=$('orderShippingMode')?.value||'';p.warehouseId=p.mode==='PICKUP'?defaultWarehouse()?.id||'':'';
     return root.YushinWarehouseLogistics.plan(p);
   };

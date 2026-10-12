@@ -1,13 +1,14 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const core=require('../modules/warehouse-logistics'),inventory=require('../modules/inventory-core'),fulfillment=require('../modules/fulfillment-core'),workspace=require('../modules/inventory-workspace');
 const src=fs.readFileSync('modules/warehouse-logistics.js','utf8');
-test('recipient validation and grouping separate warehouse, destination and shipping conditions',()=>{
+test('recipient validation groups warehouse and destination without courier-only fields',()=>{
  assert.throws(()=>core.validatePlan({mode:'SALES_SHIP'},true),/收件人/);
  assert.throws(()=>core.validatePlan({mode:'TRANSFER',warehouseId:''}),/倉庫/);
- for(const packages of [0,-1,1.5,100])assert.throws(()=>core.validatePlan({packages}));
+ const stripped=core.validatePlan({mode:'PICKUP',packages:0,condition:'冷藏',tracking:'old'});
+ assert.equal(stripped.packages,1);assert.equal('condition' in stripped,false);assert.equal('tracking' in stripped,false);
  const p={mode:'CUSTOMER_SHIP',contact:'A',phone:'123',address:'台北',condition:'冷藏'};
  const rows=[{warehouseId:'MAIN',p},{warehouseId:'MAIN',p},{warehouseId:'MAIN',p:{...p,address:'台南'}},{warehouseId:'MAIN',p:{...p,condition:'常溫'}},{warehouseId:'EXT',p}];
- const groups=core.partition(rows,r=>r.p);assert.equal(groups.length,4);assert.equal(groups[0].rows.length,2);
+ const groups=core.partition(rows,r=>r.p);assert.equal(groups.length,3);assert.equal(groups[0].rows.length,3);
 });
 test('batch retries only unfinished items, including an uncertain successful commit',async()=>{
  const p={mode:'CUSTOMER_SHIP',contact:'Luke',phone:'123',address:'台北'};
@@ -34,7 +35,7 @@ test('export groups recipients and preserves codes, quantities, notes and quoted
  const r={warehouseId:'EXT',qty:2,order:{orderNo:'YS-1',salesName:'Luke',customerName:'醫院'},item:{itemCode:'00123',itemName:'=SUM(A1)'}};
  const groups=core.partition([r,{...r,qty:1,item:{itemCode:'00456',itemName:'試劑'}}],()=>p);
  const csv=core.csvDocument(groups);assert.equal(groups.length,1);assert.equal(groups[0].rows.length,2);
- assert.ok(csv.startsWith('\uFEFF'));assert.match(csv,/"00123"/);assert.match(csv,/"台北,""二樓"""/);assert.match(csv,/"'\=SUM\(A1\)"/);assert.match(csv,/"冷凍"/);assert.match(csv,/"請電聯\n到貨"/);
+ assert.ok(csv.startsWith('\uFEFF'));assert.match(csv,/"00123"/);assert.match(csv,/"台北,""二樓"""/);assert.match(csv,/"'\=SUM\(A1\)"/);assert.doesNotMatch(csv,/冷凍|溫層|物流單號|件數/);assert.match(csv,/"請電聯\n到貨"/);
 });
 function fixture(){
  const docs=new Map([
