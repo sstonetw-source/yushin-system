@@ -3889,18 +3889,19 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 
 /* 又鑫 UI／UX 1.0 — shared screen tokens. Keep printable documents untouched. */
 :root {
-    --ys-primary: #2563EB;
-    --ys-primary-hover: #1D4ED8;
-    --ys-selected: #EFF6FF;
-    --ys-page: #F5F7FB;
-    --ys-surface: #FFFFFF;
-    --ys-text: #0F172A;
-    --ys-muted: #475569;
-    --ys-border: #CBD5E1;
-    --ys-success: #15803D;
-    --ys-warning: #B45309;
-    --ys-danger: #B91C1C;
+    --ys-primary: #4B6685;
+    --ys-primary-hover: #3E5671;
+    --ys-selected: #E2EAF3;
+    --ys-page: #F1F4F7;
+    --ys-surface: #FAFBFC;
+    --ys-text: #263445;
+    --ys-muted: #566576;
+    --ys-border: #C9D3DD;
+    --ys-success: #41674C;
+    --ys-warning: #825B23;
+    --ys-danger: #98544F;
     --ys-neutral: #64748B;
+    --ys-nav: #E6ECF2;
 }
 @media screen {
     #authStarting { background: var(--ys-page); color: var(--ys-primary-hover); }
@@ -3914,9 +3915,9 @@ button:disabled { opacity:.48; cursor:not-allowed; }
         background-color: var(--ys-page);
         font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
     }
-    #appContainer .nav-tabs { background-color: var(--ys-primary); }
-    #appContainer .nav-tab { background: rgba(15, 23, 42, .2); border-radius: 8px 8px 0 0; }
-    #appContainer .nav-tab.active { background: var(--ys-surface); color: var(--ys-primary-hover); }
+    #appContainer .nav-tabs { background-color: var(--ys-nav); color: var(--ys-text); }
+    #appContainer .nav-tab { background: transparent; color: var(--ys-muted); border-radius: 8px 8px 0 0; }
+    #appContainer .nav-tab.active { background: var(--ys-selected); color: var(--ys-primary-hover); }
     #appContainer .content-section {
         background: transparent;
         box-shadow: none;
@@ -4088,7 +4089,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 
 /* UI／UX 1.0 follow-up: finish the quotation workspace without changing printableQuote. */
 @media screen {
-    #appContainer { --workspace-background: #EFF6FF; --workspace-border: #CBD5E1; --workspace-label: #475569; --workspace-radius: 12px; }
+    #appContainer { --workspace-background: var(--ys-selected); --workspace-border: var(--ys-border); --workspace-label: var(--ys-muted); --workspace-radius: 12px; }
     #appContainer .quote-module-nav,
     #appContainer #quoteCreatePanel > .company-sub-nav {
         border: 1px solid var(--ys-border);
@@ -4283,3 +4284,21 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 #appContainer .workspace-page-title { display: flex; align-items: center; gap: 8px; }
 #appContainer .workspace-page-title > .page-help-trigger { position: relative; flex: 0 0 44px; width: 44px; height: 44px; margin: 0; padding: 0; }
 #pageHelpSources[hidden] { display: none !important; }
+
+/* Mist blue-grey screen palette. Printed and downloaded documents keep their own styles. */
+@media screen {
+    button { background-color: var(--ys-primary); }
+    #appContainer .mobile-nav-toggle { background: var(--ys-nav); color: var(--ys-text); border-color: var(--ys-border); }
+    #appContainer .mobile-nav-toggle:hover, #appContainer .nav-tab:hover { background: var(--ys-selected); color: var(--ys-primary-hover); }
+    #appContainer .auth-status, #authUserLabel { color: var(--ys-text); }
+    .auth-starting-nav { background: var(--ys-nav); color: var(--ys-text); }
+    #appContainer :is(.modal, .modal-box, .eq-modal-box, .password-modal, .product-selection-bar, .delivery-settings-section, .sales-stat-card) { background-color: var(--ys-surface); border-color: var(--ys-border); }
+    #appContainer :is(#inventoryListBody, #poListBody, #ordersBody, #forecastListBody, #eqListBody, #productManagementBody, #myQuotesBody, #purchasePendingBody, #purchaseDispatchBody, #purchaseCompletedBody, #inventoryReceivingBody, #inventoryTransferReceivingBody, #inventoryShippingBody) > tr { background-color: var(--ys-surface); }
+    #appContainer .inventory-mobile-summary > div { background: var(--ys-selected); border-color: var(--ys-border); color: var(--ys-text); }
+    #appContainer .inventory-mobile-summary span { color: var(--ys-muted); }
+    #appContainer .content-section :is(.toolbar, .module-header, .section-header) > button:not([class]),
+    #appContainer #productManagementSearchBtn, #appContainer #purchaseDirectOrderBtn { background-color: var(--ys-primary); color: #FFFFFF; }
+    #appContainer .content-section :is(.toolbar, .module-header, .section-header) > button:not([class]):hover:not(:disabled),
+    #appContainer #productManagementSearchBtn:hover:not(:disabled), #appContainer #purchaseDirectOrderBtn:hover:not(:disabled) { background-color: var(--ys-primary-hover); }
+    #appContainer #admin-statistics .sub-tabs button.active { background: var(--ys-primary); border-color: var(--ys-primary); color: #FFFFFF; }
+}

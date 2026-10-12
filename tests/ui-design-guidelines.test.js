@@ -9,10 +9,10 @@ const html = read('index.html');
 
 test('shared UI tokens follow project palette without touching printable documents', () => {
     const palette = {
-        primary: '#2563EB', 'primary-hover': '#1D4ED8', selected: '#EFF6FF',
-        page: '#F5F7FB', surface: '#FFFFFF', text: '#0F172A',
-        muted: '#475569', border: '#CBD5E1', success: '#15803D',
-        warning: '#B45309', danger: '#B91C1C', neutral: '#64748B'
+        primary: '#4B6685', 'primary-hover': '#3E5671', selected: '#E2EAF3',
+        page: '#F1F4F7', surface: '#FAFBFC', text: '#263445',
+        muted: '#566576', border: '#C9D3DD', success: '#41674C',
+        warning: '#825B23', danger: '#98544F', neutral: '#64748B'
     };
     for (const [name, value] of Object.entries(palette)) {
         assert.ok(css.includes(`--ys-${name}: ${value};`), `missing palette token: ${name}`);
@@ -39,12 +39,12 @@ test('all working modules show one consistent page title', () => {
     assert.ok(css.includes('#appContainer .forecast-status-active'));
     assert.ok(css.includes('#appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button).active'));
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單 <button[^>]*data-page-help="order-system"/);
-    assert.ok(html.includes('styles.css?v=20261012-1'));
+    assert.ok(html.includes('styles.css?v=20261012-2'));
     assert.ok(css.includes('#appContainer #myQuotesPanel > table :is(th, td):nth-child(6)'));
     assert.ok(css.includes('#appContainer #quote-system .quote-more-actions > summary'));
     assert.ok(css.includes('@media screen and (min-width: 769px)'));
     assert.ok(css.includes('html, body, #appContainer { background: var(--ys-page); }'));
-    assert.ok(html.includes('<meta name="theme-color" content="#2563EB">'));
+    assert.ok(html.includes('<meta name="theme-color" content="#E6ECF2">'));
 });
 
 test('secondary, destructive and disabled actions keep separate semantics', () => {
