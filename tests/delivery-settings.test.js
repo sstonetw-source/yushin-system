@@ -81,6 +81,6 @@ test('late customer lookup cannot overwrite a newer customer, typed address, or 
 });
 test('switching delivery back to salesperson and account reset discard pending customer lookup results',async()=>{
  const f=uiFixture();f.node('orderShippingMode').value='CUSTOMER_SHIP';f.node('orderCustomer').value='A';const first=f.c.loadOrderCustomerAddresses();
- f.node('orderShippingMode').value='PICKUP';f.node('orderSalesCollection').value='SALES_SHIP';f.c.orderDeliveryChoiceChanged();f.reads[0].resolve(customerSnapshot());await first;assert.equal(f.node('orderShippingAddress').value,'業務地址');
+ f.node('orderShippingMode').value='SALES_SHIP';f.c.orderDeliveryChoiceChanged();f.reads[0].resolve(customerSnapshot());await first;assert.equal(f.node('orderShippingAddress').value,'業務地址');
  f.node('orderShippingMode').value='CUSTOMER_SHIP';const second=f.c.loadOrderCustomerAddresses();f.c.resetDeliverySettings();f.reads[1].resolve(customerSnapshot());await second;assert.equal(f.node('orderShippingAddress').value,'業務地址');
 });

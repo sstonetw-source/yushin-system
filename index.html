@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261012-3">
+        <link rel="stylesheet" href="styles.css?v=20261012-4">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -441,16 +441,17 @@
         <section class="panel no-print" id="customerReturnPanel" style="display:none"><div id="customerReturnQueue" role="status"></div></section>
       </div>
       <div id="inventoryShippingPanel" style="display:none">
-        <div class="inventory-shipping-tabs no-print"><button type="button" id="inventoryShippingMainBtn" class="order-work-card active" aria-pressed="true" onclick="switchInventoryShippingKind('main')">主倉庫出貨</button><button type="button" id="inventoryShippingBranchBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('branch')">分倉庫出貨</button><button type="button" id="inventoryShippingTransferBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('transfer')">調回主倉</button><button type="button" id="inventoryShippingPickupBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('pickup')">待領貨</button><select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select></div>
+        <div class="inventory-shipping-tabs no-print"><button type="button" id="inventoryShippingMainBtn" class="order-work-card active" aria-pressed="true" onclick="switchInventoryShippingKind('main')">主倉庫出貨</button><button type="button" id="inventoryShippingBranchBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('branch')">分倉庫出貨</button><select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select></div>
         <div id="inventoryShippingError" class="inventory-work-error" role="status" hidden></div>
-        <div class="toolbar no-print"><select id="inventoryDeliveryModeFilter" aria-label="交付方式" onchange="renderInventoryShipping()"><option value="">全部交付方式</option><option value="PICKUP">業務自取／親送</option><option value="SALES_SHIP">寄給業務</option><option value="CUSTOMER_SHIP">直接寄客戶</option><option value="TRANSFER">轉送倉庫</option></select><button class="btn-secondary" onclick="printSelectedWarehouseShipping('list',this)">列印出貨清單</button><button class="btn-secondary" onclick="printSelectedWarehouseShipping('labels',this)">列印地址貼紙</button></div>
-        <div class="toolbar no-print inventory-shipping-batch-actions"><span id="warehouseShippingSelectionStatus">尚未勾選品項</span><button type="button" class="btn-secondary" onclick="selectVisibleWarehouseShipping(true)">全選目前清單</button><button type="button" class="btn-secondary" onclick="selectVisibleWarehouseShipping(false)">取消勾選</button><button type="button" class="btn-secondary" onclick="exportSelectedWarehouseShipping(this)">匯出出貨清單 CSV</button><button type="button" id="warehouseShippingBatchBtn" onclick="openWarehouseShippingBatch()" disabled>本批已出貨</button></div>
+        <div class="toolbar no-print"><select id="inventoryDeliveryModeFilter" aria-label="寄送對象" onchange="renderInventoryShipping()"><option value="">全部寄送對象</option><option value="SALES_SHIP">寄給業務</option><option value="CUSTOMER_SHIP">直接寄客戶</option></select></div>
+        <div class="toolbar no-print inventory-shipping-batch-actions"><span id="warehouseShippingSelectionStatus">尚未勾選品項</span><label><input type="checkbox" id="warehouseShippingSelectAll" onchange="selectVisibleWarehouseShipping(this.checked)"> 全選目前清單</label><button type="button" id="warehouseShippingBatchBtn" onclick="openWarehouseShippingBatch()" disabled>已出貨</button><details class="order-export-tools warehouse-shipping-tools"><summary>列印／匯出</summary><div class="order-export-panel"><button type="button" class="btn-secondary" onclick="printSelectedWarehouseShipping('list',this)">列印出貨清單</button><button type="button" class="btn-secondary" onclick="printSelectedWarehouseShipping('labels',this)">列印地址貼紙</button><button type="button" class="btn-secondary" onclick="exportSelectedWarehouseShipping(this)">匯出出貨清單 CSV</button><button type="button" class="btn-secondary" onclick="selectVisibleWarehouseShipping(false)">取消全部勾選</button></div></details></div>
         <p id="inventoryShippingStatus" class="inventory-work-status" role="status"></p>
         <div id="inventoryShippingSummary"></div><div class="table-wrap inventory-work-table"><table><thead><tr><th>選取</th><th>業務／客戶</th><th>貨號／品名</th><th>出貨倉庫</th><th>寄送目的地</th><th>待出數量</th><th>設定</th></tr></thead><tbody id="inventoryShippingBody"></tbody></table></div>
-        <div id="warehouseCustodyQueue"></div>
+
         <button type="button" id="inventoryShippingMoreBtn" class="btn-secondary" style="display:none" onclick="loadMoreInventoryShipping()">載入更多（50）</button>
       </div>
       <div id="inventoryStockPanel">
+        <section class="panel no-print" id="mainTransferRequestPanel" hidden><div class="section-header"><h3>調撥回主倉</h3><button type="button" class="btn-secondary" onclick="exportMainTransferRequests(this)">匯出目前調回清單</button><button type="button" id="mainTransferRetry" class="btn-secondary" onclick="loadMainTransferRequests(true)" hidden>重試讀取</button></div><p id="mainTransferRequestStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>來源</th><th>分倉</th><th>品項</th><th>調回數量</th><th>操作</th></tr></thead><tbody id="mainTransferRequestBody"></tbody></table></div></section>
       <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
 
       <div class="toolbar no-print inventory-toolbar">
@@ -540,7 +541,7 @@
     <div class="eq-modal-overlay no-print" id="inventoryTransferOverlay" onclick="if(event.target===this) closeInventoryTransfer()">
       <div class="eq-modal-box inventory-transfer-modal" style="max-width:560px;">
         <div class="inventory-quantity-heading">
-          <h3 style="margin:0;">移動庫存</h3>
+          <h3 style="margin:0;">調回主倉備貨</h3>
           <button type="button" class="btn-secondary" onclick="closeInventoryTransfer()">✕ 關閉</button>
         </div>
         <div id="inventoryTransferItemLabel" class="inventory-summary-note"></div>
@@ -553,12 +554,12 @@
           <select id="inventoryTransferTo" onchange="updateInventoryTransferHint()"></select>
         </div>
         <div class="inventory-quantity-field">
-          <label for="inventoryTransferQty">移動數量</label>
+          <label for="inventoryTransferQty">調回數量</label>
           <input id="inventoryTransferQty" type="number" min="0" step="any" inputmode="decimal">
         </div>
-        <div id="inventoryTransferHint" class="inventory-summary-note">移出後列為調撥途中，目的倉確認收貨才入庫；公司總庫存不變。訂單占用貨品請由出貨分頁轉倉。</div>
+        <div id="inventoryTransferHint" class="inventory-summary-note">發起後先保留分倉可用數量；倉管確認寄出，主倉實收後才入庫。</div>
         <div class="eq-modal-close-row">
-          <button type="button" id="saveInventoryTransferBtn" onclick="saveInventoryTransfer()">確認調撥寄出</button>
+          <button type="button" id="saveInventoryTransferBtn" onclick="saveInventoryTransfer()">發起調回主倉</button>
           <button type="button" class="btn-secondary" onclick="closeInventoryTransfer()">取消</button>
         </div>
       </div>
@@ -1696,12 +1697,12 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261012-3"></script>
+    <script src="app.js?v=20261012-4"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261010-2"></script>
-    <script src="modules/inventory-workspace.js?v=20261011-3"></script>
-    <script src="modules/warehouse-logistics.js?v=20261012-1"></script>
-    <script src="modules/delivery-settings.js?v=20261011-3"></script>
+    <script src="modules/inventory-workspace.js?v=20261012-4"></script>
+    <script src="modules/warehouse-logistics.js?v=20261012-4"></script>
+    <script src="modules/delivery-settings.js?v=20261012-4"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 
 
@@ -1844,7 +1845,8 @@
                             <div><strong>歷史成本</strong><span>實際採購價、庫存批次成本與已完成交易不會被價目表刪除</span></div>
                         </div>
                     </div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">產品匯入的新廠牌會自動加入廠牌主檔，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修也當作一般廠牌管理，可自行決定是否獨立統計。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><span style="font-size:12px;color:#777;">用於補齊既有產品主檔中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span></div></div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">產品主檔、估價、訂單與進銷存分析只使用「標準名稱」。常見縮寫或舊名稱請放在別名，例如標準名稱「Beckman Coulter」，別名可填「Beckman」。輸入別名時系統會自動轉成標準名稱，不再建立第二個廠牌。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">只有少數簽在特定分公司的廠牌需要設定。某廠牌若完全未勾選任何公司＝三家公司都可報價；若有勾選＝只能使用勾選公司的估價單抬頭。受限制廠牌在其他公司的估價單仍會顯示，但不能選取。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-statistics"><p id="tradeAnalysisScope" class="inventory-summary-note"></p></div><div data-page-help-source="admin-system" data-help-context="admin-warehouses"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">既有倉庫預設為公司倉庫。外倉從分倉庫出貨清單處理；收件資訊可自動帶入轉倉設定。</p></div></div></div>
-    <script src="modules/page-help.js?v=20261012-1"></script>
+    <script src="modules/page-help.js?v=20261012-4"></script>
 
+<script src="modules/main-warehouse-transfers.js?v=20261012-4"></script>
 </body>
 </html>

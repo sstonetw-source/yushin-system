@@ -123,7 +123,7 @@ function batchUiFixture(){
  const nodes=new Map(),node=id=>{if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',innerHTML:'',disabled:false,dataset:{},classList:{add(){},remove(){},contains(){return false;}},remove(){}});return nodes.get(id);};
  const p={mode:'CUSTOMER_SHIP',contact:'Customer',phone:'123',address:'台北'};
  const list=[{key:'O__A',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'A',itemCode:'001',deliveryPlan:p},qty:3,warehouseId:'MAIN',warehouse:{id:'MAIN'}},
- {key:'O__B',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'B',itemCode:'002',qty:2,reservedQty:2,deliveryPlan:{mode:'PICKUP'}},qty:2,warehouseId:'MAIN',warehouse:{id:'MAIN'}}];
+ {key:'O__B',order:{id:'O',salesName:'Luke',customerName:'Customer'},item:{itemId:'B',itemCode:'002',qty:2,reservedQty:2,deliveryPlan:{mode:'SALES_SHIP',contact:'Sales',phone:'123',address:'高雄'}},qty:2,warehouseId:'MAIN',warehouse:{id:'MAIN'}}];
  const inputs=list.map((r,i)=>({value:String(r.qty),dataset:{batchQty:String(i)},disabled:false})),calls=[],feedback=[];
  const c=vm.createContext({document:{getElementById:node,querySelectorAll:selector=>selector==='[data-batch-qty]'?inputs:[...inputs,node('warehouseShippingBatchDate'),node('warehouseShippingBatchNotes')]},
   canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,currentUser:{uid:'buyer'},currentUserRole:'purchaser',
@@ -215,4 +215,65 @@ test('branch-to-main transfer preserves final pickup plan through receipt and al
 test('partial transfer batch preflight blocks all mutations before a customer shipment can be committed',async()=>{
  const f=batchUiFixture();f.list[1].item.qty=5;await f.c.openWarehouseShippingBatch();await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
  assert.equal(f.calls.length,0);assert.ok(f.feedback.some(([message])=>/全部到貨/.test(message)));
+});
+function mainRequestFixture(){
+ const f=fixture();f.docs.get('warehouses/MAIN').isDefault=true;
+ f.docs.set('warehouseStocks/EXT__P',{productKey:'P',warehouseId:'EXT',onHand:6,reserved:0,incoming:0});
+ f.docs.set('inventoryLots/EXTLOT',{productKey:'P',warehouseId:'EXT',remainingQty:6,qty:6,lotNo:'EXTLOT',expiryDate:'2027-01-01'});
+ f.docs.get('inventory/P').onHand=16;
+ Object.assign(f.c,{canManageInventoryStockPolicy:()=>['admin','purchaser'].includes(f.c.currentUserRole),canEditPage:()=>true,confirm:()=>true,beginActionButton:()=>({}),endActionButton:()=>{},showActionFeedback:()=>{},loadInventory:async()=>{}});
+ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../modules/main-warehouse-transfers.js'),'utf8'),f.c);
+ f.c.loadMainTransferRequests=async()=>{};f.c.loadWarehouseTransferQueue=async()=>{};
+ return f;
+}
+test('main replenishment reserves free branch stock once; dispatch and receipt preserve company quantity without a customer reservation',async()=>{
+ const f=mainRequestFixture(),args={id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:3};
+ await f.c.createMainTransferRequest(args);await f.c.createMainTransferRequest(args);
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,6);assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,3);
+ assert.equal(f.docs.get('inventory/P').reserved,7);assert.equal(f.docs.get('inventoryLots/EXTLOT').remainingQty,6);
+ assert.equal(f.docs.get('stockTransferRequests/REQ').status,'PENDING');assert.equal(f.docs.has('stockTransfers/SEND'),false);
+ await assert.rejects(f.c.createMainTransferRequest({...args,id:'OVER',qty:4}),/不足/);
+ await f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:3});
+ await f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:3});
+ assert.equal(f.docs.get('stockTransferRequests/REQ').status,'SHIPPED');assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,3);
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,0);assert.equal(f.docs.get('inventory/P').reserved,4);
+ assert.equal(f.docs.get('inventory/P').transferReserved,0);assert.equal(inventory.normalizeStock(f.docs.get('inventory/P')).available,9);
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'OTHER',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:3}),/已變更/);
+ await f.c.commitWarehouseTransferReceipt('SEND');await f.c.commitWarehouseTransferReceipt('SEND');
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,13);assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,4);
+ assert.equal(f.docs.get('inventory/P').onHand,16);assert.equal(inventory.normalizeStock(f.docs.get('inventory/P')).available,12);
+ assert.equal(f.docs.get('inventoryReservations/O__A').quantity,4);assert.equal(f.docs.get('orders/O').items[0].warehouseId,'MAIN');
+});
+test('cancelling a pending replenishment releases its hold once, preserves order stock and rejects warehouse request creation',async()=>{
+ const f=mainRequestFixture();await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
+ await f.c.cancelMainTransferRequest('REQ',{});await f.c.cancelMainTransferRequest('REQ',{});
+ assert.equal(f.docs.get('stockTransferRequests/REQ').status,'CANCELLED');assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,0);
+ assert.equal(f.docs.get('inventory/P').reserved,4);assert.equal(f.docs.get('inventory/P').transferReserved,0);
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:2}),/已變更/);
+ f.c.currentUserRole='warehouse';await assert.rejects(f.c.createMainTransferRequest({id:'BAD',inventoryId:'P',fromWarehouseId:'EXT',qty:1}),/採購/);
+});
+test('only explicit main pickup generates an order return-to-main requirement; recipient warehouse hints and missing mode do not reroute shipments',()=>{
+ const warehouses=[{id:'MAIN'},{id:'EXT'}],helpers={status:()=> 'normal',incomplete:()=>false,items:o=>o.items,dispatch:(_o,i)=>({shippable:i.qty})};
+ const row={warehouseId:'EXT',item:{},order:{}};
+ for(const mode of ['', 'SALES_SHIP','CUSTOMER_SHIP']){
+  const value={mode,warehouseId:'MAIN',contact:'R',phone:'P',address:'A'};
+  assert.equal(core.executionPlan({...row,item:{deliveryPlan:value}},warehouses,'MAIN').mode,mode);
+  assert.equal(core.transferRequirements([{id:mode||'missing',items:[{itemId:'A',warehouseId:'EXT',qty:2,deliveryPlan:value}]}],warehouses,'MAIN',helpers).length,0);
+ }
+ assert.equal(core.transferRequirements([{id:'pickup',items:[{itemId:'A',warehouseId:'EXT',qty:2,reservedQty:2,deliveryPlan:{mode:'PICKUP'}}]}],warehouses,'MAIN',helpers).length,1);
+ assert.throws(()=>core.validatePlan({}),/交付|主倉/);
+});
+test('warehouse shipping batch refuses main pickup even when a stale selection includes it',async()=>{
+ const f=batchUiFixture();f.list[1].item.deliveryPlan={mode:'PICKUP'};
+ await f.c.openWarehouseShippingBatch();await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
+ assert.equal(f.calls.length,0);assert.ok(f.feedback.some(([text])=>/變更|重新勾選/.test(text)));
+});
+test('business delivery is enabled only for main pickup or goods already mailed to the salesperson',()=>{
+ const state={reserved:3,prepared:3,shippable:3,pending:0};
+ assert.equal(core.businessDeliveryState({}, {warehouseId:'MAIN',deliveryPlan:{mode:'PICKUP'}},state,'MAIN').shippable,3);
+ assert.equal(core.businessDeliveryState({}, {warehouseId:'EXT',deliveryPlan:{mode:'PICKUP'}},state,'MAIN').deliveryWait,'待調回主倉');
+ assert.equal(core.businessDeliveryState({}, {warehouseId:'MAIN',deliveryPlan:{mode:'SALES_SHIP'}},state,'MAIN').shippable,0);
+ assert.equal(core.businessDeliveryState({}, {warehouseId:'custody-S',deliveryPlan:{mode:'SALES_SHIP'}},state,'MAIN').shippable,3);
+ assert.equal(core.businessDeliveryState({}, {warehouseId:'EXT',deliveryPlan:{mode:'CUSTOMER_SHIP'}},state,'MAIN').shippable,0);
+ assert.equal(core.businessDeliveryState({}, {warehouseId:'EXT',fulfillmentType:'DIRECT_SHIP'},state,'MAIN'),state);
 });

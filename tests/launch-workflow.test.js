@@ -31,6 +31,18 @@ test('concurrent lot depletion prevents every delivery write',async()=>{
  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},2,'actor','O'));
  assert.equal(writes.length,0);
 });
+test('business delivery transaction rejects premature parcel delivery while preserving warehouse dispatch and main pickup',async()=>{
+ for(const [mode,warehouseId] of [['SALES_SHIP','W'],['CUSTOMER_SHIP','W'],['','W'],['PICKUP','BRANCH']]){
+  const {c,tx,writes}=deliveryContext();c.YushinWarehouseLogistics=require('../modules/warehouse-logistics');c.canReceiveInventoryCapability=()=>false;
+  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId,shippingInstructions:{mode}},2,'sales','O'),/不能登錄|先完成調回/);assert.equal(writes.length,0);
+ }
+ for(const [mode,operational] of [['PICKUP',false],['CUSTOMER_SHIP',true]]){
+  const {c,tx,writes}=deliveryContext();c.YushinWarehouseLogistics=require('../modules/warehouse-logistics');c.canReceiveInventoryCapability=()=>operational;
+  await c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W',shippingInstructions:{mode}},2,'actor','O');assert(writes.length>0);
+ }
+ const {c,tx,writes}=deliveryContext();c.YushinWarehouseLogistics=require('../modules/warehouse-logistics');c.canReceiveInventoryCapability=()=>false;
+ await c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W',fulfillmentType:'DIRECT_SHIP'},2,'sales','O');assert.equal(writes.length,0);
+});
 test('reversing multiple delivery lots reads all documents before any write',async()=>{
  const {c,tx,writes}=deliveryContext([0,0]);
  const records=[{qty:2,lotAllocations:[{lotId:'A',qty:1,cost:0},{lotId:'B',qty:1,cost:0}]}];

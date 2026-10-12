@@ -15,27 +15,25 @@
   function replaceRecipient(p){for(const key of ['contact','phone','address'])if($('orderShipping'+key[0].toUpperCase()+key.slice(1)))$('orderShipping'+key[0].toUpperCase()+key.slice(1)).value=p[key]||'';}
   function controls(p){
     const host=$('orderShippingFields');if(!host)return;
-    const mode=$('orderShippingMode');mode.innerHTML='<option value="PICKUP">業務親送</option><option value="CUSTOMER_SHIP">直接寄客戶</option>';mode.value=p.mode==='CUSTOMER_SHIP'?'CUSTOMER_SHIP':'PICKUP';mode.onchange=()=>root.orderDeliveryChoiceChanged();
+    const mode=$('orderShippingMode');mode.innerHTML='<option value="">請選擇交付方式</option><option value="PICKUP">主倉自領</option><option value="SALES_SHIP">寄給我</option><option value="CUSTOMER_SHIP">直接寄客戶</option>';mode.value=['PICKUP','SALES_SHIP','CUSTOMER_SHIP'].includes(p.mode)?p.mode:'';mode.onchange=()=>root.orderDeliveryChoiceChanged();
     const w=$('orderShippingWarehouse');const label=w.closest('label');if(label.firstChild)label.firstChild.textContent='業務領貨地點';label.style.display='none';
-    const box=document.createElement('div');box.className='delivery-choice-row logistics-wide';box.innerHTML=`<label>業務領貨方式<select id="orderSalesCollection" onchange="orderDeliveryChoiceChanged()"><option value="PICKUP">主倉自行領貨</option><option value="SALES_SHIP">寄到業務地址</option></select></label><label>客戶常用收件地址<select id="orderCustomerAddress" onchange="selectOrderCustomerAddress(this.value)"><option value="">本次自行填寫</option></select></label><div><button type="button" class="btn-secondary btn-small" onclick="saveOrderCustomerAddress(this)">記住此客戶地址</button><button type="button" class="btn-secondary btn-small" onclick="setDefaultOrderCustomerAddress(this)">儲存並設為預設</button></div><p id="orderAddressStatus" class="inventory-work-status" role="status"></p>`;host.prepend(box);
-    $('orderSalesCollection').value=p.mode==='SALES_SHIP'?'SALES_SHIP':'PICKUP';
+    const box=document.createElement('div');box.className='delivery-choice-row logistics-wide';box.innerHTML=`<label>客戶常用收件地址<select id="orderCustomerAddress" onchange="selectOrderCustomerAddress(this.value)"><option value="">本次自行填寫</option></select></label><div><button type="button" class="btn-secondary btn-small" onclick="saveOrderCustomerAddress(this)">記住此客戶地址</button><button type="button" class="btn-secondary btn-small" onclick="setDefaultOrderCustomerAddress(this)">儲存並設為預設</button></div><p id="orderAddressStatus" class="inventory-work-status" role="status"></p>`;host.prepend(box);
     host.oninput=e=>{if(e.target.id!=='orderCustomerAddress')changed=true;};
     root.orderDeliveryChoiceChanged(false);
   }
   root.setOrderShippingInstructions=function(value={}){customerGeneration++;customerRows=[];customerKey='';changed=Object.keys(value).length>0;previousSet(value);controls(root.YushinWarehouseLogistics.plan(value));};
   root.orderShippingInstructions=function(){
     const p={};for(const key of ['contact','phone','address','packages','condition','tracking','notes'])p[key]=$('orderShipping'+key[0].toUpperCase()+key.slice(1))?.value||'';
-    p.mode=$('orderShippingMode')?.value==='CUSTOMER_SHIP'?'CUSTOMER_SHIP':$('orderSalesCollection')?.value||'PICKUP';p.warehouseId=p.mode==='PICKUP'?$('orderShippingWarehouse')?.value||defaultWarehouse()?.id||'':'';
+    p.mode=$('orderShippingMode')?.value||'';p.warehouseId=p.mode==='PICKUP'?defaultWarehouse()?.id||'':'';
     return root.YushinWarehouseLogistics.plan(p);
   };
   root.orderDeliveryChoiceChanged=function(fill=true){
-    const customer=$('orderShippingMode')?.value==='CUSTOMER_SHIP',pickup=!customer&&$('orderSalesCollection')?.value==='PICKUP';
-    $('orderSalesCollection')?.closest('label').style.setProperty('display',customer?'none':'');
+    const mode=$('orderShippingMode')?.value||'',customer=mode==='CUSTOMER_SHIP',pickup=mode==='PICKUP';
     $('orderCustomerAddress')?.closest('label').style.setProperty('display',customer?'':'none');
-    $('orderShippingWarehouse')?.closest('label').style.setProperty('display',pickup?'':'none');
+    $('orderShippingWarehouse')?.closest('label').style.setProperty('display','none');
     const remember=$('orderCustomerAddress')?.closest('.delivery-choice-row')?.querySelector('div');if(remember)remember.style.display=customer?'':'none';
     for(const key of ['Contact','Phone','Address'])$('orderShipping'+key)?.closest('label').style.setProperty('display',pickup?'none':'');
-    if(fill){customerGeneration++;changed=true;if(customer){replaceRecipient({});root.loadOrderCustomerAddresses();}else{const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');replaceRecipient($('orderSalesCollection').value==='SALES_SHIP'?p:{});$('orderShippingWarehouse').value=defaultWarehouse()?.id||'';}}
+    if(fill){customerGeneration++;changed=true;if(customer){replaceRecipient({});root.loadOrderCustomerAddresses();}else{const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');const d=owner()?.deliveryDefaults||{};replaceRecipient(mode==='SALES_SHIP'?{...p,address:d.address||''}:{});$('orderShippingWarehouse').value=defaultWarehouse()?.id||'';}}
   };
   root.initializeOrderDeliveryDefaults=function(existing){
     if((existing&&Object.keys(existing).length)||changed)return;const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');previousSet(p);controls(root.YushinWarehouseLogistics.plan(p));changed=false;
