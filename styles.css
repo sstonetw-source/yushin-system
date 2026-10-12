@@ -4303,3 +4303,12 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer #productManagementSearchBtn:hover:not(:disabled), #appContainer #purchaseDirectOrderBtn:hover:not(:disabled) { background-color: var(--ys-primary-hover); }
     #appContainer #admin-statistics .sub-tabs button.active { background: var(--ys-primary); border-color: var(--ys-primary); color: #FFFFFF; }
 }
+
+@media screen and (max-width:768px) {
+    #mainTransferRequestBody, #mainTransferRequestBody > tr { display:block; }
+    #mainTransferRequestPanel thead { display:none; }
+    #mainTransferRequestBody > tr { padding:12px; margin:8px 0; border:1px solid var(--ys-border); border-radius:10px; background:var(--ys-surface); }
+    #mainTransferRequestBody td { display:block; border:0; padding:6px 0; overflow-wrap:anywhere; }
+    #mainTransferRequestBody td::before { content:attr(data-th) '：'; color:var(--ys-muted); }
+    #mainTransferRequestBody button { margin:4px; min-height:44px; }
+}

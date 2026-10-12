@@ -1330,13 +1330,104 @@ service cloud.firestore {
     }
 
 
+    // Main replenishment request: immutable source/quantity; reserve first, ship later.
+    // stockTransferRequests contains only operational item identity and actor UID, never costs.
+    function validMainTransferRequest(d) {
+      return d.keys().hasOnly(['id','inventoryId','productKey','productId','itemCode','itemName','brand',
+          'fromWarehouseId','toWarehouseId','fromStockId','qty','status','createdByUid','createdAt',
+          'transferId','shippedAt','shippedByUid','cancelledAt','cancelledByUid'])
+        && d.keys().hasAll(['id','inventoryId','productKey','productId','itemCode','itemName','brand',
+          'fromWarehouseId','toWarehouseId','fromStockId','qty','status','createdByUid','createdAt'])
+        && d.id is string && d.id.size() > 0 && d.id.size() <= 128
+        && d.inventoryId is string && d.inventoryId.size() > 0 && d.inventoryId.size() <= 1500
+        && d.productKey is string && d.productKey.size() > 0 && d.productKey.size() <= 1500
+        && d.productId is string && d.productId.size() <= 1500
+        && d.itemCode is string && d.itemCode.size() <= 1000
+        && d.itemName is string && d.itemName.size() <= 1000
+        && d.brand is string && d.brand.size() <= 1000
+        && d.fromWarehouseId is string && d.fromWarehouseId.size() > 0 && d.fromWarehouseId.size() <= 1500
+        && d.toWarehouseId is string && d.toWarehouseId.size() > 0 && d.toWarehouseId.size() <= 1500
+        && d.fromStockId is string && d.fromStockId.size() > 0 && d.fromStockId.size() <= 1500
+        && d.createdByUid is string && d.createdByUid.size() > 0 && d.createdByUid.size() <= 128
+        && d.createdAt is string && d.createdAt.size() <= 40
+        && d.qty is number && d.qty > 0 && d.qty <= 1000000
+        && d.status in ['PENDING','SHIPPED','CANCELLED']
+        && d.fromWarehouseId != d.toWarehouseId;
+    }
+    function mainTransferHold(d, direction) {
+      let invPath = /databases/$(database)/documents/inventory/$(d.inventoryId);
+      let stockPath = /databases/$(database)/documents/warehouseStocks/$(d.fromStockId);
+      let inv = get(invPath).data;
+      let nextInv = getAfter(invPath).data;
+      let stock = get(stockPath).data;
+      let nextStock = getAfter(stockPath).data;
+      return stock.productKey == d.productKey && stock.warehouseId == d.fromWarehouseId
+        && inv.get('productKey', inv.get('productId', '')) == d.productKey
+        && nextStock.onHand == stock.onHand && nextInv.onHand == inv.onHand
+        && nextStock.reserved == stock.reserved + direction * d.qty
+        && nextStock.get('transferReserved', 0) == stock.get('transferReserved', 0) + direction * d.qty
+        && nextInv.reserved == inv.reserved + direction * d.qty
+        && nextInv.get('transferReserved', 0) == inv.get('transferReserved', 0) + direction * d.qty
+        && nextStock.reserved >= 0 && nextStock.reserved <= nextStock.onHand
+        && nextStock.get('transferReserved', 0) >= 0 && nextInv.get('transferReserved', 0) >= 0
+        && nextInv.diff(inv).affectedKeys().hasOnly(['reserved','transferReserved','updatedAt'])
+        && nextStock.diff(stock).affectedKeys().hasOnly(['reserved','transferReserved','updatedAt']);
+    }
+    function mainTransferDispatch(d) {
+      let path = /databases/$(database)/documents/stockTransfers/$(d.get('transferId', 'unused'));
+      let transfer = getAfter(path).data;
+      return !exists(path) && transfer.requestId == d.id && transfer.inventoryId == d.inventoryId
+        && transfer.fromWarehouseId == d.fromWarehouseId && transfer.toWarehouseId == d.toWarehouseId
+        && transfer.qty == d.qty && transfer.reservedQty == 0 && transfer.kind == 'TRANSFER'
+        && transfer.status == 'IN_TRANSIT' && transfer.createdByUid == request.auth.uid;
+    }
+    match /stockTransferRequests/{id} {
+      allow read: if canReceiveInventory();
+      allow create: if (admin() || purchaser()) && validMainTransferRequest(request.resource.data)
+        && request.resource.data.id == id && request.resource.data.status == 'PENDING'
+        && request.resource.data.createdByUid == request.auth.uid
+        && !request.resource.data.keys().hasAny(['transferId','shippedAt','shippedByUid','cancelledAt','cancelledByUid'])
+        && get(/databases/$(database)/documents/warehouses/$(request.resource.data.toWarehouseId)).data.get('isDefault', false)
+        && get(/databases/$(database)/documents/warehouses/$(request.resource.data.toWarehouseId)).data.get('active', true)
+        && !get(/databases/$(database)/documents/warehouses/$(request.resource.data.toWarehouseId)).data.get('systemCustody', false)
+        && get(/databases/$(database)/documents/warehouses/$(request.resource.data.fromWarehouseId)).data.get('active', true)
+        && !get(/databases/$(database)/documents/warehouses/$(request.resource.data.fromWarehouseId)).data.get('systemCustody', false)
+        && mainTransferHold(request.resource.data, 1);
+      allow update: if validMainTransferRequest(request.resource.data) && resource.data.status == 'PENDING'
+        && ((canReceiveInventory() && request.resource.data.status == 'SHIPPED'
+          && request.resource.data.shippedByUid == request.auth.uid
+          && request.resource.data.shippedAt is string && request.resource.data.shippedAt.size() <= 40
+          && request.resource.data.transferId is string && request.resource.data.transferId.size() <= 128
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','transferId','shippedAt','shippedByUid'])
+          && mainTransferDispatch(request.resource.data))
+        || ((admin() || purchaser()) && request.resource.data.status == 'CANCELLED'
+          && request.resource.data.cancelledByUid == request.auth.uid
+          && request.resource.data.cancelledAt is string && request.resource.data.cancelledAt.size() <= 40
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','cancelledAt','cancelledByUid'])
+          && mainTransferHold(request.resource.data, -1)));
+      allow delete: if false;
+    }
+    function transferRequestHold(d) {
+      let path = /databases/$(database)/documents/stockTransferRequests/$(d.get('requestId', 'unused'));
+      let before = get(path).data;
+      let after = getAfter(path).data;
+      return before.status == 'PENDING' && after.status == 'SHIPPED'
+        && after.transferId == d.id && after.shippedByUid == request.auth.uid
+        && before.inventoryId == d.inventoryId && before.productKey == d.productKey
+        && before.fromWarehouseId == d.fromWarehouseId && before.toWarehouseId == d.toWarehouseId
+        && before.fromStockId == d.fromStockId && before.qty == d.qty
+        && d.orderId == '' && d.kind == 'TRANSFER' && d.reservedQty == 0;
+    }
     function transferSourceStock(d) {
       let path = /databases/$(database)/documents/warehouseStocks/$(d.fromStockId);
       let before = get(path).data;
       let after = getAfter(path).data;
-      return before.productKey == d.productKey && before.warehouseId == d.fromWarehouseId
+      let held = d.get('requestId', '') != '' ? d.qty : 0;
+      return (held == 0 || transferRequestHold(d))
+        && before.productKey == d.productKey && before.warehouseId == d.fromWarehouseId
         && after.onHand == before.onHand - d.qty
-        && after.reserved == before.reserved - d.reservedQty
+        && after.reserved == before.reserved - d.reservedQty - held
+        && (held == 0 || after.get('transferReserved', 0) == before.get('transferReserved', 0) - held)
         && after.get('incoming', 0) == before.get('incoming', 0)
         && after.onHand >= after.reserved && after.reserved >= 0;
     }
@@ -1354,8 +1445,10 @@ service cloud.firestore {
       let before = get(path).data;
       let after = getAfter(path).data;
       let direction = receive ? -1 : 1;
+      let held = !receive && d.get('requestId', '') != '' ? d.qty : 0;
       return before.get('productKey', before.get('productId', '')) == d.productKey
-        && after.onHand == before.onHand && after.reserved == before.reserved
+        && after.onHand == before.onHand && after.reserved == before.reserved - held
+        && (held == 0 || after.get('transferReserved', 0) == before.get('transferReserved', 0) - held)
         && after.get('incoming', 0) == before.get('incoming', 0)
         && (d.kind == 'HANDOFF'
           ? after == before

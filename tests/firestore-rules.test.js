@@ -1214,3 +1214,50 @@ test('commercial address masters and admin salesperson pickup preferences respec
  await assertSucceeds(setDoc(doc(db('sales1'),'customers/recipient'),address));await assertSucceeds(getDoc(doc(db('wh1'),'customers/recipient')));await assertFails(updateDoc(doc(db('wh1'),'customers/recipient'),{defaultShippingAddressId:'other'}));
  await assertSucceeds(updateDoc(doc(db('admin'),'users/sales1'),{deliveryDefaults:{mode:'SALES_SHIP',contact:'業務',phone:'456',address:'高雄'}}));await assertFails(updateDoc(doc(db('sales1'),'users/sales1'),{deliveryDefaults:{mode:'PICKUP'}}));
 });
+
+function mainRequestData(){return {id:'REQ',inventoryId:'P',productKey:'P',productId:'P',itemCode:'001',itemName:'試劑',brand:'Qiagen',fromWarehouseId:'EXT',toWarehouseId:'MAIN',fromStockId:'EXT_P',qty:3,status:'PENDING',createdByUid:'buyer1',createdAt:'2026-10-12T00:00:00Z'};}
+async function seedMainRequestStock(){
+ await seed('warehouses/MAIN',{warehouseName:'主倉',active:true,isDefault:true});await seed('warehouses/EXT',{warehouseName:'分倉',active:true,isDefault:false});
+ await seed('inventory/P',{productKey:'P',onHand:20,reserved:5,incoming:0,stockPolicy:'ORDER_ONLY',safetyStock:0});
+ await seed('warehouseStocks/EXT_P',{productKey:'P',warehouseId:'EXT',onHand:10,reserved:2,incoming:0});
+ await seed('warehouseStocks/MAIN_P',{productKey:'P',warehouseId:'MAIN',onHand:10,reserved:3,incoming:0});
+}
+function holdMainRequest(uid,patch={}){
+ const firestore=db(uid),batch=writeBatch(firestore),r={...mainRequestData(),...patch};
+ batch.set(doc(firestore,'stockTransferRequests/REQ'),r);
+ batch.update(doc(firestore,'warehouseStocks/EXT_P'),{reserved:5,transferReserved:3});
+ batch.update(doc(firestore,'inventory/P'),{reserved:8,transferReserved:3});return batch.commit();
+}
+test('main replenishment requests require purchasing, main destination and atomic stock holds; read and schema boundaries stay restricted',async()=>{
+ await seedMainRequestStock();
+ for(const uid of ['sales1','wh1'])await assertFails(holdMainRequest(uid,{createdByUid:uid}));
+ await assertFails(holdMainRequest('buyer1',{createdByUid:'admin'}));
+ await assertFails(holdMainRequest('buyer1',{extra:'unexpected'}));
+ await assertFails(holdMainRequest('buyer1',{qty:100}));
+ await assertFails(holdMainRequest('buyer1',{qty:-1}));
+ await assertFails(holdMainRequest('buyer1',{toWarehouseId:'EXT'}));
+ await assertFails(setDoc(doc(db('buyer1'),'stockTransferRequests/REQ'),mainRequestData()));
+ await assertSucceeds(holdMainRequest('buyer1'));
+ await assertSucceeds(getDocs(query(collection(db('wh1'),'stockTransferRequests'),where('status','==','PENDING'),limit(50))));
+ await assertFails(getDoc(doc(db('sales1'),'stockTransferRequests/REQ')));
+ await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),'stockTransferRequests/REQ')));
+ await assertFails(updateDoc(doc(db('buyer1'),'stockTransferRequests/REQ'),{qty:4}));
+ await assertFails(updateDoc(doc(db('buyer1'),'stockTransferRequests/REQ'),{createdByUid:'admin'}));
+ await assertFails(deleteDoc(doc(db('admin'),'stockTransferRequests/REQ')));
+});
+test('pending replenishment cancellation releases exactly its hold and cannot be replayed or bypassed by warehouse',async()=>{
+ await seedMainRequestStock();await assertSucceeds(holdMainRequest('buyer1'));
+ const cancel=uid=>{const firestore=db(uid),b=writeBatch(firestore);b.update(doc(firestore,'stockTransferRequests/REQ'),{status:'CANCELLED',cancelledAt:'2026-10-12',cancelledByUid:uid});b.update(doc(firestore,'inventory/P'),{reserved:5,transferReserved:0});b.update(doc(firestore,'warehouseStocks/EXT_P'),{reserved:2,transferReserved:0});return b.commit();};
+ await assertFails(cancel('wh1'));
+ await assertFails(updateDoc(doc(db('buyer1'),'stockTransferRequests/REQ'),{status:'CANCELLED',cancelledAt:'2026-10-12',cancelledByUid:'buyer1'}));
+ await assertSucceeds(cancel('buyer1'));await assertFails(cancel('buyer1'));
+});
+test('warehouse dispatch converts a pending replenishment hold into a linked immutable transfer and receiving restores free stock',async()=>{
+ await seedMainRequestStock();await assertSucceeds(holdMainRequest('buyer1'));
+ const uid='wh1',firestore=db(uid),r=mainRequestData();
+ const transfer={id:'SEND',requestId:'REQ',inventoryId:'P',productKey:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',fromStockId:'EXT_P',toStockId:'MAIN_P',qty:3,reservedQty:0,kind:'TRANSFER',status:'IN_TRANSIT',orderId:'',createdByUid:uid,allocations:[{lotId:'L',qty:3}]};
+ await assertFails(updateDoc(doc(firestore,'stockTransferRequests/REQ'),{status:'SHIPPED',transferId:'SEND',shippedAt:'2026-10-12',shippedByUid:uid}));
+ const ship=writeBatch(firestore);ship.set(doc(firestore,'stockTransfers/SEND'),transfer);ship.update(doc(firestore,'stockTransferRequests/REQ'),{status:'SHIPPED',transferId:'SEND',shippedAt:'2026-10-12',shippedByUid:uid});ship.update(doc(firestore,'warehouseStocks/EXT_P'),{onHand:7,reserved:2,transferReserved:0});ship.update(doc(firestore,'inventory/P'),{reserved:5,transferReserved:0,transferInTransit:3,transferFreeInTransit:3});await assertSucceeds(ship.commit());
+ const receive=writeBatch(firestore);receive.update(doc(firestore,'stockTransfers/SEND'),{status:'RECEIVED',receivedAt:'2026-10-12',receivedByUid:uid});receive.update(doc(firestore,'warehouseStocks/MAIN_P'),{onHand:13,reserved:3});receive.update(doc(firestore,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});await assertSucceeds(receive.commit());
+ await assertFails(updateDoc(doc(firestore,'stockTransferRequests/REQ'),{status:'PENDING'}));
+});
