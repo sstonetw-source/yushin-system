@@ -37,6 +37,10 @@ jobs:
           node --check functions/index.js
       - name: All application regression tests
         run: node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.test.js' | sort)
+      - name: Install headless Chrome viewport driver
+        run: npm install --no-save --no-package-lock playwright-core@1.56.0
+      - name: Check shared buttons in desktop and mobile Chrome
+        run: node tests/ui-control-browser-smoke.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator
