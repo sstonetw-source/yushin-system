@@ -4342,3 +4342,17 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #businessProductSearchBody td { display: flex; gap: 8px; min-width: 0; border: 0; }
     #businessProductSearchBody td::before { content: attr(data-th); flex: 0 0 72px; color: var(--ys-muted); }
 }
+
+/* 訂單與估價單共用：庫存提示緊接貨號，僅顯示於操作畫面。 */
+.product-stock-hint {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    border: 1px solid var(--ys-border);
+    border-radius: 8px;
+    background: var(--ys-selected);
+    color: var(--ys-text);
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+.product-stock-hint[hidden] { display: none !important; }

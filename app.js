@@ -3902,6 +3902,7 @@ window.createQuoteFromForecast = async function(id) {
 
         target.querySelector('.item-product-line').value = match?.productLine || '';
         target.querySelector('.item-product-type').value = match?.productType || '';
+        refreshQuoteWarehouseStock(target);
         target.querySelector('.item-spec').value = match?.spec || '';
 
         if (match?.price) {
@@ -5286,43 +5287,72 @@ function populateOrderWarehouseOptions(selected = '') {
     field.value = nextValue;
 }
 
+const warehouseStockReadPromises = new Map();
 async function warehouseStockSnapshot(productKey, warehouseId) {
     if (!productKey || !warehouseId) return null;
     const cacheKey = warehouseId + '||' + productKey;
     if (warehouseStockCache.has(cacheKey)) return warehouseStockCache.get(cacheKey);
+    if (warehouseStockReadPromises.has(cacheKey)) return warehouseStockReadPromises.get(cacheKey);
+    const cache = warehouseStockCache;
     const ref = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey));
-    const snap = await firestoreReadWithTimeout(ref.get(), '倉庫庫存').catch(() => null);
-    const data = snap && snap.exists ? { id:snap.id, ...snap.data() } : null;
-    warehouseStockCache.set(cacheKey, data);
-    return data;
+    const pending = firestoreReadWithTimeout(ref.get(), '倉庫庫存').then(snap => {
+        const data = snap && snap.exists ? { id:snap.id, ...snap.data() } : null;
+        if (cache === warehouseStockCache) cache.set(cacheKey, data);
+        return data;
+    }).finally(() => warehouseStockReadPromises.delete(cacheKey));
+    warehouseStockReadPromises.set(cacheKey, pending);
+    return pending;
 }
 
-let orderWarehouseStockRefreshGeneration = 0;
-window.refreshOrderWarehouseStock = async function() {
-    const generation = ++orderWarehouseStockRefreshGeneration;
-    const hint = document.getElementById('orderWarehouseStockHint');
-    const fulfillment = document.getElementById('orderFulfillmentType')?.value || 'WAREHOUSE';
+// 每個提示各自追蹤查詢；切換貨號時不讓舊品項覆蓋目前結果。
+const productStockHintGenerations = new WeakMap();
+function clearProductStockHint(hint) {
     if (!hint) return;
-    if (fulfillment === 'DIRECT_SHIP') {
-        hint.innerText = '原廠直送：不預留、不入庫、不出庫；採購與銷售紀錄仍會保留。';
+    productStockHintGenerations.set(hint, (productStockHintGenerations.get(hint) || 0) + 1);
+    hint.textContent = '';
+    hint.hidden = true;
+}
+
+async function refreshProductStockHint(hint, productKey) {
+    clearProductStockHint(hint);
+    if (!hint || !productKey) return;
+    const generation = productStockHintGenerations.get(hint);
+    const isCurrent = () => generation === productStockHintGenerations.get(hint);
+    hint.hidden = false;
+    hint.textContent = '正在查詢各倉庫可用庫存…';
+    try {
+        await loadWarehouseMaster();
+        if (!isCurrent()) return;
+        if (!warehouseMasterLoadPromise) throw new Error('warehouse-master-unavailable');
+        const warehouses = warehouseMasterCache.filter(warehouse => warehouse.active !== false);
+        const stocks = await Promise.all(warehouses.map(warehouse => warehouseStockSnapshot(productKey, warehouse.id)));
+        if (!isCurrent()) return;
+        const rows = warehouses.map((warehouse, index) => {
+            const onHand = Number(stocks[index]?.onHand || 0), reserved = Number(stocks[index]?.reserved || 0);
+            return `${warehouse.warehouseName || warehouse.id}：${Math.max(0, onHand-reserved)} 可用（現有 ${onHand}）`;
+        });
+        hint.textContent = rows.length ? rows.join(' ｜ ') : '尚未建立倉庫，請洽管理員。';
+    } catch (err) {
+        if (isCurrent()) hint.textContent = '此品項庫存查詢失敗，請重新選取貨號重試。';
+    }
+}
+
+function refreshQuoteWarehouseStock(row) {
+    return refreshProductStockHint(row?.querySelector('.quote-warehouse-stock-hint'), row?.querySelector('.item-product-id')?.value || '');
+}
+
+window.refreshOrderWarehouseStock = async function() {
+    const hint = document.getElementById('orderWarehouseStockHint');
+    if (document.getElementById('orderFulfillmentType')?.value === 'DIRECT_SHIP') {
+        clearProductStockHint(hint);
+        if (hint) {
+            hint.hidden = false;
+            hint.textContent = '原廠直送：不預留、不入庫、不出庫；採購與銷售紀錄仍會保留。';
+        }
         return;
     }
-    const code = document.getElementById('orderItemCode')?.value || '';
-    const match = findPriceItemByCodeValue(code);
-    const key = match ? (match.productId || stableProductId(match)) : '';
-    if (!key) { hint.innerText = '輸入貨號後會顯示各倉庫可用庫存。'; return; }
-    hint.innerText = '正在查詢各倉庫可用庫存…';
-    await loadWarehouseMaster();
-    if (generation !== orderWarehouseStockRefreshGeneration) return;
-    const warehouses = warehouseMasterCache.filter(warehouse => warehouse.active !== false);
-    const stocks = await Promise.all(warehouses.map(warehouse => warehouseStockSnapshot(key, warehouse.id)));
-    if (generation !== orderWarehouseStockRefreshGeneration) return;
-    const rows = warehouses.map((warehouse, index) => {
-        const stock = stocks[index];
-        const onHand = Number(stock?.onHand || 0), reserved = Number(stock?.reserved || 0);
-        return `${warehouse.warehouseName || warehouse.id}：${Math.max(0,onHand-reserved)} 可用（現有 ${onHand}）`;
-    });
-    hint.innerText = rows.length ? rows.join(' ｜ ') : '尚未建立倉庫；可先到管理員後台 → 廠牌管理建立。';
+    // 使用已確認的產品身分，避免同貨號不同廠牌時誤取第一筆。
+    return refreshProductStockHint(hint, window._orderModalProductId || '');
 };
 
 window.onOrderFulfillmentChange = function() {
@@ -5705,6 +5735,7 @@ function invalidateQuoteProductIdentityIfBrandChanged(select) {
     const linkedBrand = resolveBrandName(linkedProduct?.brand || '');
     if (linkedProduct && normalizeBrandLookupKey(currentBrand) === normalizeBrandLookupKey(linkedBrand)) return;
     if (productIdInput) productIdInput.value = '';
+    clearProductStockHint(row.querySelector('.quote-warehouse-stock-hint'));
     const productLine = row.querySelector('.item-product-line');
     const productType = row.querySelector('.item-product-type');
     if (productLine) productLine.value = '';
@@ -5759,6 +5790,7 @@ function clearOrderProductIdentityKeepBrand(input) {
     const hiddenProductLine = document.getElementById('orderProductLine');
     if (hiddenProductLine) hiddenProductLine.value = '';
     window._orderModalProductId = '';
+    clearProductStockHint(document.getElementById('orderWarehouseStockHint'));
     setOrderCostFieldForProduct(null);
 }
 
@@ -6026,6 +6058,7 @@ window.addQuoteRow = function(itemData = {}) {
                     <label>貨號：</label>
                     <input type="text" class="item-model" list="priceModelList" value="${itemData.model || ''}" oninput="onItemModelInput(this)" onchange="onItemModelChange(this)">
                 </div>
+                <div class="product-stock-hint quote-warehouse-stock-hint no-print" role="status" aria-live="polite" hidden></div>
                 <div class="field-row">
                     <label>中文品名：</label>
                     <input type="text" class="item-cn" list="priceNameCnList" value="${itemData.nameCn || ''}" onchange="onItemCnChange(this)">
@@ -6072,6 +6105,7 @@ window.addQuoteRow = function(itemData = {}) {
     `;
 
     tbody.appendChild(tr);
+    refreshQuoteWarehouseStock(tr);
     const quoteBrandSelect = tr.querySelector('.item-brand');
     populateBrandSelect(quoteBrandSelect, '廠牌（選填）', true, getPrimaryBrandNames());
     if (itemData.brand) selectBrandInDropdown(quoteBrandSelect, itemData.brand);
@@ -6095,8 +6129,9 @@ window.onItemCnChange = function(input) {
 
 window.onItemModelChange = async function(input) {
     const value = input.value.trim();
-    if (!value) return;
     const row = input.closest('tr');
+    clearProductStockHint(row?.querySelector('.quote-warehouse-stock-hint'));
+    if (!value) return;
     const matches = await findProductsByCode(value);
     if (input.value.trim() !== value) return;
     const match = selectProductCodeMatch(matches, quoteRowBrandValue(row));
@@ -20588,6 +20623,7 @@ function applyQuoteProductMatch(row, match) {
     } else {
         calculateTotals();
     }
+    refreshQuoteWarehouseStock(row);
     return true;
 }
 
@@ -20597,6 +20633,7 @@ window.onItemModelInput = function(input) {
     queueProductCodeSuggestions(input.value);
     clearProductMatchChoices(input);
     const row = input.closest('tr');
+    clearProductStockHint(row?.querySelector('.quote-warehouse-stock-hint'));
     if (row) {
         row.querySelector('.item-product-id').value = '';
         row.querySelector('.item-product-line').value = '';
