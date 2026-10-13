@@ -1795,7 +1795,7 @@ test('manual inventory changes support batch rows instead of browser prompts', (
 
 test('Product Master v2 uses targeted server lookup instead of a 500-row overlay', () => {
     assert.match(appSource, /async function findProductByCode/);
-    assert.match(appSource, /where\('normalizedPartNo', '==', normalized\)\.limit\(20\)/);
+    assert.match(appSource, /where\('normalizedPartNo', '==', normalized\)\.limit\(50\)/);
     assert.match(appSource, /productMasterDocToPriceItem/);
     assert.doesNotMatch(appSource, /function loadProductMasterOverlay/);
     assert.doesNotMatch(appSource, /collection\('products'\)\.limit\(500\)/);
@@ -4300,8 +4300,10 @@ test('inventory lookup batches product-key in queries', () => {
     const productEnd=appSource.indexOf('\n};',productStart)+3;
     const productSource=appSource.slice(productStart,productEnd);
     assert.match(productSource,/\.limit\(25\)/);
-    assert.match(productSource,/const products=\[\.\.\.map\.values\(\)\]\.slice\(0,25\)/);
-    assert.match(productSource,/where\('productKey','in',productKeys\)/);
+    assert.match(productSource,/const products=\[\.\.\.page\.values\(\)\]/);
+    assert.match(productSource,/codeQuery = codeQuery\.startAfter/);
+    assert.match(productSource,/nameQuery = nameQuery\.startAfter/);
+    assert.match(productSource,/where\('productKey','in',keys\)/);
 
     const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
     const priceEnd=appSource.indexOf('\nwindow.handlePriceExcelUpload',priceStart);
@@ -5216,12 +5218,12 @@ test('receipt event ids use the idempotent receipt operation key', () => {
 
 test('business product search renders incoming and projected stock columns', () => {
     assert.match(indexSource,/<th>可用<\/th><th>在途<\/th><th>預計<\/th>/);
-    const start=appSource.indexOf('body.innerHTML=products.map(product=>');
-    const end=appSource.indexOf('\n',start);
+    const start=appSource.indexOf('window.searchBusinessProducts=async function');
+    const end=appSource.indexOf('window.loadMoreBusinessProducts',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/projected=inventoryProjectedStock\(n\)/);
+    assert.match(source,/inventoryProjectedStock\(n\)/);
     assert.match(source,/\$\{n\.incoming\}/);
-    assert.match(source,/\$\{projected\}/);
+    assert.match(source,/\$\{inventoryProjectedStock\(n\)\}/);
     assert.match(source,/data-th="預計"/);
 });
 

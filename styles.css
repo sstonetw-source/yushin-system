@@ -3794,7 +3794,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
         #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
-        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody) {
+        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody, #businessProductSearchBody) {
         display: block;
         width: 100%;
         box-sizing: border-box;
@@ -3805,7 +3805,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
         #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
-        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody) > tr {
+        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody, #businessProductSearchBody) > tr {
         display: block;
         box-sizing: border-box;
         width: 100%;
@@ -3819,7 +3819,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
         #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
-        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody) > tr:last-child {
+        #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody, #businessProductSearchBody) > tr:last-child {
         margin-bottom: 0;
     }
     #appContainer :is(#inventoryStockPanel > .table-wrap, #poListPanel > .table-wrap) {
@@ -3829,7 +3829,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer :is(#ordersTable, #purchasePendingBody, #purchaseDispatchBody,
         #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable,
-        #poListBody, #inventoryListBody, #eqListTable, .product-management-table) td[data-th] {
+        #poListBody, #inventoryListBody, #eqListTable, .product-management-table, #businessProductSearchResults) td[data-th] {
         border-bottom-color: #d1dbe5;
         text-align: left;
         line-height: 1.5;
@@ -3838,7 +3838,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #appContainer :is(#ordersTable, #purchasePendingBody, #purchaseDispatchBody,
         #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable,
-        #poListBody, #inventoryListBody, #eqListTable, .product-management-table) td[data-th]::before {
+        #poListBody, #inventoryListBody, #eqListTable, .product-management-table, #businessProductSearchResults) td[data-th]::before {
         color: var(--workspace-label);
         font-size: 12px;
         font-weight: 700;
@@ -4318,4 +4318,13 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #mainTransferRequestBody td { display:block; border:0; padding:6px 0; overflow-wrap:anywhere; }
     #mainTransferRequestBody td::before { content:attr(data-th) '：'; color:var(--ys-muted); }
     #mainTransferRequestBody button { margin:4px; min-height:44px; }
+}
+
+#businessProductSearchMoreBtn[hidden] { display: none !important; }
+
+@media screen and (max-width: 768px) {
+    #businessProductSearchResults table { min-width: 0; width: 100%; }
+    #businessProductSearchResults thead { display: none; }
+    #businessProductSearchBody td { display: flex; gap: 8px; min-width: 0; border: 0; }
+    #businessProductSearchBody td::before { content: attr(data-th); flex: 0 0 72px; color: var(--ys-muted); }
 }

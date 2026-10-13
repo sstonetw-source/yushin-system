@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261013-1">
+        <link rel="stylesheet" href="styles.css?v=20261013-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -463,8 +463,9 @@
 
       </div>
       <div id="businessProductSearchResults" class="table-wrap inventory-product-search-results" style="display:none;">
-        <div class="inventory-search-subheading"><strong>產品主檔／售價補充結果</strong><span id="businessProductSearchStatus"></span></div>
+        <div class="inventory-search-subheading"><strong>產品主檔／售價補充結果</strong><span id="businessProductSearchStatus" role="status" aria-live="polite"></span></div>
         <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
+        <button type="button" id="businessProductSearchMoreBtn" class="btn-secondary" hidden onclick="loadMoreBusinessProducts()">載入更多產品</button>
       </div>
 
       <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
@@ -1697,7 +1698,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261012-8"></script>
+    <script src="app.js?v=20261013-1"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261010-2"></script>
     <script src="modules/inventory-workspace.js?v=20261012-5"></script>
