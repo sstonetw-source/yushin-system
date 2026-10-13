@@ -2520,16 +2520,7 @@ html[data-app-environment="preview"] body { border-top: 0; }
     box-sizing: border-box;
 }
 .product-brand-browser-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.product-brand-button {
-    min-height: 38px;
-    padding: 7px 12px;
-    border: 1px solid #b9c9d9;
-    border-radius: 999px;
-    background: #fff;
-    color: #24435f;
-    font-size: 13px;
-}
-.product-brand-button.active { border-color: #003366; background: #003366; color: #fff; }
+.product-brand-button { min-width: 0; }
 .product-brand-browser-empty { color: #7b8792; font-size: 13px; }
 .product-pending-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .product-ignored-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -3029,19 +3020,7 @@ html[data-app-environment="preview"] body { border-top: 0; }
     border-radius: 9px;
     background: #f4f8fc;
 }
-.purchase-stage-button {
-    border: 1px solid #c7d4df;
-    border-radius: 7px;
-    background: #fff;
-    color: #334;
-    text-align: left;
-    padding: 9px 10px;
-}
-.purchase-stage-button.active {
-    background: #003366;
-    border-color: #003366;
-    color: #fff;
-}
+.purchase-stage-button { text-align: left; padding: 9px 10px; }
 .purchase-stage-button span,
 .purchase-stage-button strong,
 .purchase-stage-button small { display: block; }
@@ -3964,13 +3943,13 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         font-size: 14px !important;
         min-height: 40px;
     }
-    #appContainer button.btn-secondary,
+    #appContainer button:is(.btn-secondary, .status-ok, .status-soon),
     button.btn-secondary {
         background: var(--ys-surface) !important;
         color: var(--ys-muted) !important;
         border: 1px solid var(--ys-border) !important;
     }
-    #appContainer button.btn-secondary:hover:not(:disabled),
+    #appContainer button:is(.btn-secondary, .status-ok, .status-soon):hover:not(:disabled),
     button.btn-secondary:hover:not(:disabled) {
         background: var(--ys-selected) !important;
         border-color: var(--ys-primary) !important;
@@ -4199,10 +4178,12 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen {
     /* 數量卡片與產品廠牌同樣使用分頁選取狀態；階段按鈕保留其尺寸。 */
     #appContainer .purchase-stage-button {
+        background: var(--ys-surface);
+        color: var(--ys-muted);
+        border: 1px solid var(--ys-border);
         border-radius: var(--ys-control-radius);
-        border-color: var(--ys-border);
     }
-    #appContainer .purchase-stage-button.active {
+    #appContainer .purchase-stage-button:is(.active, [aria-pressed="true"]) {
         background: var(--ys-selected);
         border-color: var(--ys-primary);
         color: var(--ys-primary-hover);
