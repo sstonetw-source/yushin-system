@@ -132,6 +132,7 @@ test('save identifies every unfinished item and focuses the first one without cr
  a.c.newOrderSaveInProgress=false;
  a.c.newOrderDraftItems=[{itemCode:'A',itemName:'Alpha',qty:1,productCheckStatus:'missing'},{itemCode:'B',itemName:'Beta',qty:1,productCheckStatus:'error'}];
  a.c.alert=s=>messages.push(s);a.c.editNewOrderDraftItem=i=>edited.push(i);
+ vm.runInContext(src.slice(src.indexOf('const MAX_ORDER_ITEMS ='),src.indexOf('\n}',src.indexOf('function assertOrderItemCount('))+2),a.c);
  const start=src.indexOf('window.saveNewOrder = function()'),end=src.indexOf('    const assistedOwner',start);
  vm.runInContext(src.slice(start,end)+'};',a.c);a.c.window.saveNewOrder();
  assert.match(messages[0],/第 1 項 A（未建檔）/);assert.match(messages[0],/第 2 項 B（查詢失敗）/);

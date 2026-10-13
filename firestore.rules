@@ -539,7 +539,23 @@ service cloud.firestore {
         && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
         && data.get('quantity', 0) is number && data.get('quantity', 0) >= 0
         && data.get('quantity', 0) <= item.get('qty', 0)
-        && (!orderIsCancelled(order) || data.get('quantity', 0) == 0);
+        && (!orderIsCancelled(order) || data.get('quantity', 0) == 0)
+        && businessReservationStockProof(id, data);
+    }
+    function businessReservationStockProof(id, data) {
+      let before = resource == null ? {} : resource.data;
+      let operationId = data.get('stockOperationId', 'unused');
+      let path = /databases/$(database)/documents/stockOperations/$(operationId);
+      let op = getAfter(path).data;
+      let stockPath = /databases/$(database)/documents/warehouseStocks/$(data.get('warehouseStockId', 'unused'));
+      return (before.get('quantity', 0) == data.get('quantity', 0)
+          && before.get('warehouseId', data.get('warehouseId', '')) == data.get('warehouseId', ''))
+        || (operationId != '' && operationId != 'unused' && !exists(path) && op.actorUid == request.auth.uid
+          && op.orderId == data.orderId && id in op.reservationIds
+          && op.productKey == data.productKey && op.warehouseId == data.warehouseId
+          && op.targetPath == 'warehouseStocks/' + data.warehouseStockId
+          && getAfter(stockPath).data.stockOperationId == operationId
+          && getAfter(stockPath).data.reserved - get(stockPath).data.reserved == op.reservedDelta);
     }
 
     function businessReservationOperationalUpdate() {
@@ -553,7 +569,7 @@ service cloud.firestore {
         && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
         && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex'
+          'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex', 'stockOperationId', 'warehouseStockId'
         ])
         && request.resource.data.get('quantity', 0) >= 0
         && request.resource.data.get('shortageQty', 0) >= 0;
@@ -953,18 +969,94 @@ service cloud.firestore {
     function validNewOrderProductMaster(data) {
       let productId = data.get('productId', '');
       return data.get('productMasterMatched', false) == true
+        && data.get('items', []) is list && data.get('items', []).size() <= 30
         && productId != ''
         && exists(productPath(productId));
     }
 
-    function validOrderEmbeddedCost(data) {
-      return !data.keys().hasAny(['costPrice'])
-        || data.get('procurementType', '') == 'SALES_SELF_ORDER';
+    function validNewItemCost(item, method) {
+      return !item.keys().hasAny(['unitCost', 'cost'])
+        && (!('costPrice' in item) || (item.get('procurementType', method) == 'SALES_SELF_ORDER'
+          && item.costPrice is number && item.costPrice >= 0));
     }
-
+    function validOrderEmbeddedCost(data) {
+      let items = data.get('items', []);
+      return items is list && items.size() <= 30
+        && validNewItemCost(data, 'PURCHASING_PO')
+        && (items.size() <= 0 || validNewItemCost(items[0], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 1 || validNewItemCost(items[1], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 2 || validNewItemCost(items[2], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 3 || validNewItemCost(items[3], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 4 || validNewItemCost(items[4], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 5 || validNewItemCost(items[5], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 6 || validNewItemCost(items[6], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 7 || validNewItemCost(items[7], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 8 || validNewItemCost(items[8], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 9 || validNewItemCost(items[9], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 10 || validNewItemCost(items[10], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 11 || validNewItemCost(items[11], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 12 || validNewItemCost(items[12], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 13 || validNewItemCost(items[13], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 14 || validNewItemCost(items[14], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 15 || validNewItemCost(items[15], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 16 || validNewItemCost(items[16], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 17 || validNewItemCost(items[17], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 18 || validNewItemCost(items[18], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 19 || validNewItemCost(items[19], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 20 || validNewItemCost(items[20], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 21 || validNewItemCost(items[21], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 22 || validNewItemCost(items[22], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 23 || validNewItemCost(items[23], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 24 || validNewItemCost(items[24], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 25 || validNewItemCost(items[25], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 26 || validNewItemCost(items[26], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 27 || validNewItemCost(items[27], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 28 || validNewItemCost(items[28], data.get('procurementType', 'PURCHASING_PO')))
+        && (items.size() <= 29 || validNewItemCost(items[29], data.get('procurementType', 'PURCHASING_PO')));
+    }
+    function commercialItemCostProtected(before, after, method) {
+      return before == after || (before.get('procurementType', method) == after.get('procurementType', method)
+        && (!after.diff(before).affectedKeys().hasAny(['costPrice','costSource','unitCost','cost'])
+          || (before.get('procurementType', method) == 'SALES_SELF_ORDER'
+            && !after.diff(before).affectedKeys().hasAny(['unitCost','cost'])
+            && after.get('costPrice', null) is number && after.costPrice >= 0)));
+    }
     function validCommercialOrderCostUpdate() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['costPrice', 'costSource'])
-        || request.resource.data.get('procurementType', '') == 'SALES_SELF_ORDER';
+      let before = resource.data.get('items', []);
+      let after = request.resource.data.get('items', []);
+      return request.resource.data.get('procurementType', 'PURCHASING_PO') == resource.data.get('procurementType', 'PURCHASING_PO')
+        && commercialItemCostProtected(resource.data, request.resource.data, 'PURCHASING_PO')
+        && (before == after || (before is list && after is list && before.size() == after.size() && before.size() <= 30
+        && (before.size() <= 0 || commercialItemCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 1 || commercialItemCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 2 || commercialItemCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 3 || commercialItemCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 4 || commercialItemCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 5 || commercialItemCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 6 || commercialItemCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 7 || commercialItemCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 8 || commercialItemCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 9 || commercialItemCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 10 || commercialItemCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 11 || commercialItemCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 12 || commercialItemCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 13 || commercialItemCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 14 || commercialItemCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 15 || commercialItemCostProtected(before[15], after[15], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 16 || commercialItemCostProtected(before[16], after[16], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 17 || commercialItemCostProtected(before[17], after[17], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 18 || commercialItemCostProtected(before[18], after[18], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 19 || commercialItemCostProtected(before[19], after[19], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 20 || commercialItemCostProtected(before[20], after[20], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 21 || commercialItemCostProtected(before[21], after[21], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 22 || commercialItemCostProtected(before[22], after[22], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 23 || commercialItemCostProtected(before[23], after[23], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 24 || commercialItemCostProtected(before[24], after[24], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 25 || commercialItemCostProtected(before[25], after[25], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 26 || commercialItemCostProtected(before[26], after[26], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 27 || commercialItemCostProtected(before[27], after[27], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 28 || commercialItemCostProtected(before[28], after[28], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 29 || commercialItemCostProtected(before[29], after[29], resource.data.get('procurementType', 'PURCHASING_PO')))));
     }
 
     function supplierCancellationResolution() {
@@ -1354,7 +1446,7 @@ service cloud.firestore {
     function logisticsLocationProtected() {
       let before = resource.data;
       let after = request.resource.data;
-      return before.get('warehouseLogisticsId', '') == '' || (before.items.size() <= 30
+      return before.get('warehouseLogisticsId', '') == '' || before.get('items', []) == after.get('items', []) || (before.items.size() <= 30
         && before.items.size() == after.items.size()
         && logisticsItemProtected(before.items, after.items, 0) && logisticsItemProtected(before.items, after.items, 1) && logisticsItemProtected(before.items, after.items, 2) && logisticsItemProtected(before.items, after.items, 3) && logisticsItemProtected(before.items, after.items, 4) && logisticsItemProtected(before.items, after.items, 5) && logisticsItemProtected(before.items, after.items, 6) && logisticsItemProtected(before.items, after.items, 7) && logisticsItemProtected(before.items, after.items, 8) && logisticsItemProtected(before.items, after.items, 9) && logisticsItemProtected(before.items, after.items, 10) && logisticsItemProtected(before.items, after.items, 11) && logisticsItemProtected(before.items, after.items, 12) && logisticsItemProtected(before.items, after.items, 13) && logisticsItemProtected(before.items, after.items, 14) && logisticsItemProtected(before.items, after.items, 15) && logisticsItemProtected(before.items, after.items, 16) && logisticsItemProtected(before.items, after.items, 17) && logisticsItemProtected(before.items, after.items, 18) && logisticsItemProtected(before.items, after.items, 19) && logisticsItemProtected(before.items, after.items, 20) && logisticsItemProtected(before.items, after.items, 21) && logisticsItemProtected(before.items, after.items, 22) && logisticsItemProtected(before.items, after.items, 23) && logisticsItemProtected(before.items, after.items, 24) && logisticsItemProtected(before.items, after.items, 25) && logisticsItemProtected(before.items, after.items, 26) && logisticsItemProtected(before.items, after.items, 27) && logisticsItemProtected(before.items, after.items, 28) && logisticsItemProtected(before.items, after.items, 29));
     }
@@ -1377,7 +1469,54 @@ service cloud.firestore {
         : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && owns(resource.data) && owns(request.resource.data)
-          && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())));
+          && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())));
+    }
+
+    function businessDeliveryRecordChange(before, after, index) {
+      return index is int && index >= 0
+        && ((after.size() == before.size() + 1 && index < after.size()
+            && after[index].qty is number && after[index].qty > 0
+            && after.removeAll([after[index]]) == before
+            && request.resource.data.deliveredQty == resource.data.get('deliveredQty', 0) + after[index].qty)
+          || (after.size() == before.size() && index < after.size()
+            && after[index].id == before[index].id && after[index].itemId == before[index].itemId
+            && after[index].qty is number && after[index].qty > 0
+            && after.removeAll([after[index]]) == before.removeAll([before[index]])
+            && request.resource.data.deliveredQty == resource.data.get('deliveredQty', 0) + after[index].qty - before[index].qty)
+          || (after.size() + 1 == before.size() && index < before.size()
+            && after == before.removeAll([before[index]])
+            && request.resource.data.deliveredQty == resource.data.get('deliveredQty', 0) - before[index].qty));
+    }
+    function businessPhysicalDelivery(id, e) {
+      let path = /databases/$(database)/documents/stockOperations/$(e.get('operationId', 'unused'));
+      let op = getAfter(path).data;
+      let invPath = /databases/$(database)/documents/inventory/$(e.get('inventoryId', 'unused'));
+      return e.get('operationId', '') != '' && !exists(path)
+        && op.actorUid == request.auth.uid && op.orderId == id
+        && op.targetPath == 'inventory/' + e.inventoryId
+        && getAfter(invPath).data.stockOperationId == e.operationId
+        && getAfter(invPath).data.onHand - get(invPath).data.onHand == op.qtyDelta
+        && op.qtyDelta == resource.data.get('deliveredQty', 0) - request.resource.data.get('deliveredQty', 0);
+    }
+    function businessOrderFactsProtected(id) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let prior = before.get('deliveryRecords', []);
+      let next = after.get('deliveryRecords', []);
+      let e = after.get('businessDeliveryEvidence', {});
+      return before.get('qty', 0) == after.get('qty', 0)
+        && before.get('isOrdered', false) == after.get('isOrdered', false)
+        && before.get('isArrived', false) == after.get('isArrived', false)
+        && before.get('receivedQty', 0) == after.get('receivedQty', 0)
+        && ((prior == next && before.get('deliveredQty', 0) == after.get('deliveredQty', 0)
+            && before.get('isDelivered', false) == after.get('isDelivered', false))
+          || (next is list && after.get('deliveredQty', 0) is number && after.deliveredQty >= 0
+            && (!after.get('isDelivered', false) || next.size() > 0)
+            && (businessDeliveryRecordChange(prior, next, e.get('recordIndex', -1))
+              || (before.get('items', []).size() == 1 && next.size() == 0 && after.deliveredQty == 0))
+            && (before.get('deliveredQty', 0) == after.deliveredQty
+              ? before.get('isDelivered', false) == after.get('isDelivered', false)
+              : businessPhysicalDelivery(id, e))));
     }
 
     match /orders/{id} {

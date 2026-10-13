@@ -121,6 +121,7 @@ let pendingTab = null;
 let salesListLoadPromise = null;
 let quickProductTarget = null;
 let quoteFormInitialized = false;
+let draftSaveTimer = null;
 const APP_CACHE_VERSION = 1;
 const APP_ASSET_VERSION = (() => {
     try {
@@ -212,6 +213,10 @@ const BUSINESS_STATUS = Object.freeze({
     CANCELLED: 'cancelled',
     VOIDED: 'voided'
 });
+const MAX_ORDER_ITEMS = 30;
+function assertOrderItemCount(items) {
+    if (items.length > MAX_ORDER_ITEMS) throw new Error(`每張訂單最多 ${MAX_ORDER_ITEMS} 個品項；請分成多張訂單後再儲存，避免後續採購／倉庫作業無法處理。`);
+}
 
 function firestoreReadWithTimeout(readPromise, label = '資料') {
     let timeoutId;
@@ -501,10 +506,12 @@ window.addEventListener('DOMContentLoaded', () => {
     // 已經在 calculateTotals() 裡存過了，這裡再存一次是安全的（等於覆蓋同樣的內容）。
     const quoteCreatePanel = document.getElementById('quoteCreatePanel');
     if (quoteCreatePanel) {
-        let draftSaveTimer = null;
         const scheduleDraftSave = () => {
             clearTimeout(draftSaveTimer);
-            draftSaveTimer = setTimeout(() => { if (!restoringQuoteDraft) saveQuoteDraft(); }, 400);
+            const uid = currentUser?.uid, generation = sessionDataGeneration;
+            draftSaveTimer = setTimeout(() => {
+                if (uid && uid === currentUser?.uid && generation === sessionDataGeneration && !restoringQuoteDraft) saveQuoteDraft();
+            }, 400);
         };
         quoteCreatePanel.addEventListener('input', scheduleDraftSave);
         quoteCreatePanel.addEventListener('change', scheduleDraftSave);
@@ -514,6 +521,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // 監控登入狀態：未登入顯示登入畫面，登入後依角色初始化系統
     firebase.auth().onAuthStateChanged(function(user) {
         if (user) {
+            if (currentUser?.uid !== user.uid) resetSessionData();
             currentUser = user;
             window.DocumentDownloads?.setUser(user.uid);
             // Returning sessions can render immediately from a small local profile cache.
@@ -550,6 +558,7 @@ window.addEventListener('DOMContentLoaded', () => {
                         .catch(err => console.error('同步 Email 失敗：', err));
                 }
             }).catch(err => {
+                if (firebase.auth().currentUser?.uid !== user.uid) return;
                 console.error('讀取登入帳號資料失敗：', err);
                 // Auth 仍有效且已有本機 profile 時，Firestore 暫時離線不能把使用者踢回登入頁。
                 // 保留既有畫面；所有真正的資料寫入仍會由 Firestore / Rules 驗證。
@@ -563,6 +572,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 showAuthWaiting('已保留登入狀態，但暫時無法讀取帳號資料。請檢查網路後重新連線。');
             });
         } else {
+            resetSessionData();
             currentUser = null;
             window.DocumentDownloads?.setUser('');
             currentUserRole = null;
@@ -605,13 +615,15 @@ let permissionRulesCheckedUid = '';
 let permissionRulesCheckPromise = null;
 function ensurePermissionRulesReady() {
     const uid=currentUser?.uid||'';
+    const generation=sessionDataGeneration;
+    const isCurrent=()=>generation===sessionDataGeneration&&uid===currentUser?.uid;
     if(!uid)return Promise.resolve(false);
     if(permissionRulesCheckedUid===uid)return Promise.resolve(permissionRulesReady);
     if(permissionRulesCheckPromise)return permissionRulesCheckPromise;
     permissionRulesCheckPromise=firestoreReadWithTimeout(db.collection('stockOperations').doc('permissions-probe').get(),'權限規則版本')
-        .then(()=>{permissionRulesReady=true;return true;})
-        .catch(err=>{permissionRulesReady=false;console.warn('新版權限規則尚未確認，暫用既有交易流程。',err.code||err.message);return false;})
-        .finally(()=>{permissionRulesCheckedUid=uid;permissionRulesCheckPromise=null;applyPermissionVisibility();});
+        .then(()=>{if(!isCurrent())return false;permissionRulesReady=true;return true;})
+        .catch(err=>{if(!isCurrent())return false;permissionRulesReady=false;console.warn('新版權限規則尚未確認，暫用既有交易流程。',err.code||err.message);return false;})
+        .finally(()=>{if(!isCurrent())return;permissionRulesCheckedUid=uid;permissionRulesCheckPromise=null;applyPermissionVisibility();});
     return permissionRulesCheckPromise;
 }
 function supplyOrdersCollection() {
@@ -1381,9 +1393,10 @@ window.addEventListener('pageshow', event => {
 // 「檢視身份」切換：只是把畫面上用來判斷權限/欄位的 currentUserRole 換成別的角色，
 // 讓管理員可以確認/測試各角色實際看到的畫面長怎樣。真正的身份還是 trueUserRole，
 // 這裡不會改動 Firebase 帳號本身，Firestore 的存取權限仍然是照登入帳號真正的角色在判斷。
-window.switchViewRole = function(role) {
-    if (trueUserRole !== 'admin') return;
-    currentUserRole = role;
+let sessionDataGeneration = 0;
+function resetSessionData() {
+    sessionDataGeneration++;
+    permissionRulesReady=false; permissionRulesCheckedUid=''; permissionRulesCheckPromise=null;
     // 先清掉前一個視角的分頁狀態，避免非同步查詢完成前短暫顯示不屬於新視角的資料。
     loadedMainPages.clear();
     mainPageRefreshAt.clear(); mainPageLoads.clear();
@@ -1440,6 +1453,37 @@ window.switchViewRole = function(role) {
     purchasingCompletedVisibleLimit = DEFAULT_LIST_LIMIT;
     purchasingViewLoaded.clear();
     equipmentList = [];
+    equipmentLoadGeneration++; equipmentSearchGeneration++;
+    forecastLoadGeneration++; forecastHistorySearchGeneration++;
+    quoteHistorySearchGeneration++; orderHistorySearchGeneration++; poHistorySearchGeneration++;
+    productManagementSearchGeneration++; productBrandBrowseGeneration++; businessProductSearchGeneration++;
+    orderModalOpenGeneration++; orderDraftProductCheckGeneration++;
+    forecastHistorySearchResults=[]; quoteHistorySearchResults=[]; orderHistorySearchResults=[];
+    salesList=[]; salesListLoadPromise=null; allUsersCache=[]; salesCodeMasterCache=[];
+    salesStatisticsOrders=[]; tradeAnalysisReady=false;
+    salesStatisticsLoadPromise=null; inventoryAnalysisReceipts=[]; inventoryAnalysisStocks=[]; inventoryAnalysisLots=[];
+    inventoryAnalysisLotCosts.clear(); inventoryAnalysisSupplyOrders=[]; inventoryAnalysisDirectShipSupplyOrders=[];
+    tradeAnalysisSnapshots.clear(); tradeAnalysisRevision++;
+    purchaseCostCache.clear(); warehouseStockCache.clear(); visibleProductCostCache.clear();
+    productCodeMatchCache.clear(); productManagementSearchCache.clear();
+    inventoryLedgerCache=[]; pendingSupplyCache=[]; inventoryReplenishmentCache=[];
+    newOrderDraftItems=[]; requestedOrderOwnerUid=''; editingQuoteNo=null; quoteFormInitialized=false;
+    forecastLoading=false; forecastReloadRequested=false; inventoryLoading=false; myQuotesPageLoading=false; myQuotesReloadRequested=false;
+    window._orderModalQuoteContext=null; window._orderModalSourceLink=null;
+    clearTimeout(draftSaveTimer);
+    window.resetDeliverySettings?.(); window.resetMainTransferRequests?.(); window.resetProduct360?.();
+    document.querySelectorAll('.content-section tbody').forEach(body=>body.replaceChildren());
+    document.querySelectorAll('.eq-modal-overlay.active, .modal-overlay.active').forEach(overlay=>overlay.classList.remove('active'));
+    for (const id of ['clientName','ordererName','quoteRemarks','salesName','orderCustomer','orderInvoiceTitle','orderRemarks']) {
+        const field=document.getElementById(id); if(field)field.value='';
+    }
+    const taskStatus=document.getElementById('receiptTaskStatus'); if(taskStatus)taskStatus.replaceChildren();
+    receiptTaskJobs.clear();
+}
+window.switchViewRole = function(role) {
+    if (trueUserRole !== 'admin') return;
+    currentUserRole = role;
+    resetSessionData();
     const activeSection = document.querySelector('.content-section.active');
     if (activeSection?.id === 'order-system') renderOrdersList();
     if (activeSection?.id === 'quote-system' && document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
@@ -3953,6 +3997,7 @@ async function createForecastOrdersDirectly(forecast, items) {
         return { ...normalizeNewOrderItem(source), itemId:`item-${index + 1}`, sourceItemIndex:index };
     }).filter(item => item.itemName || item.itemCode);
     if (!normalizedItems.length) throw new Error('Forecast 沒有可轉成訂單的品項。');
+    assertOrderItemCount(normalizedItems);
 
     const unmatchedItem=normalizedItems.find(item=>item.productMasterMatched!==true||!item.productId);
     if(unmatchedItem){
@@ -4115,12 +4160,14 @@ function applySalesRows(rows) {
 }
 
 function initSalesList() {
+    const generation=sessionDataGeneration;
     // Admin 已讀過 users 時直接共用同一份記憶體資料，避免再次掃描 users collection。
     if (allUsersCache.length) {
         applySalesRows(allUsersCache.map(u => ({ id:u.uid, ...u })));
         return Promise.resolve(salesList);
     }
-    return readCollectionInBatches('users').then(rows => applySalesRows(rows)).catch(err => {
+    return readCollectionInBatches('users').then(rows => generation===sessionDataGeneration ? applySalesRows(rows) : []).catch(err => {
+        if (generation!==sessionDataGeneration) return [];
         console.error('讀取 users 人員名單失敗：', err);
         // 短暫斷線時保留既有名單；不要把畫面上的業務選項清空。
         populateSalesDropdown();
@@ -6162,7 +6209,8 @@ window.calculateTotals = function() {
     saveQuoteDraft();
 };
 
-const QUOTE_DRAFT_STORAGE_KEY = 'quote_draft_v1';
+const QUOTE_DRAFT_STORAGE_KEY = 'quote_draft_v2';
+function quoteDraftStorageKey() { return `${QUOTE_DRAFT_STORAGE_KEY}:${currentUser?.uid || 'anonymous'}`; }
 let editingQuoteNo = '';
 
 function updateQuoteEditingBanner() {
@@ -6214,6 +6262,7 @@ window.saveLoadedQuoteAsNew = async function() {
 // 重新打開系統時都能接著剛剛還沒印完的那張繼續打，不會憑空消失。
 // 只有按「製作下一張估價單」才會真的清空、換成全新的草稿。
 function saveQuoteDraft() {
+    if (!currentUser) return;
     try {
         const items = Array.from(document.querySelectorAll('#quoteItems tr')).map(row => ({
             nameEn: row.querySelector('.item-en')?.value || '',
@@ -6243,15 +6292,16 @@ function saveQuoteDraft() {
             editingQuoteNo,
             items
         };
-        localStorage.setItem(QUOTE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+        localStorage.setItem(quoteDraftStorageKey(), JSON.stringify(draft));
     } catch (e) {
         console.error('儲存估價單草稿失敗：', e);
     }
 }
 
 function loadQuoteDraft() {
+    if (!currentUser) return null;
     try {
-        const raw = localStorage.getItem(QUOTE_DRAFT_STORAGE_KEY);
+        const raw = localStorage.getItem(quoteDraftStorageKey());
         return raw ? JSON.parse(raw) : null;
     } catch (e) {
         console.error('讀取估價單草稿失敗：', e);
@@ -7854,6 +7904,7 @@ window.markQuoteAsDeal = async function(quoteNo) {
         if(q.dealClosed){alert('這張估價單已經標記過成交了。');return;}
         const sourceItems=(q.items||[]).filter(item=>item.nameCn||item.nameEn||item.model);
         if(!sourceItems.length)throw new Error('估價單沒有可建立訂單的品項。');
+        assertOrderItemCount(sourceItems);
 
         // 成交不是直接寫死訂貨方式。先進入正式的訂單輸入流程，
         // 讓使用者逐品項確認「採購下單／業務自行訂購」及「倉庫／原廠直送」後才儲存。
@@ -10407,9 +10458,9 @@ let orderWorkQueueCache = [], orderWorkQueueReady = false, orderWorkQueueError =
 let orderWorkQueuePromise = null, orderWorkQueueGeneration = 0;
 let orderWorkQueueLoadedAt = 0, orderWorkQueueLoadedScope = '';
 function pendingOrderWorkQuery() {
-    let query = db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE);
-    if (canViewAllData('orders') || canReceiveInventoryCapability()) query = query.where('workCategories','array-contains-any',OPEN_ORDER_WORK_CATEGORIES);
-    else query = query.where('ownerUid','==',currentUser?.uid || '');
+    let query = db.collection('orders').where('status','==',BUSINESS_STATUS.ACTIVE)
+        .where('workCategories','array-contains-any',OPEN_ORDER_WORK_CATEGORIES);
+    if (!canViewAllData('orders') && !canReceiveInventoryCapability()) query = query.where('ownerUid','==',currentUser?.uid || '');
     return query.orderBy('orderDate','desc');
 }
 async function loadOrderWorkQueue(force = false) {
@@ -16802,7 +16853,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         // Web Firestore transactions accept document references, not queries.
         // Discover IDs, then re-read every candidate in the transaction so concurrent
         // delivery/receipt changes force a retry before any stock is written.
-        const lotQuery=await db.collection('inventoryLots').where('productKey','==',productKey).where('warehouseId','==',warehouseId).get();
+        const lotQuery=await db.collection('inventoryLots').where('productKey','==',productKey).where('warehouseId','==',warehouseId).where('remainingQty','>',0).get();
         const lotSnapshots=await Promise.all(lotQuery.docs.map(doc=>transaction.get(doc.ref)));
         const lotDocs=lotSnapshots.filter(doc=>doc.exists).map(doc=>({id:doc.id,...doc.data()}))
             .filter(l=>l.productKey===productKey&&l.warehouseId===warehouseId&&Number(l.remainingQty||0)>0);
@@ -18337,6 +18388,7 @@ window.saveNewOrder = function() {
     const currentItem=currentOrderModalItem();
     const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])].map(item=>({...item}));
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
+    try { assertOrderItemCount(items); } catch (err) { alert(err.message); return; }
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
     const unfinished=items.map((item,index)=>({item,index})).filter(({item})=>item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched');
     if(unfinished.length){
@@ -21992,7 +22044,9 @@ async function syncSalesCodeMasterFromUsers() {
 }
 
 async function loadSalesCodeMaster() {
+    const generation = sessionDataGeneration;
     const rows = await readCollectionInBatches('salesCodes');
+    if (generation !== sessionDataGeneration) return [];
     salesCodeMasterCache = rows
         .filter(item => item.active !== false)
         .sort((x, y) => String(x.code || x.id).localeCompare(String(y.code || y.id), 'zh-Hant'));
@@ -22000,7 +22054,9 @@ async function loadSalesCodeMaster() {
 }
 
 window.reloadSalesFromUsers = function() {
+    const generation = sessionDataGeneration;
     return readCollectionInBatches('users').then(async rows => {
+        if (generation !== sessionDataGeneration) return;
         salesList = rows
             .filter(d => d.name && d.code)
             .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', active:d.active !== false }))
@@ -22021,10 +22077,13 @@ window.reloadSalesFromUsers = function() {
         applySalesRows(rows);
         salesListLoadPromise = Promise.resolve(salesList);
         if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
+        if (generation !== sessionDataGeneration) return;
         await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
+        if (generation !== sessionDataGeneration) return;
         renderAdminSalesTable();
         populateTransferDropdowns();
     }).catch(err => {
+        if (generation !== sessionDataGeneration) return;
         mainPageLoadFailed('admin');
         console.error('重新載入人員資料失敗：', err);
         allUsersCache = [];
@@ -22685,8 +22744,16 @@ function systemAuditProductKey(record = {}) {
 
 const TEST_DATA_RESET_DELETE_COLLECTIONS = [
     'orders','purchaseOrders','procurementDemands','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
-    'receipts','customerReturnReceipts','dispatchRecords','deliveries','inventoryMovements','auditLogs'
+    'receipts','customerReturnReceipts','dispatchRecords','deliveries','inventoryMovements','auditLogs','receivingSupplyOrders'
 ];
+// Immutable operational evidence cannot be partially deleted by the client.
+const TEST_DATA_RESET_PROTECTED_COLLECTIONS = ['stockTransfers','stockTransferRequests','stockOperations'];
+async function assertClientTestResetSafe() {
+    for (const name of TEST_DATA_RESET_PROTECTED_COLLECTIONS) {
+        const snap = await firestoreReadWithTimeout(db.collection(name).limit(1).get(), `${name} 初始化安全檢查`);
+        if (!snap.empty) throw new Error('系統已有調撥或庫存交易憑證，不能使用前台初始化。請使用後端完整初始化流程，避免留下部分清除資料。');
+    }
+}
 let testDataResetPreviewState = null;
 
 async function countCollectionDocuments(name) {
@@ -22750,6 +22817,8 @@ window.previewTestDataReset = async function() {
     if(!button||button.disabled)return;
     button.disabled=true;if(wrap)wrap.style.display='none';if(status)status.textContent='';
     try{
+        testDataResetPreviewState=null;
+        await assertClientTestResetSafe();
         const counts={};
         for(const name of ['quotes',...TEST_DATA_RESET_DELETE_COLLECTIONS,'forecasts','inventory','warehouseStocks']){
             if(preview)preview.textContent=`正在檢查 ${name}…`;
@@ -22787,6 +22856,7 @@ window.executeTestDataReset = async function() {
     if(!confirm(`最後確認：保留 ${testDataResetPreviewState.counts.quotes||0} 筆估價單，永久清除其他測試營運資料並將庫存歸零？此操作無法復原。`))return;
     button.disabled=true;
     try{
+        await assertClientTestResetSafe();
         const forecasts=await readCollectionInBatches('forecasts');
         for(let i=0;i<forecasts.length;i++){
             const forecast=forecasts[i];

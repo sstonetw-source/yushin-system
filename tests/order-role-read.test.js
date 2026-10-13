@@ -12,7 +12,7 @@ test('recent and pending owner queries have collection indexes', () => {
  }
 });
 test('role switch invalidates pending order reads and clears failed loading state', () => {
- const start = src.indexOf('    ordersCache = [];', src.indexOf('window.switchViewRole ='));
+ const start = src.indexOf('    ordersCache = [];', src.indexOf('function resetSessionData('));
  const end = src.indexOf('    forecastCache = [];', start);
  const context = vm.createContext({ordersCache:[{id:'old'}], orderPaginationState:{}, orderLoadGeneration:3,
   orderPageLoading:true, orderReloadRequested:true, orderLoadErrorMessage:'old error', orderWorkQueueError:'old error',

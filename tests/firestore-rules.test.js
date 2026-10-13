@@ -831,6 +831,40 @@ test('sales cannot add cost to a formal purchasing order after creation', async 
   await assertFails(updateDoc(doc(db('sales1'), 'orders/formal-cost-update'), { costPrice:99 }));
 });
 
+test('business costs cannot bypass protection through nested lines or procurement method changes', async () => {
+  const base={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',items:[{itemId:'I1',productId:'p-order',qty:2,procurementType:'PURCHASING_PO'}]};
+  await seed('orders/nested-cost',base);
+  const ref=doc(db('sales1'),'orders/nested-cost');
+  for(const field of ['costPrice','unitCost','cost']){
+    await assertFails(updateDoc(ref,{items:[{...base.items[0],[field]:99}]}));
+  }
+  await assertFails(updateDoc(ref,{procurementType:'SALES_SELF_ORDER',costPrice:99}));
+  await assertFails(updateDoc(ref,{items:[{...base.items[0],procurementType:'SALES_SELF_ORDER',costPrice:99}]}));
+  await assertSucceeds(updateDoc(ref,{remarks:'正常商務備註'}));
+  const self={...base,procurementType:'SALES_SELF_ORDER',items:[{...base.items[0],procurementType:'SALES_SELF_ORDER',costPrice:20}]};
+  await seed('orders/self-cost-edit',self);
+  await assertSucceeds(updateDoc(doc(db('sales1'),'orders/self-cost-edit'),{items:[{...self.items[0],costPrice:21}]}));
+  await assertFails(updateDoc(doc(db('sales1'),'orders/self-cost-edit'),{items:[{...self.items[0],costPrice:-1}]}));
+});
+
+test('business order progress cannot be forged without an atomic physical delivery',async()=>{
+  await seedStockWorkflow();
+  const ref=doc(db('sales1'),'orders/stock-order');
+  for(const patch of [{deliveredQty:2},{isDelivered:true},{receivedQty:2},{isArrived:true},{isOrdered:true},{qty:999},
+    {deliveryRecords:[{id:'fake',itemId:'item-1',qty:2}],deliveredQty:2,businessDeliveryEvidence:{recordIndex:0}}]){
+    await assertFails(updateDoc(ref,patch));
+  }
+  await assertFails(setDoc(doc(db('sales1'),'inventoryReservations/stock-order__item-1'),{
+    orderId:'stock-order',itemId:'item-1',productKey:'p1',warehouseId:'w1',ownerUid:'sales1',salesCode:'S01',quantity:5
+  }));
+  await assertSucceeds(stockWorkflow(0,5,'reserve'));
+  await assertSucceeds(stockWorkflow(-2,3,'ship'));
+  const live=(await getDoc(ref)).data();
+  await assertSucceeds(updateDoc(ref,{deliveryRecords:live.deliveryRecords.map(r=>({...r,notes:'修正備註'})),businessDeliveryEvidence:{recordIndex:0}}));
+  await assertFails(updateDoc(ref,{deliveredQty:3,deliveryRecords:[{id:'ship-1',itemId:'item-1',qty:3}],businessDeliveryEvidence:live.businessDeliveryEvidence}));
+  await assertSucceeds(stockWorkflow(2,5,'ship_reversal'));
+});
+
 test('purchase communication timeline is purchaser-only and immutable', async () => {
   const event = {
     purchaseOrderId:'PO-1',
@@ -1112,7 +1146,8 @@ async function stockWorkflow(physicalDelta, reservationQty, type, warehouseId='w
     if(physicalDelta){
       tx.update(lot,{remainingQty:lotSnap.data().remainingQty+physicalDelta});
       if(type==='return_in')tx.update(order,{returnedQty:orderSnap.data().returnedQty+physicalDelta});
-      else tx.update(order,{deliveredQty:orderSnap.data().deliveredQty-physicalDelta});
+      else tx.update(order,{deliveredQty:orderSnap.data().deliveredQty-physicalDelta,
+        deliveryRecords:physicalDelta < 0 ? [{id:'ship-1',itemId:'item-1',qty:-physicalDelta}] : []});
     }
     tx.set(res,{orderId:'stock-order',itemId:'item-1',productKey:'p1',warehouseId,ownerUid:'sales1',salesCode:'S01',quantity:reservationQty,shortageQty:0,status:'active'});
     tx.set(client.collection('inventoryMovements').doc(),{sourceId:'stock-order',sourceType:'order',productKey:'p1',ownerUid:'sales1',salesCode:'S01',type,qty:physicalDelta||reserveDelta,lotAllocations:physicalDelta?[{lotId:'l1',qty:type==='ship'?-physicalDelta:physicalDelta}]:[]});
@@ -1202,13 +1237,19 @@ test('multi-product reservation uses the matching product movement for each stoc
  const client=compatDb('sales1');
  const items=['p1','p2'].map((productId,i)=>({itemId:'item-'+(i+1),productId,qty:5,warehouseId:'w1'}));
  await seed('orders/multi-stock',{ownerUid:'sales1',salesCode:'S01',items});
- for(const productId of ['p1','p2'])await seed('inventory/'+productId,{productKey:productId,onHand:10,reserved:0});
+ for(const productId of ['p1','p2']){
+  await seed('inventory/'+productId,{productKey:productId,onHand:10,reserved:0});
+  await seed('warehouseStocks/w1-'+productId,{productKey:productId,warehouseId:'w1',onHand:10,reserved:0});
+ }
  await assertSucceeds(stockPermissions.run(client,async tx=>{
   const refs=items.map(item=>client.collection('inventory').doc(item.productId));
+  const whRefs=items.map(item=>client.collection('warehouseStocks').doc('w1-'+item.productId));
   await Promise.all(refs.map(ref=>tx.get(ref)));
+  await Promise.all(whRefs.map(ref=>tx.get(ref)));
   await tx.get(client.collection('orders').doc('multi-stock'));
   items.forEach((item,i)=>{
    tx.update(refs[i],{reserved:5});
+   tx.update(whRefs[i],{reserved:5});
    tx.set(client.collection('inventoryReservations').doc('multi-stock__'+item.itemId),{orderId:'multi-stock',itemId:item.itemId,productKey:item.productId,warehouseId:'w1',ownerUid:'sales1',salesCode:'S01',quantity:5});
    tx.set(client.collection('inventoryMovements').doc(),{sourceId:'multi-stock',sourceType:'order',productKey:item.productId,ownerUid:'sales1',salesCode:'S01',type:'reserve',qty:5});
   });

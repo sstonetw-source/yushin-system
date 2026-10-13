@@ -41,7 +41,7 @@ test('admin personnel reload and shared cache retain every salesperson delivery 
  const src=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
  const defaults={mode:'SALES_SHIP',contact:'南區業務',phone:'123',address:'高雄地址'};
  const rows=[{id:'S',name:'南區業務',code:'01',deliveryDefaults:defaults},{id:'N',name:'北區業務',code:'02'}];
- const c=vm.createContext({window:{},readCollectionInBatches:async()=>rows,trueUserRole:'admin',allUsersCache:[],salesList:[],
+ const c=vm.createContext({window:{},sessionDataGeneration:0,readCollectionInBatches:async()=>rows,trueUserRole:'admin',allUsersCache:[],salesList:[],
   populateSalesDropdown(){},populateEquipmentSalesDropdown(){},syncSalesCodeMasterFromUsers:async()=>{},loadSalesCodeMaster:async()=>{},
   renderAdminSalesTable(){},populateTransferDropdowns(){},console,mainPageLoadFailed(){throw Error('reload failed');}});
  vm.runInContext(src.slice(src.indexOf('function applySalesRows('),src.indexOf('function applyCompanyTheme(')),c);

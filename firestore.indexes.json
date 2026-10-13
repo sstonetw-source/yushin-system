@@ -1,6 +1,25 @@
 {
   "indexes": [
     {
+      "collectionGroup": "inventoryLots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "productKey", "order": "ASCENDING"},
+        {"fieldPath": "warehouseId", "order": "ASCENDING"},
+        {"fieldPath": "remainingQty", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "ownerUid", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "workCategories", "arrayConfig": "CONTAINS"},
+        {"fieldPath": "orderDate", "order": "DESCENDING"}
+      ]
+    },
+    {
       "collectionGroup": "quotes",
       "queryScope": "COLLECTION",
       "fields": [

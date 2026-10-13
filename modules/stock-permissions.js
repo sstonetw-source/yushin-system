@@ -93,6 +93,21 @@
           sourceMovementId:sourceMovement?.ref.id||'',createdAt:new Date().toISOString()};
         writes.push({method:'set',ref:operationRef,data:operation});
         writes.push({method:'update',ref:target.ref,data:{stockOperationId:operationRef.id}});
+        if(target.collection==='warehouseStocks'){
+          for(const w of reservationWrites.filter(w=>operation.reservationIds.includes(w.ref.id)))w.data={...w.data,stockOperationId:operationRef.id,warehouseStockId:target.ref.id};
+        }
+      }
+      if(enabled){
+        for(const w of writes.filter(w=>w.ref.path.startsWith('orders/')&&w.method!=='delete')){
+          const before=reads.get(w.ref.path)?.data;if(!before)continue;
+          const prior=before.deliveryRecords||[],next=w.data.deliveryRecords;
+          if(!Array.isArray(next)||JSON.stringify(prior)===JSON.stringify(next))continue;
+          const ids=[...new Set([...prior,...next].map(r=>r.id))];
+          const changed=ids.filter(id=>JSON.stringify(prior.find(r=>r.id===id))!==JSON.stringify(next.find(r=>r.id===id)));
+          const index=changed.length===1?(next.findIndex(r=>r.id===changed[0])>=0?next.findIndex(r=>r.id===changed[0]):prior.findIndex(r=>r.id===changed[0])):-1;
+          const op=writes.find(row=>row.ref.path.startsWith('stockOperations/')&&row.data.orderId===w.ref.id&&row.data.targetPath.startsWith('inventory/'));
+          w.data={...w.data,businessDeliveryEvidence:{recordIndex:index,operationId:op?.ref.id||'',inventoryId:op?.data.targetPath.split('/')[1]||''}};
+        }
       }
       const supplyChanges=new Map();
       for(const write of writes){

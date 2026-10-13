@@ -96,8 +96,8 @@ test('order refresh stays paginated and status writes have an in-flight guard', 
     assert.doesNotMatch(loader, /while\s*\(/);
     assert.match(appSource, /pendingOrderStatusKeys\.has\(pendingKey\)/);
     assert.match(appSource, /pendingOrderStatusKeys\.delete\(pendingKey\)/);
-    const roleSwitchStart = appSource.indexOf('window.switchViewRole =');
-    const roleSwitchEnd = appSource.indexOf('\n};', roleSwitchStart) + 3;
+    const roleSwitchStart = appSource.indexOf('function resetSessionData(');
+    const roleSwitchEnd = appSource.indexOf('window.switchViewRole =', roleSwitchStart);
     const roleSwitch = appSource.slice(roleSwitchStart, roleSwitchEnd);
     assert.doesNotMatch(roleSwitch, /loadMyQuotesFromCloud\(\)|loadOrdersFromCloud\(\)|loadEquipmentFromCloud\(\)/);
 });
@@ -635,8 +635,8 @@ test('role changes cannot leave an older in-flight page in the cache', () => {
     assert.match(appSource, /requestedRole !== currentUserRole/);
     assert.match(appSource, /orderReloadRequested = true/);
     assert.match(appSource, /myQuotesReloadRequested = true/);
-    const roleSwitchStart = appSource.indexOf('window.switchViewRole =');
-    const roleSwitchEnd = appSource.indexOf('\n};', roleSwitchStart) + 3;
+    const roleSwitchStart = appSource.indexOf('function resetSessionData(');
+    const roleSwitchEnd = appSource.indexOf('window.switchViewRole =', roleSwitchStart);
     const roleSwitch = appSource.slice(roleSwitchStart, roleSwitchEnd);
     assert.match(roleSwitch, /ordersCache = \[\]/);
     assert.match(roleSwitch, /myQuotesCache = \[\]/);
@@ -2454,7 +2454,7 @@ test('completed purchasing queue uses mobile card layout like other work queues'
 
 
 test('admin view-role switch clears purchasing session state', () => {
-    const start=appSource.indexOf('window.switchViewRole = function(role)');
+    const start=appSource.indexOf('function resetSessionData(');
     const end=appSource.indexOf('\nfunction actuallySwitchMainTab',start);
     const source=appSource.slice(start,end);
     assert.match(source,/loadedMainPages\.clear\(\)/);
