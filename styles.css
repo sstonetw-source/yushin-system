@@ -4098,12 +4098,45 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 /* UI／UX 1.0 follow-up: finish the quotation workspace without changing printableQuote. */
 @media screen {
     #appContainer { --workspace-background: var(--ys-selected); --workspace-border: var(--ys-border); --workspace-label: var(--ys-muted); --workspace-radius: 12px; }
-    #appContainer .quote-module-nav,
+    /* 估價單兩層切換控制與採購／倉庫頁面使用相同的分頁按鈕語意。 */
+    #appContainer #quote-system > .quote-module-nav,
     #appContainer #quoteCreatePanel > .company-sub-nav {
-        border: 1px solid var(--ys-border);
-        border-radius: 10px;
-        background: var(--ys-surface);
+        border: 0;
+        border-bottom: 1px solid var(--ys-border);
+        border-radius: 0;
+        background: transparent;
+        padding: 0 0 10px;
         gap: 8px;
+    }
+    #appContainer #quote-system > .quote-module-nav > .sub-tab,
+    #appContainer #quoteCreatePanel > .company-sub-nav > .sub-tab {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 120px;
+        min-height: 44px;
+        margin: 0;
+        padding: 8px 12px;
+        box-sizing: border-box;
+        border: 1px solid var(--ys-border);
+        border-radius: 6px;
+        background: var(--ys-surface);
+        color: var(--ys-muted);
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.4;
+        text-align: center;
+    }
+    #appContainer #quote-system > .quote-module-nav > .sub-tab.active,
+    #appContainer #quoteCreatePanel > .company-sub-nav > .sub-tab.active {
+        border-color: var(--ys-primary);
+        background: var(--ys-selected);
+        color: var(--ys-primary-hover);
+        font-weight: 600;
+    }
+    #appContainer #quote-system > .quote-module-nav > .sub-tab:hover:not(.active),
+    #appContainer #quoteCreatePanel > .company-sub-nav > .sub-tab:hover:not(.active) {
+        background: var(--ys-selected);
     }
     #appContainer #quote-system .quote-primary-actions > #printBtn {
         background: var(--ys-primary);
@@ -4168,8 +4201,13 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     html, body, #appContainer { background: var(--ys-page); }
     #appContainer #quote-system > .quote-module-nav,
     #appContainer #quoteCreatePanel > .company-sub-nav {
-        padding: 8px;
+        padding: 0 0 10px;
         margin-bottom: 12px;
+    }
+    #appContainer #quote-system > .quote-module-nav > .sub-tab,
+    #appContainer #quoteCreatePanel > .company-sub-nav > .sub-tab {
+        min-width: 0;
+        padding: 8px 4px;
     }
     #appContainer #quote-system .quote-module-nav .sub-tab,
     #appContainer #quoteCreatePanel .company-sub-nav .sub-tab {
