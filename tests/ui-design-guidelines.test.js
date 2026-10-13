@@ -9,10 +9,13 @@ const html = read('index.html');
 
 test('shared UI tokens follow project palette without touching printable documents', () => {
     const palette = {
-        primary: '#4B6685', 'primary-hover': '#3E5671', selected: '#E2EAF3',
-        page: '#F1F4F7', surface: '#FAFBFC', text: '#263445',
-        muted: '#566576', border: '#C9D3DD', success: '#41674C',
-        warning: '#825B23', danger: '#98544F', neutral: '#64748B'
+        primary: '#315C85', 'primary-hover': '#264A6B', selected: '#EDF2F6',
+        page: '#F6F5F2', surface: '#FDFCFB', text: '#292D32',
+        muted: '#6B7280', border: '#E7E5E1', success: '#41674C',
+        warning: '#825B23', danger: '#98544F', neutral: '#64748B',
+        nav: '#EEEDE9', 'table-head': '#F3F2F0',
+        'success-soft': '#EAF3EB', 'warning-soft': '#FFF3E4',
+        'danger-soft': '#FCEDEB', 'neutral-soft': '#F2F2EF'
     };
     for (const [name, value] of Object.entries(palette)) {
         assert.ok(css.includes(`--ys-${name}: ${value};`), `missing palette token: ${name}`);
@@ -39,17 +42,17 @@ test('all working modules show one consistent page title', () => {
     assert.ok(css.includes('#appContainer .forecast-status-active'));
     assert.ok(css.includes('#appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button).active'));
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單 <button[^>]*data-page-help="order-system"/);
-    assert.ok(html.includes('styles.css?v=20261012-4'));
+    assert.ok(html.includes('styles.css?v=20261013-1'));
     assert.ok(css.includes('#appContainer #myQuotesPanel > table :is(th, td):nth-child(6)'));
     assert.ok(css.includes('#appContainer #quote-system .quote-more-actions > summary'));
     assert.ok(css.includes('@media screen and (min-width: 769px)'));
     assert.ok(css.includes('html, body, #appContainer { background: var(--ys-page); }'));
-    assert.ok(html.includes('<meta name="theme-color" content="#E6ECF2">'));
+    assert.ok(html.includes('<meta name="theme-color" content="#EEEDE9">'));
 });
 
 test('secondary, destructive and disabled actions keep separate semantics', () => {
     assert.match(css, /button\.btn-secondary\s*\{[\s\S]*?background: var\(--ys-surface\) !important;/);
     assert.match(css, /button\.btn-danger\s*\{[\s\S]*?background: var\(--ys-danger\) !important;/);
     assert.match(css, /#appContainer button:disabled \{ cursor: not-allowed; opacity: \.55; \}/);
-    assert.match(css, /#appContainer \.status-badge\.status-soon \{ background: var\(--ys-warning\); color: #FFFFFF; \}/);
+    assert.match(css, /#appContainer \.status-badge\.status-soon \{ background: var\(--ys-warning-soft\); color: var\(--ys-warning\); \}/);
 });
