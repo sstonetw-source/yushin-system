@@ -1061,7 +1061,7 @@
             </div>
             <div class="form-grid">
                 <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
-                <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid" onchange="initializeOrderDeliveryDefaults()"><option value="">請選擇負責業務</option></select></div>
+                <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid" onchange="orderDeliveryOwnerChanged()"><option value="">請選擇負責業務</option></select></div>
                 <div><label>客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off" oninput="queueCustomerMasterSuggestions(this.value); orderDeliveryCustomerTyping()" onchange="loadOrderCustomerAddresses()"><datalist id="orderCustomerSuggestions"></datalist></div>
                 <div><label>貨號</label><input type="text" id="orderItemCode" list="priceModelList" oninput="onOrderItemCodeInput(this)" onchange="onOrderItemCodeChange(this)"><div id="orderProductCheckStatus" role="status" class="order-product-check-status"></div><div id="orderWarehouseStockHint" class="product-stock-hint no-print" role="status" aria-live="polite" hidden></div></div>
                 <div><label>中文品名</label><input type="text" id="orderItemName"></div>
@@ -1701,8 +1701,8 @@
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261010-2"></script>
     <script src="modules/inventory-workspace.js?v=20261012-5"></script>
-    <script src="modules/warehouse-logistics.js?v=20261012-8"></script>
-    <script src="modules/delivery-settings.js?v=20261012-8"></script>
+    <script src="modules/warehouse-logistics.js?v=20261013-1"></script>
+    <script src="modules/delivery-settings.js?v=20261013-1"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 
 

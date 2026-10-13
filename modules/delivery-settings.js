@@ -11,11 +11,11 @@
   const $=id=>document.getElementById(id);let customerGeneration=0,customerRows=[],customerKey='',changed=false,profileUid='';
   root.resetDeliverySettings=function(){customerGeneration++;customerRows=[];customerKey='';changed=false;profileUid='';$('deliverySettingsOverlay')?.remove();};
   const previousSet=root.setOrderShippingInstructions;
-  const owner=()=>salesList.find(s=>s.uid===($('orderOwnerUid')?.value||currentUser?.uid))||salesList.find(s=>s.uid===currentUser?.uid);
+  const owner=()=>salesList.find(s=>s.uid===(currentUserRole==='purchaser'?$('orderOwnerUid')?.value:currentUser?.uid));
   function replaceRecipient(p){for(const key of ['contact','phone','address'])if($('orderShipping'+key[0].toUpperCase()+key.slice(1)))$('orderShipping'+key[0].toUpperCase()+key.slice(1)).value=p[key]||'';}
   function controls(p){
     const host=$('orderShippingFields');if(!host)return;
-    const mode=$('orderShippingMode');mode.innerHTML='<option value="">請選擇交付方式</option><option value="PICKUP">主倉自領</option><option value="SALES_SHIP">寄給我</option><option value="CUSTOMER_SHIP">直接寄客戶</option>';mode.value=['PICKUP','SALES_SHIP','CUSTOMER_SHIP'].includes(p.mode)?p.mode:'';mode.onchange=()=>root.orderDeliveryChoiceChanged();
+    const mode=$('orderShippingMode');mode.innerHTML='<option value="">請選擇交付方式</option><option value="PICKUP">主倉自領</option><option value="SALES_SHIP">寄給我（寄給負責業務）</option><option value="CUSTOMER_SHIP">直接寄客戶</option>';mode.value=['PICKUP','SALES_SHIP','CUSTOMER_SHIP'].includes(p.mode)?p.mode:'';mode.onchange=()=>root.orderDeliveryChoiceChanged();
     const w=$('orderShippingWarehouse');const label=w.closest('label');if(label.firstChild)label.firstChild.textContent='業務領貨地點';label.style.display='none';
     const box=document.createElement('div');box.className='delivery-choice-row logistics-wide';box.innerHTML=`<label>客戶常用收件地址<select id="orderCustomerAddress" onchange="selectOrderCustomerAddress(this.value)"><option value="">本次自行填寫</option></select></label><div><button type="button" class="btn-secondary btn-small" onclick="saveOrderCustomerAddress(this)">記住此客戶地址</button><button type="button" class="btn-secondary btn-small" onclick="setDefaultOrderCustomerAddress(this)">儲存並設為預設</button></div><p id="orderAddressStatus" class="inventory-work-status" role="status"></p>`;host.prepend(box);
     host.oninput=e=>{if(e.target.id!=='orderCustomerAddress')changed=true;};
@@ -36,8 +36,19 @@
     if(fill){customerGeneration++;changed=true;if(customer){replaceRecipient({});root.loadOrderCustomerAddresses();}else{const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');const d=owner()?.deliveryDefaults||{};replaceRecipient(mode==='SALES_SHIP'?{...p,address:d.address||''}:{});$('orderShippingWarehouse').value=defaultWarehouse()?.id||'';}}
   };
   root.initializeOrderDeliveryDefaults=function(existing){
-    if((existing&&Object.keys(existing).length)||changed)return;const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');previousSet(p);controls(root.YushinWarehouseLogistics.plan(p));changed=false;
+    if((existing&&Object.keys(existing).length)||changed||(currentUserRole==='purchaser'&&!owner()))return;const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');previousSet(p);controls(root.YushinWarehouseLogistics.plan(p));changed=false;
     if($('orderCustomer')?.value&&$('orderShippingMode')?.value==='CUSTOMER_SHIP')root.loadOrderCustomerAddresses();
+  };
+  root.orderDeliveryOwnerChanged=function(){
+    // A different owner must never inherit the previous salesperson's recipient.
+    customerGeneration++;changed=false;
+    requestedOrderOwnerUid=$('orderOwnerUid')?.value||'';
+    const mode=$('orderShippingMode')?.value||'';
+    if(mode==='CUSTOMER_SHIP'){changed=true;return;}
+    const person=owner();
+    const defaults=salespersonPlan(person,defaultWarehouse()?.id||'');
+    const p=person?{...defaults,...(mode==='SALES_SHIP'?{mode,warehouseId:'',address:person.deliveryDefaults?.address||''}:{})}:{};
+    previousSet(p);controls(root.YushinWarehouseLogistics.plan(p));changed=true;
   };
   root.orderDeliveryCustomerTyping=function(){customerGeneration++;customerRows=[];customerKey='';if($('orderCustomerAddress'))$('orderCustomerAddress').innerHTML='<option value="">本次自行填寫</option>';if($('orderShippingMode')?.value==='CUSTOMER_SHIP')replaceRecipient({});if($('orderAddressStatus'))$('orderAddressStatus').textContent='選定客戶後讀取常用地址。';};
   root.loadOrderCustomerAddresses=async function(){
@@ -75,6 +86,13 @@
     const bs=beginActionButton(button,'儲存中…');try{await db.collection('users').doc(uid).set({deliveryDefaults:p,updatedAt:new Date().toISOString()},{merge:true});if(currentUser.uid!==actor)return;const user=allUsersCache.find(u=>u.uid===uid);if(user)user.deliveryDefaults=p;applySalesRows(allUsersCache.map(u=>({id:u.uid,...u})));renderAdminSalesTable();root.closeDeliverySettings();showActionFeedback('業務領貨與地址設定已儲存。');}catch(err){showActionFeedback('儲存失敗：'+err.message,'warning');}finally{endActionButton(button,bs);}
   };
   root.renderOrderDeliverySettingsButton=function(order){
+    let summary=$('orderDeliveryRecipientSummary');
+    if(!summary){summary=document.createElement('div');summary.id='orderDeliveryRecipientSummary';summary.className='delivery-settings-section';const title=$('deliveryModalTitle');title?.parentElement.insertBefore(summary,title.nextSibling);}
+    summary.innerHTML=normalizedOrderItems(order).map(item=>{
+      const p=root.YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{});
+      const recipient=p.mode==='PICKUP'?'':`<br>收件人：${escapeHtml(p.contact||'未填寫')}｜聯絡電話：${escapeHtml(p.phone||'未填寫')}<br>完整收件地址：${escapeHtml(p.address||'未填寫；請補齊後再寄送')}`;
+      return `<p>${escapeHtml(item.itemCode||item.itemName||'品項')}｜${escapeHtml(root.YushinWarehouseLogistics.modes[p.mode]||'未設定交付方式')}${recipient}</p>`;
+    }).join('');
     let button=$('orderDeliverySettingsButton');if(!button){button=document.createElement('button');button.id='orderDeliverySettingsButton';button.type='button';button.className='btn-secondary';const title=$('deliveryModalTitle');title?.parentElement.insertBefore(button,title.nextSibling);}button.textContent='修改交付方式／地址';button.style.display=normalizedOrderStatus(order)==='normal'&&(currentUserRole==='admin'||order.ownerUid===currentUser?.uid||canReceiveInventoryCapability())&&normalizedOrderItems(order).some(editableItem)?'':'none';button.onclick=()=>root.openOrderDeliverySettings(order.id);
   };
   root.openOrderDeliverySettings=function(orderId){const order=ordersCache.find(o=>o.id===orderId);if(!order)return;const items=normalizedOrderItems(order).filter(editableItem);overlay(`<h3>修改交付設定</h3><p>尚未交付的品項可修改，到貨後仍可調整。已交付負責業務或調撥途中的品項須由倉管處理。</p><div class="table-wrap"><table><thead><tr><th>品項</th><th>交付方式</th><th>操作</th></tr></thead><tbody>${items.map(i=>`<tr><td>${escapeHtml(i.itemCode)}<br>${escapeHtml(i.itemName)}</td><td>${escapeHtml(root.YushinWarehouseLogistics.modes[(i.deliveryPlan||order.shippingInstructions||{}).mode]||'負責業務自取／親送')}</td><td><button onclick="closeDeliverySettings();openWarehouseDeliveryPlan(${inlineJsValue(orderId)},${inlineJsValue(i.itemId)})">修改</button></td></tr>`).join('')}</tbody></table></div><button class="btn-secondary" onclick="closeDeliverySettings()">關閉</button>`);};
