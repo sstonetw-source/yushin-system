@@ -3939,9 +3939,9 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer .content-section button:not(.order-work-card):not(.purchase-stage-button):not(.product-brand-button):not(.link-button):not(.inventory-details-toggle),
     #appContainer .eq-modal-box button,
     #appContainer .modal button {
-        border-radius: 8px !important;
+        border-radius: var(--ys-control-radius) !important;
         font-size: 14px !important;
-        min-height: 40px;
+        min-height: var(--ys-control-height);
     }
     #appContainer button:is(.btn-secondary, .status-ok, .status-soon),
     button.btn-secondary {
