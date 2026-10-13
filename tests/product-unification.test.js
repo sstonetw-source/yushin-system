@@ -132,3 +132,4 @@ test('batch failure reports only acknowledged writes and keeps remaining results
     commits=2;
     assert.equal(await c.commitMigrationBatch(Array.from({length:5},()=>()=>{}),2),5);
 });
+

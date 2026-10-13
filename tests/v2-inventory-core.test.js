@@ -88,7 +88,8 @@ test('count reductions preserve reservations and reconcile a manually counted un
  assert.equal(result.allocations[0].lotId,'balance');assert.equal(result.allocations[0].qty,5);
  const mixed=inventory.quantityAdjustmentLots([{id:'known',remainingQty:2,expiryDate:'2027-01-01'}],10,7,4,'balance','added');
  assert.equal(mixed.lots.reduce((sum,l)=>sum+l.remainingQty,0),7);
- assert.throws(()=>inventory.quantityAdjustmentLots([],10,3,4,'balance','added'),/已占用/);
+ assert.throws(()=>inventory.quantityAdjustmentLots([],10,3,4,'balance','added'),/已預留/);
  assert.throws(()=>inventory.quantityAdjustmentLots([{id:'known',remainingQty:11}],10,12,0,'balance','added'),/超過/);
  assert.throws(()=>inventory.reconcileStockLots([{remainingQty:-1}],10,'balance'),/不正確/);
 });
+

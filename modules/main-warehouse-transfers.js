@@ -24,7 +24,7 @@
       const stockSnap=await tx.get(stockRef),source=await tx.get(db.collection('warehouses').doc(fromWarehouseId)),target=await tx.get(db.collection('warehouses').doc(toWarehouseId));
       if(!stockSnap.exists||!source.exists||source.data().active===false||source.data().systemCustody||!target.exists||target.data().active===false||!target.data().isDefault||target.data().systemCustody)throw Error('主倉或來源分倉設定不正確。');
       const stock=stockSnap.data();
-      if(Number(stock.onHand||0)-Number(stock.reserved||0)<qty||Number(inv.onHand||0)-Number(inv.reserved||0)<qty)throw Error('分倉可用庫存不足，請勿調用已占用的貨品。');
+      if(Number(stock.onHand||0)-Number(stock.reserved||0)<qty||Number(inv.onHand||0)-Number(inv.reserved||0)<qty)throw Error('分倉可用庫存不足，請勿調用已預留的貨品。');
       if(actorUid!==currentUser.uid||actorRole!==currentUserRole)throw Error('登入身分已變更。');
       const now=new Date().toISOString();
       saved={id,inventoryId,productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||'',itemName:inv.itemName||'',brand:inv.brand||'',fromWarehouseId,toWarehouseId,fromStockId:stockRef.id,qty,status:'PENDING',createdByUid:actorUid,createdAt:now};
@@ -72,7 +72,7 @@
       await root.loadMainTransferRequests(true);await loadOrderWorkQueue(true);if(who!==identity()||error)throw Error(error||'登入身分已變更。');
       const target=defaultWarehouse(),orders=root.YushinWarehouseLogistics.transferRequirements(orderWorkQueueCache,warehouseMasterCache,mainId(),{status:normalizedOrderStatus,incomplete:orderInventorySyncIncomplete,items:normalizedOrderItems,dispatch:itemDispatchState});
       const stock=pendingRequests.map(r=>({order:{id:r.id,orderNo:'主倉備貨・'+r.id,salesName:'',customerName:''},item:r,qty:r.qty,readyQty:r.qty,warehouseId:r.fromWarehouseId,key:r.id}));
-      const groups=new Map();for(const row of [...orders,...stock]){const id=row.warehouseId;if(!groups.has(id))groups.set(id,{warehouseId:id,warehouseName:warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id,plan:{mode:'TRANSFER',warehouseId:mainId(),contact:target?.contact||target?.warehouseName||'主倉',phone:target?.phone||'',address:target?.address||'',condition:'',notes:'訂單占用與主倉備貨依來源分開點收'},rows:[]});groups.get(id).rows.push(row);}
+      const groups=new Map();for(const row of [...orders,...stock]){const id=row.warehouseId;if(!groups.has(id))groups.set(id,{warehouseId:id,warehouseName:warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id,plan:{mode:'TRANSFER',warehouseId:mainId(),contact:target?.contact||target?.warehouseName||'主倉',phone:target?.phone||'',address:target?.address||'',condition:'',notes:'訂單預留與主倉備貨依來源分開點收'},rows:[]});groups.get(id).rows.push(row);}
       if(!groups.size)throw Error('目前沒有調回主倉需求。');
       const csv=root.YushinWarehouseLogistics.csvDocument([...groups.values()]),url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='目前調回主倉清單-'+localDateString()+'.csv';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
     }catch(err){showActionFeedback('匯出未完成：'+err.message,'warning');}finally{endActionButton(button,state);}
@@ -90,3 +90,4 @@
   const original=root.renderInventoryList;
   root.renderInventoryList=function(){const result=original?.apply(this,arguments);if(operational()){root.renderMainTransferRequests();root.loadMainTransferRequests();}return result;};
 })(globalThis);
+

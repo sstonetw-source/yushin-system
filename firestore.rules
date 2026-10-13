@@ -651,6 +651,161 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['orderId','itemId','productKey']);
     }
 
+    // Reserved totals include every reservation of this product changed by the
+    // operation, including a move between warehouses. Unchanged siblings add zero.
+    function operationalReservationDelta(e, index, productKey, warehouseId) {
+      return index < e.reservationIds.size()
+        ? operationalReservationDeltaAt(e.reservationIds[index], productKey, warehouseId) : 0;
+    }
+    function operationalReservationDeltaAt(id, productKey, warehouseId) {
+      let path = /databases/$(database)/documents/inventoryReservations/$(id);
+      let before = exists(path) ? get(path).data : {};
+      let after = getAfter(path).data;
+      return after.productKey == productKey
+        && (before.get('productKey', productKey) == productKey)
+        ? (warehouseId == '' || after.get('warehouseId', '') == warehouseId ? after.get('quantity', 0) : 0)
+          - (warehouseId == '' || before.get('warehouseId', '') == warehouseId ? before.get('quantity', 0) : 0)
+        : 999999999;
+    }
+    function operationalStockDelta(e, productKey, warehouseId) {
+      return operationalReservationDelta(e, 0, productKey, warehouseId)
+        + operationalReservationDelta(e, 1, productKey, warehouseId)
+        + operationalReservationDelta(e, 2, productKey, warehouseId)
+        + operationalReservationDelta(e, 3, productKey, warehouseId)
+        + operationalReservationDelta(e, 4, productKey, warehouseId);
+    }
+    function operationalReservedStockMatches(path, e, productKey, warehouseId) {
+      let before = exists(path) ? get(path).data : {};
+      let after = getAfter(path).data;
+      return after.get('productKey', after.get('productId', '')) == productKey
+        && (warehouseId == '' || after.get('warehouseId', '') == warehouseId)
+        && after.get('reserved', 0) - before.get('reserved', 0) == operationalStockDelta(e, productKey, warehouseId);
+    }
+    function sameWarehouseReservationDelta(e, index, productKey, warehouseId) {
+      return index < e.reservationIds.size()
+        ? sameWarehouseReservationDeltaAt(e.reservationIds[index], productKey, warehouseId) : 0;
+    }
+    function sameWarehouseReservationDeltaAt(id, productKey, warehouseId) {
+      let path = /databases/$(database)/documents/inventoryReservations/$(id);
+      let before = exists(path) ? get(path).data : {};
+      let after = getAfter(path).data;
+      return after.get('quantity', 0) == 0 && before.get('quantity', 0) == 0 ? 0
+        : after.productKey == productKey && after.warehouseId == warehouseId
+          && (before.get('quantity', 0) == 0 || before.get('warehouseId', warehouseId) == warehouseId)
+          ? after.quantity - before.get('quantity', 0) : 999999999;
+    }
+    function sameWarehouseReservationStocks(e, productKey, warehouseId) {
+      let delta = sameWarehouseReservationDelta(e, 0, productKey, warehouseId)
+        + sameWarehouseReservationDelta(e, 1, productKey, warehouseId)
+        + sameWarehouseReservationDelta(e, 2, productKey, warehouseId)
+        + sameWarehouseReservationDelta(e, 3, productKey, warehouseId)
+        + sameWarehouseReservationDelta(e, 4, productKey, warehouseId);
+      let invPath = /databases/$(database)/documents/inventory/$(e.inventoryId);
+      let whPath = /databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId);
+      let beforeInv = exists(invPath) ? get(invPath).data : {};
+      let beforeWh = exists(whPath) ? get(whPath).data : {};
+      let afterInv = getAfter(invPath).data;
+      let afterWh = getAfter(whPath).data;
+      return afterInv.get('productKey', afterInv.get('productId', '')) == productKey
+        && afterWh.productKey == productKey && afterWh.warehouseId == warehouseId
+        && afterInv.reserved - beforeInv.get('reserved', 0) == delta
+        && afterWh.reserved - beforeWh.get('reserved', 0) == delta;
+    }
+    function operationalReservationStockEvidence(id) {
+      let data = request.resource.data;
+      let before = resource == null ? {} : resource.data;
+      let e = data.get('stockEvidence', {});
+      return (data.get('quantity', 0) == before.get('quantity', 0)
+          && data.get('warehouseId', '') == before.get('warehouseId', ''))
+        || (data.get('quantity', 0) == 0 && before.get('quantity', 0) == 0)
+        || (e.get('movementId', '') != '' && id in e.get('reservationIds', [])
+          && e == getAfter(/databases/$(database)/documents/inventoryMovements/$(e.movementId)).data.get('reservationStockEvidence', {})
+          && operationalReservationMovement(e.movementId, data, before));
+    }
+    // Validate the group once on its immutable movement rather than repeating
+    // the five-reservation sums on every reservation in the batch.
+    function validOperationalMovementEvidence(id) {
+      let e = request.resource.data.reservationStockEvidence;
+      let path = /databases/$(database)/documents/inventoryReservations/$(e.reservationIds[0]);
+      let data = getAfter(path).data;
+      let before = exists(path) ? get(path).data : {};
+      return e.keys().hasAll(['inventoryId','warehouseStockId','previousWarehouseStockId','reservationIds','movementId'])
+        && e.movementId == id && e.inventoryId is string && e.inventoryId.size() > 0
+        && e.warehouseStockId is string && e.warehouseStockId.size() > 0
+        && e.previousWarehouseStockId is string && e.previousWarehouseStockId.size() > 0
+        && e.reservationIds is list && e.reservationIds.size() > 0 && e.reservationIds.size() <= 5
+        && e.reservationIds.toSet().size() == e.reservationIds.size()
+        && request.resource.data.productKey == data.productKey
+        && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId
+          ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
+          : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), e, data.productKey, '')
+            && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), e, data.productKey, data.warehouseId)
+            && ((request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
+              || operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId), e, data.productKey, before.warehouseId)));
+    }
+    function operationalTransferReservationArrival(e, data, before) {
+      let movement = request.resource.data;
+      let path = /databases/$(database)/documents/stockTransfers/$(movement.get('sourceId', 'unused'));
+      let oldTransfer = get(path).data;
+      let transfer = getAfter(path).data;
+      let stockPath = /databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId);
+      return movement.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+        && e.reservationIds.size() == 1 && exists(path) && oldTransfer.status == 'IN_TRANSIT'
+        && transfer.status == 'RECEIVED' && transfer.receivedByUid == request.auth.uid
+        && transfer.orderId == data.orderId && transfer.itemId == data.itemId
+        && transfer.productKey == data.productKey && transfer.reservedQty == data.quantity
+        && before.quantity == data.quantity && transfer.fromWarehouseId == before.warehouseId
+        && transfer.toWarehouseId == data.warehouseId && transfer.fromStockId == e.previousWarehouseStockId
+        && transfer.toStockId == e.warehouseStockId && transfer.inventoryId == e.inventoryId
+        && getAfter(stockPath).data.reserved == get(stockPath).data.reserved;
+    }
+    function operationalReservationMovement(id, data, before) {
+      let path = /databases/$(database)/documents/inventoryMovements/$(id);
+      let movement = getAfter(path).data;
+      return id is string && id.size() > 0 && !exists(path)
+        && movement.productKey == data.productKey
+        && movement.get('warehouseId', '') in [data.warehouseId, before.get('warehouseId', data.warehouseId)]
+        && (movement.get('sourceId', '') == data.orderId
+          || (movement.get('sourceType', '') == 'SUPPLY_ORDER'
+            && getAfter(/databases/$(database)/documents/supplyOrders/$(movement.sourceId)).data.get('orderId', '') == data.orderId)
+          || (movement.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+            && getAfter(/databases/$(database)/documents/stockTransfers/$(movement.sourceId)).data.get('orderId', '') == data.orderId));
+    }
+
+    function validInventoryLot(data) {
+      return data.get('productKey', '') is string && data.get('productKey', '').size() > 0
+        && data.get('warehouseId', '') is string && data.get('warehouseId', '').size() > 0
+        && data.get('remainingQty', null) is number && data.remainingQty >= 0
+        && data.get('receivedQty', 0) is number && data.get('receivedQty', 0) >= 0
+        && data.get('qty', 0) is number && data.get('qty', 0) >= 0
+        && !data.keys().hasAny(['unitCost','cost','costPrice']);
+    }
+    function inventoryLotIdentityUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'productKey','productId','warehouseId','sourceType','sourceId','transferId','costLotId','receivedAt'
+      ]);
+    }
+    function reservationCreateWriter(id) {
+      let userRole = role();
+      return userRole == 'admin'
+        || (userRole in ['purchaser','warehouse'] && operationalReservationStockEvidence(id))
+        || (userRole in ['sales','engineer'] && validBusinessReservation(id, request.resource.data));
+    }
+    function reservationUpdateWriter(id) {
+      let userRole = role();
+      return userRole == 'admin'
+        || (userRole in ['purchaser','warehouse'] && operationalReservationStockEvidence(id))
+        || (userRole in ['sales','engineer'] && businessReservationOperationalUpdate()
+          && validBusinessReservation(id, request.resource.data));
+    }
+    function inventoryMovementWriter(id) {
+      let userRole = role();
+      return userRole in ['admin','purchaser','warehouse','sales','engineer']
+        && (userRole in ['admin','purchaser','warehouse'] || owns(request.resource.data))
+        && (!('reservationStockEvidence' in request.resource.data)
+          || (userRole in ['admin','purchaser','warehouse'] && validOperationalMovementEvidence(id)));
+    }
+
     function businessProcurementDemandOperationalUpdate() {
       return businessOwner()
         && owns(resource.data)
@@ -672,7 +827,14 @@ service cloud.firestore {
 
     match /users/{id} {
       allow read: if signedIn() && (id == request.auth.uid || active());
-      allow create, update: if admin();
+      allow create: if admin();
+      // A signed-in member may sync only their own token email, never role,
+      // ownership code, activation or delivery preferences.
+      allow update: if admin() || (active() && id == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['email'])
+        && request.resource.data.get('email', '') is string
+        && request.resource.data.email.size() > 0 && request.resource.data.email.size() <= 320
+        && request.resource.data.email == request.auth.token.get('email', ''));
       allow delete: if false;
     }
 
@@ -1537,19 +1699,18 @@ service cloud.firestore {
       allow list: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
       allow create: if validReservationSource(id, request.resource.data)
-        && (admin() || purchaser() || warehouse() || validBusinessReservation(id, request.resource.data));
+        && reservationCreateWriter(id);
       allow update: if validReservationSource(id, request.resource.data) && reservationIdentityUnchanged()
-        && (admin() || purchaser() || warehouse()
-          || (businessReservationOperationalUpdate() && validBusinessReservation(id, request.resource.data)));
+        && reservationUpdateWriter(id);
       allow delete: if admin();
     }
 
     match /inventoryLots/{id} {
       // Operational lot data is readable for fulfillment, but cost must never live here.
       allow read: if admin() || purchaser() || warehouse() || (businessOwner() && !('unitCost' in resource.data));
-      allow create: if canReceiveInventory() && !('unitCost' in request.resource.data);
+      allow create: if canReceiveInventory() && validInventoryLot(request.resource.data);
       allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate(id))
-        && !('unitCost' in request.resource.data);
+        && validInventoryLot(request.resource.data) && inventoryLotIdentityUnchanged();
       allow delete: if admin();
     }
 
@@ -1659,8 +1820,7 @@ service cloud.firestore {
     match /inventoryMovements/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if (admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(request.resource.data)))
+      allow create: if inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);
@@ -1697,3 +1857,4 @@ service cloud.firestore {
     }
   }
 }
+

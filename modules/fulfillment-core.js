@@ -41,7 +41,7 @@
   }
 
   function dispatchState(item = {}) {
-    // Dispatch 只需要物流事件量與「目前仍被占用」的庫存。
+    // Dispatch 只需要物流事件量與「目前仍被預留」的庫存。
     // 不先 normalizeItem()，避免在缺少 orderedQty 的輕量快照中把 live reservedQty 截成 0。
     // reservedQty 的合法性由 reservation / inventory transaction 維護；這裡只負責算待打單與可出貨。
     const grossDelivered = n(item.deliveredQty);

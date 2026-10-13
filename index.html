@@ -459,16 +459,16 @@
         <span id="inventorySearchStatus" role="status"></span>
         <select id="inventoryBrandFilter" aria-label="庫存廠牌" onchange="renderInventoryList()"><option value="">全部廠牌</option></select>
         <select id="inventoryPolicyFilter" aria-label="庫存策略" onchange="renderInventoryList()"><option value="">全部策略</option><option value="NO_STOCK">不備庫</option><option value="SAFETY_STOCK">安全庫存</option><option value="ORDER_ONLY">依訂單採購</option></select>
-        <select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">需補貨（預計庫存不足）</option><option value="out">缺貨</option><option value="reserved">有占用</option><option value="archived">已移出庫存列表</option></select>
+        <select id="inventoryStateFilter" onchange="renderInventoryList()"><option value="all">全部庫存</option><option value="low">需補貨（預計庫存不足）</option><option value="out">缺貨</option><option value="reserved">有預留</option><option value="archived">已移出庫存列表</option></select>
 
       </div>
       <div id="businessProductSearchResults" class="table-wrap inventory-product-search-results" style="display:none;">
         <div class="inventory-search-subheading"><strong>產品主檔／售價補充結果</strong><span id="businessProductSearchStatus" role="status" aria-live="polite"></span></div>
-        <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
+        <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>預留</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
         <button type="button" id="businessProductSearchMoreBtn" class="btn-secondary" hidden onclick="loadMoreBusinessProducts()">載入更多產品</button>
       </div>
 
-      <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已占用</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
+      <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已預留</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
       <button id="inventoryLoadMoreBtn" class="no-print btn-secondary" style="display:none" onclick="loadInventory(false)">載入更多（50）</button>
       <h3>待建檔品項</h3>
       <div class="table-wrap"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>在途數量</th><th>供應商</th><th>狀態</th></tr></thead><tbody id="pendingInventoryBody"></tbody></table></div>
@@ -581,8 +581,8 @@
 
     <div class="eq-modal-overlay no-print" id="inventoryReservationOverlay" onclick="if(event.target===this) closeInventoryReservationDetails()">
       <div class="eq-modal-box" style="max-width:980px;">
-        <h3 id="inventoryReservationTitle">已占用訂單</h3>
-        <div class="table-wrap"><table><thead><tr><th>訂單</th><th>客戶</th><th>貨號</th><th>品名</th><th>占用數量</th><th>負責業務</th><th>訂單日期</th></tr></thead><tbody id="inventoryReservationBody"></tbody></table></div>
+        <h3 id="inventoryReservationTitle">已預留訂單</h3>
+        <div class="table-wrap"><table><thead><tr><th>訂單</th><th>客戶</th><th>貨號</th><th>品名</th><th>預留數量</th><th>負責業務</th><th>訂單日期</th></tr></thead><tbody id="inventoryReservationBody"></tbody></table></div>
         <div class="eq-modal-close-row"><button type="button" class="btn-secondary" onclick="closeInventoryReservationDetails()">關閉</button></div>
       </div>
     </div>
@@ -740,7 +740,7 @@
                 <option value="unknown">尚無紀錄</option>
             </select>
             <button onclick="openEquipmentModal()">＋ 新增儀器</button>
-            <button onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
+            <button class="btn-secondary" onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
             <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
             <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 匯出目前篩選結果（已載入）</button>
         </div>
@@ -783,8 +783,8 @@
             <label style="font-size:12px;font-weight:bold;">備註</label>
             <textarea id="eqNotes" style="width:100%;min-height:50px;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:4px;"></textarea>
             <div style="margin-top:10px;">
-                <button onclick="saveEquipmentFromModal()">💾 儲存</button>
-                <span id="eqSaveHint" style="font-size:12px;color:#2e7d32;margin-left:6px;"></span>
+                <button id="eqSaveBtn" onclick="saveEquipmentFromModal()">💾 儲存</button>
+                <span id="eqSaveHint" class="inline-status" role="status" aria-live="polite"></span>
             </div>
 
             <div id="eqLogSection" style="display:none;margin-top:18px;padding-top:14px;border-top:1px solid #eee;">
@@ -809,12 +809,12 @@
                 <label style="font-size:12px;font-weight:bold;">說明</label>
                 <textarea id="eqLogDesc" style="width:100%;min-height:40px;box-sizing:border-box;padding:6px;border:1px solid #ccc;border-radius:4px;"></textarea>
                 <div style="margin-top:10px;">
-                    <button onclick="addEquipmentLogFromModal()">＋ 新增紀錄</button>
+                    <button id="eqAddLogBtn" onclick="addEquipmentLogFromModal()">＋ 新增紀錄</button>
                 </div>
             </div>
 
             <div class="eq-modal-close-row">
-                <button class="btn-danger" id="eqModalDeleteBtn" onclick="deleteEquipment(document.getElementById('eqModalOverlay').dataset.editId)" style="display:none;">🗑️ 刪除這台儀器</button>
+                <button class="btn-danger" id="eqModalDeleteBtn" onclick="deleteEquipment(document.getElementById('eqModalOverlay').dataset.editId)" style="display:none;">停用這台儀器</button>
                 <button class="btn-secondary" onclick="closeEquipmentModal()">關閉</button>
             </div>
         </div>
@@ -947,7 +947,7 @@
             </div>
             <div id="purchaseReplenishmentDetails" class="table-wrap purchase-replenishment-details">
                 <table>
-                    <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有</th><th>占用</th><th>可用</th><th>在途</th><th>預計</th><th>安全庫存</th><th>建議補貨</th><th>操作</th></tr></thead>
+                    <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有</th><th>預留</th><th>可用</th><th>在途</th><th>預計</th><th>安全庫存</th><th>建議補貨</th><th>操作</th></tr></thead>
                     <tbody id="purchaseReplenishmentBody"><tr><td colspan="11" style="color:#777;">自動檢查中…</td></tr></tbody>
                 </table>
             </div>
@@ -1546,7 +1546,7 @@
             <div class="panel">
                 <h3 style="margin-top:0;">資料健康</h3>
                 <p style="font-size:13px;color:#555;line-height:1.7;">
-                    手動檢查產品主檔必填資料、重複產品、人員角色、訂單與採購關聯、庫存策略、分倉與庫存占用。
+                    手動檢查產品主檔必填資料、重複產品、人員角色、訂單與採購關聯、庫存策略、分倉與庫存預留。
                     這是唯讀檢查，不會修改或刪除資料；因為會讀取多個集合，不會在登入時自動執行。
                 </p>
                 <div class="toolbar no-print" style="display:block;margin-top:12px;">
@@ -1569,7 +1569,7 @@
                 <input id="databaseBackupFile" type="file" accept=".json,application/json" style="display:none" onchange="previewDatabaseBackupUpload(this)">
                 <button type="button" id="databaseBackupRestoreBtn" class="btn-secondary" onclick="restoreMissingDatabaseBackupDocuments()" style="display:none">補回缺少的文件</button>
                 <span style="font-size:12px;color:#666;">
-                    備份會將訂單、估價單、採購單、儀器、使用者與系統設定整理成一個 JSON 檔下載到電腦。不會占用 Firebase 儲存空間，但每次會讀取全部資料。
+                    備份會將訂單、估價單、採購單、儀器、使用者與系統設定整理成一個 JSON 檔下載到電腦。不會預留 Firebase 儲存空間，但每次會讀取全部資料。
                 </span>
                 <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
                 <div id="databaseBackupUploadStatus" style="margin-top:8px;font-size:13px;"></div>
@@ -1597,7 +1597,7 @@
                 </div>
                 <div id="testDataResetStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
                 <span style="display:block;margin-top:8px;font-size:12px;color:#666;">
-                    僅真正管理員可執行。保留估價單；清除 Forecast、訂單、採購、庫存交易／占用／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、Product／Supplier／Brand／Customer Master、倉庫與系統設定。估價單中指向已清除資料的連結將無法開啟，原成交狀態不變。
+                    僅真正管理員可執行。保留估價單；清除 Forecast、訂單、採購、庫存交易／預留／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、Product／Supplier／Brand／Customer Master、倉庫與系統設定。估價單中指向已清除資料的連結將無法開啟，原成交狀態不變。
                 </span>
             </div>
 
@@ -1698,7 +1698,7 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261004-2"></script>
-    <script src="app.js?v=20261013-1"></script>
+    <script src="app.js?v=20261013-2"></script>
     <script src="modules/order-self-order-required.js?v=20261008-1"></script>
     <script src="modules/customer-cancellations.js?v=20261010-2"></script>
     <script src="modules/inventory-workspace.js?v=20261012-5"></script>
@@ -1838,7 +1838,7 @@
             儲存後系統會自動加入今天日期，例如「09/18 老師已送明年度設備預算」。
         </div></div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
             Win 原則上搭配 Stage 5；Lost 會保留案件失敗前最後所在 Stage。
-        </div></div></div><div data-page-help-source="inventory-system" data-help-context="inventoryStockPanel"><div class="inline-help-content">現有庫存 = 實體數量；已占用 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已占用；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div></div><div data-page-help-source="inventory-system" data-help-context=""><div class="inline-help-content">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」在預計庫存低於門檻時，會自動顯示在採購頁的安全庫存補貨。</div></div><div data-page-help-source="quote-system" data-help-context="myQuotesPanel"><div class="inline-help-content">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div></div><div data-page-help-source="quote-system" data-help-context=""><div class="inline-help-content"><div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張為比價用；產生三估單後會把當時設定與第一張估價內容一併保存在估價單紀錄，可從全部／我的估價單再次調出。</div></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">未完成工作包含跨年度；已完成依開發票日期篩選目前已載入歷史；工作筆數不受載入更多影響。</span></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div></div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span></div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseDispatchPanel"><div class="inline-help-content">以下為倉庫待打單品項。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseCompletedPanel"><div class="inline-help-content">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseSupplierPanel"><div class="inline-help-content">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單占用。</div></div><div data-page-help-source="admin-system" data-help-context="admin-sales"><div class="inline-help-content"><span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一產品主檔的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價目表」再上傳新版。刪除價目表不會刪除產品主檔、歷史估價單／訂單、庫存或實際採購紀錄。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products">
+        </div></div></div><div data-page-help-source="inventory-system" data-help-context="inventoryStockPanel"><div class="inline-help-content">現有庫存 = 實體數量；已預留 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已預留；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div></div><div data-page-help-source="inventory-system" data-help-context=""><div class="inline-help-content">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」在預計庫存低於門檻時，會自動顯示在採購頁的安全庫存補貨。</div></div><div data-page-help-source="quote-system" data-help-context="myQuotesPanel"><div class="inline-help-content">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div></div><div data-page-help-source="quote-system" data-help-context=""><div class="inline-help-content"><div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張為比價用；產生三估單後會把當時設定與第一張估價內容一併保存在估價單紀錄，可從全部／我的估價單再次調出。</div></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">未完成工作包含跨年度；已完成依開發票日期篩選目前已載入歷史；工作筆數不受載入更多影響。</span></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div></div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span></div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseDispatchPanel"><div class="inline-help-content">以下為倉庫待打單品項。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseCompletedPanel"><div class="inline-help-content">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseSupplierPanel"><div class="inline-help-content">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單預留。</div></div><div data-page-help-source="admin-system" data-help-context="admin-sales"><div class="inline-help-content"><span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一產品主檔的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價目表」再上傳新版。刪除價目表不會刪除產品主檔、歷史估價單／訂單、庫存或實際採購紀錄。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products">
                         <div class="product-import-rules-grid">
                             <div><strong>必要識別</strong><span>廠牌、貨號</span></div>
                             <div><strong>可選填</strong><span>產品線、規格、產品類型、單位、建議售價、標準成本</span></div>
@@ -1851,3 +1851,4 @@
 <script src="modules/main-warehouse-transfers.js?v=20261012-4"></script>
 </body>
 </html>
+
