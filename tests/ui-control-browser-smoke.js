@@ -18,15 +18,19 @@ assert.ok(chrome, 'headless Chrome is required for desktop/mobile visual regress
 
 const controls = {
     quote: '#quote-system #qsub-create',
+    quoteInactive: '#quote-system #qsub-my',
     quoteCompany: '#quote-system #sub-yushin',
     forecast: '#forecast-system #forecastCreateProbe',
     product: '#product-system #productBrandProbe',
     order: '#order-system #orderWorkProbe',
     purchasing: '#purchasing-system #purchase-tab-work',
+    purchasingInactive: '#purchasing-system .purchase-view-tabs > button:not(.active)',
     warehouse: '#inventory-system #inventoryStockTabBtn',
     warehouseReceiving: '#inventory-system #inventoryReceiveProbe',
     warehouseShipping: '#inventory-system #inventoryShippingMainBtn',
     equipment: '#equipment-system #equipmentCreateProbe',
+    equipmentSecondary: '#equipment-system #equipmentExportProbe',
+    equipmentDanger: '#equipment-system #equipmentDeleteProbe',
     administrator: '#admin-system #admin-sub-sales',
     analytics: '#admin-system #analyticsTabProbe',
     orderProgress: '#orderProgressProbe'
@@ -54,7 +58,7 @@ const fixture = `<!DOCTYPE html>
     <div class="order-work-cards inventory-work-subtabs"><button class="order-work-card active" id="inventoryReceiveProbe">採購收貨</button><button class="order-work-card">退貨收貨</button></div>
     <div class="inventory-shipping-tabs"><button class="order-work-card active" id="inventoryShippingMainBtn">主倉庫出貨</button><button class="order-work-card">其他倉庫出貨</button></div>
   </div>
-  <div id="equipment-system" class="content-section active"><div class="toolbar"><button id="equipmentCreateProbe">新增儀器</button><button class="btn-secondary">匯出</button></div></div>
+  <div id="equipment-system" class="content-section active"><div class="toolbar"><button id="equipmentCreateProbe">新增儀器</button><button class="btn-secondary" id="equipmentExportProbe">匯出</button><button class="btn-danger" id="equipmentDeleteProbe">刪除</button></div></div>
   <div id="admin-system" class="content-section active"><div class="sub-nav"><div class="sub-tab active" role="button" id="admin-sub-sales">人員名單</div><div class="sub-tab" role="button">廠牌管理</div></div><div id="admin-statistics"><div class="sub-tabs"><button class="active" id="analyticsTabProbe">銷售分析</button><button>採購分析</button></div></div></div>
   <div id="deliveryModalOverlay"><div class="order-progress-tabs"><button aria-selected="true" id="orderProgressProbe">進行中</button><button aria-selected="false">已完成</button></div></div>
 </div>
@@ -109,13 +113,21 @@ async function checkControls() {
                 assert.ok(!value.missing, `${label}: ${name} element missing`);
                 assert.ok(value.visible, `${label}: ${name} hidden`);
                 assert.ok(value.height >= 43.5, `${label}: ${name} smaller than 44px (${value.height})`);
-                if (!['forecast', 'equipment'].includes(name)) {
-                    assert.equal(value.background, 'rgb(237, 242, 246)', `${label}: ${name} selected state`);
-                    assert.equal(value.border, 'rgb(49, 92, 133)', `${label}: ${name} border`);
-                    assert.equal(value.radius, '8px', `${label}: ${name} radius`);
-                } else {
+                const primary = ['forecast', 'equipment'].includes(name);
+                const neutral = ['quoteInactive', 'purchasingInactive', 'equipmentSecondary'].includes(name);
+                const danger = name === 'equipmentDanger';
+                if (primary) {
                     assert.equal(value.background, 'rgb(49, 92, 133)', `${label}: ${name} primary action`);
+                } else if (neutral) {
+                    assert.equal(value.background, 'rgb(253, 252, 251)', `${label}: ${name} neutral action`);
+                    assert.equal(value.border, 'rgb(231, 229, 225)', `${label}: ${name} neutral border`);
+                } else if (danger) {
+                    assert.equal(value.background, 'rgb(152, 84, 79)', `${label}: ${name} destructive action`);
+                } else {
+                    assert.equal(value.background, 'rgb(237, 242, 246)', `${label}: ${name} selected state`);
+                    assert.equal(value.border, 'rgb(49, 92, 133)', `${label}: ${name} selected border`);
                 }
+                assert.equal(value.radius, '8px', `${label}: ${name} corner radius`);
                 if (label === 'mobile') {
                     assert.ok(value.right <= report.width + 1,
                         `${label}: ${name} overflows viewport ${value.right} > ${report.width}`);
