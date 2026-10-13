@@ -3897,7 +3897,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     --ys-page: #F6F5F2;
     --ys-surface: #FDFCFB;
     --ys-text: #292D32;
-    --ys-muted: #6B7280;
+    --ys-muted: #626A76;
     --ys-border: #E7E5E1;
     --ys-success: #41674C;
     --ys-warning: #825B23;
@@ -4318,4 +4318,23 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     #mainTransferRequestBody td { display:block; border:0; padding:6px 0; overflow-wrap:anywhere; }
     #mainTransferRequestBody td::before { content:attr(data-th) '：'; color:var(--ys-muted); }
     #mainTransferRequestBody button { margin:4px; min-height:44px; }
+}
+
+
+/* Shared dynamic purchasing notes; screen-only so formal documents are unchanged. */
+@media screen {
+    #appContainer .purchase-timeline-event { padding:10px 12px; border-left:3px solid var(--ys-border); margin:0 0 10px 4px; background:var(--ys-surface); }
+    #appContainer .purchase-timeline-event .record-reference { margin-top:4px; line-height:1.5; }
+    #appContainer .receiving-due-note { margin-top:4px; font-size:12px; color:var(--ys-muted); }
+    #appContainer .receiving-due-note .record-reference { margin-left:6px; }
+    #appContainer .receiving-due-note.is-warning { color:var(--ys-warning); }
+    #appContainer #eqSaveHint { display:block; margin-top:6px; }
+    #appContainer :is(.empty-hint, .stat-brand-search-hint, .stat-brand-search-tools small,
+        .product-360-card dt, .product-360-metrics span) { color:var(--ys-muted); }
+    #appContainer :is([style*="color:#777"], [style*="color: #777"],
+        [style*="color:#888"], [style*="color: #888"],
+        [style*="color:#999"], [style*="color: #999"]):not(#printableQuote *, #printablePO *, #threeQuotesPanel *) { color:var(--ys-muted) !important; }
+}
+@media screen and (max-width:768px) {
+    #appContainer .content-section table td[data-th]:not(#printableQuote *, #printablePO *)::before { color:var(--ys-muted); }
 }

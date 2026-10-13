@@ -24,8 +24,40 @@
           const orderWrites=writes.filter(row=>row.ref.path===orderRef.path&&row.method!=='delete');
           const afterOrder=orderWrites.reduce((data,row)=>({...data,...row.data}),orderData);
           const index=(afterOrder.items||[]).findIndex((item,i)=>String(item.itemId||`item-${i+1}`)===reservation.itemId);
-          if(index<0)throw new Error('庫存占用缺少對應的來源訂單品項。');
+          if(index<0)throw new Error('庫存預留缺少對應的來源訂單品項。');
           write.data={...write.data,orderItemIndex:index,ownerUid:afterOrder.ownerUid||'',salesCode:afterOrder.salesCode||''};
+        }
+      }
+      // Operational reservation changes prove both the company and warehouse
+      // reserved totals in the same transaction. Reuse existing stock documents.
+      if(role==='purchaser'||role==='warehouse'){
+        const rows=writes.filter(w=>w.ref.path.startsWith('inventoryReservations/')&&w.method!=='delete');
+        for(const w of rows)if(!reads.has(w.ref.path))await proxy.get(w.ref);
+        for(const w of rows){
+          const before=reads.get(w.ref.path)?.data||{},after={...before,...w.data};
+          if(number(before.quantity)===number(after.quantity)&&String(before.warehouseId||'')===String(after.warehouseId||''))continue;
+          if(!number(before.quantity)&&!number(after.quantity))continue;
+          const siblings=rows.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).productKey===after.productKey);
+          const representative=siblings.find(r=>{const old=reads.get(r.ref.path)?.data||{},next={...old,...r.data};return number(next.quantity)||number(old.quantity);});
+          if(representative){siblings.splice(siblings.indexOf(representative),1);siblings.unshift(representative);}
+          if(siblings.length>5)throw Error('同一產品一次最多處理 5 筆庫存預留，請分批操作。');
+          const stockRef=(collection,warehouseId)=>{
+            const match=writes.find(r=>r.ref.path.startsWith(collection+'/')&&
+              (r.data.productKey||reads.get(r.ref.path)?.data.productKey)===after.productKey&&
+              (collection==='inventory'||(r.data.warehouseId||reads.get(r.ref.path)?.data.warehouseId)===warehouseId));
+            return match?.ref||db.collection(collection).doc(collection==='inventory'?encodeURIComponent(after.productKey):encodeURIComponent(warehouseId)+'__'+encodeURIComponent(after.productKey));
+          };
+          const inv=stockRef('inventory',''),wh=stockRef('warehouseStocks',after.warehouseId||''),oldWh=stockRef('warehouseStocks',before.warehouseId||after.warehouseId||'');
+          for(const ref of [inv,wh,oldWh])if(!reads.has(ref.path))await proxy.get(ref);
+          const movement=writes.find(r=>r.ref.path.startsWith('inventoryMovements/')&&r.data.productKey===after.productKey&&
+            (!r.data.warehouseId||r.data.warehouseId===after.warehouseId||r.data.warehouseId===before.warehouseId));
+          if(!movement)throw Error('庫存預留異動缺少同筆交易的庫存紀錄。');
+          const evidence={inventoryId:inv.id,warehouseStockId:wh.id,previousWarehouseStockId:oldWh.id,
+            movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id)};
+          if(movement.data.reservationStockEvidence&&JSON.stringify(movement.data.reservationStockEvidence)!==JSON.stringify(evidence))
+            throw Error('不同倉庫的庫存預留必須分別記錄，請由管理員檢查此筆交易。');
+          movement.data={...movement.data,reservationStockEvidence:evidence};
+          w.data={...w.data,stockEvidence:evidence};
         }
       }
       const targets=new Map();
@@ -52,7 +84,7 @@
         const reservations=reservationWrites.map(write=>({id:write.ref.id,...reads.get(write.ref.path)?.data,...write.data}))
           .filter(row=>row.productKey===productKey&&(!warehouseId||row.warehouseId===warehouseId));
         const orderIds=[...new Set(reservations.map(row=>row.orderId).filter(Boolean))];
-        if(orderIds.length!==1||!reservations.length||reservations.length>5)throw new Error('庫存異動缺少唯一來源訂單或同品項占用超過 5 筆，請由管理員處理。');
+        if(orderIds.length!==1||!reservations.length||reservations.length>5)throw new Error('庫存異動缺少唯一來源訂單或同品項預留超過 5 筆，請由管理員處理。');
         const orderId=orderIds[0];
         const sourceMovement=writes.find(write=>write.ref.path.startsWith('inventoryMovements/')&&write.data?.sourceId===orderId&&write.data?.productKey===productKey);
         const operationRef=db.collection('stockOperations').doc();
@@ -89,3 +121,4 @@
   const api={run,sanitizeSupply};root.YushinStockPermissions=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
+

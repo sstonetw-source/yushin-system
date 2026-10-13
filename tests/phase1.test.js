@@ -490,7 +490,7 @@ test('new order reports committed success even when source quote update fails', 
     messages.length=0;
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
     assert.equal(messages.length,0);
-    assert.match(elements.get('actionFeedback').textContent,/訂單已建立，庫存占用已同步/);
+    assert.match(elements.get('actionFeedback').textContent,/訂單已建立，庫存預留已同步/);
     context.data={sourceType:'',customerName:'Customer',orderDate:'2026-09-27'};
     context.reserveInventoryForNewOrder=async()=>{throw new Error('庫存同步失敗');};
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
@@ -2039,7 +2039,7 @@ test('quick delivery no longer synthesizes legacy ordered or arrived states', ()
 
 test('equipment removal uses soft disable and never Firestore delete', () => {
   const app = fs.readFileSync('app.js', 'utf8');
-  const start = app.indexOf('window.deleteEquipment = function');
+  const start = app.indexOf('window.deleteEquipment = async function');
   const end = app.indexOf('function equipmentLogRealIndex', start);
   const block = app.slice(start, end);
   assert.match(block, /active:false/);
@@ -2607,7 +2607,7 @@ test('receipt allocation and affected-order refresh use bounded batched reads', 
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
     const allocateEnd=appSource.indexOf('async function refreshAffectedOrderCaches',allocateStart);
     const allocateSource=appSource.slice(allocateStart,allocateEnd);
-    assert.match(allocateSource,/firestoreReadWithTimeout\(q\.get\(\),'庫存占用候選'\)/);
+    assert.match(allocateSource,/firestoreReadWithTimeout\(q\.get\(\),'庫存預留候選'\)/);
 
     const refreshStart=appSource.indexOf('async function refreshAffectedOrderCaches');
     const refreshEnd=appSource.indexOf('async function receiveSupplyOrderRecord',refreshStart);
@@ -2678,7 +2678,7 @@ test('product save buttons show feedback during duplicate checks', () => {
 
 test('customer preference and inventory detail reads are bounded', () => {
     assert.match(appSource,/客戶估價偏好/);
-    assert.match(appSource,/庫存占用明細/);
+    assert.match(appSource,/庫存預留明細/);
 
     const preferenceStart=appSource.indexOf('window.applyCustomerQuotePreferences = async function');
     const preferenceEnd=appSource.indexOf('\nwindow.addQuoteCustomField',preferenceStart);
@@ -4018,7 +4018,8 @@ test('business reservation rules preserve reservation identity and narrow stock 
     const reservationStart=rulesSource.indexOf('match /inventoryReservations/{id}');
     const reservationEnd=rulesSource.indexOf('\n\n    match /inventoryLots/{id}',reservationStart);
     const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
-    assert.match(reservationRule,/allow update: if validReservationSource\(id, request.resource.data\) && reservationIdentityUnchanged\(\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
+    assert.match(reservationRule,/allow update: if validReservationSource\(id, request.resource.data\) && reservationIdentityUnchanged\(\)[\s\S]*?reservationUpdateWriter\(id\)/);
+    assert.match(rulesSource,/function reservationUpdateWriter\(id\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
 
 
@@ -5529,4 +5530,5 @@ test('quote and decision-analysis output have no mandatory user-entered fields',
     assert.match(appSource, /syncResult = 'skipped'/);
     assert.match(appSource, /selfOwnedBlankSales/);
 });
+
 

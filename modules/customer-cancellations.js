@@ -64,7 +64,7 @@ window.keepCancelledPurchaseAsStock=async function(id){
         });
         try{await loadActiveReceivingSupplyCache(true);renderPurchasingView();}catch(refreshError){markMainPageDirty('orders.po');showActionFeedback('採購處理已完成，請重新開啟採購頁更新清單。','warning');}
         showActionFeedback('已保留採購，到貨後轉庫存。','success');
-    }catch(err){alert('採購處理失敗：'+err.message);}finally{customerReturnActionsPending.delete(id);}
+    }catch(err){alert(actionFailureMessage('採購處理',err,id));}finally{customerReturnActionsPending.delete(id);}
 };
 window.saveReturnRecord=async function(){
     if(!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))return;
@@ -93,7 +93,7 @@ window.saveReturnRecord=async function(){
         const index=ordersCache.findIndex(o=>o.id===orderId);if(index>=0)ordersCache[index]=saved;
         delete button.dataset.operationId;resetReturnForm();renderOrderLifecycleModal();renderOrdersList();renderCustomerReturnRequests(saved);
         showActionFeedback('已建立待收退貨；確認收貨前不增加庫存，不自動補送。','success');
-    }catch(err){alert('退貨申請失敗：'+err.message);}finally{customerReturnActionsPending.delete(orderId);button.disabled=false;button.textContent='建立退貨申請';}
+    }catch(err){alert(actionFailureMessage('退貨申請',err,orderId));}finally{customerReturnActionsPending.delete(orderId);button.disabled=false;button.textContent='建立退貨申請';}
 };
 function renderCustomerReturnRequests(order){
     const target=document.getElementById('returnRequestsSummary');if(!target)return;
@@ -174,7 +174,7 @@ window.receiveCustomerReturn=async function(orderId,requestId,button){
         try{await refreshAffectedOrderCaches([orderId]);await loadCustomerReturnQueue();}catch(refreshError){showActionFeedback('退貨已收貨；清單更新失敗，請重新開啟倉庫頁。','warning');}
         markMainPageDirty('inventory','orders.list','orders.po','admin');
         showActionFeedback(quality==='SALEABLE'?'退貨已收貨並入庫，不補送。':'退貨已實收，列為不可用商品，請分開保管。','success');
-    }catch(err){alert('退貨收貨失敗：'+err.message);}finally{customerReturnActionsPending.delete(requestId);if(button.isConnected)button.disabled=false;}
+    }catch(err){alert(actionFailureMessage('退貨收貨',err,requestId));}finally{customerReturnActionsPending.delete(requestId);if(button.isConnected)button.disabled=false;}
 };
 async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,quality,warehouseId}){
     if(!canReceiveInventoryCapability())throw new Error('無收貨權限。');
@@ -222,7 +222,7 @@ window.releaseCustomerReturnHold=async function(id,button){
             tx.update(receiptRef,{disposition:'STOCK',releasedAt:new Date().toISOString(),releasedBy:currentUser.uid});
         });
         markMainPageDirty('inventory','admin');await loadCustomerReturnQueue();showActionFeedback('已轉為可用庫存。','success');
-    }catch(err){alert('轉庫存失敗：'+err.message);}finally{customerReturnActionsPending.delete(id);if(button.isConnected)button.disabled=false;}
+    }catch(err){alert(actionFailureMessage('轉庫存',err,id));}finally{customerReturnActionsPending.delete(id);if(button.isConnected)button.disabled=false;}
 };
 window.editReturnRecord=function(){alert('實收退貨不可由業務修改，請由收貨人員確認。');};
 window.deleteReturnRecord=function(){alert('實收退貨不可刪除；尚未收貨的申請可撤回。');};
@@ -236,3 +236,4 @@ function renderCustomerCancellationQueue(){
 }
 const originalPurchasingRenderer=renderPurchasingView;
 renderPurchasingView=function(){originalPurchasingRenderer();renderCustomerCancellationQueue();};
+

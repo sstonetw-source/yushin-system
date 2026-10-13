@@ -9,6 +9,91 @@ const {
 const { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where, writeBatch } = require('firebase/firestore');
 
 let env;
+
+test('members sync only their own Auth token email without changing protected profile fields',async()=>{
+ const client=env.authenticatedContext('sales1',{email:'sales1@example.com'}).firestore();
+ await assertSucceeds(updateDoc(doc(client,'users/sales1'),{email:'sales1@example.com'}));
+ await assertFails(updateDoc(doc(client,'users/sales1'),{email:'other@example.com'}));
+ await assertFails(updateDoc(doc(client,'users/sales2'),{email:'sales1@example.com'}));
+ for(const patch of [{role:'admin'},{salesCode:'S02'},{active:false},{deliveryDefaults:{mode:'PICKUP'}}])
+  await assertFails(updateDoc(doc(client,'users/sales1'),{email:'sales1@example.com',...patch}));
+});
+
+test('inventory lots reject invalid quantities and relabelled product location or source for every receiver role',async()=>{
+ const base={productKey:'p-order',productId:'p-order',warehouseId:'W1',remainingQty:3,qty:3,sourceType:'SUPPLY_ORDER',sourceId:'S1'};
+ for(const uid of ['admin','buyer1','wh1']){
+  const ref=doc(db(uid),'inventoryLots/bounded');
+  for(const patch of [{remainingQty:-1},{remainingQty:'3'},{qty:-1},{receivedQty:-1},{productKey:''},{warehouseId:''},{cost:9},{costPrice:9}])
+   await assertFails(setDoc(ref,{...base,...patch}));
+  await assertSucceeds(setDoc(ref,base));
+  for(const patch of [{remainingQty:-1},{remainingQty:'2'},{productKey:'OTHER'},{productId:'OTHER'},{warehouseId:'W2'},{sourceId:'S2'},{sourceType:'INITIAL_STOCK'},{unitCost:100}])
+   await assertFails(updateDoc(ref,patch));
+  await assertSucceeds(updateDoc(ref,{remainingQty:2}));
+ }
+});
+
+async function seedOperationalReserve(count=1){
+ await env.withSecurityRulesDisabled(async ctx=>{
+  for(let i=0;i<count;i++)await deleteDoc(doc(ctx.firestore(),'inventoryReservations/evidence__I'+i));
+  await deleteDoc(doc(ctx.firestore(),'inventoryMovements/RESERVE-EVIDENCE'));
+ });
+ const items=Array.from({length:count},(_,i)=>({itemId:'I'+i,productId:'p-order',qty:5,warehouseId:'W1'}));
+ await seed('orders/evidence',{ownerUid:'sales1',salesCode:'S01',items});
+ await seed('inventory/p-order',{productKey:'p-order',onHand:20,reserved:0,incoming:0});
+ await seed('warehouseStocks/W1__p-order',{productKey:'p-order',warehouseId:'W1',onHand:20,reserved:0,incoming:0});
+}
+function operationalReserveBatch(uid,count=1,{aggregate=true,warehouse=true,movement=true,ids=null,delta=count}={}){
+ const client=db(uid),b=writeBatch(client),reservationIds=ids||Array.from({length:count},(_,i)=>'evidence__I'+i);
+ if(aggregate)b.update(doc(client,'inventory/p-order'),{reserved:delta});
+ if(warehouse)b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:delta});
+ const evidence={inventoryId:'p-order',warehouseStockId:'W1__p-order',previousWarehouseStockId:'W1__p-order',movementId:'RESERVE-EVIDENCE',reservationIds};
+ if(movement)b.set(doc(client,'inventoryMovements/RESERVE-EVIDENCE'),{type:'reserve',qty:count,sourceId:'evidence',productKey:'p-order',warehouseId:'W1',reservationStockEvidence:evidence});
+ for(let i=0;i<count;i++)b.set(doc(client,'inventoryReservations/evidence__I'+i),{
+  orderId:'evidence',itemId:'I'+i,orderItemIndex:i,productKey:'p-order',warehouseId:'W1',ownerUid:'sales1',salesCode:'S01',quantity:1,shortageQty:4,
+  stockEvidence:evidence
+ });return b;
+}
+test('operational reservation changes require both stock totals and a new matching movement',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  await seedOperationalReserve();
+  const client=db(uid),base={orderId:'evidence',itemId:'I0',orderItemIndex:0,productKey:'p-order',warehouseId:'W1',ownerUid:'sales1',salesCode:'S01',quantity:1};
+  await assertFails(setDoc(doc(client,'inventoryReservations/evidence__I0'),base));
+  for(const options of [{aggregate:false},{warehouse:false},{movement:false},{delta:2},{ids:['evidence__I0','evidence__I0']},{ids:['other__I0']}])
+   await assertFails(operationalReserveBatch(uid,1,options).commit());
+  await assertSucceeds(operationalReserveBatch(uid).commit());
+  await assertFails(updateDoc(doc(client,'inventoryReservations/evidence__I0'),{quantity:2}));
+  await env.withSecurityRulesDisabled(async ctx=>{await deleteDoc(doc(ctx.firestore(),'inventoryMovements/RESERVE-EVIDENCE'));});
+ }
+});
+test('five same-product reservations prove the combined delta without exceeding rule limits',async()=>{
+ await seedOperationalReserve(5);
+ await assertSucceeds(operationalReserveBatch('buyer1',5).commit());
+ const stock=await getDoc(doc(db('buyer1'),'inventory/p-order'));assert.equal(stock.data().reserved,5);
+});
+
+test('reservation release on cancellation changes stock once and cannot reuse its ledger',async()=>{
+ await seedOperationalReserve();await assertSucceeds(operationalReserveBatch('buyer1').commit());
+ await seed('orders/evidence',{ownerUid:'sales1',salesCode:'S01',status:'cancelled',items:[{itemId:'I0',productId:'p-order',qty:5,warehouseId:'W1'}]});
+ const client=db('buyer1'),b=writeBatch(client),e={inventoryId:'p-order',warehouseStockId:'W1__p-order',previousWarehouseStockId:'W1__p-order',movementId:'RELEASE-E',reservationIds:['evidence__I0']};
+ b.update(doc(client,'inventory/p-order'),{reserved:0});b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:0});
+ b.update(doc(client,'inventoryReservations/evidence__I0'),{quantity:0,shortageQty:0,stockEvidence:e});
+ b.set(doc(client,'inventoryMovements/RELEASE-E'),{productKey:'p-order',warehouseId:'W1',sourceId:'evidence',type:'release',qty:-1,reservationStockEvidence:e});
+ await assertSucceeds(b.commit());await assertFails(updateDoc(doc(client,'inventoryReservations/evidence__I0'),{quantity:1}));
+});
+
+test('reservation warehouse moves must release the source and reserve the destination in the same operation',async()=>{
+ await seedOperationalReserve();await assertSucceeds(operationalReserveBatch('buyer1').commit());
+ await seed('orders/evidence',{ownerUid:'sales1',salesCode:'S01',items:[{itemId:'I0',productId:'p-order',qty:5,warehouseId:'W2'}]});
+ await seed('warehouseStocks/W2__p-order',{productKey:'p-order',warehouseId:'W2',onHand:20,reserved:0,incoming:0});
+ const move=source=>{
+  const client=db('wh1'),b=writeBatch(client),e={inventoryId:'p-order',warehouseStockId:'W2__p-order',previousWarehouseStockId:'W1__p-order',movementId:'MOVE-E',reservationIds:['evidence__I0']};
+  if(source)b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:0});
+  b.update(doc(client,'warehouseStocks/W2__p-order'),{reserved:1});
+  b.update(doc(client,'inventoryReservations/evidence__I0'),{warehouseId:'W2',stockEvidence:e});
+  b.set(doc(client,'inventoryMovements/MOVE-E'),{productKey:'p-order',warehouseId:'W2',sourceId:'evidence',type:'warehouse_transfer',qty:1,reservationStockEvidence:e});return b.commit();
+ };
+ await assertFails(move(false));await assertSucceeds(move(true));
+});
 const projectId = 'demo-yushin';
 
 async function seed(path, data) {
@@ -1088,7 +1173,7 @@ test('warehouse receives a sanitized supply view and cannot read company purchas
     const source=await tx.get(ref);
     assert.equal(source.data().unitCost,undefined);
     tx.update(ref,{receivedQty:2,incomingRegisteredQty:3,status:'PARTIAL_RECEIPT'});
-    tx.set(client.collection('inventoryLots').doc('private-lot'),{sourceId:'private-supply',sourceType:'SUPPLY_ORDER',remainingQty:2});
+    tx.set(client.collection('inventoryLots').doc('private-lot'),{productKey:'p1',warehouseId:'w1',sourceId:'private-supply',sourceType:'SUPPLY_ORDER',remainingQty:2});
     tx.set(client.collection('inventoryLotCosts').doc('private-lot'),{lotId:'private-lot',sourceType:'SUPPLY_ORDER',sourceId:'private-supply',costSourceSupplyId:'private-supply'});
   },'wh1',false,'warehouse'));
   await assertFails(updateDoc(doc(db('buyer1'),'supplyOrders/private-supply'),{unitCost:999}));
@@ -1195,9 +1280,9 @@ async function seedWarehouseShipment(){
 }
 function warehouseShipmentBatch(client,uid,item,{stock=true,extra={},qty=1}={}){
   const batch=writeBatch(client),record={id:'SHIP1',orderId:'warehouse-ship',itemId:'I1',itemIndex:0,productKey:'p-order',warehouseId:'W1',date:'2026-10-06',qty,sourceType:'INVENTORY_SHIPMENT',createdByUid:uid,movementId:'SHIP-M1'};
-  batch.set(doc(client,'inventoryMovements/SHIP-M1'),{type:'ship',sourceId:'warehouse-ship',itemId:'I1',warehouseId:'W1',productKey:'p-order',qty:-qty,actorUid:uid,warehouseStockId:'W1__p-order',inventoryDocId:'p-order'});
+  batch.set(doc(client,'inventoryMovements/SHIP-M1'),{type:'ship',sourceId:'warehouse-ship',itemId:'I1',warehouseId:'W1',productKey:'p-order',qty:-qty,actorUid:uid,warehouseStockId:'W1__p-order',inventoryDocId:'p-order',reservationStockEvidence:{inventoryId:'p-order',warehouseStockId:'W1__p-order',previousWarehouseStockId:'W1__p-order',movementId:'SHIP-M1',reservationIds:['warehouse-ship__I1']}});
   if(stock){batch.update(doc(client,'inventory/p-order'),{onHand:5-qty,reserved:3-qty});batch.update(doc(client,'warehouseStocks/W1__p-order'),{onHand:5-qty,reserved:3-qty});}
-  batch.update(doc(client,'inventoryReservations/warehouse-ship__I1'),{quantity:3-qty});
+  batch.update(doc(client,'inventoryReservations/warehouse-ship__I1'),{quantity:3-qty,stockEvidence:{inventoryId:'p-order',warehouseStockId:'W1__p-order',previousWarehouseStockId:'W1__p-order',movementId:'SHIP-M1',reservationIds:['warehouse-ship__I1']}});
   batch.update(doc(client,'orders/warehouse-ship'),{inventoryShipmentRecordId:'SHIP1',items:[{...item,reservedQty:3-qty,warehouseShippedQty:qty}],deliveryRecords:[record],deliveredQty:qty,isDelivered:qty>=3,...extra});
   return batch;
 }
@@ -1268,7 +1353,12 @@ test('order-linked transfer preserves customer delivery and cannot be cancelled 
  const b=writeBatch(client);b.set(doc(client,'stockTransfers/T'),data);b.update(doc(client,'warehouseStocks/MAIN__P'),{onHand:6,reserved:0});b.update(doc(client,'inventory/P'),{transferInTransit:4,transferFreeInTransit:0});b.update(doc(client,'orders/logistics'),{items:[{...old.items[0],transferPendingId:'T'}],warehouseLogisticsId:'T',logisticsTransfersPending:1,logisticsHistory:[{id:'T'}],workCategories:['delivery'],updatedAt:'2026-10-09'});await assertSucceeds(b.commit());
  await assertFails(updateDoc(doc(db('sales1'),'orders/logistics'),{status:'cancelled'}));await assertFails(updateDoc(doc(db('admin'),'orders/logistics'),{status:'cancelled'}));
  await assertFails(updateDoc(doc(db('sales1'),'orders/logistics'),{logisticsTransfersPending:0,items:old.items}));
- const receipt=writeBatch(client);receipt.update(doc(client,'stockTransfers/T'),{status:'RECEIVED',receivedByUid:'buyer1',receivedAt:'2026-10-09'});receipt.set(doc(client,'warehouseStocks/EXT__P'),{productKey:'P',warehouseId:'EXT',onHand:4,reserved:4,incoming:0});receipt.update(doc(client,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});receipt.update(doc(client,'orders/logistics'),{items:[{...old.items[0],warehouseId:'EXT',transferPendingId:''}],warehouseLogisticsId:'T',warehouseLogisticsEventId:'T-received',logisticsTransfersPending:0,logisticsHistory:[{id:'T'},{id:'received'}],updatedAt:'2026-10-09'});await assertSucceeds(receipt.commit());
+ const receipt=writeBatch(client);receipt.update(doc(client,'stockTransfers/T'),{status:'RECEIVED',receivedByUid:'buyer1',receivedAt:'2026-10-09'});receipt.set(doc(client,'warehouseStocks/EXT__P'),{productKey:'P',warehouseId:'EXT',onHand:4,reserved:4,incoming:0});receipt.update(doc(client,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});receipt.update(doc(client,'orders/logistics'),{items:[{...old.items[0],warehouseId:'EXT',transferPendingId:''}],warehouseLogisticsId:'T',warehouseLogisticsEventId:'T-received',logisticsTransfersPending:0,logisticsHistory:[{id:'T'},{id:'received'}],updatedAt:'2026-10-09'});
+ const evidence={inventoryId:'P',warehouseStockId:'EXT__P',previousWarehouseStockId:'MAIN__P',movementId:'T-in',reservationIds:['logistics__A']};
+ receipt.update(doc(client,'inventoryReservations/logistics__A'),{warehouseId:'EXT',stockEvidence:evidence});
+ receipt.set(doc(client,'inventoryMovements/T-in'),{type:'warehouse_transfer_in',sourceType:'WAREHOUSE_TRANSFER',sourceId:'T',productKey:'P',warehouseId:'EXT',qty:4,reservationStockEvidence:evidence});
+ await assertSucceeds(receipt.commit());
+ assert.equal((await getDoc(doc(client,'inventoryReservations/logistics__A'))).data().warehouseId,'EXT');
 });
 test('handoff creates scoped custody location without broadening warehouse master permission and remains unfulfilled',async()=>{
  await seedWarehouseLogistics();const client=db('buyer1'),data=transferData({linked:true,handoff:true}),old=(await getDoc(doc(client,'orders/logistics'))).data();
@@ -1403,3 +1493,4 @@ test('warehouse dispatch converts a pending replenishment hold into a linked imm
  const receive=writeBatch(firestore);receive.update(doc(firestore,'stockTransfers/SEND'),{status:'RECEIVED',receivedAt:'2026-10-12',receivedByUid:uid});receive.update(doc(firestore,'warehouseStocks/MAIN_P'),{onHand:13,reserved:3});receive.update(doc(firestore,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});await assertSucceeds(receive.commit());
  await assertFails(updateDoc(doc(firestore,'stockTransferRequests/REQ'),{status:'PENDING'}));
 });
+
