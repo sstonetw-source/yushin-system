@@ -51,7 +51,7 @@ test('all working modules show one consistent page title', () => {
     assert.equal((html.match(/<div class="sub-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 16);
     assert.ok(html.includes("onkeydown=\"if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}\""));
     assert.ok(css.includes('#appContainer .forecast-status-active'));
-    assert.ok(css.includes('#appContainer :is(.order-work-card, .purchase-stage-button, .product-brand-button).active'));
+    assert.ok(css.includes('.order-work-card, .product-brand-button):is(.active, [aria-pressed="true"], [aria-selected="true"])'));
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單 <button[^>]*data-page-help="order-system"/);
     assert.ok(html.includes('styles.css?v=20261013-3'));
     assert.ok(css.includes('#appContainer #myQuotesPanel > table :is(th, td):nth-child(6)'));
