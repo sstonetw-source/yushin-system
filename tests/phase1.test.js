@@ -4682,7 +4682,7 @@ test('receipt retry stays idempotent after outstanding supply is cancelled or cl
 
 
 test('mobile layout disables root rubber-band, aligns quote workspace, and equalizes Forecast actions', () => {
-    assert.match(indexSource, /<meta name="theme-color" content="#E6ECF2">/);
+    assert.match(indexSource, /<meta name="theme-color" content="#EEEDE9">/);
     assert.match(cssSource, /#appContainer \{[\s\S]*?height: 100dvh;[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior: none;/);
     assert.match(cssSource, /#quote-system > \.quote-module-nav \{[\s\S]*?position: static;/);
     assert.match(cssSource, /#quoteCreatePanel > \.company-sub-nav \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
