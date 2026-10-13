@@ -71,12 +71,12 @@ test('the screen-only tab refactor does not alter formal document blocks', () =>
 });
 
 test('all work tabs stay plain text without decorative emojis or icon markup', () => {
-    const tabHtml = [...html.matchAll(/<(div|button)\\b[^>]*class="[^"]*\\bsub-tab\\b[^"]*"[^>]*>([\\s\\S]*?)<\\/\\1>/g)];
+    const tabHtml = [...html.matchAll(/<(?:div|button)\b[^>]*class="sub-tab(?: active)?"[^>]*>([^<]+)<\/(?:div|button)>/g)];
     assert.equal(tabHtml.length, 19, 'all quote, company, admin and analytics work tabs should be audited');
-    for (const [, , content] of tabHtml) {
+    for (const [, content] of tabHtml) {
         const label = content.trim();
-        assert.ok(label && !/<(?:svg|img|i|span)\\b/i.test(label), 'tab contains nested icon markup: ' + label);
-        assert.doesNotMatch(label, /\\p{Extended_Pictographic}/u, 'tab contains a decorative emoji: ' + label);
+        assert.ok(label && !/<(?:svg|img|i|span)\b/i.test(label), 'tab contains nested icon markup: ' + label);
+        assert.doesNotMatch(label, /\p{Extended_Pictographic}/u, 'tab contains a decorative emoji: ' + label);
     }
     for (const [id, label] of [
         ['qsub-create', '建立估價單'],
@@ -84,7 +84,7 @@ test('all work tabs stay plain text without decorative emojis or icon markup', (
         ['admin-sub-sales', '人員名單'],
         ['admin-sub-statistics', '進銷存分析']
     ]) {
-        const element = html.match(new RegExp('id="' + id + '"[^>]*>([^<]+)<\\/div>'));
+        const element = html.match(new RegExp('id="' + id + '"[^>]*>([^<]+)<'));
         assert.ok(element, 'missing work tab: ' + id);
         assert.equal(element[1].trim(), label, 'work tab label should be plain text: ' + id);
     }
