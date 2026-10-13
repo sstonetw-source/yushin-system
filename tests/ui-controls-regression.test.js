@@ -60,7 +60,7 @@ test('superseded hard-coded blue/gray/red control themes are not reintroduced', 
     }
     assert.match(css, /#appContainer button:is\(\.btn-secondary, \.status-ok, \.status-soon\),\s*button\.btn-secondary\s*\{\s*background:\s*var\(--ys-surface\) !important;/);
     assert.match(css, /button\.btn-danger,\s*#appContainer button\.danger-menu-item,\s*button\.btn-danger\s*\{\s*background:\s*var\(--ys-danger\) !important;/);
-    assert.ok(html.includes('styles.css?v=20261013-3'), 'new shared styles must bypass stale mobile CSS cache');
+    assert.ok(html.includes('styles.css?v=20261013-4'), 'new shared styles must bypass stale mobile CSS cache');
 });
 
 test('the screen-only tab refactor does not alter formal document blocks', () => {

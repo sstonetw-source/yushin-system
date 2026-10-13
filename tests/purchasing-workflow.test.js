@@ -1057,7 +1057,8 @@ test('direct-ship returns create replacement supply demand', () => {
 
     const selfStart=app.indexOf('function selfOrderActionHtml');
     const selfEnd=app.indexOf('\nwindow.openSelfOrderModal',selfStart);
-    assert.doesNotMatch(app.slice(selfStart,selfEnd),/openSelfOrderModal/);
+    assert.match(app.slice(selfStart,selfEnd),/remainingProcurementQty\(order,item\)>0/);
+    assert.match(app.slice(selfStart,selfEnd),/canBusinessSelfOrder\(order\)/);
 });
 
 test('inventory replenishment source is preserved through formal PO supply records', () => {

@@ -15,6 +15,8 @@ jobs:
           node-version: '22'
       - name: JavaScript syntax check
         run: |
+          node --check modules/order-entry-core.js
+          node --check modules/order-entry-ui.js
           node --check modules/order-self-order-required.js
           node --check modules/inventory-workspace.js
           node --check modules/warehouse-logistics.js
@@ -41,6 +43,8 @@ jobs:
         run: npm install --no-save --no-package-lock playwright-core@1.56.0
       - name: Check shared buttons in desktop and mobile Chrome
         run: node tests/ui-control-browser-smoke.js
+      - name: Check order entry in desktop and mobile Chrome
+        run: node tests/order-entry-browser-smoke.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator

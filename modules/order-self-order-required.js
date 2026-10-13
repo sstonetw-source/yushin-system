@@ -21,7 +21,7 @@
     }
 
     function isSelfOrder() {
-        return id('orderProcurementType')?.value === 'SALES_SELF_ORDER';
+        return id('orderProcurementType')?.value === 'SALES_SELF_ORDER' && id('orderSelfOrderConfirmed')?.value === 'confirmed';
     }
 
     function sync() {
@@ -67,6 +67,7 @@
         if (!overlay || !selector || overlay.dataset.selfOrderRequiredBound === '1') return;
         overlay.dataset.selfOrderRequiredBound = '1';
         selector.addEventListener('change', sync);
+        id('orderSelfOrderConfirmed')?.addEventListener('change', sync);
         for (const field of ['orderSelfSupplier', 'orderCostPrice']) {
             const element = id(field);
             if (element) element.addEventListener('input', function () {

@@ -21,7 +21,7 @@ test('self-order requires supplier and nonnegative numeric cost, but accepts exp
 
 test('the order form gates adding a self-order item and saving an incomplete one', () => {
     const elements={};
-    for (const name of ['orderProcurementType','orderSelfSupplier','orderCostPrice',
+    for (const name of ['orderSelfOrderConfirmed','orderProcurementType','orderSelfSupplier','orderCostPrice',
        'orderSelfSupplierRequired','orderCostPriceRequired','orderSelfCostHint',
        'orderItemCode','orderItemName','orderItemNameEn','orderModalOverlay']) {
         elements[name]={value:'',hidden:false,style:{},dataset:{},
@@ -30,6 +30,7 @@ test('the order form gates adding a self-order item and saving an incomplete one
           focus(){this.focused=true;},reportValidity(){return !this.validationMessage;}};
     }
     elements.orderProcurementType.value='SALES_SELF_ORDER';
+    elements.orderSelfOrderConfirmed.value='confirmed';
     elements.orderItemCode.value='123';
     elements.orderModalOverlay.contains=()=>true;
     const calls=[];
@@ -55,6 +56,10 @@ test('the order form gates adding a self-order item and saving an incomplete one
     assert.equal(invoke('addCurrentOrderItemToDraft()'),false);
     elements.orderCostPrice.value='';
     assert.equal(invoke('saveNewOrder()'),true);
+    elements.orderSelfOrderConfirmed.value='pending';
+    sandbox.YushinOrderSelfRequired.sync();
+    assert.equal(elements.orderCostPrice.required,false);
+    assert.equal(invoke('saveNewOrder()'),false);
     elements.orderProcurementType.value='PURCHASING_PO';
     sandbox.onOrderProcurementTypeChange();
     assert.equal(elements.orderSelfSupplier.required,false);
