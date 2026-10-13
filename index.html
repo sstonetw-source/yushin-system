@@ -463,8 +463,9 @@
 
       </div>
       <div id="businessProductSearchResults" class="table-wrap inventory-product-search-results" style="display:none;">
-        <div class="inventory-search-subheading"><strong>產品主檔／售價補充結果</strong><span id="businessProductSearchStatus"></span></div>
+        <div class="inventory-search-subheading"><strong>產品主檔／售價補充結果</strong><span id="businessProductSearchStatus" role="status" aria-live="polite"></span></div>
         <table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>建議售價</th><th>現有</th><th>預留</th><th>可用</th><th>在途</th><th>預計</th></tr></thead><tbody id="businessProductSearchBody"></tbody></table>
+        <button type="button" id="businessProductSearchMoreBtn" class="btn-secondary" hidden onclick="loadMoreBusinessProducts()">載入更多產品</button>
       </div>
 
       <div class="table-wrap inventory-main-table-wrap"><table id="inventoryListTable"><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫位置</th><th>現有庫存</th><th>已預留</th><th>可用庫存</th><th>庫存策略</th><th>安全庫存</th><th>在途</th><th>預計庫存</th><th>批號／效期</th><th class="no-print">操作</th></tr></thead><tbody id="inventoryListBody"></tbody></table></div>
