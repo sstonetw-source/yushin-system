@@ -80,41 +80,54 @@ document.title = 'YSPROBE:' + btoa(report);
 </body>`;
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ys-ui-controls-'));
-try {
-    const fixturePath = path.join(directory, 'controls.html');
-    fs.writeFileSync(fixturePath, fixture);
-    for (const [label, size] of [['desktop', '1280,800'], ['mobile', '390,844']]) {
-        const run = spawnSync(chrome, [
-            '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
-            '--disable-gpu', '--disable-extensions', '--no-first-run',
-            '--disable-background-networking', '--window-size=' + size,
-            '--force-device-scale-factor=1', '--virtual-time-budget=1000',
-            '--dump-dom', pathToFileURL(fixturePath).href
-        ], { encoding: 'utf8', timeout: 45000, maxBuffer: 2 * 1024 * 1024 });
-        assert.equal(run.status, 0, `${label}: browser failed: ${String(run.stderr).slice(-1200)}`);
-        const match = run.stdout.match(/<title>YSPROBE:([^<]+)<\/title>/);
-        assert.ok(match, `${label}: browser did not report computed styles`);
-        const report = JSON.parse(Buffer.from(match[1], 'base64').toString('utf8'));
-        assert.ok(label === 'mobile' ? report.width <= 640 : report.width >= 769,
-            `${label}: unexpected browser width ${report.width}`);
-        for (const [name, value] of Object.entries(report.checks)) {
-            assert.ok(!value.missing, `${label}: ${name} element missing`);
-            assert.ok(value.visible, `${label}: ${name} hidden`);
-            assert.ok(value.height >= 43.5, `${label}: ${name} smaller than 44px (${value.height})`);
-            if (!['forecast', 'equipment'].includes(name)) {
-                assert.equal(value.background, 'rgb(237, 242, 246)', `${label}: ${name} selected state`);
-                assert.equal(value.border, 'rgb(49, 92, 133)', `${label}: ${name} border`);
-                assert.equal(value.radius, '8px', `${label}: ${name} radius`);
-            } else {
-                assert.equal(value.background, 'rgb(49, 92, 133)', `${label}: ${name} primary action`);
+const fixturePath = path.join(directory, 'controls.html');
+fs.writeFileSync(fixturePath, fixture);
+
+/* Playwright's browser context sets the real CSS viewport: 390px, not Chrome
+ * CLI's 500px minimum headless window. Browser itself is installed on runner. */
+async function checkControls() {
+    const { chromium } = require('playwright-core');
+    const browser = await chromium.launch({
+        executablePath: spawnSync('which', [chrome], { encoding: 'utf8' }).stdout.trim(),
+        headless: true,
+        args: ['--no-sandbox', '--disable-dev-shm-usage']
+    });
+    try {
+        for (const [label, width, height] of [['desktop', 1280, 800], ['mobile', 390, 844]]) {
+            const page = await browser.newPage({
+                viewport: { width, height },
+                isMobile: label === 'mobile',
+                hasTouch: label === 'mobile',
+                deviceScaleFactor: label === 'mobile' ? 2 : 1
+            });
+            await page.goto(pathToFileURL(fixturePath).href, { waitUntil: 'load' });
+            const title = await page.title();
+            assert.ok(title.startsWith('YSPROBE:'), `${label}: browser did not report computed styles`);
+            const report = JSON.parse(Buffer.from(title.slice('YSPROBE:'.length), 'base64').toString('utf8'));
+            assert.equal(report.width, width, `${label}: expected a ${width}px CSS viewport, got ${report.width}`);
+            for (const [name, value] of Object.entries(report.checks)) {
+                assert.ok(!value.missing, `${label}: ${name} element missing`);
+                assert.ok(value.visible, `${label}: ${name} hidden`);
+                assert.ok(value.height >= 43.5, `${label}: ${name} smaller than 44px (${value.height})`);
+                if (!['forecast', 'equipment'].includes(name)) {
+                    assert.equal(value.background, 'rgb(237, 242, 246)', `${label}: ${name} selected state`);
+                    assert.equal(value.border, 'rgb(49, 92, 133)', `${label}: ${name} border`);
+                    assert.equal(value.radius, '8px', `${label}: ${name} radius`);
+                } else {
+                    assert.equal(value.background, 'rgb(49, 92, 133)', `${label}: ${name} primary action`);
+                }
+                if (label === 'mobile') {
+                    assert.ok(value.right <= report.width + 1,
+                        `${label}: ${name} overflows viewport ${value.right} > ${report.width}`);
+                }
             }
-            if (label === 'mobile') {
-                assert.ok(value.right <= report.width + 1,
-                    `${label}: ${name} overflows viewport ${value.right} > ${report.width}`);
-            }
+            console.log(`UI browser smoke ${label} ${report.width}px: ${Object.keys(report.checks).length} control types passed`);
+            await page.close();
         }
-        console.log(`UI browser smoke ${label} ${report.width}px: ${Object.keys(report.checks).length} control types passed`);
+    } finally {
+        await browser.close();
     }
-} finally {
-    fs.rmSync(directory, { recursive: true, force: true });
 }
+checkControls()
+    .catch(error => { console.error(error); process.exitCode = 1; })
+    .finally(() => fs.rmSync(directory, { recursive: true, force: true }));
