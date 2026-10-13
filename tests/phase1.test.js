@@ -1887,7 +1887,7 @@ test('admin price-list management is the single bulk Product Import entry', () =
     assert.doesNotMatch(indexSource, /id="admin-prices"/);
     assert.doesNotMatch(indexSource, /id="productManagementTools"/);
     assert.match(indexSource, /id="productBatchMaintenance"/);
-    assert.match(indexSource, /📑 價目表管理/);
+    assert.match(indexSource, /admin-sub-products[^>]*>價目表管理</);
     assert.match(indexSource, /＋ 上傳價目表/);
     assert.match(indexSource, /下載標準範本/);
     assert.match(indexSource, /新增／更新／不變／錯誤/);
