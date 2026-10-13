@@ -3890,19 +3890,25 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 
 /* 又鑫 UI／UX 1.0 — shared screen tokens. Keep printable documents untouched. */
 :root {
-    --ys-primary: #4B6685;
-    --ys-primary-hover: #3E5671;
-    --ys-selected: #E2EAF3;
-    --ys-page: #F1F4F7;
-    --ys-surface: #FAFBFC;
-    --ys-text: #263445;
-    --ys-muted: #566576;
-    --ys-border: #C9D3DD;
+    /* 暖灰商務：低彩度背景、深藍主操作、淡色狀態。螢幕工作介面共用色票。 */
+    --ys-primary: #315C85;
+    --ys-primary-hover: #264A6B;
+    --ys-selected: #EDF2F6;
+    --ys-page: #F6F5F2;
+    --ys-surface: #FDFCFB;
+    --ys-text: #292D32;
+    --ys-muted: #6B7280;
+    --ys-border: #E7E5E1;
     --ys-success: #41674C;
     --ys-warning: #825B23;
     --ys-danger: #98544F;
     --ys-neutral: #64748B;
-    --ys-nav: #E6ECF2;
+    --ys-nav: #EEEDE9;
+    --ys-table-head: #F3F2F0;
+    --ys-success-soft: #EAF3EB;
+    --ys-warning-soft: #FFF3E4;
+    --ys-danger-soft: #FCEDEB;
+    --ys-neutral-soft: #F2F2EF;
 }
 @media screen {
     #authStarting { background: var(--ys-page); color: var(--ys-primary-hover); }
@@ -3996,7 +4002,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     }
     #appContainer button.btn-danger:hover:not(:disabled),
     #appContainer button.danger-menu-item:hover:not(:disabled) {
-        background: #991B1B !important;
+        background: #7C3833 !important;
     }
     #appContainer .content-section :is(.toolbar, .module-header) > button:not([class]):hover:not(:disabled),
     #appContainer .eq-modal-box button:not([class]):hover:not(:disabled),
@@ -4031,10 +4037,11 @@ button:disabled { opacity:.48; cursor:not-allowed; }
         font-weight: 600;
         line-height: 1.4;
     }
-    #appContainer .status-badge.status-ok { background: var(--ys-success); color: #FFFFFF; }
-    #appContainer .status-badge.status-soon { background: var(--ys-warning); color: #FFFFFF; }
-    #appContainer .status-badge.status-overdue { background: var(--ys-danger); color: #FFFFFF; }
-    #appContainer .status-badge:is(.status-none, .status-unknown) { background: var(--ys-neutral); color: #FFFFFF; }
+    /* 狀態用輕量色塊與文字，不和主要操作競爭視覺焦點。 */
+    #appContainer .status-badge.status-ok { background: var(--ys-success-soft); color: var(--ys-success); }
+    #appContainer .status-badge.status-soon { background: var(--ys-warning-soft); color: var(--ys-warning); }
+    #appContainer .status-badge.status-overdue { background: var(--ys-danger-soft); color: var(--ys-danger); }
+    #appContainer .status-badge:is(.status-none, .status-unknown) { background: var(--ys-neutral-soft); color: #56616F; }
     #appContainer .inline-status,
     #appContainer .section-subtitle,
     #appContainer .record-reference { color: var(--ys-muted); }
@@ -4064,7 +4071,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
     }
     #appContainer :is(#product-system, #forecast-system, #equipment-system, #order-system,
         #purchasing-system, #inventory-system, #admin-system) table th {
-        background: var(--ys-selected);
+        background: var(--ys-table-head);
         color: var(--ys-text);
     }
 }
@@ -4145,7 +4152,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
         line-height: 1.45;
     }
     #appContainer #myQuotesPanel > table th {
-        background: var(--ys-selected);
+        background: var(--ys-table-head);
         color: var(--ys-text);
     }
     #appContainer #myQuotesPanel > table :is(th, td):nth-child(6) {
@@ -4286,7 +4293,7 @@ button:disabled { opacity:.48; cursor:not-allowed; }
 #appContainer .workspace-page-title > .page-help-trigger { position: relative; flex: 0 0 44px; width: 44px; height: 44px; margin: 0; padding: 0; }
 #pageHelpSources[hidden] { display: none !important; }
 
-/* Mist blue-grey screen palette. Printed and downloaded documents keep their own styles. */
+/* Warm grey business palette. Printed and downloaded documents keep their own styles. */
 @media screen {
     button { background-color: var(--ys-primary); }
     #appContainer .mobile-nav-toggle { background: var(--ys-nav); color: var(--ys-text); border-color: var(--ys-border); }
