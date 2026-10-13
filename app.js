@@ -5754,7 +5754,10 @@ window.onQuoteBrandSelectChange = function(select, userChanged = false) {
             otherInput.value = '';
         }
     }
-    if (userChanged) invalidateQuoteProductIdentityIfBrandChanged(select);
+    if (userChanged) {
+        delete row.querySelector('.item-model')?.dataset.autofillBrand;
+        invalidateQuoteProductIdentityIfBrandChanged(select);
+    }
     const brand = quoteRowBrandValue(row);
     const brandIdInput = row.querySelector('.item-brand-id');
     if (brandIdInput) brandIdInput.value = brandIdForName(brand);
@@ -5770,6 +5773,7 @@ window.onQuoteBrandOtherInput = function(input) {
     const row = input?.closest?.('tr');
     const select = row?.querySelector('.item-brand');
     if (!row || !select) return;
+    delete row.querySelector('.item-model')?.dataset.autofillBrand;
     invalidateQuoteProductIdentityIfBrandChanged(select);
     onQuoteBrandSelectChange(select);
 };
@@ -5806,6 +5810,7 @@ window.onOrderBrandSelectChange = function(userChanged = false) {
     }
     if (!userChanged) return;
     const codeInput = document.getElementById('orderItemCode');
+    delete codeInput?.dataset.autofillBrand;
     clearOrderProductIdentityKeepBrand(codeInput);
     const selectedBrand = getBrandFieldValue('orderBrand', 'orderBrandOther');
     if (codeInput?.value.trim() && (select.value !== '其他' || selectedBrand)) {
@@ -5814,6 +5819,7 @@ window.onOrderBrandSelectChange = function(userChanged = false) {
 };
 
 window.onOrderBrandOtherInput = function() {
+    delete document.getElementById('orderItemCode')?.dataset.autofillBrand;
     clearOrderProductIdentityKeepBrand(document.getElementById('orderItemCode'));
 };
 
@@ -5856,6 +5862,35 @@ function clearOrderProductMatch(input, options = {}) {
     if (brandOther) { brandOther.value = ''; brandOther.style.display = 'none'; }
 }
 
+// 自動帶入的廠牌只屬於目前產品；手動選擇的廠牌才限制下一次查詢。
+function productLookupBrand(input, brand) {
+    return input.dataset.autofillBrand === normalizeBrandLookupKey(brand) ? '' : brand;
+}
+
+function clearChangedProductDetails(input, mode) {
+    const previousCode = input.dataset.matchedProductCode || (mode === 'order' ? input.dataset.preserveOrderPriceCode : '');
+    if (!previousCode || previousCode === normalizeItemCodeLoose(input.value)) return;
+    const row = mode === 'quote' ? input.closest('tr') : null;
+    const fields = mode === 'quote'
+        ? ['.item-cn', '.item-en', '.item-spec', '.inc-price', '.ex-price', '.item-origin', '.item-lead-time']
+        : ['orderItemName', 'orderItemNameEn', 'orderSpec', 'orderUnitPrice', 'orderCostPrice', 'orderSelfSupplier'];
+    fields.forEach(key => {
+        const field = row ? row.querySelector(key) : document.getElementById(key);
+        if (field) { field.value = ''; delete field.dataset.autofillCost; }
+    });
+    if (input.dataset.autofillBrand) {
+        const select = row ? row.querySelector('.item-brand') : document.getElementById('orderBrand');
+        if (select) select.value = '';
+        if (row) onQuoteBrandSelectChange(select);
+        else onOrderBrandSelectChange();
+    }
+    delete input.dataset.autofillBrand;
+    delete input.dataset.matchedProductCode;
+    delete input.dataset.preserveOrderPriceCode;
+    if (row) calculateTotals();
+    else { orderCostRequestGeneration++; calcOrderTotal(); }
+}
+
 async function applyOrderProductMatch(input, match) {
     if (!input || !match) return;
     clearQuickProductButton(input);
@@ -5863,7 +5898,10 @@ async function applyOrderProductMatch(input, match) {
     input.dataset.autofillStatus = 'matched';
     input.dataset.productCheckStatus = 'matched';
     const preservePrice = input.dataset.preserveOrderPriceCode === normalizeItemCodeLoose(input.value);
+    const lookupBrand = productLookupBrand(input, getBrandFieldValue('orderBrand', 'orderBrandOther'));
     input.value = match.model || input.value;
+    input.dataset.matchedProductCode = normalizeItemCodeLoose(input.value);
+    if (!lookupBrand) input.dataset.autofillBrand = normalizeBrandLookupKey(resolveBrandName(match.brand || ''));
     window._orderModalProductId = match.productId || stableProductId(match);
     if (match.brand) {
         selectBrandInDropdown(document.getElementById('orderBrand'), resolveBrandName(match.brand));
@@ -5874,8 +5912,8 @@ async function applyOrderProductMatch(input, match) {
     const itemNameEnInput=document.getElementById('orderItemNameEn');if(itemNameEnInput)itemNameEnInput.value=match.nameEn||'';
     const specInput=document.getElementById('orderSpec');if(specInput)specInput.value=match.spec||match.specification||'';
     const priceInput = document.getElementById('orderUnitPrice');
-    if (!preservePrice && priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') {
-        priceInput.value = match.price;
+    if (!preservePrice && priceInput) {
+        priceInput.value = match.price ?? '';
         calcOrderTotal();
     }
     input.dataset.productLine = match.productLine || '';
@@ -5889,8 +5927,11 @@ async function applyOrderProductMatch(input, match) {
 
 let orderProductCheckGeneration = 0;
 window.onOrderItemCodeChange = async function(input) {
+    clearTimeout(orderItemCodeTimer);
+    clearChangedProductDetails(input, 'order');
     const value = input.value.trim();
     const selectedBrand = getBrandFieldValue('orderBrand', 'orderBrandOther');
+    const lookupBrand = productLookupBrand(input, selectedBrand);
     const generation = ++orderProductCheckGeneration;
     const opening = orderModalOpenGeneration;
     clearQuickProductButton(input);
@@ -5908,11 +5949,11 @@ window.onOrderItemCodeChange = async function(input) {
     try {
         const matches = await findProductsByCode(value, {throwOnError:true});
         if (!isCurrent()) return;
-        const match = selectProductCodeMatch(matches, selectedBrand);
+        const match = selectProductCodeMatch(matches, lookupBrand);
         if (!match) {
             clearOrderProductMatch(input, { preserveBrand:true });
             input.dataset.autofillStatus = 'not-found';
-            const ambiguous = !selectedBrand && matches.length > 1;
+            const ambiguous = !lookupBrand && matches.length > 1;
             input.dataset.productCheckStatus = ambiguous ? 'ambiguous' : 'missing';
             if (ambiguous) showProductMatchChoices(input, matches, 'order');
             else showQuickProductButton(input, 'order');
@@ -5931,6 +5972,7 @@ let orderItemCodeTimer = null;
 window.onOrderItemCodeInput = function(input) {
     clearTimeout(orderItemCodeTimer);
     orderProductCheckGeneration++;
+    clearChangedProductDetails(input, 'order');
     input.dataset.productCheckStatus=input.value.trim()?'checking':'';
     queueProductCodeSuggestions(input.value);
     clearOrderProductMatch(input, { preserveBrand:true });
@@ -6105,10 +6147,12 @@ window.addQuoteRow = function(itemData = {}) {
     `;
 
     tbody.appendChild(tr);
+    if (itemData.model) tr.querySelector('.item-model').dataset.matchedProductCode = normalizeItemCodeLoose(itemData.model);
     refreshQuoteWarehouseStock(tr);
     const quoteBrandSelect = tr.querySelector('.item-brand');
     populateBrandSelect(quoteBrandSelect, '廠牌（選填）', true, getPrimaryBrandNames());
     if (itemData.brand) selectBrandInDropdown(quoteBrandSelect, itemData.brand);
+    if (itemData.productId) tr.querySelector('.item-model').dataset.autofillBrand = normalizeBrandLookupKey(resolveBrandName(itemData.brand || ''));
     onQuoteBrandSelectChange(quoteBrandSelect);
     const extraDetails = tr.querySelector('.quote-extra-fields');
     const hasExtraData = ['origin','leadTime','hospitalItemCode'].some(key => String(itemData[key] || '').trim())
@@ -6127,29 +6171,43 @@ window.onItemCnChange = function(input) {
     applyQuoteProductMatch(input.closest('tr'), match);
 };
 
+const quoteProductChecks = new WeakMap();
 window.onItemModelChange = async function(input) {
+    clearTimeout(quoteProductChecks.get(input)?.timer);
+    clearChangedProductDetails(input, 'quote');
     const value = input.value.trim();
     const row = input.closest('tr');
-    clearProductStockHint(row?.querySelector('.quote-warehouse-stock-hint'));
-    if (!value) return;
-    const matches = await findProductsByCode(value);
-    if (input.value.trim() !== value) return;
-    const match = selectProductCodeMatch(matches, quoteRowBrandValue(row));
-    if (!match) {
-        if (row) {
-            row.querySelector('.item-product-id').value = '';
-            row.querySelector('.item-product-line').value = '';
-            row.querySelector('.item-product-type').value = '';
-        }
-        input.dataset.autofillStatus = 'not-found';
-        if (matches.length > 1) showProductMatchChoices(input, matches, 'quote');
-        else showQuickProductButton(input, 'quote');
-        return;
-    }
+    const brand = quoteRowBrandValue(row);
+    const check = {};
+    quoteProductChecks.set(input, check);
     clearQuickProductButton(input);
     clearProductMatchChoices(input);
-    input.dataset.autofillStatus = 'matched';
-    applyQuoteProductMatch(row, match);
+    clearProductStockHint(row?.querySelector('.quote-warehouse-stock-hint'));
+    ['.item-product-id', '.item-product-line', '.item-product-type'].forEach(key => {
+        const field = row?.querySelector(key); if (field) field.value = '';
+    });
+    input.dataset.autofillStatus = value ? 'checking' : '';
+    if (!value) return;
+    const isCurrent = () => quoteProductChecks.get(input) === check && input.value.trim() === value
+        && quoteRowBrandValue(row) === brand && row?.isConnected !== false;
+    try {
+        const matches = await findProductsByCode(value, {throwOnError:true});
+        if (!isCurrent()) return;
+        const match = selectProductCodeMatch(matches, productLookupBrand(input, brand));
+        if (!match) {
+            input.dataset.autofillStatus = 'not-found';
+            if (matches.length > 1) showProductMatchChoices(input, matches, 'quote');
+            else showQuickProductButton(input, 'quote');
+            return;
+        }
+        input.dataset.autofillStatus = 'matched';
+        applyQuoteProductMatch(row, match);
+    } catch (_) {
+        if (!isCurrent()) return;
+        input.dataset.autofillStatus = 'error';
+        const hint = row?.querySelector('.quote-warehouse-stock-hint');
+        if (hint) { hint.hidden = false; hint.textContent = '產品查詢失敗，請重新輸入貨號再試一次。'; }
+    }
 };
 
 window.onIncPriceChange = function(input) {
@@ -17945,11 +18003,14 @@ function setOrderModalItem(item={}) {
     codeInput.dataset.productLine=normalized.productLine||'';
     codeInput.dataset.productType=normalized.productType||'';
     codeInput.dataset.productMasterMatched=normalized.productMasterMatched===true?'1':'0';
+    delete codeInput.dataset.autofillBrand;
+    codeInput.dataset.matchedProductCode=normalizeItemCodeLoose(normalized.itemCode);
     codeInput.dataset.preserveOrderPriceCode=normalizeItemCodeLoose(normalized.itemCode);
     codeInput.dataset.productCheckStatus=normalized.productCheckStatus||'';
     if(normalized.brand)selectBrandInDropdown(document.getElementById('orderBrand'),normalized.brand);
     else document.getElementById('orderBrand').value='';
     onOrderBrandSelectChange();
+    if (normalized.productId) codeInput.dataset.autofillBrand=normalizeBrandLookupKey(resolveBrandName(normalized.brand||''));
     document.getElementById('orderQty').value=normalized.qty||1;
     document.getElementById('orderUnitPrice').value=normalized.unitPrice||0;
     document.getElementById('orderTotalPrice').value=normalized.totalPrice||0;
@@ -18150,7 +18211,7 @@ window.addCurrentOrderItemToDraft=function(){
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;
+    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
     clearQuickProductButton(nextCodeInput);clearProductMatchChoices(nextCodeInput);
     renderNewOrderDraftItems();
     document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
@@ -18161,7 +18222,7 @@ window.openOrderModal = function(source = null) {
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
     const openingCode=document.getElementById('orderItemCode');
-    if(openingCode){delete openingCode.dataset.productCheckStatus;delete openingCode.dataset.preserveOrderPriceCode;clearQuickProductButton(openingCode);clearProductMatchChoices(openingCode);}
+    if(openingCode){delete openingCode.dataset.matchedProductCode;delete openingCode.dataset.autofillBrand;delete openingCode.dataset.productCheckStatus;delete openingCode.dataset.preserveOrderPriceCode;clearQuickProductButton(openingCode);clearProductMatchChoices(openingCode);}
     const recoveryBanner = document.getElementById('orderDraftRecoveryBanner');
     if (recoveryBanner) recoveryBanner.style.display = 'none';
 
@@ -18206,6 +18267,8 @@ window.openOrderModal = function(source = null) {
         codeInput.value = source.itemCode || '';
         codeInput.dataset.productLine = source.productLine || '';
         codeInput.dataset.productType = source.productType || '';
+        codeInput.dataset.matchedProductCode=normalizeItemCodeLoose(source.itemCode||'');
+        if (source.productId) codeInput.dataset.autofillBrand=normalizeBrandLookupKey(resolveBrandName(source.brand||''));
         codeInput.dataset.preserveOrderPriceCode=normalizeItemCodeLoose(source.itemCode||'');
         codeInput.dataset.productCheckStatus='checking';
         codeInput.dataset.productMasterMatched = (source.productMasterMatched === true || !!source.productId) ? '1' : '0';
@@ -20608,6 +20671,10 @@ async function findProductByCode(value, preferredBrand = '') {
 function applyQuoteProductMatch(row, match) {
     if (!row || !match) return false;
 
+    const codeInput = row.querySelector('.item-model');
+    const lookupBrand = productLookupBrand(codeInput, quoteRowBrandValue(row));
+    codeInput.dataset.matchedProductCode = normalizeItemCodeLoose(match.model || codeInput.value);
+    if (!lookupBrand) codeInput.dataset.autofillBrand = normalizeBrandLookupKey(resolveBrandName(match.brand || ''));
     row.querySelector('.item-en').value = match.nameEn || '';
     row.querySelector('.item-cn').value = match.nameCn || '';
     row.querySelector('.item-model').value = match.model || row.querySelector('.item-model').value || '';
@@ -20623,52 +20690,35 @@ function applyQuoteProductMatch(row, match) {
     row.querySelector('.item-product-id').value = match.productId || stableProductId(match);
     const brandIdInput = row.querySelector('.item-brand-id');
     if (brandIdInput) brandIdInput.value = match.brandId || brandIdForName(match.brand || '');
-    if (match.spec && !row.querySelector('.item-spec').value) row.querySelector('.item-spec').value = match.spec;
+    row.querySelector('.item-spec').value = match.spec || match.specification || '';
 
     const priceInput = row.querySelector('.inc-price');
     if (priceInput && match.price !== undefined && match.price !== null && String(match.price).trim() !== '') {
         priceInput.value = match.price;
         onIncPriceChange(priceInput);
     } else {
-        calculateTotals();
+        if (priceInput) { priceInput.value = ''; onIncPriceChange(priceInput); }
+        else calculateTotals();
     }
     refreshQuoteWarehouseStock(row);
     return true;
 }
 
-let quoteModelInputTimer = null;
 window.onItemModelInput = function(input) {
-    clearTimeout(quoteModelInputTimer);
+    clearTimeout(quoteProductChecks.get(input)?.timer);
+    clearChangedProductDetails(input, 'quote');
     queueProductCodeSuggestions(input.value);
+    clearQuickProductButton(input);
     clearProductMatchChoices(input);
     const row = input.closest('tr');
     clearProductStockHint(row?.querySelector('.quote-warehouse-stock-hint'));
-    if (row) {
-        row.querySelector('.item-product-id').value = '';
-        row.querySelector('.item-product-line').value = '';
-        row.querySelector('.item-product-type').value = '';
-        input.dataset.autofillStatus = '';
-    }
-    quoteModelInputTimer = setTimeout(async () => {
-        const value = input.value.trim();
-        if (!value) {
-            clearQuickProductButton(input);
-            return;
-        }
-        const matches = await findProductsByCode(value);
-        if (input.value.trim() !== value) return;
-        const match = selectProductCodeMatch(matches, quoteRowBrandValue(input.closest('tr')));
-        if (match) {
-            clearQuickProductButton(input);
-            clearProductMatchChoices(input);
-            input.dataset.autofillStatus = 'matched';
-            applyQuoteProductMatch(input.closest('tr'), match);
-        } else {
-            input.dataset.autofillStatus = 'not-found';
-            if (matches.length > 1) showProductMatchChoices(input, matches, 'quote');
-            else showQuickProductButton(input, 'quote');
-        }
-    }, 180);
+    ['.item-product-id', '.item-product-line', '.item-product-type'].forEach(key => {
+        const field = row?.querySelector(key); if (field) field.value = '';
+    });
+    input.dataset.autofillStatus = input.value.trim() ? 'checking' : '';
+    const check = {};
+    quoteProductChecks.set(input, check);
+    if (input.value.trim()) check.timer = setTimeout(() => onItemModelChange(input), 180);
 };
 
 function stableProductId(item) {

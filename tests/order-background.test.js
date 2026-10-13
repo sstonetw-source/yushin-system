@@ -60,6 +60,7 @@ function productCheckHarness(lookup) {
  let brand='Brand';const events=[];
  const c=vm.createContext({window:{},document:{getElementById:node},orderModalOpenGeneration:1,newOrderDraftItems:[],
   clearQuickProductButton(){},clearProductMatchChoices(){},clearOrderProductMatch:input=>{input.dataset.productMasterMatched='0';c.window._orderModalProductId='';},
+  clearTimeout,orderItemCodeTimer:null,orderCostRequestGeneration:0,normalizeBrandLookupKey:s=>String(s||'').toLowerCase(),
   getBrandFieldValue:()=>brand,resolveBrandName:s=>s,normalizeItemCodeLoose:s=>String(s).toUpperCase(),
   findProductsByCode:lookup,selectProductCodeMatch:(matches,b)=>{const rows=b?matches.filter(x=>x.brand===b):matches;return rows.length===1?rows[0]:null;},
   stableProductId:x=>x.productId,selectBrandInDropdown(){},onOrderBrandSelectChange(){},applyOrderProductCost:async()=>{},refreshOrderWarehouseStock:async()=>{},
@@ -69,7 +70,7 @@ function productCheckHarness(lookup) {
    productId:c.window._orderModalProductId,productMasterMatched:node('orderItemCode').dataset.productMasterMatched==='1',productCheckStatus:node('orderItemCode').dataset.productCheckStatus}),
   escapeHtml:s=>s,console
  });
- const a=src.indexOf('async function applyOrderProductMatch'),b=src.indexOf('\nlet orderItemCodeTimer',a);
+ const a=src.indexOf('function productLookupBrand'),b=src.indexOf('\nlet orderItemCodeTimer',a);
  vm.runInContext(src.slice(a,b),c);
  const x=src.indexOf('function orderItemProductStatus('),y=src.indexOf('\nwindow.quickCreateNewOrderDraftItem',x);
  vm.runInContext(src.slice(x,y),c);

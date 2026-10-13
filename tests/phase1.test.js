@@ -141,7 +141,7 @@ test('product identity handoffs clear stale hidden state before saving', () => {
     const orderInputEnd = appSource.indexOf('\n};', orderInputStart) + 3;
     const orderInput = appSource.slice(orderInputStart, orderInputEnd);
     assert.match(orderInput, /clearOrderProductMatch\(input, \{ preserveBrand:true \}\)/);
-    assert.match(appSource, /if \(input\.value\.trim\(\) !== value\) return/);
+    assert.match(appSource, /quoteProductChecks\.get\(input\) === check && input\.value\.trim\(\) === value/);
 
     const directPoStart = appSource.indexOf('window.onDirectPoCodeChange = async function');
     const directPoEnd = appSource.indexOf('\n};', directPoStart) + 3;
@@ -157,7 +157,7 @@ test('product identity handoffs clear stale hidden state before saving', () => {
     assert.match(inventoryCode, /String\(inventoryAdjustmentRows\[idx\]\.itemCode\|\|''\)\.trim\(\) !== requestedCode/);
 
     assert.match(appSource, /function invalidateQuoteProductIdentityIfBrandChanged\(select\)/);
-    assert.match(appSource, /if \(userChanged\) invalidateQuoteProductIdentityIfBrandChanged\(select\)/);
+    assert.match(appSource, /if \(userChanged\) \{[\s\S]*?invalidateQuoteProductIdentityIfBrandChanged\(select\)/);
     assert.match(appSource, /window\.onQuoteBrandOtherInput = function\(input\)/);
 });
 
@@ -1719,7 +1719,7 @@ test('quote item-code auto-fill waits for Product Master and reacts while typing
 
 test('quote item-code auto-fill fills product identity brand and current price', () => {
     const start = appSource.indexOf('function applyQuoteProductMatch');
-    const end = appSource.indexOf('let quoteModelInputTimer', start);
+    const end = appSource.indexOf('window.onItemModelInput', start);
     const s = appSource.slice(start, end);
     assert.match(s, /item-en/);
     assert.match(s, /item-cn/);
@@ -5023,7 +5023,7 @@ test('formal orders allow primary or Other brand selection but still require Pro
     assert.match(indexSource, /id="orderBrandOther" placeholder="輸入實際廠牌名稱"/);
     assert.doesNotMatch(indexSource, /id="orderBrandOther" readonly/);
     assert.match(appSource, /getPrimaryBrandNames\(\)/);
-    assert.match(appSource, /selectProductCodeMatch\(matches, selectedBrand\)/);
+    assert.match(appSource, /selectProductCodeMatch\(matches, lookupBrand\)/);
     assert.match(appSource, /clearOrderProductMatch\(input, \{ preserveBrand:true \}\)/);
     assert.match(appSource, /以下品項尚未完成產品檢查或建檔/);
     assert.match(appSource, /item\.productMasterMatched!==true/);
