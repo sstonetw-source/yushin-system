@@ -71,10 +71,73 @@
             throw new Error('未取得下載資料夾寫入權限，請重新設定資料夾或選「使用預設下載」。');
         }
     }
+    function sharePdfFile(file, pdf, fileName) {
+        // PDF rendering is asynchronous. A fresh click supplies the user activation
+        // required by Web Share; never include a blob URL or page URL in its payload.
+        return new Promise((resolve, reject) => {
+            const dialog = root.document.createElement('dialog');
+            dialog.className = 'page-help-dialog';
+            dialog.setAttribute('aria-label', 'PDF 文件已準備');
+            const body = root.document.createElement('div');
+            body.className = 'page-help-body';
+            const title = root.document.createElement('h3');
+            title.textContent = 'PDF 文件已準備';
+            const name = root.document.createElement('p');
+            name.textContent = fileName;
+            const message = root.document.createElement('p');
+            message.setAttribute('role', 'status');
+            const actions = root.document.createElement('div');
+            actions.className = 'toolbar';
+            const button = (text, className) => {
+                const el = root.document.createElement('button');
+                el.type = 'button'; el.className = className; el.textContent = text;
+                actions.appendChild(el); return el;
+            };
+            const share = button('分享 PDF 文件', 'btn-primary');
+            const download = button('下載 PDF', 'btn-secondary');
+            const cancel = button('關閉', 'btn-secondary');
+            let sharing = false;
+            const finish = result => { dialog.close(); dialog.remove(); resolve(result); };
+            share.onclick = async () => {
+                if (sharing) return;
+                sharing = true;
+                share.disabled = download.disabled = cancel.disabled = true;
+                message.textContent = '正在開啟分享…';
+                try {
+                    await root.navigator.share({files: [file]});
+                    finish(true);
+                } catch (err) {
+                    message.textContent = err.name === 'AbortError'
+                        ? '已取消分享，可重新分享或下載 PDF。'
+                        : '無法分享此文件，請重試或選擇下載 PDF。';
+                } finally {
+                    sharing = false;
+                    share.disabled = download.disabled = cancel.disabled = false;
+                }
+            };
+            download.onclick = () => {
+                try { pdf.save(fileName); finish(true); }
+                catch (err) { dialog.close(); dialog.remove(); reject(err); }
+            };
+            cancel.onclick = () => finish(false);
+            dialog.addEventListener('cancel', event => { event.preventDefault(); if (!sharing) finish(false); });
+            body.append(title, name, message, actions);
+            dialog.appendChild(body);
+            root.document.body.appendChild(dialog);
+            dialog.showModal();
+        });
+    }
     async function savePdf(kind, pdf, fileName) {
         await ready;
         const handle = handles.get(kind);
-        if (!handle) { pdf.save(fileName); return; }
+        if (!handle) {
+            if (typeof root.File === 'function' && typeof root.navigator?.share === 'function'
+                && typeof root.navigator?.canShare === 'function') {
+                const file = new root.File([pdf.output('blob')], fileName, {type: 'application/pdf'});
+                if (root.navigator.canShare({files: [file]})) return sharePdfFile(file, pdf, fileName);
+            }
+            pdf.save(fileName); return true;
+        }
         if (await handle.queryPermission({mode:'readwrite'}) !== 'granted') throw new Error('下載資料夾權限已失效，請重新設定資料夾。');
         // Never silently overwrite a prior export with the same document name.
         const safeName = fileName.replace(/[\\/\u0000]/g, '_');
@@ -91,6 +154,7 @@
         const writable = await file.createWritable();
         try { await writable.write(pdf.output('blob')); await writable.close(); }
         catch (err) { await writable.abort().catch(() => {}); throw err; }
+        return true;
     }
     root.DocumentDownloads = {setUser, choose, reset, prepare, savePdf};
     render();

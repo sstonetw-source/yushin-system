@@ -6762,7 +6762,10 @@ window.printThreeQuotes = async function() {
         });
 
         const threeQuoteName = quotePdfFileName(quoteData).replace(/\.pdf$/i, '-三家估價.pdf');
-        await window.DocumentDownloads.savePdf('quote', pdf, threeQuoteName);
+        if (await window.DocumentDownloads.savePdf('quote', pdf, threeQuoteName) === false) {
+            setQuoteOutputStatus('三家估價單已產生；已取消匯出');
+            return;
+        }
         setQuoteOutputStatus('✓ 三家估價單已產生並同步');
         closeThreeQuoteDialog();
     } catch (err) {
@@ -7198,7 +7201,10 @@ window.exportCurrentQuotePdf = async function() {
             }
         });
         if (button) button.innerText = '正在下載 PDF…';
-        await window.DocumentDownloads.savePdf('quote', pdf, quotePdfFileName(quoteData));
+        if (await window.DocumentDownloads.savePdf('quote', pdf, quotePdfFileName(quoteData)) === false) {
+            setQuoteOutputStatus('PDF 已產生；已取消匯出');
+            return;
+        }
         pdfDownloaded = true; updateOutput();
         syncPromise.then(() => {});
     } catch (err) {
@@ -15722,7 +15728,10 @@ async function printSavedPoDocument(poNo, vendorName) {
         const blob=pdf.output('blob');
         if(download){
             if (button) button.innerText = '正在下載 PDF…';
-            await window.DocumentDownloads.savePdf('purchase', pdf, fileName);
+            if (await window.DocumentDownloads.savePdf('purchase', pdf, fileName) === false) {
+                updatePoSaveStatus('採購單 PDF 已產生；已取消匯出');
+                return {blob,fileName};
+            }
             updatePoSaveStatus('✓ 採購單 PDF 已產生');
             if(poDirectStockOpenGeneration===modalGeneration&&poEditingId===exportingPoId)closePurchaseOrderModal();
             showActionFeedback(`採購單 ${poNo} PDF 已匯出。`,'success');
