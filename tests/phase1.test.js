@@ -2115,10 +2115,10 @@ test('delivery and return deletes reject duplicate submissions and cancelled ord
   const ds=appSource.slice(appSource.indexOf('window.deleteDeliveryRecord'),appSource.indexOf('window.clearLegacyDelivery'));
   assert.match(ds,/pendingDeliveryOrderIds\.has\(orderId\)/);
   assert.match(ds,/pendingDeliveryOrderIds\.delete\(orderId\)/);
-  const rs=appSource.slice(appSource.indexOf('window.deleteReturnRecord'),appSource.indexOf('window.updateOrderField'));
-  assert.match(rs,/pendingReturnOrderIds\.has\(orderId\)/);
-  assert.match(rs,/pendingReturnOrderIds\.delete\(orderId\)/);
-  assert.match(appSource,/已取消訂單仍可能有取消前已實際送出的商品/);
+  const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+  assert.match(returns,/customerReturnActionsPending.has\(orderId\)/);
+  assert.match(returns,/customerReturnActionsPending.delete\(orderId\)/);
+  assert.doesNotMatch(appSource,/window\.(saveReturnRecord|deleteReturnRecord|editReturnRecord)\s*=/);
 });
 
 
@@ -4114,7 +4114,7 @@ test('order lifecycle actions are hidden from purchaser and guarded by business 
     assert.match(actions,/canManageOrderLifecycleCapability\(\)[\s\S]*?quickSetOrderLifecycle/);
     assert.match(actions,/canManageOrderLifecycleCapability\(\)[\s\S]*?openReturnManagement/);
 
-    ['quickSetOrderLifecycle','quickCompleteDelivery','quickCancelAllDelivery','saveDeliveryRecord','deleteDeliveryRecord','saveOrderLifecycleStatus','saveReturnRecord','deleteReturnRecord','toggleOrderStatus'].forEach(name => {
+    ['quickSetOrderLifecycle','quickCompleteDelivery','quickCancelAllDelivery','saveDeliveryRecord','deleteDeliveryRecord','saveOrderLifecycleStatus','toggleOrderStatus'].forEach(name => {
         const start=appSource.indexOf('window.'+name+' =');
         const source=appSource.slice(start,start+500);
         assert.match(source,/canManageOrderLifecycleCapability\(\)/, name+' must enforce business lifecycle capability');

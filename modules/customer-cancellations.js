@@ -178,10 +178,17 @@ window.receiveCustomerReturn=async function(orderId,requestId,button){
 };
 async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,quality,warehouseId}){
     if(!canReceiveInventoryCapability())throw new Error('無收貨權限。');
+    const actorUid=currentUser?.uid;
     await runRoleTransaction(async tx=>{
+        if(!actorUid||currentUser?.uid!==actorUid||!canReceiveInventoryCapability())throw new Error('登入帳號或權限已變更，請重新開啟退貨收貨。');
         const receiptRef=db.collection('customerReturnReceipts').doc(receiptId),orderRef=db.collection('orders').doc(orderId);
         const receiptSnap=await tx.get(receiptRef),orderSnap=await tx.get(orderRef);
-        if(receiptSnap.exists)return; // Network retry is idempotent.
+        if(currentUser?.uid!==actorUid||!canReceiveInventoryCapability())throw new Error('登入帳號或權限已變更，請重新開啟退貨收貨。');
+        if(receiptSnap.exists){
+            const receipt=receiptSnap.data();
+            if(receipt.orderId!==orderId||receipt.requestId!==requestId||receipt.qty!==qty||receipt.quality!==quality||receipt.warehouseId!==warehouseId||receipt.receivedBy!==actorUid)throw new Error('退貨重試識別碼已對應其他收貨內容，請先查詢原收貨結果。');
+            return;
+        }
         if(!orderSnap.exists)throw new Error('來源訂單已不存在。');
         const order={id:orderId,...orderSnap.data()},requests=[...(order.returnRequests||[])],index=requests.findIndex(r=>r.id===requestId);
         if(index<0||requests[index].status!=='PENDING')throw new Error('退貨申請已撤回或完成。');
@@ -198,12 +205,13 @@ async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,qual
             const available=YushinInventory.availableReturnAllocations(deliveries,returns);
             result.lotAllocations=YushinInventory.reverseLotAllocations([{qty:available.reduce((s,r)=>s+Number(r.qty||0),0),lotAllocations:available}],qty).allocations;
         }
+        if(currentUser?.uid!==actorUid||!canReceiveInventoryCapability())throw new Error('登入帳號或權限已變更，請重新開啟退貨收貨。');
         const now=new Date().toISOString(),record={id:receiptId,requestId,itemId:item.itemId,date:localDateString(),qty,reason:request.reason||'',settlement:'CLOSE',quality,warehouseId,createdAt:now,createdBy:deliveryActor(),lotAllocations:result.lotAllocations||[]};
         requests[index]={...request,receivedQty:Number(request.receivedQty||0)+qty,status:qty>=remaining?'RECEIVED':'PENDING'};
         const records=[...savedReturnRecords(order),record],patch={returnRequests:requests,returnPending:requests.some(r=>r.status==='PENDING'),returnRecords:records,returnedQty:records.reduce((s,r)=>s+Number(r.qty||0),0),returnReceiptId:receiptId,updatedAt:now};
         if(result.newReservedQty!==undefined)patch.items=order.items.map(i=>i.itemId===item.itemId?{...i,reservedQty:result.newReservedQty}:i);
         Object.assign(patch,orderWorkIndexFields({...order,...patch}));
-        tx.set(receiptRef,{orderId,requestId,requestIndex:index,qty,quality,warehouseId,itemId:item.itemId,itemName:item.itemName||'',ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',disposition:quality==='SALEABLE'?'STOCK':'HOLD',record,createdAt:now,receivedBy:currentUser.uid});
+        tx.set(receiptRef,{orderId,requestId,requestIndex:index,qty,quality,warehouseId,itemId:item.itemId,itemName:item.itemName||'',ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',disposition:quality==='SALEABLE'?'STOCK':'HOLD',record,createdAt:now,receivedBy:actorUid});
         tx.update(orderRef,patch);
     });
 }
