@@ -9655,45 +9655,25 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         throw new Error('Reservation core 未載入，無法計算庫存預留。');
     }
 
-    const preferredWarehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
+    const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
     const aggregateRef=inventoryRefFor(item);
+    const warehouseRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
     const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
     const actor=currentUserName||currentUser?.email||'';
-    let warehouseId=preferredWarehouseId;
     let result={...item,itemId,reservedQty:0,shortageQty:requested,inventoryProductKey:productKey,warehouseId};
     let releasedStock=null;
 
     await runRoleTransaction(async tx=>{
         const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
+        const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
         const reservationSnap=await tx.get(reservationRef);
+
         const aggregate=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{});
+        const warehouse=inventoryNumbers(warehouseSnap?.exists?warehouseSnap.data():{});
         const existing=reservationSnap.exists?reservationSnap.data():{};
         const existingQty=Math.max(0,Number(existing.quantity||0));
         const oldProductKey=String(existing.productKey||'');
         const oldWarehouseId=String(existing.warehouseId||'');
-        const preserving=oldProductKey===productKey&&existingQty>0&&!!oldWarehouseId
-            && (oldWarehouseId===item.warehouseId || ['pending','failed'].includes(order.inventoryReservationStatus));
-        const firstId=preserving?oldWarehouseId:preferredWarehouseId;
-        const firstRef=firstId?db.collection('warehouseStocks').doc(warehouseStockDocId(firstId,productKey)):null;
-        const firstSnap=firstRef?await tx.get(firstRef):null;
-        const stockRows=[{warehouseId:firstId,snapshot:firstSnap,availableQty:inventoryNumbers(firstSnap?.exists?firstSnap.data():{}).available}].filter(row=>row.warehouseId);
-        // Keep the single-warehouse fast path. Only read other real warehouses
-        // when the preferred one cannot cover the order.
-        const firstNeed=Math.max(0,requested-(preserving?existingQty:0));
-        if(!firstId||stockRows[0]?.availableQty+1e-9<firstNeed){
-            const ids=warehouseMasterCache.filter(w=>w.active!==false&&!w.systemCustody&&w.id&&w.id!==firstId).map(w=>w.id);
-            const snapshots=await Promise.all(ids.map(id=>tx.get(db.collection('warehouseStocks').doc(warehouseStockDocId(id,productKey)))));
-            ids.forEach((id,index)=>stockRows.push({warehouseId:id,snapshot:snapshots[index],availableQty:inventoryNumbers(snapshots[index]?.exists?snapshots[index].data():{}).available}));
-        }
-        warehouseId=globalThis.YushinReservation.chooseWarehouseForReservation({
-            requestedQty:requested,preferredWarehouseId,existingWarehouseId:preserving?oldWarehouseId:'',
-            existingQty:preserving?existingQty:0,warehouses:stockRows,companyAvailableQty:aggregate.available
-        });
-        if(!warehouseId)throw new Error('尚未設定可用的倉庫，不能建立不正確的採購需求。');
-        const chosen=stockRows.find(row=>row.warehouseId===warehouseId);
-        const warehouseRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
-        const warehouseSnap=chosen?.snapshot||null;
-        const warehouse=inventoryNumbers(warehouseSnap?.exists?warehouseSnap.data():{});
         const sameStock=oldProductKey===productKey&&oldWarehouseId===warehouseId;
 
         const plan=globalThis.YushinReservation.planReservation({
@@ -9702,8 +9682,6 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
             sameStock,
             availableQty:warehouse.available
         });
-        if(plan.additionalReserveQty>aggregate.available+(oldProductKey===productKey&&!sameStock?existingQty:0)+1e-9)
-            throw new Error('公司總庫存與分倉可用量不一致，請先核對庫存，再從訂單清單重試同步，勿重複建單。');
 
         let oldAggregateRef=null,oldAggregateSnap=null,oldAggregate=null;
         let oldWarehouseRef=null,oldWarehouseSnap=null,oldWarehouse=null;
@@ -17950,6 +17928,42 @@ function pendingOrderCreateKey() {
     return `${orderDraftStorageKey()}:pending_order_id`;
 }
 
+async function prepareNewOrderWarehouseSources(tx, data) {
+    const items=Array.isArray(data.items)?data.items:[];
+    const activeWarehouseIds=warehouseMasterCache.filter(w=>w.active!==false&&!w.systemCustody&&w.id).map(w=>w.id);
+    const updated=[];
+    for(const item of items){
+        if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){updated.push(item);continue;}
+        const productKey=inventoryProductKey(item);
+        const requested=Math.max(0,Number(item.qty||item.orderedQty||0));
+        const preferred=item.warehouseId||defaultWarehouse()?.id||activeWarehouseIds[0]||'';
+        if(!productKey||!preferred)throw new Error('產品或倉庫資料不完整，無法核對實際庫存。');
+        const prefRef=db.collection('warehouseStocks').doc(warehouseStockDocId(preferred,productKey));
+        const prefSnap=await tx.get(prefRef);
+        const prefAvailable=inventoryNumbers(prefSnap.exists?prefSnap.data():{}).available;
+        const stocks=[{warehouseId:preferred,availableQty:prefAvailable}];
+        let companyAvailableQty=0;
+        if(prefAvailable+1e-9<requested){
+            const others=activeWarehouseIds.filter(id=>id!==preferred);
+            const snaps=await Promise.all(others.map(id=>tx.get(db.collection('warehouseStocks').doc(warehouseStockDocId(id,productKey)))));
+            others.forEach((id,index)=>stocks.push({warehouseId:id,availableQty:inventoryNumbers(snaps[index].exists?snaps[index].data():{}).available}));
+            const aggregateRef=inventoryRefFor(item);
+            const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
+            companyAvailableQty=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{}).available;
+        }
+        const selected=globalThis.YushinReservation.chooseWarehouseForReservation({
+            requestedQty:requested,preferredWarehouseId:preferred,warehouses:stocks,companyAvailableQty
+        });
+        if(!selected)throw new Error('沒有可用的實體倉庫，請先確認倉庫設定。');
+        const chosen=stocks.find(row=>row.warehouseId===selected);
+        if(prefAvailable+1e-9<requested&&Number(chosen?.availableQty||0)>companyAvailableQty+1e-9)
+            throw new Error('分倉可用量超過公司總可用庫存，請先核對庫存，再建立訂單。');
+        updated.push({...item,warehouseId:selected});
+    }
+    data.items=updated;
+    if(updated.length)data.warehouseId=updated[0].warehouseId||'';
+}
+
 async function createOrResumeNewOrder(data) {
     const key=pendingOrderCreateKey();
     let orderId=localStorage.getItem(key);
@@ -17958,6 +17972,8 @@ async function createOrResumeNewOrder(data) {
         // 記下編號後才寫入雲端；斷線後重試仍會指向同一張訂單。
         localStorage.setItem(key,orderId);
     }
+    if(data.items?.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')&&!warehouseMasterCache.length)
+        await loadWarehouseMaster();
     const ref=db.collection('orders').doc(orderId);
     let savedData;
     await runRoleTransaction(async tx=>{
@@ -17967,6 +17983,7 @@ async function createOrResumeNewOrder(data) {
             if(savedData.createdByUid!==currentUser?.uid || savedData.status!==BUSINESS_STATUS.ACTIVE)
                 throw new Error('待確認的訂單已由其他流程變更，請先檢查訂單清單。');
         }else{
+            await prepareNewOrderWarehouseSources(tx,data);
             tx.set(ref,data);
             savedData=data;
         }
