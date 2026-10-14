@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const code=fs.readFileSync('modules/customer-cancellations.js','utf8'),app=fs.readFileSync('app.js','utf8');
 const inventory=require('../modules/inventory-core');
-const start=code.indexOf('async function commitCustomerReturnReceipt('),end=code.indexOf('\nwindow.releaseCustomerReturnHold',start);
+const start=code.indexOf('async function assertActiveReturnWarehouse('),end=code.indexOf('\nwindow.releaseCustomerReturnHold',start);
 function fixture(){
  const order={items:[{itemId:'I1',qty:5,fulfillmentType:'WAREHOUSE',warehouseId:'W1'}],ownerUid:'S1',salesCode:'S01',deliveredQty:5,returnRequests:[{id:'Q1',itemId:'I1',qty:3,receivedQty:0,status:'PENDING',reason:'test'}],returnRecords:[],deliveryRecords:[{itemId:'I1',qty:5,lotAllocations:[{lotId:'L1',qty:5}]}]};
  const docs=new Map([['orders/O1',order],['warehouses/W1',{active:true,warehouseType:'PHYSICAL'}]]);let stock=0;const c=vm.createContext({
