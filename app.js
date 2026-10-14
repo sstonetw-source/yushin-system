@@ -21199,7 +21199,7 @@ window.saveQuickProduct = async function() {
     };
         if (button) button.textContent = '儲存中…';
         await db.collection('products').doc(productId).set(productDoc, { merge: true });
-        productManagementSearchCache.clear();
+        if (typeof productManagementSearchCache !== 'undefined') productManagementSearchCache.clear();
         const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
         priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
         refreshPriceDatalists();
