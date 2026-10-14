@@ -56,7 +56,7 @@ test('account or role change after allocation prevents clearing its progress',as
  await assert.rejects(recoverLocation(f.options),/account changed/);assert.equal(f.stock().allocationPending,true);
 });
 test('missing aggregate, disabled warehouse and inconsistent stock fail without clearing the job',async()=>{
- for(const mutate of [f=>f.docs.delete('inventory/P'),f=>f.docs.set('warehouses/W',{active:false}),f=>f.docs.set('inventory/P',{productKey:'P',onHand:4,reserved:3})]){
+ for(const mutate of [f=>f.docs.delete('inventory/P'),f=>f.docs.set('warehouses/W',{active:false}),f=>f.docs.set('inventory/P',{productKey:'P',onHand:4,reserved:3}),f=>f.docs.set('inventory/P',{productKey:'P',onHand:'bad',reserved:0}),f=>f.docs.set('warehouseStocks/W__P',{...f.stock(),onHand:1,reserved:2})]){
   const f=fixture();mutate(f);await assert.rejects(recoverLocation(f.options));assert.equal(f.stock().allocationPending,true);assert.equal(f.writes.length,0);
  }
 });

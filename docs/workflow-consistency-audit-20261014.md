@@ -215,7 +215,7 @@ CI 前兩輪定位到跨倉交易的 Rules 重複運算，以及採購原有品�
 
 本機 1,010 項應用測試通過；Firebase CLI 14／Java 17／Firestore Emulator 1.19.8 的 133 項規則測試通過，包含實際業務／工程師取消與採購／倉管恢復交易。新增規則攻擊測試涵蓋非法型別／版本／倒退／無實貨提升版本／改產品位置／業務清除及偽造進度／未登入查詢。
 
-Headless Shell 桌面 1280px 與手機 390px 通過新介面的五角色顯示、業務不查詢待分配、失敗保留、重試成功、手機卡片与 44px 點擊範圍；既有共用按鈕（17 類）、建單與五角色直送／來源重試瀏覽器 fixture 通過。截圖以 Noto Sans TC 目視核對。本機完整 Chrome 的 socket 被環境拒絕，改用官方 Headless Shell；未使用正式登入或資料。CI 使用 CLI 15／Java 21，其結果需另行記錄。
+Headless Shell 桌面 1280px 與手機 390px 通過新介面的五角色顯示、業務不查詢待分配、失敗保留、重試成功、手機卡片、44px 點擊範圍與 55 筆跨頁續處理；既有共用按鈕（17 類）、建單與五角色直送／來源重試瀏覽器 fixture 通過。截圖以 Noto Sans CJK TC 目視核對。本機完整 Chrome 的 socket 被環境拒絕，改用官方 Headless Shell；未使用正式登入或資料。CI 使用 CLI 15／Java 21，其結果需另行記錄。
 
 初次取消測試因 fixture 的簡化 movement 漏了負責業務欄位而被 Rules 拒絕；改為執行實際 inventoryMovementRecord 後通過。不能將該 fixture 失敗直接認定為正式取消流程超過規則運算上限。
 

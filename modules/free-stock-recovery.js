@@ -16,6 +16,8 @@
       assertContext();
       if(!inv.exists||inv.data().productKey!==key)throw Error('公司庫存與分倉產品識別不一致，請由管理員檢查。');
       if(!master.exists||master.data().active===false||master.data().systemCustody)throw Error('待分配倉庫不存在或已停用。');
+      const validStock=data=>['onHand','reserved'].every(k=>typeof data[k]==='number'&&Number.isFinite(data[k])&&data[k]>=0)&&data.reserved<=data.onHand;
+      if(!validStock(stock)||!validStock(inv.data()))throw Error('公司或分倉庫存數量不正確，請由管理員檢查。');
       const free=normalize(stock).available,aggregateFree=normalize(inv.data()).available;
       initial={stock,key,warehouseId,revision:stock.allocationRevision,free,qty:Math.min(free,aggregateFree)};
     });
@@ -55,9 +57,9 @@
   const guard=who=>()=>{if(!allowed()||identity()!==who)throw Error('登入帳號或角色已變更，請重新開啟倉庫。');};
   const render=()=>{
     const panel=document.getElementById('freeStockRecoveryPanel'),body=document.getElementById('freeStockRecoveryBody');
-    if(!panel||!body)return;panel.hidden=!allowed()||(!rows.length&&!errors.size&&!loading);if(panel.hidden)return;
+    if(!panel||!body)return;panel.hidden=!allowed()||(!rows.length&&!errors.size&&!loading&&!hasMore);if(panel.hidden)return;
     const name=id=>warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;
-    document.getElementById('freeStockRecoveryStatus').textContent=loading?'正在處理釋放後的庫存分配…':errors.size?(errors.get('load')||'部分庫存分配尚未完成，請查看下方品項。'):rows.length?'庫存分配待處理。':'庫存分配已更新。';
+    document.getElementById('freeStockRecoveryStatus').textContent=loading?'正在處理釋放後的庫存分配…':errors.size?(errors.get('load')||'部分庫存分配尚未完成，請查看下方品項。'):rows.length?'庫存分配待處理。':hasMore?'還有待分配庫存，請按「處理更多」。':'庫存分配已更新。';
     body.innerHTML=rows.map(s=>`<tr><td data-th="倉庫">${escapeHtml(name(s.warehouseId))}</td><td data-th="品項">${escapeHtml(s.itemCode||s.productKey)}<br>${escapeHtml(s.itemName||'')}</td><td data-th="可用數量">${Number(inventoryNumbers(s).available)}</td><td data-th="狀態">${escapeHtml(errors.get(s.id)||'等待分配')}</td><td data-th="操作"><button type="button" class="btn-secondary" onclick="retryFreeStockRecovery(${inlineJsValue(s.id)},this)" ${busy.has(s.id)?'disabled':''}>重試分配</button></td></tr>`).join('');
     const more=document.getElementById('freeStockRecoveryMore');if(more)more.hidden=!hasMore;
   };
