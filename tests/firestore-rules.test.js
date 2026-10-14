@@ -1367,7 +1367,7 @@ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])test(role+'
    await batch.commit();
   }
  });
- Object.assign(f.context,{itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus)});
+ Object.assign(f.context,{firestoreReadWithTimeout:promise=>promise,itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus)});
  const app=fs.readFileSync('app.js','utf8');
  vm.runInContext(app.slice(app.indexOf('async function allocateFreeReceiptStockToShortages('),app.indexOf('async function refreshAffectedOrderCaches(')),f.context);
  await assertSucceeds(f.context.allocateFreeReceiptStockToShortages('init-product','W1',3,uid,'','PAGED'));
