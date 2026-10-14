@@ -1,5 +1,11 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;if(root)root.YushinReservation=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
  const n=v=>Math.max(0,Number(v||0));
+ function compareReservationPriority(a={},b={}){
+   return String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))
+     ||String(a.orderId||'').localeCompare(String(b.orderId||''))
+     ||String(a.itemId||'').localeCompare(String(b.itemId||''))
+     ||String(a.id||'').localeCompare(String(b.id||''));
+ }
  function reservationLocationCanChange(item={},reservation={},demand={}){
    return !item.transferPendingId&&!item.custodyTransferId
      && !String(item.warehouseId||'').startsWith('custody-')
@@ -53,9 +59,7 @@
  }
  function planShortageAllocation(reservations=[],availableQty=0){
    let remaining=n(availableQty);
-   const rows=reservations.map((row,index)=>({...row,__index:index}))
-     .filter(row=>n(row.shortageQty)>0)
-     .sort((a,b)=>String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))||String(a.orderId||'').localeCompare(String(b.orderId||''))||String(a.itemId||'').localeCompare(String(b.itemId||'')));
+   const rows=reservations.filter(row=>n(row.shortageQty)>0).sort(compareReservationPriority);
    const allocations=[];
    for(const row of rows){
      if(remaining<=0)break;
@@ -70,5 +74,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse};
+ return {planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });

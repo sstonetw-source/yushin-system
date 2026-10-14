@@ -6,7 +6,7 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, updateDoc, where, writeBatch } = require('firebase/firestore');
+const { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
 
 let env;
 
@@ -1199,7 +1199,14 @@ function compatDb(uid) {
   const firestore = db(uid);
   let sequence = 0;
   return {
-    collection: name => ({doc:id=>doc(firestore,name,id||`audit-${Date.now()}-${++sequence}`)}),
+    collection: name => {
+      const constraints=[],builder={doc:id=>doc(firestore,name,id||`audit-${Date.now()}-${++sequence}`),
+        where:(field,op,value)=>{constraints.push(where(field,op,value));return builder;},
+        limit:max=>{constraints.push(limit(max));return builder;},
+        startAfter:snapshot=>{constraints.push(startAfter(snapshot));return builder;},
+        get:()=>getDocs(query(collection(firestore,name),...constraints))};
+      return builder;
+    },
     runTransaction: callback => runTransaction(firestore, tx => callback({
       get:async ref=>{const snap=await tx.get(ref);return {exists:snap.exists(),data:()=>snap.data(),id:snap.id,ref};},
       set:(...args)=>tx.set(...args),update:(...args)=>tx.update(...args),delete:(...args)=>tx.delete(...args)
@@ -1344,6 +1351,32 @@ test('shared stock and workflow read predicates retain fixed role, owner, cost a
  }
  await seed('users/sales1',{role:'sales',salesCode:'S01',active:false});
  for(const path of [...scoped,...stock]){await assertFails(getDoc(doc(db('sales1'),path)));await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),path)));}
+});
+for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])test(role+' runs actual paged receipt allocation past 500 candidates with durable retry',async()=>{
+ const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:'sales1'}),fulfillment=require('../modules/fulfillment-core');
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...original,orderDate:'2026-01-01',inventoryReservationStatus:'completed',items:original.items.map(i=>fulfillment.normalizeItem({...i,inventoryProductKey:'init-product'}))});
+ await seed('inventory/init-product',{productKey:'init-product',onHand:3,reserved:0,incoming:0});
+ await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:3,reserved:0,incoming:0});
+ await seed('inventoryReservations/'+f.id+'__I',{id:'stale-embedded-id',orderId:f.id,itemId:'I',orderItemIndex:0,ownerUid:'sales1',salesCode:'S01',productKey:'init-product',warehouseId:'W1',quantity:0,shortageQty:5,status:'shortage',orderDate:'2026-01-01'});
+ await seed('receipts/PAGED',{productKey:'init-product',warehouseId:'W1',autoAllocationQty:3,autoAllocatedQty:0,allocationCompleted:false});
+ await env.withSecurityRulesDisabled(async ctx=>{
+  for(let offset=0;offset<550;offset+=450){
+   const client=ctx.firestore(),batch=writeBatch(client);
+   for(let i=offset;i<Math.min(offset+450,550);i++)batch.set(doc(client,'inventoryReservations/A-FILL-'+String(i).padStart(4,'0')),{orderId:'OTHER-'+i,itemId:'I',productKey:'init-product',warehouseId:'OTHER',quantity:0,shortageQty:1,status:'shortage',orderDate:'2026-02-01'});
+   await batch.commit();
+  }
+ });
+ Object.assign(f.context,{itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus)});
+ const app=fs.readFileSync('app.js','utf8');
+ vm.runInContext(app.slice(app.indexOf('async function allocateFreeReceiptStockToShortages('),app.indexOf('async function refreshAffectedOrderCaches(')),f.context);
+ await assertSucceeds(f.context.allocateFreeReceiptStockToShortages('init-product','W1',3,uid,'','PAGED'));
+ await assertSucceeds(f.context.allocateFreeReceiptStockToShortages('init-product','W1',3,uid,'','PAGED'));
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().items[0].reservedQty,3);
+ assert.equal((await getDoc(doc(db('admin'),'receipts/PAGED'))).data().autoAllocatedQty,3);
+ assert.equal((await getDoc(doc(db('admin'),'receipts/PAGED'))).data().allocationCompleted,true);
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data().remainingToOrderQty,2);
 });
 test('warehouse and unrelated business owner cannot initialize another owner order, cancellation stops admin as well',async()=>{
  for(const [uid,role] of [['wh1','warehouse'],['sales2','sales']]){

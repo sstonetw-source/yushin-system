@@ -13,8 +13,8 @@ function allocationFixture({qty=5,incoming=0,fail=false,received=0}={}){
  ]);
  let sequence=0;const ref=path=>({path,id:path.split('/').at(-1)});
  const snapshot=path=>({exists:docs.has(path),id:path.split('/').at(-1),data:()=>structuredClone(docs.get(path))});
- const db={collection(name){const filters=[];return {doc:id=>ref(name+'/'+(id||'event-'+(++sequence))),where(key,op,value){filters.push([key,value]);return this;},limit(){return this;},startAfter(){return this;},async get(){const rows=[...docs].filter(([path,data])=>path.startsWith(name+'/')&&filters.every(([key,value])=>data[key]===value));return {docs:rows.map(([path])=>snapshot(path)),size:rows.length,empty:!rows.length};}}}};
- const c=vm.createContext({db,YushinInventory:inventory,YushinWorkflow:workflow,YushinProcurementDemand:demandCore,firestoreReadWithTimeout:p=>p,
+ const db={collection(name){const filters=[];let max=Infinity,cursor='';return {doc:id=>ref(name+'/'+(id||'event-'+(++sequence))),where(key,op,value){filters.push([key,value]);return this;},limit(qty){max=qty;return this;},startAfter(doc){cursor=doc.id;return this;},async get(){const rows=[...docs].filter(([path,data])=>path.startsWith(name+'/')&&path.split('/').at(-1)>cursor&&filters.every(([key,value])=>data[key]===value)).sort(([a],[b])=>a.localeCompare(b)).slice(0,max);return {docs:rows.map(([path])=>snapshot(path)),size:rows.length,empty:!rows.length};}}}};
+ const c=vm.createContext({db,YushinInventory:inventory,YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinReservation:require('../modules/reservation-core'),firestoreReadWithTimeout:p=>p,
   normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',
   itemDispatchState:(o,i)=>fulfillment.dispatchState(i),inventoryNumbers:inventory.normalizeStock,inventoryProductKey:i=>i.productId,orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),
   warehouseStockDocId:(w,p)=>w+'__'+p,orderWorkIndexFields:()=>({}),inventoryMovementRecord:(type,qty)=>({type,qty}),invalidateWarehouseStockCache(){},
@@ -65,6 +65,50 @@ test('missing aggregate or in-progress order cannot receive an inconsistent ware
   const result=await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester');
   assert.equal(result.allocatedQty,0);assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);assert.equal(f.demand().remainingToOrderQty,5);
  }
+});
+function addWaitingAllocation(f,id,orderId,date,{status='shortage',quantity=0,cancelled=false,documentIdField}={}){
+ const item={itemId:'I',productId:'P',warehouseId:'W',qty:3,reservedQty:quantity,shortageQty:3-quantity,supplyOrderedQty:0,receivedQty:0};
+ f.docs.set('orders/'+orderId,{ownerUid:'sales',salesCode:'S1',status:cancelled?'cancelled':'active',orderDate:date,items:[item]});
+ f.docs.set('inventoryReservations/'+id,{orderId,itemId:'I',orderDate:date,productKey:'P',warehouseId:'W',quantity,shortageQty:3-quantity,status,...(documentIdField?{id:documentIdField}:{})});
+}
+function addIrrelevantAllocationPages(f,count=550){
+ for(let i=0;i<count;i++)f.docs.set('inventoryReservations/FILL-'+String(i).padStart(4,'0'),{orderId:'OTHER-'+i,itemId:'I',productKey:'P',warehouseId:'OTHER',shortageQty:1,status:'shortage'});
+}
+test('receipt FIFO scans past 500 rows and uses the actual reservation ID despite embedded stale IDs',async()=>{
+ const f=allocationFixture();addIrrelevantAllocationPages(f);addWaitingAllocation(f,'Z-OLDEST','OLD','2026-01-01',{documentIdField:'STALE-ID'});
+ const result=await f.c.allocateFreeReceiptStockToShortages('P','W',1,'Tester');
+ assert.equal(f.docs.get('inventoryReservations/Z-OLDEST').quantity,1);assert.equal(f.docs.get('orders/OLD').items[0].reservedQty,1);
+ assert.equal(f.docs.get('orders/O').items[0].reservedQty,0);assert.equal(result.affectedOrderIds[0],'OLD');assert.equal(f.docs.has('inventoryReservations/STALE-ID'),false);
+});
+test('receipt allocation compares active and shortage candidates using the same shared priority',async()=>{
+ const f=allocationFixture();addWaitingAllocation(f,'Z-ACTIVE','ACTIVE','2026-01-01',{status:'active',quantity:1});
+ addWaitingAllocation(f,'A-SHORTAGE','SHORT','2026-02-01');f.docs.get('inventory/P').reserved=1;f.docs.get('warehouseStocks/W__P').reserved=1;
+ await f.c.allocateFreeReceiptStockToShortages('P','W',1,'Tester');
+ assert.equal(f.docs.get('orders/ACTIVE').items[0].reservedQty,2);assert.equal(f.docs.get('orders/SHORT').items[0].reservedQty,0);
+});
+test('receipt FIFO date ties use order and item priority instead of discovery or reservation ID order',async()=>{
+ const f=allocationFixture();addWaitingAllocation(f,'Z-DOC','A-ORDER','2026-01-01');addWaitingAllocation(f,'A-DOC','Z-ORDER','2026-01-01');
+ await f.c.allocateFreeReceiptStockToShortages('P','W',1,'Tester');
+ assert.equal(f.docs.get('orders/A-ORDER').items[0].reservedQty,1);assert.equal(f.docs.get('orders/Z-ORDER').items[0].reservedQty,0);
+});
+test('a stale cancelled oldest candidate past the page boundary cannot block the next valid order',async()=>{
+ const f=allocationFixture();addIrrelevantAllocationPages(f);addWaitingAllocation(f,'Z-CANCELLED','CANCEL','2025-01-01',{cancelled:true});addWaitingAllocation(f,'Z-VALID','VALID','2026-01-01');
+ await f.c.allocateFreeReceiptStockToShortages('P','W',1,'Tester');
+ assert.equal(f.docs.get('orders/CANCEL').items[0].reservedQty,0);assert.equal(f.docs.get('orders/VALID').items[0].reservedQty,1);
+});
+test('later candidate page failure leaves the persistent allocation checkpoint and stock unchanged for retry',async()=>{
+ const f=allocationFixture();addIrrelevantAllocationPages(f);addWaitingAllocation(f,'Z-OLDEST','OLD','2026-01-01');
+ f.docs.set('receipts/PAGED',{autoAllocationQty:1,autoAllocatedQty:0,allocationCompleted:false});const before=JSON.stringify([...f.docs]);
+ f.c.firestoreReadWithTimeout=async promise=>{const result=await promise;if(result.docs[0]?.id==='FILL-0050')throw Error('offline page');return result;};
+ await assert.rejects(f.c.allocateFreeReceiptStockToShortages('P','W',1,'Tester','','PAGED'),/offline page/);
+ assert.equal(JSON.stringify([...f.docs]),before);f.c.firestoreReadWithTimeout=p=>p;
+ await f.c.allocateFreeReceiptStockToShortages('P','W',1,'Tester','','PAGED');
+ assert.equal(f.docs.get('orders/OLD').items[0].reservedQty,1);assert.equal(f.docs.get('receipts/PAGED').autoAllocatedQty,1);assert.equal(f.docs.get('receipts/PAGED').allocationCompleted,true);
+});
+test('a repeated candidate page fails visibly instead of looping or publishing incomplete allocation',async()=>{
+ const f=allocationFixture();addIrrelevantAllocationPages(f,60);let first=null;const before=JSON.stringify([...f.docs]);
+ f.c.firestoreReadWithTimeout=async promise=>{const result=await promise;if(result.size>0){first=first||result;return first;}return result;};
+ await assert.rejects(f.c.allocateFreeReceiptStockToShortages('P','W',1,'Tester'),/分頁未前進/);assert.equal(JSON.stringify([...f.docs]),before);
 });
 test('engineer can retry own order, but creator metadata cannot grant another owner access',()=>{
  const c=vm.createContext({currentUserRole:'engineer',currentUser:{uid:'E'}});
