@@ -1,0 +1,11 @@
+{
+  "score": 2,
+  "summary": "本批直送到貨的所有權與同交易憑證已由 Emulator 測試；整份既有規則尚不能認定安全或全面驗收完成。未查核正式規則版本。",
+  "findings": [
+    {"check": "Business Logic vs. Rules", "severity": "major", "issue": "原先採購／倉管可確認原廠直送，負責業務卻無入口；本批改為 exact ownerUid 的業務／工程師及管理員，普通倉庫收貨分工不變。", "recommendation": "發布本批 Rules 並正式驗收；Emulator 已驗證直送分批與重試及其他角色拒絕。"},
+    {"check": "Field-Level vs. Identity-Level Security", "severity": "major", "issue": "users 現行可由所有 active 成員讀取；含 email／phone／deliveryDefaults 等個人資料時，無法只隱藏部分欄位。這是既有缺口，本批未修改名錄結構或正式資料。", "recommendation": "分開必要的人員名錄與私有聯絡／偏好資料，先盤點依賴並設計遷移，不直接收緊讀取造成代建與歸屬功能失效。"},
+    {"check": "The Update Bypass", "severity": "major", "issue": "先前總驗收已記錄商務角色可改部分 items 進度投影仍待防偽；本批原子直送及補貨分配修正不代表所有逐品項操作皆已受同交易事實约束。", "recommendation": "續查 create/update 不對稱與 receivedQty／reservedQty／supplyOrderedQty 等欄位，新增直接 API 負向測試。"},
+    {"check": "Resource Exhaustion/DoS", "severity": "moderate", "issue": "多個既有文件的可寫字串／陣列未全面驗證型態及大小；部分複雜規則容易觸及 1000 expression 限制。", "recommendation": "分批補 domain validator 並保留正常操作測試；本批縮短直送規則運算路徑，未宣稱全部欄位上限已完成。"},
+    {"check": "Authority Source", "severity": "minor", "issue": "本批直送角色來自已受保護的 users，所有權以 exact UID 檢查；未使用客戶端任意宣告的角色。", "recommendation": "保留非本人、採購、倉管及停用帳號負向回歸；正式規則尚待部署。"}
+  ]
+}

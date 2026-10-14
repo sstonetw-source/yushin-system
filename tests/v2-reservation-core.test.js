@@ -29,3 +29,9 @@ test('moving a reservation releases all old stock before reserving the new stock
     {preserved:0,release:5,additional:4,reserved:4,shortage:2}
   );
 });
+test('reservation retry does not double-cover supplier commitments but keeps physical shortage definition',()=>{
+ const p=r.planReservation({requestedQty:5,existingQty:0,sameStock:true,availableQty:5,inTransitQty:3});
+ assert.equal(p.reservedQty,2);assert.equal(p.shortageQty,3);assert.equal(p.additionalReserveQty,2);
+ const retry=r.planReservation({requestedQty:5,existingQty:2,sameStock:true,availableQty:3,inTransitQty:3});
+ assert.equal(retry.reservedQty,2);assert.equal(retry.additionalReserveQty,0);assert.equal(retry.shortageQty,3);
+});

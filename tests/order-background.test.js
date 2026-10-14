@@ -39,9 +39,9 @@ test('pending and failed synchronization block purchasing and dispatch calculati
  for(const state of ['pending','failed']){const order={inventoryReservationStatus:state};assert.equal(x.pendingPurchaseLines(order).length,0);assert.equal(x.itemDispatchState(order,{qty:2}).shippable,0);}
 });
 function retrySetup(liveStatus='pending'){
- const reserve=deferred(),events=[],x=vm.createContext({window:{addEventListener(){}},currentUser:{uid:'U1'},currentUserRole:'sales',ordersCache:[{id:'O1',createdByUid:'U1',inventoryReservationStatus:'pending'}],
+ const reserve=deferred(),events=[],x=vm.createContext({window:{addEventListener(){}},currentUser:{uid:'U1'},currentUserRole:'sales',ordersCache:[{id:'O1',createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:'pending'}],
  normalizedOrderStatus:order=>order.status==='cancelled'?'cancelled':'normal',renderOrdersList(){},writeAppDataCache(){},showActionFeedback:(...a)=>events.push(a),syncOrderIntoPurchasingCaches(){},syncNewOrderSourceDocuments:async()=>null,escapeAttr:s=>s,
- db:{collection:()=>({doc:id=>({get:async()=>({exists:true,id,data:()=>({createdByUid:'U1',inventoryReservationStatus:liveStatus})}),set:async updates=>events.push(updates)})})},firestoreReadWithTimeout:p=>p,reserveInventoryForNewOrder:async()=>{events.push('reserve');await reserve.promise;},console
+ db:{collection:()=>({doc:id=>({get:async()=>({exists:true,id,data:()=>({createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:liveStatus})}),set:async updates=>events.push(updates)})})},firestoreReadWithTimeout:p=>p,reserveInventoryForNewOrder:async()=>{events.push('reserve');await reserve.promise;},console
  });
  vm.runInContext(src.slice(src.indexOf('const pendingOrderReservationIds = new Set();'),src.indexOf('// 採購主頁資料')),x);return {x,reserve,events};
 }
@@ -150,7 +150,9 @@ test('quick creation applies the saved product immediately despite a cached earl
    brandMasterEntryForName:()=>({id:'B1'}),normalizeBrandLookupKey:x=>x,productMasterDocToPriceItem:()=>product,
    firestoreReadWithTimeout:async p=>p,beginActionButton:()=>({}),endActionButton(){},refreshPriceDatalists(){},
    closeQuickProductCreate(){},clearQuickProductDraft(){},alert(){},
-   db:{collection:()=>({where(){return this;},limit(){return this;},get:async()=>({docs:duplicate?[{data:()=>({brandName:'Brand'})}]:[]}),doc:()=>({set:async data=>writes.push(data)})})}
+   findDuplicateProductMaster:async()=>duplicate?{id:'P1',data:()=>({brandName:'Brand'})}:null,
+   syncSavedProductMaster:()=>{},
+   db:{collection:()=>({doc:()=>({})}),runTransaction:async fn=>fn({get:async()=>({exists:false}),set:(ref,data)=>writes.push(data)})}
   });
   const start=src.indexOf('window.saveQuickProduct = async function()'),end=src.indexOf('\nfunction rebuildPriceItemLookup',start);
   vm.runInContext(src.slice(start,end),a.c);await a.c.window.saveQuickProduct();

@@ -49,7 +49,7 @@ function fixture(){
  ]);
  const ref=(col,id)=>({id,path:col+'/'+id});let failCommit=false,commits=0;
  const c=vm.createContext({currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',currentUserCode:'P01',warehouseMasterCache:[{id:'MAIN',active:true},{id:'EXT',active:true}],
-   canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,deliveryActor:()=> 'Buyer',defaultWarehouse:()=>({id:'MAIN'}),
+   canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,deliveryActor:()=> 'Buyer',defaultWarehouse:()=>({id:'MAIN'}),allocateFreeReceiptStockToShortages:async()=>({affectedOrderIds:[]}),
    inventoryRefFor:i=>ref('inventory',i.productId),warehouseStockDocId:(w,p)=>w+'__'+p,
    normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',orderInventorySyncIncomplete:()=>false,
    normalizedOrderItems:o=>o.items,inventoryProductKey:i=>i.productId,
@@ -65,6 +65,22 @@ function fixture(){
  });
  vm.runInContext(src,c);return {c,docs,ref,fail:()=>{failCommit=true;},commits:()=>commits};
 }
+test('free transfer receipt persists pending allocation and retries without receiving stock or lots twice',async()=>{
+ const f=fixture();const args={id:'FREE-RETRY',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3};
+ await f.c.commitWarehouseTransfer(args);
+ let fail=true;const calls=[];
+ f.c.allocateFreeReceiptStockToShortages=async(...values)=>{calls.push(values);if(fail)throw Error('offline');return {affectedOrderIds:['WAITING']};};
+ await assert.rejects(f.c.commitWarehouseTransferReceipt(args.id),/調撥已入庫/);
+ assert.equal(f.docs.get('stockTransfers/FREE-RETRY').allocationCompleted,false);
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,3);
+ const lotCount=[...f.docs.keys()].filter(k=>k.startsWith('inventoryLots/')).length;
+ fail=false;const result=await f.c.commitWarehouseTransferReceipt(args.id);
+ assert.equal(f.docs.get('stockTransfers/FREE-RETRY').allocationCompleted,true);
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,3);
+ assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventoryLots/')).length,lotCount);
+ assert.equal(result.affectedOrderIds[0],'WAITING');assert.equal(calls[1][6],'stockTransfers');
+ await f.c.commitWarehouseTransferReceipt(args.id);assert.equal(calls.length,2);
+});
 test('free transfer is atomic, retains company total and lot identity, and hides transit stock from availability until received',async()=>{
  const f=fixture();await f.c.commitWarehouseTransfer({id:'T',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
  assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(inventory.normalizeStock(f.docs.get('inventory/P')).available,3);

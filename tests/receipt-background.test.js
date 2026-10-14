@@ -8,7 +8,7 @@ function setup(storage=new Map()){
     const calls=[],notices=[],refreshes=[];
     let selected=[row(2,5)];
     const controls={receiptTaskStatus:{hidden:true,innerHTML:''}};
-    const x=vm.createContext({window:{addEventListener(){}},currentUser:{uid:'U1'},currentUserRole:'admin',canReceiveInventoryCapability:()=>true,
+    const x=vm.createContext({window:{addEventListener(){}},currentUser:{uid:'U1'},currentUserRole:'admin',canReceiveInventoryCapability:()=>true,canConfirmSupplyReceipt:()=>true,
         poReceiptTargetId:'supply:S1',poReceiptOperationId:'OP1',
         sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
         document:{getElementById:id=>controls[id]||null,querySelectorAll:selector=>selector==='#poReceiptBatchBody tr'?selected:[]},

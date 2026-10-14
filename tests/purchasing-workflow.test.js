@@ -620,13 +620,13 @@ test('purchasing work cards use demand queue for ordering and orders for downstr
     assert.match(source,/category==='ordering'/);
 });
 
-test('shortage allocation trusts warehouse stock even when aggregate inventory cache is missing',()=>{
+test('shortage allocation requires both durable company and warehouse stock before reserving',()=>{
     const start=app.indexOf('async function allocateFreeReceiptStockToShortages');
     const end=app.indexOf('\nasync function refreshAffectedOrderCaches',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/if\(!orderSnap\.exists\|\|!resSnap\.exists\|\|!whSnap\.exists\)/);
-    assert.doesNotMatch(source,/!invSnap\.exists\|\|!whSnap\.exists/);
+    assert.match(source,/if\(!orderSnap\.exists\|\|!resSnap\.exists\|\|!whSnap\.exists\|\|!invSnap\.exists\)/);
+    assert.match(source,/Math\.max\(0,inv\.available\)/);
     assert.match(source,/inventoryNumbers\(invSnap\.exists\?invSnap\.data\(\):\{\}\)/);
     assert.match(source,/if\(invSnap\.exists\)tx\.update\(invRef/);
 });

@@ -116,17 +116,20 @@
     if(queuePromise)return queuePromise;if(queueReady&&!force)return root.renderWarehouseTransfers();
     queueReady=false;queueError='';root.renderWarehouseTransfers();
     const task=(async()=>{try{
-      const snapshot=await firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','IN_TRANSIT').limit(50).get(),'倉庫調撥收貨');
+      const [snapshot,allocationSnapshot]=await Promise.all([
+        firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','IN_TRANSIT').limit(50).get(),'倉庫調撥收貨'),
+        firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','RECEIVED').where('allocationCompleted','==',false).limit(50).get(),'調撥入庫後分配進度')
+      ]);
       if(ctx!==context())return;
-      transfers=snapshot.docs.map(doc=>({...doc.data(),id:doc.id}));queueReady=true;
+      transfers=[...snapshot.docs,...allocationSnapshot.docs].map(doc=>({...doc.data(),id:doc.id}));queueReady=true;
     }catch(err){if(ctx!==context())return;queueError=err.code==='permission-denied'?'調撥功能所需的 Firestore 規則尚未部署。':'調撥資料讀取失敗：'+err.message;
     }finally{if(ctx===context()){queuePromise=null;root.renderWarehouseTransfers();root.updateInventoryWorkspaceBadges?.();}}})();queuePromise=task;return task;
   };
   root.warehouseTransferQueueState=()=>({ready:queueReady,error:queueError,count:transfers.length,hasMore:transfers.length>=50});
   root.renderWarehouseTransfers=function(){
     const body=$('inventoryTransferReceivingBody');if(!body)return;
-    body.innerHTML=transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.qty}</td><td data-th="操作"><button type="button" onclick="receiveWarehouseTransfer(${inlineJsValue(t.id)},this)">已收貨</button></td></tr>`).join('');
-    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length} 筆調撥途中${transfers.length>=50?'，先顯示 50 筆；處理後自動補入下一批':''}。收到實體貨品後才確認入庫。`);
+    body.innerHTML=transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.status==='RECEIVED'?'已入庫・待分配':t.qty}</td><td data-th="操作"><button type="button" onclick="receiveWarehouseTransfer(${inlineJsValue(t.id)},this)">${t.status==='RECEIVED'?'重試庫存分配':'已收貨'}</button></td></tr>`).join('');
+    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length} 筆調撥收貨／待分配${transfers.length>=50?'，各類先顯示 50 筆；處理後補入下一批':''}。已入庫的重試只處理分配，不重複入庫。`);
     const card=$('inventoryTransferReceivingTab');if(card)card.innerHTML=`<span>調撥收貨</span><strong>${queueError?'—':queueReady?transfers.length+' 筆':'…'}</strong>`;
   };
   function warehouseName(id){return warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;}
@@ -298,7 +301,7 @@
   root.receiveWarehouseTransfer=async function(id,button){
     if(!allowed()||pending.has(id))return;if(!confirm('已點收這筆調撥貨品，確認全部入庫？'))return;
     pending.add(id);const bs=beginActionButton(button,'入庫中…');
-    try{const result=await root.commitWarehouseTransferReceipt(id);await refreshRows(result.orderId);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback('調撥已入庫，原訂單預留已移到收貨倉庫。');}
+    try{const result=await root.commitWarehouseTransferReceipt(id);await refreshRows(result.orderId);await refreshAffectedOrderCaches(result.affectedOrderIds||[]);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback(result.orderId?'調撥已入庫，原訂單預留已移到收貨倉庫。':'調撥已入庫，缺貨訂單分配與採購需求已同步。');}
     catch(err){showActionFeedback('調撥收貨未完成：'+err.message,'warning');}finally{pending.delete(id);endActionButton(button,bs);}
   };
 })(typeof globalThis!=='undefined'?globalThis:this);
@@ -389,12 +392,21 @@ async function commitWarehouseTransferReceipt(id){
     if(Number(inv.transferInTransit||0)<t.qty||Number(inv.transferFreeInTransit||0)<t.qty-t.reservedQty)throw Error('調撥途中數量不一致。');
     let order=null,orderRef=null,resRef=null;
     if(t.orderId){orderRef=db.collection('orders').doc(t.orderId);const os=await tx.get(orderRef);if(!os.exists)throw Error('來源訂單不存在。');order=os.data();const item=order.items[t.itemIndex];if(!item||item.itemId!==t.itemId||item.transferPendingId!==id||normalizedOrderStatus(order)!=='normal')throw Error('來源訂單或調撥關聯已變更。');resRef=db.collection('inventoryReservations').doc(t.orderId+'__'+t.itemId);const rs=await tx.get(resRef);if(!rs.exists||Number(rs.data().quantity)!==t.reservedQty)throw Error('來源訂單預留不一致。');}
-    const now=new Date().toISOString();tx.update(ref,{status:'RECEIVED',receivedAt:now,receivedByUid:currentUser.uid});
+    const now=new Date().toISOString();const allocation={autoAllocationQty:t.orderId?0:Math.max(0,t.qty-t.reservedQty),autoAllocatedQty:0,allocationCompleted:!!t.orderId||t.qty===t.reservedQty};
+    tx.update(ref,{status:'RECEIVED',receivedAt:now,receivedByUid:currentUser.uid,...allocation});saved={...t,status:'RECEIVED',...allocation};
     tx.update(invRef,{transferInTransit:Number(inv.transferInTransit)-t.qty,transferFreeInTransit:Number(inv.transferFreeInTransit||0)-(t.qty-t.reservedQty),updatedAt:now});
     tx.set(whRef,{productKey:t.productKey,productId:t.productId,warehouseId:t.toWarehouseId,itemCode:t.itemCode,itemName:t.itemName,brand:t.brand||'',brandId:t.brandId||'',onHand:Number(wh.onHand||0)+t.qty,reserved:Number(wh.reserved||0)+t.reservedQty,incoming:Number(wh.incoming||0),updatedAt:now},{merge:true});writeTransferLots(tx,t,inv,now);
     tx.set(db.collection('inventoryMovements').doc(id+'-in'),{type:'warehouse_transfer_in',qty:t.qty,productKey:t.productKey,warehouseId:t.toWarehouseId,fromWarehouseId:t.fromWarehouseId,toWarehouseId:t.toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:id,transferId:id,orderId:t.orderId,itemId:t.itemId,createdAt:now,createdBy:deliveryActor(),actorUid:currentUser.uid});
     if(order){const items=order.items.map((i,n)=>n===t.itemIndex?{...i,warehouseId:t.toWarehouseId,transferPendingId:''}:i);tx.update(resRef,{warehouseId:t.toWarehouseId,updatedAt:now});tx.update(orderRef,{items,warehouseLogisticsId:id,warehouseLogisticsEventId:id+'-received',logisticsTransfersPending:Math.max(0,Number(order.logisticsTransfersPending||0)-1),logisticsHistory:firebase.firestore.FieldValue.arrayUnion({id:id+'-received',action:'倉庫調撥收貨',itemId:t.itemId,by:deliveryActor(),at:now,detail:t.toWarehouseId+' × '+t.qty}),...orderWorkIndexFields({...order,items}),updatedAt:now});}
-  });return saved;
+  });
+  if(!saved.orderId&&saved.status==='RECEIVED'&&saved.allocationCompleted===false){
+    try{
+      const result=await allocateFreeReceiptStockToShortages(saved.productKey,saved.toWarehouseId,Math.max(0,Number(saved.autoAllocationQty||0)-Number(saved.autoAllocatedQty||0)),deliveryActor(),'',id,'stockTransfers');
+      await runRoleTransaction(async tx=>{const ref=db.collection('stockTransfers').doc(id);const snapshot=await tx.get(ref);if(!snapshot.exists||snapshot.data().status!=='RECEIVED')throw Error('調撥分配進度已變更。');tx.update(ref,{allocationCompleted:true,allocationUpdatedAt:new Date().toISOString()});});
+      saved.affectedOrderIds=result.affectedOrderIds;
+    }catch(err){throw Object.assign(Error('調撥已入庫，但缺貨訂單分配未完成；請在調撥收貨按「重試庫存分配」，不會重複入庫：'+err.message),{transferCommitted:true});}
+  }
+  return saved;
 }
 if(typeof globalThis!=='undefined'){globalThis.commitWarehouseTransfer=commitWarehouseTransfer;globalThis.commitWarehouseTransferReceipt=commitWarehouseTransferReceipt;}
 

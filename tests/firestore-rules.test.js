@@ -716,13 +716,13 @@ test('direct-ship delivery summary requires the matching supply update in the sa
   const buyerBatch=writeBatch(buyerDb);
   buyerBatch.update(doc(buyerDb,'orders/direct-buyer'),buildOrderFields('direct-supply-buyer'));
   buyerBatch.update(doc(buyerDb,'supplyOrders/direct-supply-buyer'),supplyFields);
-  await assertSucceeds(buyerBatch.commit());
+  await assertFails(buyerBatch.commit());
 
   const warehouseDb=db('wh1');
   const warehouseBatch=writeBatch(warehouseDb);
   warehouseBatch.update(doc(warehouseDb,'orders/direct-warehouse'),buildOrderFields('direct-supply-warehouse'));
   warehouseBatch.update(doc(warehouseDb,'supplyOrders/direct-supply-warehouse'),supplyFields);
-  await assertSucceeds(warehouseBatch.commit());
+  await assertFails(warehouseBatch.commit());
 
   await seed('orders/direct-standalone', seedOrder);
   await assertFails(updateDoc(doc(db('wh1'), 'orders/direct-standalone'), buildOrderFields('missing-supply')));
@@ -1002,6 +1002,83 @@ const receivingCore = require('../modules/receiving-core.js');
 const supplyCore = require('../modules/supply-core.js');
 const demandCore = require('../modules/procurement-demand-core.js');
 
+async function directReceiptFixture(uid='sales1',role='sales',ownerUid=uid) {
+ const item={itemId:'I',productId:'P',qty:3,orderedQty:3,reservedQty:0,shortageQty:0,receivedQty:0,supplyOrderedQty:3,deliveredQty:0,directShipDeliveredQty:0,fulfillmentType:'DIRECT_SHIP',warehouseId:''};
+ const salesCode=ownerUid==='eng1'?'E01':'S01';
+ const demand=demandCore.demandDocument({sourceType:'SALES_ORDER',sourceId:'direct-owner',sourceItemId:'I',sourceItemIndex:0,
+  productId:'P',productKey:'P',fulfillmentType:'DIRECT_SHIP',ownerUid,salesCode,requestedQty:3,orderedQty:3,receivedQty:0});
+ const supply={type:'PURCHASING_PO',sourceType:'SALES_ORDER',sourceId:'direct-owner',sourceItemId:'I',orderId:'direct-owner',itemId:'I',orderItemIndex:0,
+  demandId:demand.demandId,ownerUid,salesCode,productId:'P',productKey:'P',qty:3,receivedQty:0,incomingRegisteredQty:0,cancelledQty:0,closedQty:0,
+  fulfillmentType:'DIRECT_SHIP',warehouseId:'',status:'ORDERED',unitCost:123,supplier:'Vendor'};
+ await seed('orders/direct-owner',{ownerUid,salesCode,status:'active',items:[item],deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false});
+ await seed('supplyOrders/direct-owner',supply);await seed('receivingSupplyOrders/direct-owner',stockPermissions.sanitizeSupply(supply));
+ await seed('procurementDemands/'+encodeURIComponent(demand.demandId),demand);
+ const client=compatDb(uid),nativeRun=client.runTransaction,plain=value=>JSON.parse(JSON.stringify(value));
+ client.runTransaction=callback=>nativeRun(tx=>callback({...tx,set:(ref,data,options)=>options?tx.set(ref,plain(data),options):tx.set(ref,plain(data)),update:(ref,data)=>tx.update(ref,plain(data))}));
+ const context=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,permissionRulesReady:true,deliveryActor:()=>uid,localDateString:()=> '2026-10-14',
+  YushinSupply:supplyCore,YushinReceiving:receivingCore,YushinProcurementDemand:demandCore,window:{YushinReceiving:receivingCore},
+  supplyOrdersCollection:()=>client.collection('supplyOrders'),procurementDemandRef:id=>client.collection('procurementDemands').doc(encodeURIComponent(id)),
+  procurementDemandDocument:(d,c,m)=>demandCore.demandDocument({...d,...c},m),
+  runRoleTransaction:callback=>stockPermissions.run(client,callback,uid,['sales','engineer'].includes(role),role),
+  isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),normalizedOrderItems:o=>o.items.map(i=>({...i})),
+  normalizedOrderStatus:o=>[o.status,o.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
+  savedDeliveryRecords:o=>o.deliveryRecords||[],returnedQuantity:()=>0,orderQuantity:o=>o.items.reduce((s,i)=>s+i.qty,0),orderWorkIndexFields:()=>({workCategories:['billing']})});
+ const app=fs.readFileSync('app.js','utf8');
+ vm.runInContext(app.slice(app.indexOf('function canConfirmSupplyReceipt('),app.indexOf('function canManageEquipmentCapability(')),context);
+ vm.runInContext(app.slice(app.indexOf('async function receiveSupplyOrderRecord('),app.indexOf('\nwindow.openSupplyReceipt')),context);
+ return {context,client,supply,demand};
+}
+for(const [uid,role] of [['sales1','sales'],['eng1','engineer']])test(`${role} confirms own direct shipment partially and retries without cost access or stock movement`,async()=>{
+ const f=await directReceiptFixture(uid,role);
+ await f.context.receiveSupplyOrderRecord('direct-owner',1,'','','direct-event-1');
+ await f.context.receiveSupplyOrderRecord('direct-owner',1,'','','direct-event-1');
+ await f.context.receiveSupplyOrderRecord('direct-owner',2,'','','direct-event-2');
+ assert.equal((await getDoc(doc(db('admin'),'supplyOrders/direct-owner'))).data().receivedQty,3);
+ assert.equal((await getDoc(doc(db('admin'),'supplyOrders/direct-owner'))).data().unitCost,123);
+ assert.equal((await getDoc(doc(db('admin'),'orders/direct-owner'))).data().deliveredQty,3);
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent(f.demand.demandId)))).data().receivedQty,3);
+ assert.equal((await getDocs(collection(db('admin'),'receipts'))).size,2);
+ for(const name of ['inventory','warehouseStocks','inventoryLots','inventoryMovements'])assert.equal((await getDocs(collection(db('admin'),name))).size,0);
+ await assertFails(getDoc(doc(db(uid),'supplyOrders/direct-owner')));
+ await seed('receivingSupplyOrders/another-direct',{ownerUid:'sales2',fulfillmentType:'DIRECT_SHIP'});
+ await assertFails(getDoc(doc(db(uid),'receivingSupplyOrders/another-direct')));
+});
+test('direct arrival rejects purchaser, warehouse, unrelated owner, overreceipt, cancelled order and standalone replay',async()=>{
+ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse'],['sales2','sales']]){
+  const f=await directReceiptFixture(uid,role,'sales1');
+  await assert.rejects(f.context.receiveSupplyOrderRecord('direct-owner',1,'','','forged-'+uid));
+ }
+ const f=await directReceiptFixture();
+ await assert.rejects(f.context.receiveSupplyOrderRecord('direct-owner',4,'','','too-many'));
+ await assertFails(updateDoc(doc(db('sales1'),'supplyOrders/direct-owner'),{receivedQty:1,status:'PARTIAL_RECEIPT'}));
+ await assertFails(updateDoc(doc(db('sales1'),'procurementDemands/'+encodeURIComponent(f.demand.demandId)),{receivedQty:1,remainingToReceiveQty:2,status:'PARTIALLY_RECEIVED'}));
+ await seed('orders/direct-owner',{ownerUid:'sales1',salesCode:'S01',status:'cancelled',items:[],deliveryRecords:[]});
+ await assert.rejects(f.context.receiveSupplyOrderRecord('direct-owner',1,'','','cancelled'));
+});
+test('direct owner can execute the exact cost-free supply query but not another owner scope',async()=>{
+ await directReceiptFixture();
+ const q=query(collection(db('sales1'),'receivingSupplyOrders'),where('ownerUid','==','sales1'),where('orderId','==','direct-owner'),where('itemId','==','I'),where('fulfillmentType','==','DIRECT_SHIP'),limit(50));
+ await assertSucceeds(getDocs(q));
+ await assertFails(getDocs(query(collection(db('sales2'),'receivingSupplyOrders'),where('ownerUid','==','sales1'),where('fulfillmentType','==','DIRECT_SHIP'))));
+});
+test('self-order creation can read a missing cost-free view and creates its exact projection atomically',async()=>{
+ const client=compatDb('sales1');
+ const self={type:'SALES_SELF_ORDER',ownerUid:'sales1',salesCode:'S01',supplier:'Vendor',unitCost:12,qty:2,status:'ORDERED',fulfillmentType:'WAREHOUSE'};
+ await stockPermissions.run(client,async tx=>{
+  const ref=client.collection('supplyOrders').doc('new-self');const snapshot=await tx.get(ref);assert.equal(snapshot.exists,false);tx.set(ref,self);
+ },'sales1',true,'sales');
+ assert.equal((await getDoc(doc(db('admin'),'supplyOrders/new-self'))).data().unitCost,12);
+ assert.equal('unitCost' in (await getDoc(doc(db('sales1'),'receivingSupplyOrders/new-self'))).data(),false);
+});
+test('transfer allocation checkpoint is monotonic and cannot change physical facts or be written by a business role',async()=>{
+ await seed('stockTransfers/checkpoint',{status:'RECEIVED',orderId:'',qty:5,reservedQty:0,autoAllocationQty:5,autoAllocatedQty:0,allocationCompleted:false});
+ await assertSucceeds(updateDoc(doc(db('buyer1'),'stockTransfers/checkpoint'),{autoAllocatedQty:2,allocationCompleted:false}));
+ for(const patch of [{autoAllocatedQty:1},{autoAllocatedQty:6},{qty:9},{autoAllocationQty:9},{status:'IN_TRANSIT'},{allocationCompleted:'true'}])
+  await assertFails(updateDoc(doc(db('wh1'),'stockTransfers/checkpoint'),patch));
+ await assertFails(updateDoc(doc(db('sales1'),'stockTransfers/checkpoint'),{allocationCompleted:true}));
+ await assertSucceeds(updateDoc(doc(db('wh1'),'stockTransfers/checkpoint'),{allocationCompleted:true}));
+});
+
 // Exercise the real receipt transaction, not only its individual writes. Current
 // order creation stores status=active and does not require an orderStatus field.
 for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','warehouse']]) {
@@ -1033,7 +1110,7 @@ for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','wa
       set:(ref,data,options)=>options?tx.set(ref,plain(data),options):tx.set(ref,plain(data)),
       update:(ref,data)=>tx.update(ref,plain(data))}));
     const context=vm.createContext({db:client,currentUserRole:role,permissionRulesReady:true,
-      deliveryActor:()=>uid,localDateString:()=> '2026-10-12',YushinSupply:supplyCore,YushinReceiving:receivingCore,
+      deliveryActor:()=>uid,localDateString:()=> '2026-10-12',YushinSupply:supplyCore,YushinReceiving:receivingCore,canConfirmSupplyReceipt:()=>true,
       YushinProcurementDemand:demandCore,window:{YushinReceiving:receivingCore},
       supplyOrdersCollection:()=>client.collection(role==='warehouse'?'receivingSupplyOrders':'supplyOrders'),
       procurementDemandRef:id=>id?client.collection('procurementDemands').doc(encodeURIComponent(id)):null,

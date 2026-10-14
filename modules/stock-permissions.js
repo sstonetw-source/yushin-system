@@ -8,7 +8,7 @@
       const reads=new Map(),writes=[];
       const sourceRef=ref=>ref.path.startsWith('receivingSupplyOrders/')?db.collection('supplyOrders').doc(ref.id):ref;
       const proxy={
-        async get(ref){ref=sourceRef(ref);const readRef=role==='warehouse'&&ref.path.startsWith('supplyOrders/')?db.collection('receivingSupplyOrders').doc(ref.id):ref;const snapshot=await native.get(readRef);reads.set(ref.path,{ref,snapshot,data:dataAt(snapshot)});return snapshot;},
+        async get(ref){ref=sourceRef(ref);const readRef=['warehouse','sales','engineer'].includes(role)&&ref.path.startsWith('supplyOrders/')?db.collection('receivingSupplyOrders').doc(ref.id):ref;const snapshot=await native.get(readRef);reads.set(ref.path,{ref,snapshot,data:dataAt(snapshot)});return snapshot;},
         set(ref,data,options){ref=sourceRef(ref);writes.push({method:'set',ref,data,options});return proxy;},
         update(ref,data){ref=sourceRef(ref);writes.push({method:'update',ref,data});return proxy;},
         delete(ref){ref=sourceRef(ref);writes.push({method:'delete',ref});return proxy;}
@@ -104,6 +104,8 @@
           if(!Array.isArray(next)||JSON.stringify(prior)===JSON.stringify(next))continue;
           const ids=[...new Set([...prior,...next].map(r=>r.id))];
           const changed=ids.filter(id=>JSON.stringify(prior.find(r=>r.id===id))!==JSON.stringify(next.find(r=>r.id===id)));
+          // Direct customer receipt has supply/receipt evidence and no physical stock operation.
+          if(changed.length===1&&next.find(r=>r.id===changed[0])?.sourceType==='DIRECT_SHIP_RECEIPT')continue;
           const index=changed.length===1?(next.findIndex(r=>r.id===changed[0])>=0?next.findIndex(r=>r.id===changed[0]):prior.findIndex(r=>r.id===changed[0])):-1;
           const op=writes.find(row=>row.ref.path.startsWith('stockOperations/')&&row.data.orderId===w.ref.id&&row.data.targetPath.startsWith('inventory/'));
           w.data={...w.data,businessDeliveryEvidence:{recordIndex:index,operationId:op?.ref.id||'',inventoryId:op?.data.targetPath.split('/')[1]||''}};
