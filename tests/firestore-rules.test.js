@@ -1211,6 +1211,7 @@ async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,
  await seed('orders/'+id,{ownerUid,salesCode:ownerUid==='eng1'?'E01':'S01',status:'active',inventoryReservationStatus:'pending',
   items:[{itemId:'I',productId:productKey,itemCode:'INIT',qty,fulfillmentType:direct?'DIRECT_SHIP':'WAREHOUSE',warehouseId}]});
  if(!direct){
+  await seed('warehouses/W1',{active:true,isDefault:true});
   await seed('inventory/'+productKey,{productKey,onHand,reserved:0,incoming:0});
   await seed('warehouseStocks/W1__'+productKey,{productKey,warehouseId:'W1',onHand,reserved:0,incoming:0});
  }
@@ -1223,7 +1224,7 @@ async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,
   inventoryProductKey:i=>i.productId||'',inventoryRefFor:i=>client.collection('inventory').doc(i.productId),inventoryNumbers:require('../modules/inventory-core').normalizeStock,
   warehouseStockDocId:(w,p)=>w+'__'+p,defaultWarehouse:()=>({id:'W1'}),orderWorkIndexFields:()=>({workCategories:['procurement']}),
   inventoryMovementRecord:(type,qty,orderId,productKey,actor,extra)=>({type,qty,sourceType:'order',sourceId:orderId,productKey,actorUid:uid,...extra}),
-  salesCodeForName:()=> 'S01',invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},
+  salesCodeForName:()=> 'S01',warehouseMasterCache:[{id:'W1'}],invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},
   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});
  const app=fs.readFileSync('app.js','utf8');
  context.window={};
@@ -1261,6 +1262,88 @@ test('additional stock during pending retry clears demand through reservation ev
   assert.equal((await getDoc(demandRef)).data().remainingToOrderQty,0);
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,5);
  }
+});
+async function addInitializationWarehouse(f,qty,master={}){
+ await seed('warehouses/W2',{active:true,isDefault:false,...master});
+ await seed('warehouseStocks/W2__init-product',{productKey:'init-product',warehouseId:'W2',onHand:qty,reserved:0,incoming:0});
+ f.context.warehouseMasterCache.push({id:'W2',active:true});
+}
+test('real initialization selects another stocked warehouse for all authorized commercial operators',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});
+  await addInitializationWarehouse(f,5);await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
+  try{await assertSucceeds(f.run());await assertSucceeds(f.run());}catch(err){throw Error(uid+' remote initialization: '+err.message);}
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  assert.equal(order.items[0].warehouseId,'W2');assert.equal(order.items[0].reservedQty,5);assert.equal(order.items[0].shortageQty,0);
+  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W2__init-product'))).data().reserved,5);
+ }
+});
+test('unheld pending reservation and demand can atomically change warehouse on retry without broadening stock ownership',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});await f.run();
+  await addInitializationWarehouse(f,5);await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
+  try{await assertSucceeds(f.run());await assertSucceeds(f.run());}catch(err){throw Error(uid+' remote zero recovery: '+err.message);}
+  const d=(await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data();
+  assert.equal(d.warehouseId,'W2');assert.equal(d.requestedQty,0);assert.equal(d.remainingToOrderQty,0);
+  const r=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();assert.equal(r.quantity,5);assert.equal(r.warehouseId,'W2');
+ }
+});
+test('initialization rejects multi-location stock before publishing false purchasing; disabled warehouse is not selected',async()=>{
+ const f=await orderInitializationFixture('sales1','sales',{onHand:2});await addInitializationWarehouse(f,3);
+ await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
+ await assert.rejects(f.run(),/多倉分配/);
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+ await seed('warehouses/W2',{active:false});await assertSucceeds(f.run());
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().items[0].warehouseId,'W1');
+});
+test('business zero-location exception rejects committed, completed, inactive and custody relocation',async()=>{
+ const f=await orderInitializationFixture('sales1','sales',{onHand:0});await f.run();await addInitializationWarehouse(f,5);
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ const attempt=(warehouseId='W2')=>{const client=db('sales1'),b=writeBatch(client);b.update(doc(client,'orders/'+f.id),{items:[{...original.items[0],warehouseId}]});b.update(doc(client,'inventoryReservations/'+f.id+'__I'),{warehouseId});return b.commit();};
+ for(const change of [{inventoryReservationStatus:'completed'},{items:[{...original.items[0],supplyOrderedQty:1}]},{items:[{...original.items[0],reservedQty:1}]},{items:[{...original.items[0],dispatchPreparedQty:1}]},{items:[{...original.items[0],transferPendingId:'T'}]}]){
+  await seed('orders/'+f.id,{...original,...change});await assertFails(attempt());
+ }
+ await seed('orders/'+f.id,original);await seed('warehouses/W2',{active:false});await assertFails(attempt());
+ await seed('warehouses/custody-sales1',{active:true,systemCustody:true,ownerUid:'sales1'});await assertFails(attempt('custody-sales1'));
+});
+test('purchasing cannot bypass incomplete stock allocation by directly creating customer supply',async()=>{
+ for(const uid of ['buyer1','admin'])for(const type of ['PURCHASING_PO','PURCHASING_MANUAL']){
+  const ref=doc(db(uid),'supplyOrders/source-readiness-'+uid+'-'+type),data={type,orderId:'source-ready',qty:1,supplier:'Supplier',unitCost:5};
+  await assertFails(setDoc(ref,data));
+  for(const status of ['pending','failed']){
+   await seed('orders/source-ready',{ownerUid:'sales1',inventoryReservationStatus:status});await assertFails(setDoc(ref,data));
+  }
+  await seed('orders/source-ready',{ownerUid:'sales1',inventoryReservationStatus:'completed'});await assertSucceeds(setDoc(ref,data));
+  await env.withSecurityRulesDisabled(async ctx=>deleteDoc(doc(ctx.firestore(),ref.path)));
+  await seed('orders/source-ready',{ownerUid:'sales1',inventoryReservationStatus:'completed',status:'cancelled'});await assertFails(setDoc(ref,data));
+  await env.withSecurityRulesDisabled(async ctx=>deleteDoc(doc(ctx.firestore(),'orders/source-ready')));
+ }
+ await assertSucceeds(setDoc(doc(db('buyer1'),'supplyOrders/free-replenish'),{type:'STOCK_REPLENISHMENT',qty:1}));
+});
+test('shared stock and workflow read predicates retain fixed role, owner, cost and disabled-account boundaries',async()=>{
+ const scoped=['orders/read-owner','procurementDemands/read-owner','inventoryReservations/read-owner'];
+ for(const path of scoped)await seed(path,{ownerUid:'sales1',salesCode:'S01'});
+ const stock=['inventory/read-clean','warehouseStocks/read-clean'];
+ for(const path of stock)await seed(path,{productKey:'P',onHand:1,reserved:0});
+ for(const uid of ['admin','buyer1','wh1','sales1','eng1']){
+  const client=db(uid);
+  for(const path of scoped){
+   if(['admin','buyer1','wh1','sales1'].includes(uid))await assertSucceeds(getDoc(doc(client,path)));
+   else await assertFails(getDoc(doc(client,path)));
+   await assertSucceeds(getDoc(doc(client,path+'-missing')));
+  }
+  for(const path of stock){await assertSucceeds(getDoc(doc(client,path)));await assertSucceeds(getDoc(doc(client,path+'-missing')));}
+ }
+ for(const path of stock){
+  await seed(path,{productKey:'P',onHand:1,reserved:0,unitCost:5});
+  await assertSucceeds(getDoc(doc(db('admin'),path)));
+  for(const uid of ['buyer1','wh1','sales1','eng1'])await assertFails(getDoc(doc(db(uid),path)));
+ }
+ await seed('users/sales1',{role:'sales',salesCode:'S01',active:false});
+ for(const path of [...scoped,...stock]){await assertFails(getDoc(doc(db('sales1'),path)));await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),path)));}
 });
 test('warehouse and unrelated business owner cannot initialize another owner order, cancellation stops admin as well',async()=>{
  for(const [uid,role] of [['wh1','warehouse'],['sales2','sales']]){

@@ -80,6 +80,19 @@ service cloud.firestore {
       );
     }
 
+    // Evaluate the fixed role once per document read; nested role predicates
+    // consumed the transaction expression budget when discovering another warehouse.
+    function operationalOrOwnedReader(data) {
+      let userRole = role();
+      return userRole in ['admin','purchaser','warehouse']
+        || (userRole in ['sales','engineer'] && (data == null || owns(data)));
+    }
+    function safeStockReader(data) {
+      let profile = signedIn() ? userDoc().data : {};
+      return signedIn() && profileEnabled(profile)
+        && (profile.get('role', '') == 'admin' || data == null || !data.keys().hasAny(['unitCost','cost']));
+    }
+
     function validSalesOwner(data) {
       return validQuoteOwner(data)
         && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales';
@@ -377,9 +390,28 @@ service cloud.firestore {
         'receiptEvents', 'purchaseEvents', 'reservationStatus', 'reservationError', 'inventoryProductKey',
         'linkedDocuments', 'procurementStatus', 'perOrdered', 'perReceived'];
     }
-    function purchaserOrderWorkflowUpdate() {
+    function purchaserInitialLocationItems(orderId) {
+      let before = resource.data.get('items', []);
+      let after = request.resource.data.get('items', []);
+      let changed = after.removeAll(before);
+      let prior = before.removeAll(after);
+      let item = changed[0];
+      let old = prior[0];
+      let held = getAfter(/databases/$(database)/documents/inventoryReservations/$(orderId + '__' + item.itemId)).data;
+      let target = get(/databases/$(database)/documents/warehouses/$(item.warehouseId)).data;
+      return resource.data.get('inventoryReservationStatus', '') in ['pending','failed']
+        && !orderIsCancelled(resource.data) && before.size() == after.size()
+        && changed.size() == 1 && prior.size() == 1 && uncommittedOrderItem(old)
+        && resource.data.get('deliveryRecords', []).size() == 0 && resource.data.get('returnRecords', []).size() == 0
+        && item.diff(old).affectedKeys().hasOnly(['orderedQty','reservedQty','shortageQty','inventoryProductKey','warehouseId'])
+        && item.warehouseId != old.get('warehouseId', '')
+        && target.get('active', true) && !target.get('systemCustody', false) && !(item.warehouseId.matches('custody-.*'))
+        && held.orderId == orderId && held.itemId == item.itemId && held.warehouseId == item.warehouseId
+        && held.quantity == item.reservedQty && held.shortageQty == item.shortageQty;
+    }
+    function purchaserOrderWorkflowUpdate(id) {
       return purchaser()
-        && operationalItemsOnly(purchasingItemFields())
+        && (operationalItemsOnly(purchasingItemFields()) || purchaserInitialLocationItems(id))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
@@ -542,8 +574,9 @@ service cloud.firestore {
           ? ((op.qtyDelta > 0 && deliveryDelta >= op.qtyDelta)
             || (op.qtyDelta < 0 && deliveryDelta <= op.qtyDelta)) && op.reservedDelta == 0
           : op.qtyDelta == deliveryDelta
-            && op.reservedDelta == firstDelta + reservationDelta(op, 1)
-              + reservationDelta(op, 2) + reservationDelta(op, 3) + reservationDelta(op, 4));
+            && (op.reservationIds.size() == 1 ? op.reservedDelta == firstDelta
+              : op.reservedDelta == firstDelta + reservationDelta(op, 1)
+                + reservationDelta(op, 2) + reservationDelta(op, 3) + reservationDelta(op, 4)));
     }
     function hasStockOperation(targetPath, quantityField, reservedField) {
       let operationId = request.resource.data.get('stockOperationId', '');
@@ -581,7 +614,7 @@ service cloud.firestore {
       let op = getAfter(path).data;
       let stockPath = /databases/$(database)/documents/warehouseStocks/$(data.get('warehouseStockId', 'unused'));
       return (before.get('quantity', 0) == data.get('quantity', 0)
-          && before.get('warehouseId', data.get('warehouseId', '')) == data.get('warehouseId', ''))
+          && (before.get('warehouseId', data.get('warehouseId', '')) == data.get('warehouseId', '') || data.get('quantity', 0) == 0))
         || (operationId != '' && operationId != 'unused' && !exists(path) && op.actorUid == request.auth.uid
           && op.orderId == data.orderId && id in op.reservationIds
           && op.productKey == data.productKey && op.warehouseId == data.warehouseId
@@ -599,12 +632,30 @@ service cloud.firestore {
         && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
         && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
         && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
-        && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
+        && (request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
+          || businessUnheldReservationLocationChange())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex', 'stockOperationId', 'warehouseStockId'
+          'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex', 'stockOperationId', 'warehouseStockId', 'warehouseId'
         ])
         && request.resource.data.get('quantity', 0) >= 0
         && request.resource.data.get('shortageQty', 0) >= 0;
+    }
+
+    function uncommittedOrderItem(item) {
+      return item.get('reservedQty', 0) == 0 && item.get('supplyOrderedQty', 0) == 0
+        && item.get('receivedQty', 0) == 0 && item.get('dispatchPreparedQty', 0) == 0
+        && item.get('deliveredQty', 0) == 0 && item.get('returnedQty', 0) == 0
+        && item.get('transferPendingId', '') == '' && item.get('custodyTransferId', '') == '';
+    }
+    function businessUnheldReservationLocationChange() {
+      let order = get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data;
+      let master = get(/databases/$(database)/documents/warehouses/$(request.resource.data.warehouseId)).data;
+      return resource.data.get('quantity', 0) == 0
+        && order.ownerUid == request.auth.uid && order.get('inventoryReservationStatus', '') in ['pending','failed']
+        && order.get('deliveryRecords', []).size() == 0 && order.get('returnRecords', []).size() == 0
+        && uncommittedOrderItem(order.items[request.resource.data.orderItemIndex])
+        && master.get('active', true) && !master.get('systemCustody', false)
+        && !(request.resource.data.warehouseId.matches('custody-.*'));
     }
 
     function businessInventoryLotOperationalUpdate(id) {
@@ -895,9 +946,11 @@ service cloud.firestore {
         && item.get('supplyOrderedQty', 0) == oldItem.get('supplyOrderedQty', 0) && item.get('receivedQty', 0) == oldItem.get('receivedQty', 0)
         && held.orderId == d.sourceId && held.itemId == d.sourceItemId && held.productKey == d.productKey
         && held.warehouseId == item.warehouseId && held.quantity == item.reservedQty
+        && d.warehouseId == item.warehouseId
+        && (d.warehouseId == resource.data.get('warehouseId', '') || uncommittedOrderItem(oldItem))
         && item.shortageQty == (shortage > 0 ? shortage : 0)
         && d.requestedQty == (d.orderedQty > d.receivedQty + item.shortageQty ? d.orderedQty : d.receivedQty + item.shortageQty)
-        && d.diff(resource.data).affectedKeys().hasOnly(['requestedQty','remainingToOrderQty','remainingToReceiveQty','perOrdered','perReceived','status','updatedAt','sourceItemIndex']);
+        && d.diff(resource.data).affectedKeys().hasOnly(['requestedQty','remainingToOrderQty','remainingToReceiveQty','perOrdered','perReceived','status','updatedAt','sourceItemIndex','warehouseId']);
     }
 
     function businessDirectDemandReceiptUpdate() {
@@ -1569,7 +1622,7 @@ service cloud.firestore {
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
+        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
           && ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && owns(request.resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))));
@@ -1679,8 +1732,8 @@ service cloud.firestore {
     }
 
     match /orders/{id} {
-      allow get: if admin() || purchaser() || warehouse() || (commercialDocumentOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse() || owns(resource.data);
+      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
         && validNewOrderSourceSync(id)
         && validOwnedCommercialCreate(request.resource.data)
@@ -1717,10 +1770,8 @@ service cloud.firestore {
     // supplier orders / receipts link back through demandId.
     match /procurementDemands/{id} {
       // Transactions read the deterministic ID before creating a demand. Missing data carries no customer information.
-      allow get: if admin() || purchaser() || warehouse()
-        || (businessOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(resource.data));
+      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow list: if operationalOrOwnedReader(resource.data);
       allow create: if validProcurementDemand(request.resource.data) && (canReceiveInventory()
         || businessProcurementDemandCreate(request.resource.data));
       allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
@@ -1761,19 +1812,28 @@ service cloud.firestore {
               && after.get('unitCost', 0) == before.get('unitCost', 0))));
     }
 
+    function purchaserSupplySourceReady() {
+      let data = request.resource.data;
+      let orderId = data.get('orderId', '');
+      return !(data.get('type', '') in ['PURCHASING_PO','PURCHASING_MANUAL']) || orderId == ''
+        || (exists(/databases/$(database)/documents/orders/$(orderId))
+          && !orderIsCancelled(get(/databases/$(database)/documents/orders/$(orderId)).data)
+          && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('inventoryReservationStatus', '') in ['pending','failed']));
+    }
+
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser()
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if ((admin() || purchaser()) && validQuickPurchaseCost())
+      allow create: if purchaserSupplySourceReady() && (((admin() || purchaser()) && validQuickPurchaseCost())
         && validSelfOrderSupplyCreate()
         || (businessOwner()
           && request.resource.data.type == 'SALES_SELF_ORDER'
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.salesCode == salesCode()
-          && validSelfOrderSupplyCreate());
+          && validSelfOrderSupplyCreate()));
       // Sales owns the commercial intent and may create/read its own self-order,
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
@@ -1977,10 +2037,7 @@ service cloud.firestore {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
       // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
       // warehouse keeps those fields unchanged while performing physical stock work.
-      allow get: if admin() || (active() && (
-        resource == null
-        || (!('unitCost' in resource.data) && !('cost' in resource.data))
-      ));
+      allow get: if safeStockReader(resource == null ? null : resource.data);
       allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
       allow create: if (
           ((admin() || purchaser()) && validInventoryStockPolicy(request.resource.data))
@@ -2005,11 +2062,8 @@ service cloud.firestore {
     }
 
     match /warehouseStocks/{id} {
-      allow get: if admin() || (active() && (
-        resource == null
-        || (!('unitCost' in resource.data) && !('cost' in resource.data))
-      ));
-      allow list: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
+      allow get: if safeStockReader(resource == null ? null : resource.data);
+      allow list: if safeStockReader(resource.data);
       allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
@@ -2022,10 +2076,8 @@ service cloud.firestore {
     match /inventoryReservations/{id} {
       // Reservation transactions first read their deterministic ID so retries remain idempotent.
       // A missing document contains no business data; existing documents stay owner-scoped.
-      allow get: if admin() || purchaser() || warehouse()
-        || (businessOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(resource.data));
+      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow list: if operationalOrOwnedReader(resource.data);
       allow create: if validReservationSource(id, request.resource.data)
         && reservationCreateWriter(id);
       allow update: if validReservationSource(id, request.resource.data) && reservationIdentityUnchanged()

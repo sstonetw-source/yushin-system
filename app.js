@@ -4749,11 +4749,10 @@ let warehouseMasterLoadPromise = null;
 async function loadWarehouseMaster(force = false) {
     if (warehouseMasterLoadPromise && !force) return warehouseMasterLoadPromise;
     warehouseMasterLoadPromise = firestoreReadWithTimeout(
-        db.collection('warehouses').limit(50).get(),
+        readCollectionInBatches('warehouses',50),
         '倉庫主檔'
-    ).then(snapshot => {
-        warehouseMasterCache = snapshot.docs
-            .map(doc => ({ id: doc.id, ...doc.data() }))
+    ).then(rows => {
+        warehouseMasterCache = rows
             .filter(item => item.active !== false)
             .sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderWarehouseMasterAdmin();
@@ -5285,8 +5284,8 @@ function populateOrderWarehouseOptions(selected = '') {
         ? current
         : (defaultWarehouse()?.id || activeWarehouses[0]?.id || '');
 
-    // 舊版曾使用下拉選單；目前正式訂單採「依實際庫存自動配置」，
-    // orderWarehouse 是隱藏欄位，只需保存預設倉庫 id。
+    // 此隱藏欄位僅提供初始位置提示；正式位置由預留交易確認。
+    // 整個品項可由單一倉供應時會自動選倉；多倉合併仍待履約模型擴充。
     if (field.tagName === 'SELECT') {
         field.innerHTML = '<option value="">請選擇倉庫</option>' + activeWarehouses
             .map(item => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.warehouseName || item.id)}${item.isDefault ? '（預設）' : ''}</option>`).join('');
@@ -9649,13 +9648,13 @@ window.openInventoryReservationDetails = async function(productKey) {
 window.closeInventoryReservationDetails = function() {
     document.getElementById('inventoryReservationOverlay')?.classList.remove('active');
 };
-async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
+async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid = currentUser?.uid) {
     const itemId=String(item.itemId||`item-${itemIndex+1}`);
     if(!globalThis.YushinReservation?.planReservation){
         throw new Error('Reservation core 未載入，無法計算庫存預留。');
     }
     const orderRef=db.collection('orders').doc(orderId);
-    const syncUid=currentUser?.uid;
+    const syncUid=actorUid;
     const actor=currentUserName||currentUser?.email||'';
     let result,stockToInvalidate=null;
     let releasedStock=null;
@@ -9677,7 +9676,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         const effectiveDelivered=Math.max(0,Number(normalized.deliveredQty||0)-Number(normalized.returnedQty||0));
         const requested=Math.max(0,orderedQty-effectiveDelivered);
         const productKey=inventoryProductKey(item);
-        const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
+        let warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
         const now=new Date().toISOString();
         const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
         const demandRef=procurementDemandRef(demandId);
@@ -9699,15 +9698,34 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         }
         if(!warehouseId)throw new Error('找不到有效倉庫，無法安全配置庫存。');
         const aggregateRef=inventoryRefFor(item);
-        const warehouseRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
         const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
         const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
-        const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
         const reservationSnap=await tx.get(reservationRef);
-
         const aggregate=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{});
-        const warehouse=inventoryNumbers(warehouseSnap?.exists?warehouseSnap.data():{});
         const existing=reservationSnap.exists?reservationSnap.data():{};
+        const canChoose=globalThis.YushinReservation.reservationLocationCanChange({...item,
+            deliveredQty:Math.max(Number(item.deliveredQty||0),Number(normalized.deliveredQty||0)),
+            returnedQty:Math.max(Number(item.returnedQty||0),Number(normalized.returnedQty||0))},existing,currentDemand||{});
+        const candidateIds=[...new Set([warehouseId,...(canChoose?warehouseMasterCache
+            .filter(w=>w.active!==false&&!w.systemCustody&&!String(w.id).startsWith('custody-')).map(w=>w.id):[])])].filter(Boolean);
+        const warehouseContexts=await Promise.all(candidateIds.map(async id=>{
+            const ref=db.collection('warehouseStocks').doc(warehouseStockDocId(id,productKey));
+            const [master,snapshot]=await Promise.all([tx.get(db.collection('warehouses').doc(id)),tx.get(ref)]);
+            return {id,ref,snapshot,master:master.exists?{...master.data(),id}:null};
+        }));
+        if(canChoose){
+          const selection=globalThis.YushinReservation.selectSingleWarehouse({
+            warehouses:warehouseContexts.map(row=>row.master).filter(Boolean),
+            stocks:Object.fromEntries(warehouseContexts.map(row=>[row.id,row.snapshot.exists?row.snapshot.data():{}])),
+            currentWarehouseId:warehouseId,requestedQty:requested,aggregateAvailableQty:aggregateSnap?.exists?aggregate.available:0
+          });
+          if(selection.requiresMultipleLocations)throw new Error('此品項有庫存分散在多倉；目前尚未完成多倉分配，已停止此品項預留與採購需求同步，避免將其他倉現貨誤列為待採購。');
+          warehouseId=selection.warehouseId;
+        }
+        const selected=warehouseContexts.find(row=>row.id===warehouseId);
+        if(!selected?.master||selected.master.active===false)throw new Error('找不到啟用的庫存倉庫，請先確認倉庫主檔後重試。');
+        const warehouseRef=selected.ref,warehouseSnap=selected.snapshot;
+        const warehouse=inventoryNumbers(warehouseSnap.exists?warehouseSnap.data():{});
         const existingQty=Math.max(0,Number(existing.quantity||0));
         const oldProductKey=String(existing.productKey||'');
         const oldWarehouseId=String(existing.warehouseId||'');
@@ -9868,22 +9886,27 @@ async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStat
     await persistOrderProcurementDemands(orderId,order,normalizedOrderItems(order));
 }
 
-async function reserveInventoryForNewOrder(orderId, order) {
-    if(!warehouseMasterCache.length)await loadWarehouseMaster();
+async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUser?.uid) {
     const orderRef=db.collection('orders').doc(orderId);
     const snapshot=await firestoreReadWithTimeout(orderRef.get(),'讀取待同步訂單');
     if(!snapshot.exists)throw new Error('訂單已不存在，無法同步庫存。');
     const liveOrder={id:orderId,...snapshot.data()};
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i);
+    if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')){
+        await loadWarehouseMaster(true);
+        if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
+    }
+    if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+    for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i,actorUid);
     // Each item transaction has already published stock, reservation, order and demand atomically.
     // Read the result for self-order processing and UI; never overwrite the source with reservedItems.
     const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取庫存同步結果');
     if(!latest.exists)throw new Error('訂單已不存在。');
+    if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
     Object.assign(order,{id:orderId,...latest.data()});
     if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
-    await registerInitialSelfOrders(orderId,order);
+    await registerInitialSelfOrders(orderId,order,actorUid);
     return {...orderReservationSummary(order),items:order.items};
 }
 
@@ -10215,11 +10238,12 @@ function canBusinessSelfOrder(order = null) {
 }
 
 
-async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitCost,orderDate,notes=''}) {
+async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitCost,orderDate,notes='',actorUid=currentUser?.uid}) {
         let savedOrder,internalNo='';
         await runRoleTransaction(async tx=>{
             const orderRef=db.collection('orders').doc(orderId);
             const snap=await tx.get(orderRef);
+            if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
 
@@ -10273,6 +10297,7 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
             };
             const validation=window.YushinSupply?.validate(record);
             if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
+            if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
             tx.set(supplyRef,record);
             if(demandRef)tx.set(demandRef,demandDoc,{merge:true});
             items[index]={
@@ -10292,7 +10317,7 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
     return savedOrder;
 }
 
-async function registerInitialSelfOrders(orderId,order) {
+async function registerInitialSelfOrders(orderId,order,actorUid=currentUser?.uid) {
     if(order.selfOrderAtCreation!==true)return;
     let changed=false;
     try{
@@ -10300,7 +10325,7 @@ async function registerInitialSelfOrders(orderId,order) {
             if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER'||item.selfOrderConfirmed!==true)continue;
             const qty=remainingProcurementQty(order,item);
             if(qty<=0)continue;
-            const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate});
+            const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate,actorUid});
             Object.assign(order,saved);
             changed=true;
         }
@@ -11366,7 +11391,7 @@ async function synchronizeOrderInventory(orderId, order, uid = currentUser?.uid)
     if(!started.applied)throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const attemptId=order.inventoryReservationAttemptId;
     try{
-        await reserveInventoryForNewOrder(orderId,order);
+        await reserveInventoryForNewOrder(orderId,order,uid);
         const finished=await writeOrderInventorySyncState(orderId,'completed',attemptId,uid);
         Object.assign(order,finished.order);
         if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續同步。');

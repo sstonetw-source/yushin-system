@@ -2730,7 +2730,7 @@ test('purchasing order refresh updates cache without duplicate render', () => {
 });
 
 test('purchaser order edit fields match visible order UI', () => {
-    const start=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
+    const start=rulesSource.indexOf('function purchaserOrderWorkflowUpdate(');
     const end=rulesSource.indexOf('function warehouseOrderWorkflowUpdate()',start);
     const source=rulesSource.slice(start,end);
     for (const field of ['costPrice','transactionType','invoiceTitle','remarks','billingDate','fieldEditHistory']) {
@@ -3812,7 +3812,7 @@ test('self-order capability is aligned between frontend and Firestore rules', ()
     const ruleStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /inventory/{id}',ruleStart);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
-    assert.match(ruleSource,/allow create: if \(\(admin\(\) \|\| purchaser\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
+    assert.match(ruleSource,/allow create: if purchaserSupplySourceReady\(\) && \(\(\(admin\(\) \|\| purchaser\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
     assert.match(ruleSource,/request\.resource\.data\.ownerUid == request\.auth\.uid/);
     assert.match(ruleSource,/request\.resource\.data\.salesCode == salesCode\(\)/);
     assert.doesNotMatch(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?\|\| \(sales\(\)/);
@@ -4435,7 +4435,7 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     assert.match(source,/supplyAfter\.get\('receivedQty', 0\) <= supplyBefore\.get\('qty', 0\)/);
     assert.match(source,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'deliveryRecords'[\s\S]*?'deliveredQty'[\s\S]*?'isDelivered'/);
 
-    const purchaserStart=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
+    const purchaserStart=rulesSource.indexOf('function purchaserOrderWorkflowUpdate(');
     const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseOrderWorkflowUpdate()',purchaserStart);
     const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
     assert.doesNotMatch(purchaserSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);
