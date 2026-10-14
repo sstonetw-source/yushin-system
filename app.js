@@ -10481,7 +10481,7 @@ function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatc
 }
 
 function orderItemDisplayCategories(order, item, lifecycleOverride = null, dispatchOverride = null) {
-    if(orderInventorySyncIncomplete(order))return [];
+    if(['pending','failed'].includes(order?.inventoryReservationStatus))return [];
     const dispatch = dispatchOverride || itemDispatchState(order, item);
     const category=orderItemDisplayCategory(order,item,lifecycleOverride,dispatch);
     const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
@@ -11613,7 +11613,7 @@ function purchasingDispatchStateSnapshot(normalizedItemsByOrder, sourceOrders = 
 }
 
 function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchStateByItem = null, lifecycleOverride = null) {
-    if (normalizedOrderStatus(order) !== 'normal' || orderInventorySyncIncomplete(order)) return [];
+    if (normalizedOrderStatus(order) !== 'normal' || ['pending','failed'].includes(order?.inventoryReservationStatus)) return [];
     // 工作卡與明細只讀訂單本身；不要在 render 階段解析成本／Product Master。
     // 同一輪採購頁 render 可直接沿用已 normalize 的品項快照。
     // 真正按「已採購／產生採購單」時，pendingPurchaseLines() 才補齊正式採購資料。
