@@ -12,7 +12,7 @@ const { pathToFileURL } = require('node:url');
 
 const project = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(project, 'index.html'), 'utf8');
-const chrome = ['google-chrome', 'google-chrome-stable', 'chromium']
+const chrome = process.env.CHROME_EXECUTABLE_PATH || ['google-chrome', 'google-chrome-stable', 'chromium']
     .find(name => spawnSync('which', [name], { encoding: 'utf8' }).status === 0);
 assert.ok(chrome, 'headless Chrome is required for desktop/mobile visual regression');
 

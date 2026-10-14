@@ -468,10 +468,33 @@ service cloud.firestore {
         && data.get('incoming', 0) is number && data.get('incoming', 0) >= 0;
     }
 
+    // warehouseStocks optional recovery metadata: allocationPending bool;
+    // allocationRevision int 1..1e9, advanced only when physical free stock increases.
+    function validStockRecoveryMetadata(data) {
+      return !data.keys().hasAny(['allocationPending','allocationRevision'])
+        || (data.get('allocationPending', null) is bool
+          && data.get('allocationRevision', null) is int
+          && data.allocationRevision > 0 && data.allocationRevision <= 1000000000);
+    }
+    function validStockRecoveryUpdate() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let revision = before.get('allocationRevision', 0);
+      let next = after.get('allocationRevision', 0);
+      let pending = before.get('allocationPending', false);
+      let nextPending = after.get('allocationPending', false);
+      return (next == revision && pending == nextPending)
+        || (next == revision + 1 && nextPending == true
+          && after.onHand - after.reserved > before.onHand - before.reserved
+          && !(after.warehouseId.matches('custody-.*')))
+        || (canReceiveInventory() && pending == true && nextPending == false && next == revision
+          && after.diff(before).affectedKeys().hasOnly(['allocationPending']));
+    }
+
     // A warehouse stock row keeps the same physical product/location identity.
     // Moving goods creates/updates another row through the transfer workflow.
     function validWarehouseStock(data) {
-      return nonNegativeInventory(data)
+      return nonNegativeInventory(data) && validStockRecoveryMetadata(data)
         && data.get('productKey', '') is string && data.get('productKey', '').size() > 0
         && data.get('warehouseId', '') is string && data.get('warehouseId', '').size() > 0
         && data.get('productId', '') is string;
@@ -670,7 +693,7 @@ service cloud.firestore {
     function businessWarehouseStockOperationalUpdate(id) {
       return businessOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'onHand', 'reserved', 'updatedAt', 'stockOperationId'
+          'onHand', 'reserved', 'updatedAt', 'stockOperationId', 'allocationPending', 'allocationRevision'
         ])
         && nonNegativeInventory(request.resource.data)
         && hasStockOperation('warehouseStocks/' + id, 'onHand', 'reserved');
@@ -2069,6 +2092,7 @@ service cloud.firestore {
       allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
           || businessWarehouseStockOperationalUpdate(id))
         && warehouseStockIdentityUnchanged()
+        && validStockRecoveryMetadata(request.resource.data) && validStockRecoveryUpdate()
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }

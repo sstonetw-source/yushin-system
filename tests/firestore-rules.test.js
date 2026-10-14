@@ -1930,3 +1930,51 @@ test('owner can confirm pending self-order with actual zero cost and supplier in
  batch.update(doc(client,'orders/pending-confirm'),{items:[{...item,supplier:'Vendor',costPrice:0,supplyOrderedQty:1,selfOrderNos:['SO-TEST'],orderedAt:'2026-10-13',orderEvents:[{id:'pending-confirm',type:'SALES_SELF_ORDER',qty:1}]}]});
  await assertSucceeds(batch.commit());
 });
+
+
+for(const uid of ['admin','buyer1','wh1'])test(uid+' stock recovery metadata is bounded, monotonic and cannot rewrite stock identity',async()=>{
+ const base={productKey:'recovery-p',productId:'recovery-p',warehouseId:'W1',onHand:3,reserved:0,incoming:0};
+ const ref=doc(db(uid),'warehouseStocks/W1__recovery-p');
+ for(const patch of [{allocationPending:'true',allocationRevision:1},{allocationPending:true},{allocationPending:true,allocationRevision:0},{allocationPending:true,allocationRevision:1.5},{allocationPending:true,allocationRevision:1000000001}])await assertFails(setDoc(ref,{...base,...patch}));
+ await assertSucceeds(setDoc(ref,{...base,allocationPending:true,allocationRevision:1}));
+ for(const patch of [{allocationRevision:0},{allocationRevision:2},{allocationPending:false,onHand:4},{allocationPending:true,allocationRevision:3,onHand:4},{allocationRevision:2,onHand:2},{productKey:'other',allocationPending:false}])await assertFails(updateDoc(ref,patch));
+ await assertSucceeds(updateDoc(ref,{onHand:4,allocationRevision:2,allocationPending:true}));
+ await assertSucceeds(updateDoc(ref,{allocationPending:false}));
+ await assertSucceeds(updateDoc(ref,{reserved:1}));
+});
+test('business owners cannot clear or fabricate an operational recovery queue',async()=>{
+ await seed('warehouseStocks/W1__recovery-business',{productKey:'recovery-business',warehouseId:'W1',onHand:3,reserved:0,incoming:0,allocationRevision:1,allocationPending:true});
+ for(const uid of ['sales1','eng1','off1']){
+  await assertFails(updateDoc(doc(db(uid),'warehouseStocks/W1__recovery-business'),{allocationPending:false}));
+  await assertFails(updateDoc(doc(db(uid),'warehouseStocks/W1__recovery-business'),{allocationPending:true,allocationRevision:2}));
+ }
+ await assertFails(getDocs(query(collection(env.unauthenticatedContext().firestore(),'warehouseStocks'),where('allocationPending','==',true))));
+ await assertSucceeds(getDocs(query(collection(db('buyer1'),'warehouseStocks'),where('allocationPending','==',true),limit(50))));
+ await assertSucceeds(getDocs(query(collection(db('wh1'),'warehouseStocks'),where('allocationPending','==',true),limit(50))));
+});
+for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])test(role+' actual free stock recovery updates reservation and procurement atomically and clears its durable flag',async()=>{
+ const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:'sales1'}),fulfillment=require('../modules/fulfillment-core'),recovery=require('../modules/free-stock-recovery');
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed',items:original.items.map(i=>fulfillment.normalizeItem({...i,inventoryProductKey:'init-product'}))});
+ await seed('inventoryReservations/'+f.id+'__I',{orderId:f.id,itemId:'I',orderItemIndex:0,ownerUid:'sales1',salesCode:'S01',productKey:'init-product',warehouseId:'W1',quantity:0,shortageQty:5,status:'shortage'});
+ await assertSucceeds(stockPermissions.run(f.client,async tx=>{const inv=f.client.collection('inventory').doc('init-product'),wh=f.client.collection('warehouseStocks').doc('W1__init-product');await tx.get(inv);await tx.get(wh);tx.update(inv,{onHand:3});tx.update(wh,{onHand:3});},uid,false,role));
+ const pending=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();assert.equal(pending.allocationPending,true);assert.equal(pending.allocationRevision,1);
+ Object.assign(f.context,{firestoreReadWithTimeout:p=>p,itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus)});
+ const app=fs.readFileSync('app.js','utf8');vm.runInContext(app.slice(app.indexOf('async function allocateFreeReceiptStockToShortages('),app.indexOf('async function refreshAffectedOrderCaches(')),f.context);
+ const options={db:f.client,runTransaction:f.context.runRoleTransaction,allocate:f.context.allocateFreeReceiptStockToShortages,normalize:require('../modules/inventory-core').normalizeStock,stockDocId:(w,p)=>w+'__'+p,assertContext(){},stockId:'W1__init-product',actor:uid};
+ await assertSucceeds(recovery.recoverLocation(options));await assertSucceeds(recovery.recoverLocation(options));
+ const stock=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();assert.equal(stock.reserved,3);assert.equal(stock.onHand,3);assert.equal(stock.allocationPending,false);assert.equal(stock.allocationRevision,1);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().items[0].reservedQty,3);
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data().remainingToOrderQty,2);
+});
+for(const [uid,role] of [['sales1','sales'],['eng1','engineer']])test(role+' actual cancellation releases stock and queues recovery without granting recovery control',async()=>{
+ const f=await orderInitializationFixture(uid,role);await f.run();
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
+ Object.assign(f.context,{savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[]});
+ const app=fs.readFileSync('app.js','utf8');f.context.DOCUMENT_TYPES={ORDER:'order'};
+ vm.runInContext(app.slice(app.indexOf('function inventoryMovementRecord('),app.indexOf('function inventoryReservationPayload(')),f.context);
+ vm.runInContext(app.slice(app.indexOf('async function adjustInventoryReservationForLifecycle('),app.indexOf('function confirmOrderCancellation(')),f.context);
+ await assertSucceeds(f.context.runRoleTransaction(async tx=>{const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref);await f.context.adjustInventoryReservationForLifecycle(tx,f.id,snap.data(),'cancelled',uid);tx.update(ref,{status:'cancelled',orderStatus:'cancelled'});}));
+ const stock=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();assert.equal(stock.reserved,0);assert.equal(stock.onHand,3);assert.equal(stock.allocationPending,true);assert.equal(stock.allocationRevision,1);
+ await assertFails(updateDoc(doc(db(uid),'warehouseStocks/W1__init-product'),{allocationPending:false}));
+});

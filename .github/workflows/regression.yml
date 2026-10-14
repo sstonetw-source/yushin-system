@@ -34,6 +34,7 @@ jobs:
           node --check modules/supplier-core.js
           node --check modules/inventory-core.js
           node --check modules/stock-permissions.js
+          node --check modules/free-stock-recovery.js
           node --check modules/receiving-core.js
           node --check modules/fulfillment-core.js
           node --check modules/supply-core.js
@@ -54,6 +55,8 @@ jobs:
         run: node tests/order-entry-browser-smoke.js
       - name: Check direct arrival and source retry for five roles in desktop and mobile Chrome
         run: node tests/workflow-audit-browser-smoke.js
+      - name: Check free stock recovery in desktop and mobile Chrome
+        run: node tests/free-stock-recovery-browser-smoke.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator

@@ -450,6 +450,7 @@
 
         <button type="button" id="inventoryShippingMoreBtn" class="btn-secondary" style="display:none" onclick="loadMoreInventoryShipping()">載入更多（50）</button>
       </div>
+      <section class="panel no-print" id="freeStockRecoveryPanel" hidden><div class="section-header"><h3>庫存分配待處理</h3><button type="button" class="btn-secondary" onclick="loadFreeStockRecovery()">重新處理</button></div><p id="freeStockRecoveryStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>倉庫</th><th>品項</th><th>可用數量</th><th>狀態</th><th>操作</th></tr></thead><tbody id="freeStockRecoveryBody"></tbody></table></div><button type="button" id="freeStockRecoveryMore" class="btn-secondary" onclick="loadFreeStockRecovery(true)" hidden>處理更多（50）</button></section>
       <div id="inventoryStockPanel">
         <section class="panel no-print" id="mainTransferRequestPanel" hidden><div class="section-header"><h3>調撥回主倉</h3><button type="button" class="btn-secondary" onclick="exportMainTransferRequests(this)">匯出目前調回清單</button><button type="button" id="mainTransferRetry" class="btn-secondary" onclick="loadMainTransferRequests(true)" hidden>重試讀取</button></div><p id="mainTransferRequestStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>來源</th><th>分倉</th><th>品項</th><th>調回數量</th><th>操作</th></tr></thead><tbody id="mainTransferRequestBody"></tbody></table></div></section>
       <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
@@ -1666,7 +1667,7 @@
     }, 15000);
     </script>
     <script src="modules/supplier-core.js?v=20261002-7"></script>
-<script src="modules/stock-permissions.js?v=20261011-5"></script>
+<script src="modules/stock-permissions.js?v=20261014-9"></script>
     <script src="modules/inventory-core.js?v=20261010-1"></script>
     <script src="modules/receiving-core.js?v=20261002-8"></script>
     <script src="modules/fulfillment-core.js?v=20261002-5"></script>
@@ -1678,10 +1679,11 @@
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
     <script src="modules/order-entry-core.js?v=20261014-1"></script>
-    <script src="app.js?v=20261014-1"></script>
+    <script src="app.js?v=20261014-9"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261010-2"></script>
-    <script src="modules/inventory-workspace.js?v=20261012-5"></script>
+    <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
+    <script src="modules/inventory-workspace.js?v=20261014-9"></script>
     <script src="modules/warehouse-logistics.js?v=20261013-1"></script>
     <script src="modules/delivery-settings.js?v=20261013-1"></script>
     <script src="modules/order-entry-ui.js?v=20261014-1"></script>
