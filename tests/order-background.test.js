@@ -11,6 +11,7 @@ function setup(){
  ordersCache:[],writeAppDataCache(){},renderOrdersList(){},syncOrderIntoPurchasingCaches(){},closeOrderModal:()=>events.push('closed'),showActionFeedback:(...a)=>events.push(a),alert:s=>events.push(['alert',s]),
  saveButton:{disabled:true,innerText:'儲存中'},newOrderSaveInProgress:true,console
  });
+ x.synchronizeOrderInventory=async(id,order)=>{try{const result=await x.reserveInventoryForNewOrder(id,order);order.inventoryReservationStatus='completed';return result;}catch(error){order.inventoryReservationStatus='failed';throw error;}};
  return {x,create,reserve,events,storage,run:()=>vm.runInContext(`(async()=>{${chain}})()`,x)};
 }
 async function tick(){await new Promise(r=>setImmediate(r));}
@@ -39,9 +40,13 @@ test('pending and failed synchronization block purchasing and dispatch calculati
  for(const state of ['pending','failed']){const order={inventoryReservationStatus:state};assert.equal(x.pendingPurchaseLines(order).length,0);assert.equal(x.itemDispatchState(order,{qty:2}).shippable,0);}
 });
 function retrySetup(liveStatus='pending'){
+ let live={createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:liveStatus};
  const reserve=deferred(),events=[],x=vm.createContext({window:{addEventListener(){}},currentUser:{uid:'U1'},currentUserRole:'sales',ordersCache:[{id:'O1',createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:'pending'}],
  normalizedOrderStatus:order=>order.status==='cancelled'?'cancelled':'normal',renderOrdersList(){},writeAppDataCache(){},showActionFeedback:(...a)=>events.push(a),syncOrderIntoPurchasingCaches(){},syncNewOrderSourceDocuments:async()=>null,escapeAttr:s=>s,
- db:{collection:()=>({doc:id=>({get:async()=>({exists:true,id,data:()=>({createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:liveStatus})}),set:async updates=>events.push(updates)})})},firestoreReadWithTimeout:p=>p,reserveInventoryForNewOrder:async()=>{events.push('reserve');await reserve.promise;},console
+ db:{collection:()=>({doc:id=>({id:id||'attempt-1',get:async()=>({exists:true,id,data:()=>({...live})})})})},
+ runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({...live})}),update:(_ref,updates)=>{live={...live,...updates};events.push(updates);}}),
+ orderWorkIndexFields:()=>({}),orderReservationSummary:()=>({reservedQty:0,shortageQty:0}),
+ firestoreReadWithTimeout:p=>p,reserveInventoryForNewOrder:async()=>{events.push('reserve');await reserve.promise;},console
  });
  vm.runInContext(src.slice(src.indexOf('const pendingOrderReservationIds = new Set();'),src.indexOf('// 採購主頁資料')),x);return {x,reserve,events};
 }

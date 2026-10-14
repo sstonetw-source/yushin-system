@@ -385,7 +385,7 @@ service cloud.firestore {
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
           'linkedDocuments',
           'costPrice', 'transactionType', 'invoiceTitle', 'remarks', 'billingDate', 'fieldEditHistory',
-          'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt',
+          'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt', 'inventoryReservationAttemptId',
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
@@ -1621,6 +1621,27 @@ service cloud.firestore {
               : businessPhysicalDelivery(id, e))));
     }
 
+    function validOrderInventorySyncTransition() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let attempt = after.get('inventoryReservationAttemptId', '');
+      let error = after.get('inventoryReservationError', '');
+      let updatedAt = after.get('inventoryReservationUpdatedAt', '');
+      return !after.diff(before).affectedKeys().hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId'])
+        || (role() in ['admin','purchaser','sales','engineer']
+          && !orderIsCancelled(before) && !orderIsCancelled(after)
+          && before.get('inventoryReservationStatus', '') != 'completed'
+          && attempt is string && attempt.size() > 0 && attempt.size() <= 128
+          && error is string && error.size() <= 1000
+          && updatedAt is string && updatedAt.size() <= 64
+          && (after.get('inventoryReservationStatus', '') == 'pending'
+            ? after.inventoryReservationAttemptId != before.get('inventoryReservationAttemptId', '') && after.inventoryReservationError == ''
+            : before.get('inventoryReservationStatus', '') == 'pending'
+              && after.inventoryReservationAttemptId == before.get('inventoryReservationAttemptId', '')
+              && after.get('inventoryReservationStatus', '') in ['completed','failed']
+              && (after.inventoryReservationStatus != 'completed' || after.inventoryReservationError == '')));
+    }
+
     match /orders/{id} {
       allow get: if admin() || purchaser() || warehouse() || (commercialDocumentOwner() && (resource == null || owns(resource.data)));
       allow list: if admin() || purchaser() || warehouse() || owns(resource.data);
@@ -1631,7 +1652,7 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'orderStatus'])
-        || validOrderCancellationTransition()) && orderUpdateAllowed(id);
+        || validOrderCancellationTransition()) && validOrderInventorySyncTransition() && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 

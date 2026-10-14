@@ -661,8 +661,14 @@ test('purchaser may update reservation retry metadata but not commercial fields'
     inventoryReservationError:'timeout',
     inventoryReservationUpdatedAt:'2026-09-20T00:00:00Z'
   });
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/reservation-retry'), {
+    inventoryReservationStatus:'pending',
+    inventoryReservationError:'',
+    inventoryReservationUpdatedAt:'2026-09-21T00:00:00Z'
+  }));
   await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/reservation-retry'), {
     inventoryReservationStatus:'pending',
+    inventoryReservationAttemptId:'retry-attempt',
     inventoryReservationError:'',
     inventoryReservationUpdatedAt:'2026-09-21T00:00:00Z'
   }));
@@ -1271,6 +1277,44 @@ test('missing demand may be read for deterministic transaction creation but exis
  const id=encodeURIComponent('SALES_ORDER:'+f.id+':I');
  await assertFails(getDoc(doc(db('sales2'),'procurementDemands/'+id)));
  await assertFails(getDocs(collection(db('sales2'),'procurementDemands')));
+});
+test('inventory synchronization outcomes reject completed regression, old attempt and cancelled source for every operator',async()=>{
+ const refFor=uid=>doc(db(uid),'orders/sync-outcome');
+ const base={ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'A',
+  inventoryReservationError:'',inventoryReservationUpdatedAt:'2026-10-14',items:[{itemId:'I',productId:'p-order',qty:3}]};
+ const patch=(status,id='A')=>({inventoryReservationStatus:status,inventoryReservationAttemptId:id,inventoryReservationError:status==='failed'?'offline':'',inventoryReservationUpdatedAt:'2026-10-14T07:00:00Z'});
+ for(const uid of ['sales1','buyer1','admin']){
+  await seed('orders/sync-outcome',base);
+  await assertFails(updateDoc(refFor(uid),patch('completed','OLD')));
+  await assertSucceeds(updateDoc(refFor(uid),patch('pending','B')));
+  await assertFails(updateDoc(refFor(uid),patch('failed','A')));
+  await assertSucceeds(updateDoc(refFor(uid),patch('completed','B')));
+  await assertFails(updateDoc(refFor(uid),patch('failed','B')));
+  await assertFails(updateDoc(refFor(uid),patch('pending','C')));
+  for(const field of ['status','orderStatus']){
+   await seed('orders/sync-outcome',{...base,[field]:'cancelled'});
+   await assertFails(updateDoc(refFor(uid),patch('completed')));
+   await assertFails(updateDoc(refFor(uid),patch('failed')));
+  }
+ }
+ await seed('orders/sync-outcome',base);
+ for(const uid of ['wh1','sales2','eng1'])await assertFails(updateDoc(refFor(uid),patch('pending','B')));
+ await assertFails(updateDoc(refFor('sales1'),{...patch('pending','B'),inventoryReservationError:'x'.repeat(1001)}));
+});
+test('real shared synchronization starts, completes and recovers terminal results for business, engineer and purchaser',async()=>{
+ const app=fs.readFileSync('app.js','utf8');
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  Object.assign(f.context,{currentUserRole:role,orderReservationSummary:o=>({reservedQty:o.items.reduce((s,i)=>s+Number(i.reservedQty||0),0)}),console:{error(){}},
+   reserveInventoryForNewOrder:async()=>f.run()});
+  vm.runInContext(app.slice(app.indexOf('function canRetryOrderInventorySync('),app.indexOf('function orderInventorySyncStatusHtml(')),f.context);
+  const order={id:f.id,...(await getDoc(doc(db(uid),'orders/'+f.id))).data()};
+  await assertSucceeds(f.context.synchronizeOrderInventory(f.id,order,uid));
+  assert.equal(order.inventoryReservationStatus,'completed');assert.ok(order.inventoryReservationAttemptId);
+  f.context.reserveInventoryForNewOrder=async()=>{throw Error('must not repeat completed operation');};
+  await assertSucceeds(f.context.synchronizeOrderInventory(f.id,order,uid));
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+ }
 });
 async function seedStockWorkflow(){
   await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',deliveredQty:0,returnedQty:0,

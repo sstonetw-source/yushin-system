@@ -479,6 +479,7 @@ test('new order reports committed success even when source quote update fails', 
         saveButton:{disabled:true,innerText:'儲存中…'},newOrderSaveInProgress:true,
         alert:message=>messages.push(message),console:{error:()=>{}}
     });
+    context.synchronizeOrderInventory=async(id,order)=>{try{const result=await context.reserveInventoryForNewOrder(id,order);order.inventoryReservationStatus='completed';return result;}catch(error){order.inventoryReservationStatus='failed';throw error;}};
     vm.runInContext(appSource.slice(feedbackStart, feedbackEnd), context);
     vm.runInContext(appSource.slice(appSource.indexOf('async function syncNewOrderSourceDocuments'),appSource.indexOf('const pendingOrderReservationIds = new Set();')),context);
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
@@ -1079,7 +1080,7 @@ test('phase 5 order creation reserves only available stock and records shortage'
     assert.match(s,/oldWarehouseId/);
     assert.doesNotMatch(s,/const preservedQty=/);
     assert.doesNotMatch(s,/const additionalReservable=/);
-    assert.match(appSource,/await reserveInventoryForNewOrder\(docRef\.id, data\)/);
+    assert.match(appSource,/await synchronizeOrderInventory\(docRef\.id, data, savingUid\)/);
 });
 
 test('phase 5 shipment consumes both aggregate and selected warehouse stock transactionally', () => {
@@ -3951,8 +3952,9 @@ test('multi-item Forecast conversion tracks inventory reservation outcome on one
     assert.match(source,/items:normalizedItems/);
     assert.match(source,/itemCount:normalizedItems\.length/);
     assert.match(source,/inventoryReservationStatus:'pending'/);
-    assert.match(source,/inventoryReservationStatus:'completed'/);
-    assert.match(source,/inventoryReservationStatus:'failed'/);
+    assert.match(source,/await synchronizeOrderInventory\(order\.id, order\.data, synchronizationUid\)/);
+    assert.match(source,/status:'completed'/);
+    assert.match(source,/status:'failed'/);
     assert.match(source,/reservationFailures:reservationResults\.filter/);
     assert.doesNotMatch(source,/Promise\.allSettled\(created\.map\(order=>reserveInventoryForNewOrder/);
 });
