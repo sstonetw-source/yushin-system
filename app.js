@@ -9664,27 +9664,57 @@ window.closeInventoryReservationDetails = function() {
     document.getElementById('inventoryReservationOverlay')?.classList.remove('active');
 };
 async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
-    const requested=Math.max(0,Number(item.qty||0));
-    const productKey=inventoryProductKey(item);
     const itemId=String(item.itemId||`item-${itemIndex+1}`);
-    if(!requested)return {...item,itemId,orderedQty:requested,reservedQty:0,shortageQty:0,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey};
-    if(!productKey)return {...item,itemId,orderedQty:requested,reservedQty:0,shortageQty:requested,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:'',reservationError:'missing_product_master'};
-    if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
-        return {...item,itemId,orderedQty:requested,reservedQty:0,shortageQty:0,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,directShipQty:requested,warehouseId:'',reservationStatus:'not_required'};
-    }
     if(!globalThis.YushinReservation?.planReservation){
         throw new Error('Reservation core 未載入，無法計算庫存預留。');
     }
-
-    const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
-    const aggregateRef=inventoryRefFor(item);
-    const warehouseRef=warehouseId?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey)):null;
-    const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
+    const orderRef=db.collection('orders').doc(orderId);
+    const syncUid=currentUser?.uid;
     const actor=currentUserName||currentUser?.email||'';
-    let result={...item,itemId,reservedQty:0,shortageQty:requested,inventoryProductKey:productKey,warehouseId};
+    let result,stockToInvalidate=null;
     let releasedStock=null;
 
     await runRoleTransaction(async tx=>{
+        // Read the current source in every retry. Never publish a caller's full-item snapshot.
+        const orderSnap=await tx.get(orderRef);
+        if(currentUser?.uid!==syncUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+        if(!orderSnap.exists)throw new Error('訂單已不存在，無法同步庫存。');
+        order={id:orderId,...orderSnap.data()};
+        if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消／作廢的訂單不可同步庫存。');
+        itemIndex=(order.items||[]).findIndex((row,index)=>String(row.itemId||`item-${index+1}`)===itemId);
+        if(itemIndex<0)throw new Error('訂單品項已變更，請重新讀取後重試同步。');
+        item={...order.items[itemIndex],itemId};
+        if(order.inventoryReservationStatus==='completed'){result=item;return;}
+        if(item.transferPendingId)throw new Error('調撥途中不可重新配置訂單庫存。');
+        const normalized=normalizedOrderItems(order)[itemIndex];
+        const orderedQty=Math.max(0,Number(normalized.qty||0));
+        const effectiveDelivered=Math.max(0,Number(normalized.deliveredQty||0)-Number(normalized.returnedQty||0));
+        const requested=Math.max(0,orderedQty-effectiveDelivered);
+        const productKey=inventoryProductKey(item);
+        const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
+        const now=new Date().toISOString();
+        const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
+        const demandRef=procurementDemandRef(demandId);
+        const demandSnap=await tx.get(demandRef);
+        const currentDemand=demandSnap.exists?demandSnap.data():null;
+        const publish=nextItem=>{
+            if(currentUser?.uid!==syncUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+            result=nextItem;
+            const items=order.items.map((row,index)=>index===itemIndex?nextItem:row);
+            const nextOrder={...order,items};
+            const updates={items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now};
+            const demandDoc=orderItemProcurementDemandDocument(nextOrder,nextItem,currentDemand,now);
+            if(currentDemand||demandDoc.requestedQty>0||demandDoc.orderedQty>0||demandDoc.receivedQty>0)tx.set(demandRef,demandDoc,{merge:true});
+            tx.update(orderRef,updates);
+        };
+        if(!productKey){publish({...item,orderedQty,reservedQty:0,shortageQty:requested,inventoryProductKey:'',reservationError:'missing_product_master'});return;}
+        if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
+            publish({...item,orderedQty,reservedQty:0,shortageQty:0,inventoryProductKey:productKey,warehouseId:'',reservationStatus:'not_required'});return;
+        }
+        if(!warehouseId)throw new Error('找不到有效倉庫，無法安全配置庫存。');
+        const aggregateRef=inventoryRefFor(item);
+        const warehouseRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
+        const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
         const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
         const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
         const reservationSnap=await tx.get(reservationRef);
@@ -9696,12 +9726,15 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         const oldProductKey=String(existing.productKey||'');
         const oldWarehouseId=String(existing.warehouseId||'');
         const sameStock=oldProductKey===productKey&&oldWarehouseId===warehouseId;
+        if(existingQty>0&&sameStock&&(!aggregateSnap?.exists||!warehouseSnap?.exists)){
+            throw new Error('既有預留缺少對應公司或分倉庫存，請先稽核後重試。');
+        }
 
         const plan=globalThis.YushinReservation.planReservation({
             requestedQty:requested,
             existingQty,
             sameStock,
-            availableQty:warehouse.available,
+            availableQty:aggregateSnap?.exists?Math.min(warehouse.available,aggregate.available+(oldProductKey===productKey&&!sameStock?existingQty:0)):0,
             inTransitQty:Math.max(0,Number(item.supplyOrderedQty||0)-Number(item.receivedQty||0))
         });
 
@@ -9725,8 +9758,6 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
             oldAggregate=inventoryNumbers(oldAggregateSnap?.exists?oldAggregateSnap.data():{});
             oldWarehouse=inventoryNumbers(oldWarehouseSnap.data());
         }
-
-        const now=new Date().toISOString();
 
         if(aggregateRef&&aggregateSnap?.exists){
             let nextReserved=aggregate.reserved;
@@ -9779,11 +9810,13 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
             status:plan.status,warehouseId,updatedAt:now
         },{merge:true});
 
-        result={...item,itemId,orderedQty:requested,reservedQty:plan.reservedQty,shortageQty:plan.shortageQty,dispatchPreparedQty:Number(item.dispatchPreparedQty||0),deliveredQty:Number(item.deliveredQty||0),returnedQty:Number(item.returnedQty||0),inventoryProductKey:productKey,warehouseId};
+        publish({...item,itemId,orderedQty,reservedQty:plan.reservedQty,shortageQty:plan.shortageQty,inventoryProductKey:productKey,warehouseId});
+        stockToInvalidate={productKey,warehouseId};
     });
 
     if(releasedStock)invalidateWarehouseStockCache(releasedStock.productKey,releasedStock.warehouseId);
-    if(warehouseId)invalidateWarehouseStockCache(productKey,warehouseId);
+    if(stockToInvalidate)invalidateWarehouseStockCache(stockToInvalidate.productKey,stockToInvalidate.warehouseId);
+    invalidateProcurementDemandQueue();
     return result;
 }
 function orderReservationSummary(order) {
@@ -9794,110 +9827,78 @@ function orderReservationSummary(order) {
     };
 }
 
-async function persistOrderProcurementDemands(orderId, order, items = []) {
-    if(!globalThis.YushinProcurementDemand?.demandDocument)return;
-    const now=new Date().toISOString();
-    const batch=db.batch();
-    let writes=0;
-    const orderSnapshot={...order,id:orderId,items,itemCount:items.length,orderSchemaVersion:2};
-    for(const item of items){
-        const demand=procurementDemandForOrderItem(orderSnapshot,item);
-        // Fully stock-covered warehouse items do not need a Material Request.
-        if(!(demand.requestedQty>0||demand.orderedQty>0||demand.receivedQty>0))continue;
-        const ref=procurementDemandRef(demand.demandId);
-        if(!ref)continue;
-        const doc=procurementDemandDocument(demand,{
-            productId:item.productId||'',
-            productKey:inventoryProductKey(item),
-            itemCode:item.itemCode||'',
-            itemName:item.itemName||'',
-            brand:item.brand||'',
-            fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
-            warehouseId:(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
-                ? '' : (item.warehouseId||order.warehouseId||defaultWarehouse()?.id||''),
-            ownerUid:order.ownerUid||currentUser?.uid||'',
-            salesCode:order.salesCode||currentUserCode||'',
-            salesName:order.salesName||currentUserName||'',
-            // Demand keeps its own required-by date; supplier ETA belongs to supplyOrders.
-            scheduleDate:demand.scheduleDate||item.requiredByDate||item.scheduleDate||order.requiredByDate||order.expectedDate||''
-        },{
-            createdAt:order.createdAt||now,
-            updatedAt:now
-        });
-        batch.set(ref,doc,{merge:true});
-        writes++;
+function orderItemProcurementDemandDocument(order, item, currentDemand, now) {
+    const dispatch=globalThis.YushinFulfillment.dispatchState(normalizedOrderItems(order).find(row=>row.itemId===item.itemId)||item);
+    const demand=procurementDemandForOrderItem(order,item,dispatch);
+    // A historical mismatch must be audited, not repaired by erasing supplier facts.
+    if(currentDemand&&(Number(currentDemand.orderedQty||0)>demand.orderedQty||Number(currentDemand.receivedQty||0)>demand.receivedQty)){
+        throw new Error('採購需求與訂單供應進度不一致，請先稽核供應紀錄後重試。');
     }
-    if(writes){
-        await batch.commit();
-        // 新的採購需求已正式寫入後，立刻把採購頁標成需要重新讀取。
-        // 否則使用者若本次登入曾開過採購頁，畫面會沿用舊 cache，
-        // 出現「訂單有待採購、採購頁卻是 0」直到手動重整。
-        invalidateProcurementDemandQueue();
-    }
+    return procurementDemandDocument(demand,{
+        productId:item.productId||'',productKey:inventoryProductKey(item),
+        itemCode:item.itemCode||'',itemName:item.itemName||'',brand:item.brand||'',
+        fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+        warehouseId:(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
+            ? '' : (item.warehouseId||order.warehouseId||defaultWarehouse()?.id||''),
+        ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',salesName:order.salesName||'',
+        // Existing demand dates are independent of supplier ETA.
+        scheduleDate:currentDemand?.scheduleDate||demand.scheduleDate||item.requiredByDate||item.scheduleDate||order.requiredByDate||order.expectedDate||''
+    },{createdAt:currentDemand?.createdAt||order.createdAt||now,updatedAt:now});
 }
 
-async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStatus) {
-    if(!globalThis.YushinProcurementDemand?.cancelDemand)return;
-    const items=normalizedOrderItems(order);
-    if(lifecycleStatus==='cancelled'){
-        const refs=items.map((item,index)=>{
-            const itemId=String(item.itemId||`item-${index+1}`);
-            const demandId=globalThis.YushinProcurementDemand.demandIdForSource({
-                sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
-            });
-            return {item,ref:procurementDemandRef(demandId)};
-        }).filter(row=>row.ref);
-        const snapshots=await Promise.all(refs.map(row=>row.ref.get()));
-        const batch=db.batch();
-        const now=new Date().toISOString();
-        let writes=0;
-        snapshots.forEach((snapshot,index)=>{
-            if(!snapshot.exists)return;
-            const current=snapshot.data();
-            const cancelled=globalThis.YushinProcurementDemand.cancelDemand(current);
-            const doc=procurementDemandDocument({...current,...cancelled},{sourceItemIndex:index},{
-                createdAt:current.createdAt||now,
-                updatedAt:now
-            });
-            batch.set(refs[index].ref,doc,{merge:true});
-            writes++;
+async function persistOrderProcurementDemands(orderId, order, items = []) {
+    const orderRef=db.collection('orders').doc(orderId);
+    // The arguments carry identity only; live quantities and lifecycle always come from Firestore.
+    const itemIds=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
+    for(const itemId of itemIds){
+        const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
+        const ref=procurementDemandRef(demandId);
+        await runRoleTransaction(async tx=>{
+            const orderSnap=await tx.get(orderRef);
+            if(!orderSnap.exists)throw new Error('訂單已不存在，無法同步採購需求。');
+            const liveOrder={id:orderId,...orderSnap.data()};
+            const currentSnap=await tx.get(ref);
+            const current=currentSnap.exists?currentSnap.data():null;
+            const item=normalizedOrderItems(liveOrder).find(row=>row.itemId===itemId);
+            if(!item)throw new Error('訂單品項已變更，請重新讀取後重試同步。');
+            const now=new Date().toISOString();
+            if(normalizedOrderStatus(liveOrder)!=='normal'){
+                if(current){
+                    const cancelled=globalThis.YushinProcurementDemand.cancelDemand(current);
+                    tx.set(ref,procurementDemandDocument({...current,...cancelled},{},{createdAt:current.createdAt||now,updatedAt:now}),{merge:true});
+                }
+                return;
+            }
+            const doc=orderItemProcurementDemandDocument(liveOrder,item,current,now);
+            // Do not create empty demands, but clear an existing demand when stock covers it.
+            if(current||doc.requestedQty>0||doc.orderedQty>0||doc.receivedQty>0)tx.set(ref,doc,{merge:true});
         });
-        if(writes)await batch.commit();
-    }else{
-        await persistOrderProcurementDemands(orderId,order,items);
     }
     invalidateProcurementDemandQueue();
 }
 
+async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStatus) {
+    // Cancellation and restoration use the same live-source projection, not competing batch formulas.
+    await persistOrderProcurementDemands(orderId,order,normalizedOrderItems(order));
+}
+
 async function reserveInventoryForNewOrder(orderId, order) {
     if(!warehouseMasterCache.length)await loadWarehouseMaster();
-    const items=normalizedOrderItems(order);
+    const orderRef=db.collection('orders').doc(orderId);
+    const snapshot=await firestoreReadWithTimeout(orderRef.get(),'讀取待同步訂單');
+    if(!snapshot.exists)throw new Error('訂單已不存在，無法同步庫存。');
+    const liveOrder={id:orderId,...snapshot.data()};
+    const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    if(items.length===1){
-        const item=await reserveSingleOrderItem(orderId,order,items[0],0);
-        const updates={
-            items:[item],itemCount:1,orderSchemaVersion:2,
-            inventoryProductKey:item.inventoryProductKey||'',
-            fulfillmentType:item.fulfillmentType||'WAREHOUSE',warehouseId:item.warehouseId||''
-        };
-        Object.assign(order,updates);
-        Object.assign(updates,orderWorkIndexFields(order));
-        await db.collection('orders').doc(orderId).set(updates,{merge:true});
-        await persistOrderProcurementDemands(orderId,order,[item]);
-        await registerInitialSelfOrders(orderId,order);
-        return {reservedQty:Number(item.reservedQty||0),shortageQty:Number(item.shortageQty||0),items:[item]};
-    }
-    const reservedItems=[];
-    for(let i=0;i<items.length;i++) reservedItems.push(await reserveSingleOrderItem(orderId,order,items[i],i));
-    const reservedQty=reservedItems.reduce((s,item)=>s+Number(item.reservedQty||0),0);
-    const shortageQty=reservedItems.reduce((s,item)=>s+Number(item.shortageQty||0),0);
-    const updates={items:reservedItems,itemCount:reservedItems.length,orderSchemaVersion:2};
-    Object.assign(order,updates);
-    Object.assign(updates,orderWorkIndexFields(order));
-    await db.collection('orders').doc(orderId).set(updates,{merge:true});
-    await persistOrderProcurementDemands(orderId,order,reservedItems);
+    for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i);
+    // Each item transaction has already published stock, reservation, order and demand atomically.
+    // Read the result for self-order processing and UI; never overwrite the source with reservedItems.
+    const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取庫存同步結果');
+    if(!latest.exists)throw new Error('訂單已不存在。');
+    Object.assign(order,{id:orderId,...latest.data()});
+    if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
     await registerInitialSelfOrders(orderId,order);
-    return {reservedQty,shortageQty,items:reservedItems};
+    return {...orderReservationSummary(order),items:order.items};
 }
 
 function normalizedOrderItems(order) {

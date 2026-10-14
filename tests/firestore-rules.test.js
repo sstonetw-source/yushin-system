@@ -1200,6 +1200,78 @@ function compatDb(uid) {
     }))
   };
 }
+async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,ownerUid=uid}={}){
+ const id='init-'+uid,productKey='init-product',warehouseId=direct?'':'W1';
+ await seed('orders/'+id,{ownerUid,salesCode:ownerUid==='eng1'?'E01':'S01',status:'active',inventoryReservationStatus:'pending',
+  items:[{itemId:'I',productId:productKey,itemCode:'INIT',qty,fulfillmentType:direct?'DIRECT_SHIP':'WAREHOUSE',warehouseId}]});
+ if(!direct){
+  await seed('inventory/'+productKey,{productKey,onHand,reserved:0,incoming:0});
+  await seed('warehouseStocks/W1__'+productKey,{productKey,warehouseId:'W1',onHand,reserved:0,incoming:0});
+ }
+ const client=compatDb(uid),nativeRun=client.runTransaction,plain=x=>JSON.parse(JSON.stringify(x));
+ client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ const fulfillment=require('../modules/fulfillment-core');
+ const context=vm.createContext({db:client,currentUser:{uid},currentUserName:uid,currentUserCode:ownerUid==='eng1'?'E01':'S01',
+  YushinReservation:require('../modules/reservation-core'),YushinWorkflow:require('../modules/workflow-core'),YushinProcurementDemand:demandCore,YushinFulfillment:fulfillment,
+  normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),normalizedOrderStatus:o=>[o.status,o.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
+  inventoryProductKey:i=>i.productId||'',inventoryRefFor:i=>client.collection('inventory').doc(i.productId),inventoryNumbers:require('../modules/inventory-core').normalizeStock,
+  warehouseStockDocId:(w,p)=>w+'__'+p,defaultWarehouse:()=>({id:'W1'}),orderWorkIndexFields:()=>({workCategories:['procurement']}),
+  inventoryMovementRecord:(type,qty,orderId,productKey,actor,extra)=>({type,qty,sourceType:'order',sourceId:orderId,productKey,actorUid:uid,...extra}),
+  salesCodeForName:()=> 'S01',invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},
+  runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});
+ const app=fs.readFileSync('app.js','utf8');
+ context.window={};
+ vm.runInContext(app.slice(app.indexOf('function procurementDemandForOrderItem('),app.indexOf('function purchasingLifecycleSnapshot(')),context);
+ vm.runInContext(app.slice(app.indexOf('async function reserveSingleOrderItem('),app.indexOf('function normalizedOrderItems(')),context);
+ return {context,id,client,run:()=>context.reserveSingleOrderItem(id,{}, {itemId:'I'},0)};
+}
+test('real order initialization atomically publishes item reservation and demand for authorized roles',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  try{await assertSucceeds(f.run());}catch(error){throw new Error(uid+' initialization: '+error.message);}
+  try{await assertSucceeds(f.run());}catch(error){throw new Error(uid+' retry: '+error.message);}
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  const demand=(await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data();
+  assert.equal(order.items[0].reservedQty,3);assert.equal(order.items[0].shortageQty,2);assert.equal(demand.remainingToOrderQty,2);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+ }
+});
+test('direct initialization does not need stock writes and purchaser can build it for responsible business owner',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{direct:true,qty:3,ownerUid:role==='purchaser'?'sales1':uid});
+  await assertSucceeds(f.run());
+  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data().remainingToOrderQty,3);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
+ }
+});
+test('additional stock during pending retry clears demand through reservation evidence and rejects forged quantity',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer']]){
+  const f=await orderInitializationFixture(uid,role);await f.run();
+  const demandRef=doc(db(uid),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I'));
+  await assertFails(updateDoc(demandRef,{requestedQty:0,remainingToOrderQty:0,status:'PENDING'}));
+  await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:3,incoming:0});
+  await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:3,incoming:0});
+  await assertSucceeds(f.run());
+  assert.equal((await getDoc(demandRef)).data().remainingToOrderQty,0);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,5);
+ }
+});
+test('warehouse and unrelated business owner cannot initialize another owner order, cancellation stops admin as well',async()=>{
+ for(const [uid,role] of [['wh1','warehouse'],['sales2','sales']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:'sales1'});
+  await assert.rejects(f.run());assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+ }
+ const f=await orderInitializationFixture('admin','admin');
+ await seed('orders/'+f.id,{ownerUid:'admin',status:'cancelled',items:[{itemId:'I',productId:'init-product',warehouseId:'W1',qty:5}]});
+ await assert.rejects(f.run(),/取消／作廢/);assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+});
+test('missing demand may be read for deterministic transaction creation but existing documents and lists remain owner scoped',async()=>{
+ await assertSucceeds(getDoc(doc(db('sales1'),'procurementDemands/MISSING-INIT')));
+ const f=await orderInitializationFixture('sales1','sales',{onHand:0});await f.run();
+ const id=encodeURIComponent('SALES_ORDER:'+f.id+':I');
+ await assertFails(getDoc(doc(db('sales2'),'procurementDemands/'+id)));
+ await assertFails(getDocs(collection(db('sales2'),'procurementDemands')));
+});
 async function seedStockWorkflow(){
   await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',deliveredQty:0,returnedQty:0,
     items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'w1'}]});
