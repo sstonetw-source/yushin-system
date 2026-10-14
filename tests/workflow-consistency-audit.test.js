@@ -16,7 +16,7 @@ function allocationFixture({qty=5,incoming=0,fail=false,received=0}={}){
  const db={collection(name){const filters=[];return {doc:id=>ref(name+'/'+(id||'event-'+(++sequence))),where(key,op,value){filters.push([key,value]);return this;},limit(){return this;},startAfter(){return this;},async get(){const rows=[...docs].filter(([path,data])=>path.startsWith(name+'/')&&filters.every(([key,value])=>data[key]===value));return {docs:rows.map(([path])=>snapshot(path)),size:rows.length,empty:!rows.length};}}}};
  const c=vm.createContext({db,YushinInventory:inventory,YushinWorkflow:workflow,YushinProcurementDemand:demandCore,firestoreReadWithTimeout:p=>p,
   normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',
-  itemDispatchState:(o,i)=>fulfillment.dispatchState(i),inventoryNumbers:inventory.normalizeStock,
+  itemDispatchState:(o,i)=>fulfillment.dispatchState(i),inventoryNumbers:inventory.normalizeStock,inventoryProductKey:i=>i.productId,orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),
   warehouseStockDocId:(w,p)=>w+'__'+p,orderWorkIndexFields:()=>({}),inventoryMovementRecord:(type,qty)=>({type,qty}),invalidateWarehouseStockCache(){},
   runRoleTransaction:async fn=>{const writes=[];const result=await fn({get:async r=>{assert.equal(writes.length,0,'all reads precede writes');return snapshot(r.path);},update:(r,data)=>writes.push([r,data]),set:(r,data)=>writes.push([r,data])});if(fail)throw Error('permission-denied');for(const [r,data] of writes)docs.set(r.path,{...docs.get(r.path),...structuredClone(data)});return result;}});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
@@ -46,10 +46,25 @@ test('failed allocation transaction leaves order, reservation, stock and demand 
  await assert.rejects(f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester'),/permission-denied/);
  assert.equal(JSON.stringify([...f.docs]),before);
 });
+test('transfer allocation uses its durable checkpoint and does not invent a supplier receipt',async()=>{
+ const f=allocationFixture();f.docs.set('stockTransfers/T',{status:'RECEIVED',autoAllocationQty:5,autoAllocatedQty:0,allocationCompleted:false});
+ await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester','','T','stockTransfers');
+ assert.equal(f.docs.get('stockTransfers/T').autoAllocatedQty,5);assert.equal(f.docs.get('stockTransfers/T').allocationCompleted,true);
+ assert.equal(f.demand().remainingToOrderQty,0);assert.equal([...f.docs.keys()].some(k=>k.startsWith('receipts/')),false);
+ await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester','','T','stockTransfers');
+ assert.equal(f.docs.get('inventory/P').reserved,5);
+});
 test('cancelled order cannot receive free-stock allocation',async()=>{
  const f=allocationFixture();f.docs.get('orders/O').status='cancelled';
  const result=await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester');
  assert.equal(result.allocatedQty,0);assert.equal(f.docs.get('inventory/P').reserved,0);
+});
+test('missing aggregate or in-progress order cannot receive an inconsistent warehouse-only allocation',async()=>{
+ for(const type of ['missing','pending']){
+  const f=allocationFixture();if(type==='missing')f.docs.delete('inventory/P');else f.docs.get('orders/O').inventoryReservationStatus='pending';
+  const result=await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester');
+  assert.equal(result.allocatedQty,0);assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);assert.equal(f.demand().remainingToOrderQty,5);
+ }
 });
 test('engineer can retry own order, but creator metadata cannot grant another owner access',()=>{
  const c=vm.createContext({currentUserRole:'engineer',currentUser:{uid:'E'}});
@@ -57,6 +72,16 @@ test('engineer can retry own order, but creator metadata cannot grant another ow
  assert.equal(c.canRetryOrderInventorySync({ownerUid:'E'}),true);
  assert.equal(c.canRetryOrderInventorySync({ownerUid:'OTHER',createdByUid:'E'}),false);
  for(const role of ['sales','engineer','purchaser','admin','warehouse']){c.currentUserRole=role;assert.equal(c.canRetryOrderInventorySync({ownerUid:'E'}),role!=='warehouse');}
+});
+test('direct arrival belongs to exact commercial owner; ordinary warehouse receipt keeps its three operational roles',()=>{
+ const c=vm.createContext({currentUser:{uid:'OWNER'},currentUserRole:'sales'});
+ vm.runInContext(section('function canReceiveInventoryCapability(', 'function canManageEquipmentCapability('),c);
+ for(const role of ['sales','engineer','purchaser','warehouse','admin']){
+  c.currentUserRole=role;
+  assert.equal(c.canConfirmSupplyReceipt({fulfillmentType:'DIRECT_SHIP',ownerUid:'OWNER'}),['sales','engineer','admin'].includes(role));
+  assert.equal(c.canConfirmSupplyReceipt({fulfillmentType:'DIRECT_SHIP',ownerUid:'OTHER'}),role==='admin');
+  assert.equal(c.canConfirmSupplyReceipt({fulfillmentType:'WAREHOUSE'}),['purchaser','warehouse','admin'].includes(role));
+ }
 });
 test('shared duplicate check finds same-brand product after first fifty exact-code matches including inactive products',async()=>{
  let reads=0;const pages=Array.from({length:51},(_,i)=>({id:String(i),data:()=>({brandName:i===50?'Target':'Other',active:false})}));
@@ -67,11 +92,12 @@ test('shared duplicate check finds same-brand product after first fifty exact-co
  assert.equal(await c.findDuplicateProductMaster('Target','A','50'),null);
 });
 test('saved product synchronizes product page and invalidates old search results without extra database reads',()=>{
- let rendered=0,lookup;const c=vm.createContext({productManagementResults:[],productManagementSearchCache:new Map([['old',[]]]),productManagementSearchGeneration:2,productBrandBrowseGeneration:3,
-  productMasterDocToPriceItem:d=>({...d.data(),productId:d.id}),cacheProductLookupItem:item=>lookup=item,renderProductManagementResults:()=>rendered++});
+ let rendered=0,lookup;const c=vm.createContext({productManagementResults:[],productManagementSearchCache:new Map([['old',[]]]),productManagementSearchGeneration:2,productBrandBrowseGeneration:3,productManagementSearchInProgress:true,productManagementActiveSearch:'old',
+  productMasterDocToPriceItem:d=>({...d.data(),productId:d.id}),cacheProductLookupItem:item=>lookup=item,renderProductManagementResults:()=>rendered++,updateProductSearchControls(){},updateProductManagementMoreButton(){}});
  vm.runInContext(section('function syncSavedProductMaster(', 'window.saveProductMasterEditor ='),c);
  c.syncSavedProductMaster('P',{productName:'New'});c.syncSavedProductMaster('P',{productName:'Updated'});
  assert.equal(c.productManagementResults.length,1);assert.equal(c.productManagementResults[0].productName,'Updated');
  assert.equal(c.productManagementSearchCache.size,0);assert.equal(c.productManagementSearchGeneration,4);assert.equal(c.productBrandBrowseGeneration,5);
  assert.equal(lookup.productId,'P');assert.equal(rendered,2);
+ assert.equal(c.productManagementSearchInProgress,false);assert.equal(c.productManagementActiveSearch,null);
 });

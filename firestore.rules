@@ -31,7 +31,11 @@ service cloud.firestore {
     function engineer() { return role() == 'engineer'; }
     function purchaser() { return role() == 'purchaser'; }
     function warehouse() { return role() == 'warehouse'; }
-    function directShipReceiver() { return role() in ['purchaser', 'warehouse']; }
+    // Customer arrival is a commercial fact, not a warehouse receipt.
+    function directShipReceiver() {
+      let userRole = role();
+      return userRole == 'admin' || (userRole in ['sales', 'engineer'] && resource.data.get('ownerUid', '') == request.auth.uid);
+    }
 
     // Sales and engineers own their own commercial and fulfillment records.
     function businessOwner() {
@@ -211,11 +215,12 @@ service cloud.firestore {
     // Direct-ship receiving is a narrow hot path used in the same atomic batch as
     // the order delivery summary. Keep it intentionally small so the combined
     // Firestore Rules evaluation stays below the platform expression limit.
-    function directShipSupplyReceiptUpdate() {
+    function directShipSupplyReceiptUpdate(id) {
       let nextReceived = request.resource.data.get('receivedQty', 0);
       let qty = resource.data.get('qty', 0);
       return directShipReceiver()
         && resource.data.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+        && directShipSupplyReceiptEvidence(id)
         && resource.data.get('status', 'ORDERED') != 'CANCELLED'
         && resource.data.get('status', 'ORDERED') != 'CLOSED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -233,9 +238,28 @@ service cloud.firestore {
         );
     }
 
+    function directShipSupplyReceiptEvidence(id) {
+      let orderPath = /databases/$(database)/documents/orders/$(resource.data.orderId);
+      let before = get(orderPath).data;
+      let after = getAfter(orderPath).data;
+      let records = after.get('deliveryRecords', []);
+      let record = records[before.get('deliveryRecords', []).size()];
+      let receiptPath = /databases/$(database)/documents/receipts/$(record.receiptId);
+      let receipt = getAfter(receiptPath).data;
+      return !orderIsCancelled(before)
+        && resource.data.ownerUid == before.ownerUid
+        && records.size() == before.get('deliveryRecords', []).size() + 1
+        && record.sourceType == 'DIRECT_SHIP_RECEIPT' && record.sourceId == id
+        && !exists(receiptPath) && receipt.supplyOrderId == id
+        && receipt.qty == request.resource.data.receivedQty - resource.data.get('receivedQty', 0)
+        && record.qty == receipt.qty;
+    }
+
     function purchaserSupplyOperationalUpdate() {
       // Supply identity is immutable; purchasing may only change operational progress.
       return purchaser()
+        && (resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+          || request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0))
         && sameSupplyIdentity()
         && (resource.data.get('receivedQty', 0) == 0 || request.resource.data.get('unitCost', 0) == resource.data.get('unitCost', 0))
         && validSupplyOperationalState()
@@ -268,6 +292,7 @@ service cloud.firestore {
 
     function warehouseSupplyOperationalUpdate() {
       return warehouse()
+        && resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
         && sameSupplyIdentity()
         && validSupplyOperationalState()
         && request.resource.data.get('status', 'ORDERED') != 'CANCELLED'
@@ -315,6 +340,9 @@ service cloud.firestore {
       let supplyPath = /databases/$(database)/documents/supplyOrders/$(supplyId);
       let supplyBefore = get(supplyPath).data;
       let supplyAfter = getAfter(supplyPath).data;
+      let index = newRecord.get('itemIndex', -1);
+      let beforeItem = resource.data.items[index];
+      let afterItem = request.resource.data.items[index];
       return afterRecords.hasAll(beforeRecords)
         && !beforeRecords.hasAny([newRecord])
         && newRecord.get('sourceType', '') == 'DIRECT_SHIP_RECEIPT'
@@ -323,6 +351,13 @@ service cloud.firestore {
         && supplyBefore.get('orderId', '') == orderId
         && supplyBefore.get('itemId', '') == newRecord.get('itemId', '')
         && supplyBefore.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+        && supplyBefore.get('ownerUid', '') == resource.data.get('ownerUid', '')
+        && index is int && index >= 0 && index < resource.data.items.size()
+        && beforeItem.itemId == newRecord.itemId && beforeItem.get('fulfillmentType', '') == 'DIRECT_SHIP'
+        && request.resource.data.items.removeAll([afterItem]) == resource.data.items.removeAll([beforeItem])
+        && afterItem.get('receivedQty', 0) == beforeItem.get('receivedQty', 0) + newRecord.qty
+        && afterItem.get('deliveredQty', 0) == beforeItem.get('deliveredQty', 0) + newRecord.qty
+        && request.resource.data.get('deliveredQty', 0) == resource.data.get('deliveredQty', 0) + newRecord.qty
         && supplyAfter.get('receivedQty', 0) == supplyBefore.get('receivedQty', 0) + newRecord.get('qty', 0)
         && supplyAfter.get('receivedQty', 0) <= supplyBefore.get('qty', 0);
     }
@@ -839,6 +874,50 @@ service cloud.firestore {
           'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
           'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt', 'sourceItemIndex'
         ]);
+    }
+
+    function businessDirectDemandReceiptUpdate() {
+      let orderPath = /databases/$(database)/documents/orders/$(resource.data.sourceId);
+      let before = get(orderPath).data;
+      let after = getAfter(orderPath).data;
+      let records = after.get('deliveryRecords', []);
+      let record = records[before.get('deliveryRecords', []).size()];
+      return role() in ['sales', 'engineer'] && resource.data.get('ownerUid', '') == request.auth.uid
+        && resource.data.get('sourceType', '') == 'SALES_ORDER'
+        && resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+        && after.ownerUid == request.auth.uid && !orderIsCancelled(before)
+        && records.size() == before.get('deliveryRecords', []).size() + 1
+        && record.sourceType == 'DIRECT_SHIP_RECEIPT' && record.itemId == resource.data.sourceItemId
+        && request.resource.data.requestedQty == resource.data.requestedQty
+        && request.resource.data.orderedQty == resource.data.orderedQty
+        && request.resource.data.receivedQty == resource.data.receivedQty + record.qty
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'receivedQty', 'remainingToReceiveQty', 'perReceived', 'status', 'updatedAt', 'sourceItemIndex'
+        ]);
+    }
+
+    function validDirectShipReceipt(id, data) {
+      let supplyPath = /databases/$(database)/documents/supplyOrders/$(data.supplyOrderId);
+      let before = get(supplyPath).data;
+      let after = getAfter(supplyPath).data;
+      let orderPath = /databases/$(database)/documents/orders/$(before.orderId);
+      let orderBefore = get(orderPath).data;
+      let orderAfter = getAfter(orderPath).data;
+      let records = orderAfter.get('deliveryRecords', []);
+      let record = records[orderBefore.get('deliveryRecords', []).size()];
+      let userRole = role();
+      return (userRole == 'admin' || (userRole in ['sales', 'engineer'] && before.ownerUid == request.auth.uid && orderBefore.ownerUid == request.auth.uid))
+        && data.operationId == id && data.receiptId == id && id.size() <= 128
+        && data.fulfillmentType == 'DIRECT_SHIP' && before.fulfillmentType == 'DIRECT_SHIP'
+        && data.warehouseId == '' && !orderIsCancelled(orderBefore)
+        && data.orderId == before.orderId && data.itemId == before.itemId
+        && data.ownerUid == before.ownerUid && data.productId == before.get('productId', '')
+        && data.qty is number && data.qty > 0 && data.qty <= before.qty - before.get('receivedQty', 0)
+        && after.receivedQty == before.get('receivedQty', 0) + data.qty
+        && data.cumulativeReceivedQty == after.receivedQty
+        && records.size() == orderBefore.get('deliveryRecords', []).size() + 1
+        && record.sourceType == 'DIRECT_SHIP_RECEIPT' && record.sourceId == data.supplyOrderId
+        && record.receiptId == id && record.qty == data.qty;
     }
 
     match /users/{id} {
@@ -1466,10 +1545,10 @@ service cloud.firestore {
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || directShipReceiptOrderUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && owns(resource.data) && owns(request.resource.data)
-          && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())));
+        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
+        : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
+        : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
+          && ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && owns(request.resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))));
     }
 
     function businessDeliveryRecordChange(before, after, index) {
@@ -1558,7 +1637,10 @@ service cloud.firestore {
       allow create: if validProcurementDemand(request.resource.data) && (admin() || purchaser() || warehouse()
         || businessProcurementDemandCreate(request.resource.data));
       allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
-        && (admin() || purchaser() || warehouse() || businessProcurementDemandOperationalUpdate());
+        && ((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+          && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
+          ? (admin() || businessDirectDemandReceiptUpdate())
+          : (admin() || purchaser() || warehouse() || businessProcurementDemandOperationalUpdate()));
       allow delete: if admin();
     }
 
@@ -1610,7 +1692,7 @@ service cloud.firestore {
       // or receiving roles may mutate quantities/status; this prevents direct API edits
       // from bypassing procurement and receipt workflows.
       allow update: if (admin()
-        || directShipSupplyReceiptUpdate()
+        || directShipSupplyReceiptUpdate(id)
         || purchaserSupplyOperationalUpdate()
         || supplierCancellationResolution()
         || warehouseSupplyOperationalUpdate()) && supplierReceiptDispositionAllowed() && validQuickPurchaseUpdate();
@@ -1619,9 +1701,21 @@ service cloud.firestore {
 
     // The authoritative supply record retains cost. This derived receiving view
     // must exactly match it, except that financial fields are absent.
+    function businessReceivingView(data) {
+      return businessOwner() && data.get('ownerUid', '') == request.auth.uid
+        && (data.get('fulfillmentType', '') == 'DIRECT_SHIP' || data.get('type', '') == 'SALES_SELF_ORDER');
+    }
+    function receivingViewWriter(data) {
+      let userRole = role();
+      return userRole in ['admin', 'purchaser', 'warehouse']
+        || (userRole in ['sales', 'engineer'] && data.get('ownerUid', '') == request.auth.uid
+          && (data.get('fulfillmentType', '') == 'DIRECT_SHIP' || data.get('type', '') == 'SALES_SELF_ORDER'));
+    }
     match /receivingSupplyOrders/{id} {
-      allow read: if admin() || purchaser() || warehouse();
-      allow create, update: if canReceiveInventory()
+      allow get: if admin() || purchaser() || warehouse()
+        || (businessOwner() && (resource == null || businessReceivingView(resource.data)));
+      allow list: if admin() || purchaser() || warehouse() || businessReceivingView(resource.data);
+      allow create, update: if receivingViewWriter(request.resource.data)
         && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
         && request.resource.data.diff(getAfter(/databases/$(database)/documents/supplyOrders/$(id)).data)
           .affectedKeys().hasOnly(['unitCost', 'cost', 'costPrice']);
@@ -1776,11 +1870,19 @@ service cloud.firestore {
         && transferOrderEvidence(request.resource.data) && transferSourceStock(request.resource.data)
         && transferAggregate(request.resource.data, false)
         && (request.resource.data.kind != 'HANDOFF' || transferTargetStock(request.resource.data));
-      allow update: if canReceiveInventory() && resource.data.status == 'IN_TRANSIT'
+      allow update: if canReceiveInventory() && ((resource.data.status == 'IN_TRANSIT'
         && request.resource.data.status == 'RECEIVED' && request.resource.data.receivedByUid == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','receivedAt','receivedByUid'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','receivedAt','receivedByUid','autoAllocationQty','autoAllocatedQty','allocationCompleted'])
+        && request.resource.data.get('autoAllocationQty', resource.data.qty - resource.data.reservedQty) == (resource.data.get('orderId', '') == '' ? resource.data.qty - resource.data.reservedQty : 0)
+        && request.resource.data.get('autoAllocatedQty', 0) == 0
         && transferTargetStock(request.resource.data) && transferAggregate(request.resource.data, true)
-        && transferOrderEvidence(request.resource.data);
+        && transferOrderEvidence(request.resource.data))
+        || (resource.data.status == 'RECEIVED' && resource.data.get('orderId', '') == ''
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['autoAllocatedQty','allocationCompleted','allocationUpdatedAt'])
+          && request.resource.data.get('autoAllocatedQty', 0) is number
+          && request.resource.data.get('autoAllocatedQty', 0) >= resource.data.get('autoAllocatedQty', 0)
+          && request.resource.data.get('autoAllocatedQty', 0) <= resource.data.get('autoAllocationQty', 0)
+          && request.resource.data.get('allocationCompleted', false) is bool));
       allow delete: if false;
     }
 
@@ -1901,9 +2003,12 @@ service cloud.firestore {
     }
 
     match /receipts/{id} {
-      allow read: if admin() || purchaser() || warehouse()
+      allow get: if admin() || purchaser() || warehouse()
+        || (businessOwner() && (resource == null || owns(resource.data)));
+      allow list: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if canReceiveInventory()
+      allow create: if (request.resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+        ? validDirectShipReceipt(id, request.resource.data) : canReceiveInventory())
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data);
       // Receipt facts remain immutable. Receiving roles may only advance the

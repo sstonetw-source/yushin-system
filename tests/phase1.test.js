@@ -3443,7 +3443,7 @@ test('receipt allocation counter prevents concurrent retry over-allocation', () 
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
     const allocateEnd=appSource.indexOf('\nasync function refreshAffectedOrderCaches',allocateStart);
     const source=appSource.slice(allocateStart,allocateEnd);
-    assert.match(source,/const receiptRef=receiptId\?db\.collection\('receipts'\)\.doc\(receiptId\):null/);
+    assert.match(source,/const receiptRef=receiptId\?db\.collection\(checkpointCollection\)\.doc\(receiptId\):null/);
     assert.match(source,/receiptRemaining=receiptRef\?Math\.max\(0,receiptTarget-receiptAllocated\):remaining/);
     assert.match(source,/const take=Math\.min\(remaining,receiptRemaining,liveShortage/);
     assert.match(source,/autoAllocatedQty:nextAllocated/);
@@ -3971,16 +3971,17 @@ test('warehouse receiving capability is separate from purchase editing', () => {
     const receivingStart=appSource.indexOf('function renderPurchasingReceivingWorkList');
     const receivingEnd=appSource.indexOf('\nwindow.renderPoList',receivingStart);
     const receivingSource=appSource.slice(receivingStart,receivingEnd);
-    assert.equal((receivingSource.match(/!canReceiveInventoryCapability\(\)/g)||[]).length,2);
+    assert.equal((receivingSource.match(/!canReceiveInventoryCapability\(\)/g)||[]).length,1);
+    assert.match(receivingSource,/!canConfirmSupplyReceipt\(supply\)/);
     assert.doesNotMatch(receivingSource,/!canEditPage\('orders\.po'\)/);
 
     const openStart=appSource.indexOf('window.openSupplyReceipt = function');
     const openEnd=appSource.indexOf('\nwindow.savePoReceiptBatch',openStart);
-    assert.match(appSource.slice(openStart,openEnd),/if \(!canReceiveInventoryCapability\(\)\) return/);
+    assert.match(appSource.slice(openStart,openEnd),/if \(!canConfirmSupplyReceipt\(supply\)\)/);
 
     const saveStart=appSource.indexOf('window.savePoReceiptBatch = async function');
     const saveEnd=appSource.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
-    assert.match(appSource.slice(saveStart,saveEnd),/if \(!canReceiveInventoryCapability\(\)\) return/);
+    assert.match(appSource.slice(saveStart,saveEnd),/!canConfirmSupplyReceipt\(supply\)/);
     assert.match(appSource.slice(saveStart,saveEnd),/receiptTaskBlocksSupply\(supplyId\)/);
 
     const stockStart=appSource.indexOf('window.openDirectStockPurchase = async function');
@@ -4545,7 +4546,7 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     assert.match(orderSource,/orderUpdateAllowed\(id\)/);
     assert.match(rulesSource.slice(rulesSource.indexOf('function orderUpdateAllowed(id)'),rulesSource.indexOf('match /orders/{id}')),/directShipReceiptOrderUpdate\(id\)/);
 
-    const supplyFastStart=rulesSource.indexOf('function directShipSupplyReceiptUpdate()');
+    const supplyFastStart=rulesSource.indexOf('function directShipSupplyReceiptUpdate(id)');
     const supplyFastEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',supplyFastStart);
     const supplyFastSource=rulesSource.slice(supplyFastStart,supplyFastEnd);
     assert.ok(supplyFastStart>=0&&supplyFastEnd>supplyFastStart);
@@ -4555,7 +4556,7 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     const supplyMatchStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const supplyMatchEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyMatchStart);
     const supplyMatchSource=rulesSource.slice(supplyMatchStart,supplyMatchEnd);
-    assert.match(supplyMatchSource,/directShipSupplyReceiptUpdate\(\)/);
+    assert.match(supplyMatchSource,/directShipSupplyReceiptUpdate\(id\)/);
 });
 
 test('direct ship receipt transaction writes the supply delta required by security rules', () => {

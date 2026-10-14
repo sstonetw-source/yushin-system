@@ -5,9 +5,10 @@
    const existingQty=n(input.existingQty);
    const sameStock=!!input.sameStock;
    const availableQty=n(input.availableQty);
+   const inTransitQty=n(input.inTransitQty);
    const preservedQty=sameStock?Math.min(existingQty,requestedQty):0;
    const releaseQty=Math.max(0,existingQty-preservedQty);
-   const additionalNeededQty=Math.max(0,requestedQty-preservedQty);
+   const additionalNeededQty=Math.max(0,requestedQty-preservedQty-inTransitQty);
    const additionalReserveQty=Math.min(additionalNeededQty,availableQty);
    const reservedQty=preservedQty+additionalReserveQty;
    const shortageQty=Math.max(0,requestedQty-reservedQty);
