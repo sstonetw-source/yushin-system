@@ -1628,8 +1628,7 @@ service cloud.firestore {
       let attempt = after.get('inventoryReservationAttemptId', '');
       let error = after.get('inventoryReservationError', '');
       let updatedAt = after.get('inventoryReservationUpdatedAt', '');
-      return !after.diff(before).affectedKeys().hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId'])
-        || (role() in ['admin','purchaser','sales','engineer']
+      return (role() in ['admin','purchaser','sales','engineer']
           && !orderIsCancelled(before) && !orderIsCancelled(after)
           && before.get('inventoryReservationStatus', '') != 'completed'
           && attempt is string && attempt.size() > 0 && attempt.size() <= 128
@@ -1646,8 +1645,7 @@ service cloud.firestore {
     function validOrderSourceSyncTransition(id) {
       let before = resource.data;
       let after = request.resource.data;
-      return !after.diff(before).affectedKeys().hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt'])
-        || (role() in ['admin','purchaser','sales','engineer']
+      return (role() in ['admin','purchaser','sales','engineer']
           && (role() in ['admin','purchaser'] || before.get('ownerUid', '') == request.auth.uid)
           && !orderIsCancelled(before) && !orderIsCancelled(after)
           && before.get('inventoryReservationStatus', '') == 'completed'
@@ -1691,7 +1689,10 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'orderStatus'])
-        || validOrderCancellationTransition()) && validOrderInventorySyncTransition() && validOrderSourceSyncTransition(id) && orderUpdateAllowed(id);
+        || validOrderCancellationTransition())
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition())
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id))
+        && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 

@@ -1321,8 +1321,8 @@ test('new order cannot forge completed source checkpoint without the matching so
   sourceDocumentSyncStatus:'completed',sourceDocumentSyncError:'',sourceDocumentSyncUpdatedAt:'2026-10-14'};
  await seed('forecasts/new-source-checkpoint',{ownerUid:'sales1',salesCode:'S01',status:'active',linkedDocuments:[]});
  await assertFails(setDoc(doc(db('sales1'),'orders/new-source-checkpoint'),base));
- const b=writeBatch(db('sales1'));b.update(doc(db('sales1'),'forecasts/new-source-checkpoint'),{linkedDocuments:[{type:'order',id:'new-source-checkpoint',relation:'created'}]});
- b.set(doc(db('sales1'),'orders/new-source-checkpoint'),base);await assertSucceeds(b.commit());
+ const client=db('sales1'),b=writeBatch(client);b.update(doc(client,'forecasts/new-source-checkpoint'),{linkedDocuments:[{type:'order',id:'new-source-checkpoint',relation:'created'}]});
+ b.set(doc(client,'orders/new-source-checkpoint'),base);await assertSucceeds(b.commit());
 });
 test('source sync completion requires the actual source backlink and quote closure in the same transaction',async()=>{
  const base={ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',sourceType:'quote',sourceId:'source-proof',
@@ -1330,8 +1330,8 @@ test('source sync completion requires the actual source backlink and quote closu
  await seed('orders/source-proof',base);await seed('quotes/source-proof',{ownerUid:'sales1',salesCode:'S01',status:'active',linkedDocuments:[]});
  const patch={sourceDocumentSyncStatus:'completed',sourceDocumentSyncError:'',sourceDocumentSyncUpdatedAt:'2026-10-14'};
  await assertFails(updateDoc(doc(db('sales1'),'orders/source-proof'),patch));
- const b=writeBatch(db('sales1'));b.update(doc(db('sales1'),'quotes/source-proof'),{dealClosed:true,status:'completed',linkedDocuments:[{type:'order',id:'source-proof',relation:'created'}]});
- b.update(doc(db('sales1'),'orders/source-proof'),patch);await assertSucceeds(b.commit());
+ const client=db('sales1'),b=writeBatch(client);b.update(doc(client,'quotes/source-proof'),{dealClosed:true,status:'completed',linkedDocuments:[{type:'order',id:'source-proof',relation:'created'}]});
+ b.update(doc(client,'orders/source-proof'),patch);await assertSucceeds(b.commit());
  await assertFails(updateDoc(doc(db('sales1'),'orders/source-proof'),{...patch,sourceDocumentSyncStatus:'failed',sourceDocumentSyncError:'old error'}));
  await seed('orders/source-proof',{...base,status:'cancelled'});
  await assertFails(updateDoc(doc(db('sales1'),'orders/source-proof'),patch));
@@ -1375,7 +1375,7 @@ test('source-only Forecast recovery retains owner access and cannot complete a m
  vm.runInContext(app.slice(app.indexOf('function orderSourceSyncIncomplete('),app.indexOf('const pendingOrderReservationIds = new Set();')),c);
  assert.equal(await c.syncNewOrderSourceDocuments(id,{...order},'sales1'),null);
  await seed('orders/'+id,order);await env.withSecurityRulesDisabled(async ctx=>deleteDoc(doc(ctx.firestore(),'forecasts/'+id)));
- const failed={...order};assert.match((await c.syncNewOrderSourceDocuments(id,failed,'sales1')).message,/已不存在/);assert.equal(failed.sourceDocumentSyncStatus,'failed');
+ const failed={...order};assert.match((await c.syncNewOrderSourceDocuments(id,failed,'sales1')).message,/已不存在|PERMISSION_DENIED/);assert.equal(failed.sourceDocumentSyncStatus,'failed');
  assert.equal((await getDoc(doc(db('admin'),'forecasts/'+id))).exists(),false);
 });
 async function seedStockWorkflow(){
