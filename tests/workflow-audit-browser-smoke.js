@@ -20,8 +20,8 @@ window.alert=x=>messages.push(x);
  const browser=await chromium.launch({executablePath,args:['--no-sandbox','--disable-dev-shm-usage']});const errors=[];
  try{
   for(const width of [1280,390]){
-   const page=await browser.newPage({viewport:{width,height:900}});page.on('pageerror',e=>errors.push(e.message));
-   await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer"><div id="actions"></div><div id="poReceiptBatchOverlay" class="eq-modal-overlay"><div class="eq-modal-box"><h3 id="poReceiptBatchTitle"></h3><div class="table-wrap"><table><tbody id="poReceiptBatchBody"></tbody></table></div></div></div></div></body></html>');
+   const page=await browser.newPage({viewport:{width,height:900},hasTouch:width<768,isMobile:width<768});page.on('pageerror',e=>errors.push(e.message));
+   await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer"><section id="order-system" class="content-section active"><div id="actions" class="order-actions"></div></section><div id="poReceiptBatchOverlay" class="eq-modal-overlay"><div class="eq-modal-box"><h3 id="poReceiptBatchTitle"></h3><div class="table-wrap"><table><tbody id="poReceiptBatchBody"></tbody></table></div></div></div></div></body></html>');
    await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
    for(const content of [bootstrap,section('function inlineJsValue(', '// 早期估價單/訂單'),section('function canReceiveInventoryCapability(', 'function canManageEquipmentCapability('),
     section('function directShipReceiptActionHtml(', 'window.openSelfOrderModal ='),section('window.openSupplyReceipt =', 'const receiptTaskJobs =')])await page.addScriptTag({content});
