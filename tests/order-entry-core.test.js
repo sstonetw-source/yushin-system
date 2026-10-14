@@ -68,7 +68,7 @@ test('purchaser can assist with pending entry but cannot confirm a salesperson s
  f.c.currentUserRole='purchaser';assert.equal(f.c.window.saveNewOrder(),undefined);assert.match(f.alerts[0],/負責業務確認/);
 });
 
-test('trade information may be empty at creation but printing/billing requires type and invoice title when applicable',()=>{
+test('trade information may be empty at creation but printing requires type and invoice title when applicable',()=>{
  assert.equal(core.validateTrade({}).valid,false);
  assert.equal(core.validateTrade({transactionType:'直'}).valid,false);
  assert.equal(core.validateTrade({transactionType:'直',invoiceTitle:'台大'}).valid,true);
@@ -86,12 +86,13 @@ test('printing validates current transaction information before writing a dispat
   assert.equal(writes.length,core.validateTrade(trade).valid?2:0);assert.equal(c.pendingDispatchOrderIds.size,0);
  }
 });
-test('billing rechecks transaction information after loading latest order and rolls back a stale UI attempt',async()=>{
+test('invoice choice is for printing and does not block business billing confirmation',async()=>{
  const order={id:'O',transactionType:'借',isBilled:false,statusHistory:[]};const writes=[],alerts=[];
  const c=vm.createContext({window:{},YushinOrderEntry:core,ordersCache:[order],pendingOrderStatusKeys:new Set(),activeOrderWorkFilter:'all',currentUserName:'Sales',currentUser:null,currentDeliveryOrderId:null,
   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,normalizedOrderStatus:()=> 'normal',orderBillingDate:()=>'',localDateString:()=> '2026-10-13',BUSINESS_STATUS:{ACTIVE:'active'},writeAppDataCache(){},renderOrdersList(){},alert:x=>alerts.push(x),
+  firebase:{firestore:{FieldValue:{arrayUnion:x=>[x]}}},orderWorkIndexFields:()=>({}),
   db:{collection:()=>({doc:()=>({})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({...order,transactionType:''})}),update:(...x)=>writes.push(x)})});
  const a=source.indexOf('window.toggleOrderStatus ='),b=source.indexOf('window.updateOrderBillingDate',a);vm.runInContext(source.slice(a,b),c);
  c.window.toggleOrderStatus('O','isBilled',true);await new Promise(r=>setImmediate(r));
- assert.equal(writes.length,0);assert.equal(order.isBilled,false);assert.match(alerts[0],/交易資訊/);assert.equal(c.pendingOrderStatusKeys.size,0);
+ assert.equal(writes.length,1);assert.equal(order.isBilled,true);assert.equal(alerts.length,0);assert.equal(c.pendingOrderStatusKeys.size,0);
 });

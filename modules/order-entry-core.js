@@ -25,8 +25,8 @@
             && a.selfOrderConfirmed===b.selfOrderConfirmed && JSON.stringify(a.deliveryPlan||{})===JSON.stringify(b.deliveryPlan||{});
     }
     function validateTrade(order={}) {
-        if(!['直','借','扣'].includes(order.transactionType))return {valid:false,message:'請至訂單的交易資訊選擇直、借或扣，再打單／核銷。'};
-        if(order.transactionType==='直'&&!text(order.invoiceTitle))return {valid:false,message:'開發票的訂單請先填寫發票抬頭，再打單／核銷。'};
+        if(!['直','借','扣'].includes(order.transactionType))return {valid:false,message:'請至訂單的交易資訊選擇直、借或扣，供採購打單確認。'};
+        if(order.transactionType==='直'&&!text(order.invoiceTitle))return {valid:false,message:'開發票的訂單請先填寫發票抬頭，再打單。'};
         return {valid:true};
     }
     function copyItem(item={},fallback={}) {

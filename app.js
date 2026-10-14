@@ -16270,7 +16270,6 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     if (pendingOrderStatusKeys.has(pendingKey)) return;
     if (normalizedOrderStatus(o) !== 'normal') { alert('已取消的訂單不能更改進度。'); return; }
 
-    if(newValue){const validation=globalThis.YushinOrderEntry.validateTrade(o);if(!validation.valid){alert(validation.message);return;}}
     const billingDate = newValue ? (orderBillingDate(o) || localDateString()) : '';
     const previousWorkFilter = activeOrderWorkFilter;
     const previous = {
@@ -16298,7 +16297,6 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
         const snapshot = await transaction.get(ref);
         if (!snapshot.exists) throw new Error('找不到這筆訂單。');
         const order = snapshot.data();
-        if(newValue){const validation=globalThis.YushinOrderEntry.validateTrade(order);if(!validation.valid)throw new Error(validation.message);}
         if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
         const updates = {
             isBilled:newValue,
