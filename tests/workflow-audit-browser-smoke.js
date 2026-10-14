@@ -7,7 +7,7 @@ const order={id:'O',ownerUid:'OWNER',status:'active',items:[{itemId:'I',itemCode
 let ordersCache=[order],supplyReceivingCache=[],poReceiptTargetId='';
 const supply={id:'D',orderId:'O',itemId:'I',ownerUid:'OWNER',fulfillmentType:'DIRECT_SHIP',qty:3,receivedQty:0,status:'ORDERED',itemCode:'A1'};
 const normalizedOrderItems=o=>o.items,normalizedOrderStatus=o=>o.status==='active'?'normal':'cancelled',orderInventorySyncIncomplete=()=>false;
-const inlineJsValue=x=>JSON.stringify(x),escapeHtml=x=>String(x||''),escapeAttr=escapeHtml;
+const escapeHtml=x=>String(x||'');
 const beginActionButton=b=>{if(b.disabled)return null;b.disabled=true;return {};},endActionButton=b=>{if(b)b.disabled=false;};
 window.messages=[];const showActionFeedback=x=>messages.push(x);
 const readQueryInBatches=async()=>[supply],isPurchaseTerminalStatus=s=>['CANCELLED','CLOSED'].includes(s);
@@ -23,7 +23,7 @@ window.alert=x=>messages.push(x);
    const page=await browser.newPage({viewport:{width,height:900}});page.on('pageerror',e=>errors.push(e.message));
    await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer"><div id="actions"></div><div id="poReceiptBatchOverlay" class="eq-modal-overlay"><div class="eq-modal-box"><h3 id="poReceiptBatchTitle"></h3><div class="table-wrap"><table><tbody id="poReceiptBatchBody"></tbody></table></div></div></div></div></body></html>');
    await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
-   for(const content of [bootstrap,section('function canReceiveInventoryCapability(', 'function canManageEquipmentCapability('),
+   for(const content of [bootstrap,section('function inlineJsValue(', '// 早期估價單/訂單'),section('function canReceiveInventoryCapability(', 'function canManageEquipmentCapability('),
     section('function directShipReceiptActionHtml(', 'window.openSelfOrderModal ='),section('window.openSupplyReceipt =', 'const receiptTaskJobs =')])await page.addScriptTag({content});
    for(const role of ['sales','engineer','purchaser','warehouse','admin']){
     await page.evaluate(role=>{currentUserRole=role;document.getElementById('poReceiptBatchOverlay').classList.remove('active');document.getElementById('actions').innerHTML=directShipReceiptActionHtml(order);},role);
