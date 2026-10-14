@@ -52,7 +52,7 @@ jobs:
         run: node tests/ui-control-browser-smoke.js
       - name: Check order entry in desktop and mobile Chrome
         run: node tests/order-entry-browser-smoke.js
-      - name: Check direct arrival entry for five roles in desktop and mobile Chrome
+      - name: Check direct arrival and source retry for five roles in desktop and mobile Chrome
         run: node tests/workflow-audit-browser-smoke.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase

@@ -4,14 +4,19 @@ const app=fs.readFileSync('app.js','utf8');const section=(a,b)=>app.slice(app.in
 const bootstrap=`
 let currentUser={uid:'OWNER'},currentUserRole='sales';
 const order={id:'O',ownerUid:'OWNER',status:'active',items:[{itemId:'I',itemCode:'A1',qty:3,fulfillmentType:'DIRECT_SHIP',supplyOrderedQty:3,receivedQty:0}]};
-let ordersCache=[order],supplyReceivingCache=[],poReceiptTargetId='';
+let ordersCache=[order],supplyReceivingCache=[],poReceiptTargetId='',sourceOrder=null;
+const DOCUMENT_TYPES={QUOTE:'quote',FORECAST:'forecast',ORDER:'order'},pendingOrderReservationIds=new Set();
+window.sourceRetryCalls=[];
+const syncNewOrderSourceDocuments=async(id,data)=>{sourceRetryCalls.push(id);data.sourceDocumentSyncStatus='completed';return null;};
+const firestoreReadWithTimeout=p=>p,renderOrdersList=()=>{},writeAppDataCache=()=>{},syncOrderIntoPurchasingCaches=()=>{};
+const synchronizeOrderInventory=async()=>{throw Error('source-only retry must not repeat inventory');};
 const supply={id:'D',orderId:'O',itemId:'I',ownerUid:'OWNER',fulfillmentType:'DIRECT_SHIP',qty:3,receivedQty:0,status:'ORDERED',itemCode:'A1'};
 const normalizedOrderItems=o=>o.items,normalizedOrderStatus=o=>o.status==='active'?'normal':'cancelled',orderInventorySyncIncomplete=()=>false;
 const escapeHtml=x=>String(x||'');
 const beginActionButton=b=>{if(b.disabled)return null;b.disabled=true;return {};},endActionButton=b=>{if(b)b.disabled=false;};
 window.messages=[];const showActionFeedback=x=>messages.push(x);
 const readQueryInBatches=async()=>[supply],isPurchaseTerminalStatus=s=>['CANCELLED','CLOSED'].includes(s);
-const db={collection:()=>({where(){return this;}})},receiptTaskBlocksSupply=()=>false,ensureReceiptOperationId=()=> 'OP';
+const db={collection:()=>({where(){return this;},doc:id=>({get:async()=>({exists:true,id,data:()=>sourceOrder||order})})})},receiptTaskBlocksSupply=()=>false,ensureReceiptOperationId=()=> 'OP';
 window.alert=x=>messages.push(x);
 `;
 (async()=>{
@@ -24,7 +29,9 @@ window.alert=x=>messages.push(x);
    await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer"><section id="order-system" class="content-section active"><div id="actions" class="order-actions"></div></section><div id="poReceiptBatchOverlay" class="eq-modal-overlay"><div class="eq-modal-box"><h3 id="poReceiptBatchTitle"></h3><div class="table-wrap"><table><tbody id="poReceiptBatchBody"></tbody></table></div></div></div></div></body></html>');
    await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
    for(const content of [bootstrap,section('function inlineJsValue(', '// 早期估價單/訂單'),section('function canReceiveInventoryCapability(', 'function canManageEquipmentCapability('),
-    section('function directShipReceiptActionHtml(', 'window.openSelfOrderModal ='),section('window.openSupplyReceipt =', 'const receiptTaskJobs =')])await page.addScriptTag({content});
+    section('function directShipReceiptActionHtml(', 'window.openSelfOrderModal ='),section('window.openSupplyReceipt =', 'const receiptTaskJobs ='),
+    section('function orderSourceSyncIncomplete(', 'async function syncNewOrderSourceDocuments('),section('function canRetryOrderInventorySync(', 'async function writeOrderInventorySyncState('),
+    section('function orderInventorySyncStatusHtml(', "window.addEventListener('beforeunload'"),section('window.retryOrderInventoryReservation =', '// 採購主頁資料')])await page.addScriptTag({content});
    for(const role of ['sales','engineer','purchaser','warehouse','admin']){
     await page.evaluate(role=>{currentUserRole=role;document.getElementById('poReceiptBatchOverlay').classList.remove('active');document.getElementById('actions').innerHTML=directShipReceiptActionHtml(order);},role);
     assert.equal(await page.locator('#actions button').count(),['sales','engineer','admin'].includes(role)?1:0);
@@ -37,6 +44,19 @@ window.alert=x=>messages.push(x);
     }
    }
    await page.evaluate(()=>{currentUserRole='sales';currentUser={uid:'OTHER'};document.getElementById('actions').innerHTML=directShipReceiptActionHtml(order);});
+   assert.equal(await page.locator('#actions button').count(),0);
+   for(const kind of ['quote','forecast'])for(const role of ['sales','engineer','purchaser','warehouse','admin']){
+    await page.evaluate(({kind,role})=>{currentUserRole=role;currentUser={uid:'OWNER'};document.getElementById('poReceiptBatchOverlay').classList.remove('active');sourceRetryCalls.length=0;sourceOrder={id:'SOURCE',ownerUid:'OWNER',status:'active',inventoryReservationStatus:'completed',sourceType:kind,sourceId:'S',sourceDocumentSyncStatus:'failed',items:[]};ordersCache=[sourceOrder];document.getElementById('actions').innerHTML=orderInventorySyncStatusHtml(sourceOrder);},{kind,role});
+    const permitted=kind==='quote'?role!=='warehouse':['sales','admin'].includes(role);
+    assert.equal(await page.locator('#actions button').count(),permitted?1:0);
+    if(permitted){
+     await page.locator('#actions button').click();await page.waitForFunction(()=>sourceRetryCalls.length===1);
+     assert.equal(await page.evaluate(()=>ordersCache[0].sourceDocumentSyncStatus),'completed');
+     assert.equal(await page.evaluate(()=>ordersCache[0].inventoryReservationStatus),'completed');
+     if(width===390)assert.ok(await page.locator('#actions button').evaluate(el=>el.getBoundingClientRect().height)>=44);
+    }
+   }
+   await page.evaluate(()=>{sourceOrder.status='cancelled';document.getElementById('actions').innerHTML=orderInventorySyncStatusHtml(sourceOrder);});
    assert.equal(await page.locator('#actions button').count(),0);
    await page.close();console.log(`Workflow ${width}px: five roles, exact owner, direct-arrival quantity and disabled lot fields passed.`);
   }

@@ -1316,6 +1316,68 @@ test('real shared synchronization starts, completes and recovers terminal result
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
  }
 });
+test('new order cannot forge completed source checkpoint without the matching source backlink',async()=>{
+ const base={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',status:'active',sourceType:'forecast',sourceId:'new-source-checkpoint',
+  sourceDocumentSyncStatus:'completed',sourceDocumentSyncError:'',sourceDocumentSyncUpdatedAt:'2026-10-14'};
+ await seed('forecasts/new-source-checkpoint',{ownerUid:'sales1',salesCode:'S01',status:'active',linkedDocuments:[]});
+ await assertFails(setDoc(doc(db('sales1'),'orders/new-source-checkpoint'),base));
+ const b=writeBatch(db('sales1'));b.update(doc(db('sales1'),'forecasts/new-source-checkpoint'),{linkedDocuments:[{type:'order',id:'new-source-checkpoint',relation:'created'}]});
+ b.set(doc(db('sales1'),'orders/new-source-checkpoint'),base);await assertSucceeds(b.commit());
+});
+test('source sync completion requires the actual source backlink and quote closure in the same transaction',async()=>{
+ const base={ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',sourceType:'quote',sourceId:'source-proof',
+  sourceDocumentSyncStatus:'pending',items:[{itemId:'I',productId:'p-order',qty:3}]};
+ await seed('orders/source-proof',base);await seed('quotes/source-proof',{ownerUid:'sales1',salesCode:'S01',status:'active',linkedDocuments:[]});
+ const patch={sourceDocumentSyncStatus:'completed',sourceDocumentSyncError:'',sourceDocumentSyncUpdatedAt:'2026-10-14'};
+ await assertFails(updateDoc(doc(db('sales1'),'orders/source-proof'),patch));
+ const b=writeBatch(db('sales1'));b.update(doc(db('sales1'),'quotes/source-proof'),{dealClosed:true,status:'completed',linkedDocuments:[{type:'order',id:'source-proof',relation:'created'}]});
+ b.update(doc(db('sales1'),'orders/source-proof'),patch);await assertSucceeds(b.commit());
+ await assertFails(updateDoc(doc(db('sales1'),'orders/source-proof'),{...patch,sourceDocumentSyncStatus:'failed',sourceDocumentSyncError:'old error'}));
+ await seed('orders/source-proof',{...base,status:'cancelled'});
+ await assertFails(updateDoc(doc(db('sales1'),'orders/source-proof'),patch));
+ await seed('orders/source-proof',base);
+ for(const uid of ['wh1','sales2'])await assertFails(updateDoc(doc(db(uid),'orders/source-proof'),{...patch,sourceDocumentSyncStatus:'failed',sourceDocumentSyncError:'offline'}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/source-proof'),{...patch,sourceId:'OTHER'}));
+});
+test('real source sync works for quote owners, engineer, purchaser assistance and admin without redoing stock',async()=>{
+ const app=fs.readFileSync('app.js','utf8'),{arrayUnion}=require('firebase/firestore');
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const id='source-'+uid,ownerUid=role==='engineer'?uid:'sales1',salesCode=role==='engineer'?'E01':'S01';
+  const order={ownerUid,salesCode,status:'active',inventoryReservationStatus:'completed',sourceType:'quote',sourceId:id,sourceDocumentSyncStatus:'pending',items:[{itemId:'I',productId:'p-order',qty:3}]};
+  await seed('orders/'+id,order);await seed('quotes/'+id,{ownerUid,salesCode,status:'active',linkedDocuments:[]});
+  const client=compatDb(uid),nativeRun=client.runTransaction;
+  client.runTransaction=fn=>nativeRun(tx=>fn({...tx,update:(ref,data)=>tx.update(ref,{...JSON.parse(JSON.stringify(data)),...('linkedDocuments' in data?{linkedDocuments:data.linkedDocuments}:{})})}));
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role),
+   DOCUMENT_TYPES:{QUOTE:'quote',FORECAST:'forecast',ORDER:'order'},BUSINESS_STATUS:{COMPLETED:'completed'},firebase:{firestore:{FieldValue:{arrayUnion}}},
+   documentLink:(type,id,relation)=>({type,id,relation}),localDateString:()=> '2026-10-14',
+   normalizedOrderStatus:o=>[o.status,o.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
+   orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),myQuotesCache:[],quoteHistorySearchResults:[],writeAppDataCache(){},console:{error(){}}});
+  vm.runInContext(app.slice(app.indexOf('function canRetryOrderInventorySync('),app.indexOf('async function writeOrderInventorySyncState(')),c);
+  vm.runInContext(app.slice(app.indexOf('function orderSourceSyncIncomplete('),app.indexOf('const pendingOrderReservationIds = new Set();')),c);
+  const local={...order};assert.equal(await c.syncNewOrderSourceDocuments(id,local,uid),null);
+  assert.equal(local.sourceDocumentSyncStatus,'completed');assert.equal(await c.syncNewOrderSourceDocuments(id,local,uid),null);
+  assert.equal((await getDoc(doc(db('admin'),'quotes/'+id))).data().linkedDocuments.length,1);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+id+'__I'))).exists(),false);
+ }
+});
+test('source-only Forecast recovery retains owner access and cannot complete a missing or cancelled source',async()=>{
+ const app=fs.readFileSync('app.js','utf8'),{arrayUnion}=require('firebase/firestore'),id='source-forecast';
+ const order={ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',sourceType:'forecast',sourceId:id,sourceDocumentSyncStatus:'failed',items:[{itemId:'I',productId:'p-order',qty:3}]};
+ await seed('orders/'+id,order);await seed('forecasts/'+id,{ownerUid:'sales1',salesCode:'S01',status:'active',linkedDocuments:[]});
+ const client=compatDb('sales1'),nativeRun=client.runTransaction;
+ client.runTransaction=fn=>nativeRun(tx=>fn({...tx,update:(ref,data)=>tx.update(ref,{...JSON.parse(JSON.stringify(data)),...('linkedDocuments' in data?{linkedDocuments:data.linkedDocuments}:{})})}));
+ const c=vm.createContext({db:client,currentUser:{uid:'sales1'},currentUserRole:'sales',runRoleTransaction:fn=>stockPermissions.run(client,fn,'sales1',true,'sales'),
+  DOCUMENT_TYPES:{QUOTE:'quote',FORECAST:'forecast',ORDER:'order'},BUSINESS_STATUS:{COMPLETED:'completed'},firebase:{firestore:{FieldValue:{arrayUnion}}},
+  documentLink:(type,id,relation)=>({type,id,relation}),localDateString:()=> '2026-10-14',
+  normalizedOrderStatus:o=>[o.status,o.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
+  orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),myQuotesCache:[],quoteHistorySearchResults:[],writeAppDataCache(){},console:{error(){}}});
+ vm.runInContext(app.slice(app.indexOf('function canRetryOrderInventorySync('),app.indexOf('async function writeOrderInventorySyncState(')),c);
+ vm.runInContext(app.slice(app.indexOf('function orderSourceSyncIncomplete('),app.indexOf('const pendingOrderReservationIds = new Set();')),c);
+ assert.equal(await c.syncNewOrderSourceDocuments(id,{...order},'sales1'),null);
+ await seed('orders/'+id,order);await env.withSecurityRulesDisabled(async ctx=>deleteDoc(doc(ctx.firestore(),'forecasts/'+id)));
+ const failed={...order};assert.match((await c.syncNewOrderSourceDocuments(id,failed,'sales1')).message,/已不存在/);assert.equal(failed.sourceDocumentSyncStatus,'failed');
+ assert.equal((await getDoc(doc(db('admin'),'forecasts/'+id))).exists(),false);
+});
 async function seedStockWorkflow(){
   await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',deliveredQty:0,returnedQty:0,
     items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'w1'}]});
