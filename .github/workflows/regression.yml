@@ -1,10 +1,16 @@
 name: System regression tests
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
       - 'upgrade/**'
+permissions:
+  contents: read
+concurrency:
+  group: regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   regression:
     runs-on: ubuntu-latest
@@ -23,6 +29,7 @@ jobs:
           node --check modules/main-warehouse-transfers.js
           node --check modules/delivery-settings.js
           node --check app.js
+          node --check modules/customer-cancellations.js
           node --check modules/document-downloads.js
           node --check modules/supplier-core.js
           node --check modules/inventory-core.js
