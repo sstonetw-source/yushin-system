@@ -17930,6 +17930,7 @@ function pendingOrderCreateKey() {
 
 async function prepareNewOrderWarehouseSources(tx, data) {
     const items=Array.isArray(data.items)?data.items:[];
+    if(!items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'))return;
     const activeWarehouseIds=warehouseMasterCache.filter(w=>w.active!==false&&!w.systemCustody&&w.id).map(w=>w.id);
     const updated=[];
     for(const item of items){
