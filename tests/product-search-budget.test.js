@@ -62,6 +62,6 @@ test('code search without brand finds products from other brands using the exact
  assert.deepEqual(x.calls,[1]);assert.match(x.nodes.productManagementSearchStatus.textContent,/全部廠牌/);
 });
 test('new product writes clear cached product-management search results',()=>{
- assert.match(source,/await db\\.collection\\('products'\\)\\.doc\\(productId\\)\\.set\\(productDoc, \\{ merge: true \\}\\);\\s*productManagementSearchCache\\.clear\\(\\)/);
- assert.match(source,/cacheProductLookupItem\\(cached\\);\\s*productManagementSearchCache\\.clear\\(\\)/);
+ assert.ok(source.includes("await db.collection('products').doc(productId).set(productDoc, { merge: true });\\n        productManagementSearchCache.clear()".replace('\\n','\n')));
+ assert.ok(source.includes("cacheProductLookupItem(cached);\\n        productManagementSearchCache.clear()".replace('\\n','\n')));
 });
