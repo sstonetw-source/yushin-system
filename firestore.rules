@@ -1624,13 +1624,16 @@ service cloud.firestore {
     function validOrderInventorySyncTransition() {
       let before = resource.data;
       let after = request.resource.data;
+      let attempt = after.get('inventoryReservationAttemptId', '');
+      let error = after.get('inventoryReservationError', '');
+      let updatedAt = after.get('inventoryReservationUpdatedAt', '');
       return !after.diff(before).affectedKeys().hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId'])
         || (role() in ['admin','purchaser','sales','engineer']
           && !orderIsCancelled(before) && !orderIsCancelled(after)
           && before.get('inventoryReservationStatus', '') != 'completed'
-          && after.get('inventoryReservationAttemptId', '') is string && after.inventoryReservationAttemptId.size() > 0 && after.inventoryReservationAttemptId.size() <= 128
-          && after.get('inventoryReservationError', '') is string && after.inventoryReservationError.size() <= 1000
-          && after.get('inventoryReservationUpdatedAt', '') is string && after.inventoryReservationUpdatedAt.size() <= 64
+          && attempt is string && attempt.size() > 0 && attempt.size() <= 128
+          && error is string && error.size() <= 1000
+          && updatedAt is string && updatedAt.size() <= 64
           && (after.get('inventoryReservationStatus', '') == 'pending'
             ? after.inventoryReservationAttemptId != before.get('inventoryReservationAttemptId', '') && after.inventoryReservationError == ''
             : before.get('inventoryReservationStatus', '') == 'pending'

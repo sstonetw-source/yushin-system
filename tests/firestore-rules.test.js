@@ -661,8 +661,14 @@ test('purchaser may update reservation retry metadata but not commercial fields'
     inventoryReservationError:'timeout',
     inventoryReservationUpdatedAt:'2026-09-20T00:00:00Z'
   });
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/reservation-retry'), {
+    inventoryReservationStatus:'pending',
+    inventoryReservationError:'',
+    inventoryReservationUpdatedAt:'2026-09-21T00:00:00Z'
+  }));
   await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/reservation-retry'), {
     inventoryReservationStatus:'pending',
+    inventoryReservationAttemptId:'retry-attempt',
     inventoryReservationError:'',
     inventoryReservationUpdatedAt:'2026-09-21T00:00:00Z'
   }));
