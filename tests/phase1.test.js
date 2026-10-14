@@ -3252,7 +3252,7 @@ test('receipt shortage allocation skips stale candidates without blocking later 
     assert.match(source,/const skippedCandidateIds = new Set\(\)/);
     assert.match(source,/skippedCandidateIds\.has\(row\.id\)/);
     assert.match(source,/if\(skipCandidate\)\{[\s\S]*?skippedCandidateIds\.add\(candidate\.id\);[\s\S]*?continue;/);
-    assert.match(source,/if\(take<=0\)\{stopAllocation=true;return;\}/);
+    assert.match(source,/if\(take<=0\)\{completionReason='exhausted';stopAllocation=true;return;\}/);
     assert.match(source,/if\(stopAllocation\)break;/);
 });
 

@@ -121,7 +121,7 @@
     loadPromise=Promise.allSettled([loadWarehouseMaster(),loadOrderWorkQueue(force),
       force||!returnReady||returnError?loadCustomerReturnQueue():Promise.resolve(),
       force||!activeReceivingSupplyReady||activeReceivingSupplyError?loadActiveReceivingSupplyCache(true):Promise.resolve(),
-      root.loadWarehouseTransferQueue?.(force)||Promise.resolve()])
+      root.loadWarehouseTransferQueue?.(force)||Promise.resolve(),root.loadFreeStockRecovery?.()||Promise.resolve()])
       .then(results=>{
         if(role!==currentUserRole||uid!==currentUser?.uid)return;
         warehouseError=results[0].status==='rejected'?'倉庫設定讀取失敗：'+results[0].reason.message:'';
@@ -141,7 +141,7 @@
       const button=el({stock:'inventoryStockTabBtn',receiving:'inventoryReceivingTabBtn',shipping:'inventoryShippingTabBtn'}[key]);
       button?.classList.toggle('active',key===view);button?.setAttribute('aria-pressed',String(key===view));
     }
-    if(next==='stock'){if(canReceiveInventoryCapability()){await loadWarehouseMaster();await loadOrderWorkQueue();await root.loadMainTransferRequests?.();root.renderMainTransferRequests?.();}return;}
+    if(next==='stock'){if(canReceiveInventoryCapability()){await root.loadFreeStockRecovery?.();await loadWarehouseMaster();await loadOrderWorkQueue();await root.loadMainTransferRequests?.();root.renderMainTransferRequests?.();}return;}
     if(next==='receiving'){
       switchInventoryReceivingKind(receivingKind);
       await loadInventoryWorkspace();

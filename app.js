@@ -630,10 +630,13 @@ function supplyOrdersCollection() {
     return db.collection(currentUserRole === 'warehouse' && permissionRulesReady ? 'receivingSupplyOrders' : 'supplyOrders');
 }
 async function runRoleTransaction(callback) {
+    const actorUid=currentUser?.uid||'',actorRole=currentUserRole;
+    const assertSession=()=>{if(!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole)throw new Error('登入帳號或角色已變更，請重新開啟作業。');};
     await ensurePermissionRulesReady();
+    assertSession();
     if(!globalThis.YushinStockPermissions?.run)throw new Error('安全交易模組未載入，請重新整理後再試。');
-    const result = await globalThis.YushinStockPermissions.run(db, callback, currentUser?.uid || '',
-        currentUserRole === 'sales' || currentUserRole === 'engineer', currentUserRole);
+    const result = await globalThis.YushinStockPermissions.run(db, callback, actorUid,
+        actorRole === 'sales' || actorRole === 'engineer', actorRole, assertSession);
     // A successful transaction can change orders, receipts, stock or purchasing.
     // The next analysis visit must read fresh sources instead of reusing the old report.
     tradeAnalysisReady = false;
@@ -1474,7 +1477,7 @@ function resetSessionData() {
     forecastLoading=false; forecastReloadRequested=false; inventoryLoading=false; myQuotesPageLoading=false; myQuotesReloadRequested=false;
     window._orderModalQuoteContext=null; window._orderModalSourceLink=null;
     clearTimeout(draftSaveTimer);
-    window.resetDeliverySettings?.(); window.resetMainTransferRequests?.(); window.resetProduct360?.();
+    window.resetDeliverySettings?.(); window.resetMainTransferRequests?.(); window.resetFreeStockRecovery?.(); window.resetProduct360?.();
     document.querySelectorAll('.content-section tbody').forEach(body=>body.replaceChildren());
     document.querySelectorAll('.eq-modal-overlay.active, .modal-overlay.active').forEach(overlay=>overlay.classList.remove('active'));
     for (const id of ['clientName','ordererName','quoteRemarks','salesName','orderCustomer','orderInvoiceTitle','orderRemarks']) {
@@ -8991,6 +8994,7 @@ function inventoryMovementTypeLabel(type='') {
         reserve:'訂單預留',
         release:'解除預留',
         reserve_from_receipt:'到貨自動預留',
+        reserve_from_free_stock:'自由庫存自動預留',
         ship:'出貨',
         ship_reversal:'撤銷出貨',
         return_in:'客戶退貨入庫',
@@ -14549,11 +14553,13 @@ window.receiveSupplyOrder = function(supplyId) {
     document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
 };
 
-async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='',receiptId='',checkpointCollection='receipts') {
+async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='',receiptId='',checkpointCollection='receipts',allocationGuard=null) {
+    allocationGuard?.();
     if(!['receipts','stockTransfers'].includes(checkpointCollection))throw new Error('庫存分配進度來源不正確。');
     let remaining=Math.max(0,Number(maxQty||0)),allocatedQty=0;
     const affectedOrderIds = new Set();
     const skippedCandidateIds = new Set();
+    let completionReason='exhausted';
     if(!remaining||!productKey||!warehouseId)return {allocatedQty:0,unallocatedQty:remaining,affectedOrderIds:[]};
     const compare=globalThis.YushinReservation?.compareReservationPriority;
     if(!compare)throw new Error('庫存分配核心未載入，請重新載入後重試分配。');
@@ -14561,6 +14567,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
     // transaction preserves oldest-first ordering even when multiple receipts run concurrently.
     // 已失效／取消的最舊候選只跳過，不可阻塞後面的正常缺貨訂單。
     while(remaining>0){
+        allocationGuard?.();
         const oldestCandidate=async status=>{
             let candidate=null,cursor=null;
             while(true){
@@ -14581,9 +14588,11 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
         };
         const candidates=await Promise.all([oldestCandidate('shortage'),oldestCandidate('active')]);
         const candidate=candidates.filter(Boolean).sort(compare)[0];
-        if(!candidate)break;
+        if(!candidate){completionReason='no-demand';break;}
         let took=0,skipCandidate=false,stopAllocation=false;
         await runRoleTransaction(async tx=>{
+            took=0;skipCandidate=false;stopAllocation=false;
+            allocationGuard?.();
             const orderRef=db.collection('orders').doc(candidate.orderId);
             const reservationRef=db.collection('inventoryReservations').doc(candidate.id);
             const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
@@ -14596,8 +14605,9 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
                 receiptRef?tx.get(receiptRef):Promise.resolve(null)
             ]);
             const demandSnap=await tx.get(demandRef);
+            allocationGuard?.();
             if(!orderSnap.exists||!resSnap.exists||!whSnap.exists||!invSnap.exists){skipCandidate=true;return;}
-            if(receiptRef&&!receiptSnap?.exists){stopAllocation=true;return;}
+            if(receiptRef&&!receiptSnap?.exists){completionReason='deferred';stopAllocation=true;return;}
             const reservation=resSnap.data();
             if(reservation.productKey!==productKey||reservation.warehouseId!==warehouseId){skipCandidate=true;return;}
             const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
@@ -14615,10 +14625,11 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             if(inventoryProductKey(item)!==productKey||item.warehouseId!==warehouseId||item.transferPendingId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'){skipCandidate=true;return;}
             const oldShortage=Math.max(0,Number(item.shortageQty??liveShortage));
             // 已向供應商下訂的缺口不能再占用補貨，否則現貨與待到貨重複涵蓋同一需求。
+            if(Math.abs(oldReserved-Number(reservation.quantity||0))>1e-9||Math.abs(oldShortage-liveShortage)>1e-9)throw new Error('訂單與庫存預留數量不一致，請由管理員檢查後重試。');
             const uncovered=remainingProcurementQty(order,item);
             if(uncovered<=0){skipCandidate=true;return;}
             const take=Math.min(remaining,receiptRemaining,liveShortage,oldShortage,uncovered,Math.max(0,wh.available),Math.max(0,inv.available));
-            if(take<=0){stopAllocation=true;return;}
+            if(take<=0){completionReason='exhausted';stopAllocation=true;return;}
             items[index]={...item,reservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take)};
             const now=new Date().toISOString();
             const nextOrder={...order,items,updatedAt:now};
@@ -14641,8 +14652,9 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
                     allocationUpdatedAt:now
                 });
             }
-            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve_from_receipt',take,candidate.orderId,productKey,actor,{
+            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(allocationGuard?'reserve_from_free_stock':'reserve_from_receipt',take,candidate.orderId,productKey,actor,{
                 warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE',
+                ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',
                 ...(checkpointCollection==='receipts'?{receiptId:receiptId||''}:{transferId:receiptId||''})
             }));
             took=take;
@@ -14656,13 +14668,15 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
         if(stopAllocation)break;
         break;
     }
-    return {allocatedQty,unallocatedQty:remaining,affectedOrderIds:[...affectedOrderIds]};
+    return {allocatedQty,unallocatedQty:remaining,affectedOrderIds:[...affectedOrderIds],completionReason};
 }
 
 async function refreshAffectedOrderCaches(orderIds = []) {
     const ids=[...new Set(orderIds.filter(Boolean))];
     if(!ids.length)return;
+    const cacheUid=currentUser?.uid||'',cacheRole=currentUserRole;
     const refreshedOrders=await readDocumentsByIds('orders',ids);
+    if(!cacheUid||currentUser?.uid!==cacheUid||currentUserRole!==cacheRole)throw new Error('登入帳號或角色已變更，請重新載入訂單清單。');
     refreshedOrders.forEach(order=>{
         const index=ordersCache.findIndex(row=>row.id===order.id);
         if(index>=0)ordersCache[index]=order;else ordersCache.unshift(order);

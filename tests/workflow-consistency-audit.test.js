@@ -17,7 +17,7 @@ function allocationFixture({qty=5,incoming=0,fail=false,received=0}={}){
  const c=vm.createContext({db,YushinInventory:inventory,YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinReservation:require('../modules/reservation-core'),firestoreReadWithTimeout:p=>p,
   normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',
   itemDispatchState:(o,i)=>fulfillment.dispatchState(i),inventoryNumbers:inventory.normalizeStock,inventoryProductKey:i=>i.productId,orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),
-  warehouseStockDocId:(w,p)=>w+'__'+p,orderWorkIndexFields:()=>({}),inventoryMovementRecord:(type,qty)=>({type,qty}),invalidateWarehouseStockCache(){},
+  warehouseStockDocId:(w,p)=>w+'__'+p,orderWorkIndexFields:()=>({}),inventoryMovementRecord:(type,qty,sourceId,productKey,actor,extra)=>({type,qty,sourceId,productKey,actorUid:'receiver',...extra}),invalidateWarehouseStockCache(){},
   runRoleTransaction:async fn=>{const writes=[];const result=await fn({get:async r=>{assert.equal(writes.length,0,'all reads precede writes');return snapshot(r.path);},update:(r,data)=>writes.push([r,data]),set:(r,data)=>writes.push([r,data])});if(fail)throw Error('permission-denied');for(const [r,data] of writes)docs.set(r.path,{...docs.get(r.path),...structuredClone(data)});return result;}});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
  vm.runInContext(section('async function allocateFreeReceiptStockToShortages(', 'async function refreshAffectedOrderCaches('),c);
@@ -144,4 +144,49 @@ test('saved product synchronizes product page and invalidates old search results
  assert.equal(c.productManagementSearchCache.size,0);assert.equal(c.productManagementSearchGeneration,4);assert.equal(c.productBrandBrowseGeneration,5);
  assert.equal(lookup.productId,'P');assert.equal(rendered,2);
  assert.equal(c.productManagementSearchInProgress,false);assert.equal(c.productManagementActiveSearch,null);
+});
+
+function recoveryOptions(f){
+ f.docs.set('warehouses/W',{active:true});const stock=f.docs.get('warehouseStocks/W__P');
+ Object.assign(stock,{productKey:'P',warehouseId:'W',allocationPending:true,allocationRevision:1});f.docs.get('inventory/P').productKey='P';
+ return {db:f.c.db,runTransaction:f.c.runRoleTransaction,allocate:f.c.allocateFreeReceiptStockToShortages,normalize:inventory.normalizeStock,stockDocId:(w,p)=>w+'__'+p,assertContext(){},stockId:'W__P',actor:'Tester'};
+}
+test('released stock recovery uses actual allocation transactions and clears only uncovered procurement',async()=>{
+ const f=allocationFixture({incoming:2}),options=recoveryOptions(f),recover=require('../modules/free-stock-recovery').recoverLocation;
+ const result=await recover(options);await recover(options);
+ assert.equal(result.allocatedQty,3);assert.equal(f.docs.get('inventory/P').reserved,3);assert.equal(f.docs.get('inventoryReservations/R').quantity,3);
+ assert.equal(f.docs.get('orders/O').items[0].reservedQty,3);assert.equal(f.demand().orderedQty,2);assert.equal(f.demand().remainingToOrderQty,0);
+ assert.equal(f.docs.get('warehouseStocks/W__P').allocationPending,false);
+ const movement=[...f.docs.values()].find(row=>row.type==='reserve_from_free_stock');assert.equal(movement.ownerUid,'sales');assert.equal(movement.salesCode,'S1');assert.equal(movement.actorUid,'receiver');
+});
+test('actual recovery rejects inconsistent order reservation before changing any fact',async()=>{
+ const f=allocationFixture(),options=recoveryOptions(f),recover=require('../modules/free-stock-recovery').recoverLocation;
+ f.docs.get('orders/O').items[0].reservedQty=1;const before=JSON.stringify([...f.docs]);
+ await assert.rejects(recover(options),/預留數量不一致/);assert.equal(JSON.stringify([...f.docs]),before);
+});
+
+test('recovery resumes after a partially committed allocation without adding stock or reserving twice',async()=>{
+ const f=allocationFixture(),options=recoveryOptions(f),recover=require('../modules/free-stock-recovery').recoverLocation,allocate=options.allocate;
+ options.allocate=async(...args)=>{args[2]=1;await allocate(...args);throw Error('response lost');};
+ await assert.rejects(recover(options),/response lost/);assert.equal(f.docs.get('inventory/P').reserved,1);assert.equal(f.docs.get('warehouseStocks/W__P').allocationPending,true);
+ options.allocate=allocate;await recover(options);await recover(options);
+ assert.equal(f.docs.get('inventory/P').onHand,5);assert.equal(f.docs.get('inventory/P').reserved,5);assert.equal(f.docs.get('inventoryReservations/R').quantity,5);assert.equal(f.demand().remainingToOrderQty,0);
+});
+
+test('transaction retry that loses its allocation candidate cannot publish the aborted attempt quantity',async()=>{
+ const f=allocationFixture(),run=f.c.runRoleTransaction;let retried=false;
+ f.c.runRoleTransaction=async fn=>{
+  if(!retried){retried=true;await fn({get:async r=>({exists:f.docs.has(r.path),id:r.id,data:()=>structuredClone(f.docs.get(r.path))}),set(){},update(){}});f.docs.get('orders/O').status='cancelled';}
+  return run(fn);
+ };
+ const result=await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester');
+ assert.equal(result.allocatedQty,0);assert.equal(f.docs.get('inventory/P').reserved,0);assert.equal(f.docs.get('inventoryReservations/R').quantity,0);
+});
+
+test('affected-order cache refresh rejects account or role change without populating the new session cache',async()=>{
+ for(const change of [c=>{c.currentUser={uid:'NEW'};},c=>{c.currentUserRole='sales';}]){
+  const c=vm.createContext({currentUser:{uid:'OLD'},currentUserRole:'warehouse',ordersCache:[],readDocumentsByIds:async()=>{change(c);return [{id:'PRIVATE'}];},syncOrderIntoPurchasingCaches(){throw Error('must not update cache');},writeAppDataCache(){throw Error('must not persist cache');}});
+  vm.runInContext(section('async function refreshAffectedOrderCaches(', 'async function receiveSupplyOrderRecord('),c);
+  await assert.rejects(c.refreshAffectedOrderCaches(['PRIVATE']),/帳號或角色已變更/);assert.equal(c.ordersCache.length,0);
+ }
 });

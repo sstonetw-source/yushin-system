@@ -3,8 +3,11 @@
 (function(root){
   function dataAt(snapshot){return snapshot?.exists ? snapshot.data() : {};}
   function number(value){return Number(value || 0);}
-  async function run(db, callback, actorUid, enabled, role){
-    return db.runTransaction(async native=>{
+  async function run(db, callback, actorUid, enabled, role, sessionGuard=null){
+    let released=[];
+    const result=await db.runTransaction(async native=>{
+      sessionGuard?.();
+      released=[];
       const reads=new Map(),writes=[];
       const sourceRef=ref=>ref.path.startsWith('receivingSupplyOrders/')?db.collection('supplyOrders').doc(ref.id):ref;
       const proxy={
@@ -125,6 +128,30 @@
         const view=sanitizeSupply(data);
         writes.push({method:'set',ref:db.collection('receivingSupplyOrders').doc(path.split('/')[1]),data:view});
       }
+      // Mark new free physical stock in the same transaction as its release.
+      // Existing receipt/transfer checkpoints own their own post-receipt work.
+      const stockWrites=new Map();
+      for(const write of writes){
+        if(!write.ref.path.startsWith('warehouseStocks/')||write.method==='delete')continue;
+        if(!reads.has(write.ref.path))await proxy.get(write.ref);
+        const before=reads.get(write.ref.path).data;
+        const prior=stockWrites.get(write.ref.path);
+        const after=write.method==='set'&&!write.options?.merge?{...write.data}:{...(prior?.after||before),...write.data};
+        stockWrites.set(write.ref.path,{before,after,write});
+      }
+      for(const {before,after,write} of stockWrites.values()){
+        const free=data=>Math.max(0,number(data.onHand)-number(data.reserved));
+        if(!after.warehouseId||String(after.warehouseId).startsWith('custody-')||free(after)<=free(before))continue;
+        const hasReceiptCheckpoint=writes.some(w=>
+          (w.ref.path.startsWith('receipts/')&&w.data.productKey===after.productKey&&w.data.warehouseId===after.warehouseId&&number(w.data.autoAllocationQty)>0)
+          ||(w.ref.path.startsWith('stockTransfers/')&&w.data.status==='RECEIVED'&&number(w.data.autoAllocationQty)>0));
+        if(hasReceiptCheckpoint)continue;
+        const revision=number(before.allocationRevision);
+        if(!Number.isSafeInteger(revision)||revision<0||revision>=1000000000)throw Error('庫存分配進度版本不正確，請由管理員檢查。');
+        write.data={...write.data,allocationRevision:revision+1,allocationPending:true};
+        released.push(write.ref.id);
+      }
+      sessionGuard?.();
       for(const write of writes){
         if(write.method==='delete')native.delete(write.ref);
         else if(write.method==='update')native.update(write.ref,write.data);
@@ -133,6 +160,8 @@
       }
       return result;
     });
+    if(released.length){try{root.onFreeStockReleased?.(released,actorUid,role);}catch(_){/* Durable flags remain retryable. */}}
+    return result;
   }
   function sanitizeSupply(data){const {unitCost,cost,costPrice,...view}=data;return view;}
   const api={run,sanitizeSupply};root.YushinStockPermissions=api;
