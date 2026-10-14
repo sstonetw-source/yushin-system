@@ -481,7 +481,7 @@ test('new order reports committed success even when source quote update fails', 
     });
     context.synchronizeOrderInventory=async(id,order)=>{try{const result=await context.reserveInventoryForNewOrder(id,order);order.inventoryReservationStatus='completed';return result;}catch(error){order.inventoryReservationStatus='failed';throw error;}};
     vm.runInContext(appSource.slice(feedbackStart, feedbackEnd), context);
-    vm.runInContext(appSource.slice(appSource.indexOf('async function syncNewOrderSourceDocuments'),appSource.indexOf('const pendingOrderReservationIds = new Set();')),context);
+    context.syncNewOrderSourceDocuments=async(_id,order)=>order.sourceType==='QUOTE'?new Error('估價單更新失敗'):null;
     await vm.runInContext(`(async function(){${saveChain}})()`, context);
     assert.equal(context.ordersCache[0].id,'NEW-1');
     assert.equal(context.newOrderSaveInProgress,false);

@@ -386,6 +386,7 @@ service cloud.firestore {
           'linkedDocuments',
           'costPrice', 'transactionType', 'invoiceTitle', 'remarks', 'billingDate', 'fieldEditHistory',
           'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt', 'inventoryReservationAttemptId',
+          'sourceDocumentSyncStatus', 'sourceDocumentSyncError', 'sourceDocumentSyncUpdatedAt',
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
@@ -1627,8 +1628,7 @@ service cloud.firestore {
       let attempt = after.get('inventoryReservationAttemptId', '');
       let error = after.get('inventoryReservationError', '');
       let updatedAt = after.get('inventoryReservationUpdatedAt', '');
-      return !after.diff(before).affectedKeys().hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId'])
-        || (role() in ['admin','purchaser','sales','engineer']
+      return (role() in ['admin','purchaser','sales','engineer']
           && !orderIsCancelled(before) && !orderIsCancelled(after)
           && before.get('inventoryReservationStatus', '') != 'completed'
           && attempt is string && attempt.size() > 0 && attempt.size() <= 128
@@ -1642,17 +1642,57 @@ service cloud.firestore {
               && (after.inventoryReservationStatus != 'completed' || after.inventoryReservationError == '')));
     }
 
+    function validOrderSourceSyncTransition(id) {
+      let before = resource.data;
+      let after = request.resource.data;
+      return (role() in ['admin','purchaser','sales','engineer']
+          && (role() in ['admin','purchaser'] || before.get('ownerUid', '') == request.auth.uid)
+          && !orderIsCancelled(before) && !orderIsCancelled(after)
+          && before.get('inventoryReservationStatus', '') == 'completed'
+          && before.get('sourceDocumentSyncStatus', '') != 'completed'
+          && after.get('sourceType', '') == before.get('sourceType', '') && after.get('sourceId', '') == before.get('sourceId', '')
+          && after.get('sourceType', '') in ['quote','forecast'] && after.get('sourceId', '') != ''
+          && after.diff(before).affectedKeys().hasOnly(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt','updatedAt'])
+          && after.get('sourceDocumentSyncError', '') is string && after.get('sourceDocumentSyncError', '').size() <= 1000
+          && after.get('sourceDocumentSyncUpdatedAt', '') is string && after.get('sourceDocumentSyncUpdatedAt', '').size() <= 64
+          && (after.get('sourceDocumentSyncStatus', '') == 'failed'
+            || (after.get('sourceDocumentSyncStatus', '') == 'completed' && after.get('sourceDocumentSyncError', '') == '' && sourceSyncEvidence(id))));
+    }
+    function sourceSyncEvidence(id) {
+      return sourceSyncEvidenceForData(id, resource.data);
+    }
+    function sourceSyncEvidenceForData(id, order) {
+      let collection = order.sourceType == 'quote' ? 'quotes' : 'forecasts';
+      let source = getAfter(/databases/$(database)/documents/$(collection)/$(order.sourceId)).data;
+      return !orderIsCancelled(source)
+        && source.get('linkedDocuments', []).hasAny([{'type':'order','id':id,'relation':'created'}])
+        && (order.sourceType != 'quote' || source.get('dealClosed', false) == true && source.get('status', '') == 'completed');
+    }
+    function validNewOrderSourceSync(id) {
+      let data = request.resource.data;
+      return !('sourceDocumentSyncStatus' in data)
+        || (data.get('sourceType', '') in ['quote','forecast'] && data.get('sourceId', '') != ''
+          && data.get('sourceDocumentSyncError', '') == ''
+          && data.get('sourceDocumentSyncUpdatedAt', '') is string && data.get('sourceDocumentSyncUpdatedAt', '').size() <= 64
+          && (data.sourceDocumentSyncStatus == 'pending'
+            || data.sourceDocumentSyncStatus == 'completed' && sourceSyncEvidenceForData(id, data)));
+    }
+
     match /orders/{id} {
       allow get: if admin() || purchaser() || warehouse() || (commercialDocumentOwner() && (resource == null || owns(resource.data)));
       allow list: if admin() || purchaser() || warehouse() || owns(resource.data);
       allow create: if canCreateCommercialDoc()
+        && validNewOrderSourceSync(id)
         && validOwnedCommercialCreate(request.resource.data)
         && validNewOrderProductMaster(request.resource.data)
         && validOrderEmbeddedCost(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'orderStatus'])
-        || validOrderCancellationTransition()) && validOrderInventorySyncTransition() && orderUpdateAllowed(id);
+        || validOrderCancellationTransition())
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition())
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id))
+        && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 

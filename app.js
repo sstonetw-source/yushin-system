@@ -4078,7 +4078,9 @@ async function createForecastOrdersDirectly(forecast, items) {
         billingDate:'',
         inventoryReservationStatus:'pending',
         inventoryReservationError:'',
-        inventoryReservationUpdatedAt:now
+        inventoryReservationUpdatedAt:now,
+        // Forecast backlink is committed atomically with this order below.
+        sourceDocumentSyncStatus:'completed',sourceDocumentSyncError:'',sourceDocumentSyncUpdatedAt:now
     };
     orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
 
@@ -11259,33 +11261,71 @@ window.renderOrdersList = function() {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 };
 
+function orderSourceSyncIncomplete(order) {
+    return ['pending','failed'].includes(order?.sourceDocumentSyncStatus);
+}
+function canRetrySourceDocumentSync(order) {
+    return canRetryOrderInventorySync(order) && (order.sourceType!==DOCUMENT_TYPES.FORECAST
+        || currentUserRole==='admin' || (currentUserRole==='sales'&&order.ownerUid===currentUser?.uid));
+}
 async function syncNewOrderSourceDocuments(orderId,data,actorUid) {
     if(currentUser?.uid!==actorUid)return new Error('登入身份已變更，來源文件同步待確認');
-    let quoteSyncError = null;
-    if (data.sourceType === DOCUMENT_TYPES.QUOTE && data.sourceId) try {
-        const closedAt=localDateString();
-        await db.collection('quotes').doc(data.sourceId).set({
-            dealClosed:true,
-            dealClosedAt:closedAt,
-            status:BUSINESS_STATUS.COMPLETED,
-            linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderId,'created'))
-        },{merge:true});
-        if(currentUser?.uid!==actorUid)return new Error('登入身份已變更');
-        const patch={dealClosed:true,dealClosedAt:closedAt,status:BUSINESS_STATUS.COMPLETED};
-        const cachedQuote=myQuotesCache.find(q=>q.quoteNo===data.sourceId);if(cachedQuote)Object.assign(cachedQuote,patch);
-        const searchedQuote=quoteHistorySearchResults.find(q=>q.quoteNo===data.sourceId);if(searchedQuote)Object.assign(searchedQuote,patch);
-        writeAppDataCache('quotes',myQuotesCache);
-    } catch (err) {
-        quoteSyncError = err;
-        console.error('訂單已建立，但估價單狀態更新失敗：', err);
+    const orderRef=db.collection('orders').doc(orderId);
+    let sourceType='',sourceId='',quotePatch=null;
+    try{
+        const saved=await runRoleTransaction(async tx=>{
+            const snap=await tx.get(orderRef);
+            if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更');
+            if(!snap.exists)throw new Error('訂單已不存在');
+            const order={id:orderId,...snap.data()};
+            sourceType=order.sourceType||'';sourceId=order.sourceId||'';
+            if(![DOCUMENT_TYPES.QUOTE,DOCUMENT_TYPES.FORECAST].includes(sourceType)||!sourceId)return order;
+            if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止來源文件同步');
+            if(orderInventorySyncIncomplete(order))throw new Error('庫存尚未同步完成，來源文件稍後再同步');
+            if(order.sourceDocumentSyncStatus==='completed')return order;
+            if(!canRetrySourceDocumentSync(order))throw new Error('來源文件請由負責業務或管理員同步');
+            const ref=db.collection(sourceType===DOCUMENT_TYPES.QUOTE?'quotes':'forecasts').doc(sourceId);
+            const source=await tx.get(ref);
+            if(!source.exists)throw new Error('來源文件已不存在，不能重新建立來源文件');
+            if(normalizedOrderStatus(source.data())!=='normal')throw new Error('來源文件已取消／作廢，請先確認訂單關聯');
+            if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更');
+            const now=new Date().toISOString();
+            const patch={linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderId,'created')),updatedAt:now};
+            if(sourceType===DOCUMENT_TYPES.QUOTE){
+                quotePatch={dealClosed:true,dealClosedAt:source.data().dealClosedAt||localDateString(),status:BUSINESS_STATUS.COMPLETED};
+                Object.assign(patch,quotePatch);
+            }
+            tx.update(ref,patch);
+            const updates={sourceDocumentSyncStatus:'completed',sourceDocumentSyncError:'',sourceDocumentSyncUpdatedAt:now,updatedAt:now};
+            tx.update(orderRef,updates);
+            return {...order,...updates};
+        });
+        if(currentUser?.uid===actorUid){
+            Object.assign(data,saved);
+            if(quotePatch){
+                const cached=myQuotesCache.find(q=>q.quoteNo===sourceId);if(cached)Object.assign(cached,quotePatch);
+                const searched=quoteHistorySearchResults.find(q=>q.quoteNo===sourceId);if(searched)Object.assign(searched,quotePatch);
+                writeAppDataCache('quotes',myQuotesCache);
+            }
+        }
+        return null;
+    }catch(err){
+        // The source update and completion checkpoint are atomic. Lost replies must not downgrade completion.
+        const latest=await runRoleTransaction(async tx=>{
+            const snap=await tx.get(orderRef);
+            if(currentUser?.uid!==actorUid||!snap.exists)return null;
+            const order={id:orderId,...snap.data()};
+            if(!canRetryOrderInventorySync(order))return null;
+            if(order.sourceType!==sourceType||order.sourceId!==sourceId||!sourceId)return null;
+            if(normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order))return order;
+            if(order.sourceDocumentSyncStatus==='completed')return order;
+            const updates={sourceDocumentSyncStatus:'failed',sourceDocumentSyncError:String(err?.message||err).slice(0,1000),sourceDocumentSyncUpdatedAt:new Date().toISOString()};
+            tx.update(orderRef,updates);
+            return {...order,...updates};
+        }).catch(markErr=>{console.error('來源文件同步結果尚未確認：',markErr);return null;});
+        if(latest&&currentUser?.uid===actorUid)Object.assign(data,latest);
+        return latest?.sourceDocumentSyncStatus==='completed'?null:err;
     }
-    if (data.sourceType === DOCUMENT_TYPES.FORECAST && data.sourceId) {
-        db.collection('forecasts').doc(data.sourceId).set({
-            linkedDocuments: firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER, orderId, 'created')),
-            updatedAt: new Date().toISOString()
-        }, { merge: true }).catch(err => console.error('Forecast 回寫訂單關聯失敗', err));
-    }
-    return quoteSyncError;
 }
 
 const pendingOrderReservationIds = new Set();
@@ -11342,17 +11382,19 @@ async function synchronizeOrderInventory(orderId, order, uid = currentUser?.uid)
     }
 }
 function orderInventorySyncStatusHtml(order) {
-    if(!orderInventorySyncIncomplete(order))return '';
+    if(normalizedOrderStatus(order)!=='normal')return '';
+    if(!orderInventorySyncIncomplete(order)&&!orderSourceSyncIncomplete(order))return '';
     const running=pendingOrderReservationIds.has(order.id);
-    const label=running?'庫存同步中…':order.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步待確認';
-    return `<div class="inline-status" role="status">${label}${!running&&canRetryOrderInventorySync(order)?` <button type="button" class="btn-small" onclick="retryOrderInventoryReservation(${inlineJsValue(order.id)})">重試同步</button>`:''}</div>`;
+    const label=running?'訂單同步中…':!orderInventorySyncIncomplete(order)?'來源文件同步未完成':order.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步待確認';
+    const canRetry=orderInventorySyncIncomplete(order)?canRetryOrderInventorySync(order):canRetrySourceDocumentSync(order);
+    return `<div class="inline-status" role="status">${label}${!running&&canRetry?` <button type="button" class="btn-small" onclick="retryOrderInventoryReservation(${inlineJsValue(order.id)})">重試同步</button>`:''}</div>`;
 }
 window.addEventListener('beforeunload',event=>{
     if(pendingOrderReservationIds.size){event.preventDefault();event.returnValue='';}
 });
 window.retryOrderInventoryReservation = async function(orderId) {
     const cachedOrder=ordersCache.find(row=>row.id===orderId);
-    if(!cachedOrder||!canRetryOrderInventorySync(cachedOrder)||!orderInventorySyncIncomplete(cachedOrder)||pendingOrderReservationIds.has(orderId))return;
+    if(!cachedOrder||!canRetryOrderInventorySync(cachedOrder)||(!orderInventorySyncIncomplete(cachedOrder)&&!orderSourceSyncIncomplete(cachedOrder))||pendingOrderReservationIds.has(orderId))return;
     const uid=currentUser?.uid;
     pendingOrderReservationIds.add(orderId);
     renderOrdersList();
@@ -18721,6 +18763,11 @@ window.saveNewOrder = function() {
     data.searchTokens = buildFullHistorySearchTokens('order', data);
     data.inventoryReservationStatus = 'pending';
     data.inventoryReservationUpdatedAt = new Date().toISOString();
+    if([DOCUMENT_TYPES.QUOTE,DOCUMENT_TYPES.FORECAST].includes(data.sourceType)&&data.sourceId){
+        data.sourceDocumentSyncStatus='pending';
+        data.sourceDocumentSyncError='';
+        data.sourceDocumentSyncUpdatedAt=data.inventoryReservationUpdatedAt;
+    }
 
     const saveButton = document.getElementById('saveNewOrderBtn');
     const savingGeneration=orderModalOpenGeneration;
