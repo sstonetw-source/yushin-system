@@ -4012,6 +4012,7 @@ function forecastItemToOrderSource(forecast, item) {
 }
 
 async function createForecastOrdersDirectly(forecast, items) {
+    const synchronizationUid=currentUser?.uid;
     const now = new Date().toISOString();
     const orderDate = localDateString();
     const normalizedItems = items.map((item, index) => {
@@ -4094,27 +4095,10 @@ async function createForecastOrdersDirectly(forecast, items) {
     const created=[{id:orderRef.id,data:orderData}];
     const reservationResults = await Promise.all(created.map(async order => {
         try {
-            await reserveInventoryForNewOrder(order.id, order.data);
-            const completedAt = new Date().toISOString();
-            const updates = {
-                inventoryReservationStatus:'completed',
-                inventoryReservationError:'',
-                inventoryReservationUpdatedAt:completedAt
-            };
-            await db.collection('orders').doc(order.id).set(updates,{merge:true});
-            Object.assign(order.data, updates);
+            await synchronizeOrderInventory(order.id, order.data, synchronizationUid);
             return { id:order.id, status:'completed' };
         } catch (err) {
-            const failedAt = new Date().toISOString();
-            const updates = {
-                inventoryReservationStatus:'failed',
-                inventoryReservationError:String(err?.message||err),
-                inventoryReservationUpdatedAt:failedAt
-            };
-            await db.collection('orders').doc(order.id).set(updates,{merge:true})
-                .catch(markErr=>console.error('Forecast 訂單庫存預留失敗狀態寫入失敗：',markErr));
-            Object.assign(order.data, updates);
-            return { id:order.id, status:'failed', error:updates.inventoryReservationError };
+            return { id:order.id, status:'failed', error:String(err?.message||err) };
         }
     }));
 
@@ -11312,6 +11296,51 @@ function canRetryOrderInventorySync(order) {
     return currentUserRole==='admin'||currentUserRole==='purchaser'
         ||(['sales','engineer'].includes(currentUserRole)&&!!currentUser?.uid&&order?.ownerUid===currentUser.uid);
 }
+async function writeOrderInventorySyncState(orderId, status, expectedAttemptId, uid, error = '') {
+    if(!['pending','completed','failed'].includes(status))throw new Error('不支援的庫存同步狀態。');
+    const ref=db.collection('orders').doc(orderId);
+    const nextAttemptId=status==='pending'?db.collection('orders').doc().id:'';
+    return runRoleTransaction(async tx=>{
+        const snap=await tx.get(ref);
+        if(currentUser?.uid!==uid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+        if(!snap.exists)throw new Error('訂單已不存在。');
+        const order={id:orderId,...snap.data()};
+        if(!canRetryOrderInventorySync(order))throw new Error('無權同步這筆訂單。');
+        const attemptId=String(order.inventoryReservationAttemptId||'');
+        if(normalizedOrderStatus(order)!=='normal'||order.inventoryReservationStatus==='completed'||attemptId!==String(expectedAttemptId||'')){
+            return {applied:false,order};
+        }
+        if(status!=='pending'&&order.inventoryReservationStatus!=='pending')return {applied:false,order};
+        const updates={inventoryReservationStatus:status,inventoryReservationError:status==='failed'?String(error).slice(0,1000):'',
+            inventoryReservationAttemptId:status==='pending'?nextAttemptId:attemptId,inventoryReservationUpdatedAt:new Date().toISOString()};
+        Object.assign(updates,orderWorkIndexFields({...order,...updates}));
+        tx.update(ref,updates);
+        return {applied:true,order:{...order,...updates}};
+    });
+}
+async function synchronizeOrderInventory(orderId, order, uid = currentUser?.uid) {
+    const started=await writeOrderInventorySyncState(orderId,'pending',order.inventoryReservationAttemptId||'',uid);
+    Object.assign(order,started.order);
+    if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消／作廢的訂單不可同步庫存。');
+    if(order.inventoryReservationStatus==='completed')return orderReservationSummary(order);
+    if(!started.applied)throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
+    const attemptId=order.inventoryReservationAttemptId;
+    try{
+        await reserveInventoryForNewOrder(orderId,order);
+        const finished=await writeOrderInventorySyncState(orderId,'completed',attemptId,uid);
+        Object.assign(order,finished.order);
+        if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續同步。');
+        if(order.inventoryReservationStatus!=='completed')throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
+        return {...orderReservationSummary(order),items:order.items};
+    }catch(err){
+        const failed=await writeOrderInventorySyncState(orderId,'failed',attemptId,uid,String(err?.message||err))
+            .catch(markErr=>{console.error('標記庫存同步結果失敗：',markErr);return null;});
+        if(failed)Object.assign(order,failed.order);
+        // Another attempt may already have completed while this older callback failed.
+        if(failed&&normalizedOrderStatus(order)==='normal'&&order.inventoryReservationStatus==='completed')return {...orderReservationSummary(order),items:order.items};
+        throw err;
+    }
+}
 function orderInventorySyncStatusHtml(order) {
     if(!orderInventorySyncIncomplete(order))return '';
     const running=pendingOrderReservationIds.has(order.id);
@@ -11335,13 +11364,7 @@ window.retryOrderInventoryReservation = async function(orderId) {
         if(currentUser?.uid!==uid||!canRetryOrderInventorySync(order))throw new Error('登入身份或權限已變更');
         if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消／作廢的訂單不可同步庫存');
         if(order.inventoryReservationStatus!=='completed'){
-            const now=new Date().toISOString();
-            await db.collection('orders').doc(orderId).set({inventoryReservationStatus:'pending',inventoryReservationError:'',inventoryReservationUpdatedAt:now},{merge:true});
-            order.inventoryReservationStatus='pending';
-            await reserveInventoryForNewOrder(orderId,order);
-            const updates={inventoryReservationStatus:'completed',inventoryReservationError:'',inventoryReservationUpdatedAt:new Date().toISOString()};
-            await db.collection('orders').doc(orderId).set(updates,{merge:true});
-            Object.assign(order,updates);
+            await synchronizeOrderInventory(orderId,order,uid);
         }
         if(currentUser?.uid===uid){
             ordersCache=ordersCache.map(row=>row.id===orderId?order:row);
@@ -11351,9 +11374,7 @@ window.retryOrderInventoryReservation = async function(orderId) {
         }
     }catch(err){
         if(order&&normalizedOrderStatus(order)==='normal'&&currentUser?.uid===uid&&canRetryOrderInventorySync(order)){
-            const updates={inventoryReservationStatus:'failed',inventoryReservationError:String(err?.message||err),inventoryReservationUpdatedAt:new Date().toISOString()};
-            await db.collection('orders').doc(orderId).set(updates,{merge:true}).catch(markErr=>console.error('標記同步失敗：',markErr));
-            Object.assign(cachedOrder,order,updates);
+            Object.assign(cachedOrder,order);
         }
         if(currentUser?.uid===uid)showActionFeedback('庫存同步未完成，可在同一筆訂單重試：'+(err.message||err),'warning');
     }finally{
@@ -18737,25 +18758,9 @@ window.saveNewOrder = function() {
             if(data.inventoryReservationStatus==='completed'){
                 reservation=orderReservationSummary(data);
             }else{
-                reservation = await reserveInventoryForNewOrder(docRef.id, data);
-                const completedAt = new Date().toISOString();
-                await db.collection('orders').doc(docRef.id).set({
-                    inventoryReservationStatus:'completed',
-                    inventoryReservationError:'',
-                    inventoryReservationUpdatedAt:completedAt
-                },{merge:true});
-                data.inventoryReservationStatus='completed';
-                data.inventoryReservationError='';
-                data.inventoryReservationUpdatedAt=completedAt;
+                reservation = await synchronizeOrderInventory(docRef.id, data, savingUid);
             }
         } catch (reservationErr) {
-            const failedAt = new Date().toISOString();
-            await db.collection('orders').doc(docRef.id).set({
-                inventoryReservationStatus:'failed',
-                inventoryReservationError:String(reservationErr?.message||reservationErr),
-                inventoryReservationUpdatedAt:failedAt
-            },{merge:true}).catch(markErr=>console.error('標記訂單庫存預留失敗：',markErr));
-            Object.assign(data,{inventoryReservationStatus:'failed',inventoryReservationError:String(reservationErr?.message||reservationErr),inventoryReservationUpdatedAt:failedAt});
             throw new Error(`訂單已建立，但庫存預留未完成：${reservationErr?.message||reservationErr}。請從訂單清單重試同步，勿重複建立。`);
         }
         data.inventoryProductKey = inventoryProductKey(data);
