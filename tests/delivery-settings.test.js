@@ -84,3 +84,27 @@ test('switching delivery back to salesperson and account reset discard pending c
  f.node('orderShippingMode').value='SALES_SHIP';f.c.orderDeliveryChoiceChanged();f.reads[0].resolve(customerSnapshot());await first;assert.equal(f.node('orderShippingAddress').value,'業務地址');
  f.node('orderShippingMode').value='CUSTOMER_SHIP';const second=f.c.loadOrderCustomerAddresses();f.c.resetDeliverySettings();f.reads[1].resolve(customerSnapshot());await second;assert.equal(f.node('orderShippingAddress').value,'業務地址');
 });
+test('purchaser owner changes replace even edited salesperson addresses without changing personal defaults',()=>{
+ const f=uiFixture();f.c.currentUserRole='purchaser';f.c.salesList.push({uid:'T',name:'另一業務',deliveryDefaults:{mode:'SALES_SHIP',contact:'T收件人',phone:'456',address:'T完整地址'}});
+ f.c.initializeOrderDeliveryDefaults();assert.equal(f.node('orderShippingMode').value,'');
+ f.node('orderOwnerUid').value='S';f.c.orderDeliveryOwnerChanged();assert.equal(f.node('orderShippingAddress').value,'業務地址');
+ f.node('orderShippingAddress').value='本次地址';f.node('orderShippingFields').oninput({target:{id:'orderShippingAddress'}});
+ f.node('orderOwnerUid').value='T';f.c.orderDeliveryOwnerChanged();assert.equal(f.node('orderShippingContact').value,'T收件人');assert.equal(f.node('orderShippingPhone').value,'456');assert.equal(f.node('orderShippingAddress').value,'T完整地址');
+ assert.equal(f.c.requestedOrderOwnerUid,'T');f.c.initializeOrderDeliveryDefaults();assert.equal(f.node('orderShippingAddress').value,'T完整地址');
+ assert.equal(f.c.salesList[0].deliveryDefaults.address,'業務地址');assert.equal(f.c.salesList[1].deliveryDefaults.address,'T完整地址');
+ f.node('orderOwnerUid').value='';f.c.orderDeliveryOwnerChanged();assert.equal(f.node('orderShippingAddress').value,'');
+});
+test('purchaser switching owner keeps customer destinations and refuses fallback to the creator',()=>{
+ const f=uiFixture();f.c.currentUserRole='purchaser';f.c.setOrderShippingInstructions({mode:'CUSTOMER_SHIP',contact:'客戶',phone:'789',address:'客戶完整地址'});
+ f.node('orderOwnerUid').value='T';f.c.orderDeliveryOwnerChanged();assert.equal(f.node('orderShippingAddress').value,'客戶完整地址');
+ f.node('orderShippingMode').value='SALES_SHIP';f.c.orderDeliveryChoiceChanged();assert.equal(f.node('orderShippingAddress').value,'');assert.equal(f.node('orderShippingContact').value,'');
+ assert.throws(()=>logistics.validatePlan(f.c.orderShippingInstructions(),true),/完整收件地址/);
+});
+test('order snapshot survives later defaults changes and feeds shipment exports with per-order recipient',()=>{
+ const f=uiFixture();f.c.initializeOrderDeliveryDefaults();f.node('orderShippingAddress').value='訂單獨立地址';const saved=JSON.parse(JSON.stringify(f.c.orderShippingInstructions()));
+ f.c.salesList[0].deliveryDefaults.address='個人新地址';
+ const row={warehouseId:'MAIN',order:{id:'O',shippingInstructions:saved},item:{itemCode:'P',itemName:'品項'},qty:1};
+ const executed=logistics.executionPlan(row,[{id:'MAIN'}],'MAIN');assert.equal(executed.address,'訂單獨立地址');
+ const csv=logistics.csvDocument(logistics.partition([row],()=>executed));assert.match(csv,/訂單獨立地址/);assert.doesNotMatch(csv,/個人新地址/);
+ for(const key of ['contact','phone','address'])assert.throws(()=>logistics.validatePlan({...saved,[key]:'  '},true),/完整收件地址/);
+});
