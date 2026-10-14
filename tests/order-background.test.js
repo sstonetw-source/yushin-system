@@ -58,7 +58,7 @@ function productCheckHarness(lookup) {
  const node=id=>{if(!nodes.has(id))nodes.set(id,{value:'',dataset:{},innerHTML:'',style:{},focus(){this.focused=true;},scrollIntoView(){}});return nodes.get(id);};
  node('orderItemCode').value='A123';node('orderQty').value='3';node('orderUnitPrice').value='125';
  let brand='Brand';const events=[];
- const c=vm.createContext({window:{},document:{getElementById:node},orderModalOpenGeneration:1,newOrderDraftItems:[],
+ const c=vm.createContext({window:{},YushinOrderEntry:require('../modules/order-entry-core'),document:{getElementById:node},orderModalOpenGeneration:1,newOrderDraftItems:[],
   clearQuickProductButton(){},clearProductMatchChoices(){},clearOrderProductMatch:input=>{input.dataset.productMasterMatched='0';c.window._orderModalProductId='';},
   clearTimeout,orderItemCodeTimer:null,orderCostRequestGeneration:0,normalizeBrandLookupKey:s=>String(s||'').toLowerCase(),
   getBrandFieldValue:()=>brand,resolveBrandName:s=>s,normalizeItemCodeLoose:s=>String(s).toUpperCase(),

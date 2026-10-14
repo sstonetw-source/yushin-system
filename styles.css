@@ -4356,3 +4356,40 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     overflow-wrap: anywhere;
 }
 .product-stock-hint[hidden] { display: none !important; }
+
+/* Order entry shares the system palette and controls. */
+#orderModalOverlay .eq-modal-box { max-width:780px; }
+.order-entry-section { margin:16px 0; padding:16px; border:1px solid var(--ys-border); border-radius:10px; background:var(--ys-surface); }
+.order-entry-section h4 { margin:0 0 12px; color:var(--ys-text); }
+.order-entry-wide { grid-column:1/-1; }
+.order-entry-summary { margin:8px 0; line-height:1.6; color:var(--ys-text); overflow-wrap:anywhere; }
+.order-entry-details { margin:12px 0; padding:12px; border:1px solid var(--ys-border); border-radius:8px; background:var(--ys-surface); }
+.order-entry-details summary { cursor:pointer; min-height:28px; color:var(--ys-muted); }
+.order-entry-details[open] > summary { margin-bottom:12px; }
+.order-entry-details .form-grid { margin-bottom:0; }
+.order-entry-add,.order-entry-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:16px 0; }
+.order-entry-add span { font-size:13px; color:var(--ys-muted); }
+#orderModalOverlay input,#orderModalOverlay select,#orderModalOverlay textarea { box-sizing:border-box; width:100%; min-width:0; }
+#orderModalOverlay [hidden] { display:none!important; }
+#orderOwnerWrap { grid-column:1/-1; }
+#orderSelfSupplierRequired,#orderCostPriceRequired { color:var(--ys-danger); }
+#orderModalOverlay .order-entry-legacy-mode { display:none; }
+@media(max-width:640px) {
+    #orderModalOverlay .form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .order-entry-section { padding:12px; }
+    #orderModalOverlay .order-entry-details .form-grid { grid-template-columns:1fr; }
+    #orderModalOverlay summary { min-height:44px; display:flex; align-items:center; }
+    .order-entry-actions button { flex:1; }
+    #orderModalOverlay :is(input:not([type=hidden]),select,textarea) { min-height:44px; }
+}
+@media(max-width:640px) {
+    #newOrderItemsWrap table,#newOrderItemsBody { display:block; min-width:0; width:100%; }
+    #newOrderItemsWrap thead { display:none; }
+    #newOrderItemsBody tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 12px; padding:12px; margin:10px 0; border:1px solid var(--ys-border); border-radius:8px; background:var(--ys-surface); }
+    #newOrderItemsBody td { display:block; min-width:0; border:0; padding:4px 0; overflow-wrap:anywhere; }
+    #newOrderItemsBody td::before { content:attr(data-th) '：'; color:var(--ys-muted); font-size:12px; }
+    #newOrderItemsBody td:is(:nth-child(1),:nth-child(2),:nth-child(7),:nth-child(8)) { grid-column:1/-1; }
+    #newOrderItemsBody td:nth-child(3) { display:none; }
+    #newOrderItemsBody td:nth-child(8) { display:flex; flex-wrap:wrap; gap:8px; }
+    #newOrderItemsBody td:nth-child(8)::before { content:none; }
+}

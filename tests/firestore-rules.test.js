@@ -1535,3 +1535,27 @@ test('warehouse dispatch converts a pending replenishment hold into a linked imm
  await assertFails(updateDoc(doc(firestore,'stockTransferRequests/REQ'),{status:'PENDING'}));
 });
 
+
+test('pending self-order entry permits no embedded cost for its owner and retains delivery snapshot',async()=>{
+ for(const [uid,code,role] of [['sales1','S01','sales'],['eng1','E01','engineer']]){
+  const item={itemId:'I',productId:'p-order',productMasterMatched:true,itemName:'Product',qty:1,unitPrice:100,procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:false,fulfillmentType:'WAREHOUSE',warehouseId:'W1',deliveryPlan:{mode:'PICKUP',contact:'',phone:'',address:'',warehouseId:'W1',packages:1,notes:''}};
+  await assertSucceeds(setDoc(doc(db(uid),'orders/pending-'+uid),{...validOrderProduct,customerName:'Customer',ownerUid:uid,salesCode:code,createdByUid:uid,createdByRole:role,createdByName:uid,procurementType:'SALES_SELF_ORDER',selfOrderAtCreation:true,items:[item]}));
+ }
+});
+test('purchaser may create a pending self-order for an engineer without gaining owner confirmations',async()=>{
+ const data={...validOrderProduct,customerName:'Customer',ownerUid:'eng1',salesCode:'E01',createdByUid:'buyer1',createdByRole:'purchaser',createdByName:'Buyer',procurementType:'SALES_SELF_ORDER',selfOrderAtCreation:true,items:[{itemId:'I',productId:'p-order',qty:1,unitPrice:100,procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:false}]};
+ await assertSucceeds(setDoc(doc(db('buyer1'),'orders/pending-assisted'),data));
+ await assertFails(updateDoc(doc(db('buyer1'),'orders/pending-assisted'),{isBilled:true}));
+ await assertFails(setDoc(doc(db('wh1'),'orders/pending-warehouse'),data));
+});
+test('owner can confirm pending self-order with actual zero cost and supplier in one batch; others cannot claim it',async()=>{
+ const item={itemId:'I',productId:'p-order',qty:1,unitPrice:100,procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:false};
+ const data={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',createdByUid:'sales1',createdByRole:'sales',procurementType:'SALES_SELF_ORDER',items:[item]};
+ await seed('orders/pending-confirm',data);
+ const record={type:'SALES_SELF_ORDER',method:'SALES_SELF_ORDER',ownerUid:'sales1',salesCode:'S01',sourceType:'SALES_ORDER',sourceId:'pending-confirm',sourceItemId:'I',qty:1,receivedQty:0,status:'ORDERED',supplier:'Vendor',unitCost:0};
+ await assertFails(setDoc(doc(db('sales2'),'supplyOrders/pending-other'),record));
+ const client=db('sales1'),batch=writeBatch(client);
+ batch.set(doc(client,'supplyOrders/pending-confirm'),record);
+ batch.update(doc(client,'orders/pending-confirm'),{items:[{...item,supplier:'Vendor',costPrice:0,supplyOrderedQty:1,selfOrderNos:['SO-TEST'],orderedAt:'2026-10-13',orderEvents:[{id:'pending-confirm',type:'SALES_SELF_ORDER',qty:1}]}]});
+ await assertSucceeds(batch.commit());
+});

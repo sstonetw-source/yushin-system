@@ -23,9 +23,9 @@ function setup(items){
  return {docs,context,order:docs.get('orders/o'),invalidations:()=>invalidations};
 }
 test('creation registers only self-order shortages using the entered supplier and zero price',async()=>{
- const x=setup([{itemId:'a',procurementType:'SALES_SELF_ORDER',shortageQty:2,costPrice:0,supplier:'Gift vendor',productId:'p',fulfillmentType:'WAREHOUSE'},
+ const x=setup([{itemId:'a',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,shortageQty:2,costPrice:0,supplier:'Gift vendor',productId:'p',fulfillmentType:'WAREHOUSE'},
  {itemId:'b',procurementType:'PURCHASING_PO',shortageQty:3},
- {itemId:'c',procurementType:'SALES_SELF_ORDER',shortageQty:0}]);
+ {itemId:'c',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,shortageQty:0}]);
  await x.context.registerInitialSelfOrders('o',x.order);
  const supplies=[...x.docs].filter(([key])=>key.startsWith('supplyOrders/'));
  assert.equal(supplies.length,1);const supply=supplies[0][1];
@@ -37,7 +37,7 @@ test('creation registers only self-order shortages using the entered supplier an
  assert.equal(x.invalidations(),1);
 });
 test('retry of the same commitment does not duplicate it, including direct shipment',async()=>{
- const x=setup([{itemId:'a',procurementType:'SALES_SELF_ORDER',shortageQty:1,costPrice:20,supplier:'Vendor',productId:'p',fulfillmentType:'DIRECT_SHIP'}]);
+ const x=setup([{itemId:'a',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,shortageQty:1,costPrice:20,supplier:'Vendor',productId:'p',fulfillmentType:'DIRECT_SHIP'}]);
  const details={supplier:'Vendor',qty:1,unitCost:20,orderDate:'2026-10-08'};
  await x.context.registerInitialSelfOrderSupply('o','a',details);
  await x.context.registerInitialSelfOrderSupply('o','a',details);
@@ -46,7 +46,7 @@ test('retry of the same commitment does not duplicate it, including direct shipm
 });
 
 test('stock-covered self-order does not generate supplier demand or invalidate list',async()=>{
- const x=setup([{itemId:'a',procurementType:'SALES_SELF_ORDER',shortageQty:0,costPrice:2,supplier:'Vendor',productId:'p'}]);
+ const x=setup([{itemId:'a',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,shortageQty:0,costPrice:2,supplier:'Vendor',productId:'p'}]);
  await x.context.registerInitialSelfOrders('o',x.order);
  assert.equal(x.invalidations(),0);
  assert.equal([...x.docs.keys()].filter(key=>key.startsWith('supplyOrders/')).length,0);
@@ -57,4 +57,16 @@ test('creation-time pending self-order shows sync exception, not a second routin
  assert.match(source,/自行訂貨自動同步中/);
  assert.match(source,/補登異常訂貨/);
  assert.match(source,/自行訂貨已記錄為已採購，等待到貨/);
+});
+
+test('pending self-order creates no supplier commitment even when supplier and cost have been entered',async()=>{
+ const x=setup([{itemId:'pending',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:false,shortageQty:2,costPrice:5,supplier:'Vendor',productId:'p'}]);
+ await x.context.registerInitialSelfOrders('o',x.order);
+ assert.equal([...x.docs.keys()].filter(key=>key.startsWith('supplyOrders/')).length,0);assert.equal(x.invalidations(),0);
+});
+test('mixed pending and confirmed self-order lines register only confirmed shortages',async()=>{
+ const x=setup([{itemId:'pending',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:false,shortageQty:2,productId:'p'},
+ {itemId:'confirmed',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,shortageQty:1,costPrice:0,supplier:'Vendor',productId:'p'}]);
+ await x.context.registerInitialSelfOrders('o',x.order);
+ assert.equal(x.docs.has('supplyOrders/self-o-pending'),false);assert.equal(x.docs.get('supplyOrders/self-o-confirmed').qty,1);
 });

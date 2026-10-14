@@ -5888,7 +5888,7 @@ function clearChangedProductDetails(input, mode) {
     delete input.dataset.matchedProductCode;
     delete input.dataset.preserveOrderPriceCode;
     if (row) calculateTotals();
-    else { orderCostRequestGeneration++; calcOrderTotal(); }
+    else { orderCostRequestGeneration++; const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value='pending';window.syncOrderEntrySelfStatus?.();calcOrderTotal(); }
 }
 
 async function applyOrderProductMatch(input, match) {
@@ -10164,6 +10164,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
             if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能打單。');
+            const tradeValidation=globalThis.YushinOrderEntry.validateTrade(order);if(!tradeValidation.valid)throw new Error(tradeValidation.message);
             const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===itemId);
             if(index<0)throw new Error('找不到訂單品項。');
@@ -10268,6 +10269,7 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
             items[index]={
                 ...item,
                 supplyOrderedQty:already+qty,
+                supplier,costPrice:unitCost,
                 selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],
                 orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate,
                 orderEvents:[
@@ -10286,7 +10288,7 @@ async function registerInitialSelfOrders(orderId,order) {
     let changed=false;
     try{
         for(const item of normalizedOrderItems(order)){
-            if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER')continue;
+            if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER'||item.selfOrderConfirmed!==true)continue;
             const qty=remainingProcurementQty(order,item);
             if(qty<=0)continue;
             const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate});
@@ -10299,7 +10301,9 @@ async function registerInitialSelfOrders(orderId,order) {
     }
 }
 function selfOrderActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
-    return '';
+    if(!canBusinessSelfOrder(order)||normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order))return '';
+    return (normalizedItems||normalizedOrderItems(order)).filter(item=>(item.procurementType||order.procurementType)==='SALES_SELF_ORDER'&&remainingProcurementQty(order,item)>0)
+        .map(item=>`<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">確認自行訂貨・${escapeHtml(item.itemCode||item.itemName)}</button>`).join('');
 }
 
 window.openSelfOrderModal = function(orderId,itemId) {
@@ -10401,6 +10405,7 @@ window.saveSelfOrder = async function() {
             items[index]={
                 ...item,
                 supplyOrderedQty:already+qty,
+                supplier,costPrice:unitCost,
                 selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],
                 orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate,
                 orderEvents:[
@@ -11187,6 +11192,7 @@ window.renderOrdersList = function() {
             <td class="no-print" data-th="操作">
                 ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
+                    ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                     
                     ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '已送貨（分批）' : '已送貨'}</button>` : ''}
                     ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
@@ -11194,7 +11200,6 @@ window.renderOrdersList = function() {
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
                             ${orderLifecycleActionButtons(o, lifecycle, deliveryProgress, contextActions)}
-                            ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
                             ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteOrder(${inlineJsValue(o.id)})">永久刪除</button>` : ''}
@@ -12435,7 +12440,7 @@ function renderPendingPurchaseOrders() {
         }else if(order){
             // Creation-time self-orders are recorded automatically. Pending rows are
             // synchronization exceptions, not a second routine ordering action.
-            const autoSelfOrder = selfOrder && order.selfOrderAtCreation === true;
+            const autoSelfOrder = selfOrder && order.selfOrderAtCreation === true && item.selfOrderConfirmed === true;
             const syncState = String(order.inventoryReservationStatus||'');
             actionHtml=autoSelfOrder && syncState !== 'completed'
                 ? `<span class="order-progress-badge">${syncState==='failed'?'自行訂貨同步失敗，請至訂單頁重試同步':'自行訂貨自動同步中…'}</span>`
@@ -17965,6 +17970,7 @@ function collectOrderDraft() {
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
         supplier:orderDraftFieldValue('orderSelfSupplier'),unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
         procurementType:orderDraftFieldValue('orderProcurementType')||'PURCHASING_PO',
+        selfOrderConfirmed:orderDraftFieldValue('orderSelfOrderConfirmed')==='confirmed',remarks:orderDraftFieldValue('orderRemarks'),
         fulfillmentType:orderDraftFieldValue('orderFulfillmentType')||'WAREHOUSE',warehouseId:orderDraftFieldValue('orderWarehouse'),
         transactionType:orderDraftFieldValue('orderTransactionType'),invoiceTitle:orderDraftFieldValue('orderInvoiceTitle'),
         productId:window._orderModalProductId||'',items:newOrderDraftItems,
@@ -18012,16 +18018,19 @@ function setOrderModalItem(item={}) {
     onOrderBrandSelectChange();
     if (normalized.productId) codeInput.dataset.autofillBrand=normalizeBrandLookupKey(resolveBrandName(normalized.brand||''));
     document.getElementById('orderQty').value=normalized.qty||1;
-    document.getElementById('orderUnitPrice').value=normalized.unitPrice||0;
+    document.getElementById('orderUnitPrice').value=normalized.unitPrice??'';
     document.getElementById('orderTotalPrice').value=normalized.totalPrice||0;
     const supplierInput=document.getElementById('orderSelfSupplier');if(supplierInput)supplierInput.value=normalized.supplier||'';
     document.getElementById('orderCostPrice').value=normalized.costPrice??'';
     const procurement=document.getElementById('orderProcurementType');if(procurement)procurement.value=normalized.procurementType||'PURCHASING_PO';
+    const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value=normalized.selfOrderConfirmed===true?'confirmed':'pending';
     onOrderProcurementTypeChange();
     if(normalized.procurementType==='SALES_SELF_ORDER')document.getElementById('orderCostPrice').value=normalized.costPrice??'';
     document.getElementById('orderFulfillmentType').value=normalized.fulfillmentType||'WAREHOUSE';
     populateOrderWarehouseOptions(normalized.warehouseId||'');
     onOrderFulfillmentChange();
+    if(normalized.deliveryPlan)window.setOrderShippingInstructions?.(normalized.deliveryPlan);
+    window.syncOrderEntrySelfStatus?.();
     window._orderModalProductId=normalized.productId||'';
     onOrderItemCodeChange(codeInput);
     refreshOrderWarehouseStock();
@@ -18037,6 +18046,7 @@ function restoreSavedOrderDraft(){
         populateOrderOwnerSelect();
         document.getElementById('orderDateInput').value=draft.date||'';
         document.getElementById('orderCustomer').value=draft.customerName||'';
+        const remarks=document.getElementById('orderRemarks');if(remarks)remarks.value=draft.remarks||'';
         setOrderModalItem(draft);
         window.setOrderShippingInstructions?.(draft.shippingInstructions||{});
         document.getElementById('orderTransactionType').value=draft.transactionType||'';
@@ -18113,7 +18123,7 @@ window.discardSavedOrderDraftFromBanner = async function() {
 function normalizeNewOrderItem(item = {}) {
     const match=findPriceItemForOrder(item);
     const qty=Math.max(0,Number(item.qty||0));
-    const unitPrice=Number(item.unitPrice||0);
+    const unitPrice=item.unitPrice===null || item.unitPrice===undefined || String(item.unitPrice).trim()==='' ? null : Number(item.unitPrice);
     const productId=String(item.productId||match?.productId||'').trim();
     const brand=resolveBrandName(match?.brand||item.brand||'');
     return {
@@ -18131,6 +18141,9 @@ function normalizeNewOrderItem(item = {}) {
 function currentOrderModalItem() {
     const codeInput=document.getElementById('orderItemCode');
     const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',productCheckStatus:codeInput.dataset.productCheckStatus||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    item.selfOrderConfirmed=document.getElementById('orderSelfOrderConfirmed')?.value==='confirmed';
+    item.deliveryPlan=window.orderShippingInstructions?.()||{};
+    item.deliveryCustomerName=document.getElementById('orderCustomer')?.value.trim()||'';
     const cost=document.getElementById('orderCostPrice').value;if(item.procurementType==='SALES_SELF_ORDER'&&cost!=='')item.costPrice=Number(cost);
     return normalizeNewOrderItem(item);
 }
@@ -18145,6 +18158,7 @@ function orderItemProductStatusLabel(item) {
 function renderNewOrderDraftItems(){
     const body=document.getElementById('newOrderItemsBody'),wrap=document.getElementById('newOrderItemsWrap');if(!body||!wrap)return;
     const current=currentOrderModalItem();
+    window.refreshOrderEntrySummary?.();
     const currentStatus=document.getElementById('orderProductCheckStatus');
     if(currentStatus) {
         const status=orderItemProductStatus(current);
@@ -18159,7 +18173,7 @@ function renderNewOrderDraftItems(){
         const status=orderItemProductStatus(item);
         const action=status==='missing'?`<button type="button" class="btn-small btn-secondary" onclick="quickCreateNewOrderDraftItem(${index})">快速建立</button>`
             : ['ambiguous','error'].includes(status)?`<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">${status==='error'?'重試':'選擇產品'}</button>`:'';
-        return `<tr><td>${escapeHtml(item.itemCode||'')}</td><td>${escapeHtml(item.itemName||'')}</td><td>${escapeHtml(item.brand||'')}</td><td>${item.qty}</td><td>${Number(item.unitPrice||0).toLocaleString()}</td><td class="order-product-status" data-status="${status}">${orderItemProductStatusLabel(item)}</td><td>${item.procurementType==='SALES_SELF_ORDER'?'業務自行訂貨':'交由採購處理'}／${item.fulfillmentType==='DIRECT_SHIP'?'原廠直送':'倉庫'}</td><td>${action}<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`;
+        return `<tr><td data-th="貨號">${escapeHtml(item.itemCode||'')}</td><td data-th="品名">${escapeHtml(item.itemName||'')}</td><td data-th="廠牌">${escapeHtml(item.brand||'')}</td><td data-th="數量">${item.qty}</td><td data-th="單價">${item.unitPrice===null?'待確認':Number(item.unitPrice).toLocaleString()}</td><td data-th="產品狀態" class="order-product-status" data-status="${status}">${orderItemProductStatusLabel(item)}</td><td data-th="訂貨／交付">${item.procurementType==='SALES_SELF_ORDER'?(item.selfOrderConfirmed?'自行訂貨・已下訂':'自行訂貨・尚未下訂'):'交由採購處理'}／${globalThis.YushinOrderEntry.deliveryLabel(item)}</td><td data-th="操作">${action}<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`;
     }).join('');
 }
 let orderDraftProductCheckGeneration=0;
@@ -18205,16 +18219,24 @@ window.editNewOrderDraftItem=function(index){
 window.removeNewOrderDraftItem=function(index){newOrderDraftItems.splice(index,1);renderNewOrderDraftItems();};
 window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();
+    const validation=globalThis.YushinOrderEntry.validateItem(item);
+    if(!validation.valid){alert(validation.message);document.getElementById(validation.field)?.focus();return;}
+    try { globalThis.YushinWarehouseLogistics.validatePlan(item.deliveryPlan,true); } catch(err) { alert(err.message); const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return; }
     if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
     if(item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched'){alert('正式訂單品項必須先對應產品主檔。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
-    const duplicateIndex=newOrderDraftItems.findIndex(existing=>(existing.productId&&item.productId&&existing.productId===item.productId)||(!existing.productId&&!item.productId&&normalizeHistoryItemCode(existing.itemCode)===normalizeHistoryItemCode(item.itemCode)));
+    const duplicateIndex=newOrderDraftItems.findIndex(existing=>globalThis.YushinOrderEntry.sameDraftItem(existing,item));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
     else newOrderDraftItems.push(item);renderNewOrderDraftItems();
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-    const nextCodeInput=document.getElementById('orderItemCode');delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
+    const nextCodeInput=document.getElementById('orderItemCode');
+    if(nextCodeInput.dataset.autofillBrand){document.getElementById('orderBrand').value='';onOrderBrandSelectChange();}
+    const nextSelfStatus=document.getElementById('orderSelfOrderConfirmed');if(nextSelfStatus)nextSelfStatus.value='pending';
+    for(const id of ['orderSelfSupplier','orderCostPrice']){const field=document.getElementById(id);if(field){field.value='';delete field.dataset.autofillCost;}}
+    window.syncOrderEntrySelfStatus?.();
+    delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
     clearQuickProductButton(nextCodeInput);clearProductMatchChoices(nextCodeInput);
     renderNewOrderDraftItems();
-    document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value=0;document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
+    document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value='';document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
 };
 
 window.openOrderModal = function(source = null) {
@@ -18242,8 +18264,13 @@ window.openOrderModal = function(source = null) {
         if (field) field.value = '';
     });
     onOrderBrandSelectChange();
+    const selfStatus=document.getElementById('orderSelfOrderConfirmed');if(selfStatus)selfStatus.value=source?.selfOrderConfirmed===true?'confirmed':'pending';
+    window.syncOrderEntrySelfStatus?.();
+    const productDetails=document.getElementById('orderProductDetails');if(productDetails)productDetails.open=false;
+    const recipientDetails=document.getElementById('orderRecipientDetails');if(recipientDetails)recipientDetails.open=false;
+    const remarks=document.getElementById('orderRemarks');if(remarks)remarks.value=source?.remarks||'';
     document.getElementById('orderQty').value = 1;
-    document.getElementById('orderUnitPrice').value = 0;
+    document.getElementById('orderUnitPrice').value = '';
     document.getElementById('orderTotalPrice').value = 0;
     const supplierInput=document.getElementById('orderSelfSupplier');if(supplierInput)supplierInput.value=source?.supplier||'';
     document.getElementById('orderCostPrice').value = '';
@@ -18279,7 +18306,7 @@ window.openOrderModal = function(source = null) {
         if (spec) spec.value = source.spec || source.specification || '';
         document.getElementById('orderProductLine').value = source.productLine || '';
         document.getElementById('orderQty').value = source.qty || 1;
-        document.getElementById('orderUnitPrice').value = source.unitPrice || 0;
+        document.getElementById('orderUnitPrice').value = source.unitPrice ?? '';
         if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
             document.getElementById('orderCostPrice').value = source.costPrice ?? '';
         }
@@ -18443,7 +18470,7 @@ window.copyOrderAsNew = function(orderId) {
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = '複製成新訂單';
     document.getElementById('orderCustomer').value = source.customerName || '';
-    const copiedItems=normalizedOrderItems(source).map(normalizeNewOrderItem);
+    const copiedItems=normalizedOrderItems(source).map(item=>normalizeNewOrderItem(globalThis.YushinOrderEntry.copyItem(item,source.shippingInstructions)));
     const first=copiedItems[0]||normalizeNewOrderItem(source);
     // 複製訂單要沿用正式的品項填入流程，才能保留 Product Master 身分、
     // 訂貨方式、倉庫與品項屬性；不可只複製畫面文字後再依目前快取猜產品。
@@ -18511,8 +18538,23 @@ window.saveNewOrder = function() {
             && isSelectableCommercialOwner(person))
         : null;
     if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
-    if(items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&(!String(item.supplier||'').trim()||item.costPrice===null||item.costPrice===undefined||String(item.costPrice).trim()===''||!Number.isFinite(Number(item.costPrice))||Number(item.costPrice)<0))){alert('自行訂貨品項請填寫供應商與含稅進價（可填 0）；建立訂單後會直接列入待到貨。');return;}
-    let shippingInstructions;try{shippingInstructions=globalThis.YushinWarehouseLogistics?.validatePlan(window.orderShippingInstructions?.()||{},items.some(item=>item.fulfillmentType!=='DIRECT_SHIP'));}catch(err){alert(err.message);return;}
+    if(currentUserRole==='purchaser'&&items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){alert('採購可代建自行訂貨訂單；已向供應商下訂由負責業務確認。');return;}
+    if(!document.getElementById('orderCustomer').value.trim()){alert('請填寫客戶名稱。');document.getElementById('orderCustomer')?.focus();return;}
+    for(let index=0;index<items.length;index++) {
+        const validation=globalThis.YushinOrderEntry.validateItem(items[index]);
+        if(!validation.valid){alert(`第 ${index+1} 項：${validation.message}`);if(index<newOrderDraftItems.length)editNewOrderDraftItem(index);document.getElementById(validation.field)?.focus();return;}
+    }
+    let shippingInstructions;
+    try {
+        const fallback=window.orderShippingInstructions?.()||{};
+        for(const item of items) {
+            const plan=item.deliveryPlan||fallback;
+            if(plan.mode==='CUSTOMER_SHIP'&&item.deliveryCustomerName&&item.deliveryCustomerName!==document.getElementById('orderCustomer').value.trim())throw new Error('客戶已更換，請編輯各品項並重新確認收件資訊。');
+            if(item.fulfillmentType==='DIRECT_SHIP'&&plan.mode!=='CUSTOMER_SHIP')throw new Error('原廠直送請設定客戶收件資訊。');
+            item.deliveryPlan=globalThis.YushinWarehouseLogistics.validatePlan(plan,true);
+        }
+        shippingInstructions=items[0].deliveryPlan;
+    } catch(err) {alert(err.message);const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return;}
     items.forEach(item=>{delete item.productCheckStatus;});
     const firstItem=items[0];
     const itemCode = firstItem.itemCode;
@@ -18523,6 +18565,7 @@ window.saveNewOrder = function() {
         ...commercialCreatorFields(),
         company: window._orderModalQuoteContext?.company || '',
         customerName: document.getElementById('orderCustomer').value.trim(),
+        remarks:document.getElementById('orderRemarks')?.value.trim()||'',
         customerId: customerIdForName(document.getElementById('orderCustomer').value.trim()),
         brand: firstItem.brand,
         brandId: firstItem.brandId || brandIdForName(firstItem.brand),
@@ -18593,13 +18636,13 @@ window.saveNewOrder = function() {
     const savedPendingKey=pendingOrderCreateKey();
     saveOrderDraft();
     newOrderSaveInProgress = true;
-    if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
+    if (saveButton) { saveButton.disabled = true; saveButton.innerText = '建立中…'; }
     let createdOrderId = '';
     return createOrResumeNewOrder(data).then(async docRef => {
         createdOrderId = docRef.id;
         data=docRef.data;
         newOrderSaveInProgress=false;
-        if(saveButton){saveButton.disabled=false;saveButton.innerText='💾 儲存';}
+        if(saveButton){saveButton.disabled=false;saveButton.innerText='建立訂單';}
         // 正式文件確認寫入後即釋放表單；庫存與來源文件同步使用這份獨立快照。
         pendingOrderReservationIds.add(docRef.id);
         if(currentUser?.uid===savingUid){
@@ -18679,7 +18722,7 @@ window.saveNewOrder = function() {
     }).finally(() => {
         if(!createdOrderId){
             newOrderSaveInProgress = false;
-            if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存'; }
+            if (saveButton) { saveButton.disabled = false; saveButton.innerText = '建立訂單'; }
         }
     });
 };
@@ -20927,14 +20970,15 @@ function setOrderCostFieldForProduct(item) {
     const input = document.getElementById('orderCostPrice');
     if (!wrap || !input) return;
     const selfOrder = document.getElementById('orderProcurementType')?.value === 'SALES_SELF_ORDER';
+    const statusWrap=document.getElementById('orderSelfStatusWrap');if(statusWrap)statusWrap.hidden=!selfOrder;
     const supplierWrap=document.getElementById('orderSelfSupplierWrap');if(supplierWrap)supplierWrap.style.display=selfOrder?'':'none';
     const supplierInput=document.getElementById('orderSelfSupplier');if(supplierInput&&!supplierInput.value&&item?.supplier)supplierInput.value=item.supplier;
     const authorized = currentUserRole === 'admin' || currentUserRole === 'purchaser';
     wrap.style.display = selfOrder || authorized ? '' : 'none';
     input.readOnly = !selfOrder;
-    input.placeholder = selfOrder ? '本次交易含稅成本，可修改' : '選擇產品後帶入標準成本';
+    input.placeholder = selfOrder ? '尚未下訂可先留白，已下訂可填 0' : '選擇產品後帶入標準成本';
     const label = wrap.querySelector('label');
-    if (label) label.textContent = selfOrder ? '含稅交易成本' : '含稅標準成本（參考）';
+    if (label && label.firstChild) label.firstChild.textContent = selfOrder ? '含稅單位成本 ' : '含稅標準成本（參考） ';
     if (!selfOrder) input.value = '';
 }
 window.onOrderProcurementTypeChange = function() {

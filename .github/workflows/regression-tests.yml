@@ -29,6 +29,8 @@ jobs:
 
       - name: Check core JavaScript syntax
         run: |
+          node --check modules/order-entry-core.js
+          node --check modules/order-entry-ui.js
           node --check modules/order-self-order-required.js
           node --check modules/inventory-workspace.js
           node --check modules/warehouse-logistics.js
