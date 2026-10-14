@@ -14654,6 +14654,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             }
             tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(allocationGuard?'reserve_from_free_stock':'reserve_from_receipt',take,candidate.orderId,productKey,actor,{
                 warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE',
+                ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',
                 ...(checkpointCollection==='receipts'?{receiptId:receiptId||''}:{transferId:receiptId||''})
             }));
             took=take;

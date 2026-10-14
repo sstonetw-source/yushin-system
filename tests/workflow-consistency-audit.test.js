@@ -17,7 +17,7 @@ function allocationFixture({qty=5,incoming=0,fail=false,received=0}={}){
  const c=vm.createContext({db,YushinInventory:inventory,YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinReservation:require('../modules/reservation-core'),firestoreReadWithTimeout:p=>p,
   normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',
   itemDispatchState:(o,i)=>fulfillment.dispatchState(i),inventoryNumbers:inventory.normalizeStock,inventoryProductKey:i=>i.productId,orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),
-  warehouseStockDocId:(w,p)=>w+'__'+p,orderWorkIndexFields:()=>({}),inventoryMovementRecord:(type,qty)=>({type,qty}),invalidateWarehouseStockCache(){},
+  warehouseStockDocId:(w,p)=>w+'__'+p,orderWorkIndexFields:()=>({}),inventoryMovementRecord:(type,qty,sourceId,productKey,actor,extra)=>({type,qty,sourceId,productKey,actorUid:'receiver',...extra}),invalidateWarehouseStockCache(){},
   runRoleTransaction:async fn=>{const writes=[];const result=await fn({get:async r=>{assert.equal(writes.length,0,'all reads precede writes');return snapshot(r.path);},update:(r,data)=>writes.push([r,data]),set:(r,data)=>writes.push([r,data])});if(fail)throw Error('permission-denied');for(const [r,data] of writes)docs.set(r.path,{...docs.get(r.path),...structuredClone(data)});return result;}});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
  vm.runInContext(section('async function allocateFreeReceiptStockToShortages(', 'async function refreshAffectedOrderCaches('),c);
@@ -157,6 +157,7 @@ test('released stock recovery uses actual allocation transactions and clears onl
  assert.equal(result.allocatedQty,3);assert.equal(f.docs.get('inventory/P').reserved,3);assert.equal(f.docs.get('inventoryReservations/R').quantity,3);
  assert.equal(f.docs.get('orders/O').items[0].reservedQty,3);assert.equal(f.demand().orderedQty,2);assert.equal(f.demand().remainingToOrderQty,0);
  assert.equal(f.docs.get('warehouseStocks/W__P').allocationPending,false);
+ const movement=[...f.docs.values()].find(row=>row.type==='reserve_from_free_stock');assert.equal(movement.ownerUid,'sales');assert.equal(movement.salesCode,'S1');assert.equal(movement.actorUid,'receiver');
 });
 test('actual recovery rejects inconsistent order reservation before changing any fact',async()=>{
  const f=allocationFixture(),options=recoveryOptions(f),recover=require('../modules/free-stock-recovery').recoverLocation;
