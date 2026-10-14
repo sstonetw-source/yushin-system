@@ -1323,6 +1323,28 @@ test('purchasing cannot bypass incomplete stock allocation by directly creating 
  }
  await assertSucceeds(setDoc(doc(db('buyer1'),'supplyOrders/free-replenish'),{type:'STOCK_REPLENISHMENT',qty:1}));
 });
+test('shared stock and workflow read predicates retain fixed role, owner, cost and disabled-account boundaries',async()=>{
+ const scoped=['orders/read-owner','procurementDemands/read-owner','inventoryReservations/read-owner'];
+ for(const path of scoped)await seed(path,{ownerUid:'sales1',salesCode:'S01'});
+ const stock=['inventory/read-clean','warehouseStocks/read-clean'];
+ for(const path of stock)await seed(path,{productKey:'P',onHand:1,reserved:0});
+ for(const uid of ['admin','buyer1','wh1','sales1','eng1']){
+  const client=db(uid);
+  for(const path of scoped){
+   if(['admin','buyer1','wh1','sales1'].includes(uid))await assertSucceeds(getDoc(doc(client,path)));
+   else await assertFails(getDoc(doc(client,path)));
+   await assertSucceeds(getDoc(doc(client,path+'-missing')));
+  }
+  for(const path of stock){await assertSucceeds(getDoc(doc(client,path)));await assertSucceeds(getDoc(doc(client,path+'-missing')));}
+ }
+ for(const path of stock){
+  await seed(path,{productKey:'P',onHand:1,reserved:0,unitCost:5});
+  await assertSucceeds(getDoc(doc(db('admin'),path)));
+  for(const uid of ['buyer1','wh1','sales1','eng1'])await assertFails(getDoc(doc(db(uid),path)));
+ }
+ await seed('users/sales1',{role:'sales',salesCode:'S01',active:false});
+ for(const path of [...scoped,...stock]){await assertFails(getDoc(doc(db('sales1'),path)));await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),path)));}
+});
 test('warehouse and unrelated business owner cannot initialize another owner order, cancellation stops admin as well',async()=>{
  for(const [uid,role] of [['wh1','warehouse'],['sales2','sales']]){
   const f=await orderInitializationFixture(uid,role,{ownerUid:'sales1'});

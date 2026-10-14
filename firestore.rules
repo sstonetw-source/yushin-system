@@ -80,6 +80,19 @@ service cloud.firestore {
       );
     }
 
+    // Evaluate the fixed role once per document read; nested role predicates
+    // consumed the transaction expression budget when discovering another warehouse.
+    function operationalOrOwnedReader(data) {
+      let userRole = role();
+      return userRole in ['admin','purchaser','warehouse']
+        || (userRole in ['sales','engineer'] && (data == null || owns(data)));
+    }
+    function safeStockReader(data) {
+      let profile = signedIn() ? userDoc().data : {};
+      return signedIn() && profileEnabled(profile)
+        && (profile.get('role', '') == 'admin' || data == null || !data.keys().hasAny(['unitCost','cost']));
+    }
+
     function validSalesOwner(data) {
       return validQuoteOwner(data)
         && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales';
@@ -542,8 +555,9 @@ service cloud.firestore {
           ? ((op.qtyDelta > 0 && deliveryDelta >= op.qtyDelta)
             || (op.qtyDelta < 0 && deliveryDelta <= op.qtyDelta)) && op.reservedDelta == 0
           : op.qtyDelta == deliveryDelta
-            && op.reservedDelta == firstDelta + reservationDelta(op, 1)
-              + reservationDelta(op, 2) + reservationDelta(op, 3) + reservationDelta(op, 4));
+            && (op.reservationIds.size() == 1 ? op.reservedDelta == firstDelta
+              : op.reservedDelta == firstDelta + reservationDelta(op, 1)
+                + reservationDelta(op, 2) + reservationDelta(op, 3) + reservationDelta(op, 4)));
     }
     function hasStockOperation(targetPath, quantityField, reservedField) {
       let operationId = request.resource.data.get('stockOperationId', '');
@@ -1699,8 +1713,8 @@ service cloud.firestore {
     }
 
     match /orders/{id} {
-      allow get: if admin() || purchaser() || warehouse() || (commercialDocumentOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse() || owns(resource.data);
+      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
         && validNewOrderSourceSync(id)
         && validOwnedCommercialCreate(request.resource.data)
@@ -1737,10 +1751,8 @@ service cloud.firestore {
     // supplier orders / receipts link back through demandId.
     match /procurementDemands/{id} {
       // Transactions read the deterministic ID before creating a demand. Missing data carries no customer information.
-      allow get: if admin() || purchaser() || warehouse()
-        || (businessOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(resource.data));
+      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow list: if operationalOrOwnedReader(resource.data);
       allow create: if validProcurementDemand(request.resource.data) && (canReceiveInventory()
         || businessProcurementDemandCreate(request.resource.data));
       allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
@@ -2006,10 +2018,7 @@ service cloud.firestore {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
       // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
       // warehouse keeps those fields unchanged while performing physical stock work.
-      allow get: if admin() || (active() && (
-        resource == null
-        || (!('unitCost' in resource.data) && !('cost' in resource.data))
-      ));
+      allow get: if safeStockReader(resource == null ? null : resource.data);
       allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
       allow create: if (
           ((admin() || purchaser()) && validInventoryStockPolicy(request.resource.data))
@@ -2034,11 +2043,8 @@ service cloud.firestore {
     }
 
     match /warehouseStocks/{id} {
-      allow get: if admin() || (active() && (
-        resource == null
-        || (!('unitCost' in resource.data) && !('cost' in resource.data))
-      ));
-      allow list: if admin() || (active() && !('unitCost' in resource.data) && !('cost' in resource.data));
+      allow get: if safeStockReader(resource == null ? null : resource.data);
+      allow list: if safeStockReader(resource.data);
       allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
@@ -2051,10 +2057,8 @@ service cloud.firestore {
     match /inventoryReservations/{id} {
       // Reservation transactions first read their deterministic ID so retries remain idempotent.
       // A missing document contains no business data; existing documents stay owner-scoped.
-      allow get: if admin() || purchaser() || warehouse()
-        || (businessOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(resource.data));
+      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow list: if operationalOrOwnedReader(resource.data);
       allow create: if validReservationSource(id, request.resource.data)
         && reservationCreateWriter(id);
       allow update: if validReservationSource(id, request.resource.data) && reservationIdentityUnchanged()
