@@ -29,3 +29,31 @@ test('moving a reservation releases all old stock before reserving the new stock
     {preserved:0,release:5,additional:4,reserved:4,shortage:2}
   );
 });
+
+test('stock in another branch prevents false new-order procurement',()=>{
+ const rows=[{warehouseId:'MAIN',availableQty:0},{warehouseId:'EXT',availableQty:5}];
+ const selected=r.chooseWarehouseForReservation({requestedQty:3,preferredWarehouseId:'MAIN',warehouses:rows,companyAvailableQty:5});
+ assert.equal(selected,'EXT');
+ const plan=r.planReservation({requestedQty:3,availableQty:5,sameStock:false});
+ assert.equal(plan.reservedQty,3);assert.equal(plan.shortageQty,0);
+});
+test('prefer default warehouse when sufficient; do not read or use custody as a source',()=>{
+ const pick=r.chooseWarehouseForReservation({requestedQty:2,preferredWarehouseId:'MAIN',warehouses:[{warehouseId:'MAIN',availableQty:2}],companyAvailableQty:2});
+ assert.equal(pick,'MAIN');
+});
+test('single branch partial stock only creates genuinely uncovered demand',()=>{
+ const selected=r.chooseWarehouseForReservation({requestedQty:5,preferredWarehouseId:'MAIN',warehouses:[{warehouseId:'MAIN',availableQty:0},{warehouseId:'EXT',availableQty:3}],companyAvailableQty:3});
+ assert.equal(selected,'EXT');
+ const plan=r.planReservation({requestedQty:5,availableQty:3});
+ assert.equal(plan.shortageQty,2);
+});
+test('multi-warehouse stock must be transferred rather than silently purchased again',()=>{
+ assert.throws(()=>r.chooseWarehouseForReservation({requestedQty:5,preferredWarehouseId:'MAIN',warehouses:[{warehouseId:'MAIN',availableQty:2},{warehouseId:'EXT',availableQty:3}],companyAvailableQty:5}),/調撥/);
+});
+test('a held reservation keeps its original source warehouse on retry',()=>{
+ const actual=r.chooseWarehouseForReservation({requestedQty:4,preferredWarehouseId:'MAIN',existingWarehouseId:'EXT',existingQty:4,warehouses:[{warehouseId:'EXT',availableQty:0}],companyAvailableQty:0});
+ assert.equal(actual,'EXT');
+});
+test('global and branch totals mismatch must not silently become a purchase',()=>{
+ assert.throws(()=>r.chooseWarehouseForReservation({requestedQty:2,preferredWarehouseId:'MAIN',warehouses:[{warehouseId:'MAIN',availableQty:0},{warehouseId:'EXT',availableQty:0}],companyAvailableQty:2}),/核對分倉庫存/);
+});
