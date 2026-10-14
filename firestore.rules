@@ -390,9 +390,28 @@ service cloud.firestore {
         'receiptEvents', 'purchaseEvents', 'reservationStatus', 'reservationError', 'inventoryProductKey',
         'linkedDocuments', 'procurementStatus', 'perOrdered', 'perReceived'];
     }
-    function purchaserOrderWorkflowUpdate() {
+    function purchaserInitialLocationItems(orderId) {
+      let before = resource.data.get('items', []);
+      let after = request.resource.data.get('items', []);
+      let changed = after.removeAll(before);
+      let prior = before.removeAll(after);
+      let item = changed[0];
+      let old = prior[0];
+      let held = getAfter(/databases/$(database)/documents/inventoryReservations/$(orderId + '__' + item.itemId)).data;
+      let target = get(/databases/$(database)/documents/warehouses/$(item.warehouseId)).data;
+      return resource.data.get('inventoryReservationStatus', '') in ['pending','failed']
+        && !orderIsCancelled(resource.data) && before.size() == after.size()
+        && changed.size() == 1 && prior.size() == 1 && uncommittedOrderItem(old)
+        && resource.data.get('deliveryRecords', []).size() == 0 && resource.data.get('returnRecords', []).size() == 0
+        && item.diff(old).affectedKeys().hasOnly(['orderedQty','reservedQty','shortageQty','inventoryProductKey','warehouseId'])
+        && item.warehouseId != old.get('warehouseId', '')
+        && target.get('active', true) && !target.get('systemCustody', false) && !(item.warehouseId.matches('custody-.*'))
+        && held.orderId == orderId && held.itemId == item.itemId && held.warehouseId == item.warehouseId
+        && held.quantity == item.reservedQty && held.shortageQty == item.shortageQty;
+    }
+    function purchaserOrderWorkflowUpdate(id) {
       return purchaser()
-        && operationalItemsOnly(purchasingItemFields())
+        && (operationalItemsOnly(purchasingItemFields()) || purchaserInitialLocationItems(id))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
@@ -1603,7 +1622,7 @@ service cloud.firestore {
     function orderUpdateAllowed(id) {
       let userRole = role();
       return userRole == 'admin' ? true
-        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
+        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
           && ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && owns(request.resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))));

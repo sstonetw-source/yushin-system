@@ -2730,7 +2730,7 @@ test('purchasing order refresh updates cache without duplicate render', () => {
 });
 
 test('purchaser order edit fields match visible order UI', () => {
-    const start=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
+    const start=rulesSource.indexOf('function purchaserOrderWorkflowUpdate(');
     const end=rulesSource.indexOf('function warehouseOrderWorkflowUpdate()',start);
     const source=rulesSource.slice(start,end);
     for (const field of ['costPrice','transactionType','invoiceTitle','remarks','billingDate','fieldEditHistory']) {
@@ -4435,7 +4435,7 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     assert.match(source,/supplyAfter\.get\('receivedQty', 0\) <= supplyBefore\.get\('qty', 0\)/);
     assert.match(source,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'deliveryRecords'[\s\S]*?'deliveredQty'[\s\S]*?'isDelivered'/);
 
-    const purchaserStart=rulesSource.indexOf('function purchaserOrderWorkflowUpdate()');
+    const purchaserStart=rulesSource.indexOf('function purchaserOrderWorkflowUpdate(');
     const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseOrderWorkflowUpdate()',purchaserStart);
     const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
     assert.doesNotMatch(purchaserSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);

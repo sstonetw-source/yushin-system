@@ -1272,7 +1272,7 @@ test('real initialization selects another stocked warehouse for all authorized c
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});
   await addInitializationWarehouse(f,5);await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
-  await assertSucceeds(f.run());await assertSucceeds(f.run());
+  try{await assertSucceeds(f.run());await assertSucceeds(f.run());}catch(err){throw Error(uid+' remote initialization: '+err.message);}
   const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   assert.equal(order.items[0].warehouseId,'W2');assert.equal(order.items[0].reservedQty,5);assert.equal(order.items[0].shortageQty,0);
   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,0);
@@ -1283,7 +1283,7 @@ test('unheld pending reservation and demand can atomically change warehouse on r
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});await f.run();
   await addInitializationWarehouse(f,5);await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
-  await assertSucceeds(f.run());await assertSucceeds(f.run());
+  try{await assertSucceeds(f.run());await assertSucceeds(f.run());}catch(err){throw Error(uid+' remote zero recovery: '+err.message);}
   const d=(await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data();
   assert.equal(d.warehouseId,'W2');assert.equal(d.requestedQty,0);assert.equal(d.remainingToOrderQty,0);
   const r=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();assert.equal(r.quantity,5);assert.equal(r.warehouseId,'W2');
