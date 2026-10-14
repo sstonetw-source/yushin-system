@@ -4802,11 +4802,11 @@ test('admin exposes the loaded application asset version', () => {
 
 
 test('product page lets users search exact codes without selecting a brand', () => {
-    assert.doesNotMatch(indexSource, /id="productBrandBrowser"|otherProductBrandsExpanded|window\\.renderProductBrandBrowser =/);
+    assert.doesNotMatch(indexSource, /id="productBrandBrowser"|otherProductBrandsExpanded|window\.renderProductBrandBrowser =/);
     assert.match(indexSource, /id="productSearchBrandButtons"/);
-    assert.match(indexSource, /id="productManagementSearch"[^>]+oninput="updateProductSearchControls\\(\\)"/);
-    assert.match(appSource, /if \\(input\\) input.disabled = false/);
-    assert.match(appSource, /if \\(button\\) button.disabled = productManagementSearchInProgress/);
+    assert.match(indexSource, /id="productManagementSearch"[^>]+oninput="updateProductSearchControls\(\)"/);
+    assert.match(appSource, /if \(input\) input.disabled = false/);
+    assert.match(appSource, /if \(button\) button.disabled = productManagementSearchInProgress/);
 });
 
 test('admin can remove a pending product reminder without deleting source documents and restore it later', () => {
