@@ -4749,11 +4749,10 @@ let warehouseMasterLoadPromise = null;
 async function loadWarehouseMaster(force = false) {
     if (warehouseMasterLoadPromise && !force) return warehouseMasterLoadPromise;
     warehouseMasterLoadPromise = firestoreReadWithTimeout(
-        db.collection('warehouses').limit(50).get(),
+        readCollectionInBatches('warehouses',50),
         '倉庫主檔'
-    ).then(snapshot => {
-        warehouseMasterCache = snapshot.docs
-            .map(doc => ({ id: doc.id, ...doc.data() }))
+    ).then(rows => {
+        warehouseMasterCache = rows
             .filter(item => item.active !== false)
             .sort((a,b)=>Number(b.isDefault)-Number(a.isDefault)||String(a.warehouseName||'').localeCompare(String(b.warehouseName||''),'zh-Hant'));
         renderWarehouseMasterAdmin();
@@ -5285,8 +5284,8 @@ function populateOrderWarehouseOptions(selected = '') {
         ? current
         : (defaultWarehouse()?.id || activeWarehouses[0]?.id || '');
 
-    // 舊版曾使用下拉選單；目前正式訂單採「依實際庫存自動配置」，
-    // orderWarehouse 是隱藏欄位，只需保存預設倉庫 id。
+    // 此隱藏欄位僅提供初始位置提示；正式位置由預留交易確認。
+    // 整個品項可由單一倉供應時會自動選倉；多倉合併仍待履約模型擴充。
     if (field.tagName === 'SELECT') {
         field.innerHTML = '<option value="">請選擇倉庫</option>' + activeWarehouses
             .map(item => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.warehouseName || item.id)}${item.isDefault ? '（預設）' : ''}</option>`).join('');
@@ -9677,7 +9676,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         const effectiveDelivered=Math.max(0,Number(normalized.deliveredQty||0)-Number(normalized.returnedQty||0));
         const requested=Math.max(0,orderedQty-effectiveDelivered);
         const productKey=inventoryProductKey(item);
-        const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
+        let warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
         const now=new Date().toISOString();
         const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
         const demandRef=procurementDemandRef(demandId);
@@ -9699,15 +9698,34 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         }
         if(!warehouseId)throw new Error('找不到有效倉庫，無法安全配置庫存。');
         const aggregateRef=inventoryRefFor(item);
-        const warehouseRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
         const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
         const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
-        const warehouseSnap=warehouseRef?await tx.get(warehouseRef):null;
         const reservationSnap=await tx.get(reservationRef);
-
         const aggregate=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{});
-        const warehouse=inventoryNumbers(warehouseSnap?.exists?warehouseSnap.data():{});
         const existing=reservationSnap.exists?reservationSnap.data():{};
+        const canChoose=globalThis.YushinReservation.reservationLocationCanChange({...item,
+            deliveredQty:Math.max(Number(item.deliveredQty||0),Number(normalized.deliveredQty||0)),
+            returnedQty:Math.max(Number(item.returnedQty||0),Number(normalized.returnedQty||0))},existing,currentDemand||{});
+        const candidateIds=[...new Set([warehouseId,...(canChoose?warehouseMasterCache
+            .filter(w=>w.active!==false&&!w.systemCustody&&!String(w.id).startsWith('custody-')).map(w=>w.id):[])])].filter(Boolean);
+        const warehouseContexts=await Promise.all(candidateIds.map(async id=>{
+            const ref=db.collection('warehouseStocks').doc(warehouseStockDocId(id,productKey));
+            const [master,snapshot]=await Promise.all([tx.get(db.collection('warehouses').doc(id)),tx.get(ref)]);
+            return {id,ref,snapshot,master:master.exists?{...master.data(),id}:null};
+        }));
+        if(canChoose){
+          const selection=globalThis.YushinReservation.selectSingleWarehouse({
+            warehouses:warehouseContexts.map(row=>row.master).filter(Boolean),
+            stocks:Object.fromEntries(warehouseContexts.map(row=>[row.id,row.snapshot.exists?row.snapshot.data():{}])),
+            currentWarehouseId:warehouseId,requestedQty:requested,aggregateAvailableQty:aggregateSnap?.exists?aggregate.available:0
+          });
+          if(selection.requiresMultipleLocations)throw new Error('此品項有庫存分散在多倉；目前尚未完成多倉分配，已停止此品項預留與採購需求同步，避免將其他倉現貨誤列為待採購。');
+          warehouseId=selection.warehouseId;
+        }
+        const selected=warehouseContexts.find(row=>row.id===warehouseId);
+        if(!selected?.master||selected.master.active===false)throw new Error('找不到啟用的庫存倉庫，請先確認倉庫主檔後重試。');
+        const warehouseRef=selected.ref,warehouseSnap=selected.snapshot;
+        const warehouse=inventoryNumbers(warehouseSnap.exists?warehouseSnap.data():{});
         const existingQty=Math.max(0,Number(existing.quantity||0));
         const oldProductKey=String(existing.productKey||'');
         const oldWarehouseId=String(existing.warehouseId||'');
@@ -9869,7 +9887,8 @@ async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStat
 }
 
 async function reserveInventoryForNewOrder(orderId, order) {
-    if(!warehouseMasterCache.length)await loadWarehouseMaster();
+    await loadWarehouseMaster(true);
+    if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
     const orderRef=db.collection('orders').doc(orderId);
     const snapshot=await firestoreReadWithTimeout(orderRef.get(),'讀取待同步訂單');
     if(!snapshot.exists)throw new Error('訂單已不存在，無法同步庫存。');

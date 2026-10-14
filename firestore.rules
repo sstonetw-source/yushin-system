@@ -581,7 +581,7 @@ service cloud.firestore {
       let op = getAfter(path).data;
       let stockPath = /databases/$(database)/documents/warehouseStocks/$(data.get('warehouseStockId', 'unused'));
       return (before.get('quantity', 0) == data.get('quantity', 0)
-          && before.get('warehouseId', data.get('warehouseId', '')) == data.get('warehouseId', ''))
+          && (before.get('warehouseId', data.get('warehouseId', '')) == data.get('warehouseId', '') || data.get('quantity', 0) == 0))
         || (operationId != '' && operationId != 'unused' && !exists(path) && op.actorUid == request.auth.uid
           && op.orderId == data.orderId && id in op.reservationIds
           && op.productKey == data.productKey && op.warehouseId == data.warehouseId
@@ -599,12 +599,30 @@ service cloud.firestore {
         && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
         && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
         && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
-        && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
+        && (request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
+          || businessUnheldReservationLocationChange())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex', 'stockOperationId', 'warehouseStockId'
+          'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex', 'stockOperationId', 'warehouseStockId', 'warehouseId'
         ])
         && request.resource.data.get('quantity', 0) >= 0
         && request.resource.data.get('shortageQty', 0) >= 0;
+    }
+
+    function uncommittedOrderItem(item) {
+      return item.get('reservedQty', 0) == 0 && item.get('supplyOrderedQty', 0) == 0
+        && item.get('receivedQty', 0) == 0 && item.get('dispatchPreparedQty', 0) == 0
+        && item.get('deliveredQty', 0) == 0 && item.get('returnedQty', 0) == 0
+        && item.get('transferPendingId', '') == '' && item.get('custodyTransferId', '') == '';
+    }
+    function businessUnheldReservationLocationChange() {
+      let order = get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data;
+      let master = get(/databases/$(database)/documents/warehouses/$(request.resource.data.warehouseId)).data;
+      return resource.data.get('quantity', 0) == 0
+        && order.ownerUid == request.auth.uid && order.get('inventoryReservationStatus', '') in ['pending','failed']
+        && order.get('deliveryRecords', []).size() == 0 && order.get('returnRecords', []).size() == 0
+        && uncommittedOrderItem(order.items[request.resource.data.orderItemIndex])
+        && master.get('active', true) && !master.get('systemCustody', false)
+        && !(request.resource.data.warehouseId.matches('custody-.*'));
     }
 
     function businessInventoryLotOperationalUpdate(id) {
@@ -895,9 +913,11 @@ service cloud.firestore {
         && item.get('supplyOrderedQty', 0) == oldItem.get('supplyOrderedQty', 0) && item.get('receivedQty', 0) == oldItem.get('receivedQty', 0)
         && held.orderId == d.sourceId && held.itemId == d.sourceItemId && held.productKey == d.productKey
         && held.warehouseId == item.warehouseId && held.quantity == item.reservedQty
+        && d.warehouseId == item.warehouseId
+        && (d.warehouseId == resource.data.get('warehouseId', '') || uncommittedOrderItem(oldItem))
         && item.shortageQty == (shortage > 0 ? shortage : 0)
         && d.requestedQty == (d.orderedQty > d.receivedQty + item.shortageQty ? d.orderedQty : d.receivedQty + item.shortageQty)
-        && d.diff(resource.data).affectedKeys().hasOnly(['requestedQty','remainingToOrderQty','remainingToReceiveQty','perOrdered','perReceived','status','updatedAt','sourceItemIndex']);
+        && d.diff(resource.data).affectedKeys().hasOnly(['requestedQty','remainingToOrderQty','remainingToReceiveQty','perOrdered','perReceived','status','updatedAt','sourceItemIndex','warehouseId']);
     }
 
     function businessDirectDemandReceiptUpdate() {
@@ -1761,19 +1781,28 @@ service cloud.firestore {
               && after.get('unitCost', 0) == before.get('unitCost', 0))));
     }
 
+    function purchaserSupplySourceReady() {
+      let data = request.resource.data;
+      let orderId = data.get('orderId', '');
+      return !(data.get('type', '') in ['PURCHASING_PO','PURCHASING_MANUAL']) || orderId == ''
+        || (exists(/databases/$(database)/documents/orders/$(orderId))
+          && !orderIsCancelled(get(/databases/$(database)/documents/orders/$(orderId)).data)
+          && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('inventoryReservationStatus', '') in ['pending','failed']));
+    }
+
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser()
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if ((admin() || purchaser()) && validQuickPurchaseCost())
+      allow create: if purchaserSupplySourceReady() && (((admin() || purchaser()) && validQuickPurchaseCost())
         && validSelfOrderSupplyCreate()
         || (businessOwner()
           && request.resource.data.type == 'SALES_SELF_ORDER'
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.salesCode == salesCode()
-          && validSelfOrderSupplyCreate());
+          && validSelfOrderSupplyCreate()));
       // Sales owns the commercial intent and may create/read its own self-order,
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits

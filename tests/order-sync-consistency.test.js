@@ -9,6 +9,7 @@ function fixture({items=[{itemId:'I',productId:'P',warehouseId:'W',qty:5}],onHan
  const docs=new Map([
   ['orders/O',{id:'O',ownerUid:'U',salesCode:'S',status:'active',inventoryReservationStatus:'pending',createdAt:'2026-10-14',items:clone(items)}],
   ['inventory/P',{productKey:'P',onHand,reserved:0,incoming:0}],
+  ['warehouses/W',{active:true,isDefault:true}],
   ['warehouseStocks/W__P',{productKey:'P',warehouseId:'W',onHand,reserved:0,incoming:0}]
  ]);
  let seq=0;const versions=new Map(),ref=path=>({path,id:path.split('/').at(-1),get:async()=>snap(path)});
@@ -24,7 +25,11 @@ function fixture({items=[{itemId:'I',productId:'P',warehouseId:'W',qty:5}],onHan
    if(controls.beforeCommit){const hook=controls.beforeCommit;controls.beforeCommit=null;hook();}
    if([...reads].some(([path,v])=>(versions.get(path)||0)!==v))continue;
    if(controls.fail)throw Error('permission-denied');
-   for(const [r,p] of writes)put(r.path,{...docs.get(r.path),...clone(p)});
+   for(const [r,p] of writes){
+    const next={...docs.get(r.path),...clone(p)};
+    for(const [key,value] of Object.entries(p))if(value?.__arrayUnion)next[key]=[...(docs.get(r.path)?.[key]||[]),...clone(value.__arrayUnion)];
+    put(r.path,next);
+   }
    return result;
   }
   throw Error('retry exhausted');
@@ -38,7 +43,7 @@ function fixture({items=[{itemId:'I',productId:'P',warehouseId:'W',qty:5}],onHan
   inventoryNumbers:inventory.normalizeStock,inventoryProductKey:i=>i.productId||'',inventoryRefFor:i=>ref('inventory/'+i.productId),
   warehouseStockDocId:(w,p)=>w+'__'+p,defaultWarehouse:()=>({id:'W'}),inventoryMovementRecord:(type,qty,orderId,productKey,actor,extra)=>({type,qty,sourceId:orderId,productKey,...extra}),
   orderWorkIndexFields:()=>({workCategories:['procurement']}),salesCodeForName:()=> 'S',runRoleTransaction:run,firestoreReadWithTimeout:p=>p,
-  warehouseMasterCache:[{id:'W'}],invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},
+  warehouseMasterCache:[{id:'W'}],warehouseMasterLoadPromise:Promise.resolve(),loadWarehouseMaster:async()=>{},invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},
   registerInitialSelfOrders:async()=>{controls.selfCalls++;}});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
  vm.runInContext(section('async function reserveSingleOrderItem(', 'function normalizedOrderItems('),c);
@@ -110,6 +115,7 @@ test('moving one reservation releases its previous location before reserving a n
  const f=fixture({items:[{itemId:'I',productId:'P',warehouseId:'W2',qty:4}]});
  f.put('inventory/P',{onHand:15,reserved:4});f.put('warehouseStocks/W__P',{onHand:5,reserved:4});
  f.put('warehouseStocks/W2__P',{onHand:10,reserved:0});
+ f.put('warehouses/W2',{active:true});
  f.put('inventoryReservations/O__I',{orderId:'O',itemId:'I',productKey:'P',warehouseId:'W',quantity:4});
  await f.sync();assert.equal(f.docs.get('inventory/P').reserved,4);assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);
  assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,4);assert.equal(f.docs.get('inventoryReservations/O__I').warehouseId,'W2');
@@ -117,4 +123,127 @@ test('moving one reservation releases its previous location before reserving a n
 test('missing product publishes an explicit error without inventing physical inventory',async()=>{
  const f=fixture({items:[{itemId:'I',qty:3}]});await f.sync();assert.equal(f.order().items[0].reservationError,'missing_product_master');
  assert.equal([...f.docs.keys()].some(k=>k.startsWith('inventoryReservations/')),false);assert.equal(f.demand('I').remainingToOrderQty,3);
+});
+
+function addWarehouse(f,id,onHand,{reserved=0,incoming=0,transferInTransit=0,...master}={}){
+ f.put('warehouses/'+id,{active:true,...master});
+ f.put('warehouseStocks/'+id+'__P',{productKey:'P',warehouseId:id,onHand,reserved,incoming,transferInTransit});
+ f.c.warehouseMasterCache.push({id,active:true});
+}
+test('another warehouse covers the complete item without adding stock or false purchasing demand',async()=>{
+ const f=fixture({onHand:0});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
+ await f.sync();const item=f.order().items[0];
+ assert.equal(item.warehouseId,'W2');assert.equal(item.reservedQty,5);assert.equal(item.shortageQty,0);assert.equal(item.qty,5);
+ assert.equal(f.docs.get('inventoryReservations/O__I').warehouseId,'W2');assert.equal(f.docs.get('inventory/P').onHand,5);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,5);
+ assert.equal(f.demand('I'),undefined);
+});
+test('initial hint stays preferred when it can cover the whole item; other warehouse is not chosen by size',async()=>{
+ const f=fixture({onHand:5});addWarehouse(f,'W2',100);f.put('inventory/P',{productKey:'P',onHand:105,reserved:0});
+ await f.sync();assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,0);
+});
+test('partial default stock is left free when a different warehouse covers the whole item',async()=>{
+ const f=fixture({onHand:2});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:7,reserved:0});
+ await f.sync();assert.equal(f.order().items[0].warehouseId,'W2');assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);
+});
+test('a single stocked remote warehouse covers partial quantity and purchasing receives only the company gap',async()=>{
+ const f=fixture({onHand:0});addWarehouse(f,'W2',3);f.put('inventory/P',{productKey:'P',onHand:3,reserved:0});await f.sync();
+ assert.equal(f.order().items[0].warehouseId,'W2');assert.equal(f.order().items[0].reservedQty,3);assert.equal(f.demand('I').remainingToOrderQty,2);
+ assert.equal(f.demand('I').warehouseId,'W2');assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,3);
+});
+test('zero reservation and existing demand recover to another warehouse without ghost stock or duplicate reserve',async()=>{
+ const f=fixture({onHand:0});await f.sync();assert.equal(f.demand('I').remainingToOrderQty,5);
+ addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
+ await f.sync();await f.sync();
+ assert.equal(f.order().items[0].warehouseId,'W2');assert.equal(f.demand('I').warehouseId,'W2');assert.equal(f.demand('I').remainingToOrderQty,0);
+ assert.equal(f.docs.get('inventoryReservations/O__I').quantity,5);assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,5);
+ assert.equal([...f.docs.values()].filter(x=>x.type==='reserve').length,1);
+});
+test('same-product lines and simultaneous orders compete for the same live warehouse stock',async()=>{
+ const f=fixture({onHand:0});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
+ const other=structuredClone(f.order());other.id='O2';f.put('orders/O2',other);
+ await Promise.all([f.sync(),f.c.reserveSingleOrderItem('O2',other,other.items[0],0)]);
+ const items=[f.order().items[0],f.docs.get('orders/O2').items[0]];
+ assert.equal(items.reduce((sum,i)=>sum+i.reservedQty,0),5);assert.equal(items.filter(i=>i.warehouseId==='W2').length,1);
+ assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,5);assert.equal(f.docs.get('inventory/P').reserved,5);
+ const repeated=fixture({onHand:0,items:[{itemId:'I',productId:'P',warehouseId:'W',qty:5},{itemId:'J',productId:'P',warehouseId:'W',qty:5}]});
+ addWarehouse(repeated,'W2',10);repeated.put('inventory/P',{productKey:'P',onHand:10,reserved:0});await repeated.sync();
+ assert.deepEqual(repeated.order().items.map(i=>i.reservedQty),[5,5]);assert.equal(repeated.docs.get('warehouseStocks/W2__P').reserved,10);
+});
+test('disabled and custody stock are excluded; supplier incoming and transfer transit never count as ready stock',async()=>{
+ const f=fixture({onHand:0});addWarehouse(f,'OFF',5,{active:false});addWarehouse(f,'custody-U',5,{systemCustody:true});
+ addWarehouse(f,'INCOMING',0,{incoming:5});addWarehouse(f,'TRANSIT',0,{transferInTransit:5});
+ f.put('inventory/P',{productKey:'P',onHand:10,reserved:0,incoming:10,transferInTransit:5});await f.sync();
+ assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.order().items[0].reservedQty,0);assert.equal(f.demand('I').remainingToOrderQty,5);
+});
+test('live warehouse deactivation during a transaction retry prevents reservation there',async()=>{
+ const f=fixture({onHand:0});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
+ f.controls.beforeCommit=()=>f.put('warehouses/W2',{active:false});await f.sync();
+ assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,0);
+});
+test('existing physical reservation or supplier progress locks automatic location selection',async()=>{
+ for(const progress of [{reservedQty:2},{supplyOrderedQty:3},{supplyOrderedQty:3,receivedQty:1},{dispatchPreparedQty:1},{deliveredQty:1},{returnedQty:1},{custodyTransferId:'HAND'}]){
+  const f=fixture({onHand:2});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:7,reserved:Number(progress.reservedQty||0)});
+  f.put('orders/O',{...f.order(),items:[{...f.order().items[0],...progress}]});
+  if(progress.reservedQty){f.put('warehouseStocks/W__P',{productKey:'P',warehouseId:'W',onHand:2,reserved:2});f.put('inventoryReservations/O__I',{orderId:'O',itemId:'I',productKey:'P',warehouseId:'W',quantity:2});}
+  await f.sync();assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,0);
+ }
+ const history=fixture({onHand:0});addWarehouse(history,'W2',5);history.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
+ history.put('orders/O',{...history.order(),deliveryRecords:[{itemId:'I',qty:1}]});await history.sync();
+ assert.equal(history.order().items[0].warehouseId,'W');assert.equal(history.docs.get('warehouseStocks/W2__P').reserved,0);
+});
+test('company aggregate still bounds another warehouse selection and missing current master cannot silently reserve',async()=>{
+ const f=fixture({onHand:0});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:2,reserved:0});await assert.rejects(f.sync(),/多倉分配/);
+ assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,0);
+ const missing=fixture();missing.docs.delete('warehouses/W');const before=JSON.stringify([...missing.docs]);
+ await assert.rejects(missing.sync(),/啟用的庫存倉庫/);assert.equal(JSON.stringify([...missing.docs]),before);
+});
+test('multiple partial locations stop safely rather than creating false procurement shortage',async()=>{
+ for(const remote of [1,3,4]){
+  const f=fixture({onHand:2});addWarehouse(f,'W2',remote);f.put('inventory/P',{productKey:'P',onHand:2+remote,reserved:0});const before=JSON.stringify([...f.docs]);
+  await assert.rejects(f.sync(),/多倉分配/);assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.demand('I'),undefined);
+ }
+});
+test('master refresh failure or account change cannot publish a stale warehouse choice',async()=>{
+ const f=fixture();f.c.loadWarehouseMaster=async()=>{f.c.warehouseMasterLoadPromise=null;};const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/倉庫主檔讀取失敗/);assert.equal(JSON.stringify([...f.docs]),before);
+ const switched=fixture();switched.controls.beforeCommit=()=>{switched.c.currentUser={uid:'OTHER'};switched.put('orders/O',{...switched.order(),remarks:'conflict'});};
+ await assert.rejects(switched.sync(),/登入身份已變更/);assert.equal(switched.docs.get('inventory/P').reserved,0);
+});
+test('automatic remote allocation flows through printing, transfer transit, receipt and physical shipment',async()=>{
+ const f=fixture({onHand:0});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',productId:'P',onHand:5,reserved:0});
+ f.put('inventoryLots/REMOTE',{productKey:'P',productId:'P',warehouseId:'W2',remainingQty:5,qty:5,lotNo:'L',expiryDate:'2027-01-01'});
+ await f.sync();const original=f.order();
+ f.put('orders/O',{...original,inventoryReservationStatus:'completed',items:[fulfillment.prepareDispatch({...original.items[0],deliveryPlan:{mode:'PICKUP'}},5)]});
+ const core=require('../modules/warehouse-logistics'),baseCollection=f.c.db.collection;
+ f.c.db.collection=name=>({...baseCollection(name),where(field,op,value){
+  const filters=[[field,op,value]],q={where(k,o,v){filters.push([k,o,v]);return q;},limit(){return q;},get:async()=>{
+   const rows=[...f.docs].filter(([path,data])=>path.startsWith(name+'/')&&filters.every(([k,o,v])=>o==='>'?data[k]>v:data[k]===v));
+   return {size:rows.length,docs:rows.map(([path,data])=>({id:path.split('/').at(-1),ref:baseCollection(name).doc(path.split('/').at(-1)),exists:true,data:()=>structuredClone(data)}))};}};return q;
+ }});
+ Object.assign(f.c,{YushinWarehouseLogistics:core,currentUserRole:'purchaser',canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
+  deliveryActor:()=> 'Buyer',orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),
+  itemDispatchState:(_o,item)=>fulfillment.dispatchState(item),DOCUMENT_TYPES:{ORDER:'order'},
+  firebase:{firestore:{FieldValue:{arrayUnion:v=>({__arrayUnion:[v]})}}}});
+ const logisticsSource=fs.readFileSync('modules/warehouse-logistics.js','utf8');
+ vm.runInContext(logisticsSource.slice(logisticsSource.indexOf('async function commitWarehouseTransfer(')),f.c);
+ vm.runInContext(section('function inventoryReservationPayload(', 'window.openInventoryReservationDetails ='),f.c);
+ vm.runInContext(section('async function applyInventoryDeliveryDeltaInTransaction(', 'async function applyInventoryReturnDeltaInTransaction('),f.c);
+ const branchItem=f.order().items[0];assert.equal(core.businessDeliveryState(f.order(),branchItem,fulfillment.dispatchState(branchItem),'W').shippable,0);
+ await f.c.commitWarehouseTransfer({id:'REMOTE-TO-MAIN',orderId:'O',itemId:'I',qty:5,toWarehouseId:'W'});
+ assert.equal(f.order().items[0].transferPendingId,'REMOTE-TO-MAIN');assert.equal(f.docs.get('inventory/P').transferInTransit,5);
+ assert.equal(f.docs.get('inventory/P').onHand,5);assert.equal(f.docs.get('warehouseStocks/W2__P').onHand,0);
+ await assert.rejects(f.c.runRoleTransaction(tx=>f.c.applyInventoryDeliveryDeltaInTransaction(tx,{...f.order(),...f.order().items[0]},5,'Sales','O')),/調撥途中/);
+ await f.c.commitWarehouseTransferReceipt('REMOTE-TO-MAIN');await f.c.commitWarehouseTransferReceipt('REMOTE-TO-MAIN');
+ const received=f.order().items[0];assert.equal(received.warehouseId,'W');assert.equal(received.transferPendingId,'');
+ assert.equal(f.docs.get('warehouseStocks/W__P').onHand,5);assert.equal(f.docs.get('warehouseStocks/W__P').reserved,5);
+ assert.equal(f.docs.get('inventory/P').onHand,5);assert.equal(f.docs.get('inventory/P').transferInTransit,0);
+ assert.equal((f.order().deliveryRecords||[]).length,0);assert.equal(core.businessDeliveryState(f.order(),received,fulfillment.dispatchState(received),'W').shippable,5);
+ await f.c.runRoleTransaction(async tx=>{
+  const result=await f.c.applyInventoryDeliveryDeltaInTransaction(tx,{...f.order(),...received,requireStockReservation:true},5,'Sales','O');
+  tx.update(f.c.db.collection('orders').doc('O'),{items:[{...fulfillment.deliver(received,5),reservedQty:result.newReservedQty}],deliveryRecords:[{id:'DELIVER',itemId:'I',qty:5,lotAllocations:result.lotAllocations}]});
+ });
+ assert.equal(f.docs.get('warehouseStocks/W__P').onHand,0);assert.equal(f.docs.get('inventory/P').onHand,0);assert.equal(f.docs.get('inventory/P').reserved,0);
+ assert.equal(f.docs.get('inventoryReservations/O__I').quantity,0);
+ assert.equal(f.order().deliveryRecords[0].qty,5);assert.equal(f.order().items[0].deliveredQty,5);
 });
