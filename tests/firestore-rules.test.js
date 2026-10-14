@@ -2004,3 +2004,36 @@ for(const [uid,role] of [['sales1','sales'],['eng1','engineer']])test(role+' act
  const stock=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();assert.equal(stock.reserved,0);assert.equal(stock.onHand,3);assert.equal(stock.allocationPending,true);assert.equal(stock.allocationRevision,1);
  await assertFails(updateDoc(doc(db(uid),'warehouseStocks/W1__init-product'),{allocationPending:false}));
 });
+
+
+test('cancelled direct redirect requires a live physical warehouse and atomic incoming totals',async()=>{
+ const locations=[['missing',null],['disabled',{active:false}],['custody-flag',{active:true,systemCustody:true}],
+  ['custody-type',{active:true,warehouseType:'CUSTODY'}],['custody-prefix',{active:true}],['physical',{active:true,warehouseType:'PHYSICAL'}]];
+ for(const [label,warehouse] of locations){
+  const warehouseId=label==='custody-prefix'?'custody-redirect':'redirect-'+label;
+  const id='redirect-'+label,key=id,stockId=warehouseId+'__'+key;
+  if(warehouse)await seed('warehouses/'+warehouseId,warehouse);
+  await seed('orders/'+id,{status:'cancelled',orderStatus:'cancelled',ownerUid:'sales1',salesCode:'S01'});
+  await seed('supplyOrders/'+id,{type:'PURCHASING_PO',orderId:id,productKey:key,status:'PARTIAL_RECEIPT',
+   qty:5,receivedQty:2,fulfillmentType:'DIRECT_SHIP',warehouseId:''});
+  await seed('inventory/'+key,{productKey:key,onHand:0,reserved:0,incoming:4});
+  await seed('warehouseStocks/'+stockId,{productKey:key,warehouseId,onHand:0,reserved:0,incoming:1});
+  const patch={customerCancellationDisposition:'KEEP_STOCK',customerCancellationResolvedAt:'now',customerCancellationResolvedBy:'buyer1',updatedAt:'now',
+   originalFulfillmentType:'DIRECT_SHIP',fulfillmentType:'WAREHOUSE',warehouseId,redirectInventoryId:key,redirectWarehouseStockId:stockId,incomingRegisteredQty:3};
+  const commit=(uid='buyer1',includeStock=true)=>{
+   const client=db(uid),batch=writeBatch(client);
+   batch.update(doc(client,'supplyOrders/'+id),{...patch,customerCancellationResolvedBy:uid});
+   if(includeStock){batch.update(doc(client,'inventory/'+key),{incoming:7});batch.update(doc(client,'warehouseStocks/'+stockId),{incoming:4});}
+   return batch.commit();
+  };
+  if(label==='physical'){
+   for(const uid of ['sales1','eng1','wh1'])await assertFails(commit(uid));
+   await assertFails(commit('buyer1',false));
+   await assertSucceeds(commit());
+  }else{
+   await assertFails(commit());
+   assert.equal((await getDoc(doc(db('admin'),'inventory/'+key))).data().incoming,4);
+   assert.equal((await getDoc(doc(db('admin'),'supplyOrders/'+id))).data().fulfillmentType,'DIRECT_SHIP');
+  }
+ }
+});

@@ -113,7 +113,7 @@ test('receive action locks before warehouse loading and cannot double submit on 
 });
 
 test('cancelled direct shipment redirect enforces active physical warehouse in UI, transaction and Rules',()=>{
- const start=code.indexOf('window.resolveSupplierCancellation=');
+ const start=code.indexOf('window.keepCancelledPurchaseAsStock=');
  const end=code.indexOf('window.saveReturnRecord=',start);
  assert.ok(start>=0&&end>start);
  const action=code.slice(start,end);
@@ -124,4 +124,58 @@ test('cancelled direct shipment redirect enforces active physical warehouse in U
  const rulesEnd=rules.indexOf('function validReturnPendingFlag(',rulesStart);
  assert.ok(rulesStart>=0&&rulesEnd>rulesStart);
  assert.match(rules.slice(rulesStart,rulesEnd),/validActiveReturnWarehouse\(after\.warehouseId\)/);
+});
+
+
+function redirectFixture(warehouse){
+ const docs=new Map([
+  ['supplyOrders/S1',{orderId:'O1',productKey:'P1',qty:5,receivedQty:2,status:'PARTIAL_RECEIPT',fulfillmentType:'DIRECT_SHIP'}],
+  ['orders/O1',{status:'cancelled'}],
+  ['inventory/P1',{incoming:4}],['warehouseStocks/W1__P1',{incoming:1}]
+ ]);
+ if(warehouse)docs.set('warehouses/W1',warehouse);
+ const alerts=[],feedback=[];
+ const c=vm.createContext({window:{},customerReturnActionsPending:new Set(),
+  canCreatePurchaseOrderCapability:()=>true,supplyReceivingCache:[{id:'S1',fulfillmentType:'DIRECT_SHIP'}],
+  loadWarehouseMaster:async()=>{},warehouseMasterCache:[{id:'W1',active:true}],defaultWarehouse:()=>({id:'W1'}),
+  prompt:()=> '1',confirm:()=>true,alert:m=>alerts.push(m),currentUser:{uid:'buyer1'},
+  db:{collection:name=>({doc:id=>({path:name+'/'+id})})},supplyOrdersCollection:()=>c.db.collection('supplyOrders'),
+  normalizedOrderStatus:o=>o.status,isPurchaseTerminalStatus:()=>false,warehouseStockDocId:(w,k)=>w+'__'+k,
+  deliveryActor:()=> 'Buyer',loadActiveReceivingSupplyCache:async()=>{},renderPurchasingView:()=>{},
+  showActionFeedback:(message,type)=>feedback.push({message,type}),actionFailureMessage:(_a,e)=>e.message,
+  runRoleTransaction:async fn=>{const pending=[];await fn({
+   get:async ref=>({exists:docs.has(ref.path),data:()=>structuredClone(docs.get(ref.path))}),
+   set:(ref,data,opts)=>pending.push([ref.path,opts?.merge?{...docs.get(ref.path),...data}:data]),
+   update:(ref,data)=>pending.push([ref.path,{...docs.get(ref.path),...data}])
+  });for(const [path,data] of pending)docs.set(path,data);}
+ });
+ const actionStart=code.indexOf('window.keepCancelledPurchaseAsStock=');
+ const actionEnd=code.indexOf('window.saveReturnRecord=',actionStart);
+ const guardStart=code.indexOf('async function assertActiveReturnWarehouse(');
+ const guardEnd=code.indexOf('async function commitCustomerReturnReceipt(',guardStart);
+ vm.runInContext(code.slice(guardStart,guardEnd)+code.slice(actionStart,actionEnd),c);
+ return {c,docs,alerts,feedback};
+}
+test('redirect transaction rejects stale warehouse choices without committing incoming stock',async()=>{
+ for(const warehouse of [null,{active:false},{active:true,systemCustody:true},{active:true,warehouseType:'CUSTODY'}]){
+  const f=redirectFixture(warehouse),before=JSON.stringify([...f.docs]);
+  await f.c.window.keepCancelledPurchaseAsStock('S1');
+  assert.equal(JSON.stringify([...f.docs]),before);
+  assert.match(f.alerts[0],/倉庫/);
+  assert.equal(f.feedback.length,0);
+  assert.equal(f.c.customerReturnActionsPending.size,0);
+ }
+});
+test('redirect registers only outstanding incoming stock and retry does not duplicate it',async()=>{
+ const f=redirectFixture({active:true,warehouseType:'PHYSICAL'});
+ await f.c.window.keepCancelledPurchaseAsStock('S1');
+ assert.equal(f.alerts.length,0);
+ assert.equal(f.docs.get('inventory/P1').incoming,7);
+ assert.equal(f.docs.get('warehouseStocks/W1__P1').incoming,4);
+ assert.equal(f.docs.get('inventory/P1').onHand,undefined);
+ assert.equal(f.docs.get('supplyOrders/S1').incomingRegisteredQty,3);
+ assert.equal(f.docs.get('supplyOrders/S1').fulfillmentType,'WAREHOUSE');
+ const before=JSON.stringify([...f.docs]);
+ await f.c.window.keepCancelledPurchaseAsStock('S1');
+ assert.equal(JSON.stringify([...f.docs]),before);
 });
