@@ -588,7 +588,7 @@ test('self-order receipt keeps reservation from fulfillment core without adding 
 test('new order reservation persists derived work category index after item reservation is known',()=>{
     assert.match(app,/function orderWorkIndexFields\(order\)/);
     assert.match(app,/workCategories:categories/);
-    assert.match(app,/Object\.assign\(updates,orderWorkIndexFields\(order\)\);\s*await db\.collection\('orders'\)\.doc\(orderId\)\.set\(updates,\{merge:true\}\)/);
+    assert.match(app,/const updates=\{items,itemCount:items\.length,orderSchemaVersion:2,\.\.\.orderWorkIndexFields\(nextOrder\),updatedAt:now\}/);
 });
 
 
@@ -2172,7 +2172,7 @@ test('purchase flows persist procurement demand through order and receipt transa
     const persistStart=app.indexOf('async function persistOrderProcurementDemands');
     const persistEnd=app.indexOf('\nasync function syncOrderProcurementDemandLifecycle',persistStart);
     assert.ok(persistStart>=0&&persistEnd>persistStart);
-    assert.match(app.slice(persistStart,persistEnd),/await batch\.commit\(\)[\s\S]*?invalidateProcurementDemandQueue\(\)/);
+    assert.match(app.slice(persistStart,persistEnd),/await runRoleTransaction\([\s\S]*?invalidateProcurementDemandQueue\(\)/);
     assert.match(app, /demandId:demand\.demandId\s*\|\|\s*''/);
     assert.match(app, /demandId:existingSupply\?\.demandId\|\|demandId\|\|''/);
     assert.match(app, /demandId:demandProjection\.demandId\|\|''/);
@@ -2338,12 +2338,12 @@ test('procurement need date stays separate from supplier ETA', () => {
         /scheduleDate:item\.requiredByDate\|\|item\.scheduleDate\|\|order\.requiredByDate\|\|order\.expectedDate\|\|''/
     );
 
-    const persistStart=app.indexOf('async function persistOrderProcurementDemands');
+    const persistStart=app.indexOf('function orderItemProcurementDemandDocument');
     const persistEnd=app.indexOf('\nasync function syncOrderProcurementDemandLifecycle',persistStart);
     const persistSource=app.slice(persistStart,persistEnd);
     assert.match(
         persistSource,
-        /scheduleDate:demand\.scheduleDate\|\|item\.requiredByDate\|\|item\.scheduleDate\|\|order\.requiredByDate\|\|order\.expectedDate\|\|''/
+        /scheduleDate:currentDemand\?\.scheduleDate\|\|demand\.scheduleDate\|\|item\.requiredByDate\|\|item\.scheduleDate\|\|order\.requiredByDate\|\|order\.expectedDate\|\|''/
     );
 
     const poStart=app.indexOf('const scheduledPoItems=poItemsWithScheduleDates');

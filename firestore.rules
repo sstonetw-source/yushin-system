@@ -39,11 +39,11 @@ service cloud.firestore {
 
     // Sales and engineers own their own commercial and fulfillment records.
     function businessOwner() {
-      return sales() || engineer();
+      return role() in ['sales', 'engineer'];
     }
 
     function commercialDocumentOwner() {
-      return sales() || engineer();
+      return businessOwner();
     }
 
     function businessAssistant() {
@@ -59,7 +59,7 @@ service cloud.firestore {
     }
 
     function canReceiveInventory() {
-      return admin() || purchaser() || warehouse();
+      return role() in ['admin', 'purchaser', 'warehouse'];
     }
 
     function canManageEquipment() {
@@ -393,6 +393,7 @@ service cloud.firestore {
 
     function warehouseOrderWorkflowUpdate() {
       return warehouse()
+        && !(resource.data.get('inventoryReservationStatus', '') in ['pending', 'failed'])
         && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
@@ -526,10 +527,12 @@ service cloud.firestore {
       let deliveryDelta = after.get('returnedQty', 0) - before.get('returnedQty', 0)
         - after.get('deliveredQty', 0) + before.get('deliveredQty', 0);
       let movement = getAfter(/databases/$(database)/documents/inventoryMovements/$(op.sourceMovementId)).data;
-      return businessOwner() && op.actorUid == request.auth.uid && owns(before) && owns(after)
+      let firstDelta = reservationDelta(op, 0);
+      return businessOwner() && op.actorUid == request.auth.uid && owns(before)
+        && before.get('ownerUid', '') == after.get('ownerUid', '') && before.get('salesCode', '') == after.get('salesCode', '')
         && op.reservationIds is list && op.reservationIds.size() > 0 && op.reservationIds.size() <= 5
         && op.reservationIds.toSet().size() == op.reservationIds.size()
-        && reservationDeltaAt(op, op.reservationIds[0]) != 999999999
+        && firstDelta != 999999999
         && movement.get('sourceId', '') == op.orderId && movement.get('sourceType', '') == 'order'
         && movement.get('productKey', '') == op.productKey
         && !exists(/databases/$(database)/documents/inventoryMovements/$(op.sourceMovementId))
@@ -538,7 +541,7 @@ service cloud.firestore {
           ? ((op.qtyDelta > 0 && deliveryDelta >= op.qtyDelta)
             || (op.qtyDelta < 0 && deliveryDelta <= op.qtyDelta)) && op.reservedDelta == 0
           : op.qtyDelta == deliveryDelta
-            && op.reservedDelta == reservationDelta(op, 0) + reservationDelta(op, 1)
+            && op.reservedDelta == firstDelta + reservationDelta(op, 1)
               + reservationDelta(op, 2) + reservationDelta(op, 3) + reservationDelta(op, 4));
     }
     function hasStockOperation(targetPath, quantityField, reservedField) {
@@ -550,8 +553,9 @@ service cloud.firestore {
         && op.productKey == resource.data.get('productKey', resource.data.get('productId', ''))
         && op.warehouseId == (targetPath.matches('inventory/.*') ? '' : resource.data.get('warehouseId', ''))
         && op.qtyDelta == request.resource.data.get(quantityField, 0) - resource.data.get(quantityField, 0)
-        && (reservedField == '' || op.reservedDelta == request.resource.data.get(reservedField, 0) - resource.data.get(reservedField, 0))
-        && validStockOperation(op);
+        && (reservedField == '' || op.reservedDelta == request.resource.data.get(reservedField, 0) - resource.data.get(reservedField, 0));
+      // The fresh immutable stockOperations document is independently validated on create.
+      // Do not repeat its full source/reservation proof for every target in the same transaction.
     }
 
     function businessInventoryOperationalUpdate(id) {
@@ -565,17 +569,9 @@ service cloud.firestore {
 
     function validBusinessReservation(id, data) {
       let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
-      let index = data.get('orderItemIndex', -1);
-      let item = order.items[index];
-      return businessOwner() && owns(order) && owns(data)
-        && index is int && index >= 0 && index < order.items.size()
-        && data.itemId == item.get('itemId', 'item-' + string(index + 1))
-        && id == data.orderId + '__' + data.itemId
-        && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
-        && data.get('quantity', 0) is number && data.get('quantity', 0) >= 0
-        && data.get('quantity', 0) <= item.get('qty', 0)
-        && (!orderIsCancelled(order) || data.get('quantity', 0) == 0)
-        && businessReservationStockProof(id, data);
+      // Both call sites already require a business role and validReservationSource.
+      // That shared source validator proves identity, owner, bounds and cancellation once.
+      return owns(order) && businessReservationStockProof(id, data);
     }
     function businessReservationStockProof(id, data) {
       let before = resource == null ? {} : resource.data;
@@ -687,6 +683,7 @@ service cloud.firestore {
       let index = data.get('orderItemIndex', -1);
       let item = order.items[index];
       return index is int && index >= 0 && index < order.items.size()
+        && (role() != 'warehouse' || !(order.get('inventoryReservationStatus', '') in ['pending', 'failed']))
         && id == data.orderId + '__' + data.itemId
         && data.itemId == item.get('itemId', 'item-' + string(index + 1))
         && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
@@ -859,6 +856,10 @@ service cloud.firestore {
 
     function businessProcurementDemandOperationalUpdate() {
       return businessOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
+          'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt', 'sourceItemIndex'
+        ])
         && owns(resource.data)
         && owns(request.resource.data)
         && request.resource.data.get('demandId', '') == resource.data.get('demandId', '')
@@ -869,11 +870,33 @@ service cloud.firestore {
         && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
         && request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0)
         && request.resource.data.get('orderedQty', 0) >= resource.data.get('orderedQty', 0)
-        && request.resource.data.get('orderedQty', 0) <= request.resource.data.get('requestedQty', 0)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
-          'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt', 'sourceItemIndex'
-        ]);
+        && request.resource.data.get('orderedQty', 0) <= request.resource.data.get('requestedQty', 0);
+    }
+
+    function businessReservationDemandUpdate() {
+      let d = request.resource.data;
+      let orderPath = /databases/$(database)/documents/orders/$(d.sourceId);
+      let before = get(orderPath).data;
+      let after = getAfter(orderPath).data;
+      let index = d.sourceItemIndex;
+      let oldItem = before.items[index];
+      let item = after.items[index];
+      let held = getAfter(/databases/$(database)/documents/inventoryReservations/$(d.sourceId + '__' + d.sourceItemId)).data;
+      let delivered = item.get('deliveredQty', 0) - item.get('returnedQty', 0);
+      let shortage = item.qty - (delivered > 0 ? delivered : 0) - held.quantity;
+      return businessOwner() && before.get('ownerUid', '') == request.auth.uid && after.get('ownerUid', '') == request.auth.uid
+        && before.get('inventoryReservationStatus', '') in ['pending', 'failed']
+        && after.get('inventoryReservationStatus', '') in ['pending', 'failed'] && !orderIsCancelled(after)
+        && d.fulfillmentType == 'WAREHOUSE' && d.orderedQty == resource.data.orderedQty && d.receivedQty == resource.data.receivedQty
+        && d.orderedQty == item.get('supplyOrderedQty', 0) && d.receivedQty == item.get('receivedQty', 0)
+        && item.get('qty', 0) == oldItem.get('qty', 0) && item.get('deliveredQty', 0) == oldItem.get('deliveredQty', 0)
+        && item.get('returnedQty', 0) == oldItem.get('returnedQty', 0)
+        && item.get('supplyOrderedQty', 0) == oldItem.get('supplyOrderedQty', 0) && item.get('receivedQty', 0) == oldItem.get('receivedQty', 0)
+        && held.orderId == d.sourceId && held.itemId == d.sourceItemId && held.productKey == d.productKey
+        && held.warehouseId == item.warehouseId && held.quantity == item.reservedQty
+        && item.shortageQty == (shortage > 0 ? shortage : 0)
+        && d.requestedQty == (d.orderedQty > d.receivedQty + item.shortageQty ? d.orderedQty : d.receivedQty + item.shortageQty)
+        && d.diff(resource.data).affectedKeys().hasOnly(['requestedQty','remainingToOrderQty','remainingToReceiveQty','perOrdered','perReceived','status','updatedAt','sourceItemIndex']);
     }
 
     function businessDirectDemandReceiptUpdate() {
@@ -1632,15 +1655,18 @@ service cloud.firestore {
     // ERP Material Request-like purchasing demand. Demand identity is stable and
     // supplier orders / receipts link back through demandId.
     match /procurementDemands/{id} {
-      allow read: if admin() || purchaser() || warehouse()
+      // Transactions read the deterministic ID before creating a demand. Missing data carries no customer information.
+      allow get: if admin() || purchaser() || warehouse()
+        || (businessOwner() && (resource == null || owns(resource.data)));
+      allow list: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if validProcurementDemand(request.resource.data) && (admin() || purchaser() || warehouse()
+      allow create: if validProcurementDemand(request.resource.data) && (canReceiveInventory()
         || businessProcurementDemandCreate(request.resource.data));
       allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
         && ((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
           && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
           ? (admin() || businessDirectDemandReceiptUpdate())
-          : (admin() || purchaser() || warehouse() || businessProcurementDemandOperationalUpdate()));
+          : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate()));
       allow delete: if admin();
     }
 

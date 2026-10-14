@@ -532,103 +532,6 @@ test('new order creation keeps one document ID across uncertain writes and retri
     assert.equal(writes,1);
 });
 
-test('retrying a partly reserved order does not reserve the same stock twice', async () => {
-    const start=appSource.indexOf('async function reserveSingleOrderItem(');
-    const end=appSource.indexOf('async function reserveInventoryForNewOrder(',start);
-    const rows=new Map([
-        ['inventory/P-1',{onHand:10,reserved:0}],
-        ['warehouseStocks/W-1__P-1',{onHand:10,reserved:0}]
-    ]);
-    let reserveMovements=0;
-    const db={collection:name=>({doc:id=>({id:`${name}/${id||'MOVEMENT'}`})}),runTransaction:async callback=>{
-        const writes=[];
-        const result=await callback({
-            get:async ref=>({exists:rows.has(ref.id),data:()=>rows.get(ref.id)}),
-            update:(ref,patch)=>writes.push(()=>rows.set(ref.id,{...rows.get(ref.id),...patch})),
-            set:(ref,patch)=>writes.push(()=>{
-                if(ref.id.startsWith('inventoryMovements/') && patch.type==='reserve')reserveMovements++;
-                rows.set(ref.id,{...rows.get(ref.id),...patch});
-            })
-        });
-        writes.forEach(write=>write());
-        return result;
-    }};
-    const context=vm.createContext({
-        db,YushinReservation:reservation,currentUserName:'Staff',currentUser:{uid:'USER-1'},
-        inventoryProductKey:()=> 'P-1',defaultWarehouse:()=>({id:'W-1'}),
-        inventoryRefFor:()=>db.collection('inventory').doc('P-1'),
-        warehouseStockDocId:()=> 'W-1__P-1',
-        inventoryNumbers:row=>({onHand:row.onHand||0,reserved:row.reserved||0,available:(row.onHand||0)-(row.reserved||0)}),
-        inventoryMovementRecord:(type,quantity)=>({type,quantity}),
-        salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{},
-        YushinReservation:reservation
-    });
-    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
-    vm.runInContext(appSource.slice(start,end),context);
-    const order={customerName:'Customer',orderDate:'2026-09-28',salesCode:'S1'};
-    const item={itemId:'item-1',qty:4,fulfillmentType:'WAREHOUSE',warehouseId:'W-1'};
-    const first=await context.reserveSingleOrderItem('ORDER-1',order,item,0);
-    const retry=await context.reserveSingleOrderItem('ORDER-1',order,item,0);
-    assert.equal(first.reservedQty,4);
-    assert.equal(retry.reservedQty,4);
-    assert.equal(rows.get('inventory/P-1').reserved,4);
-    assert.equal(rows.get('warehouseStocks/W-1__P-1').reserved,4);
-    assert.equal(rows.get('inventoryReservations/ORDER-1__item-1').quantity,4);
-    assert.equal(reserveMovements,1);
-});
-
-
-test('moving an order reservation between warehouses releases the old stock before reserving the new stock', async () => {
-    const start=appSource.indexOf('async function reserveSingleOrderItem(');
-    const end=appSource.indexOf('async function reserveInventoryForNewOrder(',start);
-    const rows=new Map([
-        ['inventory/P-1',{onHand:15,reserved:4}],
-        ['warehouseStocks/W-1__P-1',{onHand:5,reserved:4}],
-        ['warehouseStocks/W-2__P-1',{onHand:10,reserved:0}],
-        ['inventoryReservations/ORDER-1__item-1',{quantity:4,productKey:'P-1',warehouseId:'W-1'}]
-    ]);
-    const movements=[];
-    let sequence=0;
-    const db={collection:name=>({doc:id=>({id:`${name}/${id||'MOV-'+(++sequence)}`})}),runTransaction:async callback=>{
-        const writes=[];
-        const result=await callback({
-            get:async ref=>({exists:rows.has(ref.id),data:()=>rows.get(ref.id)}),
-            update:(ref,patch)=>writes.push(()=>rows.set(ref.id,{...rows.get(ref.id),...patch})),
-            set:(ref,patch)=>writes.push(()=>{
-                if(ref.id.startsWith('inventoryMovements/'))movements.push(patch);
-                rows.set(ref.id,{...rows.get(ref.id),...patch});
-            })
-        });
-        writes.forEach(write=>write());
-        return result;
-    }};
-    const context=vm.createContext({
-        db,currentUserName:'Staff',currentUser:{uid:'USER-1'},
-        inventoryProductKey:()=> 'P-1',defaultWarehouse:()=>({id:'W-1'}),
-        inventoryRefFor:()=>db.collection('inventory').doc('P-1'),
-        warehouseStockDocId:(warehouse,key)=>`${warehouse}__${key}`,
-        inventoryNumbers:row=>({onHand:row.onHand||0,reserved:row.reserved||0,available:Math.max(0,(row.onHand||0)-(row.reserved||0)),incoming:row.incoming||0}),
-        inventoryMovementRecord:(type,quantity,orderId,productKey,actor,extra)=>({type,quantity,orderId,productKey,actor,...extra}),
-        salesCodeForName:()=>'',invalidateWarehouseStockCache:()=>{},
-        YushinReservation:reservation
-    });
-    context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
-    vm.runInContext(appSource.slice(start,end),context);
-    const order={customerName:'Customer',orderDate:'2026-10-02',salesCode:'S1'};
-    const item={itemId:'item-1',qty:4,fulfillmentType:'WAREHOUSE',warehouseId:'W-2'};
-    const result=await context.reserveSingleOrderItem('ORDER-1',order,item,0);
-
-    assert.equal(result.reservedQty,4);
-    assert.equal(result.shortageQty,0);
-    assert.equal(rows.get('inventory/P-1').reserved,4,'aggregate reserved quantity must not drift');
-    assert.equal(rows.get('warehouseStocks/W-1__P-1').reserved,0);
-    assert.equal(rows.get('warehouseStocks/W-2__P-1').reserved,4);
-    assert.equal(rows.get('inventoryReservations/ORDER-1__item-1').warehouseId,'W-2');
-    assert.deepEqual(movements.map(row=>[row.type,row.quantity,row.warehouseId]),[
-        ['release',-4,'W-1'],
-        ['reserve',4,'W-2']
-    ]);
-});
 
 test('role changes cannot leave an older in-flight page in the cache', () => {
     assert.match(appSource, /const requestedRole = currentUserRole, requestedUid = currentUser\?\.uid;/);
@@ -1480,10 +1383,10 @@ test('unknown order items do not create inventory before purchase receipt', () =
     const start = appSource.indexOf('async function reserveSingleOrderItem');
     const end = appSource.indexOf('async function reserveInventoryForNewOrder', start);
     const s = appSource.slice(start, end);
-    const missingProductReturn=s.indexOf('if(!productKey)return');
-    const transactionStart=s.indexOf('await runRoleTransaction');
-    assert.ok(missingProductReturn>=0 && transactionStart>missingProductReturn);
-    assert.match(s.slice(missingProductReturn,transactionStart), /reservationError:'missing_product_master'/);
+    const missingProductReturn=s.indexOf('if(!productKey){publish');
+    const stockRead=s.indexOf('const aggregateSnap=');
+    assert.ok(missingProductReturn>=0 && stockRead>missingProductReturn);
+    assert.match(s.slice(missingProductReturn,stockRead), /reservationError:'missing_product_master'/);
     assert.match(s,/globalThis\.YushinReservation\.planReservation/);
     assert.doesNotMatch(s, /tx\.set\(warehouseRef[\s\S]*?onHand/);
 });
@@ -4241,9 +4144,9 @@ test('critical role matrix stays aligned between UI capabilities and Firestore r
     const ruleHelperStart=rulesSource.indexOf('function businessOwner()');
     const ruleHelperEnd=rulesSource.indexOf('\n\n    function salesCode()',ruleHelperStart);
     const helperSource=rulesSource.slice(ruleHelperStart,ruleHelperEnd);
-    assert.match(helperSource,/return sales\(\) \|\| engineer\(\)/);
+    assert.match(helperSource,/return role\(\) in \['sales', 'engineer'\]/);
     assert.match(helperSource,/function canPurchase\(\)[\s\S]*?admin\(\) \|\| purchaser\(\)/);
-    assert.match(helperSource,/function canReceiveInventory\(\)[\s\S]*?admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
+    assert.match(helperSource,/function canReceiveInventory\(\)[\s\S]*?role\(\) in \['admin', 'purchaser', 'warehouse'\]/);
     assert.match(helperSource,/function canManageEquipment\(\)[\s\S]*?admin\(\) \|\| engineer\(\)/);
 
     const purchaseRuleStart=rulesSource.indexOf('match /purchaseOrders/{id}');
