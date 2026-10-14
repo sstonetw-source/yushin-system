@@ -1,10 +1,10 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const code=fs.readFileSync('modules/customer-cancellations.js','utf8'),app=fs.readFileSync('app.js','utf8');
 const inventory=require('../modules/inventory-core');
-const start=code.indexOf('async function commitCustomerReturnReceipt('),end=code.indexOf('\nwindow.releaseCustomerReturnHold',start);
+const start=code.indexOf('async function assertActiveReturnWarehouse('),end=code.indexOf('\nwindow.releaseCustomerReturnHold',start);
 function fixture(){
  const order={items:[{itemId:'I1',qty:5,fulfillmentType:'WAREHOUSE',warehouseId:'W1'}],ownerUid:'S1',salesCode:'S01',deliveredQty:5,returnRequests:[{id:'Q1',itemId:'I1',qty:3,receivedQty:0,status:'PENDING',reason:'test'}],returnRecords:[],deliveryRecords:[{itemId:'I1',qty:5,lotAllocations:[{lotId:'L1',qty:5}]}]};
- const docs=new Map([['orders/O1',order]]);let stock=0;const c=vm.createContext({
+ const docs=new Map([['orders/O1',order],['warehouses/W1',{active:true,warehouseType:'PHYSICAL'}]]);let stock=0;const c=vm.createContext({
   db:{collection:name=>({doc:id=>({path:name+'/'+id})})},
   runRoleTransaction:async fn=>{const pending=[];const tx={get:async ref=>({exists:docs.has(ref.path),data:()=>structuredClone(docs.get(ref.path))}),set:(ref,data)=>pending.push([ref,data]),update:(ref,data)=>pending.push([ref,{...docs.get(ref.path),...data}])};await fn(tx);pending.forEach(([ref,data])=>docs.set(ref.path,data));},
   canReceiveInventoryCapability:()=>true,normalizedOrderItems:o=>o.items,
@@ -60,4 +60,54 @@ test('account change during transaction reads stops receiving before stock write
  f.c.runRoleTransaction=fn=>run(tx=>fn({...tx,get:async ref=>{const snap=await tx.get(ref);f.c.currentUser={uid:'other'};return snap;}}));
  await assert.rejects(f.c.commitCustomerReturnReceipt(receiptArgs),/帳號或權限已變更/);
  assert.equal(f.stock(),0);assert.equal(f.docs.has('customerReturnReceipts/R1'),false);
+});
+
+test('receiving rejects missing, disabled, custody and mismatched warehouses before stock writes',async()=>{
+ const args={orderId:'O1',requestId:'Q1',receiptId:'R1',qty:1,quality:'SALEABLE',warehouseId:'W1'};
+ for(const change of [null,{active:false},{active:true,systemCustody:true},{active:true,warehouseType:'CUSTODY'}]){
+  const f=fixture();
+  if(change===null)f.docs.delete('warehouses/W1');else f.docs.set('warehouses/W1',change);
+  await assert.rejects(f.c.commitCustomerReturnReceipt(args),/倉庫/);
+  assert.equal(f.stock(),0);
+  assert.equal(f.docs.has('customerReturnReceipts/R1'),false);
+ }
+ const f=fixture();
+ f.docs.set('warehouses/W2',{active:true,warehouseType:'PHYSICAL'});
+ await assert.rejects(f.c.commitCustomerReturnReceipt({...args,warehouseId:'W2'}),/原出貨倉庫/);
+ assert.equal(f.stock(),0);
+});
+test('a completed receipt can be retried after the warehouse is disabled without a second stock change',async()=>{
+ const f=fixture(),args={orderId:'O1',requestId:'Q1',receiptId:'R1',qty:1,quality:'SALEABLE',warehouseId:'W1'};
+ await f.c.commitCustomerReturnReceipt(args);f.docs.set('warehouses/W1',{active:false});
+ await f.c.commitCustomerReturnReceipt(args);
+ assert.equal(f.stock(),1);
+});
+
+test('receive action locks before warehouse loading and cannot double submit on repeated taps',async()=>{
+ const start=code.indexOf('window.receiveCustomerReturn=async function(');
+ const end=code.indexOf('\nasync function assertActiveReturnWarehouse(',start);
+ assert.ok(start>=0&&end>start);
+ let loadResolve,received=0,prompts=0;
+ const loaded=new Promise(resolve=>{loadResolve=resolve;});
+ const order={id:'O1',returnRequests:[{id:'Q1',itemId:'I1',qty:1,receivedQty:0}],items:[{itemId:'I1',warehouseId:'W1',fulfillmentType:'WAREHOUSE'}]};
+ const button={disabled:false,dataset:{},isConnected:true};
+ const c=vm.createContext({
+  window:{},canReceiveInventoryCapability:()=>true,customerReturnActionsPending:new Set(),customerReturnOrders:[order],
+  prompt:()=>{prompts++;return '1';},alert:message=>{throw Error('Unexpected alert: '+message);},
+  loadWarehouseMaster:()=>loaded,warehouseMasterCache:[{id:'W1',active:true,warehouseName:'主倉'}],
+  normalizedOrderItems:o=>o.items,lifecycleRecordId:()=> 'RETRY1',
+  commitCustomerReturnReceipt:async()=>{received++;},
+  refreshAffectedOrderCaches:async()=>{},loadCustomerReturnQueue:async()=>{},
+  markMainPageDirty:()=>{},showActionFeedback:()=>{},actionFailureMessage:(_a,e)=>e.message
+ });
+ vm.runInContext(code.slice(start,end),c);
+ const first=c.window.receiveCustomerReturn('O1','Q1',button);
+ assert.equal(button.disabled,true);
+ const second=c.window.receiveCustomerReturn('O1','Q1',button);
+ await second;
+ assert.equal(prompts,2,'second tap must not open another prompt');
+ loadResolve();await first;
+ assert.equal(received,1);assert.equal(button.disabled,false);
+ assert.equal(c.customerReturnActionsPending.size,0);
+ assert.equal(button.dataset.operationId,undefined);
 });

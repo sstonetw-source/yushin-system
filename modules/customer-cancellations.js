@@ -154,28 +154,43 @@ async function postCustomerReturnStock(tx,order,item,qty,receiptId,warehouseId){
 window.receiveCustomerReturn=async function(orderId,requestId,button){
     if(!canReceiveInventoryCapability()||customerReturnActionsPending.has(requestId))return;
     const order=customerReturnOrders.find(o=>o.id===orderId),request=order?.returnRequests?.find(r=>r.id===requestId);
-    if(!request)return;
-    const qtyInput=prompt(`待收 ${Number(request.qty)-Number(request.receivedQty||0)} 個。請輸入本次實收數量（可分批）：`);
-    if(qtyInput===null)return;const qty=Number(qtyInput);
-    if(!Number.isFinite(qty)||qty<=0)return alert('實收數量須大於零。');
-    const qualityInput=prompt('商品狀況：\n1：可再銷售，增加可用庫存\n2：待檢查，分開保管\n3：損壞，分開保管\n輸入 1、2 或 3：');
-    const quality={'1':'SALEABLE','2':'INSPECTION','3':'DAMAGED'}[qualityInput];if(!quality)return;
-    await loadWarehouseMaster();const choices=warehouseMasterCache.filter(w=>w.active!==false);
-    const warehouseInput=prompt('請選擇實際收貨倉庫：\n'+choices.map((w,i)=>`${i+1}：${w.name||w.id}`).join('\n'));
-    if(warehouseInput===null)return;const warehouseId=choices[Number(warehouseInput)-1]?.id;
-    if(!warehouseId)return alert('請選擇有效倉庫。');
-    const item=normalizedOrderItems(order).find(i=>i.itemId===request.itemId);
-    if(item?.fulfillmentType!=='DIRECT_SHIP'&&item?.warehouseId&&item.warehouseId!==warehouseId)return alert('請先收到原出貨倉庫；入庫後再使用分倉移轉，避免原批次帳不一致。');
-    const receiptId=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());
+    if(!request||!button)return;
+    // Lock before prompting or awaiting the warehouse list: a second tap must not start another receipt.
     customerReturnActionsPending.add(requestId);button.disabled=true;
     try{
+        const qtyInput=prompt(`待收 ${Number(request.qty)-Number(request.receivedQty||0)} 個。請輸入本次實收數量（可分批）：`);
+        if(qtyInput===null)return;
+        const qty=Number(qtyInput);
+        if(!Number.isFinite(qty)||qty<=0){alert('實收數量須大於零。');return;}
+        const qualityInput=prompt('商品狀況：\n1：可再銷售，增加可用庫存\n2：待檢查，分開保管\n3：損壞，分開保管\n輸入 1、2 或 3：');
+        const quality={'1':'SALEABLE','2':'INSPECTION','3':'DAMAGED'}[qualityInput];
+        if(!quality)return;
+        await loadWarehouseMaster();
+        const choices=warehouseMasterCache.filter(w=>w.active!==false&&w.systemCustody!==true&&w.warehouseType!=='CUSTODY'&&!String(w.id||'').startsWith('custody-'));
+        const warehouseInput=prompt('請選擇實際收貨倉庫：\n'+choices.map((w,i)=>`${i+1}：${w.name||w.warehouseName||w.id}`).join('\n'));
+        if(warehouseInput===null)return;
+        const warehouseId=choices[Number(warehouseInput)-1]?.id;
+        if(!warehouseId){alert('請選擇有效實體倉庫。');return;}
+        const item=normalizedOrderItems(order).find(i=>i.itemId===request.itemId);
+        if((item?.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&item?.warehouseId&&item.warehouseId!==warehouseId){
+            alert('請先收到原出貨倉庫；入庫後再使用分倉移轉，避免原批次帳不一致。');return;
+        }
+        const receiptId=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());
         await commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,quality,warehouseId});
         delete button.dataset.operationId;
         try{await refreshAffectedOrderCaches([orderId]);await loadCustomerReturnQueue();}catch(refreshError){showActionFeedback('退貨已收貨；清單更新失敗，請重新開啟倉庫頁。','warning');}
         markMainPageDirty('inventory','orders.list','orders.po','admin');
         showActionFeedback(quality==='SALEABLE'?'退貨已收貨並入庫，不補送。':'退貨已實收，列為不可用商品，請分開保管。','success');
-    }catch(err){alert(actionFailureMessage('退貨收貨',err,requestId));}finally{customerReturnActionsPending.delete(requestId);if(button.isConnected)button.disabled=false;}
+    }catch(err){alert(actionFailureMessage('退貨收貨',err,requestId));}
+    finally{customerReturnActionsPending.delete(requestId);if(button.isConnected)button.disabled=false;}
 };
+async function assertActiveReturnWarehouse(tx,warehouseId){
+    if(typeof warehouseId!=='string'||!warehouseId||warehouseId.startsWith('custody-'))throw new Error('退貨收貨只能使用有效的實體倉庫。');
+    const warehouseSnap=await tx.get(db.collection('warehouses').doc(warehouseId));
+    const warehouse=warehouseSnap.exists?warehouseSnap.data():null;
+    if(!warehouse||warehouse.active===false||warehouse.systemCustody===true||warehouse.warehouseType==='CUSTODY')
+        throw new Error('收貨倉庫不存在、已停用或屬於業務保管位置，請重新選擇。');
+}
 async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,quality,warehouseId}){
     if(!canReceiveInventoryCapability())throw new Error('無收貨權限。');
     const actorUid=currentUser?.uid;
@@ -195,6 +210,9 @@ async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,qual
         const request=requests[index],remaining=Number(request.qty)-Number(request.receivedQty||0);
         if(!Number.isFinite(qty)||qty<=0||qty>remaining+1e-9)throw new Error(`實收數量不可超過 ${remaining}。`);
         const item=normalizedOrderItems(order).find(i=>i.itemId===request.itemId);if(!item)throw new Error('找不到退貨品項。');
+        await assertActiveReturnWarehouse(tx,warehouseId);
+        if((item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&item.warehouseId&&item.warehouseId!==warehouseId)
+            throw new Error('一般退貨必須收到原出貨倉庫，再使用正式調撥流程。');
         if(returnItemReturnedQty(order,item.itemId)+qty>returnItemDeliveredQty(order,item.itemId)+1e-9)throw new Error('累計實收退貨超過已送貨數量。');
         if(!['SALEABLE','INSPECTION','DAMAGED'].includes(quality)||!warehouseId)throw new Error('收貨狀況或倉庫無效。');
         let result={lotAllocations:[]};
@@ -226,6 +244,9 @@ window.releaseCustomerReturnHold=async function(id,button){
             const orderRef=db.collection('orders').doc(receipt.orderId),orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw new Error('原訂單已不存在。');
             const order={id:receipt.orderId,...orderSnap.data()},item=normalizedOrderItems(order).find(i=>i.itemId===receipt.itemId);
             const record=savedReturnRecords(order).find(r=>r.id===id);if(!item||!record)throw new Error('找不到原退貨品項或紀錄。');
+            await assertActiveReturnWarehouse(tx,receipt.warehouseId);
+            if((item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&item.warehouseId&&item.warehouseId!==receipt.warehouseId)
+                throw new Error('原收貨倉庫與來源訂單不一致，請先查核再轉庫存。');
             await postCustomerReturnStock(tx,{...order,returnRecords:savedReturnRecords(order).filter(r=>r.id!==id)},item,Number(receipt.qty),id,receipt.warehouseId);
             tx.update(receiptRef,{disposition:'STOCK',releasedAt:new Date().toISOString(),releasedBy:currentUser.uid});
         });
