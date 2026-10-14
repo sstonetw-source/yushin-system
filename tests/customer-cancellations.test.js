@@ -111,3 +111,17 @@ test('receive action locks before warehouse loading and cannot double submit on 
  assert.equal(c.customerReturnActionsPending.size,0);
  assert.equal(button.dataset.operationId,undefined);
 });
+
+test('cancelled direct shipment redirect enforces active physical warehouse in UI, transaction and Rules',()=>{
+ const start=code.indexOf('window.resolveSupplierCancellation=');
+ const end=code.indexOf('window.saveReturnRecord=',start);
+ assert.ok(start>=0&&end>start);
+ const action=code.slice(start,end);
+ assert.match(action,/systemCustody!==true&&w\.warehouseType!=='CUSTODY'/);
+ assert.match(action,/if\(redirect\)await assertActiveReturnWarehouse\(tx,warehouseId\)/);
+ const rules=fs.readFileSync('firestore.rules','utf8');
+ const rulesStart=rules.indexOf('function supplierCancellationResolution()');
+ const rulesEnd=rules.indexOf('function validReturnPendingFlag(',rulesStart);
+ assert.ok(rulesStart>=0&&rulesEnd>rulesStart);
+ assert.match(rules.slice(rulesStart,rulesEnd),/validActiveReturnWarehouse\(after\.warehouseId\)/);
+});
