@@ -1608,10 +1608,11 @@ function updateProductSearchControls() {
     const selected = !!document.getElementById('productManagementSearchBrand')?.value;
     const input = document.getElementById('productManagementSearch');
     const button = document.getElementById('productManagementSearchBtn');
-    if (input) input.disabled = !selected;
+    // Exact product-code lookup works without a brand; selecting one narrows the result.
+    if (input) input.disabled = false;
     const browseButton = document.getElementById('productManagementBrowseBtn');
     if (browseButton) browseButton.disabled = !selected || productManagementSearchInProgress;
-    if (button) button.disabled = !selected || productManagementSearchInProgress;
+    if (button) button.disabled = productManagementSearchInProgress || !String(input?.value || '').trim();
 }
 
 window.onProductSearchBrandChange = function() {
@@ -2342,8 +2343,8 @@ window.searchProductManagement = async function(loadMore = false) {
     const button = document.getElementById('productManagementSearchBtn');
     const status = document.getElementById('productManagementSearchStatus');
     const raw = String(input?.value || '').trim();
-    if (!brand || !raw) {
-        if (status) status.textContent = !brand ? '請先選擇廠牌。' : '請輸入完整貨號。';
+    if (!raw) {
+        if (status) status.textContent = '請輸入完整貨號；可直接搜尋全部廠牌，或先選擇廠牌縮小範圍。';
         return;
     }
     const generation = ++productManagementSearchGeneration;
@@ -2380,8 +2381,10 @@ window.searchProductManagement = async function(loadMore = false) {
     const isCurrent = () => generation === productManagementSearchGeneration && role === currentUserRole && uid === currentUser?.uid;
     try {
         if (!state.loaded || (loadMore && state.hasMore)) {
-            const storedBrandNames = dedupeBrandsCaseInsensitive([brand, ...(brandMasterEntryForName(brand)?.aliases || [])]).slice(0, 10);
-            // Read only matching normalized codes; brand aliases are filtered locally.
+            const storedBrandNames = brand
+                ? dedupeBrandsCaseInsensitive([brand, ...(brandMasterEntryForName(brand)?.aliases || [])]).slice(0, 10)
+                : [];
+            // Read only matching normalized codes; the optional brand is filtered locally.
             // This uses the existing single-field index without scanning a catalogue.
             let query = db.collection('products')
                 .where('normalizedPartNo', '==', normalizedCode)
@@ -2391,7 +2394,7 @@ window.searchProductManagement = async function(loadMore = false) {
             if (!isCurrent()) return;
             snapshot.docs.forEach(doc => {
                 const data = { id:doc.id, ...doc.data() };
-                if (!storedBrandNames.some(name => normalizeBrandLookupKey(name) === normalizeBrandLookupKey(data.brandName || data.brand || ''))) return;
+                if (brand && !storedBrandNames.some(name => normalizeBrandLookupKey(name) === normalizeBrandLookupKey(data.brandName || data.brand || ''))) return;
                 if (!canSeeInactive && (data.status === 'INACTIVE' || data.active === false)) return;
                 state.map.set(doc.id, data);
             });
@@ -2406,8 +2409,8 @@ window.searchProductManagement = async function(loadMore = false) {
         productManagementVisibleLimit = Math.max(PRODUCT_MANAGEMENT_RENDER_STEP, productManagementResults.length);
         renderProductManagementResults();
         if (status) status.textContent = productManagementResults.length
-            ? `${brand}：完整貨號 ${raw}，找到 ${productManagementResults.length} 筆${state.hasMore ? '，可載入更多符合結果' : ''}。`
-            : state.hasMore ? '目前符合貨號的產品皆停用，可載入更多符合結果。' : `${brand}：查無完整貨號 ${raw}，請確認廠牌與貨號。`;
+            ? `${brand || '全部廠牌'}：完整貨號 ${raw}，找到 ${productManagementResults.length} 筆${state.hasMore ? '，可載入更多符合結果' : ''}。`
+            : state.hasMore ? '目前符合貨號的產品皆停用，可載入更多符合結果。' : `${brand || '全部廠牌'}：查無完整貨號 ${raw}，請確認廠牌與貨號。`;
     } catch (err) {
         if (!isCurrent()) return;
         console.error('產品管理搜尋失敗：', err);
@@ -2820,6 +2823,7 @@ window.saveProductMasterEditor = async function() {
         }
         const cached = productMasterDocToPriceItem({ id:productId, data:() => record });
         cacheProductLookupItem(cached);
+        productManagementSearchCache.clear(); // A new/edited product invalidates previously cached empty matches.
         const resultIndex = productManagementResults.findIndex(item => (item.productId || item.id) === productId);
         if (resultIndex >= 0) productManagementResults[resultIndex] = { id:productId, ...record };
         else productManagementResults.unshift({ id:productId, ...record });
@@ -21195,6 +21199,7 @@ window.saveQuickProduct = async function() {
     };
         if (button) button.textContent = '儲存中…';
         await db.collection('products').doc(productId).set(productDoc, { merge: true });
+        productManagementSearchCache.clear();
         const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
         priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
         refreshPriceDatalists();
