@@ -9671,7 +9671,8 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
         const existingQty=Math.max(0,Number(existing.quantity||0));
         const oldProductKey=String(existing.productKey||'');
         const oldWarehouseId=String(existing.warehouseId||'');
-        const preserving=oldProductKey===productKey&&existingQty>0&&!!oldWarehouseId;
+        const preserving=oldProductKey===productKey&&existingQty>0&&!!oldWarehouseId
+            && (oldWarehouseId===item.warehouseId || ['pending','failed'].includes(order.inventoryReservationStatus));
         const firstId=preserving?oldWarehouseId:preferredWarehouseId;
         const firstRef=firstId?db.collection('warehouseStocks').doc(warehouseStockDocId(firstId,productKey)):null;
         const firstSnap=firstRef?await tx.get(firstRef):null;
