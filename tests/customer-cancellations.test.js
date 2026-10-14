@@ -42,3 +42,22 @@ test('closed return reduces actual sales without recreating pending sales',()=>{
  const c=vm.createContext({normalizedOrderStatus:()=> 'normal',orderQuantity:()=>5,orderUnitSalesAmount:()=>100,orderUnitCostForStats:()=>50,localDateString:()=> '2026-10-06',savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,dateInStatsRange:()=>true});
  vm.runInContext(app.slice(start,end),c);const result=c.calculateOrderStatsContribution({orderDate:'2026-10-01',deliveryRecords:[{date:'2026-10-02',qty:5}],returnRecords:[{date:'2026-10-06',qty:2,settlement:'CLOSE'}]},'2026-10-01','2026-10-06');assert.equal(result.actualSales,300);assert.equal(result.pendingSales,0);
 });
+
+const receiptArgs={orderId:'O1',requestId:'Q1',receiptId:'R1',qty:2,quality:'SALEABLE',warehouseId:'W1'};
+test('receipt retry rejects a reused ID with different content without changing stock',async()=>{
+ for(const patch of [{orderId:'O2'},{requestId:'Q2'},{qty:1},{quality:'DAMAGED'},{warehouseId:'W2'}]){
+  const f=fixture();await f.c.commitCustomerReturnReceipt(receiptArgs);
+  const before=JSON.stringify([...f.docs]);await assert.rejects(f.c.commitCustomerReturnReceipt({...receiptArgs,...patch}),/識別碼/);
+  assert.equal(f.stock(),2);assert.equal(JSON.stringify([...f.docs]),before);
+ }
+});
+test('another receiver cannot reuse the original receipt retry ID',async()=>{
+ const f=fixture();await f.c.commitCustomerReturnReceipt(receiptArgs);f.c.currentUser={uid:'other'};
+ await assert.rejects(f.c.commitCustomerReturnReceipt(receiptArgs),/識別碼/);assert.equal(f.stock(),2);
+});
+test('account change during transaction reads stops receiving before stock writes',async()=>{
+ const f=fixture(),run=f.c.runRoleTransaction;
+ f.c.runRoleTransaction=fn=>run(tx=>fn({...tx,get:async ref=>{const snap=await tx.get(ref);f.c.currentUser={uid:'other'};return snap;}}));
+ await assert.rejects(f.c.commitCustomerReturnReceipt(receiptArgs),/帳號或權限已變更/);
+ assert.equal(f.stock(),0);assert.equal(f.docs.has('customerReturnReceipts/R1'),false);
+});

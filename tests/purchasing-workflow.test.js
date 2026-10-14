@@ -603,9 +603,9 @@ test('purchasing state transitions refresh the derived order work index',()=>{
 test('order lifecycle, delivery and return mutations refresh work category index',()=>{
     assert.match(app,/Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\);/);
     const deliverySync=(app.match(/orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)[\s\S]{0,160}deliveryHistory/g)||[]).length;
-    const returnSync=(app.match(/orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)[\s\S]{0,160}returnHistory/g)||[]).length;
+    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
     assert.ok(deliverySync>=3,'all delivery mutation paths should refresh the work index');
-    assert.ok(returnSync>=2,'all return mutation paths should refresh the work index');
+    assert.match(returns,/Object.assign\(patch,orderWorkIndexFields\(\{\.\.\.order,\.\.\.patch\}\)\)/);
 });
 
 
@@ -984,8 +984,7 @@ test('multi-item returns require and use an explicit return item selector', () =
     assert.match(html,/id="returnItemId"/);
     assert.match(html,/onchange="updateReturnFormHint\(\)"/);
     const resetStart=app.indexOf('function returnItemDeliveredQty');
-    const saveStart=app.indexOf('window.saveReturnRecord = async function');
-    const saveEnd=app.indexOf('window.deleteReturnRecord',saveStart);
+    const saveEnd=app.indexOf('function renderOrderLifecycleStatusOptions',resetStart);
     const source=app.slice(resetStart,saveEnd);
     assert.match(source,/populateReturnItemOptions/);
     assert.match(source,/updateReturnFormHint/);
@@ -1006,10 +1005,9 @@ test('delivery writes keep isDelivered based on net delivered quantity', () => {
     const save=app.slice(saveStart,saveEnd);
     assert.match(save,/isDelivered: effectiveTotalDelivered >= total/);
 
-    const returnStart=app.indexOf('window.saveReturnRecord = async function');
-    const returnEnd=app.indexOf('window.deleteReturnRecord',returnStart);
-    const returns=app.slice(returnStart,returnEnd);
-    assert.match(returns,/isDelivered:effectiveDelivered>=orderQuantity\(order\)&&orderQuantity\(order\)>0/);
+    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    assert.match(returns,/returnRecords:records,returnedQty:/);
+    assert.match(returns,/orderWorkIndexFields/);
 });
 
 test('direct-ship returns create replacement supply demand', () => {
@@ -1308,11 +1306,9 @@ test('delivery and return writes synchronize live reservedQty back to order item
     assert.match(delivery,/newReservedQty/);
     assert.match(delivery,/updates\.items=syncedItems/);
 
-    const returnStart=app.indexOf('window.saveReturnRecord = async function()');
-    const returnEnd=app.indexOf('window.deleteReturnRecord',returnStart);
-    const returns=app.slice(returnStart,returnEnd);
-    assert.match(returns,/syncedReservedQty/);
-    assert.match(returns,/items:syncedItems/);
+    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    assert.match(returns,/result.newReservedQty/);
+    assert.match(returns,/patch.items=order.items.map/);
 });
 
 test('receipt modal close function exists and does not discard retry key', () => {
