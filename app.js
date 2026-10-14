@@ -14556,28 +14556,32 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
     const affectedOrderIds = new Set();
     const skippedCandidateIds = new Set();
     if(!remaining||!productKey||!warehouseId)return {allocatedQty:0,unallocatedQty:remaining,affectedOrderIds:[]};
+    const compare=globalThis.YushinReservation?.compareReservationPriority;
+    if(!compare)throw new Error('庫存分配核心未載入，請重新載入後重試分配。');
     // Allocate one live shortage at a time. Re-reading candidates after every successful
     // transaction preserves oldest-first ordering even when multiple receipts run concurrently.
     // 已失效／取消的最舊候選只跳過，不可阻塞後面的正常缺貨訂單。
     while(remaining>0){
-        const loadCandidates=async status=>{
-            const rows=[]; let cursor=null,hasMore=true;
-            while(hasMore&&rows.length<500){
+        const oldestCandidate=async status=>{
+            let candidate=null,cursor=null;
+            while(true){
                 let q=db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==',status).limit(50);
                 if(cursor)q=q.startAfter(cursor);
                 const page=await firestoreReadWithTimeout(q.get(),'庫存預留候選');
-                page.docs.forEach(doc=>rows.push({id:doc.id,...doc.data()}));
-                cursor=page.empty?null:page.docs[page.docs.length-1];
-                hasMore=page.size===50;
+                for(const doc of page.docs){
+                    const row={...doc.data(),id:doc.id};
+                    if(row.orderId===excludeOrderId||row.warehouseId!==warehouseId||!(Number(row.shortageQty||0)>0)||skippedCandidateIds.has(row.id))continue;
+                    if(!candidate||compare(row,candidate)<0)candidate=row;
+                }
+                if(page.size<50)break;
+                const last=page.docs[page.docs.length-1];
+                if(!last||last.id===cursor?.id)throw new Error('庫存預留分頁未前進，請重新載入後重試分配。');
+                cursor=last;
             }
-            return rows;
+            return candidate;
         };
-        const [shortageRows,activeRows]=await Promise.all([loadCandidates('shortage'),loadCandidates('active')]);
-        const candidate=[...shortageRows,...activeRows]
-            .filter(row=>row.orderId!==excludeOrderId&&row.warehouseId===warehouseId&&Number(row.shortageQty||0)>0)
-            .filter(row=>!skippedCandidateIds.has(row.id))
-            .filter((row,index,all)=>all.findIndex(x=>x.id===row.id)===index)
-            .sort((a,b)=>String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))||String(a.id).localeCompare(String(b.id)))[0];
+        const candidates=await Promise.all([oldestCandidate('shortage'),oldestCandidate('active')]);
+        const candidate=candidates.filter(Boolean).sort(compare)[0];
         if(!candidate)break;
         let took=0,skipCandidate=false,stopAllocation=false;
         await runRoleTransaction(async tx=>{

@@ -35,3 +35,10 @@ test('reservation retry does not double-cover supplier commitments but keeps phy
  const retry=r.planReservation({requestedQty:5,existingQty:2,sameStock:true,availableQty:3,inTransitQty:3});
  assert.equal(retry.reservedQty,2);assert.equal(retry.additionalReserveQty,0);assert.equal(retry.shortageQty,3);
 });
+test('shortage planning shares deterministic date, order, item and document priority without changing inputs',()=>{
+ const rows=[{id:'b',orderDate:'2026-01-01',orderId:'A',itemId:'I',shortageQty:1},{id:'a',orderDate:'2026-01-01',orderId:'A',itemId:'I',shortageQty:1},
+  {id:'old',orderDate:'2025-01-01',orderId:'Z',itemId:'I',shortageQty:1},{id:'missing',orderId:'A',itemId:'I',shortageQty:1}];
+ const before=structuredClone(rows),plan=r.planShortageAllocation(rows,3);
+ assert.deepEqual(plan.allocations.map(x=>x.reservationId),['old','a','b']);assert.deepEqual(rows,before);
+ assert.ok(r.compareReservationPriority({orderDate:'2026-01-01',orderId:'A',itemId:'B'},{orderDate:'2026-01-01',orderId:'A',itemId:'C'})<0);
+});
