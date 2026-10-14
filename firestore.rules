@@ -2142,9 +2142,19 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    function validActiveReturnWarehouse(warehouseId) {
+      return warehouseId is string && warehouseId.size() > 0 && warehouseId.size() <= 128
+        && !warehouseId.matches('custody-.*')
+        && exists(/databases/$(database)/documents/warehouses/$(warehouseId))
+        && get(/databases/$(database)/documents/warehouses/$(warehouseId)).data.get('active', true) == true
+        && get(/databases/$(database)/documents/warehouses/$(warehouseId)).data.get('systemCustody', false) != true
+        && get(/databases/$(database)/documents/warehouses/$(warehouseId)).data.get('warehouseType', '') != 'CUSTODY';
+    }
+
     match /customerReturnReceipts/{id} {
       allow read: if canReceiveInventory() || (businessOwner() && owns(resource.data));
       allow create: if canReceiveInventory()
+        && validActiveReturnWarehouse(request.resource.data.warehouseId)
         && request.resource.data.receivedBy == request.auth.uid
         && request.resource.data.qty is number && request.resource.data.qty > 0
         && request.resource.data.quality in ['SALEABLE', 'INSPECTION', 'DAMAGED']
@@ -2158,6 +2168,7 @@ service cloud.firestore {
         && request.resource.data.record.warehouseId == request.resource.data.warehouseId
         && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.returnReceiptId == id;
       allow update: if canReceiveInventory() && resource.data.disposition == 'HOLD'
+        && validActiveReturnWarehouse(resource.data.warehouseId)
         && request.resource.data.disposition == 'STOCK'
         && request.resource.data.releasedBy == request.auth.uid
         && request.resource.data.releasedAt != ''
