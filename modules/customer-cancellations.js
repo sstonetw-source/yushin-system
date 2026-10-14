@@ -162,12 +162,12 @@ window.receiveCustomerReturn=async function(orderId,requestId,button){
         if(qtyInput===null)return;
         const qty=Number(qtyInput);
         if(!Number.isFinite(qty)||qty<=0){alert('實收數量須大於零。');return;}
-        const qualityInput=prompt('商品狀況：\\n1：可再銷售，增加可用庫存\\n2：待檢查，分開保管\\n3：損壞，分開保管\\n輸入 1、2 或 3：');
+        const qualityInput=prompt('商品狀況：\n1：可再銷售，增加可用庫存\n2：待檢查，分開保管\n3：損壞，分開保管\n輸入 1、2 或 3：');
         const quality={'1':'SALEABLE','2':'INSPECTION','3':'DAMAGED'}[qualityInput];
         if(!quality)return;
         await loadWarehouseMaster();
         const choices=warehouseMasterCache.filter(w=>w.active!==false&&w.systemCustody!==true&&w.warehouseType!=='CUSTODY'&&!String(w.id||'').startsWith('custody-'));
-        const warehouseInput=prompt('請選擇實際收貨倉庫：\\n'+choices.map((w,i)=>`${i+1}：${w.name||w.warehouseName||w.id}`).join('\\n'));
+        const warehouseInput=prompt('請選擇實際收貨倉庫：\n'+choices.map((w,i)=>`${i+1}：${w.name||w.warehouseName||w.id}`).join('\n'));
         if(warehouseInput===null)return;
         const warehouseId=choices[Number(warehouseInput)-1]?.id;
         if(!warehouseId){alert('請選擇有效實體倉庫。');return;}
