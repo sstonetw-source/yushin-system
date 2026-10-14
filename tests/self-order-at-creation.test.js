@@ -70,3 +70,14 @@ test('mixed pending and confirmed self-order lines register only confirmed short
  await x.context.registerInitialSelfOrders('o',x.order);
  assert.equal(x.docs.has('supplyOrders/self-o-pending'),false);assert.equal(x.docs.get('supplyOrders/self-o-confirmed').qty,1);
 });
+test('initial self-order preserves the initiating account across supply reads and between items',async()=>{
+ const item=id=>({itemId:id,procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,shortageQty:1,costPrice:5,supplier:'Vendor',productId:'p',fulfillmentType:'DIRECT_SHIP'});
+ const during=setup([item('a')]),original=during.context.runRoleTransaction;
+ during.context.runRoleTransaction=fn=>original(tx=>fn({...tx,get:async ref=>{const snap=await tx.get(ref);if(ref.key.startsWith('supplyOrders/'))during.context.currentUser={uid:'OTHER'};return snap;}}));
+ await assert.rejects(during.context.registerInitialSelfOrders('o',during.order),/登入身份已變更/);
+ assert.equal([...during.docs.keys()].some(k=>k.startsWith('supplyOrders/')),false);
+ const between=setup([item('a'),item('b')]),supply=between.context.registerInitialSelfOrderSupply;
+ between.context.registerInitialSelfOrderSupply=async(...args)=>{const saved=await supply(...args);between.context.currentUser={uid:'OTHER'};return saved;};
+ await assert.rejects(between.context.registerInitialSelfOrders('o',between.order),/登入身份已變更/);
+ assert.equal(between.docs.has('supplyOrders/self-o-a'),true);assert.equal(between.docs.has('supplyOrders/self-o-b'),false);assert.equal(between.invalidations(),1);
+});

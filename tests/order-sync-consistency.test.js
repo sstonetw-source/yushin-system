@@ -210,6 +210,13 @@ test('master refresh failure or account change cannot publish a stale warehouse 
  const switched=fixture();switched.controls.beforeCommit=()=>{switched.c.currentUser={uid:'OTHER'};switched.put('orders/O',{...switched.order(),remarks:'conflict'});};
  await assert.rejects(switched.sync(),/登入身份已變更/);assert.equal(switched.docs.get('inventory/P').reserved,0);
 });
+test('direct shipment skips warehouse discovery and an account switch during master refresh stops all writes',async()=>{
+ const direct=fixture({items:[{itemId:'I',productId:'P',qty:3,fulfillmentType:'DIRECT_SHIP'}]});
+ direct.c.loadWarehouseMaster=async()=>{throw Error('direct shipment must not read warehouses');};await direct.sync();
+ assert.equal(direct.demand('I').remainingToOrderQty,3);
+ const switched=fixture();switched.c.loadWarehouseMaster=async()=>{switched.c.currentUser={uid:'OTHER'};};const before=JSON.stringify([...switched.docs]);
+ await assert.rejects(switched.sync(),/登入身份已變更/);assert.equal(JSON.stringify([...switched.docs]),before);assert.equal(switched.controls.selfCalls,0);
+});
 test('automatic remote allocation flows through printing, transfer transit, receipt and physical shipment',async()=>{
  const f=fixture({onHand:0});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',productId:'P',onHand:5,reserved:0});
  f.put('inventoryLots/REMOTE',{productKey:'P',productId:'P',warehouseId:'W2',remainingQty:5,qty:5,lotNo:'L',expiryDate:'2027-01-01'});

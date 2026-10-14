@@ -9648,13 +9648,13 @@ window.openInventoryReservationDetails = async function(productKey) {
 window.closeInventoryReservationDetails = function() {
     document.getElementById('inventoryReservationOverlay')?.classList.remove('active');
 };
-async function reserveSingleOrderItem(orderId, order, item, itemIndex) {
+async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid = currentUser?.uid) {
     const itemId=String(item.itemId||`item-${itemIndex+1}`);
     if(!globalThis.YushinReservation?.planReservation){
         throw new Error('Reservation core 未載入，無法計算庫存預留。');
     }
     const orderRef=db.collection('orders').doc(orderId);
-    const syncUid=currentUser?.uid;
+    const syncUid=actorUid;
     const actor=currentUserName||currentUser?.email||'';
     let result,stockToInvalidate=null;
     let releasedStock=null;
@@ -9886,23 +9886,27 @@ async function syncOrderProcurementDemandLifecycle(orderId, order, lifecycleStat
     await persistOrderProcurementDemands(orderId,order,normalizedOrderItems(order));
 }
 
-async function reserveInventoryForNewOrder(orderId, order) {
-    await loadWarehouseMaster(true);
-    if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
+async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUser?.uid) {
     const orderRef=db.collection('orders').doc(orderId);
     const snapshot=await firestoreReadWithTimeout(orderRef.get(),'讀取待同步訂單');
     if(!snapshot.exists)throw new Error('訂單已不存在，無法同步庫存。');
     const liveOrder={id:orderId,...snapshot.data()};
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i);
+    if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')){
+        await loadWarehouseMaster(true);
+        if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
+    }
+    if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+    for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i,actorUid);
     // Each item transaction has already published stock, reservation, order and demand atomically.
     // Read the result for self-order processing and UI; never overwrite the source with reservedItems.
     const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取庫存同步結果');
     if(!latest.exists)throw new Error('訂單已不存在。');
+    if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
     Object.assign(order,{id:orderId,...latest.data()});
     if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
-    await registerInitialSelfOrders(orderId,order);
+    await registerInitialSelfOrders(orderId,order,actorUid);
     return {...orderReservationSummary(order),items:order.items};
 }
 
@@ -10234,11 +10238,12 @@ function canBusinessSelfOrder(order = null) {
 }
 
 
-async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitCost,orderDate,notes=''}) {
+async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitCost,orderDate,notes='',actorUid=currentUser?.uid}) {
         let savedOrder,internalNo='';
         await runRoleTransaction(async tx=>{
             const orderRef=db.collection('orders').doc(orderId);
             const snap=await tx.get(orderRef);
+            if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
             if(!snap.exists)throw new Error('找不到訂單。');
             const order=snap.data();
 
@@ -10292,6 +10297,7 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
             };
             const validation=window.YushinSupply?.validate(record);
             if(validation&&!validation.valid)throw new Error('自行訂貨資料不完整：'+validation.errors.join(', '));
+            if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
             tx.set(supplyRef,record);
             if(demandRef)tx.set(demandRef,demandDoc,{merge:true});
             items[index]={
@@ -10311,7 +10317,7 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
     return savedOrder;
 }
 
-async function registerInitialSelfOrders(orderId,order) {
+async function registerInitialSelfOrders(orderId,order,actorUid=currentUser?.uid) {
     if(order.selfOrderAtCreation!==true)return;
     let changed=false;
     try{
@@ -10319,7 +10325,7 @@ async function registerInitialSelfOrders(orderId,order) {
             if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER'||item.selfOrderConfirmed!==true)continue;
             const qty=remainingProcurementQty(order,item);
             if(qty<=0)continue;
-            const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate});
+            const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate,actorUid});
             Object.assign(order,saved);
             changed=true;
         }
@@ -11385,7 +11391,7 @@ async function synchronizeOrderInventory(orderId, order, uid = currentUser?.uid)
     if(!started.applied)throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const attemptId=order.inventoryReservationAttemptId;
     try{
-        await reserveInventoryForNewOrder(orderId,order);
+        await reserveInventoryForNewOrder(orderId,order,uid);
         const finished=await writeOrderInventorySyncState(orderId,'completed',attemptId,uid);
         Object.assign(order,finished.order);
         if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續同步。');
