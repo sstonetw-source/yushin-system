@@ -1815,7 +1815,7 @@ test('quick product creation is temporary, duplicate-safe and can be used from q
     assert.match(appSource, /window\.saveQuickProduct/);
     assert.match(appSource, /status: 'TEMPORARY'/);
     assert.match(appSource, /normalizedPartNo/);
-    assert.match(appSource, /where\('normalizedPartNo', '==', normalizedPartNo\)/);
+    assert.match(appSource, /where\('normalizedPartNo',\s*'==',\s*normalizedPartNo\)/);
     assert.match(appSource, /showQuickProductButton\(input, 'quote'\)/);
     assert.match(appSource, /showQuickProductButton\(input, 'order'\)/);
 });
@@ -2639,7 +2639,7 @@ test('shared brand settings reads are bounded', () => {
 
 
 test('interactive quote forecast product reads are bounded', () => {
-    assert.equal((appSource.match(/產品主檔重複貨號檢查/g) || []).length, 2);
+    assert.equal((appSource.match(/產品主檔重複貨號檢查/g) || []).length, 1);
     for (const label of [
         'Forecast 歷史紀錄',
         'Forecast 產品主檔',
@@ -2663,14 +2663,14 @@ test('product save buttons show feedback during duplicate checks', () => {
     const editorStart=appSource.indexOf('window.saveProductMasterEditor = async function');
     const editorEnd=appSource.indexOf('\n};',editorStart)+3;
     const editorSource=appSource.slice(editorStart,editorEnd);
-    assert.match(editorSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?產品主檔重複貨號檢查/);
+    assert.match(editorSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?await findDuplicateProductMaster/);
     assert.match(editorSource,/button\.textContent = '儲存中…'/);
     assert.match(editorSource,/endActionButton\(button, state\)/);
 
     const quickStart=appSource.indexOf('window.saveQuickProduct = async function');
     const quickEnd=appSource.indexOf('\n};',quickStart)+3;
     const quickSource=appSource.slice(quickStart,quickEnd);
-    assert.match(quickSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?產品主檔重複貨號檢查/);
+    assert.match(quickSource,/beginActionButton\(button, '檢查中…'\)[\s\S]*?await findDuplicateProductMaster/);
     assert.match(quickSource,/button\.textContent = '儲存中…'/);
     assert.match(quickSource,/endActionButton\(button, state\)/);
 });

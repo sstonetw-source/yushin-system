@@ -6,7 +6,7 @@ function setup(role='admin',cost='50',original='20',fail=false){
  const writes=[],alerts=[];let invalidated=0;
  const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]||(nodes[id]={value:'',checked:false})},currentUserRole:role,trueUserRole:role,currentUser:{uid:'admin-id'},
  canManagePendingProductMaster:()=>true,resolveBrandName:x=>x,brandMasterEntryForName:()=>({id:'brand'}),normalizeItemCodeLoose:x=>x,normalizeBrandLookupKey:x=>x,normalizeProductTypeValue:x=>x,
- beginActionButton:()=>({}),endActionButton:()=>{},alert:m=>alerts.push(m),firestoreReadWithTimeout:p=>p,
+ beginActionButton:()=>({}),endActionButton:()=>{},alert:m=>alerts.push(m),firestoreReadWithTimeout:p=>p,findDuplicateProductMaster:async()=>null,syncSavedProductMaster:()=>{},
  db:{collection:name=>({where:()=>({limit:()=>({get:async()=>({docs:[]})})}),doc:id=>({name,id})}),runTransaction:async fn=>{const pending=[];await fn({get:async()=>({exists:true,data:()=>({standardCost:20})}),set:(ref,data)=>pending.push({ref,data})});if(fail)throw Error('write denied');writes.push(...pending);}},
  invalidateVisibleProductCosts:()=>invalidated++,purchaseCostCache:new Map(),productMasterDocToPriceItem:()=>({}),cacheProductLookupItem:()=>{},productManagementResults:[],productManagementOverviewRows:[],renderProductManagementResults:()=>{},renderProductManagementOverview:()=>{},closeProductMasterEditor:()=>{},console:{error:()=>{}}});
  vm.runInContext(code,c);return {c,writes,alerts,invalidated:()=>invalidated};

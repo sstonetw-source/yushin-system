@@ -2727,6 +2727,33 @@ window.closeProductMasterEditor = function() {
     if (codeInput) codeInput.disabled = false;
 };
 
+async function findDuplicateProductMaster(brand, code, excludeId = '') {
+    const normalizedPartNo=normalizeItemCodeLoose(code);
+    const brandKey=normalizeBrandLookupKey(resolveBrandName(brand));
+    let cursor=null;
+    while(true){
+        let query=db.collection('products').where('normalizedPartNo','==',normalizedPartNo).limit(50);
+        if(cursor)query=query.startAfter(cursor);
+        const page=await firestoreReadWithTimeout(query.get(),'產品主檔重複貨號檢查');
+        const duplicate=page.docs.find(doc=>doc.id!==excludeId&&normalizeBrandLookupKey(resolveBrandName(doc.data().brandName||doc.data().brand||''))===brandKey);
+        if(duplicate)return duplicate;
+        if(page.size<50)return null;
+        cursor=page.docs[page.docs.length-1];
+    }
+}
+
+function syncSavedProductMaster(productId, record) {
+    cacheProductLookupItem(productMasterDocToPriceItem({id:productId,data:()=>record}));
+    productManagementSearchCache.clear();
+    productManagementSearchGeneration++;
+    productBrandBrowseGeneration++;
+    const next={id:productId,...record};
+    const index=productManagementResults.findIndex(item=>(item.productId||item.id)===productId);
+    if(index>=0)productManagementResults[index]=next;
+    else productManagementResults.unshift(next);
+    renderProductManagementResults();
+}
+
 window.saveProductMasterEditor = async function() {
     if (!canManagePendingProductMaster()) return;
     const button = document.getElementById('saveProductMasterEditorBtn');
@@ -2756,15 +2783,7 @@ window.saveProductMasterEditor = async function() {
     try {
     const originalId = String(document.getElementById('pmEditProductId').value || '').trim();
     const normalizedPartNo = normalizeItemCodeLoose(code);
-    const duplicateSnap = await firestoreReadWithTimeout(
-        db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get(),
-        '產品主檔重複貨號檢查'
-    );
-    const duplicate = duplicateSnap.docs.find(doc => {
-        if (doc.id === originalId) return false;
-        const data = doc.data() || {};
-        return normalizeBrandLookupKey(resolveBrandName(data.brandName || data.brand || '')) === normalizeBrandLookupKey(brand);
-    });
+    const duplicate = await findDuplicateProductMaster(brand,code,originalId);
     if (duplicate) {
         alert('這個廠牌與貨號已經存在於產品主檔，請直接編輯既有產品。');
         return;
@@ -2818,12 +2837,7 @@ window.saveProductMasterEditor = async function() {
             invalidateVisibleProductCosts();
             purchaseCostCache.set(productId, Number(costText));
         }
-        const cached = productMasterDocToPriceItem({ id:productId, data:() => record });
-        cacheProductLookupItem(cached);
-        const resultIndex = productManagementResults.findIndex(item => (item.productId || item.id) === productId);
-        if (resultIndex >= 0) productManagementResults[resultIndex] = { id:productId, ...record };
-        else productManagementResults.unshift({ id:productId, ...record });
-        renderProductManagementResults();
+        syncSavedProductMaster(productId,record);
         const overviewIndex = productManagementOverviewRows.findIndex(item => (item.id || item.productId) === productId);
         if (overviewIndex >= 0) productManagementOverviewRows[overviewIndex] = { ...productManagementOverviewRows[overviewIndex], ...record, id:productId };
         else if (!originalId) productManagementOverviewRows.unshift({ ...record, id:productId });
@@ -11262,7 +11276,7 @@ function orderInventorySyncIncomplete(order) {
 }
 function canRetryOrderInventorySync(order) {
     return currentUserRole==='admin'||currentUserRole==='purchaser'
-        ||(currentUserRole==='sales'&&!!currentUser?.uid&&(order?.createdByUid===currentUser.uid||order?.ownerUid===currentUser.uid));
+        ||(['sales','engineer'].includes(currentUserRole)&&!!currentUser?.uid&&order?.ownerUid===currentUser.uid);
 }
 function orderInventorySyncStatusHtml(order) {
     if(!orderInventorySyncIncomplete(order))return '';
@@ -14449,10 +14463,13 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const invRef=db.collection('inventory').doc(encodeURIComponent(productKey));
             const whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,productKey));
             const receiptRef=receiptId?db.collection('receipts').doc(receiptId):null;
+            const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:candidate.orderId,sourceItemId:candidate.itemId});
+            const demandRef=procurementDemandRef(demandId);
             const [orderSnap,resSnap,invSnap,whSnap,receiptSnap]=await Promise.all([
                 tx.get(orderRef),tx.get(reservationRef),tx.get(invRef),tx.get(whRef),
                 receiptRef?tx.get(receiptRef):Promise.resolve(null)
             ]);
+            const demandSnap=await tx.get(demandRef);
             if(!orderSnap.exists||!resSnap.exists||!whSnap.exists){skipCandidate=true;return;}
             if(receiptRef&&!receiptSnap?.exists){stopAllocation=true;return;}
             const reservation=resSnap.data();
@@ -14464,19 +14481,27 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const receiptTarget=receiptRef?Math.max(0,Number(receipt?.autoAllocationQty||0)):remaining;
             const receiptAllocated=receiptRef?Math.max(0,Number(receipt?.autoAllocatedQty||0)):0;
             const receiptRemaining=receiptRef?Math.max(0,receiptTarget-receiptAllocated):remaining;
-            const take=Math.min(remaining,receiptRemaining,liveShortage,Math.max(0,wh.available));
-            if(take<=0){stopAllocation=true;return;}
             const items=normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
             if(index<0){skipCandidate=true;return;}
             const item=items[index],oldReserved=Number(item.reservedQty||0);
             const oldShortage=Math.max(0,Number(item.shortageQty??liveShortage));
+            // 已向供應商下訂的缺口不能再占用補貨，否則現貨與待到貨重複涵蓋同一需求。
+            const uncovered=remainingProcurementQty(order,item);
+            if(uncovered<=0){skipCandidate=true;return;}
+            const take=Math.min(remaining,receiptRemaining,liveShortage,oldShortage,uncovered,Math.max(0,wh.available));
+            if(take<=0){stopAllocation=true;return;}
             items[index]={...item,reservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take)};
-            const totalReserved=items.reduce((s,row)=>s+Number(row.reservedQty||0),0);
-            const totalShortage=items.reduce((s,row)=>s+Number(row.shortageQty||0),0);
             const now=new Date().toISOString();
             const nextOrder={...order,items,updatedAt:now};
             tx.update(orderRef,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
+            const demand=procurementDemandForOrderItem(nextOrder,items[index]);
+            tx.set(demandRef,procurementDemandDocument({...(demandSnap.exists?demandSnap.data():{}),...demand},{
+                sourceItemIndex:index,productId:item.productId||'',productKey,
+                itemCode:item.itemCode||'',itemName:item.itemName||'',brand:item.brand||'',
+                fulfillmentType:'WAREHOUSE',warehouseId,ownerUid:order.ownerUid||'',
+                salesCode:order.salesCode||'',salesName:order.salesName||''
+            },{createdAt:demandSnap.exists?demandSnap.data().createdAt:order.createdAt||now,updatedAt:now}),{merge:true});
             tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
             if(invSnap.exists)tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
             tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
@@ -21181,22 +21206,18 @@ window.saveQuickProduct = async function() {
     const brandEntry = brandMasterEntryForName(brand);
 
     const button = document.getElementById('saveQuickProductBtn');
+    const actorUid=currentUser?.uid;
     const state = beginActionButton(button, '檢查中…');
     if (!state) return;
     try {
     const normalizedPartNo = normalizeItemCodeLoose(code);
-    const duplicateSnap = await firestoreReadWithTimeout(
-        db.collection('products').where('normalizedPartNo', '==', normalizedPartNo).limit(20).get(),
-        '產品主檔重複貨號檢查'
-    );
-    const duplicate = duplicateSnap.docs.find(doc => {
-        const data = doc.data() || {};
-        return normalizeBrandLookupKey(resolveBrandName(data.brandName || data.brand || '')) === normalizeBrandLookupKey(brand);
-    });
+    const duplicate = await findDuplicateProductMaster(brand,code);
+    if(currentUser?.uid!==actorUid)throw new Error('登入身分已變更，請以原帳號確認產品建檔結果。');
     if (duplicate) {
         const existing = productMasterDocToPriceItem(duplicate);
+        if(existing.status==='INACTIVE'||existing.active===false)throw new Error('此廠牌與貨號的產品已停用，請由主檔管理人員確認，不可重新新增或直接帶入。');
         alert('這個廠牌與貨號已存在，系統會直接使用現有產品。');
-        priceList = priceList.filter(item => (item.productId || stableProductId(item)) !== existing.productId).concat(existing);
+        syncSavedProductMaster(duplicate.id,duplicate.data());
         refreshPriceDatalists();
         productCodeMatchCache.delete(normalizedPartNo);
         if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, existing);
@@ -21238,9 +21259,16 @@ window.saveQuickProduct = async function() {
         updatedBy: currentUser?.uid || ''
     };
         if (button) button.textContent = '儲存中…';
-        await db.collection('products').doc(productId).set(productDoc, { merge: true });
+        await db.runTransaction(async tx=>{
+            const ref=db.collection('products').doc(productId);
+            const prior=await tx.get(ref);
+            if(currentUser?.uid!==actorUid)throw new Error('登入身分已變更。');
+            if(prior.exists)throw new Error('其他人已建立這筆產品，請重新查詢貨號後使用既有主檔。');
+            tx.set(ref,productDoc);
+        });
+        if(currentUser?.uid!==actorUid)return;
         const item = productMasterDocToPriceItem({ id: productId, data: () => productDoc });
-        priceList = priceList.filter(row => (row.productId || stableProductId(row)) !== productId).concat(item);
+        syncSavedProductMaster(productId,productDoc);
         refreshPriceDatalists();
         productCodeMatchCache.delete(normalizedPartNo);
         if (quickProductTarget?.mode === 'quote') applyQuoteProductMatch(quickProductTarget.row, item);
