@@ -1,6 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const core=require('../modules/reservation-core'),permissions=require('../modules/stock-permissions');
 const plan=core.planReservationLifecycle,fulfillment=require('../modules/fulfillment-core');
+const workflow=require('../modules/workflow-core');
 const demandCore=require('../modules/procurement-demand-core');
 const app=fs.readFileSync('app.js','utf8');
 const lifecycle=app.slice(app.indexOf('async function adjustInventoryReservationForLifecycle('),app.indexOf('function confirmOrderCancellation('));
@@ -46,16 +47,18 @@ function fixture({role='admin',held=3,qty=5,status='active'}={}){
  docs.set('inventory/P',stock(held));docs.set('warehouseStocks/A__P',{...stock(held),warehouseId:'A'});
  docs.set('warehouses/A',{active:true,warehouseType:'PHYSICAL'});docs.set('warehouses/B',{active:true,warehouseType:'PHYSICAL'});
  docs.set('inventoryReservations/O__I',{orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',quantity:held,shortageQty:qty-held});
- docs.set('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'),demandCore.demandDocument({sourceType:'SALES_ORDER',sourceId:'O',sourceItemId:'I',sourceItemIndex:0,productKey:'P',productId:'P',warehouseId:'A',ownerUid:'U',salesCode:'S',requestedQty:Math.max(0,qty-held),orderedQty:0,receivedQty:0,status:'PENDING'}));
+ docs.set('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'),demandCore.demandDocument({sourceType:'SALES_ORDER',sourceId:'O',sourceItemId:'I',sourceItemIndex:0,productKey:'P',productId:'P',warehouseId:'A',ownerUid:'U',salesCode:'S',requestedQty:Math.max(0,qty-held),orderedQty:0,receivedQty:0,status:status==='cancelled'?'CANCELLED':'PENDING'}));
  const db={collection:col=>({doc:(id='event'+(++sequence))=>({path:col+'/'+id,id})}),runTransaction:async fn=>{
   const pending=[];const result=await fn({get:async ref=>{assert.equal(pending.length,0);reads.push(ref.path);return {exists:docs.has(ref.path),data:()=>structuredClone(docs.get(ref.path))};},
    set:(ref,data,options)=>pending.push({ref,data,options}),update:(ref,data)=>pending.push({ref,data,options:{merge:true}})});
   for(const w of pending){writes.push(w);docs.set(w.ref.path,{...(w.options?.merge?docs.get(w.ref.path):{}),...structuredClone(w.data)});}return result;
  }};
- const c=vm.createContext({db,YushinReservation:core,YushinProcurementDemand:demandCore,procurementDemandRef:id=>db.collection('procurementDemands').doc(encodeURIComponent(id)),normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[],
+ const c=vm.createContext({db,YushinReservation:core,YushinProcurementDemand:demandCore,YushinWorkflow:workflow,YushinFulfillment:fulfillment,procurementDemandRef:id=>db.collection('procurementDemands').doc(encodeURIComponent(id)),normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[],
   inventoryProductKey:i=>i.productId||'',inventoryRefFor:i=>i.productId?db.collection('inventory').doc(i.productId):null,
   warehouseStockDocId:(w,p)=>w+'__'+p,defaultWarehouse:()=>({id:'A'}),salesCodeForName:()=> 'S',
   inventoryMovementRecord:(type,qty,sourceId,productKey,actor,extra)=>({type,qty,sourceId,sourceType:'order',productKey,ownerUid:'U',salesCode:'S',actorUid:role,...extra})});
+ vm.runInContext(app.slice(app.indexOf('function procurementDemandForOrderItem('),app.indexOf('function purchasingLifecycleSnapshot(')),c);
+ vm.runInContext(app.slice(app.indexOf('function orderItemProcurementDemandDocument('),app.indexOf('async function persistOrderProcurementDemands(')),c);
  vm.runInContext(lifecycle,c);
  const run=async(nextStatus='cancelled')=>permissions.run(db,async tx=>{
   const ref=db.collection('orders').doc('O'),order=(await tx.get(ref)).data();
@@ -90,6 +93,42 @@ test('missing demand is not invented by order cancellation and malformed demand 
  const b=fixture();b.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')).sourceItemId='OTHER';
  const before=structuredClone([...b.docs]);
  await assert.rejects(b.run('cancelled'),/不一致/);assert.deepEqual([...b.docs],before);assert.equal(b.writes.length,0);
+});
+test('restoration reopens cancelled demand and preserves supplier commitments in the stock transaction',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  const f=fixture({role,held:0,status:'cancelled'});
+  const d=f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'));
+  Object.assign(d,{requestedQty:5,orderedQty:3,receivedQty:0,remainingToOrderQty:0,remainingToReceiveQty:3,status:'CANCELLED'});
+  f.docs.get('orders/O').items[0].supplyOrderedQty=3;
+  f.docs.get('inventory/P').reserved=8;
+  await f.run('normal');
+  const next=f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'));
+  assert.equal(next.status,'PARTIALLY_ORDERED');
+  assert.equal(next.requestedQty,5);assert.equal(next.remainingToOrderQty,2);
+  assert.equal(next.orderedQty,3);assert.equal(next.receivedQty,0);
+  assert.equal(f.docs.get('orders/O').status,'active');
+  assert.equal(f.docs.get('inventoryReservations/O__I').quantity,2);
+ }
+});
+test('restoration creates missing positive demand atomically and skips empty demand',async()=>{
+ const f=fixture({held:0,status:'cancelled'}),key='procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I');
+ f.docs.delete(key);f.docs.get('inventory/P').reserved=10;
+ await f.run('normal');assert.equal(f.docs.get(key).status,'PENDING');assert.equal(f.docs.get(key).requestedQty,5);
+ const g=fixture({held:0,status:'cancelled'});g.docs.delete(key);g.docs.get('orders/O').items[0].qty=0;
+ await g.run('normal');assert.equal(g.docs.has(key),false);
+});
+test('restoration rejects inconsistent supplier progress without partial stock or order writes',async()=>{
+ for(const change of [
+  d=>d.orderedQty=3,
+  d=>d.receivedQty=1,
+  d=>d.ownerUid='WRONG',
+  d=>d.productKey='WRONG',
+  d=>d.warehouseId='B'
+ ]){
+  const f=fixture({held:0,status:'cancelled'}),key='procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I');
+  change(f.docs.get(key));const before=structuredClone([...f.docs]);
+  await assert.rejects(f.run('normal'),/不一致|稽核/);assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
 });
 test('actual cancellation cannot erase an underfunded ledger even for an admin',async()=>{
  for(const role of ['admin','sales','engineer'])for(const path of ['inventory/P','warehouseStocks/A__P']){
