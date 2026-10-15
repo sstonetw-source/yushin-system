@@ -29,7 +29,10 @@ const parts = [
   "src/features/orders/delivery-actions.js",
   "src/features/orders/order-creation.js",
   "src/features/equipment/equipment-workspace.js",
-  "src/features/administration/administration-workspace.js"
+  "src/features/administration/brand-settings.js",
+  "src/features/analytics/sales-reports.js",
+  "src/features/administration/user-and-system-settings.js",
+  "src/features/products/product-master-import.js"
 ];
 const actual = parts.map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('');
 const output = path.join(root, 'app.js');

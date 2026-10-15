@@ -62,3 +62,12 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `src/features/orders/{order-progress,lifecycle-workspace,delivery-actions,order-creation}.js`：訂單畫面及操作（仍含交易呼叫，待 service 化）。
 
 這些來源目前經工具無損串接到 app.js，**是可維護的檔案所有權拆分，不代表完全隔離了 JavaScript scope**。每次抽出真正服務 API 前先以現有測試鎖定行為。
+
+## 管理員功能責任精分（2026-10-15）
+
+- `src/features/administration/brand-settings.js`：廠牌設定、價格表管理入口。
+- `src/features/analytics/sales-reports.js`：銷售、成本、統計報表。
+- `src/features/administration/user-and-system-settings.js`：管理員帳號及系統資料管理。
+- `src/features/products/product-master-import.js`：主檔資料匯入、更新與資料批次寫入。
+
+此批仍依原順序組成舊腳本；原始碼責任明確後才再抽出共享資料來源，避免既有全域事件與權限遭中斷。
