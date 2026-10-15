@@ -300,3 +300,97 @@ test('permanent deletion aborts all changes when later linked item has invalid d
  await assert.rejects(f.deleteOrder(),/不一致/);
  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
 });
+
+
+test('permanent deletion preserves all records when procurement quantities are malformed or negative',async()=>{
+ for(const field of ['orderedQty','receivedQty']){
+  for(const value of [-1,NaN,Infinity,-Infinity,'0',null,undefined]){
+   const f=deletionFixture();
+   f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'))[field]=value;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.deleteOrder(),/數量異常/);
+   assert.deepEqual([...f.docs],before,`${field}: ${String(value)}`);
+   assert.equal(f.writes.length,0);
+  }
+ }
+});
+
+function deletionActionFixture(){
+ let resolveRead,rejectRead,reads=0,deletes=0,confirms=0;
+ const read=new Promise((resolve,reject)=>{resolveRead=resolve;rejectRead=reject;});
+ const button={disabled:false};
+ const c=vm.createContext({window:{},trueUserRole:'admin',currentUserRole:'admin',
+  ordersCache:[{id:'O',orderNo:'SO-1'}],orderHistorySearchResults:[{id:'O'}],pendingLifecycleOrderIds:new Set(),
+  assertOrderEligibleForPermanentDelete:()=>{},confirm:()=>{confirms++;return true;},alert:()=>{},
+  actionButtonFromEventOrSelector:()=>button,beginActionButton:b=>{b.disabled=true;return {};},endActionButton:b=>{b.disabled=false;},
+  renderOrdersList:()=>{},showActionFeedback:()=>{},deliveryActor:()=> 'U',
+  firestoreReadWithTimeout:p=>p,db:{collection:()=>({where:()=>({limit:()=>({get:()=>{reads++;return read;}})})})},
+  deleteUnfulfilledOrderAtomically:async()=>{deletes++;}});
+ vm.runInContext(app.slice(app.indexOf('window.permanentlyDeleteOrder ='),app.indexOf('window.openForecastProgressModal')),c);
+ return {c,button,resolveRead,rejectRead,counts:()=>({reads,deletes,confirms})};
+}
+test('permanent deletion shares the lifecycle lock and prevents duplicate requests until confirmed success',async()=>{
+ const f=deletionActionFixture(),first=f.c.window.permanentlyDeleteOrder('O');
+ assert.equal(f.c.pendingLifecycleOrderIds.has('O'),true);assert.equal(f.button.disabled,true);
+ assert.equal(f.c.ordersCache.length,1);
+ await f.c.window.permanentlyDeleteOrder('O');
+ assert.deepEqual(f.counts(),{reads:1,deletes:0,confirms:1});
+ f.resolveRead({empty:true});await first;
+ assert.deepEqual(f.counts(),{reads:1,deletes:1,confirms:1});
+ assert.equal(f.c.ordersCache.length,0);assert.equal(f.c.orderHistorySearchResults.length,0);
+ assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);assert.equal(f.button.disabled,false);
+});
+test('failed permanent deletion preserves caches and releases the lock for retry',async()=>{
+ for(const failure of ['read','supply','transaction']){
+  const f=deletionActionFixture();
+  if(failure==='transaction')f.c.deleteUnfulfilledOrderAtomically=async()=>{throw new Error('transaction failed');};
+  const first=f.c.window.permanentlyDeleteOrder('O');
+  if(failure==='read')f.rejectRead(new Error('offline'));
+  else f.resolveRead({empty:failure!=='supply'});
+  await first;
+  assert.equal(f.c.ordersCache.length,1);assert.equal(f.c.orderHistorySearchResults.length,1);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);assert.equal(f.button.disabled,false);
+ }
+});
+test('permanent deletion cannot start during another lifecycle operation',async()=>{
+ const f=deletionActionFixture();f.c.pendingLifecycleOrderIds.add('O');
+ await f.c.window.permanentlyDeleteOrder('O');
+ assert.deepEqual(f.counts(),{reads:0,deletes:0,confirms:0});
+ assert.equal(f.c.pendingLifecycleOrderIds.has('O'),true);
+});
+
+test('permanent deletion validates raw quantities before display normalization can erase anomalies',async()=>{
+ for(const field of ['qty','orderedQty','reservedQty','supplyOrderedQty','receivedQty','dispatchPreparedQty','deliveredQty','returnedQty']){
+  for(const value of [-1,NaN,Infinity,-Infinity,'bad','',true,null]){
+   const f=deletionFixture();f.docs.get('orders/O').items[0][field]=value;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.deleteOrder(),/原始品項數量異常/);
+   assert.deepEqual([...f.docs],before,`${field}: ${String(value)}`);assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('permanent deletion retains raw fulfillment facts, transfer links and clamped reservation projections',async()=>{
+ const patches=[{dispatchPreparedQty:1},{returnedQty:1},{deliveredQty:1},
+  {transferPendingId:'T'},{custodyTransferId:'T'},{reservedQty:6}];
+ for(const patch of patches){
+  const f=deletionFixture();Object.assign(f.docs.get('orders/O').items[0],patch);
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.deleteOrder(),/原始品項已有|調撥關聯|原始預留數量/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
+test('cancelled order deletion refuses malformed reservation quantities rather than coercing them to zero',async()=>{
+ for(const value of [null,undefined,NaN,Infinity,'',false]){
+  const f=deletionFixture({held:0,status:'cancelled'});
+  f.docs.get('inventoryReservations/O__I').quantity=value;
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.deleteOrder(),/仍占用庫存/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
+test('legacy numeric strings and fractional reservations can still be permanently deleted',async()=>{
+ const f=deletionFixture({held:0.5,qty:1.5});
+ Object.assign(f.docs.get('orders/O').items[0],{qty:'1.5',reservedQty:'0.5',supplyOrderedQty:'0'});
+ await f.deleteOrder();
+ assert.equal(f.docs.has('orders/O'),false);assert.equal(f.docs.get('inventory/P').reserved,0);
+});
