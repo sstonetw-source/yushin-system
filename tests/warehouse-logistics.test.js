@@ -37,7 +37,7 @@ test('export groups recipients and preserves codes, quantities, notes and quoted
  const csv=core.csvDocument(groups);assert.equal(groups.length,1);assert.equal(groups[0].rows.length,2);
  assert.ok(csv.startsWith('\uFEFF'));assert.match(csv,/"00123"/);assert.match(csv,/"台北,""二樓"""/);assert.match(csv,/"'\=SUM\(A1\)"/);assert.doesNotMatch(csv,/冷凍|溫層|物流單號|件數/);assert.match(csv,/"請電聯\n到貨"/);
 });
-function fixture(){
+function fixture({retry=false}={}){
  const docs=new Map([
   ['inventory/P',{productKey:'P',productId:'P',itemCode:'001',itemName:'Product',brand:'QIAGEN',onHand:10,reserved:4,incoming:0}],
   ['warehouseStocks/MAIN__P',{productKey:'P',warehouseId:'MAIN',onHand:10,reserved:4,incoming:0}],
@@ -54,16 +54,16 @@ function fixture(){
    normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',orderInventorySyncIncomplete:()=>false,
    normalizedOrderItems:o=>o.items,inventoryProductKey:i=>i.productId,
    itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderWorkIndexFields:()=>({workCategories:['delivery']}),
-   firestoreReadWithTimeout:async p=>p,YushinInventory:inventory,YushinWarehouseLogistics:core,
+   firestoreReadWithTimeout:async p=>p,YushinInventory:inventory,YushinWarehouseLogistics:core,YushinFulfillment:fulfillment,
    firebase:{firestore:{FieldValue:{arrayUnion:v=>({union:v})}}},
    db:{collection:col=>({doc:id=>ref(col,id),where(field,_op,value){const predicates=[[field,value]];const query={where(f,_o,v){predicates.push([f,v]);return query;},limit(){return query;},get:async()=>{const result=[...docs.entries()].filter(([path,data])=>path.startsWith(col+'/')&&predicates.every(([f,v])=>data[f]===v)).map(([path,data])=>({id:path.split('/')[1],ref:ref(col,path.split('/')[1]),exists:true,data:()=>structuredClone(data)}));return {docs:result,size:result.length};}};return query;}})},
    runRoleTransaction:async fn=>{
     const writes=[];const tx={get:async r=>({id:r.id,ref:r,exists:docs.has(r.path),data:()=>structuredClone(docs.get(r.path))}),update:(r,d)=>writes.push([r,d,true]),set:(r,d,options)=>writes.push([r,d,!!options?.merge])};
-    await fn(tx);if(failCommit)throw Error('網路中斷');
+    await fn(tx);if(retry){writes.length=0;await fn(tx);}if(failCommit)throw Error('網路中斷');
     for(const [r,data,merge] of writes){const base=merge?docs.get(r.path)||{}:{};const d={...data};for(const [key,value] of Object.entries(d))if(value?.union)d[key]=[...(base[key]||[]),value.union];docs.set(r.path,{...base,...d});}commits+=1;
    }
  });
- vm.runInContext(src,c);return {c,docs,ref,fail:()=>{failCommit=true;},commits:()=>commits};
+ vm.runInContext(src+'\n'+fs.readFileSync('src/services/warehouse-transfer.js','utf8'),c);return {c,docs,ref,fail:()=>{failCommit=true;},commits:()=>commits};
 }
 test('free transfer receipt persists pending allocation and retries without receiving stock or lots twice',async()=>{
  const f=fixture();const args={id:'FREE-RETRY',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3};
@@ -80,6 +80,46 @@ test('free transfer receipt persists pending allocation and retries without rece
  assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventoryLots/')).length,lotCount);
  assert.equal(result.affectedOrderIds[0],'WAITING');assert.equal(calls[1][6],'stockTransfers');
  await f.c.commitWarehouseTransferReceipt(args.id);assert.equal(calls.length,2);
+});
+test('transaction retry fixes transfer actor once and preserves stock and customer delivery boundaries',async()=>{
+ const f=fixture({retry:true});let actorCalls=0;f.c.deliveryActor=()=> 'Actor-'+(++actorCalls);
+ await f.c.commitWarehouseTransfer({id:'RETRY',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'});
+ assert.equal(actorCalls,1);assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,6);
+ assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(f.docs.get('orders/O').deliveryRecords.length,0);
+ await f.c.commitWarehouseTransferReceipt('RETRY');
+ assert.equal(actorCalls,2);assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,4);
+ assert.equal(f.docs.get('inventory/P').transferInTransit,0);
+ assert.equal(f.docs.get('orders/O').deliveryRecords.length,0);
+});
+test('transactional lot reread rejects changed product or warehouse before any dispatch write',async()=>{
+ for(const patch of [{productKey:'OTHER'},{warehouseId:'OTHER'}]){
+   const f=fixture();f.c.firestoreReadWithTimeout=async promise=>{const result=await promise;Object.assign(f.docs.get('inventoryLots/L'),patch);return result;};
+   await assert.rejects(f.c.commitWarehouseTransfer({id:'STALE',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'}),/批次的產品或來源倉庫已變更/);
+   assert.equal(f.docs.has('stockTransfers/STALE'),false);
+   assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,10);
+   assert.equal(f.docs.get('inventory/P').transferInTransit,undefined);
+   assert.equal(f.docs.get('inventoryReservations/O__A').warehouseId,'MAIN');
+ }
+});
+test('a session switch after receipt keeps committed goods but pauses automatic allocation until safe retry',async()=>{
+ const f=fixture();await f.c.commitWarehouseTransfer({id:'SESSION',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
+ const run=f.c.runRoleTransaction;let allocations=0;
+ f.c.runRoleTransaction=async callback=>{await run(callback);f.c.currentUser={uid:'other'};};
+ f.c.allocateFreeReceiptStockToShortages=async()=>{allocations++;return {affectedOrderIds:[]};};
+ await assert.rejects(f.c.commitWarehouseTransferReceipt('SESSION'),error=>error.transferCommitted===true&&/登入身分已變更/.test(error.message));
+ assert.equal(allocations,0);assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,3);
+ assert.equal(f.docs.get('stockTransfers/SESSION').allocationCompleted,false);
+ f.c.currentUser={uid:'buyer'};f.c.runRoleTransaction=run;
+ await f.c.commitWarehouseTransferReceipt('SESSION');
+ assert.equal(allocations,1);assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,3);
+ assert.equal(f.docs.get('stockTransfers/SESSION').allocationCompleted,true);
+});
+test('role switch during post-receipt allocation cannot mark the checkpoint completed in the new role',async()=>{
+ const f=fixture();await f.c.commitWarehouseTransfer({id:'ROLE',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
+ f.c.allocateFreeReceiptStockToShortages=async()=>{f.c.currentUserRole='warehouse';return {affectedOrderIds:[]};};
+ await assert.rejects(f.c.commitWarehouseTransferReceipt('ROLE'),error=>error.transferCommitted===true);
+ assert.equal(f.docs.get('stockTransfers/ROLE').allocationCompleted,false);
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,3);
 });
 test('transfer retry cannot turn a previous order transfer into a different destination or salesperson handoff',async()=>{
  const f=fixture(),args={id:'ORDER-ID',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'};

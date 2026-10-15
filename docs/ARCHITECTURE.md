@@ -124,3 +124,12 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `deliveryRecordWasReversed` 由訂單與倉庫共用，辨識逐筆誤登更正與整筆撤銷的歷史。已撤銷的作業識別碼不得再次建立送貨；倉庫另保留 inventoryShipmentRecordId 防護。未引入新 Collection 或跨裝置永久 idempotency ledger。
 - 單筆出貨現在也攜帶期望倉庫和標準化寄送資訊快照，與既有批次流程一樣在交易內重新核對；資訊變更時要求重新確認。
 - 仍待多倉拆量、服務型訂單、其他交付／調撥流程的服務界線與正式環境角色驗收；本批無 Rules／Index／Collection／查詢／Listener 變更，沒有 Firebase 部署或資料清除。
+
+## 調撥寄出、點收與業務保管 Service（2026-10-16）
+
+- `src/services/warehouse-transfer.js` 為 `commitWarehouseTransfer`、`commitWarehouseTransferReceipt` 和 `writeTransferLots` 的唯一實作；`modules/warehouse-logistics.js` 保留物流核心、UI 與讀取，不再擁有這三個函式。兩支部署資源版本同步更新。
+- 保留真實時間邊界：調撥寄出扣來源倉並記途中量，點收後增加目的倉；業務交付轉至 custody 保管位置、保留訂單預留，不建立客戶 deliveryRecords，也不憑調撥改變公司 onHand。
+- 訂單調撥剩餘量使用 Fulfillment 的有效交付投影，不另複製退貨扣除公式；保留全數到貨／預留／打單後才搬移該品項的既有限制。這不是同品項多倉拆量功能。
+- 交易內重新讀到的候選批次必須仍屬於相同產品與來源倉庫，否則整筆拒絕；單筆交付業務也傳入倉庫／寄送資訊快照，與批次核對一致。actor／時間在 callback 外固定。
+- 自由庫存調撥點收與後續缺貨分配仍為 checkpoint 流程。點收後／分配前、分配返回後與完成標記交易內均核對原 UID／角色；若切換則保留已入庫與未完成分配狀態，回報 transferCommitted，可安全重試，不再入庫一次。這不代表多階段作業變成單一原子交易。
+- 主倉備貨需求建立／取消、寄送設定與其他殘留 UI 寫入仍待後續整理；多倉拆量、SERVICE 商品和正式環境五角色驗收未完成。沒有 Rules／Index／Collection／查詢／Listener 變更、Firebase 部署或資料清除。
