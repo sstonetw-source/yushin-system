@@ -85,7 +85,7 @@ test('transfer retry cannot turn a previous order transfer into a different dest
  const f=fixture(),args={id:'ORDER-ID',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'};
  await f.c.commitWarehouseTransfer(args);
  await f.c.commitWarehouseTransfer(args);
- const before=structuredClone([...f.docs]);
+ const before=JSON.stringify([...f.docs]);
  for(const patch of [
   {toWarehouseId:'MAIN'},
   {handoff:true,toWarehouseId:''},
@@ -93,7 +93,7 @@ test('transfer retry cannot turn a previous order transfer into a different dest
   {expectedPlan:{mode:'PICKUP'}}
  ]){
   await assert.rejects(f.c.commitWarehouseTransfer({...args,...patch}),/識別碼衝突/);
-  assert.deepEqual([...f.docs],before);
+  assert.equal(JSON.stringify([...f.docs]),before);
  }
 });
 test('one replenishment transfer ID cannot confirm a second pending request',async()=>{
@@ -102,14 +102,14 @@ test('one replenishment transfer ID cannot confirm a second pending request',asy
  const first={id:'SEND-ONCE',requestId:'REQ1',...base,toWarehouseId:'MAIN'};
  await f.c.commitWarehouseTransfer(first);
  await f.c.createMainTransferRequest({id:'REQ2',...base});
- const before=structuredClone([...f.docs]);
+ const before=JSON.stringify([...f.docs]);
  for(const patch of [{requestId:'REQ2'},{requestId:''}]){
   await assert.rejects(f.c.commitWarehouseTransfer({...first,...patch}),/識別碼衝突/);
-  assert.deepEqual([...f.docs],before);
+  assert.equal(JSON.stringify([...f.docs]),before);
   assert.equal(f.docs.get('stockTransferRequests/REQ2').status,'PENDING');
  }
  await f.c.commitWarehouseTransfer(first);
- assert.deepEqual([...f.docs],before);
+ assert.equal(JSON.stringify([...f.docs]),before);
 });
 test('free transfer is atomic, retains company total and lot identity, and hides transit stock from availability until received',async()=>{
  const f=fixture();await f.c.commitWarehouseTransfer({id:'T',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
