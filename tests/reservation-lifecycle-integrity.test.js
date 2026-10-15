@@ -314,3 +314,47 @@ test('permanent deletion preserves all records when procurement quantities are m
   }
  }
 });
+
+function deletionActionFixture(){
+ let resolveRead,rejectRead,reads=0,deletes=0,confirms=0;
+ const read=new Promise((resolve,reject)=>{resolveRead=resolve;rejectRead=reject;});
+ const button={disabled:false};
+ const c=vm.createContext({window:{},trueUserRole:'admin',currentUserRole:'admin',
+  ordersCache:[{id:'O',orderNo:'SO-1'}],orderHistorySearchResults:[{id:'O'}],pendingLifecycleOrderIds:new Set(),
+  assertOrderEligibleForPermanentDelete:()=>{},confirm:()=>{confirms++;return true;},alert:()=>{},
+  actionButtonFromEventOrSelector:()=>button,beginActionButton:b=>{b.disabled=true;return {};},endActionButton:b=>{b.disabled=false;},
+  renderOrdersList:()=>{},showActionFeedback:()=>{},deliveryActor:()=> 'U',
+  firestoreReadWithTimeout:p=>p,db:{collection:()=>({where:()=>({limit:()=>({get:()=>{reads++;return read;}})})})},
+  deleteUnfulfilledOrderAtomically:async()=>{deletes++;}});
+ vm.runInContext(app.slice(app.indexOf('window.permanentlyDeleteOrder ='),app.indexOf('window.openForecastProgressModal')),c);
+ return {c,button,resolveRead,rejectRead,counts:()=>({reads,deletes,confirms})};
+}
+test('permanent deletion shares the lifecycle lock and prevents duplicate requests until confirmed success',async()=>{
+ const f=deletionActionFixture(),first=f.c.window.permanentlyDeleteOrder('O');
+ assert.equal(f.c.pendingLifecycleOrderIds.has('O'),true);assert.equal(f.button.disabled,true);
+ assert.equal(f.c.ordersCache.length,1);
+ await f.c.window.permanentlyDeleteOrder('O');
+ assert.deepEqual(f.counts(),{reads:1,deletes:0,confirms:1});
+ f.resolveRead({empty:true});await first;
+ assert.deepEqual(f.counts(),{reads:1,deletes:1,confirms:1});
+ assert.equal(f.c.ordersCache.length,0);assert.equal(f.c.orderHistorySearchResults.length,0);
+ assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);assert.equal(f.button.disabled,false);
+});
+test('failed permanent deletion preserves caches and releases the lock for retry',async()=>{
+ for(const failure of ['read','supply','transaction']){
+  const f=deletionActionFixture();
+  if(failure==='transaction')f.c.deleteUnfulfilledOrderAtomically=async()=>{throw new Error('transaction failed');};
+  const first=f.c.window.permanentlyDeleteOrder('O');
+  if(failure==='read')f.rejectRead(new Error('offline'));
+  else f.resolveRead({empty:failure!=='supply'});
+  await first;
+  assert.equal(f.c.ordersCache.length,1);assert.equal(f.c.orderHistorySearchResults.length,1);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);assert.equal(f.button.disabled,false);
+ }
+});
+test('permanent deletion cannot start during another lifecycle operation',async()=>{
+ const f=deletionActionFixture();f.c.pendingLifecycleOrderIds.add('O');
+ await f.c.window.permanentlyDeleteOrder('O');
+ assert.deepEqual(f.counts(),{reads:0,deletes:0,confirms:0});
+ assert.equal(f.c.pendingLifecycleOrderIds.has('O'),true);
+});

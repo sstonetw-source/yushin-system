@@ -3744,12 +3744,17 @@ async function deleteUnfulfilledOrderAtomically(orderId,actor) {
 
 window.permanentlyDeleteOrder = async function(orderId) {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    if (pendingLifecycleOrderIds.has(orderId)) return;
     const order=ordersCache.find(row=>row.id===orderId);
     if(!order)return alert('找不到這筆訂單，請重新整理。');
     try{assertOrderEligibleForPermanentDelete(order);}
     catch(error){return alert('無法永久刪除：'+error.message);}
     if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？將在同一交易中釋放庫存並清除訂單、預留及未採購的需求。此操作無法復原。`))return;
+    const button=actionButtonFromEventOrSelector();
+    const buttonState=beginActionButton(button,'刪除中…');
+    pendingLifecycleOrderIds.add(orderId);
     try{
+        renderOrdersList();
         // Legacy supplier entries can survive stale order-item projections.
         // A bounded read is justified only for this rare destructive admin action.
         const linkedSupplies=await firestoreReadWithTimeout(
@@ -3758,10 +3763,13 @@ window.permanentlyDeleteOrder = async function(orderId) {
         await deleteUnfulfilledOrderAtomically(orderId,deliveryActor());
         ordersCache=ordersCache.filter(row=>row.id!==orderId);
         orderHistorySearchResults=orderHistorySearchResults.filter(row=>row.id!==orderId);
-        renderOrdersList();
         showActionFeedback('訂單及未採購的關聯資料已永久刪除。');
     }catch(err){
-        alert('永久刪除失敗：'+(err.message||err)+'\\n沒有將部分刪除視為完成，請重新核對訂單與庫存。');
+        alert('永久刪除失敗：'+(err.message||err)+'\n沒有將部分刪除視為完成，請重新核對訂單與庫存。');
+    }finally{
+        pendingLifecycleOrderIds.delete(orderId);
+        endActionButton(button,buttonState);
+        renderOrdersList();
     }
 };
 
@@ -11347,7 +11355,7 @@ window.renderOrdersList = function() {
                             ${orderLifecycleActionButtons(o, lifecycle, deliveryProgress, contextActions)}
                             <button type="button" onclick="copyOrderAsNew('${o.id}')">複製成新訂單</button>
                             <button type="button" onclick="openOrderStatusHistory('${o.id}')">紀錄</button>
-                            ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteOrder(${inlineJsValue(o.id)})">永久刪除</button>` : ''}
+                            ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteOrder(${inlineJsValue(o.id)})" ${pendingLifecycleOrderIds.has(o.id) ? 'disabled aria-busy="true"' : ''}>${pendingLifecycleOrderIds.has(o.id) ? '處理中…' : '永久刪除'}</button>` : ''}
                         </div>
                     </details>
                 </div>
