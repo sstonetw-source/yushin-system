@@ -419,3 +419,54 @@ test('generated legacy item identities cannot collide with an explicit item iden
   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
  }
 });
+
+function quickLifecycleActionFixture(nextStatus){
+ let resolveCommit,rejectCommit,transactions=0;
+ const commit=new Promise((resolve,reject)=>{resolveCommit=resolve;rejectCommit=reject;});
+ const before={id:'O',status:nextStatus==='normal'?'cancelled':'active',orderStatus:nextStatus==='normal'?'cancelled':'normal',orderStatusDate:'2026-10-01',orderStatusReason:'original',orderLifecycleHistory:[],items:[]};
+ const c=vm.createContext({window:{},ordersCache:[structuredClone(before)],pendingLifecycleOrderIds:new Set(),
+  canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+  normalizedOrderStatus:o=>o.orderStatus,confirmOrderCancellation:()=>true,
+  localDateString:()=> '2026-10-15',deliveryActor:()=> 'U',
+  renderOrdersList:()=>{},currentDeliveryOrderId:null,renderDeliveryModal:()=>{},renderOrderLifecycleModal:()=>{},
+  deliveryProgressInfo:()=>({remaining:1}),BUSINESS_STATUS:{ACTIVE:'active',CANCELLED:'cancelled'},
+  firebase:{firestore:{FieldValue:{arrayUnion:()=>({})}}},
+  db:{collection:()=>({doc:()=>({})})},
+  runRoleTransaction:async fn=>{transactions++;await fn({get:async()=>({exists:true,data:()=>structuredClone(before)}),update:()=>{}});await commit;},
+  adjustInventoryReservationForLifecycle:async()=>({items:[]}),orderWorkIndexFields:()=>({}),
+  normalizedOrderItems:o=>o.items,syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},alert:()=>{}});
+ vm.runInContext(app.slice(app.indexOf('window.quickSetOrderLifecycle ='),app.indexOf('window.toggleOrderProgressStatus')),c);
+ return {c,before,resolveCommit,rejectCommit,transactions:()=>transactions};
+}
+test('quick cancellation and restoration show the confirmed status until transaction commit and ignore repeated taps',async()=>{
+ for(const nextStatus of ['normal','cancelled']){
+  const f=quickLifecycleActionFixture(nextStatus),pending=f.c.window.quickSetOrderLifecycle('O',nextStatus);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.c.ordersCache[0].orderStatus,f.before.orderStatus);
+  assert.equal(f.c.ordersCache[0].orderStatusDate,f.before.orderStatusDate);
+  assert.equal(f.c.ordersCache[0].orderLifecycleHistory.length,0);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),true);
+  await f.c.window.quickSetOrderLifecycle('O',nextStatus);assert.equal(f.transactions(),1);
+  f.resolveCommit();await pending;
+  assert.equal(f.c.ordersCache[0].orderStatus,nextStatus);
+  assert.equal(f.c.ordersCache[0].orderLifecycleHistory.length,1);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);
+ }
+});
+test('failed quick lifecycle writes preserve the confirmed cache and unlock the action',async()=>{
+ for(const nextStatus of ['normal','cancelled']){
+  const f=quickLifecycleActionFixture(nextStatus),pending=f.c.window.quickSetOrderLifecycle('O',nextStatus);
+  await new Promise(resolve=>setImmediate(resolve));
+  f.rejectCommit(new Error('permission denied'));await pending;
+  assert.deepEqual(structuredClone(f.c.ordersCache[0]),f.before);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);
+ }
+});
+test('failed quick lifecycle action does not overwrite newer cache updates with a stale rollback snapshot',async()=>{
+ const f=quickLifecycleActionFixture('cancelled'),pending=f.c.window.quickSetOrderLifecycle('O','cancelled');
+ await new Promise(resolve=>setImmediate(resolve));
+ f.c.ordersCache[0].orderStatusReason='newer confirmed note';
+ f.rejectCommit(new Error('offline'));await pending;
+ assert.equal(f.c.ordersCache[0].orderStatusReason,'newer confirmed note');
+ assert.equal(f.c.ordersCache[0].orderStatus,'normal');
+});
