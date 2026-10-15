@@ -4,6 +4,7 @@
 - 建置：`node tools/build-app.cjs`
 - 確認：`node tools/build-app.cjs --check`
 - 既有 `modules/` 商業核心保留，不另建重複公式。
+- 資料庫集合責任：`docs/DATA_MODEL.md`
 - 設計與限制：`docs/ARCHITECTURE.md`
 - 計算與事件：`docs/BUSINESS_RULES.md`
 - AI / 開發修改守則：`docs/DEVELOPMENT_RULES.md`
