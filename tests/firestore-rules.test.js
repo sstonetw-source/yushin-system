@@ -2258,6 +2258,73 @@ test('actual restoration cannot reserve in a disabled or custody-designated ware
   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,5);
  }
 });
+function loadActualAdminOrderDeletion(f){
+ loadActualLifecycle(f);
+ const alerts=[];
+ Object.assign(f.context,{
+  trueUserRole:'admin',currentUserRole:'admin',
+  ordersCache:[],orderHistorySearchResults:[],
+  BUSINESS_STATUS:{CANCELLED:'cancelled'},
+  deliveryActor:()=>f.context.currentUser.uid,
+  confirm:()=>true,alert:message=>alerts.push(String(message)),
+  renderOrdersList(){},invalidateProcurementDemandQueue(){}
+ });
+ const app=fs.readFileSync('app.js','utf8');
+ vm.runInContext(app.slice(app.indexOf('function assertOrderCanBePermanentlyDeleted('),app.indexOf('window.openForecastProgressModal = function(')),f.context);
+ return {remove:()=>f.context.window.permanentlyDeleteOrder(f.id),alerts};
+}
+test('admin deletion releases reserved stock, removes cancelled order and linked demand together',async()=>{
+ const f=await orderInitializationFixture('admin','admin');await f.run();
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
+ const task=loadActualAdminOrderDeletion(f);
+ f.context.ordersCache=[{id:f.id,...original,inventoryReservationStatus:'completed'}];
+ await task.remove();
+ assert.deepEqual(task.alerts,[]);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).exists(),false);
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+ assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,0);
+});
+test('admin permanent deletion refuses supplier commitments absent from cached order',async()=>{
+ const f=await orderInitializationFixture('admin','admin');await f.run();
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
+ const path='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+ const demand=(await getDoc(doc(db('admin'),path))).data();
+ await seed(path,{...demand,orderedQty:1,requestedQty:2,remainingToOrderQty:1,remainingToReceiveQty:1,status:'PARTIALLY_ORDERED'});
+ const task=loadActualAdminOrderDeletion(f);
+ f.context.ordersCache=[{id:f.id,...original,inventoryReservationStatus:'completed'}];
+ await task.remove();
+ assert.equal(task.alerts.length,1);assert.match(task.alerts[0],/採購|供應商/);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'active');
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+ assert.equal((await getDoc(doc(db('admin'),path))).data().orderedQty,1);
+});
+test('admin deletion failure after cancellation leaves safe state and retry cleans links',async()=>{
+ const f=await orderInitializationFixture('admin','admin');await f.run();
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
+ const task=loadActualAdminOrderDeletion(f);
+ f.context.ordersCache=[{id:f.id,...original,inventoryReservationStatus:'completed'}];
+ const originalRunner=f.context.runRoleTransaction;let calls=0;
+ f.context.runRoleTransaction=async fn=>{
+  if(++calls===2)throw new Error('simulated second-phase network error');
+  return originalRunner(fn);
+ };
+ await task.remove();
+ assert.equal(task.alerts.length,1);assert.match(task.alerts[0],/已安全取消.*永久刪除未完成/);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'cancelled');
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data().status,'CANCELLED');
+ f.context.runRoleTransaction=originalRunner;
+ task.alerts.length=0;await task.remove();
+ assert.deepEqual(task.alerts,[]);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).exists(),false);
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+});
 test('cancelled direct redirect requires a live physical warehouse and atomic incoming totals',async()=>{
  const locations=[['missing',null],['disabled',{active:false}],['custody-flag',{active:true,systemCustody:true}],
   ['custody-type',{active:true,warehouseType:'CUSTODY'}],['custody-prefix',{active:true}],['physical',{active:true,warehouseType:'PHYSICAL'}]];
