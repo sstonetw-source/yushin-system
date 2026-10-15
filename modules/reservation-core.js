@@ -118,6 +118,33 @@
    return ledger.locations.map(row=>({warehouseId:row.warehouseId,qty:row.reservedQty}))
      .sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
  }
+ // Legacy stock and fulfillment can contain fractional quantities. Validate
+ // without clamping corrupt values into a smaller release or a new reservation.
+ function legacyReservationQty(value=0){
+   if(!['number','string'].includes(typeof value)||String(value).trim()===''
+     ||!Number.isFinite(Number(value))||Number(value)<0||Number(value)>Number.MAX_SAFE_INTEGER)
+     throw Error('預留數量不正確，請先核對資料。');
+   return Number(value);
+ }
+ function planReservationLifecycle({nextStatus,existingQty=0,itemReservedQty=existingQty,
+   requestedQty=0,inTransitQty=0,aggregateStock,warehouseStock}={}){
+   if(!['normal','cancelled'].includes(nextStatus))throw Error('不支援的訂單狀態。');
+   const existing=legacyReservationQty(existingQty),projected=legacyReservationQty(itemReservedQty);
+   if(Math.abs(existing-projected)>1e-9)throw Error('訂單與庫存預留數量不一致，請先核對資料。');
+   const stock=data=>{
+     const numbers={onHand:legacyReservationQty(data?.onHand),reserved:legacyReservationQty(data?.reserved),
+       transferFreeInTransit:legacyReservationQty(data?.transferFreeInTransit)};
+     if(numbers.reserved>numbers.onHand+1e-9||existing>numbers.reserved+1e-9)
+       throw Error('公司或分倉預留量不足或異常，不可縮減釋放量，請先核對資料。');
+     return numbers;
+   };
+   const company=stock(aggregateStock),warehouse=stock(warehouseStock);
+   if(nextStatus==='cancelled')return {reservedQty:0,shortageQty:0,reservedDelta:existing?-existing:0};
+   const requested=legacyReservationQty(requestedQty),incoming=legacyReservationQty(inTransitQty);
+   const availableQty=Math.min(inventory.normalizeStock(company).available,inventory.normalizeStock(warehouse).available);
+   const plan=planReservation({requestedQty:requested,existingQty:existing,sameStock:true,availableQty,inTransitQty:incoming});
+   return {reservedQty:plan.reservedQty,shortageQty:plan.shortageQty,reservedDelta:plan.reservedQty-existing};
+ }
  // Compare two complete snapshots, never partial update payloads. This is a
  // stock projection, not permission to move stock or complete a transfer.
  function reservationStockDeltas(before={},after={}){
@@ -131,11 +158,7 @@
        throw Error('不支援的預留位置格式，不可當成單倉計算。');
      // Legacy operations already allow fractional quantities and custody stock.
      // Preserve those semantics; the proposed v2 ledger stays integer-only.
-     const raw=record.quantity===undefined?0:record.quantity;
-     if(!['number','string'].includes(typeof raw)||String(raw).trim()===''
-       ||!Number.isFinite(Number(raw))||Number(raw)<0||Number(raw)>Number.MAX_SAFE_INTEGER)
-       throw Error('預留數量不正確，請先核對資料。');
-     const qty=Number(raw);
+     const qty=legacyReservationQty(record.quantity);
      return qty>0?[{warehouseId:locationId(record.warehouseId),qty}]:[];
    };
    if(before.productKey&&after.productKey&&before.productKey!==after.productKey)
@@ -244,5 +267,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
