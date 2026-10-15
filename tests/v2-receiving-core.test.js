@@ -126,3 +126,15 @@ test('receipt snapshot preserves procurement demand reference',()=>{
   assert.equal(snapshot.sourceId,'SO-1');
   assert.equal(snapshot.sourceItemId,'item-1');
 });
+test('receipt reservation uses canonical workflow outstanding and shortage projection',()=>{
+  const workflow=require('../modules/workflow-core.js');
+  const item={orderedQty:10,deliveredQty:12,returnedQty:4,reservedQty:1,receivedQty:10};
+  const p=workflow.projectItem({...item,grossDeliveredQty:12});
+  const next=receiving.applyReceiptToOrderItem(item,3);
+  assert.equal(p.outstandingQty,2);
+  assert.equal(next.reservedDelta,1);
+  assert.equal(next.item.reservedQty,2);
+  assert.equal(next.item.shortageQty,0);
+  assert.equal(next.item.receivedQty,13);
+  assert.equal(receiving.applyReceiptToOrderItem({...item,reservedQty:2},2).reservedDelta,0);
+});
