@@ -1856,12 +1856,12 @@ service cloud.firestore {
       allow create: if validProcurementDemand(request.resource.data) && (canReceiveInventory()
         || businessProcurementDemandCreate(request.resource.data));
       allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
-        && ((request.resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandCancelUpdate())
-          || (resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandRestoreUpdate())
-          || ((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+        && (((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
             && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
             ? (admin() || businessDirectDemandReceiptUpdate())
-            : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate())));
+            : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate()))
+          || (request.resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandCancelUpdate())
+          || (resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandRestoreUpdate()));
       allow delete: if admin();
     }
 
