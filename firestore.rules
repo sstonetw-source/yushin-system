@@ -969,7 +969,8 @@ service cloud.firestore {
       let held = getAfter(/databases/$(database)/documents/inventoryReservations/$(d.sourceId + '__' + d.sourceItemId)).data;
       let delivered = item.get('deliveredQty', 0) - item.get('returnedQty', 0);
       let shortage = item.qty - (delivered > 0 ? delivered : 0) - held.quantity;
-      return businessOwner() && before.get('ownerUid', '') == request.auth.uid && after.get('ownerUid', '') == request.auth.uid
+      return businessOwner() && d.get('status', '') != 'CANCELLED'
+        && before.get('ownerUid', '') == request.auth.uid && after.get('ownerUid', '') == request.auth.uid
         && before.get('inventoryReservationStatus', '') in ['pending', 'failed']
         && after.get('inventoryReservationStatus', '') in ['pending', 'failed'] && !orderIsCancelled(after)
         && d.fulfillmentType == 'WAREHOUSE' && d.orderedQty == resource.data.orderedQty && d.receivedQty == resource.data.receivedQty
