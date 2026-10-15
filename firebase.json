@@ -14,7 +14,9 @@
       "docs/**",
       "tests/**",
       "node_modules/**",
-      "*.md"
+      "*.md",
+      "src/**",
+      "tools/**"
     ],
     "cleanUrls": true,
     "trailingSlash": false,
