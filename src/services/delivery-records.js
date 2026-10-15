@@ -6,9 +6,16 @@ function assertOrderDeliveryIncrease(order,item,qty) {
     const single=normalizedOrderItems(order).length===1;
     const gross=savedDeliveryRecords(order).filter(row=>row.itemId===item.itemId||(!row.itemId&&single))
         .reduce((sum,row)=>sum+Number(row.qty||0),0);
-    const shippable=globalThis.YushinFulfillment.dispatchState({deliveredQty:gross,
-        reservedQty:item.reservedQty,dispatchPreparedQty:item.dispatchPreparedQty}).shippable;
-    if(qty>shippable+1e-9)throw new Error(`${item.itemName||'品項'} 目前已打單可出貨數量只有 ${shippable}。`);
+    const state=globalThis.YushinFulfillment.dispatchState({deliveredQty:gross,
+        reservedQty:item.reservedQty,dispatchPreparedQty:item.dispatchPreparedQty});
+    if(qty>state.shippable+1e-9)throw new Error(`${item.itemName||'品項'} 目前已打單可出貨數量只有 ${state.shippable}。`);
+    return state;
+}
+
+function deliveryRecordWasReversed(order,recordId) {
+    return (order.deliveryHistory||[]).some(row=>
+        (row.action==='delete'&&row.recordId===recordId)
+        ||(row.action==='cancel_all'&&(row.before?.records||[]).some(record=>record.id===recordId)));
 }
 
 async function completeOrderDelivery(orderId,today) {
@@ -107,7 +114,7 @@ async function saveOrderDeliveryRecord(orderId,{date,qty,notes='',editId='',item
         const order = snapshot.data();
         if (order.isDelivered && savedDeliveryRecords(order).length === 0) throw new Error('請先取消舊資料的歷史推估送貨紀錄。');
         const records = savedDeliveryRecords(order).slice();
-        if(!editId&&(order.deliveryHistory||[]).some(row=>row.action==='delete'&&row.recordId===recordId))
+        if(!editId&&deliveryRecordWasReversed(order,recordId))
             throw new Error('這筆送貨作業已更正撤銷，不能重試為新的送貨。');
         // A lost response may be retried with the same form attempt ID.
         // Never reinterpret an existing ID as a second physical shipment.

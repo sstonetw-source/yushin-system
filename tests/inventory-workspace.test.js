@@ -13,23 +13,67 @@ test('shipping uses prepared stock per item, includes partial prepared quantitie
  const rows=core.shippingRows([order,order,{...order,id:'Cancelled',status:'cancelled'},{...order,id:'Pending',pending:true}], [{id:'MAIN'},{id:'BRANCH'}],'MAIN',helpers);
  assert.equal(rows.length,2);assert.equal(rows[0].qty,1);assert.equal(rows[0].branch,false);assert.equal(rows[1].qty,2);assert.equal(rows[1].branch,true);
 });
-function fixture(){
- const order={status:'active',ownerUid:'sales1',deliveredQty:0,items:[{itemId:'A',warehouseId:'MAIN',qty:3,reservedQty:3,dispatchPreparedQty:3}],deliveryRecords:[],returnRecords:[]};
- const docs=new Map([['orders/O',order]]);let posts=0;
+function fixture({retry=false,loseResponse=false,failStock=false}={}){
+ const order={status:'active',ownerUid:'sales1',deliveredQty:0,items:[{itemId:'A',warehouseId:'MAIN',qty:3,reservedQty:3,dispatchPreparedQty:3}],deliveryRecords:[],returnRecords:[],deliveryHistory:[]};
+ const docs=new Map([['orders/O',order]]);let posts=0,lost=false;
  const c=vm.createContext({db:{collection:name=>({doc:id=>({path:name+'/'+id})})},canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
-  runRoleTransaction:async fn=>{const writes=[];await fn({get:async ref=>({exists:docs.has(ref.path),data:()=>structuredClone(docs.get(ref.path))}),update:(ref,data)=>writes.push([ref,data])});writes.forEach(([ref,data])=>docs.set(ref.path,{...docs.get(ref.path),...data}));},
+  runRoleTransaction:async fn=>{
+   const attempt=async()=>{const writes=[];const tx={posted:0,get:async ref=>({exists:docs.has(ref.path),data:()=>structuredClone(docs.get(ref.path))}),update:(ref,data)=>writes.push([ref,data])};await fn(tx);return {writes,posted:tx.posted};};
+   let result=await attempt();if(retry)result=await attempt();
+   result.writes.forEach(([ref,data])=>docs.set(ref.path,{...docs.get(ref.path),...data,deliveryHistory:[...(docs.get(ref.path).deliveryHistory||[]),...data.deliveryHistory]}));posts+=result.posted;
+   if(loseResponse&&!lost){lost=true;throw new Error('response lost');}
+  },
   normalizedOrderItems:o=>o.items,normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',orderInventorySyncIncomplete:o=>o.pending,
   savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,returnedQuantity:()=>0,orderQuantity:()=>3,
+  YushinFulfillment:fulfillment,
+  orderDeliveryProjection:o=>fulfillment.projectOrderDelivery({grossDeliveredQty:o.deliveryRecords.reduce((s,r)=>s+r.qty,0),returnedQty:o.returnRecords.reduce((s,r)=>s+r.qty,0),returnRecords:o.returnRecords}),
   itemDispatchState:(_o,item)=>fulfillment.dispatchState(item),defaultWarehouse:()=>({id:'MAIN'}),warehouseMasterCache:[{id:'MAIN'}],
   deliveryActor:()=> 'Warehouse',currentUser:{uid:'wh1'},inventoryProductKey:()=> 'P',
-  applyInventoryDeliveryDeltaInTransaction:async(_tx,item,qty)=>{posts+=qty;return {newReservedQty:item.reservedQty-qty,movementId:'M',lotAllocations:[]};},
+  applyInventoryDeliveryDeltaInTransaction:async(tx,item,qty)=>{if(failStock)throw new Error('stock failed');tx.posted+=qty;return {newReservedQty:item.reservedQty-qty,movementId:'M',lotAllocations:[]};},
   firebase:{firestore:{FieldValue:{arrayUnion:x=>[x]}}},orderWorkIndexFields:()=>({workCategories:['delivery']})});
- vm.runInContext(code.slice(code.indexOf('async function commitInventoryShipment')),c);return {c,docs,posts:()=>posts};
+ vm.runInContext(fs.readFileSync('src/services/delivery-records.js','utf8')+'\n'+fs.readFileSync('src/services/warehouse-shipment.js','utf8'),c);return {c,docs,posts:()=>posts};
 }
 test('shipment is atomic and idempotent across retries, with a unique recorded item and warehouse',async()=>{
  const f=fixture(),args={orderId:'O',itemId:'A',qty:1,date:'2026-10-06',operationId:'D'};
  await f.c.commitInventoryShipment(args);await f.c.commitInventoryShipment(args);
  assert.equal(f.posts(),1);const order=f.docs.get('orders/O');assert.equal(order.deliveryRecords.length,1);assert.equal(order.items[0].reservedQty,2);assert.equal(order.deliveryRecords[0].warehouseId,'MAIN');assert.equal(order.deliveryRecords[0].itemId,'A');assert.equal(order.inventoryShipmentRecordId,'D');
+});
+test('shipment retries reject changed dates, notes, warehouse expectations and operation-source collisions',async()=>{
+ for(const patch of [{date:'2026-10-07'},{notes:'changed'},{expectedWarehouseId:'OTHER'}]){
+  const f=fixture(),args={orderId:'O',itemId:'A',qty:1,date:'2026-10-06',operationId:'D'};
+  await f.c.commitInventoryShipment(args);
+  await assert.rejects(f.c.commitInventoryShipment({...args,...patch}),/識別碼衝突/);
+  assert.equal(f.posts(),1);
+ }
+ const f=fixture();f.docs.get('orders/O').deliveryRecords.push({id:'D',itemId:'A',qty:1,date:'2026-10-06'});
+ await assert.rejects(f.c.commitInventoryShipment({orderId:'O',itemId:'A',qty:1,date:'2026-10-06',operationId:'D'}),/識別碼衝突/);
+ assert.equal(f.posts(),0);
+});
+test('warehouse shipment cannot be replayed after the order delivery service corrected it',async()=>{
+ const f=fixture(),args={orderId:'O',itemId:'A',qty:1,date:'2026-10-06',operationId:'D'};
+ await f.c.commitInventoryShipment(args);
+ await f.c.correctOrderDeliveryRecord('O','D','誤登');
+ assert.equal(f.posts(),0);
+ assert.equal(f.docs.get('orders/O').items[0].reservedQty,3);
+ await assert.rejects(f.c.commitInventoryShipment(args),/已更正撤銷/);
+ assert.equal(f.posts(),0);
+ await f.c.commitInventoryShipment({...args,operationId:'NEW'});
+ assert.equal(f.posts(),1);
+});
+test('warehouse lost-response and transaction callback retries commit one record and one stock delta',async()=>{
+ for(const options of [{retry:true},{loseResponse:true}]){
+  const f=fixture(options),args={orderId:'O',itemId:'A',qty:1,date:'2026-10-06',operationId:'D'};
+  if(options.loseResponse)await assert.rejects(f.c.commitInventoryShipment(args),/response lost/);
+  else await f.c.commitInventoryShipment(args);
+  await f.c.commitInventoryShipment(args);
+  const saved=f.docs.get('orders/O');
+  assert.equal(f.posts(),1);assert.equal(saved.deliveryRecords.length,1);assert.equal(saved.deliveryHistory.length,1);
+ }
+});
+test('stock transaction failure never publishes warehouse delivery records, items, indexes or history',async()=>{
+ const f=fixture({failStock:true}),before=structuredClone(f.docs.get('orders/O'));
+ await assert.rejects(f.c.commitInventoryShipment({orderId:'O',itemId:'A',qty:1,date:'2026-10-06',operationId:'D'}),/stock failed/);
+ assert.equal(f.posts(),0);assert.deepEqual(f.docs.get('orders/O'),before);
 });
 test('batch customer shipments mark only shipped items and complete the order only after every item ships',async()=>{
  const f=fixture(),order=f.docs.get('orders/O');
@@ -93,6 +137,19 @@ test('mailing view excludes pickup and transfers, and a retained branch selectio
  c.switchInventoryShippingKind('branch');el('inventoryShippingWarehouse').value='BRANCH';c.renderInventoryShipping();assert.match(el('inventoryShippingBody').innerHTML,/寄給負責業務/);
  c.switchInventoryShippingKind('main');assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.match(el('inventoryShippingBody').innerHTML,/直接寄客戶/);
  el('inventoryDeliveryModeFilter').value='SALES_SHIP';c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/0 筆/);
+});
+test('single warehouse shipment UI passes a detached warehouse and recipient snapshot to the service',async()=>{
+ const {c}=workspaceUiFixture();
+ c.YushinWarehouseLogistics=require('../modules/warehouse-logistics');c.inlineJsValue=JSON.stringify;
+ const plan={mode:'CUSTOMER_SHIP',contact:'Original',phone:'123',address:'台北'};
+ c.orderWorkQueueCache=[{id:'O',shippingInstructions:plan,items:[{itemId:'A',warehouseId:'MAIN',qty:1}]}];
+ c.localDateString=()=> '2026-10-16';let promptIndex=0;c.prompt=()=>['1','2026-10-16'][promptIndex++];
+ c.lifecycleRecordId=()=> 'D';c.beginActionButton=()=>({});c.endActionButton=()=>{};
+ c.inventoryProductKey=()=> 'P';c.invalidateWarehouseStockCache=()=>{};c.refreshAffectedOrderCaches=async()=>{};c.markMainPageDirty=()=>{};
+ const calls=[];c.commitInventoryShipment=async args=>{calls.push(args);plan.contact='Changed';};
+ await c.openInventoryShipment('O','A',{dataset:{}});
+ assert.equal(calls.length,1);assert.equal(calls[0].expectedWarehouseId,'MAIN');
+ assert.equal(calls[0].expectedPlan.contact,'Original');assert.equal(calls[0].operationId,'D');
 });
 test('return loading failure does not mark purchase or shipping as empty or block their work; errors stay in the selected panel',async()=>{
  const {c,el,cards,calls}=workspaceUiFixture({returnsFail:true});

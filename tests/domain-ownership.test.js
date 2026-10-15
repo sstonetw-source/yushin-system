@@ -94,3 +94,17 @@ test('all four order delivery actions delegate protected writes and the service 
   assert.doesNotMatch(service,/document\.|ordersCache|alert\(/);
   assert.match(service,/runRoleTransaction/);
 });
+test('single and batch warehouse shipments share one service and order-delivery core validation',()=>{
+  const ui=read('modules/inventory-workspace.js'),batch=read('modules/warehouse-logistics.js');
+  assert.doesNotMatch(ui,/async function commitInventoryShipment|runRoleTransaction\s*\(/);
+  assert.match(ui,/await commitInventoryShipment\(/);
+  assert.match(ui,/operationId,expectedWarehouseId,expectedPlan/);
+  assert.match(batch,/await root\.commitInventoryShipment\(/);
+  const declarations=walk('src').filter(file=>/async function commitInventoryShipment\(/.test(read(file)));
+  assert.deepEqual(declarations,['src/services/warehouse-shipment.js']);
+  const service=read(declarations[0]);
+  assert.match(service,/assertOrderDeliveryIncrease\(/);
+  assert.match(service,/orderDeliveryProjection\(/);
+  assert.match(service,/deliveryRecordWasReversed\(/);
+  assert.doesNotMatch(service,/document\.|ordersCache|itemDispatchState\(/);
+});

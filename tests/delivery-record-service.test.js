@@ -110,6 +110,12 @@ test('repeated cancel-all restores one shipment only once and return history blo
   await assert.rejects(returned.c.cancelOrderDeliveries('O'),/退貨紀錄/);
   assert.equal(returned.writes(),0);
 });
+test('a prior create intent cannot recreate a delivery removed by cancel-all',async()=>{
+ const f=fixture();await f.c.saveOrderDeliveryRecord('O',request({qty:10}));
+ await f.c.cancelOrderDeliveries('O');
+ await assert.rejects(f.c.saveOrderDeliveryRecord('O',request({qty:10})),/已更正撤銷/);
+ assert.deepEqual(f.stock(),[10,-10]);assert.equal(f.writes(),2);
+});
 test('CLOSE returns never reopen quick shipping',async()=>{
   const f=fixture({patch:{deliveryRecords:[{id:'old',itemId:'I',qty:10}],returnRecords:[{itemId:'I',qty:2,settlement:'CLOSE'}]}});
   await f.c.completeOrderDelivery('O','2026-10-16');
