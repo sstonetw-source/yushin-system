@@ -358,3 +358,39 @@ test('permanent deletion cannot start during another lifecycle operation',async(
  assert.deepEqual(f.counts(),{reads:0,deletes:0,confirms:0});
  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),true);
 });
+
+test('permanent deletion validates raw quantities before display normalization can erase anomalies',async()=>{
+ for(const field of ['qty','orderedQty','reservedQty','supplyOrderedQty','receivedQty','dispatchPreparedQty','deliveredQty','returnedQty']){
+  for(const value of [-1,NaN,Infinity,-Infinity,'bad','',true,null]){
+   const f=deletionFixture();f.docs.get('orders/O').items[0][field]=value;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.deleteOrder(),/原始品項數量異常/);
+   assert.deepEqual([...f.docs],before,`${field}: ${String(value)}`);assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('permanent deletion retains raw fulfillment facts, transfer links and clamped reservation projections',async()=>{
+ const patches=[{dispatchPreparedQty:1},{returnedQty:1},{deliveredQty:1},
+  {transferPendingId:'T'},{custodyTransferId:'T'},{reservedQty:6}];
+ for(const patch of patches){
+  const f=deletionFixture();Object.assign(f.docs.get('orders/O').items[0],patch);
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.deleteOrder(),/原始品項已有|調撥關聯|原始預留數量/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
+test('cancelled order deletion refuses malformed reservation quantities rather than coercing them to zero',async()=>{
+ for(const value of [null,undefined,NaN,Infinity,'',false]){
+  const f=deletionFixture({held:0,status:'cancelled'});
+  f.docs.get('inventoryReservations/O__I').quantity=value;
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.deleteOrder(),/仍占用庫存/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
+test('legacy numeric strings and fractional reservations can still be permanently deleted',async()=>{
+ const f=deletionFixture({held:0.5,qty:1.5});
+ Object.assign(f.docs.get('orders/O').items[0],{qty:'1.5',reservedQty:'0.5',supplyOrderedQty:'0'});
+ await f.deleteOrder();
+ assert.equal(f.docs.has('orders/O'),false);assert.equal(f.docs.get('inventory/P').reserved,0);
+});

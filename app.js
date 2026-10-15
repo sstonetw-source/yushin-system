@@ -3671,7 +3671,26 @@ window.permanentlyDeleteQuote = async function(quoteNo) {
 };
 
 function assertOrderEligibleForPermanentDelete(order) {
+    // Display normalization clamps invalid values and derives delivery projections.
+    // Destructive operations must inspect the stored facts before that conversion.
+    for(const item of (Array.isArray(order?.items)?order.items:[])){
+        if(!item||typeof item!=='object')throw new Error('訂單原始品項格式異常，請先核對資料。');
+        for(const field of ['qty','orderedQty','reservedQty','supplyOrderedQty','receivedQty','dispatchPreparedQty','deliveredQty','returnedQty']){
+            if(!Object.prototype.hasOwnProperty.call(item,field))continue;
+            const value=item[field];
+            if(!['number','string'].includes(typeof value)||String(value).trim()===''
+                ||!Number.isFinite(Number(value))||Number(value)<0)
+                throw new Error('訂單原始品項數量異常，請先核對資料再永久刪除。');
+        }
+        if(['supplyOrderedQty','receivedQty','dispatchPreparedQty','deliveredQty','returnedQty']
+            .some(field=>Number(item[field]??0)!==0))
+            throw new Error('訂單原始品項已有採購、到貨、打單、交付或退貨紀錄，不可永久刪除。');
+        if(item.transferPendingId||item.custodyTransferId)
+            throw new Error('訂單品項仍有調撥關聯，請先核對調撥紀錄，不可永久刪除。');
+    }
     const items=normalizedOrderItems(order);
+    if(items.some((item,index)=>Number(order.items[index].reservedQty??0)!==Number(item.reservedQty??0)))
+        throw new Error('訂單原始預留數量與有效需求不一致，請先核對庫存。');
     if(!items.length)throw new Error('此訂單缺少正式品項，無法安全永久刪除，請由管理員先核對原始資料。');
     if(['pending','failed'].includes(order.inventoryReservationStatus)
         || ['pending','failed'].includes(order.sourceDocumentSyncStatus))
@@ -3713,7 +3732,8 @@ async function deleteUnfulfilledOrderAtomically(orderId,actor) {
                     ||reservation.productKey!==productKey)
                     throw new Error('預留紀錄與來源訂單不一致，請先核對資料。');
                 if(normalizedOrderStatus(liveOrder)==='cancelled'
-                    && Number(reservation.quantity||0)!==0)
+                    && (!['number','string'].includes(typeof reservation.quantity)
+                        ||String(reservation.quantity).trim()===''||Number(reservation.quantity)!==0))
                     throw new Error('已取消訂單仍占用庫存，請先核對預留再刪除。');
             }
             if(demandSnap.exists){
