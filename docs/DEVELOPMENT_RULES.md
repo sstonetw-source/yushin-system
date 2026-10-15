@@ -25,3 +25,5 @@
 ## 待改善技術債
 
 第一批完成來源責任切分及自動建置一致性；後續才讓 UI 與 transaction services 真正隔離、移除跨檔全域變數及保持 PR #91 的取消／恢復修正整合與測試。單純拆檔與生成 bundle 不是商業邏輯全面完成的證明。
+
+- 核銷／核銷日期不能在畫面另開直接 update：必須呼叫 `setOrderBillingStatus` 或 `changeOrderBillingDate`，並保持修改歷史和角色保護。

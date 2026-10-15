@@ -618,6 +618,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
     context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src/services/order-billing.js'), 'utf8'), context);
     vm.runInContext(appSource.slice(start, end), context);
     context.window.toggleOrderStatus('o1', 'isBilled', true);
     context.window.toggleOrderStatus('o1', 'isBilled', true);
@@ -648,6 +649,7 @@ test('failed billing write restores the previous state and unlocks the button', 
     context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
     vm.createContext(context);
     context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src/services/order-billing.js'), 'utf8'), context);
     vm.runInContext(appSource.slice(start, end), context);
     context.window.toggleOrderStatus('o2', 'isBilled', true);
     assert.equal(order.isBilled, true);
