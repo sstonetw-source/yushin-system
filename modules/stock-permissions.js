@@ -3,6 +3,19 @@
 (function(root){
   function dataAt(snapshot){return snapshot?.exists ? snapshot.data() : {};}
   function number(value){return Number(value || 0);}
+  // Every live fulfillment writer still uses quantity + warehouseId. Keep the
+  // proposed location ledger out of these paths until ALL consumers and Rules
+  // understand it; even an empty/unknown marker must not silently fall back.
+  const pendingLocationFields=['locationSchemaVersion','locations','allocations','warehouseAllocations'];
+  function assertReservationLocationCompatibility(ref,data){
+    if(!ref.path.startsWith('inventoryReservations/'))return;
+    if(!Object.keys(data||{}).some(key=>pendingLocationFields.includes(key.split('.')[0])))return;
+    const source=String(data.orderNo||data.orderId||ref.id||'').slice(0,80);
+    const item=String(data.itemCode||data.itemId||'').slice(0,80);
+    const error=new Error(`預留「${source}${item?'／'+item:''}」含尚未啟用的位置資料，已停止作業。請保留原資料並由管理員核對，勿直接改庫存或重複建單。`);
+    error.code='unsupported-reservation-location';
+    throw error;
+  }
   async function run(db, callback, actorUid, enabled, role, sessionGuard=null){
     let released=[];
     const result=await db.runTransaction(async native=>{
@@ -11,15 +24,18 @@
       const reads=new Map(),writes=[];
       const sourceRef=ref=>ref.path.startsWith('receivingSupplyOrders/')?db.collection('supplyOrders').doc(ref.id):ref;
       const proxy={
-        async get(ref){ref=sourceRef(ref);const readRef=['warehouse','sales','engineer'].includes(role)&&ref.path.startsWith('supplyOrders/')?db.collection('receivingSupplyOrders').doc(ref.id):ref;const snapshot=await native.get(readRef);reads.set(ref.path,{ref,snapshot,data:dataAt(snapshot)});return snapshot;},
-        set(ref,data,options){ref=sourceRef(ref);writes.push({method:'set',ref,data,options});return proxy;},
-        update(ref,data){ref=sourceRef(ref);writes.push({method:'update',ref,data});return proxy;},
+        async get(ref){ref=sourceRef(ref);const readRef=['warehouse','sales','engineer'].includes(role)&&ref.path.startsWith('supplyOrders/')?db.collection('receivingSupplyOrders').doc(ref.id):ref;const snapshot=await native.get(readRef);const data=dataAt(snapshot);assertReservationLocationCompatibility(ref,data);reads.set(ref.path,{ref,snapshot,data});return snapshot;},
+        set(ref,data,options){ref=sourceRef(ref);assertReservationLocationCompatibility(ref,data);writes.push({method:'set',ref,data,options});return proxy;},
+        update(ref,data){ref=sourceRef(ref);assertReservationLocationCompatibility(ref,data);writes.push({method:'update',ref,data});return proxy;},
         delete(ref){ref=sourceRef(ref);writes.push({method:'delete',ref});return proxy;}
       };
       const result=await callback(proxy);
       {
         for(const write of writes){
           if(!write.ref.path.startsWith('inventoryReservations/')||write.method==='delete')continue;
+          // A blind replacement must not erase an unsupported ledger and then
+          // publish a legacy-looking total. Reuse the read when already held.
+          if(!reads.has(write.ref.path))await proxy.get(write.ref);
           const reservation={...reads.get(write.ref.path)?.data,...write.data};
           const orderRef=db.collection('orders').doc(reservation.orderId);
           let orderData=reads.get(orderRef.path)?.data;

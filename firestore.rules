@@ -753,11 +753,17 @@ service cloud.firestore {
         || request.resource.data.get('sourceItemIndex', -1) == resource.data.get('sourceItemIndex', -1));
     }
 
+    function legacyReservationLocationShape(data) {
+      // Multi-location fields are proposals only. Existing stock witnesses and
+      // fulfillment paths still prove exactly one warehouse per reservation.
+      return !data.keys().hasAny(['locationSchemaVersion','locations','allocations','warehouseAllocations']);
+    }
     function validReservationSource(id, data) {
       let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
       let index = data.get('orderItemIndex', -1);
       let item = order.items[index];
-      return index is int && index >= 0 && index < order.items.size()
+      return legacyReservationLocationShape(data)
+        && index is int && index >= 0 && index < order.items.size()
         && (role() != 'warehouse' || !(order.get('inventoryReservationStatus', '') in ['pending', 'failed']))
         && id == data.orderId + '__' + data.itemId
         && data.itemId == item.get('itemId', 'item-' + string(index + 1))
@@ -2105,6 +2111,7 @@ service cloud.firestore {
       allow create: if validReservationSource(id, request.resource.data)
         && reservationCreateWriter(id);
       allow update: if validReservationSource(id, request.resource.data) && reservationIdentityUnchanged()
+        && legacyReservationLocationShape(resource.data)
         && reservationUpdateWriter(id);
       allow delete: if admin();
     }
