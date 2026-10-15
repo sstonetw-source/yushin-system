@@ -996,6 +996,7 @@ service cloud.firestore {
       // source item, owner/salesCode, item index, product, and identity.
       // Avoid repeating expensive lookups in the cancellation transaction.
       return businessOwner()
+        && d.get('sourceType', '') == 'SALES_ORDER'
         && before.get('ownerUid', '') == request.auth.uid
         && after.get('ownerUid', '') == request.auth.uid
         && !orderIsCancelled(before) && orderIsCancelled(after)
