@@ -37,7 +37,7 @@
 3. 原廠直送與一般收貨應各自維持相同的權威事件、不重複累計；`SERVICE` 商品型態須先確立不入庫的契約與測試。
 4. `deliveryRecords`、`returnRecords`、`orders.items`、`inventoryReservations` 與 `warehouseStocks` 的權威邊界，參見 `BUSINESS_RULES.md`。
 5. 未授權修改正式 Firestore、未移除現存歷史欄位相容、未部署正式 Firebase；對應既有文件 `docs/workflow-consistency-audit-20261014.md`。
-6. PR #91 為**獨立待合併**的取消／恢復修正；整合時需驗證本分支的新來源檔與生成 bundle 一致，避免直接在 bundle 解衝突。
+6. 已將 PR #91 的取消／恢復修正整合至本分支來源與 bundle；原 PR 仍獨立開啟，最終正式合併狀態以 GitHub 為準。
 
 ## 修改方式
 

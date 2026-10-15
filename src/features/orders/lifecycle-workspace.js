@@ -21,24 +21,6 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if(cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
     if (pendingLifecycleOrderIds.has(orderId) || normalizedOrderStatus(cachedOrder) === nextStatus) return;
     if(nextStatus==='cancelled'&&!confirmOrderCancellation(cachedOrder))return;
-    const optimisticBefore = {
-        orderStatus: cachedOrder.orderStatus,
-        orderStatusDate: cachedOrder.orderStatusDate,
-        orderStatusReason: cachedOrder.orderStatusReason,
-        orderLifecycleHistory: [...(cachedOrder.orderLifecycleHistory || [])]
-    };
-    const optimisticDate = localDateString();
-    const optimisticHistory = {
-        action: nextStatus === 'normal' ? 'restore' : 'status_change',
-        before: { status: normalizedOrderStatus(cachedOrder), date: cachedOrder.orderStatusDate || '', reason: cachedOrder.orderStatusReason || '' },
-        after: { status: nextStatus, date: optimisticDate, reason: '' },
-        by: deliveryActor(),
-        at: new Date().toISOString()
-    };
-    cachedOrder.orderStatus = nextStatus;
-    cachedOrder.orderStatusDate = optimisticDate;
-    cachedOrder.orderStatusReason = '';
-    cachedOrder.orderLifecycleHistory = [...optimisticBefore.orderLifecycleHistory, optimisticHistory];
     pendingLifecycleOrderIds.add(orderId);
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
@@ -92,7 +74,6 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     } catch (err) {
-        Object.assign(cachedOrder, optimisticBefore);
         pendingLifecycleOrderIds.delete(orderId);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }

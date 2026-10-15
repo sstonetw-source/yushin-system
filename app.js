@@ -16852,8 +16852,15 @@ window.prepareOrderLifecycle = function(orderId, status) {
 
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor, options={}) {
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
+    if(!Array.isArray(order?.items)||!order.items.length
+        ||order.items.some(item=>!item||typeof item!=='object'||Array.isArray(item)))
+        throw new Error('訂單缺少有效品項明細，無法安全取消或恢復。請由管理員核對原始訂單、庫存預留及採購需求。');
     const items = normalizedOrderItems(order);
-    const deliveries = savedDeliveryRecords(order);
+    // Multiple lines must never address the same reservation or demand document,
+    // including collisions between generated legacy IDs and explicit IDs.
+    const itemIds=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
+    if(new Set(itemIds).size!==itemIds.length)
+        throw new Error('訂單品項識別碼重複，無法安全取消或恢復。請由管理員核對品項與庫存預留。');
     const now = new Date().toISOString();
 
     // Firestore transactions require every read before the first write.
@@ -16871,13 +16878,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const itemId = String(item.itemId || `item-${index + 1}`);
         const productKey = inventoryProductKey(item);
         const directShip = (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
-        const grossDelivered = deliveries
-            .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
-            .reduce((sum, row) => sum + Number(row.qty || 0), 0);
-        const returned = savedReturnRecords(order)
-            .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
-            .reduce((sum, row) => sum + Number(row.qty || 0), 0);
-        const delivered = Math.max(0, grossDelivered - returned);
+        // Reuse the canonical projection: closed returns do not need replacement,
+        // and legacy item-only delivery totals remain authoritative when no ledger exists.
+        const delivered = Math.max(0, Number(item.deliveredQty||0)-Number(item.returnedQty||0));
         const ordered = Math.max(0, Number(item.qty || item.orderedQty || 0));
         const warehouseId = directShip ? '' : (item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '');
         const invRef = !directShip && productKey ? inventoryRefFor(item) : null;
@@ -17073,24 +17076,6 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if(cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
     if (pendingLifecycleOrderIds.has(orderId) || normalizedOrderStatus(cachedOrder) === nextStatus) return;
     if(nextStatus==='cancelled'&&!confirmOrderCancellation(cachedOrder))return;
-    const optimisticBefore = {
-        orderStatus: cachedOrder.orderStatus,
-        orderStatusDate: cachedOrder.orderStatusDate,
-        orderStatusReason: cachedOrder.orderStatusReason,
-        orderLifecycleHistory: [...(cachedOrder.orderLifecycleHistory || [])]
-    };
-    const optimisticDate = localDateString();
-    const optimisticHistory = {
-        action: nextStatus === 'normal' ? 'restore' : 'status_change',
-        before: { status: normalizedOrderStatus(cachedOrder), date: cachedOrder.orderStatusDate || '', reason: cachedOrder.orderStatusReason || '' },
-        after: { status: nextStatus, date: optimisticDate, reason: '' },
-        by: deliveryActor(),
-        at: new Date().toISOString()
-    };
-    cachedOrder.orderStatus = nextStatus;
-    cachedOrder.orderStatusDate = optimisticDate;
-    cachedOrder.orderStatusReason = '';
-    cachedOrder.orderLifecycleHistory = [...optimisticBefore.orderLifecycleHistory, optimisticHistory];
     pendingLifecycleOrderIds.add(orderId);
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
@@ -17144,7 +17129,6 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     } catch (err) {
-        Object.assign(cachedOrder, optimisticBefore);
         pendingLifecycleOrderIds.delete(orderId);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
