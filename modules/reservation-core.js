@@ -31,6 +31,23 @@
      && eligible.some(w=>w.id!==warehouseId&&available(w.id)>0);
    return {warehouseId,requiresMultipleLocations};
  }
+ // Pure planner only: does not mutate legacy one-location reservations.
+ function planMultiWarehouseReservation({warehouses=[],stocks={},requestedQty=0,currentWarehouseId=''}={}){
+   const needed=n(requestedQty);
+   const eligible=warehouses.filter(w=>w&&w.active!==false&&!w.systemCustody&&w.warehouseType!=='CUSTODY'&&!String(w.id||'').startsWith('custody-'))
+     .sort((a,b)=>Number(b.id===currentWarehouseId)-Number(a.id===currentWarehouseId)
+       ||Number(!!b.isDefault)-Number(!!a.isDefault)||String(a.id).localeCompare(String(b.id)));
+   let remaining=needed;
+   const allocations=[];
+   for(const warehouse of eligible){
+     if(remaining<=0)break;
+     const stock=stocks[warehouse.id]||{};
+     const available=Math.max(0,n(stock.onHand)-n(stock.reserved));
+     const qty=Math.min(remaining,available);
+     if(qty>0){allocations.push({warehouseId:warehouse.id,qty});remaining-=qty;}
+   }
+   return {requestedQty:needed,allocations,allocatedQty:needed-remaining,shortageQty:remaining};
+ }
  function planReservation(input={}){
    const requestedQty=n(input.requestedQty??input.qty);
    const existingQty=n(input.existingQty);
@@ -74,5 +91,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
