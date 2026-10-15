@@ -994,15 +994,15 @@ test('multi-item returns require and use an explicit return item selector', () =
 });
 
 test('delivery writes keep isDelivered based on net delivered quantity', () => {
-    const quickStart=app.indexOf('window.quickCompleteDelivery = async function');
-    const quickEnd=app.indexOf('window.quickCancelAllDelivery',quickStart);
+    const quickStart=app.indexOf('async function completeOrderDelivery(');
+    const quickEnd=app.indexOf('async function cancelOrderDeliveries(',quickStart);
     const quick=app.slice(quickStart,quickEnd);
-    assert.match(quick,/const alreadyReturned = returnedQuantity\(order\)/);
-    assert.match(quick,/const effectiveDelivered = Math\.max\(0, alreadyDelivered - alreadyReturned\)/);
+    assert.match(quick,/const \{effectiveDelivered\}=orderDeliveryProjection\(order\)/);
+    assert.match(quick,/effectiveAfterDelivery = orderDeliveryProjection/);
     assert.match(quick,/isDelivered: effectiveAfterDelivery >= total/);
 
-    const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
-    const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
+    const saveStart=app.indexOf('async function saveOrderDeliveryRecord(');
+    const saveEnd=app.indexOf('async function correctOrderDeliveryRecord(',saveStart);
     const save=app.slice(saveStart,saveEnd);
     assert.match(save,/isDelivered: effectiveTotalDelivered >= total/);
 
@@ -1254,14 +1254,14 @@ test('cancelled-order returns go back to free stock instead of restoring reserva
 });
 
 test('multi-item delivery edits cannot make an item delivered quantity lower than its returns', () => {
-    const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
-    const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
+    const saveStart=app.indexOf('async function saveOrderDeliveryRecord(');
+    const saveEnd=app.indexOf('async function correctOrderDeliveryRecord(',saveStart);
     const saveSource=app.slice(saveStart,saveEnd);
     assert.match(saveSource,/const itemGrossAfter=itemOtherDelivered\+qty/);
     assert.match(saveSource,/itemGrossAfter\+1e-9<itemReturned/);
 
-    const deleteStart=app.indexOf('window.deleteDeliveryRecord = async function');
-    const deleteEnd=app.indexOf('window.clearLegacyDelivery',deleteStart);
+    const deleteStart=app.indexOf('async function correctOrderDeliveryRecord(');
+    const deleteEnd=app.indexOf('window.quickCompleteDelivery',deleteStart);
     const deleteSource=app.slice(deleteStart,deleteEnd);
     assert.match(deleteSource,/const itemGrossAfter=itemRecords\.filter\(r=>r\.id!==recordId\)/);
     assert.match(deleteSource,/itemGrossAfter\+1e-9<itemReturned/);
@@ -1277,8 +1277,8 @@ test('editing a multi-item delivery stays bound to its original item', () => {
     assert.match(editSource,/otherDelivered=savedDeliveryRecords\(order\)/);
     assert.match(editSource,/otherNetDelivered=Math\.max\(0,otherDelivered-returned\)/);
 
-    const saveStart=app.indexOf('window.saveDeliveryRecord = async function');
-    const saveEnd=app.indexOf('window.deleteDeliveryRecord',saveStart);
+    const saveStart=app.indexOf('async function saveOrderDeliveryRecord(');
+    const saveEnd=app.indexOf('async function correctOrderDeliveryRecord(',saveStart);
     const saveSource=app.slice(saveStart,saveEnd);
     assert.ok(saveSource.includes("const requestedItemId=previous?.itemId||(orderItems.length===1?"));
     assert.ok(saveSource.includes("const targetItem=orderItems.find(item=>item.itemId===requestedItemId);"));
@@ -1291,8 +1291,8 @@ test('editing a multi-item delivery stays bound to its original item', () => {
 });
 
 test('delivery and return writes synchronize live reservedQty back to order items', () => {
-    const deliveryStart=app.indexOf('window.saveDeliveryRecord = async function()');
-    const deliveryEnd=app.indexOf('window.deleteDeliveryRecord',deliveryStart);
+    const deliveryStart=app.indexOf('async function saveOrderDeliveryRecord(');
+    const deliveryEnd=app.indexOf('async function correctOrderDeliveryRecord(',deliveryStart);
     const delivery=app.slice(deliveryStart,deliveryEnd);
     assert.match(delivery,/newReservedQty/);
     assert.match(delivery,/updates\.items=syncedItems/);

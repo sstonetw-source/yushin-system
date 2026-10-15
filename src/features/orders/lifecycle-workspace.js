@@ -56,6 +56,7 @@ window.toggleOrderProgressStatus = function(field, newValue) {
 };
 
 window.resetDeliveryForm = function() {
+    deliveryCreateAttempt = null;
     deliveryPartialFormOpen = false;
     document.getElementById('deliveryFormPanel').style.display = 'none';
     document.getElementById('deliveryEditId').value = '';

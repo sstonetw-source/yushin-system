@@ -105,3 +105,13 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 快速操作在目標狀態已成立時不改寫既有日期／原因；表單相同值重試不新增歷史。歷史的 before 一律來自交易內最新訂單。
 - `src/services/delivery-correction.js` 的 `clearOrderLegacyDeliveryEstimate` 為清除舊版送貨布林推估的唯一寫入入口。交易內重讀訂單；已有實際送貨或退貨時拒絕清除，避免舊畫面抹除新紀錄。重複清除不再次寫歷史；不建立實貨移動。
 - 此批未完成送貨新增／編輯／撤銷服務化、多倉拆量或服務型訂單；不得視為整體重整結案。Rules／Index／Collection 無異動，沒有正式 Firebase 部署或資料清除。
+
+## 訂單送貨交易服務（2026-10-16 後續批次）
+
+- `src/services/delivery-records.js` 擁有 `completeOrderDelivery`、`cancelOrderDeliveries`、`saveOrderDeliveryRecord`、`correctOrderDeliveryRecord` 的受保護交易；四個對應畫面入口不再直接寫 Firestore，服務不讀取 DOM 或畫面快取。
+- 一鍵／分批新增與增加送貨量均用 `Fulfillment.dispatchState` 驗證交易內最新打單、累計送貨和預留量。有效交付與 CLOSE 不補送退貨統一交由 `projectOrderDelivery` 推導；取消訂單不得新增紀錄，誤登更正仍允許保留歷史。
+- 四個入口共用每單 pending 操作鎖；一鍵送貨的樂觀「已完成」畫面不再讓連點進入撤銷流程。
+- 新增表單的相同內容在失敗重試時沿用 `recordId`，已提交相同紀錄則無寫入返回；已被更正刪除的識別碼禁止再次建立。編輯相同內容不新增歷史，更正刪除以既有 deliveryHistory 的 delete 紀錄辨識重試。識別碼、actor、時間在 transaction callback 外固定。
+- 表單識別碼只保留在本頁記憶體；改變表單內容、重設／關閉再開或重新載入後不保證沿用。這不是跨頁面／跨裝置的永久 idempotency ledger；不應將其宣稱為全面冪等驗收。
+- 增加既有送貨數量時保留原批次／成本並加入增量；減少或誤登更正沿用原批次追溯。`delivery-stock.js` 先按 lotId 加總回補量，每批次只讀／寫一次，防止同批次多筆 allocation 的最後寫入覆蓋。
+- 範圍仍不包含倉庫工作區獨立出貨入口、多倉拆量、服務型訂單、正式環境角色驗收。Rules／Index／Collection 無異動；未部署 Firebase 或刪除正式資料。

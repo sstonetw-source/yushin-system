@@ -66,3 +66,7 @@ fulfillment-core 新增 deliveryQuantities，normalizeItem 與 dispatchState 共
 ### 2026-10-16 入口追查補正
 
 上一批僅將快速取消／恢復移入 Service，狀態表單仍有獨立交易。此批把兩者接到 `setOrderLifecycleStatus`，保留表單日期／原因編輯能力，並驗證相同值重試、僅編輯中繼資料不動預留、庫存調整失敗不提交狀態。另將舊版送貨推估清除改為受保護交易，阻擋 stale modal 或 transaction retry 清掉新建立的實際送貨紀錄。其他送貨寫入入口仍待後續統一。
+
+### 2026-10-16 訂單送貨入口統一
+
+訂單頁的一鍵完成、一鍵撤銷、送貨新增／編輯、誤登更正四入口已移至 delivery-records Service，共用受保護交易與最新打單可出貨量核心驗證；消除 UI transaction 內讀取品項選單。補上樂觀完成連點誤觸撤銷、同表單成功回覆遺失、transaction 重跑、相同編輯／撤銷重試、取消訂單、CLOSE 與補送退貨投影及原批次／成本的測試。多筆相同批次回補先加總再寫入。此為訂單頁範圍；不代表倉庫工作區出貨、永久 idempotency ledger、多倉或服務型訂單全面完成。

@@ -1,5 +1,8 @@
+let deliveryCreateAttempt = null;
+
 window.quickCompleteDelivery = async function(orderIdOverride) {
     const orderId = orderIdOverride || currentDeliveryOrderId;
+    if (pendingDeliveryOrderIds.has(orderId)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if(orderInventorySyncIncomplete(cachedOrder)){showActionFeedback('訂單庫存尚未同步完成，請先完成同步。','warning');return;}
@@ -37,54 +40,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     try {
-        let savedOrder;
-        await runRoleTransaction(async transaction => {
-            const ref = db.collection('orders').doc(orderId);
-            const snapshot = await transaction.get(ref);
-            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-            const order = snapshot.data();
-            if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
-            if(orderInventorySyncIncomplete(order))throw new Error('訂單庫存尚未同步完成');
-            const transactionItems=normalizedOrderItems(order);
-            // UI 已阻擋多品項一鍵送貨；transaction 仍要以最新資料再次驗證，
-            // 避免 stale cache 或另一端剛修改品項後寫入無法歸屬品項的送貨紀錄。
-            if (transactionItems.length !== 1) throw new Error('多品項訂單不能一鍵完成送貨，請逐品項登錄。');
-            if (order.isDelivered && savedDeliveryRecords(order).length === 0) throw new Error('這筆舊資料已視為全數送貨。');
-            const total = orderQuantity(order);
-            const records = savedDeliveryRecords(order).slice();
-            const alreadyDelivered = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-            const alreadyReturned = returnedQuantity(order);
-            const effectiveDelivered = Math.max(0, alreadyDelivered - alreadyReturned);
-            const remaining = Math.max(0, total - effectiveDelivered);
-            if (!total || remaining <= 0) throw new Error('這筆訂單已無尚未送貨數量。');
-            const actor = deliveryActor();
-            const now = new Date().toISOString();
-            const record = { id: deliveryRecordId(), itemId:transactionItems[0].itemId, date: today, qty: remaining, notes: '一鍵完成剩餘送貨', createdBy: actor, createdAt: now };
-            records.push(record);
-            const history = { action: 'create', source: 'quick_complete', recordId: record.id, before: null, after: record, by: actor, at: now };
-            const statusEntries = [];
-            const deliveryItem=transactionItems[0];
-            const itemOrder={...order,...deliveryItem,deliveryRecords:records.filter(row=>row.itemId===deliveryItem.itemId),isDelivered:false};
-            const inventoryResult=await applyInventoryDeliveryInTransaction(transaction, ref, itemOrder, remaining, actor, orderId);
-            record.lotAllocations=inventoryResult?.lotAllocations||[];
-            record.cogs=Number(inventoryResult?.cogs||0);
-            records[records.length-1]=record;
-            const nextItems=transactionItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
-            const grossAfterDelivery = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-            const effectiveAfterDelivery = Math.max(0, grossAfterDelivery - returnedQuantity(order));
-            const updates = {
-                items:nextItems, deliveryRecords: records, deliveredQty: grossAfterDelivery, isDelivered: effectiveAfterDelivery >= total,
-                deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history)
-            };
-            if (statusEntries.length) updates.statusHistory = firebase.firestore.FieldValue.arrayUnion(...statusEntries);
-            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
-            transaction.update(ref, updates);
-            savedOrder = {
-                ...order, ...updates,
-                deliveryHistory: [...(order.deliveryHistory || []), history],
-                statusHistory: [...(order.statusHistory || []), ...statusEntries]
-            };
-        });
+        const savedOrder=await completeOrderDelivery(orderId,today);
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
         pendingDeliveryOrderIds.delete(orderId);
@@ -108,6 +64,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
 
 window.quickCancelAllDelivery = async function(orderIdOverride) {
     const orderId = orderIdOverride || currentDeliveryOrderId;
+    if (pendingDeliveryOrderIds.has(orderId)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if (returnedQuantity(cachedOrder) > 0) { alert('這筆訂單已有退貨紀錄，請先從 ⋯ 中更正或刪除退貨紀錄。'); return; }
@@ -124,34 +81,7 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     try {
-        let savedOrder;
-        await runRoleTransaction(async transaction => {
-            const ref = db.collection('orders').doc(orderId);
-            const snapshot = await transaction.get(ref);
-            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-            const order = snapshot.data();
-            // 前端雖已擋多品項，但 transaction 必須再次依最新 Firestore 資料驗證，
-            // 避免 stale cache／重複操作把整張訂單的庫存還原到錯誤品項。
-            if (normalizedOrderItems(order).length !== 1) throw new Error('只有單品項訂單可以一鍵取消全部送貨，請逐品項更正送貨紀錄。');
-            if (returnedQuantity(order) > 0) throw new Error('這筆訂單已有退貨紀錄，請先更正退貨紀錄。');
-            const progress = deliveryProgressInfo(order);
-            if (progress.state !== 'complete') throw new Error('這筆訂單目前不是全數已送貨狀態。');
-            const actor = deliveryActor();
-            const now = new Date().toISOString();
-            const before = savedDeliveryRecords(order).length
-                ? { records: savedDeliveryRecords(order), deliveredQty: progress.delivered }
-                : { legacyEstimated: true, estimatedDate: order.orderDate || '', deliveredQty: progress.delivered };
-            const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
-            const currentItems=normalizedOrderItems(order);
-            const deliveryItem=currentItems[0];
-            const itemOrder={...order,...deliveryItem,deliveryRecords:savedDeliveryRecords(order),isDelivered:false};
-            const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
-            const nextItems=currentItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
-            const updates = { items:nextItems, deliveryRecords: [], deliveredQty: 0, isDelivered: false, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
-            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
-            transaction.update(ref, updates);
-            savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
-        });
+        const savedOrder=await cancelOrderDeliveries(orderId);
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
         pendingDeliveryOrderIds.delete(orderId);
@@ -285,82 +215,16 @@ window.saveDeliveryRecord = async function() {
         return;
     }
     if (pendingDeliveryOrderIds.has(orderId)) return;
+    const itemId=document.getElementById('deliveryItemId')?.value||'';
+    const fingerprint=JSON.stringify([orderId,itemId,date,qty,notes]);
+    if(!editId&&deliveryCreateAttempt?.fingerprint!==fingerprint)
+        deliveryCreateAttempt={fingerprint,recordId:deliveryRecordId()};
+    const recordId=editId||deliveryCreateAttempt.recordId;
     const saveButton = document.querySelector('[onclick="saveDeliveryRecord()"]');
     pendingDeliveryOrderIds.add(orderId);
     if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
-        let savedOrder;
-        await runRoleTransaction(async transaction => {
-            const ref = db.collection('orders').doc(orderId);
-            const snapshot = await transaction.get(ref);
-            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-            const order = snapshot.data();
-            if (order.isDelivered && savedDeliveryRecords(order).length === 0) throw new Error('請先取消舊資料的歷史推估送貨紀錄。');
-            const records = savedDeliveryRecords(order).slice();
-            const existingIndex = records.findIndex(item => item.id === editId);
-            if (editId && existingIndex < 0) throw new Error('這筆送貨紀錄已被其他人修改或刪除，請重新開啟後再試。');
-            if (normalizedOrderStatus(order) !== 'normal' && existingIndex < 0) throw new Error('已取消的訂單不能新增送貨紀錄。');
-            const now = new Date().toISOString();
-            const actor = deliveryActor();
-            const previous = existingIndex >= 0 ? records[existingIndex] : null;
-            const orderItems=normalizedOrderItems(order);
-            // Select only the recorded item: never silently substitute the first item.
-            const requestedItemId=previous?.itemId||(orderItems.length===1?orderItems[0]?.itemId:document.getElementById('deliveryItemId')?.value)||'';
-            const targetItem=orderItems.find(item=>item.itemId===requestedItemId);
-            if(!targetItem)throw new Error('找不到指定送貨品項，請重新開啟訂單確認。');
-            const itemOtherDelivered=records.filter(r=>r.id!==editId&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
-            const itemReturned=savedReturnRecords(order).filter(r=>r.settlement!=='CLOSE'&&((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId)).reduce((s,r)=>s+Number(r.qty||0),0);
-            // 退貨後補送必須以「有效送貨量」驗證，而不是歷史累計送貨量。
-            // 例如訂購10、曾送10、退2，可再補送2；歷史送貨會成為12，但有效送貨仍是10。
-            const itemGrossAfter=itemOtherDelivered+qty;
-            if(itemGrossAfter+1e-9<itemReturned)throw new Error(`${targetItem.itemName||'品項'} 累計送貨數量不能低於已登錄的退貨數量 ${itemReturned}。`);
-            const itemOtherNetDelivered=Math.max(0,itemOtherDelivered-itemReturned);
-            if(itemOtherNetDelivered+qty>Number(targetItem.qty||0)+1e-9)throw new Error(`${targetItem.itemName||'品項'} 有效送貨數量將超過訂單數量。`);
-            if((targetItem.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
-                const preparedQty=Number(targetItem.dispatchPreparedQty||0);
-                if(itemOtherNetDelivered+qty>preparedQty+1e-9)throw new Error(`${targetItem.itemName||'品項'} 目前已打單可出貨數量只有 ${Math.max(0,preparedQty-itemOtherNetDelivered)}。`);
-            }
-            const record = previous
-                ? { ...previous, itemId:targetItem.itemId, date, qty, notes, updatedBy: actor, updatedAt: now }
-                : { id: deliveryRecordId(), itemId:targetItem.itemId, date, qty, notes, createdBy: actor, createdAt: now };
-            if (existingIndex >= 0) records[existingIndex] = record; else records.push(record);
-            const totalDelivered = records.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-            const total = orderQuantity(order);
-            if (!total) throw new Error('訂單數量必須大於 0，才能登錄送貨。');
-            const closedReturned=savedReturnRecords(order).filter(r=>r.settlement==='CLOSE').reduce((sum,r)=>sum+Number(r.qty||0),0);
-            const effectiveTotalDelivered=Math.max(0,totalDelivered-returnedQuantity(order)+closedReturned);
-            if (effectiveTotalDelivered > total + 1e-9) throw new Error(`有效送貨數量 ${effectiveTotalDelivered} 超過訂單數量 ${total}。`);
-            const alreadyReturned = returnedQuantity(order);
-            if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`累計送貨數量不能低於已登錄的退貨數量 ${alreadyReturned}。`);
-            const action = previous ? 'edit' : 'create';
-            const history = { action, recordId: record.id, before: previous, after: record, by: actor, at: now };
-            const updates = { deliveryRecords: records, deliveredQty: totalDelivered, isDelivered: effectiveTotalDelivered >= total, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
-            const deliveryDelta = qty - Number(previous?.qty || 0);
-            if(deliveryDelta){
-                const itemRecords=records.filter(r=>r.itemId===targetItem.itemId);
-                const itemOrder={...order,...targetItem,qty:Number(targetItem.qty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
-                const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction,itemOrder,deliveryDelta,actor,orderId,deliveryDelta<0&&previous?[previous]:null);
-                const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
-                updates.items=syncedItems;
-                if(deliveryDelta>0){
-                    record.lotAllocations=inventoryResult.lotAllocations||[];
-                    record.cogs=Number(inventoryResult.cogs||0);
-                    const recordIndex=records.findIndex(r=>r.id===record.id);
-                    if(recordIndex>=0)records[recordIndex]=record;
-                    updates.deliveryRecords=records;
-                } else if(previous){
-                    const reversed=(inventoryResult.lotAllocations||[]).map(row=>({...row,qty:Math.abs(Number(row.qty||0))}));
-                    record.lotAllocations=window.YushinInventory.allocationsAfterReversal(previous.lotAllocations||[],reversed);
-                    record.cogs=record.lotAllocations.reduce((sum,row)=>sum+Number(row.cost??(Number(row.qty||0)*Number(row.unitCost||0))),0);
-                    const recordIndex=records.findIndex(r=>r.id===record.id);
-                    if(recordIndex>=0)records[recordIndex]=record;
-                    updates.deliveryRecords=records;
-                }
-            }
-            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
-            transaction.update(ref, updates);
-            savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
-        });
+        const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId});
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
         resetDeliveryForm();
@@ -384,40 +248,7 @@ window.deleteDeliveryRecord = async function(recordId) {
     pendingDeliveryOrderIds.add(orderId);
     renderOrdersList();
     try {
-        let savedOrder;
-        await runRoleTransaction(async transaction => {
-            const ref = db.collection('orders').doc(orderId);
-            const snapshot = await transaction.get(ref);
-            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-            const order = snapshot.data();
-            const records = savedDeliveryRecords(order);
-            const removed = records.find(item => item.id === recordId);
-            if (!removed) throw new Error('找不到這筆送貨紀錄。');
-            const next = records.filter(item => item.id !== recordId);
-            const totalDelivered = next.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-            const alreadyReturned = returnedQuantity(order);
-            if (totalDelivered + 1e-9 < alreadyReturned) throw new Error(`刪除後的送貨數量會低於已登錄的退貨數量 ${alreadyReturned}，請先更正退貨紀錄。`);
-            const actor = deliveryActor();
-            const now = new Date().toISOString();
-            const history = { action: 'delete', recordId, before: removed, after: null, reason: correctionReason.trim(), by: actor, at: now };
-            const orderItems=normalizedOrderItems(order);
-            const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
-            if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
-            const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
-            const itemGrossAfter=itemRecords.filter(r=>r.id!==recordId).reduce((sum,row)=>sum+Number(row.qty||0),0);
-            const itemReturned=savedReturnRecords(order)
-                .filter(row=>((!row.itemId&&orderItems.length===1)||row.itemId===targetItem.itemId))
-                .reduce((sum,row)=>sum+Number(row.qty||0),0);
-            if(itemGrossAfter+1e-9<itemReturned)throw new Error(`${targetItem.itemName||'品項'} 刪除後的送貨數量會低於已登錄的退貨數量 ${itemReturned}，請先更正退貨紀錄。`);
-            const itemOrder={...order,...targetItem,itemId:targetItem.itemId,qty:Number(targetItem.qty||targetItem.orderedQty||0),reservedQty:Number(targetItem.reservedQty||0),deliveryRecords:itemRecords,isDelivered:false};
-            const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -Number(removed.qty || 0), actor, orderId, [removed]);
-            const syncedItems=orderItems.map(item=>item.itemId===targetItem.itemId?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
-            const effectiveDelivered=Math.max(0,totalDelivered-returnedQuantity(order));
-            const updates = { items:syncedItems, deliveryRecords: next, deliveredQty: totalDelivered, isDelivered: effectiveDelivered >= orderQuantity(order) && orderQuantity(order) > 0, deliveryHistory: firebase.firestore.FieldValue.arrayUnion(history), updatedAt: now };
-            Object.assign(updates,orderWorkIndexFields({...order,...updates}));
-            transaction.update(ref, updates);
-            savedOrder = { ...order, ...updates, deliveryHistory: [...(order.deliveryHistory || []), history] };
-        });
+        const savedOrder=await correctOrderDeliveryRecord(orderId,recordId,correctionReason);
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
         resetDeliveryForm();

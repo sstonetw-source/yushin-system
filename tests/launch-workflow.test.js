@@ -13,7 +13,7 @@ function deliveryContext(lotQuantities=[1,1]){
  const query={get:async()=>({docs:[{ref:ref('inventoryLots/A')},{ref:ref('inventoryLots/B')}]})};
  query.where=()=>query;
  const db={collection:name=>({doc:id=>ref(name==='inventoryReservations'?'reservation':`${name}/${id||'generated'}`),where:()=>query})};
- const c=vm.createContext({db,window:{},console,Date,Promise,inventoryProductKey:()=> 'P',defaultWarehouse:()=>({id:'W'}),inventoryRefFor:()=>ref('inventory'),warehouseStockDocId:()=> 'stock',inventoryNumbers:x=>x,warehouseMasterCache:[],savedDeliveryRecords:o=>o.deliveryRecords||[],inventoryMovementRecord:()=>({}),inventoryReservationPayload:()=>({}),YushinInventory:inventory});
+ const c=vm.createContext({db,window:{},console,Date,Promise,inventoryProductKey:()=> 'P',defaultWarehouse:()=>({id:'W'}),inventoryRefFor:()=>ref('inventory'),warehouseStockDocId:()=> 'stock',inventoryNumbers:x=>x,warehouseMasterCache:[],savedDeliveryRecords:o=>o.deliveryRecords||[],inventoryMovementRecord:()=>({}),inventoryReservationPayload:(_id,_order,quantity)=>({quantity}),YushinInventory:inventory});
  data['warehouseStocks/stock']=data.warehouse;
  vm.runInContext(section('async function applyInventoryDeliveryDeltaInTransaction','\nfunction applyInventoryDeliveryInTransaction'),c);
  return {c,tx,writes,reads,data};
@@ -49,6 +49,16 @@ test('reversing multiple delivery lots reads all documents before any write',asy
  await c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},-2,'actor','O',records);
  assert.equal(writes.find(row=>row.path==='inventoryLots/A').value.remainingQty,1);
  assert.equal(writes.find(row=>row.path==='inventoryLots/B').value.remainingQty,1);
+});
+test('reversing several allocations of one lot restores the summed quantity with one lot write',async()=>{
+ const {c,tx,writes,reads}=deliveryContext([2,0]);
+ const records=[{qty:3,lotAllocations:[{lotId:'A',qty:3,cost:0}]},{qty:2,lotAllocations:[{lotId:'A',qty:2,cost:0}]}];
+ await c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},-5,'actor','O',records);
+ const lotWrites=writes.filter(row=>row.path==='inventoryLots/A');
+ assert.equal(lotWrites.length,1);assert.equal(lotWrites[0].value.remainingQty,7);
+ assert.equal(reads.filter(value=>value==='inventoryLots/A').length,1);
+ assert.equal(writes.find(row=>row.path==='warehouseStocks/stock').value.onHand,15);
+ assert.equal(writes.find(row=>row.path==='reservation').value.quantity,7);
 });
 test('order cancellation explains remaining quantity and PO impact; complete orders are blocked',()=>{
  let message='',alerted='';
