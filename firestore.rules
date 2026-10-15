@@ -992,13 +992,13 @@ service cloud.firestore {
       let orderPath = /databases/$(database)/documents/orders/$(d.sourceId);
       let before = get(orderPath).data;
       let after = getAfter(orderPath).data;
-      return businessOwner() && owns(resource.data) && owns(d)
-        && resource.data.get('sourceType', '') == 'SALES_ORDER'
-        && d.get('sourceType', '') == 'SALES_ORDER'
+      // validProcurementDemand and demandIdentityUnchanged already prove
+      // source item, owner/salesCode, item index, product, and identity.
+      // Avoid repeating expensive lookups in the cancellation transaction.
+      return businessOwner()
         && before.get('ownerUid', '') == request.auth.uid
         && after.get('ownerUid', '') == request.auth.uid
         && !orderIsCancelled(before) && orderIsCancelled(after)
-        && validDemandSource(d)
         && d.get('status', '') == 'CANCELLED'
         && d.get('requestedQty', -1) == resource.data.get('requestedQty', -2)
         && d.get('orderedQty', -1) == resource.data.get('orderedQty', -2)
@@ -1830,10 +1830,11 @@ service cloud.firestore {
       allow create: if validProcurementDemand(request.resource.data) && (canReceiveInventory()
         || businessProcurementDemandCreate(request.resource.data));
       allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
-        && ((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
-          && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
-          ? (admin() || businessDirectDemandReceiptUpdate())
-          : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate() || businessLifecycleDemandCancelUpdate()));
+        && ((request.resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandCancelUpdate())
+          || ((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+            && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
+            ? (admin() || businessDirectDemandReceiptUpdate())
+            : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate())));
       allow delete: if admin();
     }
 
