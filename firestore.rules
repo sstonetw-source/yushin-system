@@ -1259,7 +1259,7 @@ service cloud.firestore {
         ])
         && (redirect ? (
           after.originalFulfillmentType == 'DIRECT_SHIP' && after.fulfillmentType == 'WAREHOUSE'
-          && after.warehouseId != '' && exists(/databases/$(database)/documents/warehouses/$(after.warehouseId))
+          && validActiveReturnWarehouse(after.warehouseId)
           && after.incomingRegisteredQty == remaining
           && getAfter(invPath).data.productKey == before.productKey
           && getAfter(whPath).data.productKey == before.productKey && getAfter(whPath).data.warehouseId == after.warehouseId

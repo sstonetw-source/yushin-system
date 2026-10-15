@@ -23,7 +23,7 @@ window.keepCancelledPurchaseAsStock=async function(id){
     const direct=cached?.fulfillmentType==='DIRECT_SHIP';
     let warehouseId=cached?.warehouseId||defaultWarehouse()?.id||'';
     if(direct){
-        const choices=(warehouseMasterCache||[]).filter(w=>w.active!==false);
+        const choices=(warehouseMasterCache||[]).filter(w=>w.active!==false&&w.systemCustody!==true&&w.warehouseType!=='CUSTODY'&&!String(w.id||'').startsWith('custody-'));
         const choice=prompt('供應商須確認改送公司倉庫及地址。\n'+choices.map((w,i)=>`${i+1}：${w.name||w.id}`).join('\n')+'\n輸入倉庫編號：');
         if(choice===null)return;
         warehouseId=choices[Number(choice)-1]?.id||'';
@@ -46,6 +46,7 @@ window.keepCancelledPurchaseAsStock=async function(id){
             const key=String(supply.productKey||supply.productId||'');
             const redirect=supply.fulfillmentType==='DIRECT_SHIP';
             if(redirect!==direct)throw new Error('採購收貨方式已變更，請更新清單後重新確認。');
+            if(redirect)await assertActiveReturnWarehouse(tx,warehouseId);
             const invRef=redirect?db.collection('inventory').doc(encodeURIComponent(key)):null;
             const whRef=redirect?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)):null;
             const invSnap=invRef?await tx.get(invRef):null,whSnap=whRef?await tx.get(whRef):null;
