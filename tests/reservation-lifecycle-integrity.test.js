@@ -300,3 +300,17 @@ test('permanent deletion aborts all changes when later linked item has invalid d
  await assert.rejects(f.deleteOrder(),/不一致/);
  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
 });
+
+
+test('permanent deletion preserves all records when procurement quantities are malformed or negative',async()=>{
+ for(const field of ['orderedQty','receivedQty']){
+  for(const value of [-1,NaN,Infinity,-Infinity,'0',null,undefined]){
+   const f=deletionFixture();
+   f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'))[field]=value;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.deleteOrder(),/數量異常/);
+   assert.deepEqual([...f.docs],before,`${field}: ${String(value)}`);
+   assert.equal(f.writes.length,0);
+  }
+ }
+});

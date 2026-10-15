@@ -3723,9 +3723,8 @@ async function deleteUnfulfilledOrderAtomically(orderId,actor) {
                     ||demand.ownerUid!==liveOrder.ownerUid||demand.salesCode!==liveOrder.salesCode
                     ||(demand.demandId&&demand.demandId!==demandId))
                     throw new Error('採購需求與訂單來源不一致，不能刪除其他來源資料。');
-                if(!(Number.isFinite(demand.orderedQty)&&Number.isFinite(demand.receivedQty))
-                    ||Number(demand.orderedQty)>0||Number(demand.receivedQty)>0)
-                    throw new Error('採購需求已有供應商承諾或收貨事實，不可永久刪除訂單。');
+                if(demand.orderedQty!==0||demand.receivedQty!==0)
+                    throw new Error('採購需求已有供應商承諾、收貨事實或數量異常，不可永久刪除訂單。請先核對採購需求。');
             }
             dependencies.push({reservationRef,demandRef});
         }
