@@ -43,6 +43,7 @@ function fixture({role='admin',held=3,qty=5,status='active'}={}){
  const item={itemId:'I',productId:'P',warehouseId:'A',qty,reservedQty:held};
  docs.set('orders/O',{ownerUid:'U',salesCode:'S',status,items:[item]});
  docs.set('inventory/P',stock(held));docs.set('warehouseStocks/A__P',{...stock(held),warehouseId:'A'});
+ docs.set('warehouses/A',{active:true,warehouseType:'PHYSICAL'});docs.set('warehouses/B',{active:true,warehouseType:'PHYSICAL'});
  docs.set('inventoryReservations/O__I',{orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',quantity:held,shortageQty:qty-held});
  const db={collection:col=>({doc:(id='event'+(++sequence))=>({path:col+'/'+id,id})}),runTransaction:async fn=>{
   const pending=[];const result=await fn({get:async ref=>{assert.equal(pending.length,0);reads.push(ref.path);return {exists:docs.has(ref.path),data:()=>structuredClone(docs.get(ref.path))};},
@@ -106,6 +107,43 @@ test('actual restoration respects company free stock and preserves the physical 
  }
  const f=fixture({held:0,status:'cancelled'});f.docs.get('orders/O').items[0].supplyOrderedQty=3;
  await f.run('normal');assert.equal(f.docs.get('inventoryReservations/O__I').quantity,2);assert.equal(f.docs.get('orders/O').items[0].shortageQty,3);
+});
+test('restoration refuses missing, inactive and custody warehouses without changing stock or order',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  for(const change of [
+   f=>f.docs.delete('warehouses/A'),
+   f=>f.docs.get('warehouses/A').active=false,
+   f=>f.docs.get('warehouses/A').systemCustody=true,
+   f=>f.docs.get('warehouses/A').warehouseType='CUSTODY',
+   f=>{const item=f.docs.get('orders/O').items[0],reservation=f.docs.get('inventoryReservations/O__I');item.warehouseId=reservation.warehouseId='custody-U';}
+  ]){
+   const f=fixture({role,held:0,status:'cancelled'});change(f);
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.run('normal'),/原訂單倉庫|不能恢復預留/);
+   assert.deepEqual([...f.docs],before);
+   assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('cancellation may release a hold in a disabled warehouse; restoration reuses a master read per location',async()=>{
+ const f=fixture();f.docs.get('warehouses/A').active=false;
+ await f.run('cancelled');assert.equal(f.docs.get('inventory/P').reserved,0);
+ const g=fixture({held:0,status:'cancelled'});
+ g.docs.get('orders/O').items.push({...g.docs.get('orders/O').items[0],itemId:'J'});
+ g.docs.set('inventoryReservations/O__J',{orderId:'O',itemId:'J',productKey:'P',warehouseId:'A',quantity:0});
+ await g.run('normal');
+ assert.equal(g.reads.filter(ref=>ref==='warehouses/A').length,1);
+ assert.equal(g.docs.get('inventory/P').reserved,10);
+});
+test('invalid later restoration warehouse cannot partially reserve the earlier item',async()=>{
+ const f=fixture({held:0,status:'cancelled'});
+ f.docs.get('orders/O').items.push({itemId:'J',productId:'P',warehouseId:'B',qty:5,reservedQty:0});
+ f.docs.set('warehouseStocks/B__P',{...stock(),warehouseId:'B'});
+ f.docs.set('inventoryReservations/O__J',{orderId:'O',itemId:'J',productKey:'P',warehouseId:'B',quantity:0});
+ f.docs.get('warehouses/B').active=false;
+ const before=structuredClone([...f.docs]);
+ await assert.rejects(f.run('normal'),/不能恢復預留/);
+ assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
 });
 test('two same-product lines share the company ceiling across different warehouses',async()=>{
  const f=fixture({held:0,status:'cancelled'});f.docs.get('inventory/P').onHand=6;
