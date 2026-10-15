@@ -42,7 +42,7 @@ async function seedOperationalReserve(count=1){
  await seed('inventory/p-order',{productKey:'p-order',onHand:20,reserved:0,incoming:0});
  await seed('warehouseStocks/W1__p-order',{productKey:'p-order',warehouseId:'W1',onHand:20,reserved:0,incoming:0});
 }
-function operationalReserveBatch(uid,count=1,{aggregate=true,warehouse=true,movement=true,ids=null,delta=count}={}){
+function operationalReserveBatch(uid,count=1,{aggregate=true,warehouse=true,movement=true,ids=null,delta=count,reservationPatch={}}={}){
  const client=db(uid),b=writeBatch(client),reservationIds=ids||Array.from({length:count},(_,i)=>'evidence__I'+i);
  if(aggregate)b.update(doc(client,'inventory/p-order'),{reserved:delta});
  if(warehouse)b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:delta});
@@ -50,7 +50,7 @@ function operationalReserveBatch(uid,count=1,{aggregate=true,warehouse=true,move
  if(movement)b.set(doc(client,'inventoryMovements/RESERVE-EVIDENCE'),{type:'reserve',qty:count,sourceId:'evidence',productKey:'p-order',warehouseId:'W1',reservationStockEvidence:evidence});
  for(let i=0;i<count;i++)b.set(doc(client,'inventoryReservations/evidence__I'+i),{
   orderId:'evidence',itemId:'I'+i,orderItemIndex:i,productKey:'p-order',warehouseId:'W1',ownerUid:'sales1',salesCode:'S01',quantity:1,shortageQty:4,
-  stockEvidence:evidence
+  stockEvidence:evidence,...reservationPatch
  });return b;
 }
 test('operational reservation changes require both stock totals and a new matching movement',async()=>{
@@ -1248,6 +1248,51 @@ test('real order initialization atomically publishes item reservation and demand
   const demand=(await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data();
   assert.equal(order.items[0].reservedQty,3);assert.equal(order.items[0].shortageQty,2);assert.equal(demand.remainingToOrderQty,2);
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+ }
+});
+const unactivatedLocationPatches=[{locationSchemaVersion:2},{locationSchemaVersion:0},{locations:[]},
+ {locations:[{warehouseId:'W1',reservedQty:1},{warehouseId:'W2',reservedQty:1}]},
+ {allocations:[]},{warehouseAllocations:[]}];
+test('direct operational and admin batches cannot introduce location fields with otherwise valid stock evidence',async()=>{
+ for(const uid of ['buyer1','wh1','admin']){
+  await seedOperationalReserve();
+  for(const reservationPatch of unactivatedLocationPatches){
+   await assertFails(operationalReserveBatch(uid,1,{reservationPatch}).commit());
+   assert.equal((await getDoc(doc(db('admin'),'inventory/p-order'))).data().reserved,0);
+   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__p-order'))).data().reserved,0);
+   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/evidence__I0'))).exists(),false);
+  }
+  await assertSucceeds(operationalReserveBatch(uid).commit());
+ }
+});
+test('business callers cannot bypass the runtime guard by injecting location data into native writes',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer']]){
+  for(const patch of unactivatedLocationPatches){
+   const f=await orderInitializationFixture(uid,role),originalRun=f.client.runTransaction;
+   f.client.runTransaction=callback=>originalRun(tx=>callback({...tx,set:(ref,data,options)=>{
+    const record=ref.path.startsWith('inventoryReservations/')?{...data,...patch}:data;
+    return options?tx.set(ref,record,options):tx.set(ref,record);
+   }}));
+   await assertFails(f.run());
+   const admin=db('admin');assert.equal((await getDoc(doc(admin,'inventory/init-product'))).data().reserved,0);
+   assert.equal((await getDoc(doc(admin,'inventoryReservations/'+f.id+'__I'))).exists(),false);
+   assert.equal((await getDoc(doc(admin,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+  }
+  const legal=await orderInitializationFixture(uid,role);await assertSucceeds(legal.run());
+ }
+});
+test('unknown existing location metadata stays readable for audit but cannot be stripped to bypass the single-warehouse writer',async()=>{
+ const client=db('admin'),ref=doc(client,'inventoryReservations/compat__I');
+ const base={orderId:'compat',itemId:'I',orderItemIndex:0,productKey:'P',warehouseId:'W1',ownerUid:'sales1',salesCode:'S01',quantity:1,shortageQty:0};
+ await seed('orders/compat',{ownerUid:'sales1',salesCode:'S01',status:'active',items:[{itemId:'I',productId:'P',warehouseId:'W1',qty:5}]});
+ await seed('inventory/P',{productKey:'P',onHand:5,reserved:1});
+ for(const patch of unactivatedLocationPatches){
+  await seed(ref.path,{...base,...patch});await assertSucceeds(getDoc(ref));
+  await assertFails(updateDoc(ref,{quantity:0}));
+  const batch=writeBatch(client);batch.set(ref,{...base,quantity:0});batch.update(doc(client,'inventory/P'),{reserved:0});
+  await assertFails(batch.commit());
+  assert.equal((await getDoc(ref)).data().quantity,1);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/P'))).data().reserved,1);
  }
 });
 test('actual initialization rejects unmatched company free stock without creating purchase demand for four writers',async()=>{

@@ -15,7 +15,7 @@ test('purchasing warehouse and admin transactions derive reservation ownership a
   await permissions.run(f.db,tx=>tx.set(f.db.collection('inventoryReservations').doc('O__B'),
    {orderId:'O',itemId:'B',orderItemIndex:0,ownerUid:'false-owner',salesCode:'FALSE',quantity:0}),role,false,role);
   assert.equal(f.writes[0].data.orderItemIndex,1);assert.equal(f.writes[0].data.ownerUid,'sales');
-  assert.equal(f.writes[0].data.salesCode,'S01');assert.deepEqual(f.events,role==='admin'?['read','write']:['read','read','write']);
+  assert.equal(f.writes[0].data.salesCode,'S01');assert.deepEqual(f.events,['read','read','write']);
  }
 });
 test('operational reservation source validation uses the same transaction order snapshot and rejects missing items before any writes',async()=>{
@@ -47,5 +47,60 @@ test('operational wrapper reuses stock reads and attaches a single five-item mov
  assert.equal(proof.reservationIds.length,5);assert.equal(proof.inventoryId,'P');assert.equal(proof.warehouseStockId,'W1__P');
  for(const row of f.writes.filter(x=>x.path.startsWith('inventoryReservations/')))assert.deepEqual(row.data.stockEvidence,proof);
  assert.ok(f.events.indexOf('write')>f.events.lastIndexOf('read'));
+});
+
+const unsupportedLocations=[{locationSchemaVersion:2},{locationSchemaVersion:0},{locations:[]},
+ {locations:[{warehouseId:'W1',reservedQty:1},{warehouseId:'W2',reservedQty:1}]},
+ {locations:null},{allocations:[]},{warehouseAllocations:[]}];
+test('all roles stop on unsupported reservation snapshots before any buffered stock or order write',async()=>{
+ for(const role of ['sales','engineer','purchaser','warehouse','admin'])for(const patch of unsupportedLocations){
+  const f=fixture([{itemId:'A'}]),record={orderId:'O',itemId:'A',itemCode:'PART',quantity:2,warehouseId:'W1',...patch};
+  f.docs.set('inventoryReservations/O__A',record);const before=structuredClone([...f.docs]);
+  await assert.rejects(permissions.run(f.db,async tx=>{
+   tx.update(f.db.collection('inventory').doc('P'),{reserved:0});
+   const snap=await tx.get(f.db.collection('inventoryReservations').doc('O__A'));
+   tx.update(f.db.collection('orders').doc('O'),{items:[{itemId:'A',reservedQty:snap.data().quantity}]});
+  },role,false,role),error=>error.code==='unsupported-reservation-location'&&/O／PART/.test(error.message));
+  assert.equal(f.writes.length,0);assert.deepEqual([...f.docs],before);
+ }
+});
+test('set, update and dotted paths cannot introduce unactivated locations even without reading the reservation',async()=>{
+ for(const role of ['sales','engineer','purchaser','warehouse','admin'])for(const method of ['set','update']){
+  for(const patch of [...unsupportedLocations,{'locations.0.reservedQty':1},{'warehouseAllocations.W1':1}]){
+   const f=fixture([{itemId:'A'}]);
+   await assert.rejects(permissions.run(f.db,tx=>{
+    tx.update(f.db.collection('orders').doc('O'),{remarks:'queued'});
+    tx[method](f.db.collection('inventoryReservations').doc('O__A'),{orderId:'O',itemId:'A',quantity:0,...patch});
+   },role,false,role),error=>error.code==='unsupported-reservation-location');
+   assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('blind replacement cannot conceal and erase an existing unsupported ledger',async()=>{
+ for(const role of ['sales','engineer','purchaser','warehouse','admin']){
+  const f=fixture([{itemId:'A'}]);f.docs.set('inventoryReservations/O__A',{orderId:'O',itemId:'A',quantity:2,locations:[]});
+  await assert.rejects(permissions.run(f.db,tx=>tx.set(f.db.collection('inventoryReservations').doc('O__A'),
+   {orderId:'O',itemId:'A',quantity:0,warehouseId:'W1'}),role,false,role),/尚未啟用的位置資料/);
+  assert.equal(f.writes.length,0);assert.equal(f.docs.get('inventoryReservations/O__A').quantity,2);
+ }
+});
+test('a payload mutated after queuing is checked again before native writes',async()=>{
+ const f=fixture([{itemId:'A'}]);
+ await assert.rejects(permissions.run(f.db,tx=>{
+  const payload={orderId:'O',itemId:'A',quantity:0};
+  tx.set(f.db.collection('inventoryReservations').doc('O__A'),payload);payload.locations=[];
+ },'admin',false,'admin'),error=>error.code==='unsupported-reservation-location');
+ assert.equal(f.writes.length,0);
+});
+test('ordinary legacy fractional quantities and custody identity remain readable without an extra duplicate read',async()=>{
+ const f=fixture([{itemId:'A'}]);const ref=f.db.collection('inventoryReservations').doc('O__A');
+ const record={orderId:'O',itemId:'A',quantity:0.5,warehouseId:'custody-sales'};f.docs.set(ref.path,record);
+ await permissions.run(f.db,async tx=>{assert.deepEqual((await tx.get(ref)).data(),record);tx.update(ref,{quantity:0.5});},'admin',false,'admin');
+ assert.deepEqual(f.events,['read','read','write']);assert.equal(f.writes[0].data.quantity,0.5);
+});
+test('location-shaped fields on other collections are outside the reservation compatibility guard',async()=>{
+ const f=fixture([{itemId:'A'}]);f.docs.set('orders/O',{items:[{itemId:'A'}],locations:[],allocations:[]});
+ await permissions.run(f.db,async tx=>{await tx.get(f.db.collection('orders').doc('O'));tx.update(f.db.collection('orders').doc('O'),{locations:['unchanged-purpose']});},'admin',false,'admin');
+ assert.equal(f.writes.length,1);
 });
 
