@@ -5,9 +5,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const parts = [
+  "src/infrastructure/firebase.js",
   "src/app/bootstrap.js",
   "src/app/navigation.js",
   "src/features/products/product-management.js",
+  "src/features/forecasts/forecast-head.js",
+  "src/shared/action-feedback.js",
   "src/features/forecasts/forecast-workspace.js",
   "src/features/quotations/quotation-workspace.js",
   "src/features/inventory/inventory-workspace.js",
