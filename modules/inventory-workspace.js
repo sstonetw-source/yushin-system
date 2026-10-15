@@ -211,10 +211,12 @@
     const qty=Number(qtyInput);if(!Number.isFinite(qty)||qty<=0||qty>row.qty)return alert('出貨數量須大於 0，且不能超過已打單待出數量。');
     const dateInput=prompt('實際出貨日期（YYYY-MM-DD）：',localDateString());if(dateInput===null)return;
     const notes='';
+    const expectedWarehouseId=row.warehouseId;
+    const expectedPlan=JSON.parse(JSON.stringify(root.YushinWarehouseLogistics.plan(row.item.deliveryPlan||row.order.shippingInstructions||{})));
     const operationId=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());
     shipmentPending.add(orderId);const buttonState=beginActionButton(button,'出貨中…');
     try{
-      await commitInventoryShipment({orderId,itemId,qty,date:dateInput.trim(),notes:notes.trim(),operationId});
+      await commitInventoryShipment({orderId,itemId,qty,date:dateInput.trim(),notes:notes.trim(),operationId,expectedWarehouseId,expectedPlan});
       delete button.dataset.operationId;
       invalidateWarehouseStockCache(inventoryProductKey(row.item),row.warehouseId);
       try{await refreshAffectedOrderCaches([orderId]);await loadOrderWorkQueue(true);}
@@ -225,41 +227,3 @@
     finally{shipmentPending.delete(orderId);endActionButton(button,buttonState);}
   };
 })(typeof globalThis!=='undefined'?globalThis:this);
-
-async function commitInventoryShipment({orderId,itemId,qty,date,notes='',operationId,expectedWarehouseId='',expectedPlan=null}){
-  if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw new Error('無倉庫出貨權限。');
-  if(!operationId||!Number.isFinite(qty)||qty<=0)throw new Error('出貨數量或操作識別碼不正確。');
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)throw new Error('請填寫有效的出貨日期。');
-  let saved;
-  await runRoleTransaction(async tx=>{
-    const ref=db.collection('orders').doc(orderId),snapshot=await tx.get(ref);
-    if(!snapshot.exists)throw new Error('找不到訂單。');
-    const order=snapshot.data(),records=savedDeliveryRecords(order);
-    const prior=records.find(r=>r.id===operationId);
-    if(prior){if(prior.itemId!==itemId||Number(prior.qty)!==qty)throw new Error('出貨操作識別碼衝突。');saved=order;return;}
-    if(normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order))throw new Error('訂單已取消或庫存尚未同步。');
-    if(!Array.isArray(order.items))throw new Error('舊版訂單須先完成品項整理，才能由倉庫出貨。');
-    const item=normalizedOrderItems(order).find(i=>i.itemId===itemId);
-    if(item?.transferPendingId)throw new Error('此品項尚在調撥途中。');
-    const plan=item?.deliveryPlan||order.shippingInstructions;
-    if(plan&&plan.mode!=='CUSTOMER_SHIP')throw new Error('交付方式已變更，請重新確認。');
-    if(plan)globalThis.YushinWarehouseLogistics.validatePlan(plan,true);
-    if(!item||(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP')throw new Error('此品項不屬於倉庫出貨。');
-    const state=itemDispatchState(order,item);
-    if(qty>state.shippable)throw new Error('出貨數量超過最新已打單可出貨數量。');
-    const warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
-    if(!warehouseMasterCache.some(w=>w.id===warehouseId&&w.active!==false))throw new Error('出貨倉庫不存在或已停用。');
-    if(expectedWarehouseId&&warehouseId!==expectedWarehouseId)throw new Error('出貨倉庫已變更，請重新核對。');
-    if(expectedPlan&&JSON.stringify(globalThis.YushinWarehouseLogistics.plan(plan||{}))!==JSON.stringify(expectedPlan))throw new Error('寄送資訊已變更，請重新核對。');
-    const actor=deliveryActor(),now=new Date().toISOString();
-    const result=await applyInventoryDeliveryDeltaInTransaction(tx,{...order,...item,itemId,warehouseId,isDelivered:false,requireStockReservation:true},qty,actor,orderId);
-    const record={id:operationId,orderId,itemId,productKey:inventoryProductKey(item),itemIndex:order.items.findIndex(i=>i.itemId===itemId),warehouseId,date,qty,notes,...(plan?{deliveryPlan:globalThis.YushinWarehouseLogistics.plan(plan)}:{}),sourceType:'INVENTORY_SHIPMENT',createdBy:actor,createdByUid:currentUser.uid,createdAt:now,movementId:result.movementId,lotAllocations:result.lotAllocations||[],cogs:0};
-    const nextRecords=[...records,record],totalDelivered=nextRecords.reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const closedReturns=savedReturnRecords(order).filter(r=>r.settlement==='CLOSE').reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const nextItems=order.items.map(i=>i.itemId===itemId?{...i,reservedQty:result.newReservedQty,warehouseShippedQty:state.grossDelivered+qty}:i);
-    const history={action:'create',source:'inventory',recordId:operationId,before:null,after:record,by:actor,at:now};
-    const updates={inventoryShipmentRecordId:operationId,items:nextItems,deliveryRecords:nextRecords,deliveredQty:totalDelivered,isDelivered:totalDelivered-returnedQuantity(order)+closedReturns>=orderQuantity(order),deliveryHistory:firebase.firestore.FieldValue.arrayUnion(history),updatedAt:now};
-    Object.assign(updates,orderWorkIndexFields({...order,...updates}));tx.update(ref,updates);saved={...order,...updates};
-  });
-  return saved;
-}

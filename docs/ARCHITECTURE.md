@@ -115,3 +115,12 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 表單識別碼只保留在本頁記憶體；改變表單內容、重設／關閉再開或重新載入後不保證沿用。這不是跨頁面／跨裝置的永久 idempotency ledger；不應將其宣稱為全面冪等驗收。
 - 增加既有送貨數量時保留原批次／成本並加入增量；減少或誤登更正沿用原批次追溯。`delivery-stock.js` 先按 lotId 加總回補量，每批次只讀／寫一次，防止同批次多筆 allocation 的最後寫入覆蓋。
 - 範圍仍不包含倉庫工作區獨立出貨入口、多倉拆量、服務型訂單、正式環境角色驗收。Rules／Index／Collection 無異動；未部署 Firebase 或刪除正式資料。
+
+## 倉庫寄客戶的共用服務接線（2026-10-16 後續批次）
+
+- `commitInventoryShipment` 的唯一實作已從 `modules/inventory-workspace.js` 移至 `src/services/warehouse-shipment.js`；單筆出貨與 `warehouse-logistics.js` 批次寄客戶共用此受保護 Service，不保留平行舊實作。部署 bundle 在外部畫面模組前載入，兩支資源版本同步更新。
+- 倉庫與訂單送貨共同呼叫 `assertOrderDeliveryIncrease`，由 `Fulfillment.dispatchState` 驗證正式打單、累計已送與預留；完成狀態均經 `orderDeliveryProjection`，不再於倉庫另寫 CLOSE 退貨公式。
+- 相同 operationId 重試核對 sourceType、品項、數量、日期、備註，以及有提供時的倉庫／寄送資訊快照；相同請求無額外寫入，不同意圖不能借用同一 ID。actor、UID、時間在 callback 外固定。
+- `deliveryRecordWasReversed` 由訂單與倉庫共用，辨識逐筆誤登更正與整筆撤銷的歷史。已撤銷的作業識別碼不得再次建立送貨；倉庫另保留 inventoryShipmentRecordId 防護。未引入新 Collection 或跨裝置永久 idempotency ledger。
+- 單筆出貨現在也攜帶期望倉庫和標準化寄送資訊快照，與既有批次流程一樣在交易內重新核對；資訊變更時要求重新確認。
+- 仍待多倉拆量、服務型訂單、其他交付／調撥流程的服務界線與正式環境角色驗收；本批無 Rules／Index／Collection／查詢／Listener 變更，沒有 Firebase 部署或資料清除。

@@ -70,3 +70,7 @@ fulfillment-core 新增 deliveryQuantities，normalizeItem 與 dispatchState 共
 ### 2026-10-16 訂單送貨入口統一
 
 訂單頁的一鍵完成、一鍵撤銷、送貨新增／編輯、誤登更正四入口已移至 delivery-records Service，共用受保護交易與最新打單可出貨量核心驗證；消除 UI transaction 內讀取品項選單。補上樂觀完成連點誤觸撤銷、同表單成功回覆遺失、transaction 重跑、相同編輯／撤銷重試、取消訂單、CLOSE 與補送退貨投影及原批次／成本的測試。多筆相同批次回補先加總再寫入。此為訂單頁範圍；不代表倉庫工作區出貨、永久 idempotency ledger、多倉或服務型訂單全面完成。
+
+### 2026-10-16 倉庫出貨接線
+
+單筆／批次倉庫寄客戶的 commitInventoryShipment 已移至 warehouse-shipment Service，與訂單送貨共同使用可出貨量及有效交付投影；業務領貨、調撥仍是不同事實，不機械合併。補上操作識別碼的完整內容衝突檢查、歷史撤銷防重放、單筆倉庫／寄送資訊快照核對。測試包括跨入口更正後重試、交易 callback 重跑、回覆遺失、庫存失敗無部分寫入。尚待多倉拆量、服務型訂單及其他交付流程／正式環境驗收，不以本批取代整體完成門檻。
