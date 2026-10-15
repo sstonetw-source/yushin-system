@@ -638,7 +638,8 @@ test('shortage allocation maintains work indexes',()=>{
 
 test('quote cancellation and legacy delivery cleanup refresh work category index',()=>{
     assert.match(app,/const cancelledOrder = \{\.\.\.order,status:'cancelled'[\s\S]*?orderWorkIndexFields\(cancelledOrder\)/);
-    assert.match(app,/clearLegacyDelivery[\s\S]*?Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\)/);
+    const correction=fs.readFileSync(path.join(__dirname,'../src/services/delivery-correction.js'),'utf8');
+    assert.match(correction,/Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\)/);
 });
 
 test('receiving queue reads every open supply type and follows the source order arrival state',()=>{

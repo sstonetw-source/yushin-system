@@ -59,3 +59,18 @@ test('order lifecycle UI cannot directly write cancellation and restoration docu
   assert.match(service,/adjustInventoryReservationForLifecycle\s*\(/);
   assert.match(service,/transaction\.update\s*\(/);
 });
+
+test('lifecycle form and legacy delivery correction delegate all writes to services',()=>{
+  const source=read('src/features/orders/delivery-actions.js');
+  for(const [name,next,service] of [
+    ['saveOrderLifecycleStatus','// Customer return mutations','setOrderLifecycleStatus'],
+    ['clearLegacyDelivery','function lifecycleRecordId','clearOrderLegacyDeliveryEstimate']
+  ]){
+    const start=source.indexOf('window.'+name+' =');
+    const end=source.indexOf(next,start);
+    assert.ok(start>=0&&end>start);
+    const action=source.slice(start,end);
+    assert.match(action,new RegExp('await '+service+'\\('));
+    assert.doesNotMatch(action,/runRoleTransaction\s*\(|db\.collection\s*\(/);
+  }
+});

@@ -438,22 +438,21 @@ window.clearLegacyDelivery = async function() {
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     if (!order) return;
     if (returnedQuantity(order) > 0) { alert('這筆訂單已有退貨紀錄，請先更正或刪除退貨紀錄。'); return; }
-    const now = new Date().toISOString();
-    const history = { action: 'clear_legacy_estimate', before: { isDelivered: true, estimatedDate: order.orderDate || '' }, after: null, by: deliveryActor(), at: now };
+    if (pendingDeliveryOrderIds.has(order.id)) return;
+    pendingDeliveryOrderIds.add(order.id);
     try {
-        const updates={isDelivered:false,deliveredQty:0,deliveryRecords:[],deliveryHistory:firebase.firestore.FieldValue.arrayUnion(history),updatedAt:now};
-        Object.assign(updates,orderWorkIndexFields({...order,...updates}));
-        await db.collection('orders').doc(order.id).update(updates);
-        order.isDelivered = false;
-        order.deliveredQty = 0;
-        order.deliveryRecords = [];
-        order.deliveryHistory = [...(order.deliveryHistory || []), history];
+        const savedOrder=await clearOrderLegacyDeliveryEstimate(order.id);
+        const index=ordersCache.findIndex(item=>item.id===order.id);
+        if(index>=0)ordersCache[index]={id:order.id,...savedOrder};
         resetDeliveryForm();
         renderDeliveryModal();
         renderOrderLifecycleModal();
         renderOrdersList();
     } catch (err) {
         alert('取消歷史推估失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
+    } finally {
+        pendingDeliveryOrderIds.delete(order.id);
+        renderOrdersList();
     }
 };
 
@@ -587,38 +586,11 @@ window.saveOrderLifecycleStatus = async function() {
     if (previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
     if (pendingLifecycleOrderIds.has(order.id)) return;
     if(nextStatus==='cancelled'&&previous.status!=='cancelled'&&!confirmOrderCancellation(order))return;
-    const actor = deliveryActor();
-    const at = new Date().toISOString();
-    const history = { action: nextStatus === 'normal' && previous.status !== 'normal' ? 'restore' : 'status_change', before: previous, after: { status: nextStatus, date, reason }, by: actor, at };
     const saveButton = document.getElementById('orderLifecycleSaveBtn');
     pendingLifecycleOrderIds.add(order.id);
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
     try {
-        let savedOrder;
-        await runRoleTransaction(async transaction => {
-            const ref = db.collection('orders').doc(order.id);
-            const snapshot = await transaction.get(ref);
-            if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-            const liveOrder = snapshot.data();
-            const livePrevious = { status: normalizedOrderStatus(liveOrder), date: liveOrder.orderStatusDate || '', reason: liveOrder.orderStatusReason || '' };
-            let reservationLifecycle=null;
-            if (livePrevious.status !== nextStatus) {
-                if(nextStatus==='cancelled'&&deliveryProgressInfo(liveOrder).remaining<=0)throw new Error('訂單已無剩餘未送貨數量，請重新確認。');
-                reservationLifecycle=await adjustInventoryReservationForLifecycle(transaction, order.id, liveOrder, nextStatus, actor);
-            }
-            const liveHistory = { action: nextStatus === 'normal' && livePrevious.status !== 'normal' ? 'restore' : 'status_change', before: livePrevious, after: { status: nextStatus, date, reason }, by: actor, at };
-            const updates = {
-                items:reservationLifecycle?.items||liveOrder.items||[],
-                itemCount:(reservationLifecycle?.items||normalizedOrderItems(liveOrder)).length,
-                orderSchemaVersion:2,
-                status: nextStatus === 'cancelled' ? BUSINESS_STATUS.CANCELLED : BUSINESS_STATUS.ACTIVE,
-                orderStatus: nextStatus, orderStatusDate: date, orderStatusReason: reason,
-                orderLifecycleHistory: firebase.firestore.FieldValue.arrayUnion(liveHistory), updatedAt: at
-            };
-            Object.assign(updates,orderWorkIndexFields({...liveOrder,...updates}));
-            transaction.update(ref, updates);
-            savedOrder = { ...liveOrder, ...updates, orderLifecycleHistory: [...(liveOrder.orderLifecycleHistory || []), liveHistory] };
-        });
+        const savedOrder=await setOrderLifecycleStatus(order.id,nextStatus,{date,reason});
         // The lifecycle transaction already synchronizes stock and purchase demand.
         const index = ordersCache.findIndex(item => item.id === order.id);
         if (index >= 0) ordersCache[index] = { id: order.id, ...savedOrder };
