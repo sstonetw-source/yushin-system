@@ -16861,7 +16861,6 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     const itemIds=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
     if(new Set(itemIds).size!==itemIds.length)
         throw new Error('訂單品項識別碼重複，無法安全取消或恢復。請由管理員核對品項與庫存預留。');
-    const deliveries = savedDeliveryRecords(order);
     const now = new Date().toISOString();
 
     // Firestore transactions require every read before the first write.
@@ -16879,13 +16878,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const itemId = String(item.itemId || `item-${index + 1}`);
         const productKey = inventoryProductKey(item);
         const directShip = (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
-        const grossDelivered = deliveries
-            .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
-            .reduce((sum, row) => sum + Number(row.qty || 0), 0);
-        const returned = savedReturnRecords(order)
-            .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
-            .reduce((sum, row) => sum + Number(row.qty || 0), 0);
-        const delivered = Math.max(0, grossDelivered - returned);
+        // Reuse the canonical projection: closed returns do not need replacement,
+        // and legacy item-only delivery totals remain authoritative when no ledger exists.
+        const delivered = Math.max(0, Number(item.deliveredQty||0)-Number(item.returnedQty||0));
         const ordered = Math.max(0, Number(item.qty || item.orderedQty || 0));
         const warehouseId = directShip ? '' : (item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '');
         const invRef = !directShip && productKey ? inventoryRefFor(item) : null;

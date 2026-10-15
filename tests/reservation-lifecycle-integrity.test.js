@@ -59,6 +59,10 @@ function fixture({role='admin',held=3,qty=5,status='active'}={}){
   inventoryMovementRecord:(type,qty,sourceId,productKey,actor,extra)=>({type,qty,sourceId,sourceType:'order',productKey,ownerUid:'U',salesCode:'S',actorUid:role,...extra})});
  vm.runInContext(app.slice(app.indexOf('function procurementDemandForOrderItem('),app.indexOf('function purchasingLifecycleSnapshot(')),c);
  vm.runInContext(app.slice(app.indexOf('function orderItemProcurementDemandDocument('),app.indexOf('async function persistOrderProcurementDemands(')),c);
+ c.window={YushinFulfillment:fulfillment};
+ c.brandIdentityForRecord=item=>({brand:item.brand||'',brandId:item.brandId||''});
+ c.normalizeHistoryItemCode=value=>value;c.parseMoney=value=>Number(value);
+ vm.runInContext(app.slice(app.indexOf('function normalizedOrderItems('),app.indexOf('function ensureOrderItemCompatibility(')),c);
  vm.runInContext(lifecycle,c);
  const run=async(nextStatus='cancelled')=>permissions.run(db,async tx=>{
   const ref=db.collection('orders').doc('O'),order=(await tx.get(ref)).data();
@@ -490,5 +494,38 @@ test('missing or malformed lifecycle item lists fail with an actionable message 
    assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
    assert.deepEqual(f.reads,['orders/O']);
   }
+ }
+});
+
+
+test('restoration does not reserve replacement stock for returns explicitly closed without reshipment',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  const f=fixture({role,held:0,qty:5,status:'cancelled'});
+  const order=f.docs.get('orders/O');
+  order.deliveryRecords=[{itemId:'I',qty:5}];
+  order.returnRecords=[{itemId:'I',qty:2,settlement:'CLOSE'}];
+  await f.run('normal');
+  assert.equal(f.docs.get('inventory/P').reserved,0);
+  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,0);
+  assert.equal(f.docs.get('inventoryReservations/O__I').quantity,0);
+  assert.equal(f.docs.get('inventoryReservations/O__I').shortageQty,0);
+ }
+});
+test('restoration reserves only open replacement returns and respects legacy item delivery quantities',async()=>{
+ for(const scenario of [
+  {deliveryRecords:[{itemId:'I',qty:5}],returnRecords:[{itemId:'I',qty:2,settlement:'CLOSE'},{itemId:'I',qty:1,settlement:'REPLACE'}],expected:1},
+  {deliveredQty:4,expected:1},
+  {deliveredQty:5,returnedQty:2,expected:2}
+ ]){
+  const f=fixture({held:0,qty:5,status:'cancelled'}),order=f.docs.get('orders/O');
+  if(scenario.deliveryRecords)order.deliveryRecords=scenario.deliveryRecords;
+  if(scenario.returnRecords)order.returnRecords=scenario.returnRecords;
+  if(scenario.deliveredQty!==undefined)order.items[0].deliveredQty=scenario.deliveredQty;
+  if(scenario.returnedQty!==undefined)order.items[0].returnedQty=scenario.returnedQty;
+  await f.run('normal');
+  assert.equal(f.docs.get('inventory/P').reserved,scenario.expected);
+  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,scenario.expected);
+  assert.equal(f.docs.get('inventoryReservations/O__I').quantity,scenario.expected);
+  assert.equal(f.docs.get('inventoryReservations/O__I').shortageQty,0);
  }
 });
