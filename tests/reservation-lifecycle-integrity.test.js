@@ -50,10 +50,10 @@ function fixture({role='admin',held=3,qty=5,status='active'}={}){
  docs.set('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'),demandCore.demandDocument({sourceType:'SALES_ORDER',sourceId:'O',sourceItemId:'I',sourceItemIndex:0,productKey:'P',productId:'P',warehouseId:'A',ownerUid:'U',salesCode:'S',requestedQty:Math.max(0,qty-held),orderedQty:0,receivedQty:0,status:status==='cancelled'?'CANCELLED':'PENDING'}));
  const db={collection:col=>({doc:(id='event'+(++sequence))=>({path:col+'/'+id,id})}),runTransaction:async fn=>{
   const pending=[];const result=await fn({get:async ref=>{assert.equal(pending.length,0);reads.push(ref.path);return {exists:docs.has(ref.path),data:()=>structuredClone(docs.get(ref.path))};},
-   set:(ref,data,options)=>pending.push({ref,data,options}),update:(ref,data)=>pending.push({ref,data,options:{merge:true}})});
-  for(const w of pending){writes.push(w);docs.set(w.ref.path,{...(w.options?.merge?docs.get(w.ref.path):{}),...structuredClone(w.data)});}return result;
+   set:(ref,data,options)=>pending.push({ref,data,options}),update:(ref,data)=>pending.push({ref,data,options:{merge:true}}),delete:ref=>pending.push({ref,method:'delete'})});
+  for(const w of pending){writes.push(w);if(w.method==='delete')docs.delete(w.ref.path);else docs.set(w.ref.path,{...(w.options?.merge?docs.get(w.ref.path):{}),...structuredClone(w.data)});}return result;
  }};
- const c=vm.createContext({db,YushinReservation:core,YushinProcurementDemand:demandCore,YushinWorkflow:workflow,YushinFulfillment:fulfillment,procurementDemandRef:id=>db.collection('procurementDemands').doc(encodeURIComponent(id)),normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[],
+ const c=vm.createContext({db,YushinReservation:core,YushinProcurementDemand:demandCore,YushinWorkflow:workflow,YushinFulfillment:fulfillment,procurementDemandRef:id=>db.collection('procurementDemands').doc(encodeURIComponent(id)),normalizedOrderItems:o=>o.items.map(fulfillment.normalizeItem),normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[],
   inventoryProductKey:i=>i.productId||'',inventoryRefFor:i=>i.productId?db.collection('inventory').doc(i.productId):null,
   warehouseStockDocId:(w,p)=>w+'__'+p,defaultWarehouse:()=>({id:'A'}),salesCodeForName:()=> 'S',
   inventoryMovementRecord:(type,qty,sourceId,productKey,actor,extra)=>({type,qty,sourceId,sourceType:'order',productKey,ownerUid:'U',salesCode:'S',actorUid:role,...extra})});
@@ -238,4 +238,65 @@ test('zero-hold direct shipment cancellation does not read physical stock or dis
  await f.run();assert.deepEqual(f.reads,['orders/O','inventoryReservations/O__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')]);
  const g=fixture();g.docs.get('orders/O').items[0].fulfillmentType='DIRECT_SHIP';g.docs.get('inventoryReservations/O__I').warehouseId='';
  await assert.rejects(g.run(),/不足/);assert.equal(g.writes.length,0);
+});
+
+const deletionFunctions=app.slice(app.indexOf('function assertOrderEligibleForPermanentDelete('),app.indexOf('window.permanentlyDeleteOrder =',app.indexOf('function assertOrderEligibleForPermanentDelete(')));
+function deletionFixture(options={}){
+ const f=fixture(options);
+ f.c.runRoleTransaction=fn=>permissions.run(f.db,fn,'U',false,options.role||'admin');
+ vm.runInContext(deletionFunctions,f.c);
+ return {...f,deleteOrder:()=>f.c.deleteUnfulfilledOrderAtomically('O','U')};
+}
+test('permanent deletion releases stock and removes order, reservation and unpurchased demand in a single transaction',async()=>{
+ for(const held of [0,3]){
+  const f=deletionFixture({held});
+  await f.deleteOrder();
+  assert.equal(f.docs.has('orders/O'),false);
+  assert.equal(f.docs.has('inventoryReservations/O__I'),false);
+  assert.equal(f.docs.has('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')),false);
+  assert.equal(f.docs.get('inventory/P').reserved,0);
+  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,0);
+  assert.equal(f.docs.get('inventory/P').onHand,10);
+  assert.equal(f.writes.filter(w=>w.method==='delete').length,3);
+ }
+ const cancelled=deletionFixture({held:0,status:'cancelled'});
+ await cancelled.deleteOrder();
+ assert.equal(cancelled.docs.has('orders/O'),false);
+ assert.equal(cancelled.writes.filter(w=>w.ref.path.startsWith('inventoryMovements/')).length,0);
+});
+test('permanent deletion stops on supplier commitments, provenance errors and held cancelled orders without mutations',async()=>{
+ const edits=[
+  f=>f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')).orderedQty=1,
+  f=>f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')).receivedQty=1,
+  f=>f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')).sourceItemId='OTHER',
+  f=>f.docs.get('orders/O').items[0].supplyOrderedQty=1,
+  f=>f.docs.get('orders/O').items[0].purchaseDocumentNos=['PO-1'],
+  f=>f.docs.get('orders/O').sourceId='Q-1',
+  f=>f.docs.get('orders/O').inventoryReservationStatus='pending',
+  f=>f.docs.get('orders/O').deliveryRecords=[{itemId:'I',qty:1}]
+ ];
+ for(const edit of edits){
+  const f=deletionFixture();edit(f);
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.deleteOrder());
+  assert.deepEqual([...f.docs],before);
+  assert.equal(f.writes.length,0);
+ }
+ const cancelled=deletionFixture({held:3,status:'cancelled'});
+ const before=structuredClone([...cancelled.docs]);
+ await assert.rejects(cancelled.deleteOrder(),/仍占用庫存|不為零/);
+ assert.deepEqual([...cancelled.docs],before);
+ assert.equal(cancelled.writes.length,0);
+});
+test('permanent deletion aborts all changes when later linked item has invalid demand',async()=>{
+ const f=deletionFixture(),first=f.docs.get('orders/O').items[0];
+ f.docs.get('orders/O').items.push({...first,itemId:'J',reservedQty:0});
+ f.docs.set('inventoryReservations/O__J',{orderId:'O',itemId:'J',productKey:'P',warehouseId:'A',quantity:0});
+ f.docs.set('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:J'),{
+  ...f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')),
+  demandId:'SALES_ORDER:O:J',sourceItemId:'J',ownerUid:'WRONG'
+ });
+ const before=structuredClone([...f.docs]);
+ await assert.rejects(f.deleteOrder(),/不一致/);
+ assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
 });
