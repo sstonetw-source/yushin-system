@@ -647,8 +647,9 @@ service cloud.firestore {
     }
 
     function businessReservationOperationalUpdate() {
-      return businessOwner()
-        && owns(resource.data)
+      // Only reservationUpdateWriter calls this helper, after checking the fixed
+      // business role. Repeating role() here exhausts the retry expression budget.
+      return owns(resource.data)
         && owns(request.resource.data)
         && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
         && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
