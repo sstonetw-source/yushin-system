@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const src=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
 const code=src.slice(src.indexOf('window.quickCompleteDelivery = async function'),src.indexOf('function renderDeliveryModal()'));
 function setup({delivered=false,multi=false,pending=false}={}){
- const item={itemId:'LINE-7',productId:'PRODUCT-7',warehouseId:'WAREHOUSE-7',fulfillmentType:'WAREHOUSE',qty:1,reservedQty:1};
+ const item={itemId:'LINE-7',productId:'PRODUCT-7',warehouseId:'WAREHOUSE-7',fulfillmentType:'WAREHOUSE',qty:1,reservedQty:1,dispatchPreparedQty:1};
  const order={id:'ORDER-1',productId:'wrong-header-product',warehouseId:'wrong-header-warehouse',items:[item],deliveryRecords:delivered?[{id:'D1',itemId:'LINE-7',qty:1}]:[],isDelivered:delivered,inventoryReservationStatus:pending?'pending':'completed'};
  const live=JSON.parse(JSON.stringify(order));if(multi)live.items.push({...item,itemId:'LINE-8'});
  const calls=[],alerts=[],updates=[];
@@ -10,13 +10,15 @@ function setup({delivered=false,multi=false,pending=false}={}){
  const progress=o=>{const total=o.items.reduce((s,i)=>s+i.qty,0),n=records(o).reduce((s,r)=>s+r.qty,0);return {total,delivered:n,remaining:total-n,state:n>=total?'complete':'pending'};};
  const inventory=async(...args)=>{const data=args[2]||args[1];assert.equal(data.itemId,'LINE-7');calls.push(args);return {newReservedQty:args[3]<0?1:0,lotAllocations:[],cogs:10};};
  const x=vm.createContext({window:{},ordersCache:[order],currentDeliveryOrderId:null,pendingDeliveryOrderIds:new Set(),canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+ YushinFulfillment:require('../modules/fulfillment-core.js'),
  orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),normalizedOrderStatus:()=> 'normal',normalizedOrderItems:o=>o.items.map(i=>({...i})),orderQuantity:o=>o.items.reduce((s,i)=>s+i.qty,0),returnedQuantity:()=>0,
  savedDeliveryRecords:records,deliveryProgressInfo:progress,fulfillmentProgressInfo:()=>({shippable:1}),localDateString:()=> '2026-10-04',deliveryActor:()=> 'User',deliveryRecordId:()=> 'D2',renderOrdersList(){},openDeliveryModal(){},openPartialDeliveryForm(){},
+ orderDeliveryProjection:o=>({effectiveDelivered:records(o).reduce((s,r)=>s+r.qty,0)}),
  db:{collection:()=>({doc:id=>({id})}),runTransaction:async callback=>callback({get:async()=>({exists:true,data:()=>live}),update:(ref,patch)=>updates.push(patch)})},
  firebase:{firestore:{FieldValue:{arrayUnion:(...a)=>a}}},orderWorkIndexFields:()=>({}),applyInventoryDeliveryInTransaction:inventory,
  applyInventoryDeliveryDeltaInTransaction:async(tx,data,qty,actor,id,reversed)=>{assert.equal(data.itemId,'LINE-7');calls.push([tx,null,data,qty,actor,id,reversed]);return {newReservedQty:1};},alert:s=>alerts.push(s),showActionFeedback:s=>alerts.push(s)
  });vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
-vm.runInContext(code,x);return {x,calls,alerts,updates};
+vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../src/services/delivery-records.js'),'utf8')+'\n'+code,x);return {x,calls,alerts,updates};
 }
 test('one-click shipping passes the exact item identity product and warehouse to inventory accounting',async()=>{
  const a=setup();await a.x.window.quickCompleteDelivery('ORDER-1');assert.equal(a.alerts.length,0);assert.equal(a.calls[0][2].productId,'PRODUCT-7');assert.equal(a.calls[0][2].warehouseId,'WAREHOUSE-7');assert.equal(a.calls[0][5],'ORDER-1');assert.equal(a.updates[0].deliveryRecords[0].itemId,'LINE-7');assert.equal(a.updates[0].items[0].reservedQty,0);
@@ -29,4 +31,15 @@ test('live transaction rejects a multi-item order even if the cached row has onl
 });
 test('pending inventory synchronization never starts one-click delivery',async()=>{
  const a=setup({pending:true});await a.x.window.quickCompleteDelivery('ORDER-1');assert.equal(a.calls.length,0);assert.match(a.alerts[0],/尚未同步完成/);
+});
+test('a second quick-delivery tap cannot turn the optimistic completed row into a cancellation',async()=>{
+ const a=setup();let finish,calls=0,cancels=0;
+ a.x.completeOrderDelivery=async()=>{calls++;return new Promise(resolve=>{finish=resolve;});};
+ a.x.quickCancelAllDelivery=()=>{cancels++;};
+ const first=a.x.window.quickCompleteDelivery('ORDER-1');
+ assert.equal(a.x.ordersCache[0].isDelivered,true);
+ await a.x.window.quickCompleteDelivery('ORDER-1');
+ assert.equal(calls,1);assert.equal(cancels,0);
+ finish({...a.x.ordersCache[0]});await first;
+ assert.equal(a.x.pendingDeliveryOrderIds.size,0);
 });

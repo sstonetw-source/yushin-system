@@ -74,3 +74,23 @@ test('lifecycle form and legacy delivery correction delegate all writes to servi
     assert.doesNotMatch(action,/runRoleTransaction\s*\(|db\.collection\s*\(/);
   }
 });
+
+test('all four order delivery actions delegate protected writes and the service does not read DOM',()=>{
+  const ui=read('src/features/orders/delivery-actions.js');
+  for(const [name,next,service] of [
+    ['quickCompleteDelivery','window.quickCancelAllDelivery','completeOrderDelivery'],
+    ['quickCancelAllDelivery','function renderDeliveryModal','cancelOrderDeliveries'],
+    ['saveDeliveryRecord','window.deleteDeliveryRecord','saveOrderDeliveryRecord'],
+    ['deleteDeliveryRecord','window.clearLegacyDelivery','correctOrderDeliveryRecord']
+  ]){
+    const start=ui.indexOf('window.'+name+' ='),end=ui.indexOf(next,start);
+    assert.ok(start>=0&&end>start);
+    const action=ui.slice(start,end);
+    assert.match(action,new RegExp('await '+service+'\\('));
+    assert.doesNotMatch(action,/runRoleTransaction\s*\(|db\.collection\s*\(/);
+    assert.match(action,/pendingDeliveryOrderIds\.has\(orderId\)/);
+  }
+  const service=read('src/services/delivery-records.js');
+  assert.doesNotMatch(service,/document\.|ordersCache|alert\(/);
+  assert.match(service,/runRoleTransaction/);
+});

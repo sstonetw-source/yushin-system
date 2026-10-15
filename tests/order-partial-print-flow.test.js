@@ -89,13 +89,16 @@ function deliveryTestHarness(selectedItem, recordToEdit=null, single=false) {
         deliveryEditId:{value:recordToEdit?.id||''},deliveryItemId:{value:selectedItem}};
     const alerts=[],updates=[],deltas=[],button={disabled:false,textContent:''};
     const context=vm.createContext({window:{},currentDeliveryOrderId:'SO',pendingDeliveryOrderIds:new Set(),ordersCache:[order],
+        YushinFulfillment:fulfillment,
         canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+        orderInventorySyncIncomplete:()=>false,
         document:{getElementById:id=>fields[id]||null,querySelector:()=>button},
         db:{collection:()=>({doc:id=>({id})})},
         runRoleTransaction:async callback=>callback({get:async()=>({exists:true,data:()=>order}),update:(_ref,data)=>updates.push(data)}),
         savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[],
         normalizedOrderStatus:o=>o.status,normalizedOrderItems:o=>o.items,
         orderQuantity:o=>o.items.reduce((s,item)=>s+item.qty,0),returnedQuantity:()=>0,
+        orderDeliveryProjection:o=>fulfillment.projectOrderDelivery({grossDeliveredQty:(o.deliveryRecords||[]).reduce((s,r)=>s+r.qty,0),returnedQty:0,returnRecords:o.returnRecords||[]}),
         deliveryActor:()=> 'Sales',deliveryRecordId:()=> 'NEW',
         firebase:{firestore:{FieldValue:{arrayUnion:item=>[item]}}},
         orderWorkIndexFields:()=>({}),
@@ -106,8 +109,8 @@ function deliveryTestHarness(selectedItem, recordToEdit=null, single=false) {
     const start=app.indexOf('window.saveDeliveryRecord = async function()');
     const end=app.indexOf('\nwindow.deleteDeliveryRecord = async function(',start);
     assert.ok(start>=0&&end>start);
-    vm.runInContext(app.slice(start,end),context);
-    return {order,context,alerts,updates,deltas,button};
+    vm.runInContext("let deliveryCreateAttempt=null;\n"+fs.readFileSync(path.join(__dirname,'../src/services/delivery-records.js'),'utf8')+'\n'+app.slice(start,end),context);
+    return {order,context,alerts,updates,deltas,button,fields};
 }
 test('delivery never switches an invalid item ID to the first line',async()=>{
     for(const id of ['', 'MISSING', 'item-1']) {
@@ -142,4 +145,22 @@ test('legacy single-line selection ignores a stale hidden selector; stale edited
     assert.equal(outdated.deltas.length,0);
     assert.equal(outdated.updates.length,0);
     assert.match(outdated.alerts[0],/找不到指定送貨品項/);
+});
+test('delivery form reuses the same create identity after a failed response, until reset or input changes',async()=>{
+    const t=deliveryTestHarness('I2');let sequence=0;
+    const requests=[];
+    t.context.deliveryRecordId=()=> 'attempt-'+(++sequence);
+    t.context.saveOrderDeliveryRecord=async(_id,request)=>{
+        requests.push({...request});
+        if(requests.length===1)throw new Error('response lost');
+        return {...t.order};
+    };
+    await t.context.window.saveDeliveryRecord();
+    await t.context.window.saveDeliveryRecord();
+    assert.equal(requests[0].recordId,'attempt-1');
+    assert.equal(requests[1].recordId,'attempt-1');
+    assert.equal(t.context.pendingDeliveryOrderIds.size,0);
+    t.fields.deliveryQty.value='2';
+    await t.context.window.saveDeliveryRecord();
+    assert.equal(requests[2].recordId,'attempt-2');
 });

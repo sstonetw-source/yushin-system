@@ -50,9 +50,13 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         const sourceRecords=Array.isArray(reversalRecords)&&reversalRecords.length?reversalRecords:savedDeliveryRecords(order);
         const reversal=globalThis.YushinInventory.reverseLotAllocations(sourceRecords,restoreQty);
         lotAllocations=reversal.allocations.map(row=>({...row,qty:-row.qty,cost:-row.cost}));
-        const lotContexts=await Promise.all(reversal.allocations.map(async row=>{
-            const lotRef=db.collection('inventoryLots').doc(row.lotId);
-            return {row,lotRef,lotSnap:await transaction.get(lotRef)};
+        // Several delivery records (or an increased record) can refer to one lot.
+        // Read/update that document once with the total reversal, not last-write-wins.
+        const restoreByLot=new Map();
+        for(const row of reversal.allocations)restoreByLot.set(row.lotId,(restoreByLot.get(row.lotId)||0)+row.qty);
+        const lotContexts=await Promise.all([...restoreByLot].map(async([lotId,qty])=>{
+            const lotRef=db.collection('inventoryLots').doc(lotId);
+            return {row:{lotId,qty},lotRef,lotSnap:await transaction.get(lotRef)};
         }));
         for(const {row,lotRef,lotSnap} of lotContexts){
             if(!lotSnap.exists)throw new Error(`找不到原出貨批次 ${row.lotNo||row.lotId}，無法安全還原庫存。`);
