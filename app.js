@@ -10113,12 +10113,26 @@ function deliveredQuantity(order, normalizedItems = null) {
     return order?.isDelivered ? orderQuantity(order, normalizedItems) : 0;
 }
 
+// One projection for both the delivery card and lifecycle status. CLOSED
+// returns do not require replacement stock; never deduct them twice.
+function orderDeliveryProjection(order, normalizedItems = null) {
+    if (!globalThis.YushinFulfillment?.deliveryQuantities)
+        throw new Error('Fulfillment core 未載入，無法計算有效交付數量。');
+    const grossDelivered = deliveredQuantity(order, normalizedItems);
+    const returned = Math.min(Math.max(0, returnedQuantity(order)), grossDelivered);
+    const closedReturns = Math.min(returned, savedReturnRecords(order)
+        .filter(row=>row.settlement==='CLOSE')
+        .reduce((sum,row)=>sum+Math.max(0,Number(row.qty||0)),0));
+    const quantities = globalThis.YushinFulfillment.deliveryQuantities({
+        deliveredQty:grossDelivered,
+        returnedQty:Math.max(0,returned-closedReturns)
+    });
+    return {grossDelivered,returned,closedReturns,effectiveDelivered:quantities.effectiveDeliveredQty};
+}
+
 function deliveryProgressInfo(order, normalizedItems = null) {
     const total = orderQuantity(order, normalizedItems);
-    const grossDelivered = deliveredQuantity(order, normalizedItems);
-    const returned = Math.min(returnedQuantity(order), grossDelivered);
-    const closedReturns = savedReturnRecords(order).filter(r=>r.settlement==='CLOSE').reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const effectiveDelivered = Math.max(0, grossDelivered - returned + closedReturns);
+    const {grossDelivered,returned,effectiveDelivered} = orderDeliveryProjection(order, normalizedItems);
     const delivered = Math.min(effectiveDelivered, total || effectiveDelivered);
     const remaining = Math.max(0, total - delivered);
     const isLegacyEstimated = !!order?.isDelivered && savedDeliveryRecords(order).length === 0;
@@ -10145,9 +10159,7 @@ function normalizedOrderStatus(order) {
 }
 
 function orderLifecycleInfo(order, normalizedItems = null) {
-    const delivered = deliveredQuantity(order, normalizedItems);
-    const returned = Math.min(returnedQuantity(order), delivered);
-    const effectiveDelivered = Math.max(0, delivered - returned);
+    const {grossDelivered:delivered,returned,effectiveDelivered} = orderDeliveryProjection(order, normalizedItems);
     const status = normalizedOrderStatus(order);
     if (status === 'cancelled') return { status, label: '已取消', css: 'invalid', delivered, returned, effectiveDelivered };
     if (savedReturnRecords(order).some(r=>r.settlement==='CLOSE')) return {status,label:'退貨已收貨・不補送',css:'returned',delivered,returned,effectiveDelivered};
@@ -16852,8 +16864,15 @@ window.prepareOrderLifecycle = function(orderId, status) {
 
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor, options={}) {
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
+    if(!Array.isArray(order?.items)||!order.items.length
+        ||order.items.some(item=>!item||typeof item!=='object'||Array.isArray(item)))
+        throw new Error('訂單缺少有效品項明細，無法安全取消或恢復。請由管理員核對原始訂單、庫存預留及採購需求。');
     const items = normalizedOrderItems(order);
-    const deliveries = savedDeliveryRecords(order);
+    // Multiple lines must never address the same reservation or demand document,
+    // including collisions between generated legacy IDs and explicit IDs.
+    const itemIds=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
+    if(new Set(itemIds).size!==itemIds.length)
+        throw new Error('訂單品項識別碼重複，無法安全取消或恢復。請由管理員核對品項與庫存預留。');
     const now = new Date().toISOString();
 
     // Firestore transactions require every read before the first write.
@@ -16871,13 +16890,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const itemId = String(item.itemId || `item-${index + 1}`);
         const productKey = inventoryProductKey(item);
         const directShip = (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
-        const grossDelivered = deliveries
-            .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
-            .reduce((sum, row) => sum + Number(row.qty || 0), 0);
-        const returned = savedReturnRecords(order)
-            .filter(row => row.itemId === itemId || (!row.itemId && items.length === 1))
-            .reduce((sum, row) => sum + Number(row.qty || 0), 0);
-        const delivered = Math.max(0, grossDelivered - returned);
+        // Reuse the canonical projection: closed returns do not need replacement,
+        // and legacy item-only delivery totals remain authoritative when no ledger exists.
+        const delivered = Math.max(0, Number(item.deliveredQty||0)-Number(item.returnedQty||0));
         const ordered = Math.max(0, Number(item.qty || item.orderedQty || 0));
         const warehouseId = directShip ? '' : (item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '');
         const invRef = !directShip && productKey ? inventoryRefFor(item) : null;
@@ -17073,24 +17088,6 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if(cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
     if (pendingLifecycleOrderIds.has(orderId) || normalizedOrderStatus(cachedOrder) === nextStatus) return;
     if(nextStatus==='cancelled'&&!confirmOrderCancellation(cachedOrder))return;
-    const optimisticBefore = {
-        orderStatus: cachedOrder.orderStatus,
-        orderStatusDate: cachedOrder.orderStatusDate,
-        orderStatusReason: cachedOrder.orderStatusReason,
-        orderLifecycleHistory: [...(cachedOrder.orderLifecycleHistory || [])]
-    };
-    const optimisticDate = localDateString();
-    const optimisticHistory = {
-        action: nextStatus === 'normal' ? 'restore' : 'status_change',
-        before: { status: normalizedOrderStatus(cachedOrder), date: cachedOrder.orderStatusDate || '', reason: cachedOrder.orderStatusReason || '' },
-        after: { status: nextStatus, date: optimisticDate, reason: '' },
-        by: deliveryActor(),
-        at: new Date().toISOString()
-    };
-    cachedOrder.orderStatus = nextStatus;
-    cachedOrder.orderStatusDate = optimisticDate;
-    cachedOrder.orderStatusReason = '';
-    cachedOrder.orderLifecycleHistory = [...optimisticBefore.orderLifecycleHistory, optimisticHistory];
     pendingLifecycleOrderIds.add(orderId);
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
@@ -17144,7 +17141,6 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     } catch (err) {
-        Object.assign(cachedOrder, optimisticBefore);
         pendingLifecycleOrderIds.delete(orderId);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }

@@ -12,6 +12,15 @@
     return Math.min(Math.max(n(value), n(min)), n(max));
   }
 
+  // deliveredQty is always cumulative here. Callers exclude CLOSE returns
+  // before projecting replacement demand; physical return history stays intact.
+  function deliveryQuantities(item = {}) {
+    const grossDeliveredQty = n(item.deliveredQty);
+    const returnedQty = Math.min(n(item.returnedQty), grossDeliveredQty);
+    return { grossDeliveredQty, returnedQty,
+      effectiveDeliveredQty: Math.max(0, grossDeliveredQty - returnedQty) };
+  }
+
   function normalizeItem(item = {}, index = 0) {
     const orderedQty = n(item.orderedQty ?? item.qty);
     // 採購、到貨、打單、送貨與退貨都是累計事件量。
@@ -19,9 +28,10 @@
     const supplyOrderedQty = n(item.supplyOrderedQty);
     const receivedQty = n(item.receivedQty);
     const dispatchPreparedQty = n(item.dispatchPreparedQty);
-    const deliveredQty = n(item.deliveredQty);
-    const returnedQty = Math.min(n(item.returnedQty), deliveredQty);
-    const fulfilledQty = clamp(deliveredQty - returnedQty, 0, orderedQty);
+    const delivery = deliveryQuantities(item);
+    const deliveredQty = delivery.grossDeliveredQty;
+    const returnedQty = delivery.returnedQty;
+    const fulfilledQty = clamp(delivery.effectiveDeliveredQty, 0, orderedQty);
     const outstandingQty = Math.max(0, orderedQty - fulfilledQty);
     const reservedQty = clamp(item.reservedQty, 0, outstandingQty);
     const shortageQty = Math.max(0, outstandingQty - reservedQty);
@@ -44,9 +54,10 @@
     // Dispatch 只需要物流事件量與「目前仍被預留」的庫存。
     // 不先 normalizeItem()，避免在缺少 orderedQty 的輕量快照中把 live reservedQty 截成 0。
     // reservedQty 的合法性由 reservation / inventory transaction 維護；這裡只負責算待打單與可出貨。
-    const grossDelivered = n(item.deliveredQty);
-    const returned = Math.min(n(item.returnedQty), grossDelivered);
-    const delivered = Math.max(0, grossDelivered - returned);
+    const delivery = deliveryQuantities(item);
+    const grossDelivered = delivery.grossDeliveredQty;
+    const returned = delivery.returnedQty;
+    const delivered = delivery.effectiveDeliveredQty;
     const reserved = n(item.reservedQty);
     const prepared = n(item.dispatchPreparedQty);
     const preparedOutstanding = Math.max(0, prepared - grossDelivered);
@@ -86,6 +97,7 @@
   }
 
   return {
+    deliveryQuantities,
     normalizeItem,
     dispatchState,
     pendingDispatchQty,
@@ -95,3 +107,4 @@
     returnDelivery
   };
 });
+

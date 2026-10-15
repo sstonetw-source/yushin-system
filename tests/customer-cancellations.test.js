@@ -34,8 +34,8 @@ test('over receipt, withdrawn request, invalid quantity and unauthorized role re
  f.c.canReceiveInventoryCapability=()=>false;await assert.rejects(f.c.commitCustomerReturnReceipt({}),/無收貨權限/);
 });
 test('closed return keeps fulfillment complete rather than scheduling replacement',()=>{
- const start=app.indexOf('function deliveryProgressInfo('),end=app.indexOf('\nfunction savedReturnRecords',start);
- const c=vm.createContext({orderQuantity:()=>5,deliveredQuantity:()=>5,returnedQuantity:()=>2,savedReturnRecords:()=>[{qty:2,settlement:'CLOSE'}],savedDeliveryRecords:()=>[{}]});vm.runInContext(app.slice(start,end),c);assert.equal(c.deliveryProgressInfo({}).remaining,0);assert.equal(c.deliveryProgressInfo({}).state,'complete');
+ const start=app.indexOf('function orderDeliveryProjection('),end=app.indexOf('\nfunction savedReturnRecords',start);
+ const c=vm.createContext({YushinFulfillment:require('../modules/fulfillment-core'),orderQuantity:()=>5,deliveredQuantity:()=>5,returnedQuantity:()=>2,savedReturnRecords:()=>[{qty:2,settlement:'CLOSE'}],savedDeliveryRecords:()=>[{}]});vm.runInContext(app.slice(start,end),c);assert.equal(c.deliveryProgressInfo({}).remaining,0);assert.equal(c.deliveryProgressInfo({}).state,'complete');
 });
 test('closed return reduces actual sales without recreating pending sales',()=>{
  const start=app.indexOf('function calculateOrderStatsContribution('),end=app.indexOf('\nfunction addSalesStatsContribution',start);

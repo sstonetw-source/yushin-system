@@ -59,6 +59,10 @@ function fixture({role='admin',held=3,qty=5,status='active'}={}){
   inventoryMovementRecord:(type,qty,sourceId,productKey,actor,extra)=>({type,qty,sourceId,sourceType:'order',productKey,ownerUid:'U',salesCode:'S',actorUid:role,...extra})});
  vm.runInContext(app.slice(app.indexOf('function procurementDemandForOrderItem('),app.indexOf('function purchasingLifecycleSnapshot(')),c);
  vm.runInContext(app.slice(app.indexOf('function orderItemProcurementDemandDocument('),app.indexOf('async function persistOrderProcurementDemands(')),c);
+ c.window={YushinFulfillment:fulfillment};
+ c.brandIdentityForRecord=item=>({brand:item.brand||'',brandId:item.brandId||''});
+ c.normalizeHistoryItemCode=value=>value;c.parseMoney=value=>Number(value);
+ vm.runInContext(app.slice(app.indexOf('function normalizedOrderItems('),app.indexOf('function ensureOrderItemCompatibility(')),c);
  vm.runInContext(lifecycle,c);
  const run=async(nextStatus='cancelled')=>permissions.run(db,async tx=>{
   const ref=db.collection('orders').doc('O'),order=(await tx.get(ref)).data();
@@ -393,4 +397,135 @@ test('legacy numeric strings and fractional reservations can still be permanentl
  Object.assign(f.docs.get('orders/O').items[0],{qty:'1.5',reservedQty:'0.5',supplyOrderedQty:'0'});
  await f.deleteOrder();
  assert.equal(f.docs.has('orders/O'),false);assert.equal(f.docs.get('inventory/P').reserved,0);
+});
+
+test('duplicate item identities cannot release another orders stock or restore the same reservation twice',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  for(const nextStatus of ['cancelled','normal']){
+   const f=fixture({role,held:3,status:nextStatus==='normal'?'cancelled':'active'});
+   f.docs.get('inventory/P').reserved=9;f.docs.get('warehouseStocks/A__P').reserved=9;
+   f.docs.get('orders/O').items.push({...f.docs.get('orders/O').items[0]});
+   // Legacy demand rows use -1 when the original item index is unknown.
+   f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')).sourceItemIndex=-1;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.run(nextStatus),/品項識別碼重複/);
+   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('generated legacy item identities cannot collide with an explicit item identity during lifecycle changes',async()=>{
+ for(const nextStatus of ['cancelled','normal']){
+  const f=fixture();
+  const item=f.docs.get('orders/O').items[0];
+  item.itemId='item-2';f.docs.get('orders/O').items.push({...item,itemId:''});
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.run(nextStatus),/品項識別碼重複/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
+
+function quickLifecycleActionFixture(nextStatus){
+ let resolveCommit,rejectCommit,transactions=0;
+ const commit=new Promise((resolve,reject)=>{resolveCommit=resolve;rejectCommit=reject;});
+ const before={id:'O',status:nextStatus==='normal'?'cancelled':'active',orderStatus:nextStatus==='normal'?'cancelled':'normal',orderStatusDate:'2026-10-01',orderStatusReason:'original',orderLifecycleHistory:[],items:[]};
+ const c=vm.createContext({window:{},ordersCache:[structuredClone(before)],pendingLifecycleOrderIds:new Set(),
+  canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+  normalizedOrderStatus:o=>o.orderStatus,confirmOrderCancellation:()=>true,
+  localDateString:()=> '2026-10-15',deliveryActor:()=> 'U',
+  renderOrdersList:()=>{},currentDeliveryOrderId:null,renderDeliveryModal:()=>{},renderOrderLifecycleModal:()=>{},
+  deliveryProgressInfo:()=>({remaining:1}),BUSINESS_STATUS:{ACTIVE:'active',CANCELLED:'cancelled'},
+  firebase:{firestore:{FieldValue:{arrayUnion:()=>({})}}},
+  db:{collection:()=>({doc:()=>({})})},
+  runRoleTransaction:async fn=>{transactions++;await fn({get:async()=>({exists:true,data:()=>structuredClone(before)}),update:()=>{}});await commit;},
+  adjustInventoryReservationForLifecycle:async()=>({items:[]}),orderWorkIndexFields:()=>({}),
+  normalizedOrderItems:o=>o.items,syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},alert:()=>{}});
+ vm.runInContext(app.slice(app.indexOf('window.quickSetOrderLifecycle ='),app.indexOf('window.toggleOrderProgressStatus')),c);
+ return {c,before,resolveCommit,rejectCommit,transactions:()=>transactions};
+}
+test('quick cancellation and restoration show the confirmed status until transaction commit and ignore repeated taps',async()=>{
+ for(const nextStatus of ['normal','cancelled']){
+  const f=quickLifecycleActionFixture(nextStatus),pending=f.c.window.quickSetOrderLifecycle('O',nextStatus);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.c.ordersCache[0].orderStatus,f.before.orderStatus);
+  assert.equal(f.c.ordersCache[0].orderStatusDate,f.before.orderStatusDate);
+  assert.equal(f.c.ordersCache[0].orderLifecycleHistory.length,0);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),true);
+  await f.c.window.quickSetOrderLifecycle('O',nextStatus);assert.equal(f.transactions(),1);
+  f.resolveCommit();await pending;
+  assert.equal(f.c.ordersCache[0].orderStatus,nextStatus);
+  assert.equal(f.c.ordersCache[0].orderLifecycleHistory.length,1);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);
+ }
+});
+test('failed quick lifecycle writes preserve the confirmed cache and unlock the action',async()=>{
+ for(const nextStatus of ['normal','cancelled']){
+  const f=quickLifecycleActionFixture(nextStatus),pending=f.c.window.quickSetOrderLifecycle('O',nextStatus);
+  await new Promise(resolve=>setImmediate(resolve));
+  f.rejectCommit(new Error('permission denied'));await pending;
+  assert.deepEqual(structuredClone(f.c.ordersCache[0]),f.before);
+  assert.equal(f.c.pendingLifecycleOrderIds.has('O'),false);
+ }
+});
+test('failed quick lifecycle action does not overwrite newer cache updates with a stale rollback snapshot',async()=>{
+ const f=quickLifecycleActionFixture('cancelled'),pending=f.c.window.quickSetOrderLifecycle('O','cancelled');
+ await new Promise(resolve=>setImmediate(resolve));
+ f.c.ordersCache[0].orderStatusReason='newer confirmed note';
+ f.rejectCommit(new Error('offline'));await pending;
+ assert.equal(f.c.ordersCache[0].orderStatusReason,'newer confirmed note');
+ assert.equal(f.c.ordersCache[0].orderStatus,'normal');
+});
+
+test('empty order items cannot change lifecycle status while leaving existing reservations and demand behind',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  for(const nextStatus of ['normal','cancelled']){
+   const f=fixture({role});f.docs.get('orders/O').items=[];
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.run(nextStatus),/缺少有效品項明細/);
+   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('missing or malformed lifecycle item lists fail with an actionable message before any linked reads',async()=>{
+ for(const items of [undefined,null,{},'bad',[null],[5],[[]]]){
+  for(const nextStatus of ['normal','cancelled']){
+   const f=fixture();f.docs.get('orders/O').items=items;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.run(nextStatus),/缺少有效品項明細/);
+   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+   assert.deepEqual(f.reads,['orders/O']);
+  }
+ }
+});
+
+
+test('restoration does not reserve replacement stock for returns explicitly closed without reshipment',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  const f=fixture({role,held:0,qty:5,status:'cancelled'});
+  const order=f.docs.get('orders/O');
+  order.deliveryRecords=[{itemId:'I',qty:5}];
+  order.returnRecords=[{itemId:'I',qty:2,settlement:'CLOSE'}];
+  await f.run('normal');
+  assert.equal(f.docs.get('inventory/P').reserved,0);
+  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,0);
+  assert.equal(f.docs.get('inventoryReservations/O__I').quantity,0);
+  assert.equal(f.docs.get('inventoryReservations/O__I').shortageQty,0);
+ }
+});
+test('restoration reserves only open replacement returns and respects legacy item delivery quantities',async()=>{
+ for(const scenario of [
+  {deliveryRecords:[{itemId:'I',qty:5}],returnRecords:[{itemId:'I',qty:2,settlement:'CLOSE'},{itemId:'I',qty:1,settlement:'REPLACE'}],expected:1},
+  {deliveredQty:4,expected:1},
+  {deliveredQty:5,returnedQty:2,expected:2}
+ ]){
+  const f=fixture({held:0,qty:5,status:'cancelled'}),order=f.docs.get('orders/O');
+  if(scenario.deliveryRecords)order.deliveryRecords=scenario.deliveryRecords;
+  if(scenario.returnRecords)order.returnRecords=scenario.returnRecords;
+  if(scenario.deliveredQty!==undefined)order.items[0].deliveredQty=scenario.deliveredQty;
+  if(scenario.returnedQty!==undefined)order.items[0].returnedQty=scenario.returnedQty;
+  await f.run('normal');
+  assert.equal(f.docs.get('inventory/P').reserved,scenario.expected);
+  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,scenario.expected);
+  assert.equal(f.docs.get('inventoryReservations/O__I').quantity,scenario.expected);
+  assert.equal(f.docs.get('inventoryReservations/O__I').shortageQty,0);
+ }
 });

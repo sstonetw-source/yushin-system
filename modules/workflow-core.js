@@ -1,8 +1,9 @@
 (function(root,factory){
-  const api=factory();
+  const fulfillment=typeof module==='object'&&module.exports?require('./fulfillment-core.js'):root?.YushinFulfillment;
+  const api=factory(fulfillment);
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinWorkflow=api;
-})(typeof globalThis!=='undefined'?globalThis:this,function(){
+})(typeof globalThis!=='undefined'?globalThis:this,function(fulfillment){
   const RELEASE_MODES=Object.freeze({
     STANDARD:'STANDARD',
     ADVANCE_TO_CUSTOMER:'ADVANCE_TO_CUSTOMER'
@@ -41,14 +42,17 @@
     // app 若同時掌握 gross/effective 會明確傳 effectiveDeliveredQty；
     // 這裡不可在 fallback 再扣一次 returnedQty，否則退貨補送完成仍會被判成未完成。
     const hasExplicitEffective=hasNumber(input.effectiveDeliveredQty);
-    const effectiveDeliveredQty=hasExplicitEffective
-      ? Math.min(orderedQty,n(input.effectiveDeliveredQty))
-      : Math.min(orderedQty,n(input.deliveredQty));
     const grossDeliveredQty=hasNumber(input.grossDeliveredQty)
       ? n(input.grossDeliveredQty)
       : hasExplicitEffective
         ? n(input.deliveredQty)
         : n(input.deliveredQty)+returnedQty;
+    // Explicit cumulative input uses the same projection as dispatch. Legacy
+    // deliveredQty-only input remains effective quantity at this boundary.
+    const delivery=fulfillment.deliveryQuantities({deliveredQty:grossDeliveredQty,returnedQty});
+    const effectiveDeliveredQty=Math.min(orderedQty,hasExplicitEffective
+      ? n(input.effectiveDeliveredQty)
+      : hasNumber(input.grossDeliveredQty)?delivery.effectiveDeliveredQty:n(input.deliveredQty));
     const outstandingQty=Math.max(0,orderedQty-effectiveDeliveredQty);
 
     let reservedQty=0;

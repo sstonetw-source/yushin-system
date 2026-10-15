@@ -1083,17 +1083,6 @@ test('inventory replenishment uses the same procurement demand core', () => {
     assert.equal(projected.remainingToOrderQty,8);
 });
 
-test('restoring an order uses net delivered quantity after returns', () => {
-    const start=app.indexOf('async function adjustInventoryReservationForLifecycle');
-    const end=app.indexOf('\nwindow.quickSetOrderLifecycle',start);
-    const source=app.slice(start,end);
-    assert.ok(start>=0&&end>start);
-    assert.match(source,/const grossDelivered = deliveries/);
-    assert.match(source,/const returned = savedReturnRecords\(order\)/);
-    assert.match(source,/const delivered = Math\.max\(0, grossDelivered - returned\)/);
-    assert.match(source,/const outstanding = Math\.max\(0, ordered - delivered\)/);
-});
-
 test('full returns stay in fulfillment instead of closing the order', () => {
     const workflow=require('../modules/workflow-core.js');
     assert.equal(workflow.itemWorkCategory({
@@ -1163,11 +1152,12 @@ vm.runInContext(source,context);
 });
 
 test('delivery progress uses net delivered quantity after returns', () => {
-    const start=app.indexOf('function deliveryProgressInfo');
+    const start=app.indexOf('function orderDeliveryProjection(');
     const end=app.indexOf('\nfunction savedReturnRecords',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     const context=vm.createContext({
+        YushinFulfillment:fulfillment,
         orderQuantity:()=>10,
         deliveredQuantity:()=>10,
         returnedQuantity:()=>2,
