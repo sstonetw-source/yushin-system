@@ -938,8 +938,9 @@ service cloud.firestore {
 
     function businessProcurementDemandOperationalUpdate() {
       return businessOwner()
-        // A normal supply-progress edit cannot independently close a demand.
-        // Lifecycle cancellation requires its co-committed order transition.
+        // Generic supply progress can neither cancel nor reopen a cancelled demand.
+        // Both lifecycle transitions require their co-committed order proof.
+        && resource.data.get('status', '') != 'CANCELLED'
         && request.resource.data.get('status', '') != 'CANCELLED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
@@ -969,7 +970,7 @@ service cloud.firestore {
       let held = getAfter(/databases/$(database)/documents/inventoryReservations/$(d.sourceId + '__' + d.sourceItemId)).data;
       let delivered = item.get('deliveredQty', 0) - item.get('returnedQty', 0);
       let shortage = item.qty - (delivered > 0 ? delivered : 0) - held.quantity;
-      return businessOwner() && d.get('status', '') != 'CANCELLED'
+      return businessOwner() && resource.data.get('status', '') != 'CANCELLED' && d.get('status', '') != 'CANCELLED'
         && before.get('ownerUid', '') == request.auth.uid && after.get('ownerUid', '') == request.auth.uid
         && before.get('inventoryReservationStatus', '') in ['pending', 'failed']
         && after.get('inventoryReservationStatus', '') in ['pending', 'failed'] && !orderIsCancelled(after)
