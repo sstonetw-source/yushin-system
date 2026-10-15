@@ -3670,26 +3670,117 @@ window.permanentlyDeleteQuote = async function(quoteNo) {
     }catch(err){alert('永久刪除失敗：'+(err.message||err));}
 };
 
+// Historical supplier, delivery and custody events must remain auditable.
+// Admin cleanup only applies to an order without any downstream fulfillment.
+function assertOrderCanBePermanentlyDeleted(order) {
+    if(!order||!Array.isArray(order.items))throw new Error('訂單缺少完整品項，不能永久刪除。');
+    if(['pending','failed'].includes(order.inventoryReservationStatus))
+        throw new Error('訂單庫存同步尚未完成，請先核對或完成庫存同步。');
+    if(savedDeliveryRecords(order).length||savedReturnRecords(order).length
+        ||(order.logisticsHistory||[]).length||order.warehouseLogisticsId)
+        throw new Error('訂單已有送貨、退貨或調撥紀錄，不能永久刪除，請保留交易紀錄。');
+    for(const item of normalizedOrderItems(order)){
+        if(Number(item.supplyOrderedQty||0)>0||Number(item.receivedQty||0)>0
+            ||Number(item.dispatchPreparedQty||0)>0||item.transferPendingId
+            ||item.custodyTransferId||item.orderedAt
+            ||(item.selfOrderNos||[]).length||(item.supplyOrderNos||[]).length
+            ||(item.receiptEvents||[]).length)
+            throw new Error('訂單已有採購、打單、收貨或領貨進度，不能永久刪除，請保留交易紀錄。');
+    }
+}
 window.permanentlyDeleteOrder = async function(orderId) {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
-    const order=ordersCache.find(row=>row.id===orderId);
-    if(!order)return alert('找不到這筆訂單，請重新整理。');
-    const hasFlow=savedDeliveryRecords(order).length>0||savedReturnRecords(order).length>0||
-        normalizedOrderItems(order).some(item=>Number(item.supplyOrderedQty||0)>0||Number(item.receivedQty||0)>0);
-    if(hasFlow)return alert('這筆訂單已有採購／到貨／送貨／退貨紀錄。為避免庫存帳失真，請使用「系統初始化」清除整批測試資料，或先處理相關流程。');
-    if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？系統會先釋放未使用的庫存預留。此操作無法復原。`))return;
+    const cached=ordersCache.find(row=>row.id===orderId);
+    if(!cached)return alert('找不到這筆訂單，請重新整理。');
+    try { assertOrderCanBePermanentlyDeleted(cached); }
+    catch(err){ return alert(err.message); }
+    if(!confirm(`永久刪除訂單「${cached.orderNo||orderId}」及其無採購承諾的預留、需求？系統將先安全取消並釋放庫存，此操作無法復原。`))return;
+    let cancelled=false;
     try{
-        if(normalizedOrderStatus(order)!=='cancelled'){
-            await runRoleTransaction(async tx=>{
-                const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);
-                if(!snap.exists)throw new Error('找不到這筆訂單。');
-                await adjustInventoryReservationForLifecycle(tx,orderId,{id:orderId,...snap.data()},'cancelled',deliveryActor(),{skipDemandSync:true});
-            });
-        }
-        const refs=normalizedOrderItems(order).map((item,index)=>db.collection('inventoryReservations').doc(`${orderId}__${String(item.itemId||`item-${index+1}`)}`));
-        const batch=db.batch();refs.forEach(ref=>batch.delete(ref));batch.delete(db.collection('orders').doc(orderId));await batch.commit();
-        ordersCache=ordersCache.filter(row=>row.id!==orderId);orderHistorySearchResults=orderHistorySearchResults.filter(row=>row.id!==orderId);renderOrdersList();
-    }catch(err){alert('永久刪除失敗：'+(err.message||err));}
+        const orderRef=db.collection('orders').doc(orderId);
+        // Phase 1: check the LIVE order and all linked supplier commitments,
+        // then release stock and cancel demands atomically. On a later failure
+        // the order remains safely cancelled, never silently half-released.
+        await runRoleTransaction(async tx=>{
+            const snap=await tx.get(orderRef);
+            if(!snap.exists)throw new Error('找不到這筆訂單。');
+            const live={id:orderId,...snap.data()};
+            assertOrderCanBePermanentlyDeleted(live);
+            const items=normalizedOrderItems(live);
+            if(items.length>200)throw new Error('訂單品項過多，請由管理員分批核對後處理。');
+            for(let index=0;index<items.length;index++){
+                const item=items[index],itemId=String(item.itemId||`item-${index+1}`);
+                const demandId=globalThis.YushinProcurementDemand.demandIdForSource({
+                    sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
+                });
+                const demandRef=procurementDemandRef(demandId);
+                const demandSnap=await tx.get(demandRef);
+                if(demandSnap.exists){
+                    const demand=demandSnap.data();
+                    if(demand.sourceType!=='SALES_ORDER'||demand.sourceId!==orderId||demand.sourceItemId!==itemId
+                        ||demand.ownerUid!==live.ownerUid||demand.salesCode!==live.salesCode
+                        ||demand.productKey!==inventoryProductKey(item))
+                        throw new Error('採購需求與訂單來源不一致，不能永久刪除。');
+                    if(Number(demand.orderedQty||0)>0||Number(demand.receivedQty||0)>0)
+                        throw new Error('訂單仍有供應商採購或到貨紀錄，不能永久刪除。');
+                }
+            }
+            await adjustInventoryReservationForLifecycle(tx,orderId,live,'cancelled',deliveryActor());
+            tx.update(orderRef,{status:BUSINESS_STATUS.CANCELLED,orderStatus:'cancelled'});
+        });
+        cancelled=true;
+        // Phase 2: deleting the order, empty reservation docs and empty demands
+        // is a single transaction. Validate a fresh snapshot, not the UI cache.
+        await runRoleTransaction(async tx=>{
+            const snap=await tx.get(orderRef);
+            if(!snap.exists)throw new Error('訂單已被其他操作刪除，請重新整理。');
+            const live={id:orderId,...snap.data()};
+            assertOrderCanBePermanentlyDeleted(live);
+            if(normalizedOrderStatus(live)!=='cancelled')
+                throw new Error('訂單狀態已變動，停止永久刪除。');
+            const items=normalizedOrderItems(live);
+            if(items.length>200)throw new Error('訂單品項過多，停止永久刪除。');
+            const links=[];
+            for(let index=0;index<items.length;index++){
+                const item=items[index],itemId=String(item.itemId||`item-${index+1}`);
+                const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
+                const demandRef=procurementDemandRef(globalThis.YushinProcurementDemand.demandIdForSource({
+                    sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
+                }));
+                const reservation=await tx.get(reservationRef);
+                const demand=await tx.get(demandRef);
+                const quantity=reservation.exists?Number(reservation.data().quantity):0;
+                if(!Number.isFinite(quantity)||quantity!==0||Number(item.reservedQty||0)!==0)
+                    throw new Error('訂單仍有庫存預留，停止刪除，請先核對預留帳。');
+                if(reservation.exists&&(reservation.data().orderId!==orderId||reservation.data().itemId!==itemId))
+                    throw new Error('庫存預留來源與訂單不一致，停止刪除。');
+                if(demand.exists){
+                    const d=demand.data();
+                    if(d.sourceType!=='SALES_ORDER'||d.sourceId!==orderId||d.sourceItemId!==itemId
+                        ||d.ownerUid!==live.ownerUid||d.salesCode!==live.salesCode
+                        ||d.productKey!==inventoryProductKey(item)
+                        ||Number(d.orderedQty||0)!==0||Number(d.receivedQty||0)!==0
+                        ||d.status!=='CANCELLED')
+                        throw new Error('採購需求含未結清或不一致的紀錄，停止刪除。');
+                }
+                links.push({reservationRef,reservation,demandRef,demand});
+            }
+            for(const link of links){
+                if(link.reservation.exists)tx.delete(link.reservationRef);
+                if(link.demand.exists)tx.delete(link.demandRef);
+            }
+            tx.delete(orderRef);
+        });
+        ordersCache=ordersCache.filter(row=>row.id!==orderId);
+        orderHistorySearchResults=orderHistorySearchResults.filter(row=>row.id!==orderId);
+        invalidateProcurementDemandQueue();
+        renderOrdersList();
+    }catch(err){
+        const prefix=cancelled
+            ?'訂單已安全取消並釋放預留，但永久刪除未完成；請重新查詢訂單及關聯需求後重試：'
+            :'永久刪除前的訂單／供應紀錄核對或取消失敗，原訂單尚未刪除：';
+        alert(prefix+(err?.message||err));
+    }
 };
 
 window.openForecastProgressModal = function(id) {
