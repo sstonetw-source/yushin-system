@@ -248,8 +248,8 @@ test('automatic remote allocation flows through printing, transfer transit, rece
   deliveryActor:()=> 'Buyer',orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus),
   itemDispatchState:(_o,item)=>fulfillment.dispatchState(item),DOCUMENT_TYPES:{ORDER:'order'},
   firebase:{firestore:{FieldValue:{arrayUnion:v=>({__arrayUnion:[v]})}}}});
- const logisticsSource=fs.readFileSync('modules/warehouse-logistics.js','utf8');
- vm.runInContext(logisticsSource.slice(logisticsSource.indexOf('async function commitWarehouseTransfer(')),f.c);
+ const logisticsSource=fs.readFileSync('src/services/warehouse-transfer.js','utf8');
+ vm.runInContext(logisticsSource,f.c);
  vm.runInContext(section('function inventoryReservationPayload(', 'window.openInventoryReservationDetails ='),f.c);
  vm.runInContext(section('async function applyInventoryDeliveryDeltaInTransaction(', 'async function applyInventoryReturnDeltaInTransaction('),f.c);
  const branchItem=f.order().items[0];assert.equal(core.businessDeliveryState(f.order(),branchItem,fulfillment.dispatchState(branchItem),'W').shippable,0);

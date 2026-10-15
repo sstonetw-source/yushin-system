@@ -108,3 +108,15 @@ test('single and batch warehouse shipments share one service and order-delivery 
   assert.match(service,/deliveryRecordWasReversed\(/);
   assert.doesNotMatch(service,/document\.|ordersCache|itemDispatchState\(/);
 });
+test('warehouse transfer dispatch and receipt are owned by one service, not the logistics UI',()=>{
+ const ui=read('modules/warehouse-logistics.js');
+ assert.doesNotMatch(ui,/async function commitWarehouseTransfer|function writeTransferLots/);
+ for(const name of ['commitWarehouseTransfer','commitWarehouseTransferReceipt','writeTransferLots']){
+   const declarations=walk('src').filter(file=>new RegExp('function '+name+'\\(').test(read(file)));
+   assert.deepEqual(declarations,['src/services/warehouse-transfer.js']);
+ }
+ const service=read('src/services/warehouse-transfer.js');
+ assert.match(service,/runRoleTransaction/);assert.doesNotMatch(service,/document\.|alert\(|showActionFeedback/);
+ assert.match(service,/YushinFulfillment\.deliveryQuantities\(item\)/);
+ assert.match(ui,/handoff:true,expectedWarehouseId:row.warehouseId,expectedPlan:savedRowPlan\(row\)/);
+});
