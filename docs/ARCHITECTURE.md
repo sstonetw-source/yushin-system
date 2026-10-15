@@ -82,3 +82,8 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `src/infrastructure/stock-transaction.js`：權限 Rules 可用性檢查、採購安全來源選擇，以及唯一 `runRoleTransaction()` 入口；執行時確認真實登入 UID／角色未變更、委託 `YushinStockPermissions.run()`，提交成功後統一失效分析快取。
 - `src/app/role-capabilities.js`：角色能力、客戶身分識別等與交易引擎不同的政策和 UI 輔助。
 - 本次來源拆分採**原始位元順序不變**的方式，仍由一支 `app.js` 執行，後續對安全交易 API 進行獨立注入/測試時可在單一位置修改；不是聲稱已移除所有跨檔全域依賴。
+
+## 訂單打單交易 Service（2026-10-15）
+- `src/services/dispatch-preparation.js` 的 `prepareOrderDispatch(orderId,itemId)` 擁有打單的 Firestore transaction（重新讀正式訂單、驗證交易資訊、計算可打單量、同交易建立 `dispatchRecords` 與更新 `orders`）。
+- `window.markOrderItemDispatchPrepared` 僅負責角色可見性、重複按鍵鎖、操作回饋及快取重新呈現；不可另寫第二套打單 Firestore 異動。
+- 冪等性依 transaction 中重新檢查當前待打單量；如先前已提交，重試不能建立第二張相同的 dispatch 記錄。UI 鎖只是輔助，不能取代交易讀取。

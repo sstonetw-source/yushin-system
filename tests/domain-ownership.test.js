@@ -22,3 +22,14 @@ test('order and receiving quantity projections delegate to domain core',()=>{
   assert.match(read('modules/fulfillment-core.js'),/function\s+projectOrderDelivery\s*\(/);
   assert.match(read('modules/receiving-core.js'),/workflow\.projectItem\s*\(/);
 });
+
+test('dispatch recording lives in the services layer, not order UI',()=>{
+  const ui=read('src/features/orders/order-workspace.js');
+  const start=ui.indexOf('window.markOrderItemDispatchPrepared =');
+  const end=ui.indexOf('function canBusinessSelfOrder',start);
+  assert.ok(start>=0&&end>start);
+  const handler=ui.slice(start,end);
+  assert.match(handler,/await\s+prepareOrderDispatch\s*\(/);
+  assert.doesNotMatch(handler,/await\s+runRoleTransaction\s*\(/);
+  assert.match(read('src/services/dispatch-preparation.js'),/async\s+function\s+prepareOrderDispatch\s*\(/);
+});
