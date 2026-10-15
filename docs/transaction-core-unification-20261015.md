@@ -62,3 +62,7 @@ fulfillment-core 新增 deliveryQuantities，normalizeItem 與 dispatchState 共
 - 修改後實際執行 1,116 項 Node 應用測試全部通過；兩個修改模組的語法及 git diff 空白檢查通過。
 - Node VM 載入不是實際瀏覽器驗收；正式登入、Emulator 及正式資料測試沒有由這些結果代替。
 - 本輪無 Rules／Index 變更，也沒有正式部署。GitHub PR／CI 結果另記，不以 PR 建立代表 CI 通過。
+
+### 2026-10-16 入口追查補正
+
+上一批僅將快速取消／恢復移入 Service，狀態表單仍有獨立交易。此批把兩者接到 `setOrderLifecycleStatus`，保留表單日期／原因編輯能力，並驗證相同值重試、僅編輯中繼資料不動預留、庫存調整失敗不提交狀態。另將舊版送貨推估清除改為受保護交易，阻擋 stale modal 或 transaction retry 清掉新建立的實際送貨紀錄。其他送貨寫入入口仍待後續統一。

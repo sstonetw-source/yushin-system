@@ -98,3 +98,10 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `src/services/order-lifecycle.js` 的 `setOrderLifecycleStatus(orderId,nextStatus)` 在 `runRoleTransaction` 中讀取最新訂單，判斷取消／恢復是否合法，並藉 `adjustInventoryReservationForLifecycle` 於同交易處理預留與採購需求，然後原子寫入訂單狀態、歷程及工作索引。
 - `src/features/orders/lifecycle-workspace.js` 的 `quickSetOrderLifecycle` 僅負責角色畫面操作、確認提示、狀態更新與失敗回饋；不得直接再實作另一個取消／恢復資料庫交易。
 - 單次重試中採相同 actor、date、at；服務對已是目標狀態的正式訂單不重複寫入，避免產生重複狀態歷程。
+
+## 取消／恢復全入口與歷史推估更正（2026-10-16）
+
+- `quickSetOrderLifecycle` 和狀態表單 `saveOrderLifecycleStatus` 均呼叫 `setOrderLifecycleStatus(orderId,nextStatus,details)`；`details` 包含狀態日期與原因。只修改日期／原因不觸發庫存預留變更；狀態轉換仍與預留、需求同交易提交。
+- 快速操作在目標狀態已成立時不改寫既有日期／原因；表單相同值重試不新增歷史。歷史的 before 一律來自交易內最新訂單。
+- `src/services/delivery-correction.js` 的 `clearOrderLegacyDeliveryEstimate` 為清除舊版送貨布林推估的唯一寫入入口。交易內重讀訂單；已有實際送貨或退貨時拒絕清除，避免舊畫面抹除新紀錄。重複清除不再次寫歷史；不建立實貨移動。
+- 此批未完成送貨新增／編輯／撤銷服務化、多倉拆量或服務型訂單；不得視為整體重整結案。Rules／Index／Collection 無異動，沒有正式 Firebase 部署或資料清除。

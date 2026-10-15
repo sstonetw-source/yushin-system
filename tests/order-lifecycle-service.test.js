@@ -64,3 +64,42 @@ test('fully fulfilled cancellation or inconsistent reservations do not write an 
   await assert.rejects(broken.c.setOrderLifecycleStatus('O1','cancelled'),/inventory inconsistent/);
   assert.equal(broken.writes(),0);
 });
+
+test('form cancellation/restoration and quick actions share stock changes and preserve form details',async()=>{
+  const f=fixture();
+  const details={date:'2026-10-14',reason:'  客戶取消  '};
+  await f.c.setOrderLifecycleStatus('O1','cancelled',details);
+  assert.equal(f.state().orderStatusDate,'2026-10-14');
+  assert.equal(f.state().orderStatusReason,'客戶取消');
+  await f.c.setOrderLifecycleStatus('O1','cancelled',details);
+  await f.c.setOrderLifecycleStatus('O1','cancelled');
+  assert.equal(f.writes(),1);
+  assert.equal(f.reservations(),1);
+  await f.c.setOrderLifecycleStatus('O1','normal',{date:'2026-10-15',reason:'客戶恢復'});
+  assert.equal(f.reservations(),2);
+  assert.equal(f.state().orderLifecycleHistory[1].action,'restore');
+  assert.equal(f.state().orderLifecycleHistory[1].before.reason,'客戶取消');
+});
+test('editing lifecycle metadata does not replay stock transitions and uses live before values',async()=>{
+  const f=fixture({status:'cancelled',remaining:0,throwOnAdjust:true});
+  await f.c.setOrderLifecycleStatus('O1','cancelled',{date:'2026-10-14',reason:'補說明'});
+  await f.c.setOrderLifecycleStatus('O1','cancelled',{date:'2026-10-15',reason:'更正說明'});
+  assert.equal(f.reservations(),0);
+  assert.equal(f.writes(),2);
+  assert.equal(f.state().orderLifecycleHistory[1].before.reason,'補說明');
+  assert.equal(f.state().orderLifecycleHistory[1].action,'status_change');
+});
+test('invalid form state/date and failed reservation updates never commit form changes',async()=>{
+  const f=fixture();
+  for(const date of ['', '2026-02-30', '2026-13-01', '2026-1-1']){
+    await assert.rejects(f.c.setOrderLifecycleStatus('O1','cancelled',{date}),/正確的狀態日期/);
+  }
+  await assert.rejects(f.c.setOrderLifecycleStatus('O1','other',{date:'2026-10-15'}),/不支援/);
+  assert.equal(f.writes(),0);
+  const broken=fixture({throwOnAdjust:true});
+  await assert.rejects(broken.c.setOrderLifecycleStatus('O1','cancelled',{
+    date:'2026-10-15',reason:'不應儲存'
+  }),/inventory inconsistent/);
+  assert.equal(broken.writes(),0);
+  assert.equal(broken.state().orderLifecycleHistory.length,0);
+});
