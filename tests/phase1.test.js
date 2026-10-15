@@ -3124,7 +3124,7 @@ test('order list skips search-string work when no keyword and batches DOM insert
 test('high frequency lookup reads are bounded', () => {
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'產品主檔'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('quotes'\)\.doc\(forecast\.sourceId\)\.get\(\)[\s\S]*?'Forecast 來源估價單'/);
-    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)[\s\S]*?\.limit\(20\)[\s\S]*?'Customer Master 客戶建議'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)[\s\S]*?\.limit\(20\)[\s\S]*?'客戶主檔建議'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價偏好'/);
 });
 
@@ -4515,7 +4515,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     assert.match(quickSource,/existingSupply\?\.fulfillmentType \|\| currentFulfillmentType/);
     assert.match(quickSource,/existingSupply\?\.warehouseId \|\| currentWarehouseId/);
     assert.match(quickSource,/產品識別不可在追加採購前變更/);
-    assert.match(quickSource,/訂貨方式不可在追加採購前變更/);
+    assert.match(quickSource,/交付方式不可在追加採購前變更/);
     assert.match(quickSource,/入庫倉庫不可在追加採購前變更/);
     assert.match(quickSource,/type:'PURCHASING_MANUAL'/);
     assert.match(quickSource,/method:'PURCHASING_MANUAL'/);
@@ -4707,12 +4707,12 @@ test('admin exposes the loaded application asset version', () => {
 });
 
 
-test('product page has a single gated brand search area', () => {
+test('product page lets users search exact codes without selecting a brand', () => {
     assert.doesNotMatch(indexSource, /id="productBrandBrowser"|otherProductBrandsExpanded|window\.renderProductBrandBrowser =/);
     assert.match(indexSource, /id="productSearchBrandButtons"/);
-    assert.match(indexSource, /id="productManagementSearch"[^>]+disabled/);
-    assert.match(appSource, /if \(input\) input.disabled = !selected/);
-    assert.match(appSource, /if \(button\) button.disabled = !selected \|\| productManagementSearchInProgress/);
+    assert.match(indexSource, /id="productManagementSearch"[^>]+oninput="updateProductSearchControls\(\)"/);
+    assert.match(appSource, /if \(input\) input.disabled = false/);
+    assert.match(appSource, /if \(button\) button.disabled = productManagementSearchInProgress/);
 });
 
 test('admin can remove a pending product reminder without deleting source documents and restore it later', () => {
@@ -5423,7 +5423,7 @@ test('customer suggestions stay bounded while full Customer Master remains lazy-
     assert.doesNotMatch(source, /ordersCache\.map\(/);
     assert.doesNotMatch(source, /querySelectorAll\('#clientList option'\)/);
     assert.match(appSource, /queueCustomerMasterSuggestions/);
-    assert.match(appSource, /\.limit\(20\)[\s\S]*Customer Master 客戶建議/);
+    assert.match(appSource, /\.limit\(20\)[\s\S]*客戶主檔建議/);
 });
 
 test('quote and decision-analysis output have no mandatory user-entered fields', () => {

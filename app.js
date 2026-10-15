@@ -1614,10 +1614,11 @@ function updateProductSearchControls() {
     const selected = !!document.getElementById('productManagementSearchBrand')?.value;
     const input = document.getElementById('productManagementSearch');
     const button = document.getElementById('productManagementSearchBtn');
-    if (input) input.disabled = !selected;
+    // Exact product-code lookup works without a brand; selecting one narrows the result.
+    if (input) input.disabled = false;
     const browseButton = document.getElementById('productManagementBrowseBtn');
     if (browseButton) browseButton.disabled = !selected || productManagementSearchInProgress;
-    if (button) button.disabled = !selected || productManagementSearchInProgress;
+    if (button) button.disabled = productManagementSearchInProgress || !String(input?.value || '').trim();
 }
 
 window.onProductSearchBrandChange = function() {
@@ -2348,8 +2349,8 @@ window.searchProductManagement = async function(loadMore = false) {
     const button = document.getElementById('productManagementSearchBtn');
     const status = document.getElementById('productManagementSearchStatus');
     const raw = String(input?.value || '').trim();
-    if (!brand || !raw) {
-        if (status) status.textContent = !brand ? '請先選擇廠牌。' : '請輸入完整貨號。';
+    if (!raw) {
+        if (status) status.textContent = '請輸入完整貨號；可直接搜尋全部廠牌，或先選擇廠牌縮小範圍。';
         return;
     }
     const generation = ++productManagementSearchGeneration;
@@ -2386,8 +2387,10 @@ window.searchProductManagement = async function(loadMore = false) {
     const isCurrent = () => generation === productManagementSearchGeneration && role === currentUserRole && uid === currentUser?.uid;
     try {
         if (!state.loaded || (loadMore && state.hasMore)) {
-            const storedBrandNames = dedupeBrandsCaseInsensitive([brand, ...(brandMasterEntryForName(brand)?.aliases || [])]).slice(0, 10);
-            // Read only matching normalized codes; brand aliases are filtered locally.
+            const storedBrandNames = brand
+                ? dedupeBrandsCaseInsensitive([brand, ...(brandMasterEntryForName(brand)?.aliases || [])]).slice(0, 10)
+                : [];
+            // Read only matching normalized codes; the optional brand is filtered locally.
             // This uses the existing single-field index without scanning a catalogue.
             let query = db.collection('products')
                 .where('normalizedPartNo', '==', normalizedCode)
@@ -2397,7 +2400,7 @@ window.searchProductManagement = async function(loadMore = false) {
             if (!isCurrent()) return;
             snapshot.docs.forEach(doc => {
                 const data = { id:doc.id, ...doc.data() };
-                if (!storedBrandNames.some(name => normalizeBrandLookupKey(name) === normalizeBrandLookupKey(data.brandName || data.brand || ''))) return;
+                if (brand && !storedBrandNames.some(name => normalizeBrandLookupKey(name) === normalizeBrandLookupKey(data.brandName || data.brand || ''))) return;
                 if (!canSeeInactive && (data.status === 'INACTIVE' || data.active === false)) return;
                 state.map.set(doc.id, data);
             });
@@ -2412,8 +2415,8 @@ window.searchProductManagement = async function(loadMore = false) {
         productManagementVisibleLimit = Math.max(PRODUCT_MANAGEMENT_RENDER_STEP, productManagementResults.length);
         renderProductManagementResults();
         if (status) status.textContent = productManagementResults.length
-            ? `${brand}：完整貨號 ${raw}，找到 ${productManagementResults.length} 筆${state.hasMore ? '，可載入更多符合結果' : ''}。`
-            : state.hasMore ? '目前符合貨號的產品皆停用，可載入更多符合結果。' : `${brand}：查無完整貨號 ${raw}，請確認廠牌與貨號。`;
+            ? `${brand || '全部廠牌'}：完整貨號 ${raw}，找到 ${productManagementResults.length} 筆${state.hasMore ? '，可載入更多符合結果' : ''}。`
+            : state.hasMore ? '目前符合貨號的產品皆停用，可載入更多符合結果。' : `${brand || '全部廠牌'}：查無完整貨號 ${raw}，請確認廠牌與貨號。`;
     } catch (err) {
         if (!isCurrent()) return;
         console.error('產品管理搜尋失敗：', err);
@@ -8982,7 +8985,7 @@ window.renderPendingInventoryItems=function(){
 };
 function inventoryMovementTypeLabel(type='') {
     return ({
-        initial:'新增庫存',
+        initial:'手動新增庫存',
         adjustment:'盤點調整',
         scrap:'報廢',
         warehouse_transfer_out:'倉庫移出',
@@ -9064,7 +9067,7 @@ window.renderInventoryLedger=function(){
 };
 let inventoryAdjustmentRows = [];
 
-function inventoryAdjustmentTitle(type) {return ({initial:'新增庫存',adjustment:'批號／效期庫存異動',scrap:'報廢'})[type]||'庫存異動';}
+function inventoryAdjustmentTitle(type) {return ({initial:'手動新增庫存',adjustment:'批號／效期庫存異動',scrap:'報廢'})[type]||'庫存異動';}
 window.onInventoryAdjustmentTypeChange=function(){
     const type=document.getElementById('inventoryAdjustmentType')?.value||'adjustment';
     const title=document.getElementById('inventoryAdjustmentTitle');
@@ -9125,7 +9128,7 @@ window.openInventoryAdjustment = async function(type = 'initial', item = null) {
         }));
         renderInventoryAdjustmentRows();
     } catch (err) {
-        console.warn('新增庫存：倉庫主檔載入失敗，先保留目前表單。', err);
+        console.warn('手動新增庫存：倉庫主檔載入失敗，先保留目前表單。', err);
     }
 };
 window.closeInventoryAdjustment = function() {
@@ -9409,7 +9412,7 @@ window.saveInventoryTransfer=async function(){
 window.downloadInventoryImportTemplate=async function(){
     try{await ensureXlsxLoaded();}catch(err){alert(err.message);return;}
     const rows=[{'貨號':'5000006','倉庫':'台北倉','數量':10,'實際單位成本':0,'批號':'','效期':'','備註':'範例列，可刪除'}];
-    const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'庫存匯入');XLSX.writeFile(wb,'又鑫_庫存批量匯入範本.xlsx');
+    const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'庫存匯入');XLSX.writeFile(wb,'又鑫_庫存批次匯入範本.xlsx');
 };
 window.previewInventoryExcelImport=async function(input){
     const file=input?.files?.[0];if(!file)return;
@@ -9510,7 +9513,7 @@ window.saveInventoryAdjustmentBatch = async function() {
     const rows=inventoryAdjustmentRows.filter(row=>row.itemCode&&Number(row.qty));
     if(!rows.length){alert('請至少輸入一筆貨號與數量。');return;}
     if(warehouseMasterCache.length && rows.some(row=>!row.warehouseId)){alert('請為每筆庫存異動選擇倉庫。');return;}
-    if(type==='initial'&&canCreatePurchaseOrderCapability()&&rows.some(row=>String(row.unitCost ?? '').trim()===''||!Number.isFinite(Number(row.unitCost))||Number(row.unitCost)<0)){alert('期初庫存請填寫每筆實際單位成本。');return;}
+    if(type==='initial'&&canCreatePurchaseOrderCapability()&&rows.some(row=>String(row.unitCost ?? '').trim()===''||!Number.isFinite(Number(row.unitCost))||Number(row.unitCost)<0)){alert('手動新增庫存請填寫每筆實際單位成本。');return;}
     const actor=currentUserName||currentUser?.email||'';
     const button=document.getElementById('saveInventoryAdjustmentBatchBtn');
     if(button){button.disabled=true;button.textContent='儲存中…';}
@@ -9717,6 +9720,12 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
             return {id,ref,snapshot,master:master.exists?{...master.data(),id}:null};
         }));
         if(canChoose){
+          const eligibleLocations=warehouseContexts.filter(row=>row.master&&row.master.active!==false
+              &&!row.master.systemCustody&&row.master.warehouseType!=='CUSTODY'&&!row.id.startsWith('custody-'));
+          const availableAtEligibleLocations=eligibleLocations
+              .reduce((sum,row)=>sum+inventoryNumbers(row.snapshot.exists?row.snapshot.data():{}).available,0);
+          if(eligibleLocations.length&&aggregateSnap?.exists&&aggregate.available>availableAtEligibleLocations+1e-8)
+              throw new Error('公司可用庫存與啟用分倉可用量不一致，請先核對分倉庫存或停用倉庫，避免誤列待採購。');
           const selection=globalThis.YushinReservation.selectSingleWarehouse({
             warehouses:warehouseContexts.map(row=>row.master).filter(Boolean),
             stocks:Object.fromEntries(warehouseContexts.map(row=>[row.id,row.snapshot.exists?row.snapshot.data():{}])),
@@ -10256,7 +10265,7 @@ async function registerInitialSelfOrderSupply(orderId,itemId,{supplier,qty,unitC
             const index=items.findIndex(row=>row.itemId===itemId);
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
-            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購處理，不能自行訂貨。');
+            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購，不能自行訂貨。');
             const supplyRef=supplyOrdersCollection().doc(`self-${encodeURIComponent(orderId)}-${encodeURIComponent(itemId)}`);
             const existingSupply=await tx.get(supplyRef);
             if(existingSupply.exists){savedOrder=order;return;}
@@ -10419,7 +10428,7 @@ window.saveSelfOrder = async function() {
             const index=items.findIndex(row=>row.itemId===itemId);
             if(index<0)throw new Error('找不到訂單品項。');
             const item=items[index];
-            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購處理，不能自行訂貨。');
+            if ((item.procurementType || order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') throw new Error('此品項設定為交由採購，不能自行訂貨。');
             const already=Math.max(0,Number(item.supplyOrderedQty||0));
             const demand=procurementDemandForOrderItem({...order,id:orderId},item);
             const remaining=demand.remainingToOrderQty;
@@ -10549,6 +10558,7 @@ function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatc
 function orderItemDisplayCategories(order, item, lifecycleOverride = null, dispatchOverride = null) {
     const dispatch = dispatchOverride || itemDispatchState(order, item);
     const category=orderItemDisplayCategory(order,item,lifecycleOverride,dispatch);
+    if(category!=='closed'&&['pending','failed'].includes(order?.inventoryReservationStatus))return [];
     const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
     // A single line can be partly printed and partly awaiting paperwork/arrival.
     // Keep both work queues visible, but never present unprinted quantities to sales.
@@ -11226,7 +11236,7 @@ window.renderOrdersList = function() {
             <td class="order-date-cell" data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td class="order-customer-cell" data-th="客戶名稱"><div class="record-reference">客戶訂單${o.orderNo ? `・${escapeHtml(o.orderNo)}` : o.quoteNo ? `・來源估價單 ${escapeHtml(o.quoteNo)}` : ''}</div>${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml((lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state))||itemStatusMap[itemStatus]||'待採購')}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td class="order-details-cell">
                 <div class="order-text-summary">${escapeHtml([o.transactionType ? `交易：${o.transactionType}` : '', o.invoiceTitle || '', o.isBilled && orderBillingDate(o) ? `核銷日期：${orderBillingDate(o)}` : '', o.remarks || ''].filter(Boolean).join('・'))}</div>
@@ -11756,7 +11766,7 @@ function purchasingDispatchStateSnapshot(normalizedItemsByOrder, sourceOrders = 
 }
 
 function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchStateByItem = null, lifecycleOverride = null) {
-    if (normalizedOrderStatus(order) !== 'normal') return [];
+    if (normalizedOrderStatus(order) !== 'normal' || ['pending','failed'].includes(order?.inventoryReservationStatus)) return [];
     // 工作卡與明細只讀訂單本身；不要在 render 階段解析成本／Product Master。
     // 同一輪採購頁 render 可直接沿用已 normalize 的品項快照。
     // 真正按「已採購／產生採購單」時，pendingPurchaseLines() 才補齊正式採購資料。
@@ -12791,7 +12801,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
                     throw new Error('此品項已建立供應紀錄，產品識別不可在追加採購前變更。');
                 }
                 if ((existingSupply.fulfillmentType || 'WAREHOUSE') !== currentFulfillmentType) {
-                    throw new Error('此品項已建立供應紀錄，訂貨方式不可在追加採購前變更。');
+                    throw new Error('此品項已建立供應紀錄，交付方式不可在追加採購前變更。');
                 }
                 if (!directShip && existingSupply.warehouseId && currentWarehouseId && existingSupply.warehouseId !== currentWarehouseId) {
                     throw new Error('此品項已建立供應紀錄，入庫倉庫不可在追加採購前變更。');
@@ -14846,7 +14856,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             return;
         }
         const productKey=supply.productKey||supply.productId||(supply.itemCode?`code:${normalizeHistoryItemCode(supply.itemCode)}`:'');
-        if(!productKey)throw new Error('此品項缺少 Product ID／貨號。');
+        if(!productKey)throw new Error('此品項缺少 產品識別碼／貨號。');
         const warehouseId=supply.warehouseId||defaultWarehouse()?.id||'';
         if(!warehouseId)throw new Error('此供應紀錄尚未指定入庫倉庫，無法安全入庫。');
         receivedProductKey=productKey;receivedWarehouseId=warehouseId;sourceOrderId=supply.orderId||'';
@@ -18210,7 +18220,7 @@ function renderNewOrderDraftItems(){
         const status=orderItemProductStatus(item);
         const action=status==='missing'?`<button type="button" class="btn-small btn-secondary" onclick="quickCreateNewOrderDraftItem(${index})">快速建立</button>`
             : ['ambiguous','error'].includes(status)?`<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">${status==='error'?'重試':'選擇產品'}</button>`:'';
-        return `<tr><td data-th="貨號">${escapeHtml(item.itemCode||'')}</td><td data-th="品名">${escapeHtml(item.itemName||'')}</td><td data-th="廠牌">${escapeHtml(item.brand||'')}</td><td data-th="數量">${item.qty}</td><td data-th="單價">${item.unitPrice===null?'待確認':Number(item.unitPrice).toLocaleString()}</td><td data-th="產品狀態" class="order-product-status" data-status="${status}">${orderItemProductStatusLabel(item)}</td><td data-th="訂貨／交付">${item.procurementType==='SALES_SELF_ORDER'?(item.selfOrderConfirmed?'自行訂貨・已下訂':'自行訂貨・尚未下訂'):'交由採購處理'}／${globalThis.YushinOrderEntry.deliveryLabel(item)}</td><td data-th="操作">${action}<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`;
+        return `<tr><td data-th="貨號">${escapeHtml(item.itemCode||'')}</td><td data-th="品名">${escapeHtml(item.itemName||'')}</td><td data-th="廠牌">${escapeHtml(item.brand||'')}</td><td data-th="數量">${item.qty}</td><td data-th="單價">${item.unitPrice===null?'待確認':Number(item.unitPrice).toLocaleString()}</td><td data-th="產品狀態" class="order-product-status" data-status="${status}">${orderItemProductStatusLabel(item)}</td><td data-th="訂貨／交付">${item.procurementType==='SALES_SELF_ORDER'?(item.selfOrderConfirmed?'自行訂貨・已下訂':'自行訂貨・尚未下訂'):'交由採購'}／${globalThis.YushinOrderEntry.deliveryLabel(item)}</td><td data-th="操作">${action}<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`;
     }).join('');
 }
 let orderDraftProductCheckGeneration=0;
@@ -18422,7 +18432,7 @@ async function searchCustomerMasterSuggestions(raw) {
                 .endAt(prefix + '\uf8ff')
                 .limit(20)
                 .get(),
-            'Customer Master 客戶建議'
+            '客戶主檔建議'
         );
         // 使用者可能在等待期間繼續輸入；舊查詢結果不可覆蓋新的關鍵字。
         const currentValues = [
@@ -18437,7 +18447,7 @@ async function searchCustomerMasterSuggestions(raw) {
             .slice(0, 20);
         populateOrderCustomerSuggestions();
     } catch (err) {
-        console.warn('Customer Master 客戶建議查詢失敗：', err);
+        console.warn('客戶主檔建議查詢失敗：', err);
     }
 }
 
@@ -19461,7 +19471,7 @@ function runEquipmentUpsertBatch(ops) {
     return chain;
 }
 
-// 儀器管理系統：批量上傳 Excel（依「儀器編號」比對：比對到既有紀錄就更新、比對不到就新增；
+// 儀器管理系統：批次上傳 Excel（依「儀器編號」比對：比對到既有紀錄就更新、比對不到就新增；
 // 不會刪除任何既有資料，維修保養／校正紀錄也會被保留。一般業務只能新增/更新自己名下的儀器，管理員可操作全部）
 window.handleEquipmentExcelUpload = async function(input) {
     const file = input.files && input.files[0];
@@ -19557,7 +19567,7 @@ window.handleEquipmentExcelUpload = async function(input) {
                         brand: String(getField(row, ['廠牌', '品牌'])).trim(),
                         model: model,
                         serialNo: String(getField(row, ['序號'])).trim(),
-                        // 一般業務批量上傳一律歸在自己名下，忽略 Excel 裡填的負責業務；管理員則照 Excel 內容
+                        // 一般業務批次上傳一律歸在自己名下，忽略 Excel 裡填的負責業務；管理員則照 Excel 內容
                         salesName: (currentUserRole === 'admin')
                             ? String(getField(row, ['負責業務', '業務'])).trim()
                             : currentUserName,
@@ -19598,14 +19608,14 @@ window.handleEquipmentExcelUpload = async function(input) {
                 ];
 
                 runEquipmentUpsertBatch(allOps).then(() => {
-                    let msg = `批量處理完成：更新 ${updateOps.length} 筆、新增 ${insertRecords.length} 筆`;
+                    let msg = `批次處理完成：更新 ${updateOps.length} 筆、新增 ${insertRecords.length} 筆`;
                     if (skipCount > 0) msg += `、略過 ${skipCount} 筆（缺少客戶名稱或型號）`;
                     msg += '。既有資料不會被刪除，維修保養紀錄也會保留。';
                     alert(msg);
                     input.value = '';
                     loadEquipmentFromCloud();
                 }).catch(err => {
-                    alert('批量寫入 Firestore 失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
+                    alert('批次寫入 Firestore 失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
                     input.value = '';
                 });
             }).catch(err => {
@@ -19621,7 +19631,7 @@ window.handleEquipmentExcelUpload = async function(input) {
     reader.readAsArrayBuffer(file);
 };
 
-// 儀器管理系統：批量下載 Excel（欄位與批量上傳格式相同，可編輯後重新上傳）
+// 儀器管理系統：批量下載 Excel（欄位與批次上傳格式相同，可編輯後重新上傳）
 window.exportEquipmentExcel = async function() {
     if (!(equipmentSearchActive ? equipmentSearchResults : equipmentList).length) {
         alert('目前沒有儀器資料可以下載。');
@@ -21502,6 +21512,7 @@ let tradeAnalysisDetailKind = '';
 let tradeAnalysisDetailReport = null;
 let tradeAnalysisSourceOrders = new Map();
 let tradeAnalysisTab = 'purchasing';
+let tradeAnalysisSensitiveVisible = true;
 let tradeAnalysisWarehouseStocks = [];
 const TRADE_ANALYSIS_LABELS = {incoming:'待到貨採購',purchases:'已進貨（收貨）',pending:'待送貨訂單',sales:'已銷貨（送貨）',stock:'目前庫存'};
 
@@ -21548,15 +21559,25 @@ function renderSimpleTradeAnalysisPage() {
     const cols=quantity?['現有數量','已預留數量','可用數量']:simpleTradeAnalysisLabels().filter(label=>label!=='毛利率');
     document.getElementById('tradeAnalysisTableHead').innerHTML='<tr>'+['廠牌','貨號','品名',...cols].map(label=>`<th>${escapeHtml(label)}</th>`).join('')+'</tr>';
     const rows=tradeAnalysisSimpleRows.slice(tradeAnalysisSimplePage*50,(tradeAnalysisSimplePage+1)*50);
-    document.getElementById('unifiedBrandAnalyticsBody').innerHTML=rows.map(row=>`<tr><td>${escapeHtml(row.brand)}</td><td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.name)}</td>${(quantity?row.quantities:row.values).map(value=>`<td>${value===null?'待補成本':quantity?value:formatStatsMoney(value)}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length+3}">沒有符合條件的資料。</td></tr>`;
+    document.getElementById('unifiedBrandAnalyticsBody').innerHTML=rows.map(row=>`<tr><td>${escapeHtml(row.brand)}</td><td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.name)}</td>${(quantity?row.quantities:row.values).slice(0,cols.length).map(value=>`<td>${value===null?'待補成本':quantity?value:formatStatsMoney(value)}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length+3}">沒有符合條件的資料。</td></tr>`;
     const pages=Math.max(1,Math.ceil(tradeAnalysisSimpleRows.length/50));
     document.getElementById('tradeAnalysisPageStatus').textContent=`第 ${tradeAnalysisSimplePage+1} / ${pages} 頁，共 ${tradeAnalysisSimpleRows.length} 筆`;
     document.getElementById('tradeAnalysisPrevBtn').disabled=tradeAnalysisSimplePage===0;
     document.getElementById('tradeAnalysisNextBtn').disabled=tradeAnalysisSimplePage>=pages-1;
 }
 function simpleTradeAnalysisLabels() {
-    return tradeAnalysisTab==='purchasing'?['採購金額','實際到貨金額','未到貨金額']:tradeAnalysisTab==='selling'?['銷售金額','實際出貨金額','未出貨金額','毛利','毛利率']:['現有庫存金額','已預留庫存金額','可用庫存金額'];
+    return tradeAnalysisTab==='purchasing'?['採購金額','實際到貨金額','未到貨金額']:tradeAnalysisTab==='selling'
+        ? ['銷售金額','實際出貨金額','未出貨金額',...(tradeAnalysisSensitiveVisible?['毛利','毛利率']:[])]
+        : ['現有庫存金額','已預留庫存金額','可用庫存金額'];
 }
+
+window.toggleTradeAnalysisSensitive = function() {
+    if(currentUserRole!=='admin')return;
+    tradeAnalysisSensitiveVisible=!tradeAnalysisSensitiveVisible;
+    const button=document.getElementById('tradeAnalysisSensitiveBtn');
+    if(button){button.textContent=tradeAnalysisSensitiveVisible?'隱藏毛利':'顯示毛利';button.setAttribute('aria-pressed',String(!tradeAnalysisSensitiveVisible));}
+    renderSalesStatistics();
+};
 
 function tradeAnalysisCost(value) {
     if(value===null||value===undefined||value==='')return null;
@@ -21699,15 +21720,18 @@ window.exportTradeAnalysis = async function() {
     try {
         const filters={...tradeAnalysisAppliedFilters},tab=tradeAnalysisTab;
         const rows=buildSimpleTradeAnalysis(filters);
-        const labels=tradeAnalysisTab==='purchasing'?['採購金額','實際到貨金額','未到貨金額']:tradeAnalysisTab==='selling'?['銷售金額','實際出貨金額','未出貨金額','毛利']:['現有庫存金額','已預留庫存金額','可用庫存金額'];
+        const labels=simpleTradeAnalysisLabels().filter(label=>label!=='毛利率');
         const data=rows.map(r=>({'單號':r.documentNo,'廠牌':r.brand,'貨號':r.code,'品名':r.name,'產品線':r.line,'產品類型':r.type,'倉庫':r.warehouse,...Object.fromEntries(labels.map((l,i)=>[l,r.values[i]===null?'待補成本':r.values[i]])),...(r.quantities?{'現有數量':r.quantities[0],'已預留數量':r.quantities[1],'可用數量':r.quantities[2]}:{})}));
         const totals=labels.map((_,i)=>rows.reduce((n,r)=>n+(r.values[i]??0),0));
         const missing=rows.some(r=>r.values.some(v=>v===null));
         data.push({'品名':'總計',...Object.fromEntries(labels.map((l,i)=>[l,i===3&&missing?'待補成本':totals[i]]))});
         const {start,end}=filters;
         const scope=[{'項目':'期間','內容':tradeAnalysisTab==='inventory'?'目前庫存':`${start} 至 ${end} 成立的單據，目前履約進度`},{'項目':'廠牌','內容':filters.brand||'全部'},{'項目':'產品線','內容':filters.line||'全部'},{'項目':'產品類型','內容':filters.type||'全部'},{'項目':'業務','內容':tradeAnalysisTab==='selling'?(filters.sales||'全部'):'公司共同數字'},{'項目':'估值說明','內容':document.getElementById('tradeAnalysisScope').textContent},{'項目':'資料完整性','內容':missing?'缺少成本的金額未計入；毛利待補成本':'完整'}];
-        if(tradeAnalysisTab==='selling')scope.push({'項目':'毛利率','內容':missing?'待補成本':totals[1]?totals[3]/totals[1]:0});
-        await ensureXlsxLoaded();const wb=XLSX.utils.book_new();
+        if(tradeAnalysisTab==='selling'&&labels.includes('毛利'))scope.push({'項目':'毛利率','內容':missing?'待補成本':totals[1]?totals[3]/totals[1]:0});
+        await ensureXlsxLoaded();
+        if(currentUserRole!=='admin'||(tab==='selling'&&labels.includes('毛利')&&!tradeAnalysisSensitiveVisible))
+            throw new Error('登入身份或毛利顯示設定已變更，請確認後重新匯出。');
+        const wb=XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(scope),'篩選與總計');
         XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'品項明細');
         XLSX.writeFile(wb,`進銷存分析_${tab}_${localDateString()}.xlsx`);
@@ -21812,6 +21836,7 @@ function renderUnifiedBrandAnalytics() {
 window.switchTradeAnalysisTab = function(tab) {
     if(!['purchasing','selling','inventory'].includes(tab))return;
     tradeAnalysisTab=tab;
+    const sensitiveButton=document.getElementById('tradeAnalysisSensitiveBtn');if(sensitiveButton)sensitiveButton.hidden=tab!=='selling';
     document.getElementById('salesStatsSalesField').hidden=tab!=='selling';
     document.querySelectorAll('[data-analysis-period]').forEach(el=>el.hidden=tab==='inventory');
     document.querySelectorAll('[data-analysis-tab]').forEach(el=>{
@@ -23070,7 +23095,7 @@ function systemAuditItemCode(record = {}) {
 function systemAuditActionLabel(issue) {
     if(issue.target?.kind==='product')return '編輯產品';
     if(issue.target?.kind==='duplicates')return '比較重複產品';
-    if(issue.type.includes('找不到 Product'))return '查找／補建產品';
+    if(issue.type.includes('找不到產品主檔'))return '查找／補建產品';
     return '查看並處理';
 }
 window.openSystemAuditIssue = async function(index) {
@@ -23088,7 +23113,7 @@ window.openSystemAuditIssue = async function(index) {
     const action=(label,kind,value='')=>`<button type="button" class="btn-small" onclick="followSystemAuditShortcut(${index},'${kind}',${Number(value)||0})">${escapeHtml(label)}</button>`;
     const actions=[];
     if(target.kind==='duplicates')target.records.forEach((product,i)=>actions.push(action(`編輯 ${product.manufacturerPartNo||product.sku||product.id}（${i+1}）`,'duplicate',i)));
-    if(issue.type.includes('找不到 Product'))actions.push(action('查找產品','product-search'),action('補建產品','product-new'));
+    if(issue.type.includes('找不到產品主檔'))actions.push(action('查找產品','product-search'),action('補建產品','product-new'));
     if(['inventory','stock','supply','demand','reservation'].includes(target.kind)&&code)actions.push(action('查看此品項庫存','inventory'));
     if(target.kind==='order')actions.push(action('開啟來源訂單','order'));
     if(target.kind==='reservation'&&(record.orderId||record.sourceId))actions.push(action('開啟來源訂單','order'));
@@ -23100,7 +23125,7 @@ window.openSystemAuditIssue = async function(index) {
     }
     if(issue.type.includes('倉庫'))actions.push(action('設定倉庫','warehouses'));
     if(target.kind==='user')actions.push(action('人員管理','sales'));
-    const guidance=issue.type.includes('找不到 Product')?'先查找是否已有正確產品；確認缺少時可補建。建立後請重新執行健康檢查，確認來源資料是否已正確連結。'
+    const guidance=issue.type.includes('找不到產品主檔')?'先查找是否已有正確產品；確認缺少時可補建。建立後請重新執行健康檢查，確認來源資料是否已正確連結。'
         :target.kind==='duplicates'?'逐筆比較產品資料，確認保留的產品後，可在產品管理停用重複品項。'
         :target.kind==='product'?'修改後請重新執行健康檢查。'
         :'先核對下列來源資料，再開啟對應畫面處理；沒有提供編輯入口的關聯異常，需要確認原因後修正。';
@@ -23214,7 +23239,7 @@ window.runSystemDataAudit = async function() {
                 issues.push({ target:{kind:'order',record:order},type:'訂單庫存同步失敗',detail:`${order.orderNo||order.id}｜${order.inventoryReservationError||'庫存預留未完成'}`});
             }
             const orderItems=normalizedOrderItems(order);
-            if(!orderItems.length&&!knownProduct(order))issues.push({ target:{kind:'order',record:order}, type:'訂單找不到 Product', detail:`${order.orderNo || order.id}｜${order.itemCode || order.productKey || ''}` });
+            if(!orderItems.length&&!knownProduct(order))issues.push({ target:{kind:'order',record:order}, type:'訂單找不到產品主檔', detail:`${order.orderNo || order.id}｜${order.itemCode || order.productKey || ''}` });
             orderItems.forEach((item,index)=>{
                 if(!knownProduct(item))issues.push({ target:{kind:'order',record:order},type:'訂單品項找不到產品主檔',detail:`${order.orderNo||order.id}｜第 ${index+1} 項｜${item.itemCode||item.productId||''}`});
             });
@@ -23265,7 +23290,7 @@ window.runSystemDataAudit = async function() {
                     issues.push({ target:{kind:'demand',record:demand,supplies:suppliesByDemand.get(demand.demandId)||[]}, type:'採購需求來源品項不存在', detail:`${demandId || demand.id}｜${sourceId}／${sourceItemId}` });
                 }
             }else if(sourceType==='STOCK_REPLENISHMENT'&&!knownProduct(demand)){
-                issues.push({ target:{kind:'demand',record:demand,supplies:suppliesByDemand.get(demand.demandId)||[]}, type:'補庫需求找不到 Product', detail:`${demandId || demand.id}｜${demand.itemCode || demand.productKey || sourceId}` });
+                issues.push({ target:{kind:'demand',record:demand,supplies:suppliesByDemand.get(demand.demandId)||[]}, type:'補庫需求找不到產品主檔', detail:`${demandId || demand.id}｜${demand.itemCode || demand.productKey || sourceId}` });
             }
         });
 
@@ -23286,7 +23311,7 @@ window.runSystemDataAudit = async function() {
             if(!demandId)issues.push({ target:{kind:'supply',record:supply}, type:'供應紀錄缺少採購需求', detail:`${supply.internalNo || supply.id}｜未記錄 demandId` });
             else if(!demandById.has(demandId))issues.push({ target:{kind:'supply',record:supply}, type:'供應紀錄找不到採購需求', detail:`${supply.internalNo || supply.id}｜${demandId}` });
             if(sourceOrderId&&!orderIds.has(sourceOrderId))issues.push({ target:{kind:'supply',record:supply}, type:'供應紀錄來源訂單不存在', detail:`${supply.internalNo || supply.id}｜${sourceOrderId}` });
-            if(!knownProduct(supply))issues.push({ target:{kind:'supply',record:supply}, type:'供應紀錄找不到 Product', detail:`${supply.internalNo || supply.id}｜${supply.itemCode || supply.productKey || ''}` });
+            if(!knownProduct(supply))issues.push({ target:{kind:'supply',record:supply}, type:'供應紀錄找不到產品主檔', detail:`${supply.internalNo || supply.id}｜${supply.itemCode || supply.productKey || ''}` });
             const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
             const warehouseId=String(supply.warehouseId||'').trim();
             if(!directShip&&(!warehouseId||!warehouseIds.has(warehouseId)))issues.push({ target:{kind:'supply',record:supply}, type:'供應紀錄倉庫異常', detail:`${supply.internalNo || supply.id}｜${warehouseId || '未指定'}` });
@@ -23298,7 +23323,7 @@ window.runSystemDataAudit = async function() {
         inventory.forEach(item => {
             // inventory 只保留產品索引／總覽快取；實際數量以 warehouseStocks 為準。
             // 健康檢查不可再把 aggregate cache 的 onHand / reserved 當成正式庫存錯誤。
-            if (!knownProduct(item)) issues.push({ target:{kind:'inventory',record:item}, type:'庫存索引找不到 Product', detail:`${item.itemCode || item.id}` });
+            if (!knownProduct(item)) issues.push({ target:{kind:'inventory',record:item}, type:'庫存索引找不到產品主檔', detail:`${item.itemCode || item.id}` });
             const policy=String(item.stockPolicy||'ORDER_ONLY').toUpperCase();
             const safetyStock=Number(item.safetyStock||0);
             if(!Object.values(INVENTORY_STOCK_POLICIES).includes(policy)){
@@ -23312,7 +23337,7 @@ window.runSystemDataAudit = async function() {
 
         warehouseStocks.forEach(stock => {
             if (stock.warehouseId && !warehouseIds.has(String(stock.warehouseId))) issues.push({ target:{kind:'stock',record:stock}, type:'分倉指向不存在倉庫', detail:`${stock.id}｜${stock.warehouseId}` });
-            if (!knownProduct(stock)) issues.push({ target:{kind:'stock',record:stock}, type:'分倉找不到 Product', detail:`${stock.id}` });
+            if (!knownProduct(stock)) issues.push({ target:{kind:'stock',record:stock}, type:'分倉找不到產品主檔', detail:`${stock.id}` });
             const n = inventoryNumbers(stock);
             if (n.onHand < 0 || n.reserved < 0 || n.reserved > n.onHand) issues.push({ target:{kind:'stock',record:stock}, type:'分倉數量異常', detail:`${stock.id}｜現有 ${n.onHand}／預留 ${n.reserved}` });
         });
@@ -23320,7 +23345,7 @@ window.runSystemDataAudit = async function() {
         reservations.filter(r => r.status === 'active').forEach(reservation => {
             const orderId = String(reservation.orderId || reservation.sourceId || reservation.id || '').trim();
             if (orderId && !orderIds.has(orderId)) issues.push({ target:{kind:'reservation',record:reservation}, type:'庫存預留來源訂單不存在', detail:`${reservation.orderNo || reservation.id}｜${orderId}` });
-            if (!knownProduct(reservation)) issues.push({ target:{kind:'reservation',record:reservation}, type:'庫存預留找不到 Product', detail:`${reservation.orderNo || reservation.id}｜${reservation.productKey || reservation.itemCode || ''}` });
+            if (!knownProduct(reservation)) issues.push({ target:{kind:'reservation',record:reservation}, type:'庫存預留找不到產品主檔', detail:`${reservation.orderNo || reservation.id}｜${reservation.productKey || reservation.itemCode || ''}` });
         });
 
         const counts = `Product ${products.length}、人員 ${users.length}、訂單 ${orders.length}、採購單文件 ${purchaseOrders.length}、採購需求 ${procurementDemands.length}、供應紀錄 ${supplyOrders.length}、庫存索引 ${inventory.length}、分倉 ${warehouseStocks.length}、預留 ${reservations.length}`;

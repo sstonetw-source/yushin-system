@@ -19,8 +19,11 @@ function fixture({items=[{itemId:'I',productId:'P',warehouseId:'W',qty:5}],onHan
  const controls={beforeCommit:null,fail:false,selfCalls:0};
  const run=async fn=>{
   for(let retry=0;retry<10;retry++){
+   // Firestore reads one consistent snapshot per attempt; a concurrent commit
+   // cannot make the company read old while a later warehouse read sees new.
+   const attemptDocs=new Map([...docs].map(([path,data])=>[path,clone(data)])),attemptVersions=new Map(versions);
    const reads=new Map(),writes=[];
-   const result=await fn({get:async r=>{assert.equal(writes.length,0,'read before write');reads.set(r.path,versions.get(r.path)||0);return snap(r.path);},
+   const result=await fn({get:async r=>{assert.equal(writes.length,0,'read before write');reads.set(r.path,attemptVersions.get(r.path)||0);return {exists:attemptDocs.has(r.path),data:()=>clone(attemptDocs.get(r.path)),id:r.id};},
     update:(r,p)=>writes.push([r,p]),set:(r,p)=>writes.push([r,p])});
    if(controls.beforeCommit){const hook=controls.beforeCommit;controls.beforeCommit=null;hook();}
    if([...reads].some(([path,v])=>(versions.get(path)||0)!==v))continue;
@@ -173,12 +176,12 @@ test('same-product lines and simultaneous orders compete for the same live wareh
 test('disabled and custody stock are excluded; supplier incoming and transfer transit never count as ready stock',async()=>{
  const f=fixture({onHand:0});addWarehouse(f,'OFF',5,{active:false});addWarehouse(f,'custody-U',5,{systemCustody:true});
  addWarehouse(f,'INCOMING',0,{incoming:5});addWarehouse(f,'TRANSIT',0,{transferInTransit:5});
- f.put('inventory/P',{productKey:'P',onHand:10,reserved:0,incoming:10,transferInTransit:5});await f.sync();
- assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.order().items[0].reservedQty,0);assert.equal(f.demand('I').remainingToOrderQty,5);
+ f.put('inventory/P',{productKey:'P',onHand:10,reserved:0,incoming:10,transferInTransit:5});await assert.rejects(f.sync(),/核對分倉庫存/);
+ assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.order().items[0].reservedQty||0,0);assert.equal(f.demand('I'),undefined);
 });
 test('live warehouse deactivation during a transaction retry prevents reservation there',async()=>{
  const f=fixture({onHand:0});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
- f.controls.beforeCommit=()=>f.put('warehouses/W2',{active:false});await f.sync();
+ f.controls.beforeCommit=()=>f.put('warehouses/W2',{active:false});await assert.rejects(f.sync(),/核對分倉庫存/);
  assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,0);
 });
 test('existing physical reservation or supplier progress locks automatic location selection',async()=>{
@@ -197,6 +200,19 @@ test('company aggregate still bounds another warehouse selection and missing cur
  assert.equal(f.order().items[0].warehouseId,'W');assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,0);
  const missing=fixture();missing.docs.delete('warehouses/W');const before=JSON.stringify([...missing.docs]);
  await assert.rejects(missing.sync(),/啟用的庫存倉庫/);assert.equal(JSON.stringify([...missing.docs]),before);
+});
+test('company free stock missing from eligible physical locations stops without publishing false demand',async()=>{
+ for(const onHand of [0,2]){
+  const f=fixture({onHand});f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
+  const before=JSON.stringify([...f.docs]);await assert.rejects(f.sync(),/核對分倉庫存/);
+  assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.demand('I'),undefined);
+ }
+});
+test('stock stranded in a disabled warehouse cannot silently become a new purchase shortage',async()=>{
+ const f=fixture({onHand:2});addWarehouse(f,'W2',3);f.put('warehouses/W2',{active:false});
+ f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});
+ const before=JSON.stringify([...f.docs]);await assert.rejects(f.sync(),/核對分倉庫存/);
+ assert.equal(JSON.stringify([...f.docs]),before);
 });
 test('multiple partial locations stop safely rather than creating false procurement shortage',async()=>{
  for(const remote of [1,3,4]){

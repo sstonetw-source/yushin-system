@@ -18,10 +18,10 @@ function setup(){
 }
 test('exact code finds a later product without reading preceding catalogue pages; repeated searches reuse matches',async()=>{
  const x=setup();x.c.window.queueProductManagementSearch();assert.equal(x.calls.length,0);
- x.nodes.productManagementSearchBrand.value='';await x.c.window.searchProductManagement();assert.equal(x.calls.length,0);
- x.nodes.productManagementSearchBrand.value='Brand';x.nodes.productManagementSearch.value='';await x.c.window.searchProductManagement();assert.equal(x.calls.length,0);
- x.nodes.productManagementSearch.value='P74';await x.c.window.searchProductManagement();assert.deepEqual(x.calls,[1]);assert.equal(x.c.productManagementResults[0].manufacturerPartNo,'P74');
- await x.c.window.searchProductManagement();await x.c.window.searchProductManagement(true);assert.deepEqual(x.calls,[1]);
+ x.nodes.productManagementSearchBrand.value='';await x.c.window.searchProductManagement();assert.deepEqual(x.calls,[1]);assert.equal(x.c.productManagementResults[0].manufacturerPartNo,'P74');
+ x.nodes.productManagementSearchBrand.value='Brand';x.nodes.productManagementSearch.value='';await x.c.window.searchProductManagement();assert.deepEqual(x.calls,[1]);
+ x.nodes.productManagementSearch.value='P74';await x.c.window.searchProductManagement();assert.deepEqual(x.calls,[1,1]);assert.equal(x.c.productManagementResults[0].manufacturerPartNo,'P74');
+ await x.c.window.searchProductManagement();await x.c.window.searchProductManagement(true);assert.deepEqual(x.calls,[1,1]);
 });
 test('empty matches are cached; name, partial code and a different leading zero are not exact codes',async()=>{
  const x=setup();
@@ -33,16 +33,17 @@ test('empty matches are cached; name, partial code and a different leading zero 
  x.nodes.productManagementSearchBrand.value='Other';await x.c.window.searchProductManagement();assert.equal(x.c.productManagementResults[0].manufacturerPartNo,'P100');
 });
 test('primary brands are visible; other brands expand locally and selection enables search',()=>{
- const nodes={productManagementSearchBrand:{value:''},productSearchBrandButtons:{innerHTML:''},productManagementSearch:{},productManagementSearchBtn:{}};
+ const nodes={productManagementSearchBrand:{value:''},productSearchBrandButtons:{innerHTML:''},productManagementSearch:{value:''},productManagementSearchBtn:{}};
  const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]},productManagementSearchInProgress:false,
   clearProductManagementSearch:()=>{},getUnifiedBrandEntries:()=>[{name:'Beckman',active:true},{name:'OtherVendor',active:true}],
   getPrimaryBrandNames:()=>['Beckman'],normalizeBrandLookupKey:s=>s.toLowerCase(),inlineJsValue:JSON.stringify,escapeHtml:s=>s});
  vm.runInContext(source.slice(source.indexOf('function updateProductSearchControls'),source.indexOf('async function ensureProductBrandBrowserLoaded')),c);
  c.renderProductBrandBrowser=c.window.renderProductBrandBrowser;c.onProductSearchBrandChange=c.window.onProductSearchBrandChange;
  c.window.renderProductBrandBrowser();assert.match(nodes.productSearchBrandButtons.innerHTML,/Beckman/);assert.doesNotMatch(nodes.productSearchBrandButtons.innerHTML,/OtherVendor/);
- assert.equal(nodes.productManagementSearch.disabled,true);
+ assert.equal(nodes.productManagementSearch.disabled,false);assert.equal(nodes.productManagementSearchBtn.disabled,true);
  c.window.toggleProductSearchOtherBrands();assert.match(nodes.productSearchBrandButtons.innerHTML,/OtherVendor/);
- c.window.selectProductSearchBrand('OtherVendor');assert.equal(nodes.productManagementSearchBrand.value,'OtherVendor');assert.equal(nodes.productManagementSearch.disabled,false);assert.equal(nodes.productManagementSearchBtn.disabled,false);
+ c.window.selectProductSearchBrand('OtherVendor');assert.equal(nodes.productManagementSearchBrand.value,'OtherVendor');assert.equal(nodes.productManagementSearch.disabled,false);assert.equal(nodes.productManagementSearchBtn.disabled,true);
+ nodes.productManagementSearch.value='P74';c.updateProductSearchControls();assert.equal(nodes.productManagementSearchBtn.disabled,false);
  c.window.toggleProductSearchOtherBrands();assert.match(nodes.productSearchBrandButtons.innerHTML,/其他.*OtherVendor/);
 });
 
@@ -53,4 +54,10 @@ test('case, whitespace and common separators match the full normalized code and 
   assert.equal(x.c.productManagementResults[0].manufacturerPartNo,'P74');
  }
  assert.deepEqual(x.calls,[1]);
+});
+
+test('code search without brand finds products from other brands using the exact-code index',async()=>{
+ const x=setup();x.nodes.productManagementSearchBrand.value='';x.nodes.productManagementSearch.value='P100';
+ await x.c.window.searchProductManagement();assert.equal(x.c.productManagementResults[0].brandName,'Other');
+ assert.deepEqual(x.calls,[1]);assert.match(x.nodes.productManagementSearchStatus.textContent,/全部廠牌/);
 });

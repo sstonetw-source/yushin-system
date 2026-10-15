@@ -1250,6 +1250,17 @@ test('real order initialization atomically publishes item reservation and demand
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
  }
 });
+test('actual initialization rejects unmatched company free stock without creating purchase demand for four writers',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});
+  await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
+  await assert.rejects(f.run(),/核對分倉庫存/);
+  const client=db('admin');assert.equal((await getDoc(doc(client,'inventory/init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(client,'warehouseStocks/W1__init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(client,'inventoryReservations/'+f.id+'__I'))).exists(),false);
+  assert.equal((await getDoc(doc(client,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+ }
+});
 test('direct initialization does not need stock writes and purchaser can build it for responsible business owner',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{direct:true,qty:3,ownerUid:role==='purchaser'?'sales1':uid});
