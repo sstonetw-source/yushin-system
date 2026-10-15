@@ -193,7 +193,7 @@ test('second-item failure rolls back the first-item proposed release',async()=>{
 });
 test('zero-hold direct shipment cancellation does not read physical stock or discard an accidental hold',async()=>{
  const f=fixture({held:0});f.docs.get('orders/O').items[0].fulfillmentType='DIRECT_SHIP';f.docs.get('inventoryReservations/O__I').warehouseId='';
- await f.run();assert.deepEqual(f.reads,['orders/O','inventoryReservations/O__I']);
+ await f.run();assert.deepEqual(f.reads,['orders/O','inventoryReservations/O__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')]);
  const g=fixture();g.docs.get('orders/O').items[0].fulfillmentType='DIRECT_SHIP';g.docs.get('inventoryReservations/O__I').warehouseId='';
  await assert.rejects(g.run(),/不足/);assert.equal(g.writes.length,0);
 });
