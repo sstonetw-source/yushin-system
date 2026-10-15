@@ -21,6 +21,21 @@
       effectiveDeliveredQty: Math.max(0, grossDeliveredQty - returnedQty) };
   }
 
+  // Canonical order-level delivery and return projection. CLOSE means no replacement.
+  function projectOrderDelivery({grossDeliveredQty = 0, returnedQty = 0, returnRecords = []} = {}) {
+    const grossDelivered = n(grossDeliveredQty);
+    const returned = Math.min(grossDelivered, n(returnedQty));
+    const closedReturns = Math.min(returned,
+      (Array.isArray(returnRecords) ? returnRecords : [])
+        .filter(row => row?.settlement === 'CLOSE')
+        .reduce((sum, row) => sum + n(row?.qty), 0));
+    const effectiveDelivered = deliveryQuantities({
+      deliveredQty: grossDelivered,
+      returnedQty: returned - closedReturns
+    }).effectiveDeliveredQty;
+    return {grossDelivered, returned, closedReturns, effectiveDelivered};
+  }
+
   function normalizeItem(item = {}, index = 0) {
     const orderedQty = n(item.orderedQty ?? item.qty);
     // 採購、到貨、打單、送貨與退貨都是累計事件量。
@@ -98,6 +113,7 @@
 
   return {
     deliveryQuantities,
+    projectOrderDelivery,
     normalizeItem,
     dispatchState,
     pendingDispatchQty,

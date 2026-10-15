@@ -1,8 +1,8 @@
 (function(root,factory){
-  const api=factory();
+  const api=factory(root);
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinReceiving=api;
-})(typeof globalThis!=='undefined'?globalThis:this,function(){
+})(typeof globalThis!=='undefined'?globalThis:this,function(root){
   const STATUSES=Object.freeze({
     ORDERED:'ORDERED',
     PARTIAL_RECEIPT:'PARTIAL_RECEIPT',
@@ -55,14 +55,18 @@
   }
 
   function applyReceiptToOrderItem(item={},receiptQty=0){
-    const orderedQty=n(item.orderedQty??item.qty);
-    const grossDeliveredQty=n(item.deliveredQty);
-    const returnedQty=Math.min(grossDeliveredQty,n(item.returnedQty));
-    const effectiveDeliveredQty=Math.min(orderedQty,Math.max(0,grossDeliveredQty-returnedQty));
-    const outstandingQty=Math.max(0,orderedQty-effectiveDeliveredQty);
-    const currentReservedQty=Math.min(outstandingQty,n(item.reservedQty));
+    // One authority for outstanding quantity and reservation across receipt, return and orders.
+    const workflow=typeof module==='object'&&module.exports
+      ? require('./workflow-core.js') : root?.YushinWorkflow;
+    if(!workflow?.projectItem)throw new Error('Workflow core 未載入，無法更新收貨預留。');
+    const projection=workflow.projectItem({
+      ...item,grossDeliveredQty:item.deliveredQty??0,effectiveDeliveredQty:undefined
+    });
+    const orderedQty=projection.orderedQty;
+    const outstandingQty=projection.outstandingQty;
+    const currentReservedQty=projection.reservedQty;
     const appliedQty=n(receiptQty);
-    const reservedDelta=Math.min(appliedQty,Math.max(0,outstandingQty-currentReservedQty));
+    const reservedDelta=Math.min(appliedQty,projection.shortageQty);
     const reservedQty=currentReservedQty+reservedDelta;
     const shortageQty=Math.max(0,outstandingQty-reservedQty);
     const receivedQty=n(item.receivedQty)+appliedQty;

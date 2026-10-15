@@ -112,3 +112,11 @@ test('dispatchState keeps a later live reservation even when a lightweight snaps
   assert.equal(ready.pending,0);
   assert.equal(ready.shippable,5);
 });
+test('CLOSE returns do not reopen replacement demand',()=>{
+  const x=f.projectOrderDelivery({grossDeliveredQty:12,returnedQty:5,returnRecords:[
+    {qty:2,settlement:'CLOSE'},{qty:3,settlement:'REPLACE'}
+  ]});
+  assert.deepEqual(x,{grossDelivered:12,returned:5,closedReturns:2,effectiveDelivered:9});
+  assert.equal(f.projectOrderDelivery({grossDeliveredQty:5,returnedQty:8,
+    returnRecords:[{qty:8,settlement:'CLOSE'}]}).effectiveDelivered,5);
+});

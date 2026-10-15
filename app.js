@@ -10116,18 +10116,13 @@ function deliveredQuantity(order, normalizedItems = null) {
 // One projection for both the delivery card and lifecycle status. CLOSED
 // returns do not require replacement stock; never deduct them twice.
 function orderDeliveryProjection(order, normalizedItems = null) {
-    if (!globalThis.YushinFulfillment?.deliveryQuantities)
+    if (!globalThis.YushinFulfillment?.projectOrderDelivery)
         throw new Error('Fulfillment core 未載入，無法計算有效交付數量。');
-    const grossDelivered = deliveredQuantity(order, normalizedItems);
-    const returned = Math.min(Math.max(0, returnedQuantity(order)), grossDelivered);
-    const closedReturns = Math.min(returned, savedReturnRecords(order)
-        .filter(row=>row.settlement==='CLOSE')
-        .reduce((sum,row)=>sum+Math.max(0,Number(row.qty||0)),0));
-    const quantities = globalThis.YushinFulfillment.deliveryQuantities({
-        deliveredQty:grossDelivered,
-        returnedQty:Math.max(0,returned-closedReturns)
+    return globalThis.YushinFulfillment.projectOrderDelivery({
+        grossDeliveredQty: deliveredQuantity(order, normalizedItems),
+        returnedQty: returnedQuantity(order),
+        returnRecords: savedReturnRecords(order)
     });
-    return {grossDelivered,returned,closedReturns,effectiveDelivered:quantities.effectiveDeliveredQty};
 }
 
 function deliveryProgressInfo(order, normalizedItems = null) {

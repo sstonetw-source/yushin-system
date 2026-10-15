@@ -42,3 +42,7 @@
 5. 變更資料模型前，先列出每個 collection、索引、Rules、查詢、函式和測試的影響；在 Preview/Emulator 驗證，正式資料不得自動清空。
 
 此文件的流程細節應與 `docs/system-architecture-20260923.md` 及 `docs/workflow-consistency-audit-20261014.md` 核對；尚未解決的多地點／端到端缺口不得標成完成。
+
+## 補充：有效交付與收貨保留
+- 訂單級有效交付由 `Fulfillment.projectOrderDelivery` 統一推導。不補送結案退貨計入歷史退貨量，但不重新創造交付需求。
+- 收貨預留量使用 `Workflow.projectItem` 的可預留缺口，再依實收數量決定 `reservedDelta`，不自行重新計算累計交付。
