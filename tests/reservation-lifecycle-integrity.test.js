@@ -103,8 +103,8 @@ test('restoration reopens cancelled demand and preserves supplier commitments in
   f.docs.get('inventory/P').reserved=8;
   await f.run('normal');
   const next=f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'));
-  assert.equal(next.status,'PARTIALLY_ORDERED');
-  assert.equal(next.requestedQty,5);assert.equal(next.remainingToOrderQty,2);
+  assert.equal(next.status,'ORDERED');
+  assert.equal(next.requestedQty,3);assert.equal(next.remainingToOrderQty,0);
   assert.equal(next.orderedQty,3);assert.equal(next.receivedQty,0);
   assert.equal(f.docs.get('orders/O').status,'active');
   assert.equal(f.docs.get('inventoryReservations/O__I').quantity,2);
@@ -167,7 +167,10 @@ test('actual restoration respects company free stock and preserves the physical 
   assert.equal(f.docs.get('warehouseStocks/A__P').reserved,2);
  }
  const f=fixture({held:0,status:'cancelled'});f.docs.get('orders/O').items[0].supplyOrderedQty=3;
+ const linked=f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'));
+ Object.assign(linked,{orderedQty:3,requestedQty:5,remainingToReceiveQty:3,status:'CANCELLED'});
  await f.run('normal');assert.equal(f.docs.get('inventoryReservations/O__I').quantity,2);assert.equal(f.docs.get('orders/O').items[0].shortageQty,3);
+ assert.equal(f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')).orderedQty,3);
 });
 test('restoration refuses missing, inactive and custody warehouses without changing stock or order',async()=>{
  for(const role of ['admin','sales','engineer']){
