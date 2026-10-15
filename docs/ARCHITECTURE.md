@@ -15,8 +15,8 @@
 | 層級 | 現有真正的來源／實作 | 責任／限制 |
 | --- | --- | --- |
 | App | `src/app/bootstrap.js`, `navigation.js` | Firebase 初始化、登入、角色、頁面狀態、導航。初始化檔仍含共享狀態與輔助函式，後續應再抽。 |
-| Features | `src/features/products/`, `forecasts/`, `quotations/`, `orders/`, `purchasing/`, `equipment/`, `administration/` | 使用者介面、查詢、表單、顯示。部分業務計算仍混雜，尚需透過 service 抽離。 |
-| Transaction workflows（過渡區） | `src/features/transactions/transaction-workflows.js` | 現有收貨、出貨、取消等操作入口；目前仍混合 UI、Firestore 寫入、協調，不應被視為乾淨 service。 |
+| Features | `src/features/products/`, `forecasts/`, `quotations/`, `orders/`, `purchasing/`, `inventory/`, `equipment/`, `administration/` | 使用者介面、查詢、表單、顯示。部分業務計算仍混雜，尚需透過 service 抽離。 |
+| Services（過渡區） | `src/services/order-reservation.js`, `supply-order.js`, `receiving.js`, `order-lifecycle-reservation.js`, `delivery-stock.js` | **實際交易操作已從大段中抽至各個維護位置**，但仍依賴跨檔全域資料，尚未形成獨立注入的服務；後續須收斂寫入入口與冪等契約。 |
 | Core | `modules/workflow-core.js`, `fulfillment-core.js`, `inventory-core.js`, `reservation-core.js`, `procurement-demand-core.js`, `receiving-core.js`, `supply-core.js`, `order-entry-core.js` | 驗證、純數量投影、供貨／預留演算法。不可在 feature 另造權威公式。 |
 | Shared transaction infrastructure | `modules/stock-permissions.js`, app 的 `runRoleTransaction` | 以 Firestore Transaction 執行、附加庫存變更證明。**所有寫入未必已經走同一路徑，待持續稽核。** |
 | Workspace / 既有 UI 模組 | `modules/inventory-workspace.js`, `warehouse-logistics.js`, `customer-cancellations.js`, `delivery-settings.js`, `order-entry-ui.js` 等 | 含 UI 與流程呼叫；重複業務規則應逐步改呼叫共同核心。 |
@@ -49,3 +49,16 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 ```
 
 重整期間任何 commit 若只修改 `app.js` 而未改 `src/`，CI 應失敗。後續模組化要逐步把業務操作和共享狀態從 feature 移至真正服務模組，而不是建立平行 copy。
+
+## Source responsibilities（2026-10-15 第二批精分）
+
+- `src/services/order-reservation.js`：建單逐品項預留及採購需求同步。
+- `src/services/supply-order.js`：採購／供應單登記與取消供應流程。
+- `src/services/receiving.js`：收貨、自由庫存再分配與重試協調。
+- `src/services/order-lifecycle-reservation.js`：取消／恢復的預留交易變更。
+- `src/services/delivery-stock.js`：送貨、退貨對庫存與批次的交易更新。
+- `src/features/inventory/inventory-workspace.js`：產品庫存顯示、盤點／調整操作 UI。
+- `src/features/purchasing/purchase-order-editor.js`：採購單表單、PDF 與列印。
+- `src/features/orders/{order-progress,lifecycle-workspace,delivery-actions,order-creation}.js`：訂單畫面及操作（仍含交易呼叫，待 service 化）。
+
+這些來源目前經工具無損串接到 app.js，**是可維護的檔案所有權拆分，不代表完全隔離了 JavaScript scope**。每次抽出真正服務 API 前先以現有測試鎖定行為。
