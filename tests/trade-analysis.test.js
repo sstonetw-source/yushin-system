@@ -160,7 +160,7 @@ test('legacy multi-item delivered flags preserve line amounts and cancellation k
 });
 
 function simpleFixture(tab){
- const x=fixture();Object.assign(x,{tradeAnalysisTab:tab,salesStatisticsQueryWindow:()=>filters,
+ const x=fixture();Object.assign(x,{tradeAnalysisTab:tab,tradeAnalysisSensitiveVisible:true,salesStatisticsQueryWindow:()=>filters,
  readTradeAnalysisFilters:()=>({...filters,brand:'',line:'',sales:'',type:''}),document:{getElementById:()=>({value:''})},tradeAnalysisWarehouseStocks:[{id:'W',productKey:'P1',productId:'P1',warehouseId:'WH',onHand:2,reserved:1}]});
  x.inventoryAnalysisLots[0].productKey='P1';x.inventoryAnalysisLots[0].warehouseId='WH';
  vm.runInContext(fn('buildSimpleTradeAnalysis'),x);return x;
@@ -251,7 +251,7 @@ test('type and line filters consistently limit all three tab calculations, inclu
 function loaderFixture() {
     const x=fixture(),elements={},loads=[],applied=[];
     const element=id=>elements[id]||(elements[id]={value:'',textContent:'',innerHTML:'',hidden:false,setAttribute(){}});
-    Object.assign(x,{currentUserRole:'admin',currentUser:{uid:'admin'},tradeAnalysisTab:'purchasing',
+    Object.assign(x,{currentUserRole:'admin',currentUser:{uid:'admin'},tradeAnalysisTab:'purchasing',tradeAnalysisSensitiveVisible:true,
         tradeAnalysisAppliedFilters:{...filters},tradeAnalysisSnapshots:new Map(),tradeAnalysisRevision:0,
         tradeAnalysisLoadedKey:'',tradeAnalysisReady:false,tradeAnalysisFiltersPending:false,salesStatisticsLoadPromise:null,
         document:{getElementById:element,querySelectorAll:()=>[]},
@@ -327,7 +327,7 @@ test('current-tab Excel includes all filtered rows and applied product type, ind
         tradeAnalysisAppliedFilters:applied,beginActionButton:()=>({}),endActionButton:()=>{},ensureXlsxLoaded:async()=>{},
         document:{getElementById:id=>elements[id]||(elements[id]={value:'未套用的條件',textContent:'計算方式'})},
         alert:message=>{throw Error(message);},XLSX:{utils:{book_new:()=>({}),json_to_sheet:rows=>rows,book_append_sheet:(_wb,rows,name)=>sheets.push({rows,name})},writeFile(){}}});
-    vm.runInContext('window=globalThis',x);
+    vm.runInContext('window=globalThis;'+fn('simpleTradeAnalysisLabels'),x);
     const start=source.indexOf('window.exportTradeAnalysis = async function');vm.runInContext(source.slice(start,source.indexOf('\n};',start)+3),x);
     const rows=x.buildSimpleTradeAnalysis(applied);await x.exportTradeAnalysis();
     const detail=sheets.find(sheet=>sheet.name==='品項明細').rows;

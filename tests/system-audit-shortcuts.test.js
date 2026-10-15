@@ -23,7 +23,7 @@ test('audit shortcuts preserve the exact product document identity',async()=>{
 });
 test('encoded warehouse keys yield item code for lookup and a new product draft never inherits stock ID',async()=>{
  const {x,calls,issues}=setup();assert.equal(x.systemAuditItemCode({id:'wh%3A主倉__prd%3ARoche%3A06612601001'}),'06612601001');
- issues([{type:'分倉找不到 Product',target:{kind:'stock',record:{id:'wh:main__code:500-0006',brand:'Roche'}}}]);
+ issues([{type:'分倉找不到產品主檔',target:{kind:'stock',record:{id:'wh:main__code:500-0006',brand:'Roche'}}}]);
  await x.window.followSystemAuditShortcut(0,'product-new');
  assert.equal(Object.keys(calls[0][1]).length,0);assert.equal(calls[0][2].itemCode,'500-0006');assert.equal(calls[0][2].brand,'Roche');
 });

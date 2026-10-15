@@ -97,8 +97,8 @@
     <div id="product-system" class="content-section">
         <h2 class="workspace-page-title no-print">產品 <button type="button" class="page-help-trigger no-print" data-page-help="product-system" aria-label="產品功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
         <div class="toolbar no-print product-search-toolbar">
-            <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌</strong></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
-            <input id="productManagementSearch" type="search" disabled placeholder="請輸入完整貨號">
+            <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌（瀏覽時選擇）</strong></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
+            <input id="productManagementSearch" type="search" oninput="updateProductSearchControls()" placeholder="直接輸入完整貨號（不限廠牌）">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()" disabled>搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
             <button type="button" id="productManagementBrowseBtn" class="btn-secondary" onclick="browseProductMasterBrand(document.getElementById('productManagementSearchBrand').value)" disabled>瀏覽此廠牌產品</button>
@@ -453,7 +453,7 @@
       <section class="panel no-print" id="freeStockRecoveryPanel" hidden><div class="section-header"><h3>庫存分配待處理</h3><button type="button" class="btn-secondary" onclick="loadFreeStockRecovery()">重新處理</button></div><p id="freeStockRecoveryStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>倉庫</th><th>品項</th><th>可用數量</th><th>狀態</th><th>操作</th></tr></thead><tbody id="freeStockRecoveryBody"></tbody></table></div><button type="button" id="freeStockRecoveryMore" class="btn-secondary" onclick="loadFreeStockRecovery(true)" hidden>處理更多（50）</button></section>
       <div id="inventoryStockPanel">
         <section class="panel no-print" id="mainTransferRequestPanel" hidden><div class="section-header"><h3>調撥回主倉</h3><button type="button" class="btn-secondary" onclick="exportMainTransferRequests(this)">匯出目前調回清單</button><button type="button" id="mainTransferRetry" class="btn-secondary" onclick="loadMainTransferRequests(true)" hidden>重試讀取</button></div><p id="mainTransferRequestStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>來源</th><th>分倉</th><th>品項</th><th>調回數量</th><th>操作</th></tr></thead><tbody id="mainTransferRequestBody"></tbody></table></div></section>
-      <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 庫存入庫</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批量新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
+      <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 手動新增庫存</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批次新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
 
       <div class="toolbar no-print inventory-toolbar">
         <input id="inventorySearch" type="search" placeholder="搜尋庫存／產品：貨號 / 品名 / 廠牌 / 批號" oninput="scheduleInventorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();runInventoryUnifiedSearchNow();}">
@@ -480,20 +480,20 @@
     <div class="eq-modal-overlay no-print" id="inventoryAdjustmentOverlay" onclick="if(event.target===this) closeInventoryAdjustment()">
       <div class="eq-modal-box" style="max-width:1100px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <h3 id="inventoryAdjustmentTitle" style="margin:0;">新增庫存</h3>
+          <h3 id="inventoryAdjustmentTitle" style="margin:0;">手動新增庫存</h3>
           <button type="button" class="btn-secondary" onclick="closeInventoryAdjustment()">✕ 關閉</button>
         </div>
         <div class="form-grid" style="margin-top:14px;">
           <div id="inventoryAdjustmentTypeWrap">
             <label>異動類型</label>
             <select id="inventoryAdjustmentType" onchange="onInventoryAdjustmentTypeChange()">
-              <option value="initial">期初庫存／新增入庫</option>
+              <option value="initial">手動新增庫存（含期初庫存）</option>
               <option value="adjustment">批號／效期庫存異動</option>
               <option value="scrap">報廢</option>
             </select>
           </div>
         </div>
-        <div class="inventory-summary-note" id="inventoryAdjustmentHint">一般盤點請直接使用庫存卡片的「修改庫存」，輸入盤點後的現有數量；這裡保留給新增庫存、批號／效期品項異動與報廢。客戶退貨請從原訂單操作，供應商退貨請從原採購來源處理。</div>
+        <div class="inventory-summary-note" id="inventoryAdjustmentHint">一般盤點請直接使用庫存卡片的「修改庫存」，輸入盤點後的現有數量；這裡保留給手動新增庫存、批號／效期品項異動與報廢。客戶退貨請從原訂單操作，供應商退貨請從原採購來源處理。</div>
         <div class="table-wrap">
           <table class="inventory-adjustment-table">
             <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>倉庫</th><th>數量</th><th>實際單位成本</th><th>批號</th><th>效期</th><th>操作</th></tr></thead>
@@ -741,7 +741,7 @@
                 <option value="unknown">尚無紀錄</option>
             </select>
             <button onclick="openEquipmentModal()">＋ 新增儀器</button>
-            <button class="btn-secondary" onclick="document.getElementById('eqExcelInput').click()">📤 批量上傳 Excel</button>
+            <button class="btn-secondary" onclick="document.getElementById('eqExcelInput').click()">📤 批次上傳 Excel</button>
             <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
             <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 匯出目前篩選結果（已載入）</button>
         </div>
@@ -755,7 +755,7 @@
             </thead>
             <tbody id="eqListBody"></tbody>
         </table>
-        <div class="empty-hint" id="eqEmptyHint" style="display:none;">目前沒有儀器紀錄，點選「＋ 新增儀器」或「批量上傳 Excel」開始建立。</div>
+        <div class="empty-hint" id="eqEmptyHint" style="display:none;">目前沒有儀器紀錄，點選「＋ 新增儀器」或「批次上傳 Excel」開始建立。</div>
         <div style="text-align:center;margin-top:12px;"><button type="button" class="btn-secondary" id="equipmentLoadMoreBtn" style="display:none;" onclick="loadMoreEquipment()">載入更多</button></div>
     </div>
 
@@ -862,7 +862,7 @@
                     <input type="date" id="exportStartDate">
                     <span>至</span>
                     <input type="date" id="exportEndDate" aria-label="匯出結束日期">
-                    <button type="button" onclick="exportOrdersByDate()" class="btn-secondary">匯出 Excel（供交由採購處理）</button>
+                    <button type="button" onclick="exportOrdersByDate()" class="btn-secondary">匯出 Excel（供交由採購）</button>
                 </div>
             </details>
         </div>
@@ -1079,8 +1079,8 @@
                 </div></details>
             </section>
             <section class="order-entry-section">
-                <h4>訂貨方式</h4><div class="form-grid">
-                    <div class="order-entry-wide"><label for="orderProcurementType">由誰訂貨</label><select id="orderProcurementType" onchange="onOrderProcurementTypeChange()"><option value="PURCHASING_PO">交由採購處理</option><option value="SALES_SELF_ORDER">業務自行訂貨</option></select></div>
+                <h4>採購方式</h4><div class="form-grid">
+                    <div class="order-entry-wide"><label for="orderProcurementType">由誰訂貨</label><select id="orderProcurementType" onchange="onOrderProcurementTypeChange()"><option value="PURCHASING_PO">交由採購</option><option value="SALES_SELF_ORDER">業務自行訂貨</option></select></div>
                     <div id="orderSelfStatusWrap" hidden class="order-entry-wide"><label for="orderSelfOrderConfirmed">自行訂貨進度</label><select id="orderSelfOrderConfirmed" onchange="syncOrderEntrySelfStatus()"><option value="pending">尚未下訂</option><option value="confirmed">已向供應商下訂</option></select></div>
                     <div id="orderSelfSupplierWrap" style="display:none;"><label for="orderSelfSupplier">供應商 <span id="orderSelfSupplierRequired" hidden aria-hidden="true">＊</span></label><input type="text" id="orderSelfSupplier" placeholder="供應商名稱"></div>
                     <div id="orderCostFieldWrap" style="display:none;"><label for="orderCostPrice">含稅單位成本 <span id="orderCostPriceRequired" hidden aria-hidden="true">＊</span></label><input type="number" id="orderCostPrice" min="0" step="any" inputmode="decimal" placeholder="可先留白"><small id="orderSelfCostHint" hidden>確認已下訂時必填；無成本可填 0。</small></div>
@@ -1444,6 +1444,7 @@
             <div id="tradeAnalysisCards" class="sales-stat-cards admin-overview-cards trade-analysis-cards"></div>
 
             <div class="trade-analysis-detail-actions no-print">
+                <button type="button" id="tradeAnalysisSensitiveBtn" class="btn-secondary" aria-pressed="false" onclick="toggleTradeAnalysisSensitive()" hidden>隱藏毛利</button>
                 <button type="button" id="tradeAnalysisToggleBtn" aria-expanded="false" onclick="toggleSimpleTradeAnalysisDetail()" disabled>查看明細</button>
                 <button type="button" id="tradeAnalysisWorkbookBtn" onclick="exportTradeAnalysis()" class="btn-secondary" disabled>匯出此分頁 Excel</button>
             </div>
@@ -1577,7 +1578,7 @@
                 </div>
                 <div id="testDataResetStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
                 <span style="display:block;margin-top:8px;font-size:12px;color:#666;">
-                    僅真正管理員可執行。保留估價單；清除 Forecast、訂單、採購、庫存交易／預留／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、Product／Supplier／Brand／Customer Master、倉庫與系統設定。估價單中指向已清除資料的連結將無法開啟，原成交狀態不變。
+                    僅真正管理員可執行。保留估價單；清除 Forecast、訂單、採購、庫存交易／預留／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、產品、供應商、廠牌與客戶主檔、倉庫與系統設定。估價單中指向已清除資料的連結將無法開啟，原成交狀態不變。
                 </span>
             </div>
 
@@ -1679,7 +1680,7 @@
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
     <script src="modules/order-entry-core.js?v=20261014-1"></script>
-    <script src="app.js?v=20261014-9"></script>
+    <script src="app.js?v=20261015-1"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261015-1"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
@@ -1829,7 +1830,7 @@
                             <div><strong>歷史成本</strong><span>實際採購價、庫存批次成本與已完成交易不會被價目表刪除</span></div>
                         </div>
                     </div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">產品匯入的新廠牌會自動加入廠牌主檔，不需要在這裡逐一建立。此頁主要設定哪些廠牌要「獨立統計」以及下方的「報價公司限制」；未設為獨立統計的廠牌仍會保留真正廠牌名稱，只是在進銷存報表合併計入「其他廠牌」。維修也當作一般廠牌管理，可自行決定是否獨立統計。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><span style="font-size:12px;color:#777;">用於補齊既有產品主檔中尚未建立的廠牌；只新增缺少的廠牌，不更改現有統計或公司限制。</span></div></div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">產品主檔、估價、訂單與進銷存分析只使用「標準名稱」。常見縮寫或舊名稱請放在別名，例如標準名稱「Beckman Coulter」，別名可填「Beckman」。輸入別名時系統會自動轉成標準名稱，不再建立第二個廠牌。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-agencies"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">只有少數簽在特定分公司的廠牌需要設定。某廠牌若完全未勾選任何公司＝三家公司都可報價；若有勾選＝只能使用勾選公司的估價單抬頭。受限制廠牌在其他公司的估價單仍會顯示，但不能選取。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-statistics"><p id="tradeAnalysisScope" class="inventory-summary-note"></p></div><div data-page-help-source="admin-system" data-help-context="admin-warehouses"><div class="inline-help-content"><p style="font-size:12px;color:#666;margin:6px 0;">既有倉庫預設為公司倉庫。外倉從分倉庫出貨清單處理；收件資訊可自動帶入轉倉設定。</p></div></div></div>
-    <script src="modules/page-help.js?v=20261012-8"></script>
+    <script src="modules/page-help.js?v=20261015-1"></script>
 
 <script src="modules/main-warehouse-transfers.js?v=20261012-4"></script>
 </body>
