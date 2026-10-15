@@ -87,3 +87,8 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `src/services/dispatch-preparation.js` 的 `prepareOrderDispatch(orderId,itemId)` 擁有打單的 Firestore transaction（重新讀正式訂單、驗證交易資訊、計算可打單量、同交易建立 `dispatchRecords` 與更新 `orders`）。
 - `window.markOrderItemDispatchPrepared` 僅負責角色可見性、重複按鍵鎖、操作回饋及快取重新呈現；不可另寫第二套打單 Firestore 異動。
 - 冪等性依 transaction 中重新檢查當前待打單量；如先前已提交，重試不能建立第二張相同的 dispatch 記錄。UI 鎖只是輔助，不能取代交易讀取。
+
+## 訂單核銷交易邊界（2026-10-15）
+- `src/services/order-billing.js` 為核銷狀態及核銷日期的唯一 Firestore Transaction 寫入入口；在交易內重新讀取權威訂單、驗證未取消及核銷資格，並在原子更新中記錄異動歷史。
+- `src/features/orders/order-status.js` 只處理 UI、樂觀快取及完成／失敗回饋。核銷日期不再直接 `db.doc().update()`，一律使用 `runRoleTransaction` 及安全 Rules。
+- 連續點擊用 pendingKey 阻止同頁重複請求；跨裝置重試則由交易內對最新資料的確認避免重覆寫入。快取不代替 Rules。

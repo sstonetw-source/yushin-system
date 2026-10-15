@@ -31,29 +31,7 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     writeAppDataCache('orders', ordersCache);
     renderOrdersList();
 
-    let committed;
-    runRoleTransaction(async transaction => {
-        const ref = db.collection('orders').doc(orderId);
-        const snapshot = await transaction.get(ref);
-        if (!snapshot.exists) throw new Error('找不到這筆訂單。');
-        const order = snapshot.data();
-        if (normalizedOrderStatus(order) !== 'normal') throw new Error('這筆訂單已取消。');
-        const updates = {
-            isBilled:newValue,
-            billingDate,
-            status:BUSINESS_STATUS.ACTIVE,
-            updatedAt: timestamp,
-            statusHistory:firebase.firestore.FieldValue.arrayUnion(logEntry)
-        };
-        Object.assign(updates,orderWorkIndexFields({...order,...updates}));
-        transaction.update(ref, updates);
-        committed = {
-            isBilled:newValue,
-            billingDate,
-            status:BUSINESS_STATUS.ACTIVE,
-            statusHistory:[...(order.statusHistory || []),logEntry]
-        };
-    }).then(() => {
+    setOrderBillingStatus(orderId,newValue,billingDate,logEntry,timestamp).then(committed => {
         Object.assign(o, committed);
         pendingOrderStatusKeys.delete(pendingKey);
         writeAppDataCache('orders', ordersCache);
@@ -76,23 +54,35 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
 window.updateOrderBillingDate = function(orderId, value) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order || !order.isBilled || !canEditPage('orders.list')) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) { alert('請選擇正確的核銷日期。'); renderOrdersList(); return; }
+    if (!isValidOrderBillingDate(value)) { alert('請選擇正確的核銷日期。'); renderOrdersList(); return; }
+    const pendingKey=`${orderId}:billingDate`;
+    if(pendingOrderStatusKeys.has(pendingKey))return;
     const previous = order.billingDate || '';
     if (previous === value) return;
+    const previousHistory=[...(order.fieldEditHistory||[])];
     const history = {
         field: 'billingDate', label: '修改核銷日期', before: previous || orderBillingDate(order), after: value,
         by: currentUserName || currentUser?.email || '未知使用者', at: new Date().toISOString()
     };
+    pendingOrderStatusKeys.add(pendingKey);
     order.billingDate = value;
-    order.fieldEditHistory = [...(order.fieldEditHistory || []), history];
+    order.fieldEditHistory = [...previousHistory,history];
     writeAppDataCache('orders', ordersCache);
     renderOrdersList();
-    db.collection('orders').doc(orderId).update({ billingDate: value, updatedAt: history.at, fieldEditHistory: firebase.firestore.FieldValue.arrayUnion(history) }).catch(err => {
-        order.billingDate = previous;
-        order.fieldEditHistory = (order.fieldEditHistory || []).filter(item => item !== history);
-        writeAppDataCache('orders', ordersCache);
+    changeOrderBillingDate(orderId,value,history).then(committed=>{
+        Object.assign(order,committed);
+        pendingOrderStatusKeys.delete(pendingKey);
+        writeAppDataCache('orders',ordersCache);
         renderOrdersList();
-        alert('更新核銷日期失敗，已還原：' + err.message);
+    }).catch(err=>{
+        if(order.billingDate===value){
+            order.billingDate=previous;
+            order.fieldEditHistory=previousHistory;
+        }
+        pendingOrderStatusKeys.delete(pendingKey);
+        writeAppDataCache('orders',ordersCache);
+        renderOrdersList();
+        alert('更新核銷日期失敗，已還原：'+err.message);
     });
 };
 
