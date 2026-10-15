@@ -81,6 +81,36 @@ test('free transfer receipt persists pending allocation and retries without rece
  assert.equal(result.affectedOrderIds[0],'WAITING');assert.equal(calls[1][6],'stockTransfers');
  await f.c.commitWarehouseTransferReceipt(args.id);assert.equal(calls.length,2);
 });
+test('transfer retry cannot turn a previous order transfer into a different destination or salesperson handoff',async()=>{
+ const f=fixture(),args={id:'ORDER-ID',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'};
+ await f.c.commitWarehouseTransfer(args);
+ await f.c.commitWarehouseTransfer(args);
+ const before=structuredClone([...f.docs]);
+ for(const patch of [
+  {toWarehouseId:'MAIN'},
+  {handoff:true,toWarehouseId:''},
+  {expectedWarehouseId:'OTHER'},
+  {expectedPlan:{mode:'PICKUP'}}
+ ]){
+  await assert.rejects(f.c.commitWarehouseTransfer({...args,...patch}),/識別碼衝突/);
+  assert.deepEqual([...f.docs],before);
+ }
+});
+test('one replenishment transfer ID cannot confirm a second pending request',async()=>{
+ const f=mainRequestFixture(),base={inventoryId:'P',fromWarehouseId:'EXT',qty:3};
+ await f.c.createMainTransferRequest({id:'REQ1',...base});
+ const first={id:'SEND-ONCE',requestId:'REQ1',...base,toWarehouseId:'MAIN'};
+ await f.c.commitWarehouseTransfer(first);
+ await f.c.createMainTransferRequest({id:'REQ2',...base});
+ const before=structuredClone([...f.docs]);
+ for(const patch of [{requestId:'REQ2'},{requestId:''}]){
+  await assert.rejects(f.c.commitWarehouseTransfer({...first,...patch}),/識別碼衝突/);
+  assert.deepEqual([...f.docs],before);
+  assert.equal(f.docs.get('stockTransferRequests/REQ2').status,'PENDING');
+ }
+ await f.c.commitWarehouseTransfer(first);
+ assert.deepEqual([...f.docs],before);
+});
 test('free transfer is atomic, retains company total and lot identity, and hides transit stock from availability until received',async()=>{
  const f=fixture();await f.c.commitWarehouseTransfer({id:'T',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
  assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(inventory.normalizeStock(f.docs.get('inventory/P')).available,3);
