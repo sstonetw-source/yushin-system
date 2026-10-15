@@ -81,6 +81,7 @@ test('printing validates current transaction information before writing a dispat
   const c=vm.createContext({window:{},currentUser:{uid:'buyer'},currentUserRole:'purchaser',pendingDispatchOrderIds:new Set(),YushinOrderEntry:core,document:{getElementById:()=>null},ordersCache:[],currentDeliveryOrderId:null,
    db:{collection:()=>({doc:()=>({})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>order}),set:(...x)=>writes.push(x),update:(...x)=>writes.push(x)}),
    normalizedOrderStatus:()=> 'normal',normalizedOrderItems:o=>o.items,itemDispatchState:()=>({pending:1,prepared:0}),deliveryActor:()=> 'Buyer',orderWorkIndexFields:()=>({}),syncOrderIntoPurchasingCaches(){},writeAppDataCache(){},alert:x=>alerts.push(x)});
+  vm.runInContext(fs.readFileSync('src/services/dispatch-preparation.js','utf8'),c);
   const a=source.indexOf('window.markOrderItemDispatchPrepared = async function'),b=source.indexOf('function canBusinessSelfOrder(',a);vm.runInContext(source.slice(a,b),c);
   await c.window.markOrderItemDispatchPrepared('O','I');
   assert.equal(writes.length,core.validateTrade(trade).valid?2:0);assert.equal(c.pendingDispatchOrderIds.size,0);
