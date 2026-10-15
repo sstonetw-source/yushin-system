@@ -938,6 +938,9 @@ service cloud.firestore {
 
     function businessProcurementDemandOperationalUpdate() {
       return businessOwner()
+        // A normal supply-progress edit cannot independently close a demand.
+        // Lifecycle cancellation requires its co-committed order transition.
+        && request.resource.data.get('status', '') != 'CANCELLED'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
           'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt', 'sourceItemIndex'
