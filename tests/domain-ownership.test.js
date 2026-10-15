@@ -33,3 +33,15 @@ test('dispatch recording lives in the services layer, not order UI',()=>{
   assert.doesNotMatch(handler,/await\s+runRoleTransaction\s*\(/);
   assert.match(read('src/services/dispatch-preparation.js'),/async\s+function\s+prepareOrderDispatch\s*\(/);
 });
+
+test('billing UI delegates Firestore operations to the protected service',()=>{
+  const ui=read('src/features/orders/order-status.js');
+  assert.match(ui,/setOrderBillingStatus\s*\(/);
+  assert.match(ui,/changeOrderBillingDate\s*\(/);
+  assert.doesNotMatch(ui,/db\.collection\s*\(/);
+  assert.doesNotMatch(ui,/runRoleTransaction\s*\(/);
+  const svc=read('src/services/order-billing.js');
+  assert.match(svc,/runRoleTransaction\s*\(/);
+  assert.match(svc,/transaction\.get\s*\(/);
+  assert.match(svc,/transaction\.update\s*\(/);
+});

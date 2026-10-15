@@ -92,7 +92,8 @@ test('invoice choice is for printing and does not block business billing confirm
  const c=vm.createContext({window:{},YushinOrderEntry:core,ordersCache:[order],pendingOrderStatusKeys:new Set(),activeOrderWorkFilter:'all',currentUserName:'Sales',currentUser:null,currentDeliveryOrderId:null,
   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,normalizedOrderStatus:()=> 'normal',orderBillingDate:()=>'',localDateString:()=> '2026-10-13',BUSINESS_STATUS:{ACTIVE:'active'},writeAppDataCache(){},renderOrdersList(){},alert:x=>alerts.push(x),
   firebase:{firestore:{FieldValue:{arrayUnion:x=>[x]}}},orderWorkIndexFields:()=>({}),
-  db:{collection:()=>({doc:()=>({})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({...order,transactionType:''})}),update:(...x)=>writes.push(x)})});
+  db:{collection:()=>({doc:()=>({})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({...order,isBilled:false,transactionType:''})}),update:(...x)=>writes.push(x)})});
+ vm.runInContext(fs.readFileSync('src/services/order-billing.js','utf8'),c);
  const a=source.indexOf('window.toggleOrderStatus ='),b=source.indexOf('window.updateOrderBillingDate',a);vm.runInContext(source.slice(a,b),c);
  c.window.toggleOrderStatus('O','isBilled',true);await new Promise(r=>setImmediate(r));
  assert.equal(writes.length,1);assert.equal(order.isBilled,true);assert.equal(alerts.length,0);assert.equal(c.pendingOrderStatusKeys.size,0);
