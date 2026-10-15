@@ -16760,9 +16760,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     // A restored order may only reserve against a live physical warehouse.
     // Reuse master snapshots when several items target the same location.
     const restoredWarehouseSnapshots = new Map();
-    // Only cancellation of an existing demand is handled atomically in this phase.
-    // No new demand records are created on cancellation.
-    const syncCancelledDemands=nextStatus==='cancelled'&&!options.skipDemandSync;
+    // All linked purchase demands must be read before the first transaction write.
+    // Deletion/testing flows may opt out explicitly; regular lifecycle never does.
+    const syncLinkedDemands=!options.skipDemandSync;
     for (let index = 0; index < items.length; index++) {
         const item = items[index];
         const savedItem=order.items?.[index]||{};
@@ -16785,7 +16785,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const invSnap = invRef ? await transaction.get(invRef) : null;
         const whSnap = whRef ? await transaction.get(whRef) : null;
         const reservationSnap = await transaction.get(reservationRef);
-        const demandRef=syncCancelledDemands?procurementDemandRef(globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId})):null;
+        const demandRef=syncLinkedDemands?procurementDemandRef(globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId})):null;
         const demandSnap=demandRef?await transaction.get(demandRef):null;
         const reservationData=reservationSnap.exists?reservationSnap.data():{};
         if(nextStatus==='normal'&&!directShip&&productKey){
@@ -16898,16 +16898,46 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         totalShortage += shortage;
     }
 
-    // Demand cancellation and reservation release share this transaction. If any
-    // demand fails validation / Rules, neither the order nor the stock is released.
-    for(const ctx of contexts){
-        if(!ctx.demandSnap?.exists)continue;
-        const demand=ctx.demandSnap.data();
-        if(demand.status==='CANCELLED')continue;
-        if(demand.sourceType!=='SALES_ORDER'||demand.sourceId!==orderId||demand.sourceItemId!==ctx.itemId
-            ||demand.productKey!==ctx.productKey||demand.ownerUid!==order.ownerUid||demand.salesCode!==order.salesCode)
-            throw new Error('採購需求與訂單歸屬或品項不一致，取消前請先核對資料。');
-        transaction.update(ctx.demandRef,{status:'CANCELLED',remainingToOrderQty:0,sourceItemIndex:ctx.index,updatedAt:now});
+    // Restore/cancel the linked demand in the same transaction as reservations
+    // and stock; never publish an order status before its procurement projection.
+    if(syncLinkedDemands){
+        const restoredOrder=nextStatus==='normal'
+            ? {...order,id:orderId,status:'active',orderStatus:'normal',items:nextItems}
+            : null;
+        for(const ctx of contexts){
+            const previous=ctx.demandSnap?.exists?ctx.demandSnap.data():null;
+            if(previous&&(
+                previous.demandId!=='SALES_ORDER:'+orderId+':'+ctx.itemId
+                ||previous.sourceType!=='SALES_ORDER'||previous.sourceId!==orderId
+                ||previous.sourceItemId!==ctx.itemId||previous.productKey!==ctx.productKey
+                ||previous.ownerUid!==order.ownerUid||previous.salesCode!==order.salesCode
+                ||(previous.sourceItemIndex!==undefined&&previous.sourceItemIndex!==-1&&previous.sourceItemIndex!==ctx.index)
+            ))throw new Error('採購需求與訂單歸屬或品項不一致，請先核對資料。');
+            if(nextStatus==='cancelled'){
+                if(previous&&previous.status!=='CANCELLED')
+                    transaction.update(ctx.demandRef,{status:'CANCELLED',remainingToOrderQty:0,
+                        sourceItemIndex:ctx.index,updatedAt:now});
+                continue;
+            }
+            const nextItem=nextItems[ctx.index];
+            const doc=orderItemProcurementDemandDocument(restoredOrder,nextItem,previous,now);
+            if(previous){
+                // Historical supplier orders and receipts cannot be erased,
+                // inferred upwards, or reassigned by restoring a commercial order.
+                if(previous.orderedQty!==doc.orderedQty||previous.receivedQty!==doc.receivedQty
+                    ||previous.fulfillmentType!==doc.fulfillmentType
+                    ||previous.warehouseId!==doc.warehouseId)
+                    throw new Error('採購需求與供應商履約紀錄不一致，請先稽核再恢復訂單。');
+                transaction.update(ctx.demandRef,{
+                    requestedQty:doc.requestedQty,remainingToOrderQty:doc.remainingToOrderQty,
+                    remainingToReceiveQty:doc.remainingToReceiveQty,perOrdered:doc.perOrdered,
+                    perReceived:doc.perReceived,status:doc.status,sourceItemIndex:ctx.index,
+                    updatedAt:now
+                });
+            }else if(doc.requestedQty>0||doc.orderedQty>0||doc.receivedQty>0){
+                transaction.set(ctx.demandRef,doc);
+            }
+        }
     }
     stockStates.forEach(state => {
         if(Number(state.reserved||0)!==Number(state.beforeReserved||0))
@@ -16998,12 +17028,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
         });
-        try{
-            if(nextStatus!=='cancelled')await syncOrderProcurementDemandLifecycle(orderId,{id:orderId,...savedOrder},nextStatus);
-        }catch(demandErr){
-            console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
-            showActionFeedback('訂單已更新，但採購需求尚未同步。請到資料健康檢查訂單／採購關聯。','warning');
-        }
+        // The lifecycle transaction already synchronizes stock and purchase demand.
         normalizedOrderItems(savedOrder).forEach(item=>{
             const productKey=inventoryProductKey(item);
             const warehouseId=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||savedOrder.warehouseId||'');
@@ -17934,12 +17959,7 @@ window.saveOrderLifecycleStatus = async function() {
             transaction.update(ref, updates);
             savedOrder = { ...liveOrder, ...updates, orderLifecycleHistory: [...(liveOrder.orderLifecycleHistory || []), liveHistory] };
         });
-        try{
-            if(nextStatus!=='cancelled')await syncOrderProcurementDemandLifecycle(order.id,{id:order.id,...savedOrder},nextStatus);
-        }catch(demandErr){
-            console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
-            showActionFeedback('訂單已更新，但採購需求尚未同步。請到資料健康檢查訂單／採購關聯。','warning');
-        }
+        // The lifecycle transaction already synchronizes stock and purchase demand.
         const index = ordersCache.findIndex(item => item.id === order.id);
         if (index >= 0) ordersCache[index] = { id: order.id, ...savedOrder };
         renderDeliveryModal();

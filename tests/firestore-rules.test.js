@@ -2094,6 +2094,7 @@ function loadActualLifecycle(f){
  Object.assign(f.context,{savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[],DOCUMENT_TYPES:{ORDER:'order'}});
  const app=fs.readFileSync('app.js','utf8');
  vm.runInContext(app.slice(app.indexOf('function inventoryMovementRecord('),app.indexOf('function inventoryReservationPayload(')),f.context);
+ vm.runInContext(app.slice(app.indexOf('function orderItemProcurementDemandDocument('),app.indexOf('async function persistOrderProcurementDemands(')),f.context);
  vm.runInContext(app.slice(app.indexOf('async function adjustInventoryReservationForLifecycle('),app.indexOf('function confirmOrderCancellation(')),f.context);
  return status=>f.context.runRoleTransaction(async tx=>{
   const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref);
@@ -2159,6 +2160,56 @@ test('actual lifecycle refuses underfunded cancellation for admin and business r
   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
  }
 });
+test('atomic order restoration reopens linked purchase demand for sales, engineer and admin',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  const f=await orderInitializationFixture(uid,role);await f.run();
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...order,inventoryReservationStatus:'completed'});
+  const run=loadActualLifecycle(f);
+  const id='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+  await assertSucceeds(run('cancelled'));
+  const closed=(await getDoc(doc(db('admin'),id))).data();
+  assert.equal(closed.status,'CANCELLED');assert.equal(closed.remainingToOrderQty,0);
+  if(role!=='admin'){
+   const client=db(uid);
+   await assertFails(updateDoc(doc(client,id),{status:'PENDING',remainingToOrderQty:2}));
+  }
+  await assertSucceeds(run('normal'));
+  const restored=(await getDoc(doc(db('admin'),id))).data();
+  assert.equal(restored.status,'PENDING');assert.equal(restored.requestedQty,2);
+  assert.equal(restored.remainingToOrderQty,2);
+  assert.equal(restored.orderedQty,closed.orderedQty);assert.equal(restored.receivedQty,closed.receivedQty);
+  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'active');
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+ }
+});
+test('restoring without a prior demand creates it in the same reservation transaction',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  const d='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+  await seed('orders/'+f.id,{...order,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+  await env.withSecurityRulesDisabled(async c=>c.firestore().doc(d).delete());
+  const run=loadActualLifecycle(f);
+  await assertSucceeds(run('normal'));
+  const demand=(await getDoc(doc(db('admin'),d))).data();
+  assert.equal(demand.requestedQty,5);assert.equal(demand.status,'PENDING');
+  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'active');
+ }
+});
+test('restore detects supplier quantity drift and leaves reservation, demand and order untouched',async()=>{
+ const f=await orderInitializationFixture('sales1','sales',{onHand:0});await f.run();
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ const id='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+ const demand=(await getDoc(doc(db('admin'),id))).data();
+ await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+ await seed(id,{...demand,status:'CANCELLED',remainingToOrderQty:0,orderedQty:2,remainingToReceiveQty:2});
+ const run=loadActualLifecycle(f);
+ await assert.rejects(run('normal'),/不一致|稽核/);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'cancelled');
+ assert.equal((await getDoc(doc(db('admin'),id))).data().orderedQty,2);
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,0);
+});
 test('actual restoration respects zero and partial company availability for admin sales and engineer',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
@@ -2167,6 +2218,9 @@ test('actual restoration respects zero and partial company availability for admi
   const run=loadActualLifecycle(f);
   for(const companyReserved of [5,4]){
    await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+   const linkedId='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+   const linked=(await getDoc(doc(db('admin'),linkedId))).data();
+   await seed(linkedId,{...linked,status:'CANCELLED',remainingToOrderQty:0});
    await seed('inventoryReservations/'+f.id+'__I',reservation);
    await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:companyReserved,incoming:0});
    await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
@@ -2188,6 +2242,9 @@ test('actual restoration cannot reserve in a disabled or custody-designated ware
   for(const warehouse of [{active:false},{active:true,systemCustody:true},{active:true,warehouseType:'CUSTODY'}]){
    await seed('warehouses/W1',warehouse);
    await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+   const linkedId='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+   const linked=(await getDoc(doc(db('admin'),linkedId))).data();
+   await seed(linkedId,{...linked,status:'CANCELLED',remainingToOrderQty:0});
    await seed('inventoryReservations/'+f.id+'__I',reservation);
    await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
    await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
