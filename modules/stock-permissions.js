@@ -33,6 +33,7 @@
       {
         for(const write of writes){
           if(!write.ref.path.startsWith('inventoryReservations/')||write.method==='delete')continue;
+          assertReservationLocationCompatibility(write.ref,write.data);
           // A blind replacement must not erase an unsupported ledger and then
           // publish a legacy-looking total. Reuse the read when already held.
           if(!reads.has(write.ref.path))await proxy.get(write.ref);

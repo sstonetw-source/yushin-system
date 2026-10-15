@@ -84,6 +84,14 @@ test('blind replacement cannot conceal and erase an existing unsupported ledger'
   assert.equal(f.writes.length,0);assert.equal(f.docs.get('inventoryReservations/O__A').quantity,2);
  }
 });
+test('a payload mutated after queuing is checked again before native writes',async()=>{
+ const f=fixture([{itemId:'A'}]);
+ await assert.rejects(permissions.run(f.db,tx=>{
+  const payload={orderId:'O',itemId:'A',quantity:0};
+  tx.set(f.db.collection('inventoryReservations').doc('O__A'),payload);payload.locations=[];
+ },'admin',false,'admin'),error=>error.code==='unsupported-reservation-location');
+ assert.equal(f.writes.length,0);
+});
 test('ordinary legacy fractional quantities and custody identity remain readable without an extra duplicate read',async()=>{
  const f=fixture([{itemId:'A'}]);const ref=f.db.collection('inventoryReservations').doc('O__A');
  const record={orderId:'O',itemId:'A',quantity:0.5,warehouseId:'custody-sales'};f.docs.set(ref.path,record);
