@@ -303,12 +303,14 @@ test('partial transfer batch preflight blocks all mutations before a customer sh
  const f=batchUiFixture();f.list[1].item.qty=5;await f.c.openWarehouseShippingBatch();await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
  assert.equal(f.calls.length,0);assert.ok(f.feedback.some(([message])=>/全部到貨/.test(message)));
 });
-function mainRequestFixture(){
- const f=fixture();f.docs.get('warehouses/MAIN').isDefault=true;
+function mainRequestFixture(options={}){
+ const f=fixture(options);f.docs.get('warehouses/MAIN').isDefault=true;
  f.docs.set('warehouseStocks/EXT__P',{productKey:'P',warehouseId:'EXT',onHand:6,reserved:0,incoming:0});
  f.docs.set('inventoryLots/EXTLOT',{productKey:'P',warehouseId:'EXT',remainingQty:6,qty:6,lotNo:'EXTLOT',expiryDate:'2027-01-01'});
  f.docs.get('inventory/P').onHand=16;
  Object.assign(f.c,{canManageInventoryStockPolicy:()=>['admin','purchaser'].includes(f.c.currentUserRole),canEditPage:()=>true,confirm:()=>true,beginActionButton:()=>({}),endActionButton:()=>{},showActionFeedback:()=>{},loadInventory:async()=>{}});
+ f.c.YushinReservation=require('../modules/reservation-core');
+ vm.runInContext(fs.readFileSync('src/services/main-transfer-request.js','utf8'),f.c);
  vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../modules/main-warehouse-transfers.js'),'utf8'),f.c);
  f.c.loadMainTransferRequests=async()=>{};f.c.loadWarehouseTransferQueue=async()=>{};
  return f;
@@ -338,6 +340,46 @@ test('cancelling a pending replenishment releases its hold once, preserves order
  assert.equal(f.docs.get('inventory/P').reserved,4);assert.equal(f.docs.get('inventory/P').transferReserved,0);
  await assert.rejects(f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:2}),/已變更/);
  f.c.currentUserRole='warehouse';await assert.rejects(f.c.createMainTransferRequest({id:'BAD',inventoryId:'P',fromWarehouseId:'EXT',qty:1}),/採購/);
+});
+test('main replenishment cannot reserve company free stock already in transit even when the branch appears sufficient',async()=>{
+ const f=mainRequestFixture();f.docs.get('inventory/P').transferFreeInTransit=10;
+ const before=structuredClone([...f.docs]);
+ await assert.rejects(f.c.createMainTransferRequest({id:'OVER',inventoryId:'P',fromWarehouseId:'EXT',qty:3}),/可用庫存不足/);
+ assert.deepEqual([...f.docs],before);
+});
+test('main request service retries reserve and release once; cancelled request IDs never reopen',async()=>{
+ const f=mainRequestFixture({retry:true}),args={id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2};
+ await f.c.createMainTransferRequest(args);await f.c.createMainTransferRequest(args);
+ assert.equal(f.docs.get('inventory/P').reserved,6);
+ await f.c.cancelMainTransferRequestRecord('REQ');await f.c.cancelMainTransferRequestRecord('REQ');
+ const replay=await f.c.createMainTransferRequest(args);
+ assert.equal(replay.status,'CANCELLED');assert.equal(f.docs.get('inventory/P').reserved,4);
+ assert.equal(f.docs.get('warehouseStocks/EXT__P').transferReserved,0);
+});
+test('inconsistent cancellation or a failed commit leaves both stock holds and request status unchanged',async()=>{
+ for(const kind of ['short-hold','commit']){
+  const f=mainRequestFixture();await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
+  if(kind==='short-hold')f.docs.get('warehouseStocks/EXT__P').transferReserved=1;else f.fail();
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.c.cancelMainTransferRequestRecord('REQ'));
+  assert.deepEqual([...f.docs],before);assert.equal(f.docs.get('stockTransferRequests/REQ').status,'PENDING');
+ }
+});
+test('shipped requests and non-purchasing roles cannot release main replenishment holds',async()=>{
+ const f=mainRequestFixture();await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
+ await f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:2});
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.c.cancelMainTransferRequestRecord('REQ'),/已寄出/);
+ f.c.currentUserRole='warehouse';await assert.rejects(f.c.cancelMainTransferRequestRecord('REQ'),/採購/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+});
+test('cancelled request stays successfully cancelled when refreshing the UI fails',async()=>{
+ const f=mainRequestFixture(),messages=[];await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
+ f.c.loadMainTransferRequests=async()=>{throw Error('offline');};f.c.showActionFeedback=message=>messages.push(message);
+ await f.c.cancelMainTransferRequest('REQ',{});
+ assert.equal(f.docs.get('stockTransferRequests/REQ').status,'CANCELLED');
+ assert.equal(f.docs.get('inventory/P').reserved,4);
+ assert.match(messages[0],/已取消.*清單更新失敗/);assert.doesNotMatch(messages[0],/取消未完成/);
 });
 test('only explicit main pickup generates an order return-to-main requirement; recipient warehouse hints and missing mode do not reroute shipments',()=>{
  const warehouses=[{id:'MAIN'},{id:'EXT'}],helpers={status:()=> 'normal',incomplete:()=>false,items:o=>o.items,dispatch:(_o,i)=>({shippable:i.qty})};

@@ -1232,11 +1232,15 @@ window.saveInventoryTransfer=async function(){
     const operationId=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());
     const state=beginActionButton(button,'調撥中…');
     try{
-        await createMainTransferRequest({id:operationId,inventoryId:inventoryTransferEditingId,fromWarehouseId,qty});
+        const request=await createMainTransferRequest({id:operationId,inventoryId:inventoryTransferEditingId,fromWarehouseId,qty});
         delete button.dataset.operationId;
         invalidateWarehouseStockCache(key,fromWarehouseId);invalidateWarehouseStockCache(key,toWarehouseId);
-        closeInventoryTransfer();await loadInventory(true);await loadMainTransferRequests(true);
-        showActionFeedback('調回需求已建立並保留數量；倉管確認寄出後，主倉再點收。');
+        closeInventoryTransfer();
+        try{await loadInventory(true);await loadMainTransferRequests(true);}
+        catch(err){showActionFeedback('調回需求已儲存，但清單更新失敗；請重新開啟庫存頁確認。','warning');return;}
+        showActionFeedback(request.status==='PENDING'
+            ?'調回需求已建立並保留數量；倉管確認寄出後，主倉再點收。'
+            :`此調回需求已存在，目前${request.status==='CANCELLED'?'已取消':'已寄出'}，未重複保留庫存。`);
     }catch(err){alert('移動庫存失敗：'+(err?.message||err));}
     finally{endActionButton(button,state);}
 
