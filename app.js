@@ -16853,6 +16853,11 @@ window.prepareOrderLifecycle = function(orderId, status) {
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor, options={}) {
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
     const items = normalizedOrderItems(order);
+    // Multiple lines must never address the same reservation or demand document,
+    // including collisions between generated legacy IDs and explicit IDs.
+    const itemIds=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
+    if(new Set(itemIds).size!==itemIds.length)
+        throw new Error('訂單品項識別碼重複，無法安全取消或恢復。請由管理員核對品項與庫存預留。');
     const deliveries = savedDeliveryRecords(order);
     const now = new Date().toISOString();
 

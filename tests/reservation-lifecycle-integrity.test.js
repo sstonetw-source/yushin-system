@@ -394,3 +394,28 @@ test('legacy numeric strings and fractional reservations can still be permanentl
  await f.deleteOrder();
  assert.equal(f.docs.has('orders/O'),false);assert.equal(f.docs.get('inventory/P').reserved,0);
 });
+
+test('duplicate item identities cannot release another orders stock or restore the same reservation twice',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  for(const nextStatus of ['cancelled','normal']){
+   const f=fixture({role,held:3,status:nextStatus==='normal'?'cancelled':'active'});
+   f.docs.get('inventory/P').reserved=9;f.docs.get('warehouseStocks/A__P').reserved=9;
+   f.docs.get('orders/O').items.push({...f.docs.get('orders/O').items[0]});
+   // Legacy demand rows use -1 when the original item index is unknown.
+   f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')).sourceItemIndex=-1;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.run(nextStatus),/品項識別碼重複/);
+   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('generated legacy item identities cannot collide with an explicit item identity during lifecycle changes',async()=>{
+ for(const nextStatus of ['cancelled','normal']){
+  const f=fixture();
+  const item=f.docs.get('orders/O').items[0];
+  item.itemId='item-2';f.docs.get('orders/O').items.push({...item,itemId:''});
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.run(nextStatus),/品項識別碼重複/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
