@@ -1465,7 +1465,9 @@ test('phase 14 canonical lifecycle statuses preserve cancellation semantics with
     const lifecycleStart = appSource.indexOf('window.quickSetOrderLifecycle =');
     const lifecycleEnd = appSource.indexOf('window.toggleOrderProgressStatus', lifecycleStart);
     const lifecycle = appSource.slice(lifecycleStart, lifecycleEnd);
-    assert.match(lifecycle, /status: nextStatus === 'cancelled' \? BUSINESS_STATUS\.CANCELLED : BUSINESS_STATUS\.ACTIVE/);
+    assert.match(lifecycle, /await setOrderLifecycleStatus\(orderId,nextStatus\)/);
+    const service = fs.readFileSync(path.join(__dirname, '..', 'src/services/order-lifecycle.js'), 'utf8');
+    assert.match(service, /status: nextStatus === 'cancelled' \? BUSINESS_STATUS\.CANCELLED : BUSINESS_STATUS\.ACTIVE/);
     assert.doesNotMatch(lifecycle, /db\.collection\([^\n]+\)\.doc\([^\n]+\)\.delete\(/);
 });
 
