@@ -439,6 +439,7 @@ function quickLifecycleActionFixture(nextStatus){
   runRoleTransaction:async fn=>{transactions++;await fn({get:async()=>({exists:true,data:()=>structuredClone(before)}),update:()=>{}});await commit;},
   adjustInventoryReservationForLifecycle:async()=>({items:[]}),orderWorkIndexFields:()=>({}),
   normalizedOrderItems:o=>o.items,syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},alert:()=>{}});
+ vm.runInContext(fs.readFileSync('src/services/order-lifecycle.js','utf8'),c);
  vm.runInContext(app.slice(app.indexOf('window.quickSetOrderLifecycle ='),app.indexOf('window.toggleOrderProgressStatus')),c);
  return {c,before,resolveCommit,rejectCommit,transactions:()=>transactions};
 }

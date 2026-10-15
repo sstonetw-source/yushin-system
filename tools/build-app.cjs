@@ -28,6 +28,7 @@ const parts = [
   "src/features/orders/order-status.js",
   "src/features/orders/order-progress.js",
   "src/services/order-lifecycle-reservation.js",
+  "src/services/order-lifecycle.js",
   "src/features/orders/lifecycle-workspace.js",
   "src/services/delivery-stock.js",
   "src/features/orders/delivery-actions.js",
