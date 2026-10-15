@@ -16750,6 +16750,7 @@ window.prepareOrderLifecycle = function(orderId, status) {
 };
 
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor) {
+    if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
     const items = normalizedOrderItems(order);
     const deliveries = savedDeliveryRecords(order);
     const now = new Date().toISOString();
@@ -16758,6 +16759,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     const contexts = [];
     for (let index = 0; index < items.length; index++) {
         const item = items[index];
+        const savedItem=order.items?.[index]||{};
+        const itemReservedQty=Object.hasOwn(savedItem,'reservedQty')?savedItem.reservedQty:item.reservedQty;
         const itemId = String(item.itemId || `item-${index + 1}`);
         const productKey = inventoryProductKey(item);
         const directShip = (item.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
@@ -16776,7 +16779,19 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const invSnap = invRef ? await transaction.get(invRef) : null;
         const whSnap = whRef ? await transaction.get(whRef) : null;
         const reservationSnap = await transaction.get(reservationRef);
-        contexts.push({item,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap});
+        const reservationData=reservationSnap.exists?reservationSnap.data():{};
+        if(!directShip&&item.transferPendingId)throw new Error('此品項尚在倉庫調撥途中，請目的倉確認收貨後再取消或恢復。');
+        for(const [key,value] of Object.entries({orderId,itemId,productKey,warehouseId})){
+            if(reservationData[key]!==undefined&&reservationData[key]!==value)
+                throw new Error('預留來源、產品或倉庫與訂單不一致，請先核對資料。');
+        }
+        for(const snap of [invSnap,whSnap]){
+            if(snap?.exists&&snap.data().productKey!==undefined&&snap.data().productKey!==productKey)
+                throw new Error('庫存產品與訂單不一致，請先核對資料。');
+        }
+        if(whSnap?.exists&&whSnap.data().warehouseId!==undefined&&whSnap.data().warehouseId!==warehouseId)
+            throw new Error('分倉庫存位置與訂單不一致，請先核對資料。');
+        contexts.push({item,itemReservedQty,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap,reservationData});
     }
 
     const nextItems = [];
@@ -16784,14 +16799,17 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     let totalShortage = 0;
     const stockStates = new Map();
     contexts.forEach(ctx => {
-        if (ctx.invRef && ctx.invSnap?.exists && !stockStates.has(ctx.invRef.path)) stockStates.set(ctx.invRef.path,{ref:ctx.invRef,...inventoryNumbers(ctx.invSnap.data())});
-        if (ctx.whRef && ctx.whSnap?.exists && !stockStates.has(ctx.whRef.path)) stockStates.set(ctx.whRef.path,{ref:ctx.whRef,...inventoryNumbers(ctx.whSnap.data())});
+        if (ctx.invRef && ctx.invSnap?.exists && !stockStates.has(ctx.invRef.path)) stockStates.set(ctx.invRef.path,{...ctx.invSnap.data(),ref:ctx.invRef});
+        if (ctx.whRef && ctx.whSnap?.exists && !stockStates.has(ctx.whRef.path)) stockStates.set(ctx.whRef.path,{...ctx.whSnap.data(),ref:ctx.whRef});
     });
 
     for (const ctx of contexts) {
-        const {item,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap} = ctx;
+        const {item,itemReservedQty,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap,reservationData} = ctx;
 
         if (directShip || !productKey) {
+            // A direct or unlinked line cannot silently erase an existing hold.
+            globalThis.YushinReservation.planReservationLifecycle({nextStatus:'cancelled',
+                existingQty:reservationData.quantity,itemReservedQty});
             const shortage = directShip ? 0 : Math.max(0, ordered - delivered);
             transaction.set(reservationRef, {
                 orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
@@ -16809,13 +16827,16 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
 
         const invState = invRef ? stockStates.get(invRef.path) : null;
         const whState = whRef ? stockStates.get(whRef.path) : null;
+        const existingQty=reservationData.quantity;
+        if(Number(existingQty)>0&&(!reservationSnap.exists||reservationData.warehouseId!==warehouseId))
+            throw new Error('既有預留缺少正確位置，請先核對資料。');
         if (nextStatus === 'cancelled') {
-            const reservationData = reservationSnap?.exists ? reservationSnap.data() : null;
-            const reservedRemaining = Math.max(0, Number(reservationData?.quantity ?? item.reservedQty ?? 0));
-            const release = Math.min(reservedRemaining, whState?.reserved || 0);
+            const plan=globalThis.YushinReservation.planReservationLifecycle({nextStatus,existingQty,
+                itemReservedQty,aggregateStock:invState,warehouseStock:whState});
+            const release=-plan.reservedDelta;
             if (release > 0) {
-                invState.reserved = Math.max(0, invState.reserved - release);
-                whState.reserved = Math.max(0, whState.reserved - release);
+                invState.reserved = Number(invState.reserved||0) - release;
+                whState.reserved = Number(whState.reserved||0) - release;
                 transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release',-release,orderId,productKey,actor,{reason:'order_cancelled',warehouseId,itemId}));
             }
             transaction.set(reservationRef,{
@@ -16834,14 +16855,16 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const orderedSupply = Math.max(0, Number(item.supplyOrderedQty||0));
         const receivedSupply = Math.max(0, Number(item.receivedQty||0));
         const incomingSupply = Math.min(outstanding, Math.max(0, orderedSupply - receivedSupply));
-        const needed = Math.max(0, outstanding - incomingSupply);
-        const reserve = whState ? Math.min(needed,Math.max(0,whState.onHand-whState.reserved)) : 0;
+        const plan=globalThis.YushinReservation.planReservationLifecycle({nextStatus,existingQty,
+            itemReservedQty,requestedQty:outstanding,inTransitQty:incomingSupply,
+            aggregateStock:invState,warehouseStock:whState});
+        const reserve=plan.reservedQty;
         // shortageQty 一律代表尚無實貨預留的量；已下訂待到貨另由 supplyOrderedQty - receivedQty 涵蓋。
         const shortage = Math.max(0, outstanding - reserve);
-        if (reserve > 0) {
-            invState.reserved += reserve;
-            whState.reserved += reserve;
-            transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord('reserve',reserve,orderId,productKey,actor,{reason:'order_restored',warehouseId,itemId}));
+        if(plan.reservedDelta){
+            invState.reserved=Number(invState.reserved||0)+plan.reservedDelta;
+            whState.reserved=Number(whState.reserved||0)+plan.reservedDelta;
+            transaction.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(plan.reservedDelta>0?'reserve':'release',plan.reservedDelta,orderId,productKey,actor,{reason:'order_restored',warehouseId,itemId}));
         }
         transaction.set(reservationRef,{
             orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
@@ -16856,7 +16879,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     }
 
     stockStates.forEach(state => {
-        transaction.update(state.ref,{reserved:Math.max(0,state.reserved),updatedAt:now});
+        transaction.update(state.ref,{reserved:Number(state.reserved||0),updatedAt:now});
     });
     transaction.update(db.collection('orders').doc(orderId),{
         items:nextItems,updatedAt:now

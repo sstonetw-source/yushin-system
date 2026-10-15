@@ -2090,6 +2090,53 @@ for(const [uid,role] of [['sales1','sales'],['eng1','engineer']])test(role+' act
 });
 
 
+function loadActualLifecycle(f){
+ Object.assign(f.context,{savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[],DOCUMENT_TYPES:{ORDER:'order'}});
+ const app=fs.readFileSync('app.js','utf8');
+ vm.runInContext(app.slice(app.indexOf('function inventoryMovementRecord('),app.indexOf('function inventoryReservationPayload(')),f.context);
+ vm.runInContext(app.slice(app.indexOf('async function adjustInventoryReservationForLifecycle('),app.indexOf('function confirmOrderCancellation(')),f.context);
+ return status=>f.context.runRoleTransaction(async tx=>{
+  const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref);
+  await f.context.adjustInventoryReservationForLifecycle(tx,f.id,snap.data(),status,f.context.currentUser.uid);
+  tx.update(ref,{status:status==='normal'?'active':'cancelled',orderStatus:status});
+ });
+}
+test('actual lifecycle refuses underfunded cancellation for admin and business roles without erasing the original hold',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  const f=await orderInitializationFixture(uid,role);await f.run();
+  const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
+  const run=loadActualLifecycle(f);
+  for(const [company,warehouse] of [[1,3],[3,1]]){
+   await seed('inventory/init-product',{productKey:'init-product',onHand:3,reserved:company,incoming:0});
+   await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:3,reserved:warehouse,incoming:0});
+   await assert.rejects(run('cancelled'),/不足|異常/);
+   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,company);
+   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,warehouse);
+   assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'active');
+  }
+  await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:3,reserved:3,incoming:0});
+  await assertSucceeds(run('cancelled'));await assertSucceeds(run('normal'));
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+ }
+});
+test('actual restoration respects the company availability ceiling for admin sales and engineer',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
+  const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+  await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:4,incoming:0});
+  await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
+  await assertSucceeds(loadActualLifecycle(f)('normal'));
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  assert.equal(order.items[0].reservedQty,1);assert.equal(order.items[0].shortageQty,4);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,5);
+  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,1);
+ }
+});
+
 test('cancelled direct redirect requires a live physical warehouse and atomic incoming totals',async()=>{
  const locations=[['missing',null],['disabled',{active:false}],['custody-flag',{active:true,systemCustody:true}],
   ['custody-type',{active:true,warehouseType:'CUSTODY'}],['custody-prefix',{active:true}],['physical',{active:true,warehouseType:'PHYSICAL'}]];
