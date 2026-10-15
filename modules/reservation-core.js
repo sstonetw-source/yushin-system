@@ -48,6 +48,22 @@
    }
    return {requestedQty:needed,allocations,allocatedQty:needed-remaining,shortageQty:remaining};
  }
+ // Canonical per-location quantity model. No writes until transaction and Rules are migrated.
+ function validateMultiLocationLedger({requestedQty=0,locations=[]}={}){
+   if(!Number.isSafeInteger(requestedQty)||requestedQty<0)throw Error('訂單數量必須為非負整數。');
+   if(!Array.isArray(locations))throw Error('倉庫分配明細格式不正確。');
+   const seen=new Set();let reservedQty=0;const normalized=[];
+   for(const location of locations){
+     const warehouseId=String(location?.warehouseId||'').trim();
+     const qty=location?.reservedQty;
+     if(!warehouseId||warehouseId.startsWith('custody-')||seen.has(warehouseId))throw Error('倉庫分配位置重複或不正確。');
+     if(!Number.isSafeInteger(qty)||qty<=0)throw Error('各倉預留數量必須為正整數。');
+     seen.add(warehouseId);reservedQty+=qty;
+     if(!Number.isSafeInteger(reservedQty)||reservedQty>requestedQty)throw Error('各倉預留總量超過訂購量。');
+     normalized.push({warehouseId,reservedQty:qty});
+   }
+   return {requestedQty,locations:normalized,reservedQty,shortageQty:requestedQty-reservedQty};
+ }
  function planReservation(input={}){
    const requestedQty=n(input.requestedQty??input.qty);
    const existingQty=n(input.existingQty);
@@ -91,5 +107,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {validateMultiLocationLedger,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
