@@ -983,6 +983,27 @@ service cloud.firestore {
         && d.diff(resource.data).affectedKeys().hasOnly(['requestedQty','remainingToOrderQty','remainingToReceiveQty','perOrdered','perReceived','status','updatedAt','sourceItemIndex','warehouseId']);
     }
 
+    function businessLifecycleDemandCancelUpdate() {
+      let d = request.resource.data;
+      let orderPath = /databases/$(database)/documents/orders/$(d.sourceId);
+      let before = get(orderPath).data;
+      let after = getAfter(orderPath).data;
+      return businessOwner() && owns(resource.data) && owns(d)
+        && resource.data.get('sourceType', '') == 'SALES_ORDER'
+        && d.get('sourceType', '') == 'SALES_ORDER'
+        && before.get('ownerUid', '') == request.auth.uid
+        && after.get('ownerUid', '') == request.auth.uid
+        && !orderIsCancelled(before) && orderIsCancelled(after)
+        && validDemandSource(d)
+        && d.get('status', '') == 'CANCELLED'
+        && d.get('requestedQty', -1) == resource.data.get('requestedQty', -2)
+        && d.get('orderedQty', -1) == resource.data.get('orderedQty', -2)
+        && d.get('receivedQty', -1) == resource.data.get('receivedQty', -2)
+        && d.diff(resource.data).affectedKeys().hasOnly([
+          'status','remainingToOrderQty','updatedAt','sourceItemIndex'
+        ]);
+    }
+
     function businessDirectDemandReceiptUpdate() {
       let orderPath = /databases/$(database)/documents/orders/$(resource.data.sourceId);
       let before = get(orderPath).data;
@@ -1808,7 +1829,7 @@ service cloud.firestore {
         && ((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
           && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
           ? (admin() || businessDirectDemandReceiptUpdate())
-          : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate()));
+          : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate() || businessLifecycleDemandCancelUpdate()));
       allow delete: if admin();
     }
 
