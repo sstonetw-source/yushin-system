@@ -2101,6 +2101,43 @@ function loadActualLifecycle(f){
   tx.update(ref,{status:status==='normal'?'active':'cancelled',orderStatus:status});
  });
 }
+test('cancellation changes the demand and held stock atomically for the owner; unrelated writers cannot close demand',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  const f=await orderInitializationFixture(uid,role);await f.run();
+  const current=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...current,inventoryReservationStatus:'completed'});
+  const demandPath='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+  const before=(await getDoc(doc(db('admin'),demandPath))).data();
+  assert.equal(before.status,'PENDING');
+  const client=db(uid);
+  // Administrators retain the pre-existing unrestricted demand update privilege.
+  if(role!=='admin'){
+   await assertFails(updateDoc(doc(client,demandPath),{status:'CANCELLED',remainingToOrderQty:0}));
+   await seed('orders/'+f.id,{...current,inventoryReservationStatus:'pending'});
+   await assertFails(updateDoc(doc(client,demandPath),{status:'CANCELLED',remainingToOrderQty:0}));
+   await seed('orders/'+f.id,{...current,inventoryReservationStatus:'completed'});
+  }
+  const run=loadActualLifecycle(f);
+  await assertSucceeds(run('cancelled'));
+  const after=(await getDoc(doc(db('admin'),demandPath))).data();
+  assert.equal(after.status,'CANCELLED');assert.equal(after.remainingToOrderQty,0);
+  assert.equal(after.orderedQty,before.orderedQty);assert.equal(after.receivedQty,before.receivedQty);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,0);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+ }
+});
+test('malformed linked demand prevents cancellation from partially releasing reserved inventory',async()=>{
+ const f=await orderInitializationFixture('sales1','sales');await f.run();
+ const current=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...current,inventoryReservationStatus:'completed'});
+ const demandPath='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+ const demand=(await getDoc(doc(db('admin'),demandPath))).data();
+ await seed(demandPath,{...demand,productKey:'wrong-product'});
+ await assert.rejects(loadActualLifecycle(f)('cancelled'),/不一致/);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'active');
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+ assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,3);
+});
 test('actual lifecycle refuses underfunded cancellation for admin and business roles without erasing the original hold',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   const f=await orderInitializationFixture(uid,role);await f.run();

@@ -3683,7 +3683,7 @@ window.permanentlyDeleteOrder = async function(orderId) {
             await runRoleTransaction(async tx=>{
                 const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);
                 if(!snap.exists)throw new Error('找不到這筆訂單。');
-                await adjustInventoryReservationForLifecycle(tx,orderId,{id:orderId,...snap.data()},'cancelled',deliveryActor());
+                await adjustInventoryReservationForLifecycle(tx,orderId,{id:orderId,...snap.data()},'cancelled',deliveryActor(),{skipDemandSync:true});
             });
         }
         const refs=normalizedOrderItems(order).map((item,index)=>db.collection('inventoryReservations').doc(`${orderId}__${String(item.itemId||`item-${index+1}`)}`));
@@ -16749,7 +16749,7 @@ window.prepareOrderLifecycle = function(orderId, status) {
     document.getElementById('orderLifecycleReason').focus();
 };
 
-async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor) {
+async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor, options={}) {
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
     const items = normalizedOrderItems(order);
     const deliveries = savedDeliveryRecords(order);
@@ -16760,6 +16760,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     // A restored order may only reserve against a live physical warehouse.
     // Reuse master snapshots when several items target the same location.
     const restoredWarehouseSnapshots = new Map();
+    // Only cancellation of an existing demand is handled atomically in this phase.
+    // No new demand records are created on cancellation.
+    const syncCancelledDemands=nextStatus==='cancelled'&&!options.skipDemandSync;
     for (let index = 0; index < items.length; index++) {
         const item = items[index];
         const savedItem=order.items?.[index]||{};
@@ -16782,6 +16785,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const invSnap = invRef ? await transaction.get(invRef) : null;
         const whSnap = whRef ? await transaction.get(whRef) : null;
         const reservationSnap = await transaction.get(reservationRef);
+        const demandRef=syncCancelledDemands?procurementDemandRef(globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId})):null;
+        const demandSnap=demandRef?await transaction.get(demandRef):null;
         const reservationData=reservationSnap.exists?reservationSnap.data():{};
         if(nextStatus==='normal'&&!directShip&&productKey){
             if(!warehouseId||String(warehouseId).startsWith('custody-'))
@@ -16806,7 +16811,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         }
         if(whSnap?.exists&&whSnap.data().warehouseId!==undefined&&whSnap.data().warehouseId!==warehouseId)
             throw new Error('分倉庫存位置與訂單不一致，請先核對資料。');
-        contexts.push({item,itemReservedQty,itemId,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap,reservationData});
+        contexts.push({item,itemReservedQty,itemId,index,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap,reservationData,demandRef,demandSnap});
     }
 
     const nextItems = [];
@@ -16893,6 +16898,17 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         totalShortage += shortage;
     }
 
+    // Demand cancellation and reservation release share this transaction. If any
+    // demand fails validation / Rules, neither the order nor the stock is released.
+    for(const ctx of contexts){
+        if(!ctx.demandSnap?.exists)continue;
+        const demand=ctx.demandSnap.data();
+        if(demand.status==='CANCELLED')continue;
+        if(demand.sourceType!=='SALES_ORDER'||demand.sourceId!==orderId||demand.sourceItemId!==ctx.itemId
+            ||demand.productKey!==ctx.productKey||demand.ownerUid!==order.ownerUid||demand.salesCode!==order.salesCode)
+            throw new Error('採購需求與訂單歸屬或品項不一致，取消前請先核對資料。');
+        transaction.update(ctx.demandRef,{status:'CANCELLED',remainingToOrderQty:0,sourceItemIndex:ctx.index,updatedAt:now});
+    }
     stockStates.forEach(state => {
         if(Number(state.reserved||0)!==Number(state.beforeReserved||0))
             transaction.update(state.ref,{reserved:Number(state.reserved||0),updatedAt:now});
@@ -16983,7 +16999,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
         });
         try{
-            await syncOrderProcurementDemandLifecycle(orderId,{id:orderId,...savedOrder},nextStatus);
+            if(nextStatus!=='cancelled')await syncOrderProcurementDemandLifecycle(orderId,{id:orderId,...savedOrder},nextStatus);
         }catch(demandErr){
             console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
             showActionFeedback('訂單已更新，但採購需求尚未同步。請到資料健康檢查訂單／採購關聯。','warning');
@@ -17919,7 +17935,7 @@ window.saveOrderLifecycleStatus = async function() {
             savedOrder = { ...liveOrder, ...updates, orderLifecycleHistory: [...(liveOrder.orderLifecycleHistory || []), liveHistory] };
         });
         try{
-            await syncOrderProcurementDemandLifecycle(order.id,{id:order.id,...savedOrder},nextStatus);
+            if(nextStatus!=='cancelled')await syncOrderProcurementDemandLifecycle(order.id,{id:order.id,...savedOrder},nextStatus);
         }catch(demandErr){
             console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
             showActionFeedback('訂單已更新，但採購需求尚未同步。請到資料健康檢查訂單／採購關聯。','warning');
