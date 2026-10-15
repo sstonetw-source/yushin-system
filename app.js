@@ -10113,12 +10113,26 @@ function deliveredQuantity(order, normalizedItems = null) {
     return order?.isDelivered ? orderQuantity(order, normalizedItems) : 0;
 }
 
+// One projection for both the delivery card and lifecycle status. CLOSED
+// returns do not require replacement stock; never deduct them twice.
+function orderDeliveryProjection(order, normalizedItems = null) {
+    if (!globalThis.YushinFulfillment?.deliveryQuantities)
+        throw new Error('Fulfillment core 未載入，無法計算有效交付數量。');
+    const grossDelivered = deliveredQuantity(order, normalizedItems);
+    const returned = Math.min(Math.max(0, returnedQuantity(order)), grossDelivered);
+    const closedReturns = Math.min(returned, savedReturnRecords(order)
+        .filter(row=>row.settlement==='CLOSE')
+        .reduce((sum,row)=>sum+Math.max(0,Number(row.qty||0)),0));
+    const quantities = globalThis.YushinFulfillment.deliveryQuantities({
+        deliveredQty:grossDelivered,
+        returnedQty:Math.max(0,returned-closedReturns)
+    });
+    return {grossDelivered,returned,closedReturns,effectiveDelivered:quantities.effectiveDeliveredQty};
+}
+
 function deliveryProgressInfo(order, normalizedItems = null) {
     const total = orderQuantity(order, normalizedItems);
-    const grossDelivered = deliveredQuantity(order, normalizedItems);
-    const returned = Math.min(returnedQuantity(order), grossDelivered);
-    const closedReturns = savedReturnRecords(order).filter(r=>r.settlement==='CLOSE').reduce((sum,r)=>sum+Number(r.qty||0),0);
-    const effectiveDelivered = Math.max(0, grossDelivered - returned + closedReturns);
+    const {grossDelivered,returned,effectiveDelivered} = orderDeliveryProjection(order, normalizedItems);
     const delivered = Math.min(effectiveDelivered, total || effectiveDelivered);
     const remaining = Math.max(0, total - delivered);
     const isLegacyEstimated = !!order?.isDelivered && savedDeliveryRecords(order).length === 0;
@@ -10145,9 +10159,7 @@ function normalizedOrderStatus(order) {
 }
 
 function orderLifecycleInfo(order, normalizedItems = null) {
-    const delivered = deliveredQuantity(order, normalizedItems);
-    const returned = Math.min(returnedQuantity(order), delivered);
-    const effectiveDelivered = Math.max(0, delivered - returned);
+    const {grossDelivered:delivered,returned,effectiveDelivered} = orderDeliveryProjection(order, normalizedItems);
     const status = normalizedOrderStatus(order);
     if (status === 'cancelled') return { status, label: '已取消', css: 'invalid', delivered, returned, effectiveDelivered };
     if (savedReturnRecords(order).some(r=>r.settlement==='CLOSE')) return {status,label:'退貨已收貨・不補送',css:'returned',delivered,returned,effectiveDelivered};
