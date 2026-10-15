@@ -2139,6 +2139,45 @@ test('malformed linked demand prevents cancellation from partially releasing res
  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,3);
 });
+function loadActualPermanentDelete(f){
+ loadActualLifecycle(f);
+ const app=fs.readFileSync('app.js','utf8');
+ vm.runInContext(app.slice(app.indexOf('function assertOrderEligibleForPermanentDelete('),app.indexOf('window.permanentlyDeleteOrder =')),f.context);
+ return ()=>f.context.deleteUnfulfilledOrderAtomically(f.id,f.context.currentUser.uid);
+}
+test('admin permanent deletion atomically releases stock and deletes all linked unpurchased demand and reservations',async()=>{
+ for(const [status,onHand] of [['active',3],['cancelled',0]]){
+  const f=await orderInitializationFixture('admin','admin',{onHand});await f.run();
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...order,status,orderStatus:status,inventoryReservationStatus:'completed'});
+  const reservation='inventoryReservations/'+f.id+'__I';
+  const demand='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+  if(status==='cancelled')await seed(demand,{...(await getDoc(doc(db('admin'),demand))).data(),status:'CANCELLED',remainingToOrderQty:0});
+  await assertSucceeds(loadActualPermanentDelete(f)());
+  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).exists(),false);
+  assert.equal((await getDoc(doc(db('admin'),reservation))).exists(),false);
+  assert.equal((await getDoc(doc(db('admin'),demand))).exists(),false);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,0);
+ }
+});
+test('admin deletion refuses hidden supplier commitments; business cannot delete another role protected order',async()=>{
+ const f=await orderInitializationFixture('admin','admin');await f.run();
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
+ const demand='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+ const linked=(await getDoc(doc(db('admin'),demand))).data();
+ await seed(demand,{...linked,orderedQty:1,requestedQty:2,remainingToOrderQty:1,remainingToReceiveQty:1});
+ await assert.rejects(loadActualPermanentDelete(f)(),/供應商承諾/);
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).exists(),true);
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+ assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,3);
+ const sales=await orderInitializationFixture('sales1','sales');await sales.run();
+ const saleOrder=(await getDoc(doc(db('admin'),'orders/'+sales.id))).data();
+ await seed('orders/'+sales.id,{...saleOrder,inventoryReservationStatus:'completed'});
+ await assertFails(loadActualPermanentDelete(sales)());
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+sales.id))).exists(),true);
+});
 test('actual lifecycle refuses underfunded cancellation for admin and business roles without erasing the original hold',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   const f=await orderInitializationFixture(uid,role);await f.run();

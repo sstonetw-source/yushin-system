@@ -3670,26 +3670,100 @@ window.permanentlyDeleteQuote = async function(quoteNo) {
     }catch(err){alert('永久刪除失敗：'+(err.message||err));}
 };
 
+function assertOrderEligibleForPermanentDelete(order) {
+    const items=normalizedOrderItems(order);
+    if(!items.length)throw new Error('此訂單缺少正式品項，無法安全永久刪除，請由管理員先核對原始資料。');
+    if(['pending','failed'].includes(order.inventoryReservationStatus)
+        || ['pending','failed'].includes(order.sourceDocumentSyncStatus))
+        throw new Error('訂單仍有待完成的庫存或來源文件同步，不能永久刪除。');
+    if(order.sourceId||order.sourceLink||order.quoteContext
+        || (Array.isArray(order.linkedDocuments)&&order.linkedDocuments.some(row=>row?.id)))
+        throw new Error('訂單已連結估價單、Forecast 或其他正式文件；不能直接永久刪除，以免來源資料失去關聯。');
+    if(order.isDelivered||order.isBilled||savedDeliveryRecords(order).length||savedReturnRecords(order).length
+        || (order.deliveryHistory||[]).length||(order.returnHistory||[]).length)
+        throw new Error('訂單已有出貨、退貨或核銷紀錄，請保留商業歷史，不得永久刪除。');
+    if(items.some(item=>Number(item.supplyOrderedQty||0)>0||Number(item.receivedQty||0)>0
+        || (item.purchaseDocumentNos||[]).length>0||(item.selfOrderNos||[]).length>0
+        || (item.orderEvents||[]).length>0||(item.receiptEvents||[]).length>0
+        || Number(item.deliveredQty||0)>0))
+        throw new Error('訂單已有採購、到貨或交付紀錄，不能永久刪除。');
+    const ids=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
+    if(new Set(ids).size!==ids.length)throw new Error('訂單品項識別碼重複，無法安全清除關聯資料。');
+    return {items,ids};
+}
+
+async function deleteUnfulfilledOrderAtomically(orderId,actor) {
+    return runRoleTransaction(async tx=>{
+        const orderRef=db.collection('orders').doc(orderId);
+        const orderSnap=await tx.get(orderRef);
+        if(!orderSnap.exists)throw new Error('訂單已刪除，請重新整理。');
+        const liveOrder={id:orderId,...orderSnap.data()};
+        const {items,ids}=assertOrderEligibleForPermanentDelete(liveOrder);
+        const dependencies=[];
+        for(let i=0;i<ids.length;i++){
+            const item=items[i],itemId=ids[i],productKey=inventoryProductKey(item);
+            const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
+            const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
+            const demandRef=procurementDemandRef(demandId);
+            const reservationSnap=await tx.get(reservationRef);
+            const demandSnap=await tx.get(demandRef);
+            if(reservationSnap.exists){
+                const reservation=reservationSnap.data();
+                if(reservation.orderId!==orderId||reservation.itemId!==itemId
+                    ||reservation.productKey!==productKey)
+                    throw new Error('預留紀錄與來源訂單不一致，請先核對資料。');
+                if(normalizedOrderStatus(liveOrder)==='cancelled'
+                    && Number(reservation.quantity||0)!==0)
+                    throw new Error('已取消訂單仍占用庫存，請先核對預留再刪除。');
+            }
+            if(demandSnap.exists){
+                const demand=demandSnap.data();
+                if(demand.sourceType!=='SALES_ORDER'||demand.sourceId!==orderId
+                    ||demand.sourceItemId!==itemId||demand.productKey!==productKey
+                    ||demand.ownerUid!==liveOrder.ownerUid||demand.salesCode!==liveOrder.salesCode
+                    ||(demand.demandId&&demand.demandId!==demandId))
+                    throw new Error('採購需求與訂單來源不一致，不能刪除其他來源資料。');
+                if(!(Number.isFinite(demand.orderedQty)&&Number.isFinite(demand.receivedQty))
+                    ||Number(demand.orderedQty)>0||Number(demand.receivedQty)>0)
+                    throw new Error('採購需求已有供應商承諾或收貨事實，不可永久刪除訂單。');
+            }
+            dependencies.push({reservationRef,demandRef});
+        }
+        if(normalizedOrderStatus(liveOrder)!=='cancelled'){
+            await adjustInventoryReservationForLifecycle(tx,orderId,liveOrder,'cancelled',actor,{skipDemandSync:true});
+        }else if(items.some(item=>Number(item.reservedQty||0)!==0)){
+            throw new Error('已取消訂單的預留投影不為零，請先核對庫存。');
+        }
+        for(const {reservationRef,demandRef} of dependencies){
+            tx.delete(reservationRef);
+            tx.delete(demandRef);
+        }
+        tx.delete(orderRef);
+        return {id:orderId,itemCount:items.length};
+    });
+}
+
 window.permanentlyDeleteOrder = async function(orderId) {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     const order=ordersCache.find(row=>row.id===orderId);
     if(!order)return alert('找不到這筆訂單，請重新整理。');
-    const hasFlow=savedDeliveryRecords(order).length>0||savedReturnRecords(order).length>0||
-        normalizedOrderItems(order).some(item=>Number(item.supplyOrderedQty||0)>0||Number(item.receivedQty||0)>0);
-    if(hasFlow)return alert('這筆訂單已有採購／到貨／送貨／退貨紀錄。為避免庫存帳失真，請使用「系統初始化」清除整批測試資料，或先處理相關流程。');
-    if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？系統會先釋放未使用的庫存預留。此操作無法復原。`))return;
+    try{assertOrderEligibleForPermanentDelete(order);}
+    catch(error){return alert('無法永久刪除：'+error.message);}
+    if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？將在同一交易中釋放庫存並清除訂單、預留及未採購的需求。此操作無法復原。`))return;
     try{
-        if(normalizedOrderStatus(order)!=='cancelled'){
-            await runRoleTransaction(async tx=>{
-                const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);
-                if(!snap.exists)throw new Error('找不到這筆訂單。');
-                await adjustInventoryReservationForLifecycle(tx,orderId,{id:orderId,...snap.data()},'cancelled',deliveryActor(),{skipDemandSync:true});
-            });
-        }
-        const refs=normalizedOrderItems(order).map((item,index)=>db.collection('inventoryReservations').doc(`${orderId}__${String(item.itemId||`item-${index+1}`)}`));
-        const batch=db.batch();refs.forEach(ref=>batch.delete(ref));batch.delete(db.collection('orders').doc(orderId));await batch.commit();
-        ordersCache=ordersCache.filter(row=>row.id!==orderId);orderHistorySearchResults=orderHistorySearchResults.filter(row=>row.id!==orderId);renderOrdersList();
-    }catch(err){alert('永久刪除失敗：'+(err.message||err));}
+        // Legacy supplier entries can survive stale order-item projections.
+        // A bounded read is justified only for this rare destructive admin action.
+        const linkedSupplies=await firestoreReadWithTimeout(
+            db.collection('supplyOrders').where('orderId','==',orderId).limit(1).get(),'檢查訂單供應商紀錄');
+        if(!linkedSupplies.empty)throw new Error('系統仍有此訂單的供應商紀錄，不能永久刪除。請先核對採購單。');
+        await deleteUnfulfilledOrderAtomically(orderId,deliveryActor());
+        ordersCache=ordersCache.filter(row=>row.id!==orderId);
+        orderHistorySearchResults=orderHistorySearchResults.filter(row=>row.id!==orderId);
+        renderOrdersList();
+        showActionFeedback('訂單及未採購的關聯資料已永久刪除。');
+    }catch(err){
+        alert('永久刪除失敗：'+(err.message||err)+'\\n沒有將部分刪除視為完成，請重新核對訂單與庫存。');
+    }
 };
 
 window.openForecastProgressModal = function(id) {
