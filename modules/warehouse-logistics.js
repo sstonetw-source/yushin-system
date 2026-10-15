@@ -313,7 +313,23 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
   const actorUid=currentUser.uid,actorRole=currentUserRole;let saved;
   await runRoleTransaction(async tx=>{
     const transferRef=db.collection('stockTransfers').doc(id),prior=await tx.get(transferRef);
-    if(prior.exists){saved=prior.data();if(saved.orderId!==orderId||saved.itemId!==itemId||Number(saved.qty)!==qty||(!orderId&&(saved.inventoryId!==inventoryId||saved.fromWarehouseId!==fromWarehouseId||saved.toWarehouseId!==toWarehouseId)))throw Error('調撥操作識別碼衝突。');return;}
+    if(prior.exists){
+      saved=prior.data();
+      // A committed operation may be retried after its response is lost, but
+      // the same ID must never confirm a different dispatch or request.
+      const sameSource=orderId
+        ? (!expectedWarehouseId||saved.fromWarehouseId===expectedWarehouseId)
+        : saved.inventoryId===inventoryId&&saved.fromWarehouseId===fromWarehouseId;
+      const sameDestination=orderId&&handoff
+        ? saved.toWarehouseId==='custody-'+saved.ownerUid
+        : saved.toWarehouseId===toWarehouseId;
+      const samePlan=!expectedPlan||JSON.stringify(saved.deliveryPlan||{})===JSON.stringify(expectedPlan);
+      if(saved.orderId!==orderId||saved.itemId!==itemId||Number(saved.qty)!==qty
+        ||(saved.kind||'TRANSFER')!==(handoff?'HANDOFF':'TRANSFER')
+        ||(saved.requestId||'')!==requestId||!sameSource||!sameDestination||!samePlan)
+        throw Error('調撥操作識別碼衝突，原操作已提交或內容不同，請核對調撥紀錄。');
+      return;
+    }
     let transferRequest=null,requestRef=null;
     if(requestId){requestRef=db.collection('stockTransferRequests').doc(requestId);const rs=await tx.get(requestRef);if(!rs.exists)throw Error('調回需求不存在。');transferRequest=rs.data();if(transferRequest.status!=='PENDING'||transferRequest.inventoryId!==inventoryId||transferRequest.fromWarehouseId!==fromWarehouseId||transferRequest.toWarehouseId!==toWarehouseId||Number(transferRequest.qty)!==qty||handoff||orderId)throw Error('調回需求已變更。');}
     let order=null,item=null,index=-1,orderRef=null,reservationRef=null,reservation=null;
