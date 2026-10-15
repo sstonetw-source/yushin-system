@@ -3,6 +3,11 @@
 (function(root){
   function dataAt(snapshot){return snapshot?.exists ? snapshot.data() : {};}
   function number(value){return Number(value || 0);}
+  function reservationDeltas(before,after){
+    const core=typeof module==='object'&&module.exports?require('./reservation-core.js'):root.YushinReservation;
+    if(!core?.reservationStockDeltas)throw Error('預留計算模組尚未載入，請重新整理後重試。');
+    return core.reservationStockDeltas(before,after);
+  }
   // Every live fulfillment writer still uses quantity + warehouseId. Keep the
   // proposed location ledger out of these paths until ALL consumers and Rules
   // understand it; even an empty/unknown marker must not silently fall back.
@@ -55,8 +60,8 @@
         for(const w of rows)if(!reads.has(w.ref.path))await proxy.get(w.ref);
         for(const w of rows){
           const before=reads.get(w.ref.path)?.data||{},after={...before,...w.data};
-          if(number(before.quantity)===number(after.quantity)&&String(before.warehouseId||'')===String(after.warehouseId||''))continue;
-          if(!number(before.quantity)&&!number(after.quantity))continue;
+          const delta=reservationDeltas(before,after);
+          if(!delta.companyReservedDelta&&!delta.warehouseDeltas.length)continue;
           const siblings=rows.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).productKey===after.productKey);
           const representative=siblings.find(r=>{const old=reads.get(r.ref.path)?.data||{},next={...old,...r.data};return number(next.quantity)||number(old.quantity);});
           if(representative){siblings.splice(siblings.indexOf(representative),1);siblings.unshift(representative);}
@@ -98,11 +103,25 @@
         const isLot=target.collection==='inventoryLots';
         const qtyDelta=number(target.after[isLot?'remainingQty':'onHand'])-number(target.before[isLot?'remainingQty':'onHand']);
         const reservedDelta=isLot?0:number(target.after.reserved)-number(target.before.reserved);
-        if(!qtyDelta&&!reservedDelta)continue;
         const productKey=target.before.productKey || target.before.productId;
         const warehouseId=target.collection==='inventory'?'':String(target.before.warehouseId||'');
-        const reservations=reservationWrites.map(write=>({id:write.ref.id,...reads.get(write.ref.path)?.data,...write.data}))
-          .filter(row=>row.productKey===productKey&&(!warehouseId||row.warehouseId===warehouseId));
+        const matchingWrites=reservationWrites.filter(write=>{
+          const after={...reads.get(write.ref.path)?.data,...write.data};
+          return after.productKey===productKey&&(!warehouseId||after.warehouseId===warehouseId);
+        });
+        const reservations=matchingWrites.map(write=>({...reads.get(write.ref.path)?.data,...write.data,id:write.ref.id}));
+        if(!isLot){
+          // Rules remain the authority. Reject inconsistent commercial proposals
+          // before generating witnesses; reuse snapshots already held by the transaction.
+          const expected=matchingWrites.reduce((sum,write)=>{
+            const before=reads.get(write.ref.path)?.data||{},after={...before,...write.data};
+            const delta=reservationDeltas(before,after);
+            return sum+(warehouseId?delta.warehouseDeltas.find(row=>row.warehouseId===warehouseId)?.reservedDelta||0:delta.companyReservedDelta);
+          },0);
+          if(!Number.isFinite(reservedDelta)||!Number.isFinite(expected)||Math.abs(reservedDelta-expected)>1e-9)
+            throw Error('公司或分倉預留增減與來源預留不一致，已停止作業，請核對資料後重試。');
+        }
+        if(!qtyDelta&&!reservedDelta)continue;
         const orderIds=[...new Set(reservations.map(row=>row.orderId).filter(Boolean))];
         if(orderIds.length!==1||!reservations.length||reservations.length>5)throw new Error('庫存異動缺少唯一來源訂單或同品項預留超過 5 筆，請由管理員處理。');
         const orderId=orderIds[0];
