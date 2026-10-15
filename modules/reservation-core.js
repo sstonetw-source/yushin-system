@@ -1,4 +1,9 @@
-(function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;if(root)root.YushinReservation=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
+(function(root,factory){
+ const inventory=typeof module==='object'&&module.exports?require('./inventory-core.js'):root?.YushinInventory;
+ const api=factory(inventory);
+ if(typeof module==='object'&&module.exports)module.exports=api;
+ if(root)root.YushinReservation=api;
+})(typeof globalThis!=='undefined'?globalThis:this,function(inventory){
  const n=v=>Math.max(0,Number(v||0));
  function compareReservationPriority(a={},b={}){
    return String(a.orderDate||'9999-12-31').localeCompare(String(b.orderDate||'9999-12-31'))
@@ -31,22 +36,125 @@
      && eligible.some(w=>w.id!==warehouseId&&available(w.id)>0);
    return {warehouseId,requiresMultipleLocations};
  }
- // Pure planner only: does not mutate legacy one-location reservations.
- function planMultiWarehouseReservation({warehouses=[],stocks={},requestedQty=0,currentWarehouseId=''}={}){
-   const needed=n(requestedQty);
-   const eligible=warehouses.filter(w=>w&&w.active!==false&&!w.systemCustody&&w.warehouseType!=='CUSTODY'&&!String(w.id||'').startsWith('custody-'))
+ // New location APIs fail closed on malformed quantities. Do not silently turn
+ // a corrupt ledger into zero stock or overwrite the legacy reservation.
+ function locationQty(value=0){
+   if(!['number','string'].includes(typeof value)||String(value).trim()===''
+     ||!Number.isFinite(Number(value))||Number(value)<0||Number(value)>Number.MAX_SAFE_INTEGER)
+     throw new Error('多倉預留數量不正確，請先核對資料。');
+   return Number(value);
+ }
+ function locationId(value){
+   if(typeof value!=='string'||!value.trim()||value!==value.trim())
+     throw new Error('多倉預留缺少有效倉庫識別碼。');
+   return value;
+ }
+ function physicalWarehouse(w){
+   return w.active!==false&&!w.systemCustody&&w.warehouseType!=='CUSTODY'&&!w.id.startsWith('custody-');
+ }
+ function locationWarehouses(warehouses,currentWarehouseId){
+   const ids=new Set();
+   for(const w of warehouses){
+     const id=locationId(w?.id);
+     if(ids.has(id))throw new Error('多倉預留的倉庫主檔重複。');
+     ids.add(id);
+   }
+   return warehouses.filter(physicalWarehouse)
      .sort((a,b)=>Number(b.id===currentWarehouseId)-Number(a.id===currentWarehouseId)
        ||Number(!!b.isDefault)-Number(!!a.isDefault)||String(a.id).localeCompare(String(b.id)));
+ }
+ function locationAvailable(stock={}){
+   if(!inventory?.normalizeStock)throw new Error('Inventory core 未載入，無法計算多倉可用量。');
+   return inventory.normalizeStock({onHand:locationQty(stock.onHand),reserved:locationQty(stock.reserved),
+     transferFreeInTransit:locationQty(stock.transferFreeInTransit)}).available;
+ }
+ // Pure planner only: does not mutate legacy one-location reservations.
+ // aggregateStock is optional for compatibility with the first-stage preview;
+ // reconciliation below always requires the company-level ceiling.
+ function planMultiWarehouseReservation({warehouses=[],stocks={},requestedQty=0,currentWarehouseId='',aggregateStock}={}){
+   const needed=locationQty(requestedQty);
+   const eligible=locationWarehouses(warehouses,currentWarehouseId);
    let remaining=needed;
+   let companyAvailable=aggregateStock===undefined?needed:locationAvailable(aggregateStock);
    const allocations=[];
    for(const warehouse of eligible){
      if(remaining<=0)break;
      const stock=stocks[warehouse.id]||{};
-     const available=Math.max(0,n(stock.onHand)-n(stock.reserved));
-     const qty=Math.min(remaining,available);
-     if(qty>0){allocations.push({warehouseId:warehouse.id,qty});remaining-=qty;}
+     const qty=Math.min(remaining,locationAvailable(stock),companyAvailable);
+     if(qty>0){allocations.push({warehouseId:warehouse.id,qty});remaining-=qty;companyAvailable-=qty;}
    }
    return {requestedQty:needed,allocations,allocatedQty:needed-remaining,shortageQty:remaining};
+ }
+ // One deterministic reservation document per order/item remains the authority.
+ // V2 stores its quantities per location; it is NOT a second stock collection.
+ function reservationLocations(reservation={}){
+   const quantity=locationQty(reservation.quantity);
+   if(reservation.locationSchemaVersion===undefined){
+     if(reservation.allocations!==undefined)throw new Error('多倉預留缺少位置版本，不可當成舊單覆寫。');
+     return quantity>0?[{warehouseId:locationId(reservation.warehouseId),qty:quantity}]:[];
+   }
+   if(reservation.locationSchemaVersion!==2||!Array.isArray(reservation.allocations))
+     throw new Error('不支援的多倉預留位置版本。');
+   const seen=new Set();
+   const locations=reservation.allocations.map(row=>{
+     const warehouseId=locationId(row?.warehouseId),qty=locationQty(row?.qty);
+     if(!qty||seen.has(warehouseId))throw new Error('多倉預留位置重複或數量為零。');
+     seen.add(warehouseId);return {warehouseId,qty};
+   });
+   if(locations.reduce((sum,row)=>sum+row.qty,0)!==quantity)
+     throw new Error('多倉預留總量與各倉數量不一致，請先稽核。');
+   return locations.sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
+ }
+ // Returns a proposed atomic change, never writes Firestore. The caller must
+ // re-read all sources inside the SAME transaction before applying any deltas.
+ // No relocation: existing quantities stay in their warehouse; a disabled
+ // physical location may be released, but cannot receive additional holds.
+ function planLocationReservation({productKey,warehouses=[],stocks={},aggregateStock,reservation={},
+   requestedQty=0,inTransitQty=0,currentWarehouseId=''}={}){
+   if(typeof productKey!=='string'||!productKey||!aggregateStock)
+     throw new Error('多倉預留缺少產品或公司庫存。');
+   const checkProduct=data=>{
+     if(data.productKey!==undefined&&data.productKey!==productKey)
+       throw new Error('多倉預留產品不一致，不可跨產品配置。');
+   };
+   checkProduct(reservation);checkProduct(aggregateStock);
+   locationWarehouses(warehouses,currentWarehouseId);
+   for(const w of warehouses){
+     const stock=stocks[w.id];if(!stock)continue;
+     checkProduct(stock);
+     if(stock.warehouseId!==undefined&&stock.warehouseId!==w.id)
+       throw new Error('多倉預留分倉位置不一致。');
+   }
+   const requested=locationQty(requestedQty),incoming=locationQty(inTransitQty);
+   const before=reservationLocations(reservation),existingQty=locationQty(reservation.quantity);
+   if(locationQty(aggregateStock.reserved)<existingQty)
+     throw new Error('公司預留量少於本品項預留，請先稽核。');
+   const kept=new Map(),previous=new Map(before.map(row=>[row.warehouseId,row.qty]));
+   let remaining=requested;
+   for(const row of before){
+     const master=warehouses.find(w=>w.id===row.warehouseId),stock=stocks[row.warehouseId];
+     if(!master||master.systemCustody||master.warehouseType==='CUSTODY'||row.warehouseId.startsWith('custody-'))
+       throw new Error('既有預留位置缺失或在業務保管中，需使用對應履約流程。');
+     if(!stock||locationQty(stock.reserved)<row.qty||locationQty(stock.onHand)<row.qty)
+       throw new Error('既有預留缺少足量分倉庫存，請先稽核。');
+     const qty=Math.min(remaining,row.qty);if(qty)kept.set(row.warehouseId,qty);remaining-=qty;
+   }
+   const preservedQty=requested-remaining;
+   // Supplier commitments cover the physical shortage but must not be counted
+   // as stock. Preserve actual holds even if a historical supply overcommits.
+   const additional=planMultiWarehouseReservation({warehouses,stocks,aggregateStock,currentWarehouseId,
+     requestedQty:Math.max(0,requested-preservedQty-incoming)});
+   for(const row of additional.allocations)kept.set(row.warehouseId,(kept.get(row.warehouseId)||0)+row.qty);
+   const allocations=[...kept].map(([warehouseId,qty])=>({warehouseId,qty}))
+     .sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
+   const quantity=allocations.reduce((sum,row)=>sum+row.qty,0);
+   const warehouseDeltas=[...new Set([...previous.keys(),...kept.keys()])].sort().map(warehouseId=>({
+     warehouseId,reservedDelta:(kept.get(warehouseId)||0)-(previous.get(warehouseId)||0)
+   })).filter(row=>row.reservedDelta!==0);
+   return {reservation:{locationSchemaVersion:2,allocations,quantity,shortageQty:requested-quantity,
+       status:quantity>0?'active':'shortage'},
+     warehouseDeltas,companyReservedDelta:quantity-existingQty,
+     remainingToOrderQty:Math.max(0,requested-quantity-incoming)};
  }
  function planReservation(input={}){
    const requestedQty=n(input.requestedQty??input.qty);
@@ -91,5 +199,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
