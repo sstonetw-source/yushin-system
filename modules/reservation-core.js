@@ -118,6 +118,36 @@
    return ledger.locations.map(row=>({warehouseId:row.warehouseId,qty:row.reservedQty}))
      .sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
  }
+ // Compare two complete snapshots, never partial update payloads. This is a
+ // stock projection, not permission to move stock or complete a transfer.
+ function reservationStockDeltas(before={},after={}){
+   const project=record=>{
+     if(record.locationSchemaVersion===2){
+       if(Object.hasOwn(record,'allocations')||Object.hasOwn(record,'warehouseAllocations'))
+         throw Error('多倉預留同時含不同位置格式，請先核對資料。');
+       return reservationLocations(record);
+     }
+     if(['locationSchemaVersion','locations','allocations','warehouseAllocations'].some(key=>Object.hasOwn(record,key)))
+       throw Error('不支援的預留位置格式，不可當成單倉計算。');
+     // Legacy operations already allow fractional quantities and custody stock.
+     // Preserve those semantics; the proposed v2 ledger stays integer-only.
+     const raw=record.quantity===undefined?0:record.quantity;
+     if(!['number','string'].includes(typeof raw)||String(raw).trim()===''
+       ||!Number.isFinite(Number(raw))||Number(raw)<0||Number(raw)>Number.MAX_SAFE_INTEGER)
+       throw Error('預留數量不正確，請先核對資料。');
+     const qty=Number(raw);
+     return qty>0?[{warehouseId:locationId(record.warehouseId),qty}]:[];
+   };
+   if(before.productKey&&after.productKey&&before.productKey!==after.productKey)
+     throw Error('預留產品不一致，不可計算跨產品庫存差額。');
+   const previous=project(before),next=project(after);
+   const oldQty=new Map(previous.map(row=>[row.warehouseId,row.qty]));
+   const newQty=new Map(next.map(row=>[row.warehouseId,row.qty]));
+   const warehouseDeltas=[...new Set([...oldQty.keys(),...newQty.keys()])].sort().map(warehouseId=>({
+     warehouseId,reservedDelta:(newQty.get(warehouseId)||0)-(oldQty.get(warehouseId)||0)
+   })).filter(row=>row.reservedDelta!==0);
+   return {companyReservedDelta:next.reduce((sum,row)=>sum+row.qty,0)-previous.reduce((sum,row)=>sum+row.qty,0),warehouseDeltas};
+ }
  // Returns a proposed atomic change, never writes Firestore. The caller must
  // re-read all sources inside the SAME transaction before applying any deltas.
  // No relocation: existing quantities stay in their warehouse; a disabled
@@ -214,5 +244,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });

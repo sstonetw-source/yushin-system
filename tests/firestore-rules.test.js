@@ -1603,6 +1603,33 @@ test('stock witness cannot be reused for a second stock change',async()=>{
   await assertFails(updateDoc(doc(db('sales1'),'inventory/p1'),{reserved:4,stockOperationId:stock.data().stockOperationId}));
 });
 
+test('commercial wrapper rejects inconsistent reserved deltas before commit and still permits the valid atomic flow',async()=>{
+ for(const [uid,role,code] of [['sales1','sales','S01'],['eng1','engineer','E01']]){
+  await seedStockWorkflow();
+  await seed('orders/stock-order',{ownerUid:uid,salesCode:code,items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'w1'}]});
+  const client=compatDb(uid);
+  const attempt=(company,warehouse)=>stockPermissions.run(client,async tx=>{
+   const inv=client.collection('inventory').doc('p1'),wh=client.collection('warehouseStocks').doc('w1-p1');
+   await tx.get(inv);await tx.get(wh);
+   tx.update(inv,{reserved:company});tx.update(wh,{reserved:warehouse});
+   tx.set(client.collection('inventoryReservations').doc('stock-order__item-1'),{
+    orderId:'stock-order',itemId:'item-1',productKey:'p1',warehouseId:'w1',quantity:1,shortageQty:4,status:'active'});
+   tx.set(client.collection('inventoryMovements').doc('CHECK-'+uid),{
+    sourceId:'stock-order',sourceType:'order',productKey:'p1',ownerUid:uid,salesCode:code,type:'reserve',qty:1});
+  },uid,true,role);
+  for(const pair of [[2,1],[1,2],[0,1],[1,0]]){
+   await assert.rejects(attempt(...pair),/預留增減.*不一致/);
+   assert.equal((await getDoc(doc(db('admin'),'inventory/p1'))).data().reserved,0);
+   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/w1-p1'))).data().reserved,0);
+   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/stock-order__item-1'))).exists(),false);
+   assert.equal((await getDoc(doc(db('admin'),'inventoryMovements/CHECK-'+uid))).exists(),false);
+  }
+  await assertSucceeds(attempt(1,1));
+  assert.equal((await getDoc(doc(db('admin'),'inventory/p1'))).data().reserved,1);
+  await env.withSecurityRulesDisabled(async ctx=>deleteDoc(doc(ctx.firestore(),'inventoryReservations/stock-order__item-1')));
+ }
+});
+
 test('disabled-only accounts are denied by backend and commercial roles may probe missing order and quote IDs',async()=>{
   await seed('users/off2',{role:'sales',salesCode:'S02',active:true,disabled:true});
   await assertFails(getDoc(doc(db('off2'),'products/p-order')));
