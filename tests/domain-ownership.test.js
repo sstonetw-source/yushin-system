@@ -45,3 +45,17 @@ test('billing UI delegates Firestore operations to the protected service',()=>{
   assert.match(svc,/transaction\.get\s*\(/);
   assert.match(svc,/transaction\.update\s*\(/);
 });
+
+test('order lifecycle UI cannot directly write cancellation and restoration documents',()=>{
+  const ui=read('src/features/orders/lifecycle-workspace.js');
+  const start=ui.indexOf('window.quickSetOrderLifecycle =');
+  const end=ui.indexOf('window.toggleOrderProgressStatus',start);
+  assert.ok(start>=0&&end>start);
+  const action=ui.slice(start,end);
+  assert.match(action,/await\s+setOrderLifecycleStatus\s*\(/);
+  assert.doesNotMatch(action,/runRoleTransaction\s*\(/);
+  const service=read('src/services/order-lifecycle.js');
+  assert.match(service,/runRoleTransaction\s*\(/);
+  assert.match(service,/adjustInventoryReservationForLifecycle\s*\(/);
+  assert.match(service,/transaction\.update\s*\(/);
+});
