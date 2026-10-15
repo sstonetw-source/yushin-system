@@ -1152,11 +1152,12 @@ vm.runInContext(source,context);
 });
 
 test('delivery progress uses net delivered quantity after returns', () => {
-    const start=app.indexOf('function deliveryProgressInfo');
+    const start=app.indexOf('function orderDeliveryProjection(');
     const end=app.indexOf('\nfunction savedReturnRecords',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     const context=vm.createContext({
+        YushinFulfillment:fulfillment,
         orderQuantity:()=>10,
         deliveredQuantity:()=>10,
         returnedQuantity:()=>2,
