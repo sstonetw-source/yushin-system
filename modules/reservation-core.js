@@ -40,7 +40,7 @@
  // a corrupt ledger into zero stock or overwrite the legacy reservation.
  function locationQty(value=0){
    if(!['number','string'].includes(typeof value)||String(value).trim()===''
-     ||!Number.isFinite(Number(value))||Number(value)<0||Number(value)>Number.MAX_SAFE_INTEGER)
+     ||!Number.isSafeInteger(Number(value))||Number(value)<0)
      throw new Error('多倉預留數量不正確，請先核對資料。');
    return Number(value);
  }
@@ -85,25 +85,38 @@
    }
    return {requestedQty:needed,allocations,allocatedQty:needed-remaining,shortageQty:remaining};
  }
+ // Canonical per-location quantity model. No writes until transaction and Rules are migrated.
+ function validateMultiLocationLedger({requestedQty=0,locations=[]}={}){
+   if(!Number.isSafeInteger(requestedQty)||requestedQty<0)throw Error('訂單數量必須為非負整數。');
+   if(!Array.isArray(locations))throw Error('倉庫分配明細格式不正確。');
+   const seen=new Set();let reservedQty=0;const normalized=[];
+   for(const location of locations){
+     const warehouseId=String(location?.warehouseId||'').trim();
+     const qty=location?.reservedQty;
+     if(!warehouseId||warehouseId.startsWith('custody-')||seen.has(warehouseId))throw Error('倉庫分配位置重複或不正確。');
+     if(!Number.isSafeInteger(qty)||qty<=0)throw Error('各倉預留數量必須為正整數。');
+     seen.add(warehouseId);reservedQty+=qty;
+     if(!Number.isSafeInteger(reservedQty)||reservedQty>requestedQty)throw Error('各倉預留總量超過訂購量。');
+     normalized.push({warehouseId,reservedQty:qty});
+   }
+   return {requestedQty,locations:normalized,reservedQty,shortageQty:requestedQty-reservedQty};
+ }
  // One deterministic reservation document per order/item remains the authority.
  // V2 stores its quantities per location; it is NOT a second stock collection.
  function reservationLocations(reservation={}){
    const quantity=locationQty(reservation.quantity);
    if(reservation.locationSchemaVersion===undefined){
-     if(reservation.allocations!==undefined)throw new Error('多倉預留缺少位置版本，不可當成舊單覆寫。');
+     if(reservation.locations!==undefined||reservation.allocations!==undefined)throw new Error('多倉預留缺少位置版本，不可當成舊單覆寫。');
      return quantity>0?[{warehouseId:locationId(reservation.warehouseId),qty:quantity}]:[];
    }
-   if(reservation.locationSchemaVersion!==2||!Array.isArray(reservation.allocations))
+   if(reservation.locationSchemaVersion!==2||!Array.isArray(reservation.locations))
      throw new Error('不支援的多倉預留位置版本。');
-   const seen=new Set();
-   const locations=reservation.allocations.map(row=>{
-     const warehouseId=locationId(row?.warehouseId),qty=locationQty(row?.qty);
-     if(!qty||seen.has(warehouseId))throw new Error('多倉預留位置重複或數量為零。');
-     seen.add(warehouseId);return {warehouseId,qty};
-   });
-   if(locations.reduce((sum,row)=>sum+row.qty,0)!==quantity)
+   for(const row of reservation.locations)locationId(row?.warehouseId);
+   const ledger=validateMultiLocationLedger({requestedQty:quantity,locations:reservation.locations});
+   if(ledger.reservedQty!==quantity)
      throw new Error('多倉預留總量與各倉數量不一致，請先稽核。');
-   return locations.sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
+   return ledger.locations.map(row=>({warehouseId:row.warehouseId,qty:row.reservedQty}))
+     .sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
  }
  // Returns a proposed atomic change, never writes Firestore. The caller must
  // re-read all sources inside the SAME transaction before applying any deltas.
@@ -147,11 +160,13 @@
    for(const row of additional.allocations)kept.set(row.warehouseId,(kept.get(row.warehouseId)||0)+row.qty);
    const allocations=[...kept].map(([warehouseId,qty])=>({warehouseId,qty}))
      .sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
-   const quantity=allocations.reduce((sum,row)=>sum+row.qty,0);
+   const ledger=validateMultiLocationLedger({requestedQty:requested,
+     locations:allocations.map(row=>({warehouseId:row.warehouseId,reservedQty:row.qty}))});
+   const quantity=ledger.reservedQty;
    const warehouseDeltas=[...new Set([...previous.keys(),...kept.keys()])].sort().map(warehouseId=>({
      warehouseId,reservedDelta:(kept.get(warehouseId)||0)-(previous.get(warehouseId)||0)
    })).filter(row=>row.reservedDelta!==0);
-   return {reservation:{locationSchemaVersion:2,allocations,quantity,shortageQty:requested-quantity,
+   return {reservation:{locationSchemaVersion:2,locations:ledger.locations,quantity,shortageQty:ledger.shortageQty,
        status:quantity>0?'active':'shortage'},
      warehouseDeltas,companyReservedDelta:quantity-existingQty,
      remainingToOrderQty:Math.max(0,requested-quantity-incoming)};
@@ -199,5 +214,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
