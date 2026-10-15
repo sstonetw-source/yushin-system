@@ -1314,8 +1314,9 @@ test('initialization rejects multi-location stock before publishing false purcha
  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
- await seed('warehouses/W2',{active:false});await assertSucceeds(f.run());
+ await seed('warehouses/W2',{active:false});await assert.rejects(f.run(),/核對分倉庫存/);
  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().items[0].warehouseId,'W1');
+ assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
 });
 test('business zero-location exception rejects committed, completed, inactive and custody relocation',async()=>{
  const f=await orderInitializationFixture('sales1','sales',{onHand:0});await f.run();await addInitializationWarehouse(f,5);

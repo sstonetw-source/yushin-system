@@ -28,6 +28,7 @@ const renderAdminStatistics=()=>renderSalesStatistics();
    const fragment=await page.evaluate(html=>{
     const d=new DOMParser().parseFromString(html,'text/html');
     const product=d.getElementById('product-system'),analysis=d.getElementById('admin-statistics');
+    const scope=d.getElementById('tradeAnalysisScope');scope.hidden=true;analysis.appendChild(scope);
     product.style.display='block';analysis.style.display='block';
     return '<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer">'+product.outerHTML+analysis.outerHTML+'</div></body></html>';
    },html);
