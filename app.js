@@ -17028,12 +17028,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
             transaction.update(ref, updates);
             savedOrder = { ...order, ...updates, orderLifecycleHistory: [...(order.orderLifecycleHistory || []), history] };
         });
-        try{
-            // The transaction already updated every linked demand atomically.
-        }catch(demandErr){
-            console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
-            showActionFeedback('訂單已更新，但採購需求尚未同步。請到資料健康檢查訂單／採購關聯。','warning');
-        }
+        // The lifecycle transaction already synchronizes stock and purchase demand.
         normalizedOrderItems(savedOrder).forEach(item=>{
             const productKey=inventoryProductKey(item);
             const warehouseId=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||savedOrder.warehouseId||'');
@@ -17964,12 +17959,7 @@ window.saveOrderLifecycleStatus = async function() {
             transaction.update(ref, updates);
             savedOrder = { ...liveOrder, ...updates, orderLifecycleHistory: [...(liveOrder.orderLifecycleHistory || []), liveHistory] };
         });
-        try{
-            // The transaction already updated every linked demand atomically.
-        }catch(demandErr){
-            console.error('訂單狀態已更新，但採購需求同步失敗：',demandErr);
-            showActionFeedback('訂單已更新，但採購需求尚未同步。請到資料健康檢查訂單／採購關聯。','warning');
-        }
+        // The lifecycle transaction already synchronizes stock and purchase demand.
         const index = ordersCache.findIndex(item => item.id === order.id);
         if (index >= 0) ordersCache[index] = { id: order.id, ...savedOrder };
         renderDeliveryModal();
