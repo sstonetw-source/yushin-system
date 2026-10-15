@@ -16757,6 +16757,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
 
     // Firestore transactions require every read before the first write.
     const contexts = [];
+    // A restored order may only reserve against a live physical warehouse.
+    // Reuse master snapshots when several items target the same location.
+    const restoredWarehouseSnapshots = new Map();
     for (let index = 0; index < items.length; index++) {
         const item = items[index];
         const savedItem=order.items?.[index]||{};
@@ -16780,6 +16783,18 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const whSnap = whRef ? await transaction.get(whRef) : null;
         const reservationSnap = await transaction.get(reservationRef);
         const reservationData=reservationSnap.exists?reservationSnap.data():{};
+        if(nextStatus==='normal'&&!directShip&&productKey){
+            if(!warehouseId||String(warehouseId).startsWith('custody-'))
+                throw new Error('原訂單倉庫不是可用的實體倉庫；請由管理員先核對倉庫與貨品位置，再恢復訂單。');
+            let warehouseSnap=restoredWarehouseSnapshots.get(warehouseId);
+            if(!warehouseSnap){
+                warehouseSnap=await transaction.get(db.collection('warehouses').doc(warehouseId));
+                restoredWarehouseSnapshots.set(warehouseId,warehouseSnap);
+            }
+            if(!warehouseSnap.exists||warehouseSnap.data().active===false
+                ||warehouseSnap.data().systemCustody||warehouseSnap.data().warehouseType==='CUSTODY')
+                throw new Error('原訂單倉庫已停用、已刪除或屬業務保管位置，不能恢復預留。請由管理員核對倉庫及調撥紀錄。');
+        }
         if(!directShip&&item.transferPendingId)throw new Error('此品項尚在倉庫調撥途中，請目的倉確認收貨後再取消或恢復。');
         for(const [key,value] of Object.entries({orderId,itemId,productKey,warehouseId})){
             if(reservationData[key]!==undefined&&reservationData[key]!==value)
