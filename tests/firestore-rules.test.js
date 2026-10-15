@@ -2142,6 +2142,28 @@ test('actual restoration respects zero and partial company availability for admi
  }
 });
 
+test('actual restoration cannot reserve in a disabled or custody-designated warehouse for any commercial role',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
+  const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  const reservation=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();
+  const run=loadActualLifecycle(f);
+  for(const warehouse of [{active:false},{active:true,systemCustody:true},{active:true,warehouseType:'CUSTODY'}]){
+   await seed('warehouses/W1',warehouse);
+   await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+   await seed('inventoryReservations/'+f.id+'__I',reservation);
+   await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
+   await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
+   await assert.rejects(run('normal'),/不能恢復預留/);
+   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+   assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().status,'cancelled');
+   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,0);
+  }
+  await seed('warehouses/W1',{active:true,isDefault:true});
+  await assertSucceeds(run('normal'));
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,5);
+ }
+});
 test('cancelled direct redirect requires a live physical warehouse and atomic incoming totals',async()=>{
  const locations=[['missing',null],['disabled',{active:false}],['custody-flag',{active:true,systemCustody:true}],
   ['custody-type',{active:true,warehouseType:'CUSTODY'}],['custody-prefix',{active:true}],['physical',{active:true,warehouseType:'PHYSICAL'}]];
