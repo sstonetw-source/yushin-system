@@ -7,6 +7,8 @@ const root = path.resolve(__dirname, '..');
 const parts = [
   "src/infrastructure/firebase.js",
   "src/app/bootstrap.js",
+  "src/infrastructure/stock-transaction.js",
+  "src/app/role-capabilities.js",
   "src/app/navigation.js",
   "src/features/products/product-management.js",
   "src/features/forecasts/forecast-head.js",

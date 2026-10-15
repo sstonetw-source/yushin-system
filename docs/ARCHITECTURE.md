@@ -76,3 +76,9 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `YushinFulfillment.projectOrderDelivery` 統一訂單級累計送貨、退貨、結案不補送與有效交付；頁面提供輸入，不再維護公式。
 - `YushinReceiving.applyReceiptToOrderItem` 改由 `YushinWorkflow.projectItem` 決定 `outstandingQty`、`reservedQty`、`shortageQty`。Firestore 實際收貨寫入未變動。
 - Receiving 在執行時解析 Workflow 相依，避免瀏覽器原有 script 載入順序在初始化時讀到空物件。
+
+## 共用交易執行責任（2026-10-15）
+
+- `src/infrastructure/stock-transaction.js`：權限 Rules 可用性檢查、採購安全來源選擇，以及唯一 `runRoleTransaction()` 入口；執行時確認真實登入 UID／角色未變更、委託 `YushinStockPermissions.run()`，提交成功後統一失效分析快取。
+- `src/app/role-capabilities.js`：角色能力、客戶身分識別等與交易引擎不同的政策和 UI 輔助。
+- 本次來源拆分採**原始位元順序不變**的方式，仍由一支 `app.js` 執行，後續對安全交易 API 進行獨立注入/測試時可在單一位置修改；不是聲稱已移除所有跨檔全域依賴。
