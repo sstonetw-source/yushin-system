@@ -2111,7 +2111,12 @@ test('cancellation changes the demand and held stock atomically for the owner; u
   assert.equal(before.status,'PENDING');
   const client=db(uid);
   // Administrators retain the pre-existing unrestricted demand update privilege.
-  if(role!=='admin')await assertFails(updateDoc(doc(client,demandPath),{status:'CANCELLED',remainingToOrderQty:0}));
+  if(role!=='admin'){
+   await assertFails(updateDoc(doc(client,demandPath),{status:'CANCELLED',remainingToOrderQty:0}));
+   await seed('orders/'+f.id,{...current,inventoryReservationStatus:'pending'});
+   await assertFails(updateDoc(doc(client,demandPath),{status:'CANCELLED',remainingToOrderQty:0}));
+   await seed('orders/'+f.id,{...current,inventoryReservationStatus:'completed'});
+  }
   const run=loadActualLifecycle(f);
   await assertSucceeds(run('cancelled'));
   const after=(await getDoc(doc(db('admin'),demandPath))).data();
