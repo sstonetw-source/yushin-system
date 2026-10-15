@@ -2218,6 +2218,9 @@ test('actual restoration respects zero and partial company availability for admi
   const run=loadActualLifecycle(f);
   for(const companyReserved of [5,4]){
    await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+   const linkedId='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+   const linked=(await getDoc(doc(db('admin'),linkedId))).data();
+   await seed(linkedId,{...linked,status:'CANCELLED',remainingToOrderQty:0});
    await seed('inventoryReservations/'+f.id+'__I',reservation);
    await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:companyReserved,incoming:0});
    await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
@@ -2239,6 +2242,9 @@ test('actual restoration cannot reserve in a disabled or custody-designated ware
   for(const warehouse of [{active:false},{active:true,systemCustody:true},{active:true,warehouseType:'CUSTODY'}]){
    await seed('warehouses/W1',warehouse);
    await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+   const linkedId='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
+   const linked=(await getDoc(doc(db('admin'),linkedId))).data();
+   await seed(linkedId,{...linked,status:'CANCELLED',remainingToOrderQty:0});
    await seed('inventoryReservations/'+f.id+'__I',reservation);
    await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
    await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
