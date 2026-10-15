@@ -16799,8 +16799,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     let totalShortage = 0;
     const stockStates = new Map();
     contexts.forEach(ctx => {
-        if (ctx.invRef && ctx.invSnap?.exists && !stockStates.has(ctx.invRef.path)) stockStates.set(ctx.invRef.path,{...ctx.invSnap.data(),ref:ctx.invRef});
-        if (ctx.whRef && ctx.whSnap?.exists && !stockStates.has(ctx.whRef.path)) stockStates.set(ctx.whRef.path,{...ctx.whSnap.data(),ref:ctx.whRef});
+        if (ctx.invRef && ctx.invSnap?.exists && !stockStates.has(ctx.invRef.path)) stockStates.set(ctx.invRef.path,{...ctx.invSnap.data(),ref:ctx.invRef,beforeReserved:ctx.invSnap.data().reserved});
+        if (ctx.whRef && ctx.whSnap?.exists && !stockStates.has(ctx.whRef.path)) stockStates.set(ctx.whRef.path,{...ctx.whSnap.data(),ref:ctx.whRef,beforeReserved:ctx.whSnap.data().reserved});
     });
 
     for (const ctx of contexts) {
@@ -16879,7 +16879,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
     }
 
     stockStates.forEach(state => {
-        transaction.update(state.ref,{reserved:Number(state.reserved||0),updatedAt:now});
+        if(Number(state.reserved||0)!==Number(state.beforeReserved||0))
+            transaction.update(state.ref,{reserved:Number(state.reserved||0),updatedAt:now});
     });
     transaction.update(db.collection('orders').doc(orderId),{
         items:nextItems,updatedAt:now

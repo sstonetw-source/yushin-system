@@ -2122,18 +2122,23 @@ test('actual lifecycle refuses underfunded cancellation for admin and business r
   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
  }
 });
-test('actual restoration respects the company availability ceiling for admin sales and engineer',async()=>{
+test('actual restoration respects zero and partial company availability for admin sales and engineer',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
   const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
-  await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
-  await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:4,incoming:0});
-  await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
-  await assertSucceeds(loadActualLifecycle(f)('normal'));
-  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
-  assert.equal(order.items[0].reservedQty,1);assert.equal(order.items[0].shortageQty,4);
-  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,5);
-  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,1);
+  const reservation=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();
+  const run=loadActualLifecycle(f);
+  for(const companyReserved of [5,4]){
+   await seed('orders/'+f.id,{...original,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
+   await seed('inventoryReservations/'+f.id+'__I',reservation);
+   await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:companyReserved,incoming:0});
+   await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
+   await assertSucceeds(run('normal'));
+   const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+   assert.equal(order.items[0].reservedQty,5-companyReserved);assert.equal(order.items[0].shortageQty,companyReserved);
+   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,5);
+   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,5-companyReserved);
+  }
  }
 });
 

@@ -115,6 +115,16 @@ test('two same-product lines share the company ceiling across different warehous
  await f.run('normal');assert.equal(f.docs.get('inventory/P').reserved,6);
  assert.deepEqual(f.docs.get('orders/O').items.map(i=>i.reservedQty),[5,1]);
 });
+test('zero-availability restoration and zero-hold cancellation never write unchanged stock',async()=>{
+ for(const role of ['admin','sales','engineer'])for(const status of ['normal','cancelled']){
+  const f=fixture({role,held:0,status:status==='normal'?'cancelled':'active'});
+  if(status==='normal')f.docs.get('inventory/P').reserved=10;
+  await f.run(status);
+  assert.equal(f.docs.get('inventoryReservations/O__I').quantity,0);
+  assert.equal(f.docs.get('orders/O').items[0].shortageQty,status==='normal'?5:0);
+  assert.equal(f.writes.filter(w=>['inventory','warehouseStocks','inventoryMovements','stockOperations'].includes(w.ref.path.split('/')[0])).length,0);
+ }
+});
 test('second-item failure rolls back the first-item proposed release',async()=>{
  const f=fixture();f.docs.get('inventory/P').reserved=5;f.docs.get('warehouseStocks/A__P').reserved=5;
  f.docs.get('orders/O').items.push({...f.docs.get('orders/O').items[0],itemId:'J'});
