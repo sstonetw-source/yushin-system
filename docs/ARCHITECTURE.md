@@ -92,3 +92,9 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `src/services/order-billing.js` 為核銷狀態及核銷日期的唯一 Firestore Transaction 寫入入口；在交易內重新讀取權威訂單、驗證未取消及核銷資格，並在原子更新中記錄異動歷史。
 - `src/features/orders/order-status.js` 只處理 UI、樂觀快取及完成／失敗回饋。核銷日期不再直接 `db.doc().update()`，一律使用 `runRoleTransaction` 及安全 Rules。
 - 連續點擊用 pendingKey 阻止同頁重複請求；跨裝置重試則由交易內對最新資料的確認避免重覆寫入。快取不代替 Rules。
+
+## 訂單取消／恢復的 Service 入口（2026-10-15）
+
+- `src/services/order-lifecycle.js` 的 `setOrderLifecycleStatus(orderId,nextStatus)` 在 `runRoleTransaction` 中讀取最新訂單，判斷取消／恢復是否合法，並藉 `adjustInventoryReservationForLifecycle` 於同交易處理預留與採購需求，然後原子寫入訂單狀態、歷程及工作索引。
+- `src/features/orders/lifecycle-workspace.js` 的 `quickSetOrderLifecycle` 僅負責角色畫面操作、確認提示、狀態更新與失敗回饋；不得直接再實作另一個取消／恢復資料庫交易。
+- 單次重試中採相同 actor、date、at；服務對已是目標狀態的正式訂單不重複寫入，避免產生重複狀態歷程。
