@@ -16852,6 +16852,9 @@ window.prepareOrderLifecycle = function(orderId, status) {
 
 async function adjustInventoryReservationForLifecycle(transaction, orderId, order, nextStatus, actor, options={}) {
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
+    if(!Array.isArray(order?.items)||!order.items.length
+        ||order.items.some(item=>!item||typeof item!=='object'||Array.isArray(item)))
+        throw new Error('訂單缺少有效品項明細，無法安全取消或恢復。請由管理員核對原始訂單、庫存預留及採購需求。');
     const items = normalizedOrderItems(order);
     // Multiple lines must never address the same reservation or demand document,
     // including collisions between generated legacy IDs and explicit IDs.

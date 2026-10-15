@@ -470,3 +470,25 @@ test('failed quick lifecycle action does not overwrite newer cache updates with 
  assert.equal(f.c.ordersCache[0].orderStatusReason,'newer confirmed note');
  assert.equal(f.c.ordersCache[0].orderStatus,'normal');
 });
+
+test('empty order items cannot change lifecycle status while leaving existing reservations and demand behind',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  for(const nextStatus of ['normal','cancelled']){
+   const f=fixture({role});f.docs.get('orders/O').items=[];
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.run(nextStatus),/缺少有效品項明細/);
+   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+  }
+ }
+});
+test('missing or malformed lifecycle item lists fail with an actionable message before any linked reads',async()=>{
+ for(const items of [undefined,null,{},'bad',[null],[5],[[]]]){
+  for(const nextStatus of ['normal','cancelled']){
+   const f=fixture();f.docs.get('orders/O').items=items;
+   const before=structuredClone([...f.docs]);
+   await assert.rejects(f.run(nextStatus),/缺少有效品項明細/);
+   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+   assert.deepEqual(f.reads,['orders/O']);
+  }
+ }
+});
