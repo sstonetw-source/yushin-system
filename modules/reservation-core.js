@@ -21,13 +21,11 @@
  // The legacy fulfillment model has one location per item. A whole-item choice
  // is safe; combining partial locations requires a separate quantity ledger.
  function selectSingleWarehouse({warehouses=[],stocks={},currentWarehouseId='',requestedQty=0,aggregateAvailableQty=0}={}){
-   const eligible=warehouses.filter(w=>w.active!==false&&!w.systemCustody&&!String(w.id).startsWith('custody-'))
-     .sort((a,b)=>Number(b.id===currentWarehouseId)-Number(a.id===currentWarehouseId)
-       ||Number(!!b.isDefault)-Number(!!a.isDefault)||String(a.id).localeCompare(String(b.id)));
+   const eligible=locationWarehouses(warehouses,currentWarehouseId);
    const needed=n(requestedQty);
-   const available=id=>Math.max(0,n(stocks[id]?.onHand)-n(stocks[id]?.reserved));
+   const available=id=>inventory.normalizeStock(stocks[id]||{}).available;
    let selected=needed>0&&n(aggregateAvailableQty)>=needed
-     ? eligible.find(w=>n(stocks[w.id]?.onHand)-n(stocks[w.id]?.reserved)>=needed) : null;
+     ? eligible.find(w=>available(w.id)>=needed) : null;
    const stocked=eligible.filter(w=>available(w.id)>0);
    if(!selected&&needed>0&&stocked.length===1&&n(aggregateAvailableQty)>=available(stocked[0].id))selected=stocked[0];
    const warehouseId=(selected||eligible[0])?.id||'';
@@ -288,5 +286,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });

@@ -270,3 +270,43 @@ test('automatic remote allocation flows through printing, transfer transit, rece
  assert.equal(f.docs.get('inventoryReservations/O__I').quantity,0);
  assert.equal(f.order().deliveryRecords[0].qty,5);assert.equal(f.order().items[0].deliveredQty,5);
 });
+
+test('warehouse selection excludes free transfer transit using the same availability as reservation writes',async()=>{
+ const f=fixture({onHand:5});addWarehouse(f,'W2',5);
+ f.put('inventory/P',{productKey:'P',onHand:10,reserved:0,transferFreeInTransit:5});
+ f.put('warehouseStocks/W__P',{productKey:'P',warehouseId:'W',onHand:5,reserved:0,transferFreeInTransit:5});
+ await f.sync();await f.sync();
+ assert.equal(f.order().items[0].warehouseId,'W2');assert.equal(f.order().items[0].reservedQty,5);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);assert.equal(f.docs.get('warehouseStocks/W2__P').reserved,5);
+ assert.equal(f.demand('I'),undefined);assert.equal([...f.docs.values()].filter(x=>x.type==='reserve').length,1);
+});
+test('partial physical stock is used when the hinted warehouse contains only free transit',async()=>{
+ const f=fixture({onHand:5});addWarehouse(f,'W2',3);
+ f.put('inventory/P',{productKey:'P',onHand:8,reserved:0,transferFreeInTransit:5});
+ f.put('warehouseStocks/W__P',{productKey:'P',warehouseId:'W',onHand:5,reserved:0,transferFreeInTransit:5});
+ await f.sync();assert.equal(f.order().items[0].warehouseId,'W2');assert.equal(f.order().items[0].reservedQty,3);
+ assert.equal(f.demand('I').remainingToOrderQty,2);assert.equal(f.demand('I').warehouseId,'W2');
+});
+test('free transit appearing during a transaction conflict causes live warehouse reselection',async()=>{
+ const f=fixture({onHand:5});addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:10,reserved:0});
+ f.controls.beforeCommit=()=>{
+  f.put('inventory/P',{productKey:'P',onHand:10,reserved:0,transferFreeInTransit:5});
+  f.put('warehouseStocks/W__P',{productKey:'P',warehouseId:'W',onHand:5,reserved:0,transferFreeInTransit:5});
+ };
+ await f.sync();assert.equal(f.order().items[0].warehouseId,'W2');assert.equal(f.order().items[0].reservedQty,5);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);assert.equal(f.docs.get('inventory/P').reserved,5);
+ assert.equal(f.demand('I'),undefined);
+});
+test('warehouseType custody cannot win selection even without systemCustody or a custody ID',async()=>{
+ const f=fixture({onHand:5});f.put('warehouses/W',{active:true,isDefault:true,warehouseType:'CUSTODY'});
+ addWarehouse(f,'W2',5);f.put('inventory/P',{productKey:'P',onHand:10,reserved:5});
+ await f.sync();assert.equal(f.order().items[0].warehouseId,'W2');assert.equal(f.order().items[0].reservedQty,5);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);assert.equal(f.demand('I'),undefined);
+});
+test('locked reservations never initialize into a custody master regardless of its naming convention',async()=>{
+ for(const patch of [{warehouseType:'CUSTODY'},{systemCustody:true}]){
+  const f=fixture({items:[{itemId:'I',productId:'P',warehouseId:'W',qty:5,supplyOrderedQty:1}]});
+  f.put('warehouses/W',{active:true,...patch});const before=structuredClone([...f.docs]);
+  await assert.rejects(f.sync(),/啟用的庫存倉庫/);assert.deepEqual([...f.docs],before);
+ }
+});
