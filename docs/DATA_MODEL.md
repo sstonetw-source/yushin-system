@@ -4,6 +4,12 @@
 
 ## Firestore 集合（規則中實際宣告）
 
+### 正式採購的補貨需求識別（2026-10-16）
+
+- 安全庫存補貨：procurementDemands/STOCK_REPLENISHMENT:{inventoryId} 是跨採購單的共享需求文件，正式 PO transaction 必須先讀後寫，沿用當下的訂購／收貨累計。
+- 手動直接庫存採購：每個採購品項使用 procurementDemands/STOCK_REPLENISHMENT:MANUAL_PO:{poNo}:{lineIndex}；supplyOrders.sourceId 必須和需求的 sourceId 一致，PO 以原始品項快照做重試核對。此為新增資料契約，未遷移歷史紀錄。
+- 本批未新增 Firestore 集合、索引或 Rules，也不更動正式資料庫。
+
 ### 庫存設定操作憑證（2026-10-16）
 
 `auditLogs/{operationId}` 新增 action `inventory_policy_set`，欄位限定為 action、inventoryId、actorUid、actorRole、stockPolicy、safetyStock、previousStockPolicy、previousSafetyStock、changed、createdAt。Rules 核對原值、同交易後值及角色；不新增 inventory 欄位。既有清單 archive／restore audit 額外記 actorRole／changed，無變更也新增憑證但不更新 inventory。管理員仍有既有 audit 刪除權，不宣稱對管理員不可竄改。
