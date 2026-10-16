@@ -12,7 +12,7 @@
     const stockPolicy=String(policy||'').trim().toUpperCase();
     if(!Object.values(STOCK_POLICIES).includes(stockPolicy))throw new Error('庫存策略格式不正確。');
     const value=stockPolicy===STOCK_POLICIES.SAFETY_STOCK?safetyStock:0;
-    if(!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0||(stockPolicy===STOCK_POLICIES.SAFETY_STOCK&&Number(value)<=0))throw new Error('安全庫存必須是大於 0 的數字。');
+    if(!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value))||(Number(value)<0||Number(value)>Number.MAX_SAFE_INTEGER)||(stockPolicy===STOCK_POLICIES.SAFETY_STOCK&&Number(value)<=0))throw new Error('安全庫存必須是大於 0 的數字。');
     return {stockPolicy,safetyStock:Number(value)};
   }
   function n(value){
