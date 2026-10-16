@@ -32,7 +32,7 @@
 
 ## 已知重要未完項目
 
-1. 主要交易已有可直接載入測試的 Service；全域依賴、其他 Feature 寫入與庫存清單／搜尋的舊批次投影仍待收斂，不能把拆檔當成全面解耦。
+1. 主要交易已有可直接載入測試的 Service；庫存清單／批號搜尋已改讀實際批次分頁。全域依賴、其他 Feature 寫入與舊持久化鏡像的清理仍待收斂，不能把拆檔當成全面解耦。
 2. 新訂單同品項**真正多倉拆量**、跨倉分批交付仍未完成；`inventoryReservations` 單地點與規劃中的 locations ledger 不可混讀。
 3. 原廠直送與一般收貨應各自維持相同的權威事件、不重複累計；`SERVICE` 商品型態須先確立不入庫的契約與測試。
 4. `deliveryRecords`、`returnRecords`、`orders.items`、`inventoryReservations` 與 `warehouseStocks` 的權威邊界，參見 `BUSINESS_RULES.md`。
@@ -64,6 +64,8 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `src/services/order-creation.js`：共用建單提交與 Forecast 原子來源連結。
 - `src/services/inventory-count.js`：數量盤點、批次與操作憑證的共同交易。
 - `src/services/manual-inventory.js`：手動／Excel 新增、批號／效期調整與報廢的逐列交易。
+- `src/infrastructure/inventory-lot-read.js`：實際批次與批號／效期等值查詢的唯讀分頁 adapter。
+- `src/features/inventory/inventory-lot-view.js`：批次頁面快取、完整性狀態、分頁按鈕與搜尋協調；不寫庫存或持久化批次。
 - `src/features/inventory/inventory-workspace.js`：產品庫存顯示、盤點／調整操作 UI。
 - `src/features/purchasing/purchase-order-editor.js`：採購單表單、PDF 與列印。
 - `src/features/orders/{order-progress,lifecycle-workspace,delivery-actions,order-creation}.js`：訂單畫面及操作（仍含交易呼叫，待 service 化）。
@@ -247,3 +249,12 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 - 新交易讀產品及倉庫主檔，檢查存在、停用、產品識別、必填批號／效期與實體倉庫；拒絕明確 Service 型別。讀原始庫存／批次時拒絕無效數量與不足的預留，缺批次量以明確未知成本的未分批來源補齊；指定批號減量不把未分批量冒充指定批號。
 - 成本：相較原每列兩筆 stock read，新增 movement、產品、倉庫及兩筆固定 lot ID read；成本有權角色另讀成本 ID。新增每產品一次 `inventoryLots.where(productKey).limit(201)` 查詢與逐文件 tx 重讀，超過 200 批拒絕。查所有倉庫批次是為重建舊列表鏡像；僅寫目標倉批次，無新索引／Listener／Rules／集合。盤盈／缺批次可能多寫 balance lot。初始真實成本與倉管 costPending 仍分離。
 - 本節更新前節的批次異動待辦。清單封存／庫存設定等 Feature 寫入、其他入口的舊批次列表投影、超過 200 批的分頁設計、跨重載恢復、多倉、完整 SERVICE 與 Preview 驗收仍未完成。無正式部署、遷移或資料刪除。
+
+## 庫存批次的唯讀投影（2026-10-16）
+
+- 清單批號、效期及其 FEFO 排序改讀 `inventoryLots`；`fefoLots` 不再回退 `inventory.lots`。`YushinInventory.operationalLotRows` 驗證識別／有限非負餘量、排除零餘量並白名單投影，保留庫別，不攜成本或任意附加 payload。舊鏡像仍可能被歷史 writer 寫入，但不再決定此清單／搜尋結果。
+- 每頁新產品以 30 keys 一組做 `productKey in` 查詢，每組每次讀 101 筆（100＋lookahead），正常 50 產品首讀兩組、最多 202 文件；不為每產品／每倉各開查詢，不自動掃完。cursor 以本次實際消費的第 100 文件為準，零餘量也推進 cursor。更多、失敗及尚未讀取均明示；未讀完不宣稱沒有批次或列出全域最早效期。
+- Feature 保留群組 cursor／已讀資料，重用同一 in-flight page；按需載入更多並展開已讀列。刷新、相關產品庫存異動與角色切換失效快取；原 UID／角色、view generation 及群組 identity 防止舊結果復活。批次狀態只在記憶體，未寫 AppDataCache／localStorage，也不修改 Firestore。
+- 貨號／品名／廠牌保留原 `inventory.searchTokens` 分頁，後驗證只看商品欄位，排除舊鏡像造成的批號假命中。完整批號以 `inventoryLots.lotNo == rawTrimmedInput` 查詢（區分大小寫），YYYY-MM-DD 另查 expiryDate；每欄每頁 51 讀取（50＋lookahead），用產品 key 批讀對應 inventory，再載入分倉／批次顯示。批號結果未讀完提供分頁，不以部分結果當全庫完成。
+- 新批次／批號查詢皆使用既有單欄索引，無 Rules、composite index、集合或 Listener 變更。原商品 token 搜尋仍可能掃完全部索引候選；本批沒有改寫該既有查詢策略，也未保證批號片段／模糊搜尋。五角色 Rules 及桌機／手機控制另由 CI 驗證。
+- 本節更新前節「庫存列表舊批次讀取」待辦；清單封存／設定交易、持久化鏡像／索引詞清理、超過 200 批的寫入作業、跨重載工作恢復、多倉、完整 SERVICE 與 Preview 全流程驗收仍待處理。

@@ -94,3 +94,9 @@
 初始成本沿用 `inventoryLotCosts`，有成本權角色寫 unitCost，倉管寫 costPending；重試核對不將成本放入公開 movement。`inventory.lots` 於人工異動入口由產品各倉已讀的權威 lot 投影成 `{warehouseId,lotNo,expiryDate,qty}`，不再直接加減；其他既有入口的列表鏡像刷新尚待統一，不能將鏡像當成庫存對帳依據。
 
 新增每產品 bounded lot 查詢（最多 201 筆，超過 200 拒絕），使用既有單欄索引；無新集合／Rules／composite index／Listener。瀏覽器列新增 operationId 以接續同視窗重試，無資料遷移或正式資料更動。
+
+## 庫存清單批次讀模型（2026-10-16）
+
+無新 Firestore 欄位、集合、Rules 或 composite index。批次顯示直接讀 inventoryLots 的 productKey／warehouseId／lotNo／expiryDate／remainingQty／receivedAt，以真正文件 ID 為識別；唯讀白名單投影不包含成本。群組頁面、cursor、載入錯誤與完整性僅保留記憶體，角色切換清除，未持久化。
+
+新增單欄查詢：productKey in 最多 30 值，單次 101 文件 lookahead；完整 lotNo 等值／YYYY-MM-DD expiryDate 等值各 51 文件 lookahead；命中產品以 inventory.productKey in 批讀。全部沿用既有自動單欄索引，不需要部署新 composite index。舊 inventory.lots／批號 searchTokens 不遷移或刪除；目前清單與後驗證不再依它們判斷批次命中，舊 tokens 仍可能增加索引候選讀取。
