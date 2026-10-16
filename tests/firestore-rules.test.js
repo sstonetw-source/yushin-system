@@ -1202,7 +1202,9 @@ function compatDb(uid) {
   return {
     collection: name => {
       const constraints=[],builder={doc:id=>doc(firestore,name,id||`audit-${Date.now()}-${++sequence}`),
-        where:(field,op,value)=>{constraints.push(where(field,op,value));return builder;},
+        // vm-loaded browser code creates cross-realm arrays; the modular Node SDK
+        // expects native arrays, while production browser code uses one realm.
+        where:(field,op,value)=>{constraints.push(where(field,op,Array.isArray(value)?Array.from(value):value));return builder;},
         limit:max=>{constraints.push(limit(max));return builder;},
         startAfter:snapshot=>{constraints.push(startAfter(snapshot));return builder;},
         get:()=>getDocs(query(collection(firestore,name),...constraints))};
