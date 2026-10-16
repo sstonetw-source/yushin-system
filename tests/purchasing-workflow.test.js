@@ -541,7 +541,7 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     assert.match(coreTransaction, /method:'PURCHASING_PO'/);
     assert.match(coreTransaction, /const sourceType=item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
     assert.match(coreTransaction, /sourceType,/);
-    assert.match(coreTransaction, /sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
+    assert.match(coreTransaction, /sourceId:sourceType==='STOCK_REPLENISHMENT'\?demandProjection\.sourceId/);
     assert.match(coreTransaction, /sourceItemId:item\.itemId\|\|item\.sourceItemId\|\|''/);
     assert.match(coreTransaction, /purchaseDocumentId:poDocumentId/);
     assert.match(coreTransaction, /poRecord\.supplyOrderIds=supplyOrderIds/);
@@ -1078,7 +1078,7 @@ test('inventory replenishment source is preserved through formal PO supply recor
     const poSource=app.slice(poStart,poEnd);
     assert.match(poSource,/const sourceType=item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
     assert.match(poSource,/sourceType,/);
-    assert.match(poSource,/sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
+    assert.match(poSource,/sourceId:sourceType==='STOCK_REPLENISHMENT'\?demandProjection\.sourceId/);
 });
 
 test('inventory replenishment uses the same procurement demand core', () => {
@@ -2345,7 +2345,7 @@ test('procurement need date stays separate from supplier ETA', () => {
     const poSource=formalService;
     assert.match(
         poSource,
-        /scheduleDate:String\(item\.demandScheduleDate\|\|item\.requiredByDate\|\|''\)\.trim\(\)/
+        /scheduleDate:snapshot\?\.scheduleDate\|\|String\(item\.demandScheduleDate\|\|item\.requiredByDate\|\|''\)\.trim\(\)/
     );
     assert.match(poSource,/scheduleDate:demandProjection\.scheduleDate[\s\S]*?sourceOrderForDemand\?\.expectedDate/);
     assert.match(poSource,/expectedDate:item\.scheduleDate\|\|poRecord\.expectedDate\|\|''/);
