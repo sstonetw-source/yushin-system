@@ -22,7 +22,8 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     if (!whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
 
     const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {}), wh = inventoryNumbers(whSnap.data());
-    const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
+    const currentReservation=globalThis.YushinReservation.assertLegacyReservationLocation(
+        reservationSnap.exists?reservationSnap.data():{}, {warehouseId,productKey});
     const newReservedRemaining=Math.max(0,currentReservation-deltaQty);
     const reservedDelta=newReservedRemaining-currentReservation;
     const now = new Date().toISOString();
@@ -130,7 +131,8 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     }
     // 正常訂單退貨後要把商品重新保留給原訂單，供補送使用。
     // 已取消／作廢訂單只把退貨放回自由庫存，不能重新占住庫存；若遇到殘留預留也一併釋放。
-    const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
+    const currentReservation=globalThis.YushinReservation.assertLegacyReservationLocation(
+        reservationSnap.exists?reservationSnap.data():{}, {warehouseId,productKey});
     const returnKeepsReservation=normalizedOrderStatus(order)==='normal';
     const nextReservation=returnKeepsReservation?(order.customerReturnSettlement==='CLOSE'?currentReservation:Math.max(0,currentReservation+deltaQty)):0;
     const reservationDelta=nextReservation-currentReservation;
