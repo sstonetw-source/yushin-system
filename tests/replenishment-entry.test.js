@@ -17,7 +17,7 @@ function setup({exists=true,incoming=0}={}){
 }
 test('visible replenishment item still opens after all inventory caches were invalidated',async()=>{
  const {x,calls}=setup();await x.window.openInventoryReplenishment('I1');
- assert.deepEqual(calls[0],['read','inventory','I1']);assert.equal(x.poItems[0].sourceId,'I1');assert.equal(x.poItems[0].qty,79);assert.ok(calls.some(c=>c[0]==='open'));assert.deepEqual(calls.find(c=>c[0]==='match'),['match','06612601001','Roche']);assert.equal(calls.some(c=>c[0]==='alert'),false);
+ assert.deepEqual(calls[0],['read','inventory','I1']);assert.equal(x.poItems[0].sourceId,'I1');assert.equal(x.poItems[0].qty,79);assert.equal(calls.some(c=>c[0]==='demand'),false,'準備採購視窗時不可先寫入採購需求');assert.ok(calls.some(c=>c[0]==='open'));assert.deepEqual(calls.find(c=>c[0]==='match'),['match','06612601001','Roche']);assert.equal(calls.some(c=>c[0]==='alert'),false);
 });
 test('current incoming stock prevents redundant replenishment using stale screen totals',async()=>{
  const {x,calls}=setup({incoming:79});await x.window.openInventoryReplenishment('I1');assert.equal(calls.some(c=>c[0]==='demand'||c[0]==='open'),false);assert.match(calls.find(c=>c[0]==='alert')[1],/不需重複建立/);assert.ok(calls.some(c=>c[0]==='released'));
