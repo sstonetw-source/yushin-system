@@ -158,3 +158,11 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - UID／角色在開啟確認前取得，服務入口與交易每次重跑及讀取後重查身分／能力；actor 名稱、日期與時間固定於 callback 外，每次 callback 清除上次嘗試的輸出。直接服務呼叫也驗證供應商、成本及數量。
 - 新增 callback 重跑、讀取時換帳號、原確認身分失效、交易失敗無部分寫入、後續真實追加及無效輸入測試；既有 incoming 與不確定回覆測試改為直接載入服務。
 - 沒有新增資料讀取／Collection／Rules／Index／Listener，也沒有 Firebase 部署或資料刪除。固定供應紀錄與最新剩餘需求檢查不是永久作業 ledger；舊確認恰逢後續等量新需求仍非跨裝置防重保證。正式 PO、多倉拆量、SERVICE 流程及正式角色驗收尚待處理。
+
+## 正式 PO 核心服務（2026-10-16）
+
+- `src/services/formal-purchase-order.js` 的 `commitFormalPurchaseOrder` 接手建立 PO、逐列供應承諾、需求進度及來源訂單連結的共同交易；列印事件負責表單快照、快取與 PDF，核心提交完成後才輸出。輸入複製與每次 callback 結果清空，避免失敗嘗試外洩。
+- 同一來源品項拆成多列，需求投影逐列累計、每個需求只寫一次，來源訂單亦依整筆採購總量更新；修正需求文件僅留下最後一列數量。相同備庫需求重複列目前拒絕，須先合併為單列，避免在缺少權威備庫需求合併語意時靜默覆蓋。
+- 原 UID／角色於 PDF prepare 前取得，服務及每次交易讀取後核對能力與身分。供應 actor／事件時間在 callback 外固定；直接服務呼叫亦核對必要數量／價格與單號。
+- 原單號已存在時，排除建立／輸出時間等非意圖欄位後比較原 PO 內容，核對固定供應連結、actor、來源、產品、數量、成本與供應商，僅回傳現況、不再寫入。不覆寫到貨進度、不重開取消單。衝突或缺供應紀錄拒絕，不視為新的 PO。
+- 正常建立無額外讀取；只有既存單號的重試路徑新增每列一筆已知 supply document read。無新 Collection／Rules／Index／Listener、無 Firebase 部署或資料刪除。Incoming 仍由既有 registerPurchaseIncoming 逐供應分段同步，並非與 PO 全部單交易；跨段身分固定、多倉拆量、SERVICE 與正式角色驗收仍待後續處理。

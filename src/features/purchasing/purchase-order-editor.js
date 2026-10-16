@@ -805,6 +805,7 @@ window.printPurchaseOrder = async function() {
         updatePoSaveStatus(poNoLoading ? '採購單號仍在產生中，完成後即可列印 / 存為 PDF。' : '採購單號尚未就緒，請切換公司或重新開啟後再試。', !poNoLoading);
         return;
     }
+    const actorUid=currentUser?.uid, actorRole=currentUserRole;
     poSaveInProgress = true;
     try { await window.DocumentDownloads.prepare('purchase'); }
     catch (err) { updatePoSaveStatus(err.message, true); return; }
@@ -965,179 +966,14 @@ window.printPurchaseOrder = async function() {
     let poCommitted = false;
     try {
         const poDocumentId = poNo;
-        let committedSourceOrders = [];
-        let committedSupplyOrders = [];
-        const commitPromise = runRoleTransaction(async transaction => {
-            committedSourceOrders = [];
-            committedSupplyOrders = [];
-            const poRef = db.collection('purchaseOrders').doc(poDocumentId);
-            const orderRefs = orderIds.map(orderId => db.collection('orders').doc(orderId));
-            const poSnapshot = await transaction.get(poRef);
-            const orderSnapshots = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
-            if (poSnapshot.exists) throw new Error(`採購單號 ${poNo} 已存在，請關閉視窗後重新產生單號。`);
-            orderSnapshots.forEach((snapshot, index) => {
-                if (!snapshot.exists) throw new Error('來源訂單已不存在。');
-                assertPurchaseLinesAvailable(snapshot.data(), poRecord.items.filter(item => item.orderId === orderIds[index]));
-            });
-            const supplyOrderIds = [];
-            poRecord.items.forEach((item,itemIndex)=>{
-                const sourceType=item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT');
-                let demandProjection;
-                let sourceOrderForDemand=null;
-                let sourceItemForDemand=null;
-                if(sourceType==='SALES_ORDER'){
-                    const sourceSnapshot=orderSnapshots.find(snapshot=>snapshot.id===item.orderId);
-                    if(!sourceSnapshot?.exists)throw new Error('採購需求找不到來源訂單。');
-                    sourceOrderForDemand={id:sourceSnapshot.id,...sourceSnapshot.data()};
-                    const sourceItems=normalizedOrderItems(sourceOrderForDemand);
-                    sourceItemForDemand=sourceItems.find(row=>row.itemId===item.itemId)
-                        || sourceItems[Number(item.orderItemIndex||0)];
-                    if(!sourceItemForDemand)throw new Error('採購需求找不到來源訂單品項。');
-                    demandProjection=procurementDemandForOrderItem(sourceOrderForDemand,sourceItemForDemand);
-                }else{
-                    demandProjection=globalThis.YushinProcurementDemand.normalizeDemand({
-                        demandId:item.demandId||globalThis.YushinProcurementDemand.demandIdForSource({
-                            sourceType,sourceId:item.sourceId||item.productId||item.itemCode||''
-                        }),
-                        sourceType,
-                        sourceId:item.sourceId||item.productId||item.itemCode||'',
-                        sourceItemId:'',
-                        requestedQty:Number(item.demandRequestedQty??item.qty??0),
-                        orderedQty:Number(item.demandOrderedQty||0),
-                        receivedQty:Number(item.demandReceivedQty||0),
-                        // Stock replenishment has no customer required-by date by default.
-                        // item.scheduleDate here is supplier ETA and must not become demand timing.
-                        scheduleDate:String(item.demandScheduleDate||item.requiredByDate||'').trim()
-                    });
-                }
-                const demandOrderPlan=globalThis.YushinProcurementDemand.applyOrder(demandProjection,Number(item.qty||0));
-                if(demandOrderPlan.appliedQty!==Number(item.qty||0)){
-                    throw new Error('採購需求數量已變更，請重新整理後再建立採購單。');
-                }
-                const demandRef=procurementDemandRef(demandProjection.demandId);
-                const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
-                    productId:item.productId||sourceItemForDemand?.productId||'',
-                    productKey:poIncomingKey(item)||inventoryProductKey(sourceItemForDemand||{}),
-                    itemCode:item.itemCode||sourceItemForDemand?.itemCode||'',
-                    itemName:item.itemName||sourceItemForDemand?.itemName||'',
-                    brand:resolveBrandName(item.brand||sourceItemForDemand?.brand||''),
-                    fulfillmentType:item.fulfillmentType||sourceItemForDemand?.fulfillmentType||'WAREHOUSE',
-                    warehouseId:(item.fulfillmentType||sourceItemForDemand?.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'
-                        ? '' : (item.warehouseId||sourceItemForDemand?.warehouseId||defaultWarehouse()?.id||''),
-                    ownerUid:item.ownerUid||sourceOrderForDemand?.ownerUid||'',
-                    salesCode:item.salesCode||sourceOrderForDemand?.salesCode||'',
-                    salesName:item.salesName||sourceOrderForDemand?.salesName||'',
-                    // Preserve Material Request required-by timing. Do not overwrite it
-                    // with this PO line's vendor delivery estimate.
-                    scheduleDate:demandProjection.scheduleDate
-                        ||sourceItemForDemand?.requiredByDate
-                        ||sourceItemForDemand?.scheduleDate
-                        ||sourceOrderForDemand?.requiredByDate
-                        ||sourceOrderForDemand?.expectedDate
-                        ||''
-                },{
-                    createdAt:sourceOrderForDemand?.createdAt||poRecord.createdAt,
-                    updatedAt:poRecord.createdAt
-                });
-
-                const supplyId=formalSupplyOrderId(poDocumentId,itemIndex);
-                const supplyRef=supplyOrdersCollection().doc(supplyId);
-                supplyOrderIds.push(supplyId);
-                const supplyRecord={
-                    // ERPNext-style：採購方式與需求來源分開。
-                    // 正式採購單永遠是 PURCHASING_PO；是否為客戶需求或備庫由 sourceType 表示。
-                    type:'PURCHASING_PO',
-                    method:'PURCHASING_PO',
-                    sourceType,
-                    sourceId:item.orderId||item.sourceId||'',
-                    sourceItemId:item.itemId||item.sourceItemId||'',
-                    demandId:demandProjection.demandId||'',
-                    internalNo:poNo,
-                    purchaseDocumentId:poDocumentId,
-                    purchaseDocumentNo:poNo,
-                    status:'ORDERED',
-                    orderId:item.orderId||'',
-                    itemId:item.itemId||'',
-                    orderItemIndex:Number(item.orderItemIndex||0),
-                    ownerUid:item.ownerUid||'',
-                    salesCode:item.salesCode||'',
-                    salesName:item.salesName||'',
-                    productId:item.productId||'',
-                    productKey:poIncomingKey(item),
-                    itemCode:item.itemCode||'',
-                    itemName:item.itemName||'',
-                    brand:resolveBrandName(item.brand||''),
-                    brandId:item.brandId||brandIdForName(item.brand||''),
-                    qty:Number(item.qty||0),
-                    receivedQty:0,
-                    incomingRegisteredQty:0,
-                    supplier:poRecord.supplierName||vendorName,
-                    supplierId:poRecord.supplierId||'',
-                    supplierEmail:poRecord.supplierEmail||'',
-                    unitCost:Number(item.unitPrice||0),
-                    orderDate:poRecord.poDate,
-                    expectedDate:item.scheduleDate||poRecord.expectedDate||'',
-                    scheduleDate:item.scheduleDate||poRecord.scheduleDate||poRecord.expectedDate||'',
-                    fulfillmentType:item.fulfillmentType||'WAREHOUSE',
-                    warehouseId:(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||defaultWarehouse()?.id||''),
-                    createdAt:poRecord.createdAt,
-                    updatedAt:poRecord.createdAt,
-                    createdByUid:currentUser?.uid||'',
-                    createdBy:currentUserName||currentUser?.email||'',
-                    createdByRole:currentUserRole
-                };
-                transaction.set(supplyRef,supplyRecord);
-                if(demandRef)transaction.set(demandRef,demandDoc,{merge:true});
-                committedSupplyOrders.push({id:supplyId,...supplyRecord});
-            });
-            poRecord.supplyOrderIds=supplyOrderIds;
-            transaction.set(poRef, poRecord);
-            orderSnapshots.forEach((snapshot, index) => {
-                if (snapshot.exists) {
-                    const orderData = snapshot.data();
-                    const orderedLines=poRecord.items.filter(item=>item.orderId===snapshot.id);
-                    const nextItems=normalizedOrderItems(orderData).map((item,itemIndex)=>{
-                        const matches=orderedLines.filter(line=>Number(line.orderItemIndex)===itemIndex);
-                        const orderedQty=matches.reduce((sum,line)=>sum+Number(line.qty||0),0);
-                        const currentSupplyOrdered=Math.max(0,Number(item.supplyOrderedQty||0));
-                        const cumulative=currentSupplyOrdered+orderedQty;
-                        const identityLine=matches.find(line=>line.itemId&&item.itemId&&line.itemId===item.itemId)||matches[0];
-                        return orderedQty>0?{
-                            ...item,
-                            // 採購單可補齊來源訂單原本缺少的產品識別資料；已有值不覆蓋，
-                            // 避免「來源貨號空白 → 採購頁可填 → 儲存又被擋住」的死路流程。
-                            productId:item.productId||identityLine?.productId||'',
-                            itemCode:item.itemCode||identityLine?.itemCode||'',
-                            itemName:item.itemName||identityLine?.itemName||'',
-                            brand:item.brand||resolveBrandName(identityLine?.brand||''),
-                            brandId:item.brandId||identityLine?.brandId||brandIdForName(item.brand||identityLine?.brand||''),
-                            productLine:item.productLine||identityLine?.productLine||'',
-                            supplyOrderedQty:cumulative,
-                            purchaseDocumentNos:[...new Set([...(item.purchaseDocumentNos||[]),poNo])],
-                            orderedAt:item.orderedAt && item.orderedAt < poRecord.poDate ? item.orderedAt : poRecord.poDate,
-                            orderEvents:[
-                                ...(item.orderEvents||[]).filter(event=>event.id!==poDocumentId),
-                                {id:poDocumentId,type:'PURCHASING_PO',at:poRecord.createdAt||new Date().toISOString(),date:poRecord.poDate||'',qty:orderedQty,documentNo:poNo,by:poRecord.buyerName||currentUserName||currentUser?.email||''}
-                            ]
-                        }:item;
-                    });
-                    const nextOrderData={...orderData,items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2};
-                    const orderUpdates = {
-                        items:nextItems,itemCount:nextItems.length,orderSchemaVersion:2,
-                        ...orderWorkIndexFields(nextOrderData),
-                        linkedDocuments: normalizeDocumentLinks([...(orderData.linkedDocuments || []), documentLink(DOCUMENT_TYPES.PURCHASE_ORDER, poDocumentId, 'document')])
-                    };
-                    transaction.update(orderRefs[index], orderUpdates);
-                    committedSourceOrders.push({id:snapshot.id,...orderData,...orderUpdates});
-                }
-            });
-        });
+        const commitPromise = commitFormalPurchaseOrder(poRecord, {actorUid,actorRole});
 
         // 採購單會同時改寫來源訂單與供應紀錄，不能像估價單一樣「先印再存」：
         // 若 iPhone 在列印畫面直接關閉頁面，背景 transaction 可能尚未完成，會造成紙本已下單但系統沒有紀錄。
         // 只等待這個最小且必要的核心 transaction；在途庫存仍於列印後背景同步。
         updatePoSaveStatus('正在確認並儲存採購單…');
-        await commitPromise;
+        const {poRecord:committedRecord,committedSourceOrders,committedSupplyOrders} = await commitPromise;
+        Object.assign(poRecord,committedRecord);
         poCommitted = true;
         invalidateProcurementDemandQueue();
         if (button) button.innerText = '同步在途庫存中…';

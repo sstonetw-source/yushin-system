@@ -12,6 +12,7 @@ const demand = require('../modules/procurement-demand-core.js');
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+const formalService = fs.readFileSync(path.join(__dirname, '../src/services/formal-purchase-order.js'), 'utf8');
 
 function purchaseCopyHarness({allowed = true, editable = true, saving = false, searchOnly = false} = {}) {
     const original = {
@@ -262,6 +263,7 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
     const messages = [];
     const context = vm.createContext({
         window:{DocumentDownloads:{prepare:async()=>{}}}, poEditingId:'PO1', poListCache:[savedPo],
+        currentUser:{uid:'buyer'},currentUserRole:'purchaser',
         canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
         document:{getElementById:()=>button},
         registerPurchaseIncoming:async () => { registrationCalls++; await new Promise(resolve => { releaseRegistration=resolve; }); },
@@ -529,9 +531,8 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     const printStart = app.indexOf('window.printPurchaseOrder = async function()');
     const printEnd = app.indexOf("window.addEventListener('afterprint'", printStart);
     const printSource = app.slice(printStart, printEnd);
-    const transactionStart = printSource.indexOf('const commitPromise = runRoleTransaction');
-    const transactionEnd = printSource.indexOf('await commitPromise');
-    const coreTransaction = printSource.slice(transactionStart, transactionEnd);
+    assert.match(printSource,/commitFormalPurchaseOrder\(poRecord, \{actorUid,actorRole\}\)/);
+    const coreTransaction = formalService;
     assert.match(coreTransaction, /(?:db\.collection\('supplyOrders'\)|supplyOrdersCollection\(\))\.doc\(supplyId\)/);
     assert.match(coreTransaction, /type:'PURCHASING_PO'/);
     assert.match(coreTransaction, /method:'PURCHASING_PO'/);
@@ -939,9 +940,9 @@ test('formal purchase order commit immediately hydrates the receiving supply cac
     const end=app.indexOf('\n// 「製作下一張估價單」',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/let committedSupplyOrders = \[\]/);
-    assert.match(source,/committedSupplyOrders = \[\]/);
-    assert.match(source,/committedSupplyOrders\.push\(\{id:supplyId,\.\.\.supplyRecord\}\)/);
+    assert.match(formalService,/let committedSupplyOrders = \[\]/);
+    assert.match(formalService,/committedSupplyOrders = \[\]/);
+    assert.match(formalService,/committedSupplyOrders\.push\(\{id:supplyId,\.\.\.supplyRecord\}\)/);
     assert.match(source,/const supplyMap = new Map\(supplyReceivingCache\.map/);
     assert.match(source,/committedSupplyOrders\.forEach\(row => supplyMap\.set\(row\.id, row\)\)/);
     assert.match(source,/supplyReceivingCache = \[\.\.\.supplyMap\.values\(\)\]/);
@@ -2051,7 +2052,7 @@ test('purchase order snapshots supplier identity and email onto PO and supply re
     assert.match(source,/supplierSnapshot,/);
     const supplyStart=app.indexOf('const supplyRecord={',end);
     const supplyEnd=app.indexOf('transaction.set\(supplyRef,supplyRecord\)',supplyStart);
-    const supplySource=app.slice(supplyStart,supplyEnd);
+    const supplySource=formalService;
     assert.match(supplySource,/supplierId:poRecord\.supplierId\|\|''/);
     assert.match(supplySource,/supplierEmail:poRecord\.supplierEmail\|\|''/);
 });
@@ -2166,7 +2167,7 @@ test('purchase flows persist procurement demand through order and receipt transa
     assert.match(app, /demandId:existingSupply\?\.demandId\|\|demandId\|\|''/);
     assert.match(app, /demandId:demandProjection\.demandId\|\|''/);
     assert.match(app, /tx\.set\(demandRef,demandDoc,\{merge:true\}\)/);
-    assert.match(app, /transaction\.set\(demandRef,demandDoc,\{merge:true\}\)/);
+    assert.match(formalService, /demandWrites\.forEach\(\(\{ref,doc\}\)=>transaction\.set\(ref,doc,\{merge:true\}\)\)/);
     assert.equal((app.match(/updateDemandReceipt\(qty\)/g)||[]).length,2);
     assert.match(app, /YushinProcurementDemand\.applyReceipt\(baseDemand,receiptQty\)/);
 });
@@ -2337,7 +2338,7 @@ test('procurement need date stays separate from supplier ETA', () => {
 
     const poStart=app.indexOf('const scheduledPoItems=poItemsWithScheduleDates');
     const poEnd=app.indexOf('\n        // 訂購單會同時改寫來源訂單與供應紀錄',poStart);
-    const poSource=app.slice(poStart,poEnd);
+    const poSource=formalService;
     assert.match(
         poSource,
         /scheduleDate:String\(item\.demandScheduleDate\|\|item\.requiredByDate\|\|''\)\.trim\(\)/
