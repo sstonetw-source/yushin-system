@@ -1240,6 +1240,10 @@ test('new planning receipts enforce exact schema real role and same atomic inven
   batch.set(doc(client,'auditLogs/planning-forged'),{...base,...patch});await assertFails(batch.commit());
  }
  const omitted={...base};delete omitted.actorRole;await assertFails(setDoc(doc(client,'auditLogs/planning-omitted'),omitted));
+ for(const safetyStock of [Infinity,NaN]){
+  const invalidNumber=writeBatch(client);invalidNumber.update(doc(client,'inventory/planning-proof'),{stockPolicy:'SAFETY_STOCK',safetyStock,updatedAt:at});
+  invalidNumber.set(doc(client,'auditLogs/planning-invalid-number'),{...base,safetyStock});await assertFails(invalidNumber.commit());
+ }
  const stock=writeBatch(client);stock.update(doc(client,'inventory/planning-proof'),{stockPolicy:'SAFETY_STOCK',safetyStock:5,updatedAt:at,onHand:20});stock.set(doc(client,'auditLogs/planning-stock'),base);await assertFails(stock.commit());
  for(const uid of ['sales1','eng1','wh1'])await assertFails(setDoc(doc(db(uid),'auditLogs/planning-role-'+uid),{...base,actorUid:uid}));
  const valid=writeBatch(client);valid.update(doc(client,'inventory/planning-proof'),{stockPolicy:'SAFETY_STOCK',safetyStock:5,updatedAt:at});valid.set(doc(client,'auditLogs/planning-valid'),base);await assertSucceeds(valid.commit());
