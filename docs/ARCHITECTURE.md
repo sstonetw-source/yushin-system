@@ -150,3 +150,11 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 手動表單同內容失敗重試保留 operationId；在交易內讀到相同供應意圖就返回、不再追加承諾。識別碼撞到不同來源／品項／供應商／數量／成本／日期／備註則拒絕。actor、角色、時間與供應 reference 在 callback 外固定。
 - 手動防重增加每次交易一筆已知 supply document read，沒有新查詢／Listener／Collection／Rules／Index。表單識別碼只在本頁記憶體保留，重新開啟表單／重載或改內容會視為新意圖，不代表永久跨裝置 ledger。
 - 本批不變更到貨或現貨數量；直送承諾仍無公司倉庫。不代表正式 PO／快速採購全部已統一，多倉拆量、SERVICE 商品與正式環境驗收仍未完成。沒有 Firebase 部署或資料刪除。
+
+## 快速採購交易服務（2026-10-16）
+
+- `src/services/quick-purchase.js` 的 `commitQuickPurchase` 擁有快速採購的供應、需求、來源訂單與公司／分倉 incoming 同交易寫入。畫面僅取得確認、忙碌鎖及更新快取，不再包含 transaction 實作。
+- 沿用訂單／品項固定供應 ID、原供應商／成本／產品／交付方式／倉庫快照，保留後續真實缺貨追加及零剩餘需求時 incoming 修復。直送不增加公司／分倉 incoming，零成本仍有效。
+- UID／角色在開啟確認前取得，服務入口與交易每次重跑及讀取後重查身分／能力；actor 名稱、日期與時間固定於 callback 外，每次 callback 清除上次嘗試的輸出。直接服務呼叫也驗證供應商、成本及數量。
+- 新增 callback 重跑、讀取時換帳號、原確認身分失效、交易失敗無部分寫入、後續真實追加及無效輸入測試；既有 incoming 與不確定回覆測試改為直接載入服務。
+- 沒有新增資料讀取／Collection／Rules／Index／Listener，也沒有 Firebase 部署或資料刪除。固定供應紀錄與最新剩餘需求檢查不是永久作業 ledger；舊確認恰逢後續等量新需求仍非跨裝置防重保證。正式 PO、多倉拆量、SERVICE 流程及正式角色驗收尚待處理。

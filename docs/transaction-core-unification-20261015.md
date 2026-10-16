@@ -86,3 +86,7 @@ fulfillment-core 新增 deliveryQuantities，normalizeItem 與 dispatchState 共
 ### 2026-10-16 自行訂貨雙入口合併
 
 建單自動同步與手動自行訂貨共用 commitSelfOrderSupply，移除兩套重複供應／需求／來源訂單寫入。保留初始同步與手動登記的不同權限／同步時機，並固定原 UID／角色跨品項接續。手動作業識別碼在 transaction 外建立、同表單失敗重試沿用，回覆遺失不重複登記；相同 ID 不同內容拒絕。新增供應／需求／訂單整筆失敗、部分訂貨、直送、零成本、角色／帳號切換、核心缺失及 UI 重試測試。此批不涵蓋正式 PO、快速採購、多倉拆量、SERVICE 流程與正式環境驗收。
+
+### 2026-10-16 快速採購服務邊界
+
+快速採購交易移至 commitQuickPurchase，沿用 ProcurementDemand 與 Receiving 純規則及固定 supply ID。確認前捕捉 UID／角色，服務入口、交易 callback 重跑與讀取後均核對；callback 外固定 actor／時間，每次嘗試清空輸出。保留原供應快照、後續真實缺貨追加與 incoming 修復、不增加讀取。新增原子失敗、交易重跑、身分切換、邊界驗證測試。固定 supply ID 不是永久意圖 ledger，舊確認碰到後續等量需求仍待加強；正式 PO、多倉拆量、SERVICE 與正式環境驗收未完成，無 Firebase 部署或資料刪除。

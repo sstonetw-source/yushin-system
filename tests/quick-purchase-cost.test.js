@@ -17,7 +17,7 @@ test('additional supply uses its actual price and supplier instead of changing o
 test('cancelled confirmation makes no transaction; invalid confirmed costs fail before transaction',async()=>{
  const action=source.slice(source.indexOf('window.markPurchaseItemOrdered ='),source.indexOf('window.openOrderPurchaseDraft ='));
  for(const details of [null,{supplier:'Vendor',unitCost:-1},{supplier:'',unitCost:50},{supplier:'Vendor',unitCost:NaN}]){
- let transactions=0;const c=vm.createContext({window:{},canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,pendingPurchaseOrderKeys:new Set(),requestQuickPurchaseDetails:async()=>details,
+ let transactions=0;const c=vm.createContext({window:{},currentUser:{uid:'buyer'},currentUserRole:'purchaser',canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,pendingPurchaseOrderKeys:new Set(),requestQuickPurchaseDetails:async()=>details,
  runRoleTransaction:()=>{transactions++;},alert:()=>{}});vm.runInContext(action,c);await c.window.markPurchaseItemOrdered('o','i');assert.equal(transactions,0);assert.equal(c.pendingPurchaseOrderKeys.size,0);
  }
 });
