@@ -1,4 +1,7 @@
 // Receipt dialogs, frozen retry jobs and view refresh. Authoritative writes stay in Services.
+let poReceiptTargetId = '';
+let poReceiptOperationId = '';
+
 function receiptOperationStorageKey(supplyId, ownerUid = currentUser?.uid || '') {
     return `yushin-receipt-operation:${ownerUid}:${String(supplyId || '')}`;
 }

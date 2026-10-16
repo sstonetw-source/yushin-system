@@ -1,3 +1,39 @@
+/* =========================================================
+   產生採購單：採購把選好的訂單品項，整理成一張要發給供應商的「採購單」，
+   格式跟估價單相同，但抬頭是供應商、單價預設帶「含稅成本」而不是賣客戶的售價，
+   而且單價在這裡還可以再調整；也可以切換又鑫／辰星／鼎新，套用各公司的抬頭資訊跟單號代碼
+   ========================================================= */
+let poItems = [];
+let poAllItems = [];
+let poCurrentCompany = 'yushin';
+let poEditingId = null;
+let poSaveInProgress = false;
+let poDirectStockMode = false;
+let poIncomingSyncPending = false;
+let poNoGeneration = 0;
+let poDirectStockOpenGeneration = 0;
+let poNoReady = false;
+let poNoLoading = false;
+
+function updatePoSaveStatus(message = '', isError = false) {
+    const status = document.getElementById('poSaveStatus');
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = isError ? '#b42318' : '#12502b';
+}
+
+function updatePoSaveButton() {
+    const button = document.getElementById('printPurchaseOrderBtn');
+    if (!button) return;
+    const waitingForNumber = !poEditingId && !poNoReady;
+    const copyButton = document.getElementById('poCopyAsNewBtn');
+    if (copyButton) copyButton.disabled = poSaveInProgress;
+    button.disabled = poSaveInProgress || waitingForNumber;
+    button.textContent = waitingForNumber
+        ? (poNoLoading ? '產生單號中…' : '單號未就緒')
+        : poEditingId ? '📄 下載 PDF' : '📄 建立採購單並下載 PDF';
+}
+
 function purchaseItemsFromSavedPo(po) {
     const sourceItems = [po?.items, po?.orderItems, po?.purchaseItems, po?.lineItems, po?.products]
         .find(items => Array.isArray(items) && items.length)
@@ -836,7 +872,7 @@ window.printPurchaseOrder = async function() {
         poSaveInProgress = true;
         if (button) { button.disabled = true; button.innerText = '同步雲端後開啟列印…'; }
         try {
-            await registerPurchaseIncoming(savedPo.id, savedPo, {actorUid,actorRole});
+            await registerPurchaseIncoming(savedPo.id, savedPo, {actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache});
             poIncomingSyncPending = false;
             updatePoSaveStatus(`採購單 ${savedPo.poNo} 已同步雲端，正在產生 PDF…`);
             await printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
@@ -1006,7 +1042,7 @@ window.printPurchaseOrder = async function() {
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立採購單。
-        registerPurchaseIncoming(poDocumentId, poRecord, {actorUid,actorRole})
+        registerPurchaseIncoming(poDocumentId, poRecord, {actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache})
             .then(() => {
                 if(poEditingId===poDocumentId)poIncomingSyncPending = false;
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();

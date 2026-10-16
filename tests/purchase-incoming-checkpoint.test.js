@@ -38,8 +38,20 @@ function setup({retry=false,failSecond=false,changeAt='',afterCommit,afterDiscar
                 commits++;afterCommit?.(c,commits,records);
             }
         }
-    });vm.runInContext(source,c);return {c,po,records,movements,invalidated,writes};
+    });vm.runInContext(source,c);
+    const register=c.registerPurchaseIncoming;
+    c.registerPurchaseIncoming=(id,record,options={})=>register(id,record,{onStockCommitted:c.invalidateWarehouseStockCache,...options});
+    return {c,po,records,movements,invalidated,writes};
 }
+test('incoming Service executes without a UI cache collaborator when notification is omitted',async()=>{
+    const x=setup();delete x.c.invalidateWarehouseStockCache;await x.c.registerPurchaseIncoming('PO',x.po,{onStockCommitted:null});
+    assert.equal(x.records.get('inventory/S1').incoming,3);assert.equal(x.records.get('inventory/S2').incoming,3);assert.equal(x.invalidated.length,0);
+});
+test('incoming notification failure retains checkpoint and retry never counts the committed line twice',async()=>{
+    const x=setup();await assert.rejects(x.c.registerPurchaseIncoming('PO',x.po,{onStockCommitted:()=>{throw Error('view cache failed');}}),e=>e.incomingCommitted);
+    assert.equal(x.records.get('supplyOrders/S1').incomingRegisteredQty,3);assert.equal(x.records.get('supplyOrders/S2').incomingRegisteredQty,0);
+    await x.c.registerPurchaseIncoming('PO',x.po);assert.equal(x.movements.length,2);assert.equal(x.records.get('inventory/S1').incoming,3);
+});
 test('incoming checkpoints retry callbacks and use actual committed stock identity',async()=>{
     const x=setup({retry:true});await x.c.registerPurchaseIncoming('PO',x.po);
     assert.equal(x.movements.length,2);assert.equal(x.records.get('inventory/S1').incoming,3);
