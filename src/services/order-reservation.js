@@ -64,8 +64,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
             return {id,ref,snapshot,master:master.exists?{...master.data(),id}:null};
         }));
         if(canChoose){
-          const eligibleLocations=warehouseContexts.filter(row=>row.master&&row.master.active!==false
-              &&!row.master.systemCustody&&row.master.warehouseType!=='CUSTODY'&&!row.id.startsWith('custody-'));
+          const eligibleLocations=warehouseContexts.filter(row=>row.master&&globalThis.YushinReservation.physicalWarehouse(row.master));
           const availableAtEligibleLocations=eligibleLocations
               .reduce((sum,row)=>sum+inventoryNumbers(row.snapshot.exists?row.snapshot.data():{}).available,0);
           if(eligibleLocations.length&&aggregateSnap?.exists&&aggregate.available>availableAtEligibleLocations+1e-8)
@@ -79,7 +78,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
           warehouseId=selection.warehouseId;
         }
         const selected=warehouseContexts.find(row=>row.id===warehouseId);
-        if(!selected?.master||selected.master.active===false)throw new Error('找不到啟用的庫存倉庫，請先確認倉庫主檔後重試。');
+        if(!selected?.master||!globalThis.YushinReservation.physicalWarehouse(selected.master))throw new Error('找不到啟用的庫存倉庫，請先確認倉庫主檔後重試。');
         const warehouseRef=selected.ref,warehouseSnap=selected.snapshot;
         const warehouse=inventoryNumbers(warehouseSnap.exists?warehouseSnap.data():{});
         const existingQty=Math.max(0,Number(existing.quantity||0));

@@ -2489,3 +2489,35 @@ test('cancelled direct redirect requires a live physical warehouse and atomic in
   }
  }
 });
+
+test('actual initialization selects physical remote stock over free transit for authorized writers and safely retries',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{onHand:5,ownerUid:role==='purchaser'?'sales1':uid});
+  await seed('inventory/init-product',{productKey:'init-product',onHand:10,reserved:0,incoming:0,transferFreeInTransit:5});
+  await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:0,incoming:0,transferFreeInTransit:5});
+  await seed('warehouses/W2',{active:true});
+  await seed('warehouseStocks/W2__init-product',{productKey:'init-product',warehouseId:'W2',onHand:5,reserved:0,incoming:0});
+  f.context.warehouseMasterCache.push({id:'W2'});
+  await assertSucceeds(f.run());await assertSucceeds(f.run());
+  const admin=db('admin'),order=(await getDoc(doc(admin,'orders/'+f.id))).data();
+  assert.equal(order.items[0].warehouseId,'W2');assert.equal(order.items[0].reservedQty,5);
+  assert.equal((await getDoc(doc(admin,'warehouseStocks/W1__init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(admin,'warehouseStocks/W2__init-product'))).data().reserved,5);
+  assert.equal((await getDoc(doc(admin,'inventory/init-product'))).data().reserved,5);
+  assert.equal((await getDoc(doc(admin,'inventoryReservations/'+f.id+'__I'))).data().warehouseId,'W2');
+  assert.equal((await getDoc(doc(admin,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+ }
+});
+test('actual initialization refuses a locked custody master before any stock or demand publication',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  await seed('warehouses/W1',{active:true,warehouseType:'CUSTODY'});
+  const admin=db('admin'),orderRef=doc(admin,'orders/'+f.id),before=(await getDoc(orderRef)).data();
+  await seed('orders/'+f.id,{...before,items:[{...before.items[0],supplyOrderedQty:1}]});
+  await assert.rejects(f.run(),/啟用的庫存倉庫/);
+  assert.equal((await getDoc(doc(admin,'inventory/init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(admin,'warehouseStocks/W1__init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(admin,'inventoryReservations/'+f.id+'__I'))).exists(),false);
+  assert.equal((await getDoc(doc(admin,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+ }
+});

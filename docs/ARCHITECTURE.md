@@ -272,3 +272,9 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 - 貨號／品名／廠牌保留原 `inventory.searchTokens` 分頁，後驗證只看商品欄位，排除舊鏡像造成的批號假命中。完整批號以 `inventoryLots.lotNo == rawTrimmedInput` 查詢（區分大小寫），YYYY-MM-DD 另查 expiryDate；每欄每頁 51 讀取（50＋lookahead），用產品 key 批讀對應 inventory，再載入分倉／批次顯示。批號結果未讀完提供分頁，不以部分結果當全庫完成。
 - 新批次／批號查詢皆使用既有單欄索引，無 Rules、composite index、集合或 Listener 變更。原商品 token 搜尋仍可能掃完全部索引候選；本批沒有改寫該既有查詢策略，也未保證批號片段／模糊搜尋。五角色 Rules 及桌機／手機控制另由 CI 驗證。
 - 本節更新前節「庫存列表舊批次讀取」待辦；清單封存／設定交易、持久化鏡像／索引詞清理、超過 200 批的寫入作業、跨重載工作恢復、多倉、完整 SERVICE 與 Preview 全流程驗收仍待處理。
+
+## 2026-10-17 選倉與實際預留的可用量契約
+
+已實作：`selectSingleWarehouse` 沿用 `locationWarehouses` 的啟用實體倉篩選與排序，並使用 `inventory-core.normalizeStock` 計算分倉可用量；不再自行計算 onHand − reserved 而漏扣 transferFreeInTransit。`reserveSingleOrderItem` 的公司／分倉可用量檢查與最後選定倉驗證共用 `reservation-core.physicalWarehouse`，包含 warehouseType:CUSTODY、systemCustody 及 custody- 前綴。已有供應進度而鎖定位置的品項也不能繞過最終實體倉驗證。
+
+無新寫入、查詢、索引、Rules 或資料遷移；本批未開放多倉位置 ledger。實際 Service 模擬交易涵蓋途中量、部分現貨、衝突後重新選倉、保管倉及重試；新增四個授權角色的 Emulator 情境，結果依當批 CI 判定。Preview 多倉拆量、分批出貨與服務型訂單全流程仍未驗收。
