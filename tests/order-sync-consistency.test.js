@@ -49,7 +49,7 @@ function fixture({items=[{itemId:'I',productId:'P',warehouseId:'W',qty:5}],onHan
   warehouseMasterCache:[{id:'W'}],warehouseMasterLoadPromise:Promise.resolve(),loadWarehouseMaster:async()=>{},invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},
   registerInitialSelfOrders:async()=>{controls.selfCalls++;}});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
- vm.runInContext(section('async function reserveSingleOrderItem(', 'function normalizedOrderItems('),c);
+ vm.runInContext(fs.readFileSync('src/services/order-reservation.js','utf8'),c);
  const sync=()=>c.reserveInventoryForNewOrder('O',clone(docs.get('orders/O')));
  return {c,docs,put,controls,sync,order:()=>docs.get('orders/O'),demand:itemId=>docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:'+itemId))};
 }

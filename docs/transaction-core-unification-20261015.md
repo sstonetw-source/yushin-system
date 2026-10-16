@@ -82,3 +82,7 @@ fulfillment-core 新增 deliveryQuantities，normalizeItem 與 dispatchState 共
 ### 2026-10-16 主倉備貨需求
 
 主倉需求建立／取消已移至 main-transfer-request Service；公司與分倉備貨預留由 Reservation.planMainTransferHold 統一規劃後同交易提交。修正主倉備貨可用量未扣自由庫存調撥途中量的缺口；取消保留量不足時整筆拒絕，不縮減釋放量。新增核心邊界、重試、CANCELLED 不重開、SHIPPED 不可取消、交易失敗無部分寫入，以及成功後刷新失敗／終止狀態的 UI 回饋測試。未完成範圍仍包括多倉拆量、SERVICE 商品、其他分散寫入與正式環境驗收。
+
+### 2026-10-16 自行訂貨雙入口合併
+
+建單自動同步與手動自行訂貨共用 commitSelfOrderSupply，移除兩套重複供應／需求／來源訂單寫入。保留初始同步與手動登記的不同權限／同步時機，並固定原 UID／角色跨品項接續。手動作業識別碼在 transaction 外建立、同表單失敗重試沿用，回覆遺失不重複登記；相同 ID 不同內容拒絕。新增供應／需求／訂單整筆失敗、部分訂貨、直送、零成本、角色／帳號切換、核心缺失及 UI 重試測試。此批不涵蓋正式 PO、快速採購、多倉拆量、SERVICE 流程與正式環境驗收。

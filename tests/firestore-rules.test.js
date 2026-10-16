@@ -1236,7 +1236,7 @@ async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,
  const app=fs.readFileSync('app.js','utf8');
  context.window={};
  vm.runInContext(app.slice(app.indexOf('function procurementDemandForOrderItem('),app.indexOf('function purchasingLifecycleSnapshot(')),context);
- vm.runInContext(app.slice(app.indexOf('async function reserveSingleOrderItem('),app.indexOf('function normalizedOrderItems(')),context);
+ vm.runInContext(fs.readFileSync('src/services/order-reservation.js','utf8'),context);
  return {context,id,client,run:()=>context.reserveSingleOrderItem(id,{}, {itemId:'I'},0)};
 }
 test('real order initialization atomically publishes item reservation and demand for authorized roles',async()=>{

@@ -18,6 +18,7 @@ const parts = [
   "src/features/inventory/inventory-workspace.js",
   "src/services/order-reservation.js",
   "src/services/dispatch-preparation.js",
+  "src/services/self-order-supply.js",
   "src/features/orders/order-workspace.js",
   "src/features/purchasing/purchasing-workspace.js",
   "src/services/supply-order.js",

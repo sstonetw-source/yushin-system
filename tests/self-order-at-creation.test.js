@@ -6,7 +6,7 @@ function setup(items){
  let invalidations=0;
  const docs=new Map([['orders/o',{selfOrderAtCreation:true,ownerUid:'u',salesCode:'S',orderDate:'2026-10-08',items}]]);
  const ref=(collection,id)=>({id,key:`${collection}/${id}`});
- const context=vm.createContext({window:{YushinSupply:require('../modules/supply-core')},
+ const context=vm.createContext({window:{YushinSupply:require('../modules/supply-core')},YushinSupply:require('../modules/supply-core'),
   YushinProcurementDemand:require('../modules/procurement-demand-core'),
   db:{collection:c=>({doc:id=>ref(c,id)})},supplyOrdersCollection:()=>({doc:id=>ref('supplyOrders',id)}),
   currentUser:{uid:'u'},currentUserCode:'S',currentUserName:'Sales',currentUserRole:'sales',
@@ -19,7 +19,7 @@ function setup(items){
   invalidateProcurementDemandQueue:()=>{ invalidations++; },
   runRoleTransaction:async fn=>fn({get:async r=>({exists:docs.has(r.key),data:()=>docs.get(r.key)}),set:(r,d)=>docs.set(r.key,d),update:(r,d)=>docs.set(r.key,{...docs.get(r.key),...d})})
  });
- vm.runInContext(source.slice(source.indexOf('async function registerInitialSelfOrderSupply'),source.indexOf('function selfOrderActionHtml')),context);
+ vm.runInContext(fs.readFileSync('src/services/self-order-supply.js','utf8'),context);
  return {docs,context,order:docs.get('orders/o'),invalidations:()=>invalidations};
 }
 test('creation registers only self-order shortages using the entered supplier and zero price',async()=>{
@@ -80,4 +80,12 @@ test('initial self-order preserves the initiating account across supply reads an
  between.context.registerInitialSelfOrderSupply=async(...args)=>{const saved=await supply(...args);between.context.currentUser={uid:'OTHER'};return saved;};
  await assert.rejects(between.context.registerInitialSelfOrders('o',between.order),/登入身份已變更/);
  assert.equal(between.docs.has('supplyOrders/self-o-a'),true);assert.equal(between.docs.has('supplyOrders/self-o-b'),false);assert.equal(between.invalidations(),1);
+});
+test('initial multi-item synchronization keeps the initiating role between committed lines',async()=>{
+ const item=id=>({itemId:id,procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,shortageQty:1,costPrice:0,supplier:'Vendor',productId:'p'});
+ const x=setup([item('a'),item('b')]),register=x.context.registerInitialSelfOrderSupply;
+ x.context.registerInitialSelfOrderSupply=async(...args)=>{const saved=await register(...args);x.context.currentUserRole='admin';return saved;};
+ await assert.rejects(x.context.registerInitialSelfOrders('o',x.order),/登入身份已變更/);
+ assert.equal(x.docs.has('supplyOrders/self-o-a'),true);assert.equal(x.docs.has('supplyOrders/self-o-b'),false);
+ assert.equal(x.invalidations(),1);
 });

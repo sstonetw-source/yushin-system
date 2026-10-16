@@ -130,3 +130,13 @@ test('main transfer request UI delegates writes and both stock hold transitions 
  assert.equal((service.match(/YushinReservation\.planMainTransferHold\(/g)||[]).length,2);
  assert.doesNotMatch(service,/document\.|showActionFeedback|confirm\(/);
 });
+test('automatic and manual self-orders share one supplier commitment transaction, with no UI writes',()=>{
+ const ui=read('src/features/orders/order-workspace.js');
+ const start=ui.indexOf('window.saveSelfOrder ='),end=ui.indexOf('function isDeletableOrderDraft',start);
+ const action=ui.slice(start,end);
+ assert.match(action,/await commitSelfOrderSupply\(/);assert.doesNotMatch(action,/runRoleTransaction|tx\.set\(/);
+ const service=read('src/services/self-order-supply.js');
+ assert.equal((service.match(/runRoleTransaction\(/g)||[]).length,1);
+ assert.match(service,/registerInitialSelfOrderSupply[\s\S]*commitSelfOrderSupply/);
+ assert.doesNotMatch(service,/document\.|ordersCache|alert\(/);
+});
