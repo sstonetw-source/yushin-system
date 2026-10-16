@@ -30,7 +30,7 @@
 ## 流程與寫入最小契約
 
 - **下單／轉單**：來源可來自 UI、估價單、Forecast；重複執行不能產生額外訂單、預留、採購需求。同一品項的預留／需求同一 Firestore transaction；若整筆單有逐項 checkpoint，必須可重試與辨識已完成。
-- **一般採購**：建立 PO 與 supply event，增加在途，不增加庫存；部分採購不能讓實際需求重複下單。
+- **一般採購**：建立 PO 與 supply event，增加在途，不增加庫存；部分採購不能讓實際需求重複下單。安全庫存的「建立採購單」入口只準備表單，不應先更新 `procurementDemands`；使用者確認儲存後，由 `commitFormalPurchaseOrder` 在同一交易寫入 PO、Supply 及需求，避免未採購的幽靈需求。
 - **收貨**：`supplyOrders`、`receipts`、`inventoryLots`、`inventoryMovements`、`inventory/warehouseStocks` 及來源品項的必要資料以受控交易更新；累計不能超過有效已下訂量。部分收貨重試不可重覆加庫存。
 - **打單／出貨／送達**：備貨量、累計送貨與實際扣庫存是不同事件；倉庫交業務保管不代表已送客戶。
 - **取消／恢復**：不得重複釋放／重複預留；非補送退貨不產生新需求。須檢查每個 itemId 唯一性及現有公司／分倉庫存。
