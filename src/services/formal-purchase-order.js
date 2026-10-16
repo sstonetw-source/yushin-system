@@ -50,7 +50,7 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
                     if (!data || data.purchaseDocumentId!==poDocumentId || data.createdByUid!==actorUid || data.type!=='PURCHASING_PO'
                         || Number(data.qty)!==Number(item.qty) || Number(data.unitCost)!==Number(item.unitPrice)
                         || data.productKey!==poIncomingKey(item) || data.supplier!==(poRecord.supplierName||vendorName)
-                        || data.sourceId!==(item.orderId||item.sourceId||'') || data.sourceItemId!==(item.itemId||item.sourceItemId||''))
+                        || data.sourceId!==(item.orderId||item.sourceId||('MANUAL_PO:'+poDocumentId+':'+index)) || data.sourceItemId!==(item.itemId||item.sourceItemId||''))
                         throw new Error('既有採購供應紀錄與本次作業不符，請先核對原單。');
                     committedSupplyOrders.push({id:ids[index],...data});
                 });
