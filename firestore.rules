@@ -2328,7 +2328,7 @@ service cloud.firestore {
         && data.actorUid == request.auth.uid
         && data.actorRole in ['admin','purchaser'] && (admin() || data.actorRole == 'purchaser')
         && data.stockPolicy in ['NO_STOCK','SAFETY_STOCK','ORDER_ONLY']
-        && data.safetyStock is number && data.safetyStock >= 0 && data.safetyStock <= 1.7976931348623157e308
+        && data.safetyStock is number && data.safetyStock >= 0 && data.safetyStock <= 9007199254740991
         && (data.stockPolicy == 'SAFETY_STOCK' ? data.safetyStock > 0 : data.safetyStock == 0)
         && data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 32
         && data.previousStockPolicy == before.get('stockPolicy', null)
