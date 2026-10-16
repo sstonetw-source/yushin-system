@@ -102,3 +102,9 @@ registerPurchaseIncoming 固定建單／重試原 UID／角色跨 PDF 及逐品�
 ### 2026-10-16 採購取消／結清
 
 cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 PO 連結驗證。缺來源文件、承諾量或公司／分倉 incoming 不足，均整筆拒絕，不以 clamp 掩蓋；保留已到貨及直送語意。整單停止移至 stopPurchaseOrderOutstanding，最後重讀原單及所有供應後 transaction 結清，移除 UI 直接 set；分段失敗與最後提交失敗都可接續，不重複扣回。成功後刷新失敗不誤報交易失敗。增加已知文件讀取：正式單列原 PO、整單啟動 PO 與最後 PO／各供應。無新查詢／Listener／Collection／Rules／Index，無部署或資料刪除；整張 PO 仍非單交易，多倉拆量、SERVICE 及正式環境驗收未完成。
+
+### 2026-10-16 收貨重試與跨階段身分
+
+收貨保留原 UID／角色跨背景工作、transaction callback、提交後進度修復及缺貨分配；每次 callback 重置輸出，固定 actor／日期及批次／movement 引用。同 receiptId 核對供應單、數量、批號、效期與新 actor 快照，不同內容拒絕。新增有限數量驗證及已提交後錯誤標記，進度查詢失敗也保留原工作，不誤導重複入庫。共用分配 guard 貫穿候選分頁／交易／提交後；調撥也傳入 guard，保留原 movement 類型。修正業務／工程師自己的直送工作沒有重試入口。舊工作角色僅在原人明確重試時補存，舊 receipt 不遷移。1,264 項本機應用測試通過；CI Chrome／Emulator 另驗證，非正式環境驗收。無新增查詢、Listener、Collection、Rules 或 Index，無 Firebase 部署／資料刪除。
+
+尚待：收貨來源／預留／在途異常的全面一致性檢查、多倉拆量、SERVICE、其餘分散寫入與 Preview 完整流程驗收；本批不宣稱全部交易已統一。

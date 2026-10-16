@@ -116,7 +116,7 @@ async function commitWarehouseTransferReceipt(id){
   if(!saved.orderId&&saved.status==='RECEIVED'&&saved.allocationCompleted===false){
     try{
       assertActor();
-      const result=await allocateFreeReceiptStockToShortages(saved.productKey,saved.toWarehouseId,Math.max(0,Number(saved.autoAllocationQty||0)-Number(saved.autoAllocatedQty||0)),actor,'',id,'stockTransfers');
+      const result=await allocateFreeReceiptStockToShortages(saved.productKey,saved.toWarehouseId,Math.max(0,Number(saved.autoAllocationQty||0)-Number(saved.autoAllocatedQty||0)),actor,'',id,'stockTransfers',assertActor);
       assertActor();
       await runRoleTransaction(async tx=>{assertActor();const ref=db.collection('stockTransfers').doc(id);const snapshot=await tx.get(ref);if(!snapshot.exists||snapshot.data().status!=='RECEIVED')throw Error('調撥分配進度已變更。');tx.update(ref,{allocationCompleted:true,allocationUpdatedAt:new Date().toISOString()});});
       saved.affectedOrderIds=result.affectedOrderIds;

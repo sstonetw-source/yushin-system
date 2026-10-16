@@ -44,7 +44,7 @@ test('a different supply can receive concurrently while duplicate submission sta
 test('opening another receipt never changes the first frozen quantity lot expiry or operation ID',async()=>{
     const {x,calls,select}=setup();const p1=x.window.savePoReceiptBatch();
     select('S2','OP2',3);const p2=x.window.savePoReceiptBatch();
-    const first=calls.find(c=>c.args);assert.deepEqual(first.args,['S1',2,'LOT','2027-01-01','OP1-0']);
+    const first=calls.find(c=>c.args);assert.deepEqual(JSON.parse(JSON.stringify(first.args)),['S1',2,'LOT','2027-01-01','OP1-0',{actorUid:'U1',actorRole:'admin'}]);
     calls.filter(c=>c.args).forEach(c=>c.resolve([]));await Promise.all([p1,p2]);
 });
 test('uncertain failure keeps original details and retries the same receipt ID',async()=>{
@@ -53,20 +53,20 @@ test('uncertain failure keeps original details and retries the same receipt ID',
     assert.match(controls.receiptTaskStatus.innerHTML,/用原資料重試/);
     assert.equal(JSON.parse(storage.get('yushin-receipt-tasks:U1'))[0].entries[0].qty,2);
     const retry=x.window.retryReceiptTask('S1');const transactions=calls.filter(c=>c.args);
-    assert.deepEqual(transactions[1].args,transactions[0].args);transactions[1].resolve([]);await retry;
+    assert.deepEqual(JSON.parse(JSON.stringify(transactions[1].args)),JSON.parse(JSON.stringify(transactions[0].args)));transactions[1].resolve([]);await retry;
     assert.equal(JSON.parse(storage.get('yushin-receipt-tasks:U1')).length,0);
 });
 test('post-commit allocation failure identifies committed stock and reuses operation ID',async()=>{
     const {x,calls,controls}=setup();const pending=x.window.savePoReceiptBatch();
     calls.find(c=>c.args).reject(Object.assign(Error('allocation'),{code:'receipt-allocation-pending',receiptCommitted:true}));await pending;
-    assert.match(controls.receiptTaskStatus.innerHTML,/已入庫，庫存分配尚未完成/);
+    assert.match(controls.receiptTaskStatus.innerHTML,/已確認到貨，後續處理尚未完成/);
     const retry=x.window.retryReceiptTask('S1');const transactions=calls.filter(c=>c.args);
     assert.equal(transactions[1].args[4],'OP1-0');transactions[1].resolve([]);await retry;
 });
 test('reload restores an unresolved job without issuing new writes until explicit retry',async()=>{
     const storage=new Map();const a=setup(storage);const pending=a.x.window.savePoReceiptBatch();
     const b=setup(storage);b.x.restoreReceiptTasks();b.x.renderReceiptTasks();assert.equal(b.calls.length,0);
-    const retry=b.x.window.retryReceiptTask('S1');assert.deepEqual(b.calls[0].args,a.calls[1].args);
+    const retry=b.x.window.retryReceiptTask('S1');assert.deepEqual(JSON.parse(JSON.stringify(b.calls[0].args)),JSON.parse(JSON.stringify(a.calls[1].args)));
     b.calls[0].resolve([]);await retry;a.calls[1].resolve([]);await pending;
 });
 test('receipt jobs belong to the submitting user and cannot be retried after switching accounts',async()=>{
@@ -84,4 +84,30 @@ test('a failed refresh after confirmed receipt is not presented as another recei
     const {x,calls,controls,storage}=setup();vm.runInContext("refreshReceiptTaskViews=async()=>{throw Error('refresh');}",x);
     const pending=x.window.savePoReceiptBatch();calls[1].resolve([]);await pending;
     assert.equal(controls.receiptTaskStatus.hidden,true);assert.equal(JSON.parse(storage.get('yushin-receipt-tasks:U1')).length,0);
+});
+test('role switch after receipt retains original job and retries only with original role',async()=>{
+    const {x,calls,storage}=setup();const pending=x.window.savePoReceiptBatch();
+    x.currentUserRole='warehouse';calls[1].resolve([]);await pending;
+    const job=JSON.parse(storage.get('yushin-receipt-tasks:U1'))[0];
+    assert.equal(job.actorRole,'admin');assert.equal(job.state,'error');
+    await x.window.retryReceiptTask('S1');assert.equal(calls.filter(c=>c.args).length,1);
+    x.currentUserRole='admin';const retry=x.window.retryReceiptTask('S1');
+    const transactions=calls.filter(c=>c.args);assert.equal(transactions[1].args[5].actorRole,'admin');
+    transactions[1].resolve([]);await retry;assert.equal(JSON.parse(storage.get('yushin-receipt-tasks:U1')).length,0);
+});
+test('sales and engineer can retry their direct-receipt task without inventory receiving capability',async()=>{
+    for(const role of ['sales','engineer']){
+        const {x,calls,controls}=setup();x.currentUserRole=role;x.canReceiveInventoryCapability=()=>false;
+        const pending=x.window.savePoReceiptBatch();calls[1].reject(Error('offline'));await pending;
+        assert.match(controls.receiptTaskStatus.innerHTML,/用原資料重試/);
+        const retry=x.window.retryReceiptTask('S1'),transactions=calls.filter(c=>c.args);
+        assert.equal(transactions[1].args[5].actorRole,role);transactions[1].resolve([]);await retry;
+    }
+});
+test('legacy task adopts role only when original user explicitly retries',async()=>{
+    const storage=new Map([['yushin-receipt-tasks:U1',JSON.stringify([{supplyId:'S1',operationBase:'LEGACY',ownerUid:'U1',label:'A',entries:[{itemIndex:0,qty:2,lotNo:'LOT',expiryDate:''}]}])]]);
+    const {x,calls}=setup(storage);x.restoreReceiptTasks();assert.equal(calls.length,0);
+    assert.equal(JSON.parse(storage.get('yushin-receipt-tasks:U1'))[0].actorRole,undefined);
+    const retry=x.window.retryReceiptTask('S1');assert.equal(calls[0].args[4],'LEGACY-0');
+    assert.equal(calls[0].args[5].actorRole,'admin');calls[0].resolve([]);await retry;
 });
