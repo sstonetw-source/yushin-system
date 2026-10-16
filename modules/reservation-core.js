@@ -124,9 +124,7 @@
      throw Error('預留數量不正確，請先核對資料。');
    return Number(value);
  }
- function planReservationLifecycle({nextStatus,existingQty=0,itemReservedQty=existingQty,
-   requestedQty=0,inTransitQty=0,aggregateStock,warehouseStock}={}){
-   if(!['normal','cancelled'].includes(nextStatus))throw Error('不支援的訂單狀態。');
+ function validateReservationBalance({existingQty=0,itemReservedQty=existingQty,aggregateStock,warehouseStock}={}){
    const existing=legacyReservationQty(existingQty),projected=legacyReservationQty(itemReservedQty);
    if(Math.abs(existing-projected)>1e-9)throw Error('訂單與庫存預留數量不一致，請先核對資料。');
    const stock=data=>{
@@ -136,7 +134,12 @@
        throw Error('公司或分倉預留量不足或異常，不可縮減釋放量，請先核對資料。');
      return numbers;
    };
-   const company=stock(aggregateStock),warehouse=stock(warehouseStock);
+   return {existingQty:existing,company:stock(aggregateStock),warehouse:stock(warehouseStock)};
+ }
+ function planReservationLifecycle({nextStatus,existingQty=0,itemReservedQty=existingQty,
+   requestedQty=0,inTransitQty=0,aggregateStock,warehouseStock}={}){
+   if(!['normal','cancelled'].includes(nextStatus))throw Error('不支援的訂單狀態。');
+   const {existingQty:existing,company,warehouse}=validateReservationBalance({existingQty,itemReservedQty,aggregateStock,warehouseStock});
    if(nextStatus==='cancelled')return {reservedQty:0,shortageQty:0,reservedDelta:existing?-existing:0};
    const requested=legacyReservationQty(requestedQty),incoming=legacyReservationQty(inTransitQty);
    const availableQty=Math.min(inventory.normalizeStock(company).available,inventory.normalizeStock(warehouse).available);
@@ -286,5 +289,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });

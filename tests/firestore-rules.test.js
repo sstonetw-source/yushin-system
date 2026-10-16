@@ -2521,3 +2521,23 @@ test('actual initialization refuses a locked custody master before any stock or 
   assert.equal((await getDoc(doc(admin,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
  }
 });
+
+test('actual reservation sync refuses insufficient company and warehouse balances for authorized roles',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  await assertSucceeds(f.run());
+  const orderRef=doc(db('admin'),'orders/'+f.id),saved=(await getDoc(orderRef)).data();
+  await seed('orders/'+f.id,{...saved,items:saved.items.map(item=>({...item,qty:1,orderedQty:1}))});
+  for(const path of ['inventory/init-product','warehouseStocks/W1__init-product']){
+   const original=(await getDoc(doc(db('admin'),path))).data();
+   await seed(path,{...original,reserved:2});
+   const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product',
+    'inventoryReservations/'+f.id+'__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')];
+   const before=await Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));
+   await assert.rejects(f.run(),/不足|核對/);
+   const after=await Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));
+   assert.deepEqual(after,before,uid+' must not erase the ledger discrepancy');
+   await seed(path,original);
+  }
+ }
+});
