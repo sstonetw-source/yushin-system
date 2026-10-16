@@ -62,6 +62,32 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
                 if (!snapshot.exists) throw new Error('來源訂單已不存在。');
                 assertPurchaseLinesAvailable(snapshot.data(), poRecord.items.filter(item => item.orderId === orderIds[index]));
             });
+            // Stock POs do not necessarily update a source sales order. Lock each
+            // deterministic demand document inside this transaction before writing
+            // any supply or PO records; competing POs will then conflict/retry.
+            // Independent direct-stock purchases get their own per-PO demand ID.
+            const stockDemands=new Map();
+            const stockDemandInputs=new Map();
+            poRecord.items.forEach((item,index)=>{
+                const sourceType=item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT');
+                if(!['SALES_ORDER','STOCK_REPLENISHMENT'].includes(sourceType))
+                    throw new Error('採購需求來源類型不正確。');
+                if(sourceType!=='STOCK_REPLENISHMENT')return;
+                const sourceId=String(item.sourceId||'').trim()||('MANUAL_PO:'+poDocumentId+':'+index);
+                const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType,sourceId});
+                if(item.demandId&&item.demandId!==demandId)throw new Error('採購需求識別與品項來源不符，請重新開啟採購單。');
+                if(!poIncomingKey(item))throw new Error('庫存採購缺少有效產品識別。');
+                if([...stockDemandInputs.values()].some(row=>row.demandId===demandId))
+                    throw new Error('同一補貨需求請合併為單一採購列，避免重複承諾。');
+                stockDemandInputs.set(index,{sourceId,demandId});
+            });
+            await Promise.all([...stockDemandInputs.values()].map(async ({demandId})=>{
+                const ref=procurementDemandRef(demandId);
+                if(!ref)throw new Error('採購需求文件識別不正確。');
+                const snap=await transaction.get(ref);
+                stockDemands.set(demandId,{ref,data:snap.exists?snap.data():null});
+            }));
+            assertActor();
             const supplyOrderIds = [];
             poRecord.items.forEach((item,itemIndex)=>{
                 const sourceType=item.sourceType||(item.orderId?'SALES_ORDER':'STOCK_REPLENISHMENT');
@@ -78,19 +104,32 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
                     if(!sourceItemForDemand)throw new Error('採購需求找不到來源訂單品項。');
                     demandProjection=procurementDemandForOrderItem(sourceOrderForDemand,sourceItemForDemand);
                 }else{
+                    const input=stockDemandInputs.get(itemIndex);
+                    const snapshot=stockDemands.get(input.demandId)?.data;
+                    const requestedQty=Number(item.demandRequestedQty??item.qty??0);
+                    const orderedQty=Number(item.demandOrderedQty||0);
+                    const receivedQty=Number(item.demandReceivedQty||0);
+                    if(![requestedQty,orderedQty,receivedQty].every(value=>Number.isFinite(value)&&value>=0))
+                        throw new Error('庫存補貨需求數量不正確。');
+                    if(snapshot){
+                        if(snapshot.demandId!==input.demandId||snapshot.sourceType!==sourceType
+                            ||snapshot.sourceId!==input.sourceId||snapshot.sourceItemId!==''
+                            ||snapshot.productKey!==poIncomingKey(item))
+                            throw new Error('既有庫存補貨需求識別與品項不一致，請先核對紀錄。');
+                        if(snapshot.status==='CANCELLED')throw new Error('此補貨需求已取消，請先恢復後再建立採購單。');
+                        if(![snapshot.requestedQty,snapshot.orderedQty,snapshot.receivedQty].every(value=>typeof value==='number'&&Number.isFinite(value)&&value>=0)
+                            ||snapshot.orderedQty>snapshot.requestedQty||snapshot.receivedQty>snapshot.orderedQty)
+                            throw new Error('既有補貨需求數量不一致，請先核對供應紀錄。');
+                    }
+                    // Persisted commitments win over stale modal values. A previously
+                    // stored demand cannot silently grow from an old browser snapshot.
+                    // Independent/manual POs use unique IDs and start from zero.
                     demandProjection=globalThis.YushinProcurementDemand.normalizeDemand({
-                        demandId:item.demandId||globalThis.YushinProcurementDemand.demandIdForSource({
-                            sourceType,sourceId:item.sourceId||item.productId||item.itemCode||''
-                        }),
-                        sourceType,
-                        sourceId:item.sourceId||item.productId||item.itemCode||'',
-                        sourceItemId:'',
-                        requestedQty:Number(item.demandRequestedQty??item.qty??0),
-                        orderedQty:Number(item.demandOrderedQty||0),
-                        receivedQty:Number(item.demandReceivedQty||0),
-                        // Stock replenishment has no customer required-by date by default.
-                        // item.scheduleDate here is supplier ETA and must not become demand timing.
-                        scheduleDate:String(item.demandScheduleDate||item.requiredByDate||'').trim()
+                        demandId:input.demandId,sourceType,sourceId:input.sourceId,sourceItemId:'',
+                        requestedQty:snapshot?Math.max(snapshot.orderedQty,Math.min(snapshot.requestedQty,requestedQty)):requestedQty,
+                        orderedQty:snapshot?snapshot.orderedQty:orderedQty,
+                        receivedQty:snapshot?snapshot.receivedQty:receivedQty,
+                        scheduleDate:snapshot?.scheduleDate||String(item.demandScheduleDate||item.requiredByDate||'').trim()
                     });
                 }
                 if (plannedDemands.has(demandProjection.demandId)) {
@@ -102,7 +141,9 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
                     throw new Error('採購需求數量已變更，請重新整理後再建立採購單。');
                 }
                 plannedDemands.set(demandProjection.demandId,demandOrderPlan.demand);
-                const demandRef=procurementDemandRef(demandProjection.demandId);
+                const demandRef=sourceType==='STOCK_REPLENISHMENT'
+                    ?stockDemands.get(demandProjection.demandId)?.ref
+                    :procurementDemandRef(demandProjection.demandId);
                 const demandDoc=procurementDemandDocument(demandOrderPlan.demand,{
                     productId:item.productId||sourceItemForDemand?.productId||'',
                     productKey:poIncomingKey(item)||inventoryProductKey(sourceItemForDemand||{}),
@@ -137,7 +178,7 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
                     type:'PURCHASING_PO',
                     method:'PURCHASING_PO',
                     sourceType,
-                    sourceId:item.orderId||item.sourceId||'',
+                    sourceId:sourceType==='STOCK_REPLENISHMENT'?demandProjection.sourceId:(item.orderId||item.sourceId||''),
                     sourceItemId:item.itemId||item.sourceItemId||'',
                     demandId:demandProjection.demandId||'',
                     internalNo:poNo,
