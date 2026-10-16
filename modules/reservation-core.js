@@ -164,6 +164,25 @@
    };
    return {aggregate:project(aggregateStock),warehouse:project(warehouseStock)};
  }
+ // A legacy single-warehouse writer MUST reject a future v2 locations ledger.
+ // Firestore Rules do not yet permit v2; this explicit boundary also prevents
+ // admin/emulator paths from silently replacing per-location reserved balances.
+ function assertLegacyReservationLocation(record={}, {warehouseId='',productKey=''}={}){
+   if(!record||typeof record!=='object'||Array.isArray(record))
+     throw new Error('預留紀錄格式不正確，請先核對資料。');
+   if(['locationSchemaVersion','locations','allocations','warehouseAllocations']
+     .some(key=>Object.hasOwn(record,key)))
+     throw new Error('此訂單預留使用多倉位置資料；目前單倉交易不可直接修改，請先完成多倉交易驗收。');
+   const quantity=legacyReservationQty(record.quantity);
+   if(quantity>0){
+     const savedWarehouseId=locationId(record.warehouseId);
+     if(warehouseId&&savedWarehouseId!==warehouseId)
+       throw new Error('既有預留倉庫與操作倉庫不同，請先核對分倉。');
+     if(productKey&&record.productKey!==undefined&&record.productKey!==productKey)
+       throw new Error('既有預留產品與操作商品不同，請先核對庫存。');
+   }
+   return quantity;
+ }
  // Compare two complete snapshots, never partial update payloads. This is a
  // stock projection, not permission to move stock or complete a transfer.
  function reservationStockDeltas(before={},after={}){
@@ -286,5 +305,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,assertLegacyReservationLocation,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
