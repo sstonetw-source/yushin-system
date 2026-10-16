@@ -54,6 +54,17 @@ function fixture({items=[{itemId:'I',productId:'P',warehouseId:'W',qty:5}],onHan
  return {c,docs,put,controls,sync,order:()=>docs.get('orders/O'),demand:itemId=>docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:'+itemId))};
 }
 
+test('single-warehouse synchronization rejects a future multi-location hold without modifying stock or demand',async()=>{
+ const f=fixture();
+ f.put('inventoryReservations/O__I',{
+  orderId:'O',itemId:'I',productKey:'P',warehouseId:'W',quantity:2,
+  locationSchemaVersion:2,locations:[{warehouseId:'W',reservedQty:2}]
+ });
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/多倉位置資料/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
 test('stock, item and demand publish atomically; retry never repeats reserved quantity',async()=>{
  const f=fixture({onHand:3});await f.sync();assert.equal(f.order().items[0].reservedQty,3);assert.equal(f.demand('I').remainingToOrderQty,2);
  await f.sync();assert.equal(f.docs.get('inventory/P').reserved,3);assert.equal(f.order().items[0].shortageQty,2);
