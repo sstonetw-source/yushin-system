@@ -53,6 +53,8 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
         const reservationSnap=await tx.get(reservationRef);
         const aggregate=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{});
         const existing=reservationSnap.exists?reservationSnap.data():{};
+        // Legacy one-location reservations must not overwrite a v2 multi-location ledger.
+        globalThis.YushinReservation.assertLegacyReservationLocation(existing);
         const canChoose=globalThis.YushinReservation.reservationLocationCanChange({...item,
             deliveredQty:Math.max(Number(item.deliveredQty||0),Number(normalized.deliveredQty||0)),
             returnedQty:Math.max(Number(item.returnedQty||0),Number(normalized.returnedQty||0))},existing,currentDemand||{});
