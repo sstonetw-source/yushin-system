@@ -661,23 +661,8 @@ window.openInventoryReplenishment = async function(inventoryId) {
         }
         const suggestedQty = demand.remainingToOrderQty;
 
-        // 先保存補貨需求，再開採購單；等待期間按鈕會立即顯示「準備採購單…」。
-        const demandRef = procurementDemandRef(demand.demandId);
-        if (demandRef) {
-            const now = new Date().toISOString();
-            const demandDoc = procurementDemandDocument(demand, {
-                productId:item.productId || item.productKey || '',
-                productKey:item.productKey || item.productId || '',
-                itemCode:item.itemCode || '',
-                itemName:item.itemName || '',
-                brand:item.brand || '',
-                fulfillmentType:'WAREHOUSE',
-                warehouseId:defaultWarehouse()?.id || ''
-            }, { createdAt:item.createdAt || now, updatedAt:now });
-            await demandRef.set(demandDoc, { merge:true });
-            invalidateProcurementDemandQueue();
-        }
-
+        // 此處僅準備採購表單，不能先持久化需求；關閉表單不代表已有採購承諾。
+        // commitFormalPurchaseOrder 會在同一交易建立採購單、供應紀錄與採購需求。
         const match = await findProductByCode(item.itemCode || '',item.brand || '');
         let unitPrice = 0;
         if (match) {
