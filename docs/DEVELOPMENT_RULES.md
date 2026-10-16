@@ -4,6 +4,9 @@
 
 ## 實作規範
 
+- 多倉交易尚未啟用前，現有單倉 Service 在讀取權威 inventoryReservations 後必須呼叫 Reservation Core assertLegacyReservationLocation；不得直接取 reservation.quantity 後以單倉位置寫回，也不得只新增 locations 欄位而不處理履約、退貨、調撥與 Rules。
+
+
 - 庫存策略／安全庫存與清單封存必須經 inventory-planning Service，不得在 Feature 直接 update／另開交易。固定 pending 操作 ID 到回覆及 UI 同步確認；已提交後刷新失敗與未提交須區分，原身分／視窗 generation 不符不得更新新畫面。新策略 audit 必須與 inventory 同交易且通過精確 schema／前後值 Rules。此次需同步審查及部署 Rules，GitHub 合併不代表 Firebase 已部署。
 
 1. 先定位權威核心與既有 service；不要在頁面另寫交付、預留、在途、退貨、有效交付的第二套計算。
