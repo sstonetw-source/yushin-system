@@ -2549,6 +2549,8 @@ async function actualShipmentFixture(uid,role){
  await seed('orders/'+f.id,{...saved,inventoryReservationStatus:'completed',items:saved.items.map(i=>({...i,dispatchPreparedQty:5})),deliveryRecords:[]});
  await seed('inventoryLots/issue-'+uid,{productKey:'init-product',productId:'init-product',warehouseId:'W1',remainingQty:5,qty:5,sourceType:'INITIAL_STOCK',sourceId:'issue-'+uid});
  const rawClient=compatDb(uid),plain=x=>JSON.parse(JSON.stringify(x));
+ // Keep document references and transactions on one SDK instance.
+ f.client.collection=rawClient.collection;
  const clean=data=>{const result=plain(data);if(result.deliveryHistory?.__arrayUnion)result.deliveryHistory=arrayUnion(...result.deliveryHistory.__arrayUnion);return result;};
  f.client.runTransaction=callback=>rawClient.runTransaction(tx=>callback({...tx,
   set:(r,data,o)=>o?tx.set(r,clean(data),o):tx.set(r,clean(data)),update:(r,data)=>tx.update(r,clean(data))}));
