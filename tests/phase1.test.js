@@ -4389,8 +4389,8 @@ test('supply order rules preserve identity and valid operational quantities', ()
 });
 
 test('supply rule tightening still covers current quick-order receipt and cancellation writes', () => {
-    const quickStart=appSource.indexOf('window.markPurchaseItemOrdered = async function');
-    const quickEnd=appSource.indexOf('\nwindow.',quickStart+30);
+    const quickStart=appSource.indexOf('async function commitQuickPurchase(');
+    const quickEnd=appSource.indexOf('// Atomic quick-purchase service end.',quickStart);
     const quickSource=appSource.slice(quickStart,quickEnd);
     assert.match(quickSource,/qty:nextSupplyQty/);
     assert.match(quickSource,/receivedQty/);
@@ -4511,8 +4511,8 @@ test('cancelled or closed supply is terminal and cannot be received again', () =
 
 
 test('quick purchase keeps immutable supply snapshot and rules restrict mutable fields', () => {
-    const quickStart=appSource.indexOf('window.markPurchaseItemOrdered = async function');
-    const quickEnd=appSource.indexOf('\nwindow.openOrderPurchaseDraft',quickStart);
+    const quickStart=appSource.indexOf('async function commitQuickPurchase(');
+    const quickEnd=appSource.indexOf('// Atomic quick-purchase service end.',quickStart);
     const quickSource=appSource.slice(quickStart,quickEnd);
     assert.ok(quickStart>=0&&quickEnd>quickStart);
     assert.match(quickSource,/existingSupply\?\.productKey \|\| currentProductKey/);
@@ -4528,7 +4528,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     assert.match(quickSource,/sourceItemId:itemId/);
     assert.match(quickSource,/ownerUid:existingSupply\?\.ownerUid\|\|order\.ownerUid/);
     assert.match(quickSource,/itemCode:existingSupply\?\.itemCode\|\|item\.itemCode/);
-    assert.match(quickSource,/createdByUid:existingSupply\?\.createdByUid\|\|currentUser\?\.uid/);
+    assert.match(quickSource,/createdByUid:existingSupply\?\.createdByUid\|\|actorUid/);
     assert.match(quickSource,/incomingRegisteredQty:targetIncomingQty/);
     assert.match(quickSource,/inv\.incoming\+incomingDelta/);
 
@@ -5156,7 +5156,7 @@ test('Product 360 displays the same projected stock formula as inventory', () =>
 
 
 test('quick purchase incoming keeps canonical product and brand identity across procurement and inventory', () => {
-    const start = appSource.indexOf('window.markPurchaseItemOrdered = async function');
+    const start = appSource.indexOf('async function commitQuickPurchase(');
     const end = appSource.indexOf('window.openPurchaseOrderModal', start);
     const source = appSource.slice(start, end > start ? end : start + 22000);
     assert.match(source, /const identity = brandIdentityForRecord\(existingSupply \|\| item\)/);

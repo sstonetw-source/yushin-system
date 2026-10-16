@@ -711,7 +711,7 @@ test('manual ordered action records supply and source item only once after an un
         renderPurchasingView:()=>switched.push(['render']),showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
-vm.runInContext(source,context);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8') + source,context);
     context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(updates,1);
@@ -778,7 +778,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
         switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
-vm.runInContext(source,context);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8') + source,context);
     context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
     assert.equal(supply.qty,2);
@@ -810,8 +810,10 @@ test('ordered action is a direct snapshot-based state change without a data-entr
     assert.doesNotMatch(saveSource, /switchPurchasingView\(/);
     assert.doesNotMatch(saveSource, /loadPendingPurchaseOrders\(true\)/);
     assert.match(saveSource, /syncCommittedQuickPurchaseDemand\(savedDemand, savedOrder\)/);
-    assert.match(saveSource, /const demand = procurementDemandForOrderItem\(order, item\)/);
-    assert.match(saveSource, /const qty = demand\.remainingToOrderQty/);
+    assert.match(saveSource, /commitQuickPurchase\(orderId, itemId, purchaseDetails, actorUid, actorRole\)/);
+    const serviceSource=fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8');
+    assert.match(serviceSource, /const demand = procurementDemandForOrderItem\(order, item\)/);
+    assert.match(serviceSource, /const qty = demand\.remainingToOrderQty/);
     assert.doesNotMatch(saveSource, /findProduct|preloadPurchaseCosts|loadSupplierWarehouseMasters|supplierForProduct/);
     assert.doesNotMatch(html, /id="manualPurchaseOverlay"/);
     assert.doesNotMatch(app, /printSupplyOrderDocument/);
@@ -1849,7 +1851,7 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
-vm.runInContext(source,context);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8') + source,context);
 
     const button={disabled:false,textContent:'已採購',isConnected:false};
     context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
@@ -1883,7 +1885,7 @@ vm.runInContext(source,context);
 test('quick ordered action writes incoming inside the same transaction', () => {
     const start=app.indexOf('window.markPurchaseItemOrdered = async function');
     const end=app.indexOf('\nwindow.openOrderPurchaseDraft',start);
-    const source=app.slice(start,end);
+    const source=fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8');
     assert.match(source,/globalThis\.YushinReceiving\.normalizeSupply/);
     assert.match(source,/const targetIncomingQty = directShip \? 0 : supplyProjection\.remainingQty/);
     assert.match(source,/const incomingDelta = targetIncomingQty - registeredIncomingQty/);
