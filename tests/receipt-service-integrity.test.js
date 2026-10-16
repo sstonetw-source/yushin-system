@@ -104,7 +104,7 @@ test('identity change after physical commit preserves receipt and prevents cache
     f.c.currentUser={uid:'U'};await f.receive();assert.equal(f.records.get('inventory/P').onHand,2);
 });
 test('discarded warehouse attempt cannot leak cache or allocation output into direct-ship retry',async()=>{
-    const f=setup({replay:true,afterDiscard(c,records,n){if(n!==1)return;const s=records.get('supplyOrders/S');s.fulfillmentType='DIRECT_SHIP';s.warehouseId='';s.incomingRegisteredQty=0;}});
+    const f=setup({replay:true,afterDiscard(c,records,n){if(n!==1)return;const s=records.get('supplyOrders/S');s.fulfillmentType='DIRECT_SHIP';s.warehouseId='';s.incomingRegisteredQty=0;records.get('orders/O').items[0].fulfillmentType='DIRECT_SHIP';}});
     f.c.currentUserRole='admin';await f.receive(2,'','');assert.equal(f.records.get('inventory/P').onHand,0);
     assert.equal(f.records.get('orders/O').deliveryRecords.length,1);assert.equal(f.invalidated.length,0);
 });
@@ -139,4 +139,118 @@ test('postcommit reconciliation failure is reported as committed receipt pending
     await assert.rejects(f.receive(),e=>e.receiptCommitted);
     f.c.readQueryInBatches=async()=>{throw Error('movement query failed');};
     await assert.rejects(f.receive(),e=>e.receiptCommitted&&/movement query/.test(e.message));assert.equal(f.records.get('inventory/P').onHand,2);
+});
+async function refusesWithoutWrites(f,pattern){
+    const before=JSON.stringify([...f.records]);await assert.rejects(f.receive(),pattern);
+    assert.equal(JSON.stringify([...f.records]),before);assert.equal(f.writes.length,0);assert.equal(f.invalidated.length,0);
+}
+test('missing source order, source item and duplicate item IDs cannot silently receive as free stock',async()=>{
+    for(const kind of ['order','item','duplicate','itemId','orderId','alias']){
+        const f=setup(),s=f.records.get('supplyOrders/S'),o=f.records.get('orders/O');
+        if(kind==='order')f.records.delete('orders/O');
+        if(kind==='item')o.items[0].itemId='OTHER';
+        if(kind==='duplicate')o.items.push({...o.items[0]});
+        if(kind==='itemId')delete s.itemId;
+        if(kind==='orderId')delete s.orderId;
+        if(kind==='alias')s.sourceId='OTHER';
+        await refusesWithoutWrites(f,/來源|識別碼/);
+    }
+});
+test('wrong source product, fulfillment mode or incoming warehouse refuses all receipt writes',async()=>{
+    for(const kind of ['product','mode','warehouse','transfer']){
+        const f=setup(),i=f.records.get('orders/O').items[0];
+        if(kind==='product')i.productId='OTHER';
+        if(kind==='mode')i.fulfillmentType='DIRECT_SHIP';
+        if(kind==='warehouse')i.warehouseId='OTHER';
+        if(kind==='transfer')i.transferPendingId='TRANSFER';
+        await refusesWithoutWrites(f,/產品|供貨|倉庫/);
+    }
+});
+test('saved supply warehouse is required and never guessed from the default',async()=>{
+    const f=setup();delete f.records.get('supplyOrders/S').warehouseId;f.c.defaultWarehouse=()=>({id:'W'});
+    await refusesWithoutWrites(f,/尚未指定入庫倉庫/);
+});
+test('source inventory synchronization must finish before receiving',async()=>{
+    const f=setup();f.c.orderInventorySyncIncomplete=()=>true;await refusesWithoutWrites(f,/庫存同步尚未完成/);
+});
+test('company and warehouse incoming must each cover the exact core receipt release',async()=>{
+    for(const path of ['inventory/P','warehouseStocks/W__P']){
+        const f=setup();f.records.get(path).incoming=1;await refusesWithoutWrites(f,/在途保留量不足/);
+        const g=setup();g.records.delete(path);await refusesWithoutWrites(g,/在途保留量不足/);
+    }
+});
+test('receipt rejects mismatched company and warehouse product or warehouse identity',async()=>{
+    for(const [path,field] of [['inventory/P','productKey'],['inventory/P','productId'],['warehouseStocks/W__P','productKey'],['warehouseStocks/W__P','productId'],['warehouseStocks/W__P','warehouseId']]){
+        const f=setup();f.records.get(path)[field]='OTHER';await refusesWithoutWrites(f,/庫存識別不符/);
+    }
+});
+test('receipt cannot normalize malformed or negative aggregate stock silently',async()=>{
+    for(const path of ['inventory/P','warehouseStocks/W__P'])for(const field of ['onHand','reserved','incoming'])for(const value of [-1,NaN,Infinity,'',null,false]){
+        const f=setup();f.records.get(path)[field]=value;await refusesWithoutWrites(f,/數量異常/);
+    }
+    const f=setup();f.records.get('inventory/P').reserved=1;await refusesWithoutWrites(f,/預留超過實貨/);
+});
+test('reservation identity and quantities must match the live source item',async()=>{
+    for(const [field,value] of [['orderId','OTHER'],['itemId','OTHER'],['productKey','OTHER'],['warehouseId','OTHER'],['quantity',1],['shortageQty',4],['quantity',-1],['quantity',NaN]]){
+        const f=setup();f.records.get('inventoryReservations/O__I')[field]=value;await refusesWithoutWrites(f,/來源|數量異常/);
+    }
+    const f=setup();f.records.delete('inventoryReservations/O__I');await refusesWithoutWrites(f,/缺少庫存預留/);
+});
+test('aggregate reserved must cover the existing source reservation before adding a receipt',async()=>{
+    for(const path of ['inventory/P','warehouseStocks/W__P']){
+        const f=setup();f.records.get('orders/O').items[0].reservedQty=1;
+        Object.assign(f.records.get('inventoryReservations/O__I'),{quantity:1,shortageQty:4});
+        for(const p of ['inventory/P','warehouseStocks/W__P'])Object.assign(f.records.get(p),{onHand:1,reserved:1});
+        f.records.get(path).reserved=0;await refusesWithoutWrites(f,/預留數量不一致/);
+    }
+});
+test('source commitment and malformed supply incoming cannot be hidden by normalization',async()=>{
+    for(const kind of ['sourceQty','sourceReceived','sourceNegative','registeredNegative','registeredExcess','registeredNull']){
+        const f=setup(),s=f.records.get('supplyOrders/S'),i=f.records.get('orders/O').items[0];
+        if(kind==='sourceQty')i.supplyOrderedQty=1;
+        if(kind==='sourceReceived')i.receivedQty=4;
+        if(kind==='sourceNegative')i.receivedQty=-1;
+        if(kind==='registeredNegative')s.incomingRegisteredQty=-1;
+        if(kind==='registeredExcess')s.incomingRegisteredQty=6;
+        if(kind==='registeredNull')s.incomingRegisteredQty=null;
+        await refusesWithoutWrites(f,/數量|承諾量不足/);
+    }
+});
+test('existing procurement demand must match source and have enough valid outstanding commitment',async()=>{
+    for(const [field,value] of [['sourceId','OTHER'],['sourceItemId','OTHER'],['productKey','OTHER'],['fulfillmentType','DIRECT_SHIP'],['orderedQty',1],['receivedQty',4],['receivedQty',-1],['orderedQty',null]]){
+        const f=setup();f.records.get('procurementDemands/D')[field]=value;await refusesWithoutWrites(f,/需求.*不符|承諾量不足|數量異常/);
+    }
+});
+test('separate partial receipts consume incoming exactly and retries never repeat release',async()=>{
+    const f=setup();await f.receive();await f.receive(2,'LOT','2027-01-01','OP2');await f.receive(2,'LOT','2027-01-01','OP2');
+    for(const path of ['inventory/P','warehouseStocks/W__P']){
+        const s=f.records.get(path);assert.deepEqual([s.onHand,s.reserved,s.incoming],[4,4,1]);
+    }
+    assert.equal(f.records.get('supplyOrders/S').receivedQty,4);assert.equal(f.records.get('supplyOrders/S').incomingRegisteredQty,1);
+    assert.equal(f.records.get('procurementDemands/D').receivedQty,4);
+});
+test('unregistered legacy incoming may receive with zero release but never fabricates incoming',async()=>{
+    const f=setup();f.records.get('supplyOrders/S').incomingRegisteredQty=0;
+    f.records.delete('inventory/P');f.records.delete('warehouseStocks/W__P');await f.receive();
+    assert.equal(f.records.get('inventory/P').onHand,2);assert.equal(f.records.get('inventory/P').incoming,0);
+});
+test('standalone replenishment still receives without a fabricated customer source',async()=>{
+    const f=setup(),s=f.records.get('supplyOrders/S');delete s.orderId;delete s.itemId;s.sourceType='STOCK_REPLENISHMENT';
+    f.records.get('procurementDemands/D').sourceId='P';
+    await f.receive();assert.equal(f.records.get('orders/O').items[0].receivedQty,0);
+    assert.equal(f.records.get('inventory/P').onHand,2);assert.equal(f.records.get('receipts/OP').autoAllocationQty,2);
+});
+test('committed receipt retry does not revalidate later cancelled source or changed incoming as a new receipt',async()=>{
+    const f=setup();await f.receive();f.records.delete('orders/O');f.records.get('inventory/P').incoming=0;
+    const before=f.writes.length;await f.receive();assert.equal(f.writes.length,before);assert.equal(f.records.get('inventory/P').onHand,2);
+});
+test('direct shipment enforces source identity and never releases phantom company incoming',async()=>{
+    for(const kind of ['product','mode','incoming','commitment']){
+        const f=setup({direct:true});
+        if(kind==='product')f.records.get('orders/O').items[0].productId='OTHER';
+        if(kind==='mode')f.records.get('orders/O').items[0].fulfillmentType='WAREHOUSE';
+        if(kind==='incoming')f.records.get('supplyOrders/S').incomingRegisteredQty=1;
+        if(kind==='commitment')f.records.get('orders/O').items[0].supplyOrderedQty=1;
+        await refusesWithoutWrites(f,/產品|供貨|在途|承諾/);
+    }
 });

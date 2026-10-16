@@ -1142,9 +1142,10 @@ test('phase 6 supply receipt decreases incoming and increases warehouse stock wi
     assert.match(source,/YushinSupply\.applyReceipt\(procurement,qty\)/);
     assert.match(source,/const incomingRelease=receiptPlan\.incomingReleaseQty/);
     assert.match(source,/onHand:inv\.onHand\+qty/);
-    assert.match(source,/incoming:Math\.max\(0,inv\.incoming-incomingRelease\)/);
+    assert.match(source,/if\(inv\.incoming<incomingRelease\|\|wh\.incoming<incomingRelease\)throw/);
+    assert.match(source,/incoming:inv\.incoming-incomingRelease/);
     assert.match(source,/onHand:wh\.onHand\+qty/);
-    assert.match(source,/incoming:Math\.max\(0,wh\.incoming-incomingRelease\)/);
+    assert.match(source,/incoming:wh\.incoming-incomingRelease/);
     assert.match(source,/incomingRegisteredQty:receiptPlan\.record\.incomingRegisteredQty/);
     assert.match(source,/collection\('receipts'\)/);
     assert.doesNotMatch(source,/pendingInventoryItems/);
