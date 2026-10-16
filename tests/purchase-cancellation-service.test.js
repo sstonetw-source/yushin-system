@@ -1,6 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const all=fs.readFileSync(path.join(__dirname,'../src/services/supply-order.js'),'utf8');
-const source=all.slice(all.indexOf('async function cancelOutstandingSupplyRecord('),all.indexOf('window.cancelSupplyOutstanding ='));
+const source=all;
+const ui=fs.readFileSync(path.join(__dirname,'../src/features/purchasing/purchase-cancellation-workspace.js'),'utf8');
 const demand=require('../modules/procurement-demand-core.js');
 function setup({retry=false,failSupply='',changeAt='',manual=false,direct=false,failFinalize=false,changeLinks=false}={}){
     const records=new Map(),movements=[],invalidated=[],writes=[];let seq=0,failed=false;
@@ -130,14 +131,40 @@ test('successful cancellation followed by UI failure is not reported as an uncom
             db:{collection:()=>({doc:()=>({get:async()=>({id:'PO',exists:true,data:()=>({supplyOrderIds:['S1']})})})})},
             supplyOrdersCollection:()=>({doc:()=>({get:async()=>({id:'S1',exists:true,data:()=>supply})})}),firestoreReadWithTimeout:p=>p,
             isPurchaseTerminalStatus:()=>false,prompt:()=> 'Stopped',alert:x=>alerts.push(x),document:{getElementById:()=>null},console,
+            invalidateWarehouseStockCache:()=>{},invalidateProcurementDemandQueue:()=>{},
             purchaseHistorySupplyCache:{set:()=>{throw new Error('cache failed');}},writeAppDataCache:()=>{throw new Error('cache failed');},
             cancelOutstandingSupplyRecord:async()=>({terminalStatus:'CLOSED',cancelledQty:3}),
             stopPurchaseOrderOutstanding:async()=>({patch:{status:'CLOSED'},cancelledQty:3,supplyIds:['S1'],affectedOrderIds:[]})});
-        const start=all.indexOf(wholePo?'window.cancelPurchaseOrderOutstanding =':'window.cancelSupplyOutstanding =');
-        const end=all.indexOf(wholePo?'\nlet poReceiptTargetId':'\nwindow.cancelPurchaseOrderOutstanding',start);
-        vm.runInContext(all.slice(start,end),c);
+        const start=ui.indexOf(wholePo?'window.cancelPurchaseOrderOutstanding =':'window.cancelSupplyOutstanding =');
+        const end=wholePo?ui.length:ui.indexOf('\nwindow.cancelPurchaseOrderOutstanding',start);
+        vm.runInContext(ui.slice(start,end),c);
         await (wholePo?c.window.cancelPurchaseOrderOutstanding('PO'):c.window.cancelSupplyOutstanding('S1'));
         assert.equal(alerts.length,1);assert.match(alerts[0],/已完成，但畫面更新失敗/);
         assert.equal(c.purchaseCancellationInProgress.size,0);
     }
+});
+test('supply transactions execute without browser or cache collaborators',async()=>{
+    const x=setup();delete x.c.invalidateWarehouseStockCache;delete x.c.invalidateProcurementDemandQueue;
+    const result=await x.c.stopPurchaseOrderOutstanding('PO','Stopped');
+    assert.equal(result.patch.status,'CLOSED');assert.equal(x.movements.length,2);assert.equal(x.invalidated.length,0);
+});
+test('whole PO forwards notifications only after committed supply checkpoints, not discarded callbacks',async()=>{
+    const x=setup({retry:true}),notifications=[],demands=[];
+    await x.c.stopPurchaseOrderOutstanding('PO','Stopped',{
+        onStockCommitted:(key,warehouse)=>{assert.equal(x.records.get('supplyOrders/'+key).status,'CLOSED');notifications.push([key,warehouse]);},
+        onDemandChanged:id=>{assert.equal(x.records.get('procurementDemands/'+id).orderedQty,2);demands.push(id);}
+    });
+    assert.deepEqual(notifications,[['S1','W'],['S2','W']]);assert.deepEqual(demands,['S1','S2']);
+});
+test('notification failure after single cancellation reports committed supply and retry never double releases',async()=>{
+    for(const hook of ['onStockCommitted','onDemandChanged']){
+        const x=setup();await assert.rejects(x.c.cancelOutstandingSupplyRecord('PO','S1','Stopped',{[hook]:()=>{throw Error('view cache failed');}}),e=>e.supplyCommitted&&e.supplyResult.cancelledQty===3);
+        assert.equal(x.records.get('inventory/S1').incoming,0);await x.c.cancelOutstandingSupplyRecord('PO','S1','Retry');
+        assert.equal(x.movements.length,1);assert.equal(x.records.get('orders/S1').items[0].supplyOrderedQty,2);
+    }
+});
+test('notification interruption during whole PO stop preserves completed line and leaves finalization pending',async()=>{
+    const x=setup();await assert.rejects(x.c.stopPurchaseOrderOutstanding('PO','Stopped',{onDemandChanged:()=>{throw Error('view cache failed');}}),e=>e.supplyCommitted);
+    assert.equal(x.records.get('supplyOrders/S1').status,'CLOSED');assert.equal(x.records.get('supplyOrders/S2').status,'PARTIAL_RECEIPT');
+    assert.equal(x.records.get('purchaseOrders/PO').status,undefined);await x.c.stopPurchaseOrderOutstanding('PO','Retry');assert.equal(x.movements.length,2);
 });

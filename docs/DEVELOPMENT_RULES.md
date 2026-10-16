@@ -28,3 +28,4 @@
 
 - 核銷／核銷日期不能在畫面另開直接 update：必須呼叫 `setOrderBillingStatus` 或 `changeOrderBillingDate`，並保持修改歷史和角色保護。
 - 收貨 Service 不得使用 window、document、Storage、UI 快取或呈現函式；Feature 不得自行重開收貨 transaction。提交後快取通知由呼叫端傳入同步 `onStockCommitted`，只在成功提交及身分檢查後執行，不得放在 transaction callback；通知失敗不能當成資料未提交。
+- supply-order Service 同樣不擁有採購編輯狀態、取消確認、清單或快取；Feature 用 `onStockCommitted`／`onDemandChanged` 接收同步提交後通知。整張停止中途通知失敗不得將前面已完成的供應視為回滾，也不得提前標示整張完成；必須保留原 checkpoint 續跑。

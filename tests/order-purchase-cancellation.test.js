@@ -45,7 +45,7 @@ test('formal receiving line cancellation targets just its supply, retaining anot
  const c=vm.createContext({window:{},currentUser:{uid:'buyer'},currentUserRole:'purchaser',canCreatePurchaseOrderCapability:()=>true,purchaseCancellationInProgress:new Set(),purchaseHistorySupplyCache:new Map(),supplyReceivingCache:[supply,{id:'S2',purchaseDocumentId:'PO1'}],
   supplyOrdersCollection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>supply})})}),firestoreReadWithTimeout:p=>p,
   isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),prompt:message=>{prompts.push(message);return 'Supplier stopped shipment';},alert:message=>alerts.push(message),document:{getElementById:()=>null},
-  cancelOutstandingSupplyRecord:async(...args)=>{calls.push(args);return {terminalStatus:'CLOSED',cancelledQty:2,receivedQty:1,orderId:''};},loadActiveReceivingSupplyCache:async()=>{},refreshAffectedOrderCaches:async()=>{},showActionFeedback:()=>{},console});
+  cancelOutstandingSupplyRecord:async(...args)=>{calls.push(args);return {terminalStatus:'CLOSED',cancelledQty:2,receivedQty:1,orderId:''};},loadActiveReceivingSupplyCache:async()=>{},refreshAffectedOrderCaches:async()=>{},showActionFeedback:()=>{},invalidateWarehouseStockCache:()=>{},invalidateProcurementDemandQueue:()=>{},console});
  const start=app.indexOf('window.cancelSupplyOutstanding = async function');
  vm.runInContext(app.slice(start,app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',start)),c);
  await c.window.cancelSupplyOutstanding('S1');

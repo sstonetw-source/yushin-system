@@ -119,7 +119,7 @@ const validate = vm.runInNewContext(`${syncGuard}\n${validation}\nassertPurchase
 
 test('purchase order action distinguishes creation from downloading an existing document', () => {
     const start = app.indexOf('function updatePoSaveButton()');
-    const end = app.indexOf('function poIncomingKey', start);
+    const end = app.indexOf('function purchaseItemsFromSavedPo', start);
     const source = app.slice(start, end);
     assert.match(source, /poEditingId \? '📄 下載 PDF' : '📄 建立採購單並下載 PDF'/);
     assert.doesNotMatch(source, /重試同步在途庫存/);
@@ -270,7 +270,7 @@ test('saved PO keeps one-click print behavior while repairing pending incoming s
         canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
         document:{getElementById:()=>button},
         registerPurchaseIncoming:async () => { registrationCalls++; await new Promise(resolve => { releaseRegistration=resolve; }); },
-        printSavedPoDocument:()=>{printCalls++;}, updatePoSaveStatus:message=>messages.push(message),
+        printSavedPoDocument:()=>{printCalls++;}, updatePoSaveStatus:message=>messages.push(message),invalidateWarehouseStockCache:()=>{},
         updatePoSaveButton:()=>{button.innerText='🖨️ 列印 / 存為 PDF（自動同步雲端）';}, alert:message=>messages.push(message)
     });
     vm.runInContext(`let poSaveInProgress=false; let poIncomingSyncPending=false;\n${app.slice(start,end)}\n}`, context);
@@ -1373,7 +1373,7 @@ test('PO core transaction commits before the print dialog opens', () => {
     const awaitIndex=source.indexOf('await commitPromise;');
     const printIndex=source.indexOf('printSavedPoDocument(poNo, vendorName);');
     assert.ok(awaitIndex>=0&&printIndex>awaitIndex,'core PO transaction must finish before print');
-    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord, \{actorUid,actorRole\}\)\s*\.then/);
+    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord, \{actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache\}\)\s*\.then/);
 });
 
 test('committed PO refreshes item quantities in order and purchasing views', () => {
@@ -1946,7 +1946,7 @@ test('quick manual cancellation reuses the same audited cancellation transaction
     const formalStart=app.indexOf('window.cancelPurchaseOrderOutstanding = async function');
     const formalEnd=app.indexOf('\nlet poReceiptTargetId',formalStart);
     const formalSource=app.slice(formalStart,formalEnd);
-    assert.match(formalSource,/stopPurchaseOrderOutstanding\(poId,reason,\{actorUid,actorRole\}\)/);
+    assert.match(formalSource,/stopPurchaseOrderOutstanding\(poId,reason,\{actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache,onDemandChanged:invalidateProcurementDemandQueue\}\)/);
     assert.match(app,/cancelOutstandingSupplyRecord\(poId,supplyId,reason,actor\)/);
 });
 

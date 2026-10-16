@@ -41,6 +41,27 @@ test('free-stock and transfer Features explicitly wire postcommit cache notifica
   assert.match(read('modules/warehouse-logistics.js'),/commitWarehouseTransferReceipt\(id,\{onStockCommitted:invalidateWarehouseStockCache\}\)/);
   assert.match(read('src/services/warehouse-transfer.js'),/assertActor,onStockCommitted\)/);
 });
+test('supply Service owns incoming, cancellation and finalization without editor or UI state',()=>{
+  const service=read('src/services/supply-order.js');
+  assert.doesNotMatch(service,/\b(?:window|document)\s*(?:\.|\[)|\b(?:sessionStorage|localStorage)\b|\b(?:alert|prompt)\s*\(/);
+  assert.doesNotMatch(service,/\b\w*Cache\b|invalidateWarehouseStockCache|invalidateProcurementDemandQueue|purchaseCancellationInProgress|updatePoSaveButton|\blet poItems\b/);
+  for(const name of ['registerPurchaseIncoming','cancelOutstandingSupplyRecord','stopPurchaseOrderOutstanding']){
+    assert.match(service,new RegExp('async function '+name+'\\('));
+    assert.deepEqual(walk('src').filter(file=>new RegExp('async function '+name+'\\(').test(read(file))),['src/services/supply-order.js']);
+  }
+  assert.match(service,/const actor=\{actorUid,actorRole,onStockCommitted,onDemandChanged\}/);
+});
+test('purchase cancellation Feature delegates both write paths and editor owns its presentation state',()=>{
+  const feature=read('src/features/purchasing/purchase-cancellation-workspace.js');
+  assert.match(feature,/await cancelOutstandingSupplyRecord\(/);
+  assert.match(feature,/await stopPurchaseOrderOutstanding\(/);
+  assert.match(feature,/onStockCommitted:invalidateWarehouseStockCache,onDemandChanged:invalidateProcurementDemandQueue/);
+  assert.doesNotMatch(feature,/runRoleTransaction|db\.runTransaction|db\.batch|tx\.(?:set|update|delete)\(/);
+  assert.doesNotMatch(feature,/db\.collection\([^\n]*\)\.(?:set|update|add|delete)\(/);
+  const editor=read('src/features/purchasing/purchase-order-editor.js');
+  assert.match(editor,/let poItems = \[\]/);assert.match(editor,/function updatePoSaveButton\(/);
+  assert.equal((editor.match(/registerPurchaseIncoming\([^\n]*onStockCommitted:invalidateWarehouseStockCache/g)||[]).length,2);
+});
 test('one stock transaction wrapper is owned by Infrastructure',()=>{
   const sources=walk('src');
   const declarations=sources.filter(file=>/\basync\s+function\s+runRoleTransaction\s*\(/.test(read(file)));

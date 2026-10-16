@@ -118,3 +118,7 @@ cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 P
 ### 2026-10-16 架構收尾：收貨 Feature／Service 邊界
 
 以 main `dbf261a` 為基準，將收貨視窗、背景工作、sessionStorage 重試移回收貨 Feature，訂單快取刷新回到既有訂單 Feature；收貨 Service 僅保留原收貨及分配交易。用明確的同步提交後通知取代 Service 直接呼叫 UI 快取，接通收貨／調撥／自由庫存分配三入口，保留中途失敗、原身分與冪等契約。新增架構防回流及無 DOM 執行、通知時機與通知失敗續跑測試；1,288 項本機應用測試通過，CI Chrome／Emulator 另驗證。沒有改資料模型、Rules、索引、查詢、讀寫量或正式資料，無 Firebase 部署。尚未完成採購取消 UI 邊界、建單／轉單、盤點交易責任、多倉、SERVICE 及 Preview 完整驗收，不能據此宣稱全系統架構已收尾。
+
+### 2026-10-16 架構收尾：採購取消／在途與畫面分離
+
+以 main `08ab1a4` 為基準，把 Service 中採購編輯狀態／按鈕移回既有 editor，取消雙入口／確認／按鍵鎖移至取消 Feature，收貨視窗狀態移回收貨 Feature。supply-order Service 僅保留原在途、取消及 PO 結清交易與純識別 helper，不直接認識畫面／快取。由 Feature 明確傳入同步提交後通知，整張 PO 逐列轉交；通知失敗保留已提交 checkpoint，單筆 UI 不誤報資料未提交、整張 UI 不誤報全部完成。新增 8 項架構／通知行為測試；1,296 項本機應用測試全過，CI 桌機／手機／Emulator 另驗證。無新的商業核心、資料模型、Rules、索引、讀寫量或正式資料更動；尚待建單／轉單與盤點責任收尾、多倉、SERVICE 及 Preview 完整驗收。

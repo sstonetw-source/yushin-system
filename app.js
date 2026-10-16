@@ -14243,47 +14243,11 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
 }
 // Atomic quick-purchase service end.
 
-/* =========================================================
-   產生採購單：採購把選好的訂單品項，整理成一張要發給供應商的「採購單」，
-   格式跟估價單相同，但抬頭是供應商、單價預設帶「含稅成本」而不是賣客戶的售價，
-   而且單價在這裡還可以再調整；也可以切換又鑫／辰星／鼎新，套用各公司的抬頭資訊跟單號代碼
-   ========================================================= */
-let poItems = [];
-let poAllItems = [];
-let poCurrentCompany = 'yushin';
-let poEditingId = null;
-let poSaveInProgress = false;
-let poDirectStockMode = false;
-let poIncomingSyncPending = false;
-let poNoGeneration = 0;
-let poDirectStockOpenGeneration = 0;
-let poNoReady = false;
-let poNoLoading = false;
-const purchaseCancellationInProgress = new Set();
-
-function updatePoSaveStatus(message = '', isError = false) {
-    const status = document.getElementById('poSaveStatus');
-    if (!status) return;
-    status.textContent = message;
-    status.style.color = isError ? '#b42318' : '#12502b';
-}
-
-function updatePoSaveButton() {
-    const button = document.getElementById('printPurchaseOrderBtn');
-    if (!button) return;
-    const waitingForNumber = !poEditingId && !poNoReady;
-    const copyButton = document.getElementById('poCopyAsNewBtn');
-    if (copyButton) copyButton.disabled = poSaveInProgress;
-    button.disabled = poSaveInProgress || waitingForNumber;
-    button.textContent = waitingForNumber
-        ? (poNoLoading ? '產生單號中…' : '單號未就緒')
-        : poEditingId ? '📄 下載 PDF' : '📄 建立採購單並下載 PDF';
-}
-
+// Purchasing transactions and checkpoints; no editor, DOM or UI-cache ownership.
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
-async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
+async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null}={}) {
     if (isPurchaseTerminalStatus(poRecord?.status)) return;
     const assertActor=()=>{
         if (!actorUid || currentUser?.uid!==actorUid || currentUserRole!==actorRole) throw new Error('登入身份已變更，請以原帳號重試在途同步。');
@@ -14377,12 +14341,17 @@ async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.u
             });
             committedStock={key,warehouseId};
         });
-        assertActor();
-        if (committedStock) invalidateWarehouseStockCache(committedStock.key,committedStock.warehouseId);
+        try{
+            assertActor();
+            if (committedStock) onStockCommitted?.(committedStock.key,committedStock.warehouseId);
+        }catch(err){
+            if(committedStock)err.incomingCommitted=true;
+            throw err;
+        }
     }
 }
 
-async function cancelOutstandingSupplyRecord(poId, supplyId, reason, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
+async function cancelOutstandingSupplyRecord(poId, supplyId, reason, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null,onDemandChanged=null}={}) {
     const assertActor=()=>{
         if (!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole) throw new Error('登入身份已變更，請以原帳號重試取消。');
         if (!canCreatePurchaseOrderCapability()) throw new Error('目前無採購取消權限。');
@@ -14544,20 +14513,26 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason, {actorUid=c
         });
         result={cancelledQty:remaining,receivedQty:received,terminalStatus,orderId:String(supply.orderId||''),productKey,warehouseId,demandId};
     });
-    assertActor();
-    if(result.productKey&&result.warehouseId)invalidateWarehouseStockCache(result.productKey,result.warehouseId);
-    if(result.demandId)invalidateProcurementDemandQueue();
+    try{
+        assertActor();
+        if(result.productKey&&result.warehouseId)onStockCommitted?.(result.productKey,result.warehouseId);
+        if(result.demandId)onDemandChanged?.(result.demandId);
+    }catch(err){
+        err.supplyCommitted=true;
+        err.supplyResult=result;
+        throw err;
+    }
     return result;
 }
 
-async function stopPurchaseOrderOutstanding(poId,reason,{actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
+async function stopPurchaseOrderOutstanding(poId,reason,{actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null,onDemandChanged=null}={}) {
     const assertActor=()=>{
         if(!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole)throw new Error('登入身份已變更，請以原帳號重試取消。');
         if(!canCreatePurchaseOrderCapability())throw new Error('目前無採購取消權限。');
     };
     if(typeof reason!=='string'||!reason.trim())throw new Error('請填寫取消原因。');
     reason=reason.trim();assertActor();
-    const actor={actorUid,actorRole},actorName=currentUserName||currentUser?.email||'',now=new Date().toISOString();
+    const actor={actorUid,actorRole,onStockCommitted,onDemandChanged},actorName=currentUserName||currentUser?.email||'',now=new Date().toISOString();
     const ref=db.collection('purchaseOrders').doc(poId);
     const supplyIds=await runRoleTransaction(async tx=>{
         const snapshot=await tx.get(ref);assertActor();
@@ -14614,6 +14589,9 @@ async function stopPurchaseOrderOutstanding(poId,reason,{actorUid=currentUser?.u
     return {patch,cancelledQty,receivedQty,supplyIds,affectedOrderIds:[...affectedOrderIds]};
 }
 
+// Purchase cancellation UI and cache refresh; authoritative writes stay in supply-order Service.
+const purchaseCancellationInProgress = new Set();
+
 window.cancelSupplyOutstanding = async function(supplyId) {
     if (!canCreatePurchaseOrderCapability()) {
         alert('只有管理員或採購可以取消採購的未到貨數量。');
@@ -14668,7 +14646,7 @@ window.cancelSupplyOutstanding = async function(supplyId) {
         const result = await cancelOutstandingSupplyRecord(
             supply.purchaseDocumentId || supply.internalNo || supply.id,
             supply.id,
-            reason,{actorUid,actorRole}
+            reason,{actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache,onDemandChanged:invalidateProcurementDemandQueue}
         );
         supplyStopped=true;
         purchaseHistorySupplyCache.set(supply.id, {...supply, status:result.terminalStatus,
@@ -14689,7 +14667,7 @@ window.cancelSupplyOutstanding = async function(supplyId) {
         );
     } catch (err) {
         console.error('取消採購品項未到貨失敗：', err);
-        alert(supplyStopped?'取消已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
+        alert(supplyStopped||err?.supplyCommitted?'取消已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
             :'取消採購品項失敗：' + (err?.message || err) + '。可以重新執行；已成功的異動不會重複扣除。');
     } finally {
         purchaseCancellationInProgress.delete(actionKey);
@@ -14727,7 +14705,7 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
     purchaseCancellationInProgress.add(poId);
     let stopCommitted=false;
     try{
-        const {patch,cancelledQty,supplyIds:committedSupplyIds,affectedOrderIds}=await stopPurchaseOrderOutstanding(poId,reason,{actorUid,actorRole});
+        const {patch,cancelledQty,supplyIds:committedSupplyIds,affectedOrderIds}=await stopPurchaseOrderOutstanding(poId,reason,{actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache,onDemandChanged:invalidateProcurementDemandQueue});
         if(!patch){alert('這張採購單目前沒有尚未到貨的數量可取消。');return;}
         stopCommitted=true;
         const documentStatus=patch.status;
@@ -14754,9 +14732,6 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
         purchaseCancellationInProgress.delete(poId);
     }
 };
-
-let poReceiptTargetId = '';
-let poReceiptOperationId = '';
 
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
 async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
@@ -15518,6 +15493,9 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
 }
 
 // Receipt dialogs, frozen retry jobs and view refresh. Authoritative writes stay in Services.
+let poReceiptTargetId = '';
+let poReceiptOperationId = '';
+
 function receiptOperationStorageKey(supplyId, ownerUid = currentUser?.uid || '') {
     return `yushin-receipt-operation:${ownerUid}:${String(supplyId || '')}`;
 }
@@ -15754,6 +15732,42 @@ window.savePoReceiptBatch = async function() {
     showActionFeedback('已開始背景確認到貨，可繼續其他操作；請保持頁面開啟。');
     return runReceiptTask(job);
 };
+/* =========================================================
+   產生採購單：採購把選好的訂單品項，整理成一張要發給供應商的「採購單」，
+   格式跟估價單相同，但抬頭是供應商、單價預設帶「含稅成本」而不是賣客戶的售價，
+   而且單價在這裡還可以再調整；也可以切換又鑫／辰星／鼎新，套用各公司的抬頭資訊跟單號代碼
+   ========================================================= */
+let poItems = [];
+let poAllItems = [];
+let poCurrentCompany = 'yushin';
+let poEditingId = null;
+let poSaveInProgress = false;
+let poDirectStockMode = false;
+let poIncomingSyncPending = false;
+let poNoGeneration = 0;
+let poDirectStockOpenGeneration = 0;
+let poNoReady = false;
+let poNoLoading = false;
+
+function updatePoSaveStatus(message = '', isError = false) {
+    const status = document.getElementById('poSaveStatus');
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = isError ? '#b42318' : '#12502b';
+}
+
+function updatePoSaveButton() {
+    const button = document.getElementById('printPurchaseOrderBtn');
+    if (!button) return;
+    const waitingForNumber = !poEditingId && !poNoReady;
+    const copyButton = document.getElementById('poCopyAsNewBtn');
+    if (copyButton) copyButton.disabled = poSaveInProgress;
+    button.disabled = poSaveInProgress || waitingForNumber;
+    button.textContent = waitingForNumber
+        ? (poNoLoading ? '產生單號中…' : '單號未就緒')
+        : poEditingId ? '📄 下載 PDF' : '📄 建立採購單並下載 PDF';
+}
+
 function purchaseItemsFromSavedPo(po) {
     const sourceItems = [po?.items, po?.orderItems, po?.purchaseItems, po?.lineItems, po?.products]
         .find(items => Array.isArray(items) && items.length)
@@ -16592,7 +16606,7 @@ window.printPurchaseOrder = async function() {
         poSaveInProgress = true;
         if (button) { button.disabled = true; button.innerText = '同步雲端後開啟列印…'; }
         try {
-            await registerPurchaseIncoming(savedPo.id, savedPo, {actorUid,actorRole});
+            await registerPurchaseIncoming(savedPo.id, savedPo, {actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache});
             poIncomingSyncPending = false;
             updatePoSaveStatus(`採購單 ${savedPo.poNo} 已同步雲端，正在產生 PDF…`);
             await printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
@@ -16762,7 +16776,7 @@ window.printPurchaseOrder = async function() {
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立採購單。
-        registerPurchaseIncoming(poDocumentId, poRecord, {actorUid,actorRole})
+        registerPurchaseIncoming(poDocumentId, poRecord, {actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache})
             .then(() => {
                 if(poEditingId===poDocumentId)poIncomingSyncPending = false;
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();

@@ -53,7 +53,9 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 ## Source responsibilities（2026-10-15 第二批精分）
 
 - `src/services/order-reservation.js`：建單逐品項預留及採購需求同步。
-- `src/services/supply-order.js`：採購／供應單登記與取消供應流程。
+- `src/services/supply-order.js`：在途同步、單筆供應取消及整張 PO checkpoint／結清交易；不擁有編輯狀態、取消視窗或 UI 快取。
+- `src/features/purchasing/purchase-cancellation-workspace.js`：單筆／整張採購取消的確認、按鍵鎖與清單更新。
+- `src/features/purchasing/purchase-order-editor.js`：採購編輯狀態、儲存按鈕與 PDF；由 Feature 呼叫在途 Service 並明確傳入提交後快取通知。
 - `src/services/receiving.js`：收貨及自由庫存再分配的交易／checkpoint；不含 DOM、瀏覽器工作暫存及快取刷新。
 - `src/features/purchasing/receiving-workspace.js`：收貨視窗、背景工作／sessionStorage 重試與結果呈現。
 - `src/features/orders/order-workspace.js` 的 `refreshAffectedOrderCaches`：跨入口共用訂單快取刷新，仍為畫面責任，不在 Service 中。
@@ -209,4 +211,12 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 
 `tests/domain-ownership.test.js` 防止收貨 Service 再引入 window／DOM／Storage／快取，以及防止收貨 Feature 另開交易。行為測試直接載入整個 Service，驗證無瀏覽器／快取全域仍能收貨，通知不在丟棄的 transaction callback 發出，收貨與分配後通知失敗也不重複扣帳。
 
-這是收貨範圍的責任分離；真實角色、Firestore adapter、部分既有純規則／actor 輔助仍透過 classic script 共用識別碼解析，未宣稱完整依賴注入或全系統解耦。採購取消 UI 仍混在 supply-order Service，建單／轉單及盤點仍有 Feature 交易，為後續架構收尾項目。
+這是收貨範圍的責任分離；真實角色、Firestore adapter、部分既有純規則／actor 輔助仍透過 classic script 共用識別碼解析，未宣稱完整依賴注入或全系統解耦。建單／轉單及盤點仍有 Feature 交易，為後續架構收尾項目；採購取消邊界另見下節。
+
+## 採購在途／取消的 Feature／Service 邊界（2026-10-16）
+
+- supply-order Service 保留原 `poIncomingKey` 純識別 helper、`registerPurchaseIncoming`、`cancelOutstandingSupplyRecord` 與 `stopPurchaseOrderOutstanding`；移除 DOM、window、編輯狀態、取消確認、按鍵鎖、清單與快取函式。採購編輯狀態／按鈕回到既有 editor，取消雙入口由專屬 Feature 擁有；收貨視窗的目標與識別碼變數回到收貨 Feature。
+- 在途 Service 接收同步 `onStockCommitted`；單筆取消及整張 PO 接收並轉交同步 `onStockCommitted`／`onDemandChanged`。通知僅在交易與原身分核對完成後執行，Feature 明確接上既有快取失效，Service 不認識快取實作。
+- 在途通知失敗可帶 `incomingCommitted`，單筆取消通知失敗帶 `supplyCommitted`／`supplyResult`，不表示交易回滾。單筆 UI 區分已提交後更新失敗；整張停止若在某列通知中斷，保留已停止列、尚未處理列與未結清原單，重試沿用原 checkpoint，不誤報整張已完成。
+- 新架構測試檢查唯一交易 owner、Service 無 UI 依賴、取消 Feature 不另開寫入、editor 的兩條在途呼叫皆接通知；行為測試涵蓋無快取 collaborator、callback 重跑不重複通知、單列通知失敗及整張中斷續跑。保留原始角色、數量、取消範圍與讀寫量，無資料模型／Rules／Index 變更。
+- 全域真實角色、Firestore adapter、既有投影 helper 尚未全面改為依賴注入；建單／轉單、盤點交易責任及 Preview 全流程驗收仍未完成。本節不代表整個系統架構已完成。
