@@ -54,7 +54,7 @@ function fixture({retry=false}={}){
    normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',orderInventorySyncIncomplete:()=>false,
    normalizedOrderItems:o=>o.items,inventoryProductKey:i=>i.productId,
    itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderWorkIndexFields:()=>({workCategories:['delivery']}),
-   firestoreReadWithTimeout:async p=>p,YushinInventory:inventory,YushinWarehouseLogistics:core,YushinFulfillment:fulfillment,
+   firestoreReadWithTimeout:async p=>p,YushinInventory:inventory,YushinWarehouseLogistics:core,YushinFulfillment:fulfillment,YushinReservation:require('../modules/reservation-core'),
    firebase:{firestore:{FieldValue:{arrayUnion:v=>({union:v})}}},
    db:{collection:col=>({doc:id=>ref(col,id),where(field,_op,value){const predicates=[[field,value]];const query={where(f,_o,v){predicates.push([f,v]);return query;},limit(){return query;},get:async()=>{const result=[...docs.entries()].filter(([path,data])=>path.startsWith(col+'/')&&predicates.every(([f,v])=>data[f]===v)).map(([path,data])=>({id:path.split('/')[1],ref:ref(col,path.split('/')[1]),exists:true,data:()=>structuredClone(data)}));return {docs:result,size:result.length};}};return query;}})},
    runRoleTransaction:async fn=>{
@@ -65,6 +65,14 @@ function fixture({retry=false}={}){
  });
  vm.runInContext(src+'\n'+fs.readFileSync('src/services/warehouse-transfer.js','utf8'),c);return {c,docs,ref,fail:()=>{failCommit=true;},commits:()=>commits};
 }
+test('order-linked transfer refuses a multi-location reservation before moving lots or stock',async()=>{
+ const f=fixture(),record=f.docs.get('inventoryReservations/O__A');
+ Object.assign(record,{locationSchemaVersion:2,locations:[{warehouseId:'MAIN',reservedQty:4}]});
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'V2-BLOCK',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'}),/多倉位置資料/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.commits(),0);
+});
 test('free transfer receipt persists pending allocation and retries without receiving stock or lots twice',async()=>{
  const f=fixture();const args={id:'FREE-RETRY',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3};
  await f.c.commitWarehouseTransfer(args);
