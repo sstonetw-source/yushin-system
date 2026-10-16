@@ -1135,7 +1135,7 @@ test('phase 6 supply orders register incoming cache without increasing on-hand',
 
 test('phase 6 supply receipt decreases incoming and increases warehouse stock with partial receipts', () => {
     const start=appSource.indexOf('async function receiveSupplyOrderRecord');
-    const end=appSource.indexOf('window.openSupplyReceipt',start);
+    const end=appSource.indexOf('function receiptOperationStorageKey',start);
     const source=appSource.slice(start,end);
     assert.match(source,/YushinSupply\.normalize\(\{\.\.\.supply,id:supplyId\}\)/);
     assert.match(source,/YushinReceiving\.buildReceiptSnapshot\(procurement/);
@@ -2515,12 +2515,12 @@ test('opening linked purchase orders and supply sync checks are bounded', () => 
 
 test('receipt allocation and affected-order refresh use bounded batched reads', () => {
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
-    const allocateEnd=appSource.indexOf('async function refreshAffectedOrderCaches',allocateStart);
+    const allocateEnd=appSource.indexOf('async function receiveSupplyOrderRecord',allocateStart);
     const allocateSource=appSource.slice(allocateStart,allocateEnd);
     assert.match(allocateSource,/firestoreReadWithTimeout\(q\.get\(\),'庫存預留候選'\)/);
 
     const refreshStart=appSource.indexOf('async function refreshAffectedOrderCaches');
-    const refreshEnd=appSource.indexOf('async function receiveSupplyOrderRecord',refreshStart);
+    const refreshEnd=appSource.indexOf('function canBusinessSelfOrder',refreshStart);
     const refreshSource=appSource.slice(refreshStart,refreshEnd);
     assert.match(refreshSource,/readDocumentsByIds\('orders',ids\)/);
     assert.doesNotMatch(refreshSource,/\.doc\(id\)\.get\(\)/);
@@ -3288,13 +3288,13 @@ test('successful history searches avoid duplicate final render', () => {
 
 test('receipt allocation retry resumes after committed receipt without duplicate stock', () => {
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
-    const allocateEnd=appSource.indexOf('\nasync function refreshAffectedOrderCaches',allocateStart);
+    const allocateEnd=appSource.indexOf('\nasync function receiveSupplyOrderRecord',allocateStart);
     const allocateSource=appSource.slice(allocateStart,allocateEnd);
     assert.match(allocateSource,/receiptId=''/);
     assert.match(allocateSource,/receiptId:receiptId\|\|''/);
 
     const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
-    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptEnd=appSource.indexOf('\nfunction receiptOperationStorageKey',receiptStart);
     const receiptSource=appSource.slice(receiptStart,receiptEnd);
     assert.match(receiptSource,/autoAllocationQty/);
     assert.match(receiptSource,/processedReceipt=receipt/);
@@ -3351,7 +3351,7 @@ test('receiving list reuses purchasing normalized item snapshot', () => {
 
 test('receipt allocation counter prevents concurrent retry over-allocation', () => {
     const allocateStart=appSource.indexOf('async function allocateFreeReceiptStockToShortages');
-    const allocateEnd=appSource.indexOf('\nasync function refreshAffectedOrderCaches',allocateStart);
+    const allocateEnd=appSource.indexOf('\nasync function receiveSupplyOrderRecord',allocateStart);
     const source=appSource.slice(allocateStart,allocateEnd);
     assert.match(source,/const receiptRef=receiptId\?db\.collection\(checkpointCollection\)\.doc\(receiptId\):null/);
     assert.match(source,/receiptRemaining=receiptRef\?Math\.max\(0,receiptTarget-receiptAllocated\):remaining/);
@@ -3360,7 +3360,7 @@ test('receipt allocation counter prevents concurrent retry over-allocation', () 
     assert.match(source,/allocationCompleted:nextAllocated>=receiptTarget/);
 
     const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
-    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptEnd=appSource.indexOf('\nfunction receiptOperationStorageKey',receiptStart);
     const receiptSource=appSource.slice(receiptStart,receiptEnd);
     assert.match(receiptSource,/autoAllocatedQty:0/);
     assert.match(receiptSource,/reconciledAllocated=Math\.max\(currentAllocated,alreadyAllocated\)/);
@@ -4415,7 +4415,7 @@ test('supply rule tightening still covers current quick-order receipt and cancel
     assert.match(cancelSource,/incomingRegisteredQty:0/);
 
     const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
-    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptEnd=appSource.indexOf('\nfunction receiptOperationStorageKey',receiptStart);
     const receiptSource=appSource.slice(receiptStart,receiptEnd);
     assert.match(receiptSource,/YushinSupply\.normalize\(\{\.\.\.supply,id:supplyId\}\)/);
     assert.match(receiptSource,/YushinSupply\.applyReceipt\(procurement,qty\)/);
@@ -4472,7 +4472,7 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
 
 test('direct ship receipt transaction writes the supply delta required by security rules', () => {
     const receiptStart=appSource.indexOf('async function receiveSupplyOrderRecord');
-    const receiptEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptEnd=appSource.indexOf('\nfunction receiptOperationStorageKey',receiptStart);
     const receiptSource=appSource.slice(receiptStart,receiptEnd);
     const directStart=receiptSource.indexOf('if(directShip){');
     const warehouseStart=receiptSource.indexOf('const productKey=',directStart);
@@ -4489,7 +4489,7 @@ test('direct ship receipt transaction writes the supply delta required by securi
 
 test('cancelled or closed supply is terminal and cannot be received again', () => {
     const receiveStart=appSource.indexOf('async function receiveSupplyOrderRecord');
-    const receiveEnd=appSource.indexOf('\nwindow.openSupplyReceipt',receiveStart);
+    const receiveEnd=appSource.indexOf('\nfunction receiptOperationStorageKey',receiveStart);
     const receiveSource=appSource.slice(receiveStart,receiveEnd);
     assert.match(receiveSource,/isPurchaseTerminalStatus\(supply\.status\)/);
     assert.match(receiveSource,/已結案，不能再確認到貨/);
@@ -4583,7 +4583,7 @@ test('supply status must match operational quantities', () => {
 
 test('receipt retry stays idempotent after outstanding supply is cancelled or closed', () => {
     const start=appSource.indexOf('async function receiveSupplyOrderRecord');
-    const end=appSource.indexOf('\nwindow.openSupplyReceipt',start);
+    const end=appSource.indexOf('\nfunction receiptOperationStorageKey',start);
     const source=appSource.slice(start,end);
     const receiptGuard=source.indexOf('if(receiptSnap.exists)');
     const terminalGuard=source.indexOf('if (isPurchaseTerminalStatus(supply.status))');

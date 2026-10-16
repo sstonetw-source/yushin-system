@@ -300,6 +300,23 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
 };
 
 
+async function refreshAffectedOrderCaches(orderIds = []) {
+    const ids=[...new Set(orderIds.filter(Boolean))];
+    if(!ids.length)return;
+    const cacheUid=currentUser?.uid||'',cacheRole=currentUserRole;
+    const refreshedOrders=await readDocumentsByIds('orders',ids);
+    if(!cacheUid||currentUser?.uid!==cacheUid||currentUserRole!==cacheRole)throw new Error('登入帳號或角色已變更，請重新載入訂單清單。');
+    refreshedOrders.forEach(order=>{
+        const index=ordersCache.findIndex(row=>row.id===order.id);
+        if(index>=0)ordersCache[index]=order;else ordersCache.unshift(order);
+        syncOrderIntoPurchasingCaches(order, { render:false });
+    });
+    ordersCache.sort((a,b)=>(b.orderDate||'').localeCompare(a.orderDate||''));
+    writeAppDataCache('orders',ordersCache);
+    if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+    if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+}
+
 function canBusinessSelfOrder(order = null) {
     if (currentUserRole === 'admin') return true;
     if (!canSelfOrderCapability(currentUserRole)) return false;

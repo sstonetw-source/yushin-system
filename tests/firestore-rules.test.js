@@ -1032,7 +1032,7 @@ async function directReceiptFixture(uid='sales1',role='sales',ownerUid=uid) {
   savedDeliveryRecords:o=>o.deliveryRecords||[],returnedQuantity:()=>0,orderQuantity:o=>o.items.reduce((s,i)=>s+i.qty,0),orderWorkIndexFields:()=>({workCategories:['billing']})});
  const app=fs.readFileSync('app.js','utf8');
  vm.runInContext(app.slice(app.indexOf('function canConfirmSupplyReceipt('),app.indexOf('function canManageEquipmentCapability(')),context);
- vm.runInContext(app.slice(app.indexOf('async function receiveSupplyOrderRecord('),app.indexOf('\nwindow.openSupplyReceipt')),context);
+ vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),context);
  return {context,client,supply,demand};
 }
 for(const [uid,role] of [['sales1','sales'],['eng1','engineer']])test(`${role} confirms own direct shipment partially and retries without cost access or stock movement`,async()=>{
@@ -1131,7 +1131,7 @@ for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','wa
       orderWorkIndexFields:()=>({workCategories:['dispatch']}),buildInventorySearchTokens:()=>[],
       invalidateWarehouseStockCache:()=>{}});
     const app=fs.readFileSync('app.js','utf8'),start=app.indexOf('async function receiveSupplyOrderRecord(');
-    vm.runInContext(app.slice(start,app.indexOf('\nwindow.openSupplyReceipt',start)),context);
+    vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),context);
     await context.receiveSupplyOrderRecord('receipt-supply',1,'LOT','','receipt-operation');
     await context.receiveSupplyOrderRecord('receipt-supply',1,'LOT','','receipt-operation');
     for(const path of [invPath,stockPath]){
@@ -1427,7 +1427,7 @@ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])test(role+'
  });
  Object.assign(f.context,{firestoreReadWithTimeout:promise=>promise,itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus)});
  const app=fs.readFileSync('app.js','utf8');
- vm.runInContext(app.slice(app.indexOf('async function allocateFreeReceiptStockToShortages('),app.indexOf('async function refreshAffectedOrderCaches(')),f.context);
+ vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),f.context);
  await assertSucceeds(f.context.allocateFreeReceiptStockToShortages('init-product','W1',3,uid,'','PAGED'));
  await assertSucceeds(f.context.allocateFreeReceiptStockToShortages('init-product','W1',3,uid,'','PAGED'));
  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
@@ -2071,7 +2071,7 @@ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])test(role+'
  await assertSucceeds(stockPermissions.run(f.client,async tx=>{const inv=f.client.collection('inventory').doc('init-product'),wh=f.client.collection('warehouseStocks').doc('W1__init-product');await tx.get(inv);await tx.get(wh);tx.update(inv,{onHand:3});tx.update(wh,{onHand:3});},uid,false,role));
  const pending=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();assert.equal(pending.allocationPending,true);assert.equal(pending.allocationRevision,1);
  Object.assign(f.context,{firestoreReadWithTimeout:p=>p,itemDispatchState:(_o,i)=>fulfillment.dispatchState(i),orderInventorySyncIncomplete:o=>['pending','failed'].includes(o.inventoryReservationStatus)});
- const app=fs.readFileSync('app.js','utf8');vm.runInContext(app.slice(app.indexOf('async function allocateFreeReceiptStockToShortages('),app.indexOf('async function refreshAffectedOrderCaches(')),f.context);
+ const app=fs.readFileSync('app.js','utf8');vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),f.context);
  const options={db:f.client,runTransaction:f.context.runRoleTransaction,allocate:f.context.allocateFreeReceiptStockToShortages,normalize:require('../modules/inventory-core').normalizeStock,stockDocId:(w,p)=>w+'__'+p,assertContext(){},stockId:'W1__init-product',actor:uid};
  await assertSucceeds(recovery.recoverLocation(options));await assertSucceeds(recovery.recoverLocation(options));
  const stock=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();assert.equal(stock.reserved,3);assert.equal(stock.onHand,3);assert.equal(stock.allocationPending,false);assert.equal(stock.allocationRevision,1);

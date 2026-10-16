@@ -14,7 +14,7 @@ function setup(storage=new Map()){
         document:{getElementById:id=>controls[id]||null,querySelectorAll:selector=>selector==='#poReceiptBatchBody tr'?selected:[]},
         supplyReceivingCache:[{id:'S1',itemCode:'A'},{id:'S2',itemCode:'B'}],pendingSupplyCache:[],
         inventoryReceivingVisible:false,purchasingReceivingLoadPromise:null,activeReceivingSupplyLoadPromise:null,markMainPageDirty:()=>{},canAccessPage:()=>false,getDataScope:()=> 'none',
-        loadInventory:async()=>{},loadPurchasingReceivingQueue:async()=>{},refreshAffectedOrderCaches:async ids=>refreshes.push(ids),
+        loadInventory:async()=>{},loadPurchasingReceivingQueue:async()=>{},refreshAffectedOrderCaches:async ids=>refreshes.push(ids),invalidateWarehouseStockCache:()=>{},
         escapeHtml:s=>s,escapeAttr:s=>s,inlineJsValue:s=>JSON.stringify(String(s)),showActionFeedback:(...args)=>notices.push(args),alert:s=>notices.push(['alert',s]),
         ensureReceiptOperationId:id=>'OP-'+id,clearReceiptOperationId:(...args)=>calls.push({clear:args}),
         closePoReceiptBatch:()=>{calls.push({closed:true});x.poReceiptTargetId='';selected=[];},
@@ -31,6 +31,7 @@ function row(qty,max,index=0){
 test('confirm closes the modal before the receiving transaction completes',async()=>{
     const {x,calls,controls}=setup();const pending=x.window.savePoReceiptBatch();
     assert.equal(calls[0].closed,true);assert.equal(calls[1].args[0],'S1');
+    assert.equal(calls[1].args[5].onStockCommitted,x.invalidateWarehouseStockCache);
     assert.equal(controls.receiptTaskStatus.hidden,false);assert.match(controls.receiptTaskStatus.innerHTML,/到貨處理中/);
     calls[1].resolve([]);await pending;assert.equal(controls.receiptTaskStatus.hidden,true);
 });
