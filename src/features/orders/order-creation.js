@@ -26,20 +26,7 @@ async function createOrResumeNewOrder(data) {
         // 記下編號後才寫入雲端；斷線後重試仍會指向同一張訂單。
         localStorage.setItem(key,orderId);
     }
-    const ref=db.collection('orders').doc(orderId);
-    let savedData;
-    await runRoleTransaction(async tx=>{
-        const snap=await tx.get(ref);
-        if(snap.exists){
-            savedData=snap.data();
-            if(savedData.createdByUid!==currentUser?.uid || savedData.status!==BUSINESS_STATUS.ACTIVE)
-                throw new Error('待確認的訂單已由其他流程變更，請先檢查訂單清單。');
-        }else{
-            tx.set(ref,data);
-            savedData=data;
-        }
-    });
-    return {id:orderId,data:savedData};
+    return commitOrderCreation(orderId,data,{actorUid:currentUser?.uid,actorRole:currentUserRole});
 }
 
 function orderDraftFieldValue(id) {

@@ -220,3 +220,10 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 - 在途通知失敗可帶 `incomingCommitted`，單筆取消通知失敗帶 `supplyCommitted`／`supplyResult`，不表示交易回滾。單筆 UI 區分已提交後更新失敗；整張停止若在某列通知中斷，保留已停止列、尚未處理列與未結清原單，重試沿用原 checkpoint，不誤報整張已完成。
 - 新架構測試檢查唯一交易 owner、Service 無 UI 依賴、取消 Feature 不另開寫入、editor 的兩條在途呼叫皆接通知；行為測試涵蓋無快取 collaborator、callback 重跑不重複通知、單列通知失敗及整張中斷續跑。保留原始角色、數量、取消範圍與讀寫量，無資料模型／Rules／Index 變更。
 - 全域真實角色、Firestore adapter、既有投影 helper 尚未全面改為依賴注入；建單／轉單、盤點交易責任及 Preview 全流程驗收仍未完成。本節不代表整個系統架構已完成。
+
+## 建單／轉單的共用提交服務（2026-10-16）
+
+- `src/services/order-creation.js` 的 `commitOrderCreation` 擁有訂單文件提交。手動／估價轉單共用原視窗 wrapper；Forecast 多品項不再在 Feature 自行 batch 寫訂單。草稿、pending ID、庫存接續與快取仍由 Feature 協調，Service 無 DOM／Storage／快取依賴。
+- Service 固定原 UID／角色與資料快照，入口、callback 重跑、讀取及提交後核對身分；已有 ID 回傳權威原單，不覆蓋進度。Forecast 同交易讀來源、核對有效狀態／負責人及提供的版本，再寫訂單和來源 backlink。失敗不留下半份連結；已提交後身分變更帶 `orderCommitted/orderId`。
+- 手動建單沿用一筆 order read；Forecast 從無讀取的 batch 改為一筆 order read 加一筆 Forecast read，新單仍兩筆寫入，重試已有 ID 僅讀 order。無新增查詢、Listener、資料模型、Rules 或索引。Forecast Feature 以每帳號／來源的瀏覽器 pending ID 接續不確定回覆及庫存失敗。
+- 此批只統一建單提交，不把庫存初始化與延後來源同步合併為單交易；共用 classic-global actor／Firestore／helper 尚未全面依賴注入。盤點與其他 Feature 寫入、多倉、SERVICE、跨裝置去重及 Preview 完整驗收仍未完成。前節的建單待辦由本節更新，不代表全系統架構完成。

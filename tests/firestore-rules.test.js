@@ -1498,6 +1498,39 @@ test('new order cannot forge completed source checkpoint without the matching so
  const client=db('sales1'),b=writeBatch(client);b.update(doc(client,'forecasts/new-source-checkpoint'),{linkedDocuments:[{type:'order',id:'new-source-checkpoint',relation:'created'}]});
  b.set(doc(client,'orders/new-source-checkpoint'),base);await assertSucceeds(b.commit());
 });
+test('common creation service reads and creates orders under actual commercial role permissions',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const client=compatDb(uid),nativeRun=client.runTransaction;
+  client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(ref,data)=>tx.set(ref,JSON.parse(JSON.stringify(data)))}));
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},
+   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});
+  vm.runInContext(fs.readFileSync('src/services/order-creation.js','utf8'),c);
+  const data={...validOrderProduct,ownerUid:role==='engineer'?uid:'sales1',salesCode:role==='engineer'?'E01':'S01',status:'active',
+   createdByUid:uid,createdByRole:role,createdByName:uid,inventoryReservationStatus:'pending'};
+  const id='common-'+uid;await assertSucceeds(c.commitOrderCreation(id,data));
+  const retry=await assertSucceeds(c.commitOrderCreation(id,{...data,customerName:'stale form'}));
+  assert.equal(retry.data.customerName,undefined);
+ }
+});
+test('common Forecast creation transaction atomically proves source link under sales and admin Rules',async()=>{
+ const {arrayUnion}=require('firebase/firestore');
+ for(const [uid,role] of [['sales1','sales'],['admin','admin']]){
+  const id='common-forecast-'+uid,client=compatDb(uid),nativeRun=client.runTransaction;
+  client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(ref,data)=>tx.set(ref,JSON.parse(JSON.stringify(data))),
+   update:(ref,data)=>tx.update(ref,{updatedAt:data.updatedAt,linkedDocuments:data.linkedDocuments})}));
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},DOCUMENT_TYPES:{FORECAST:'forecast',ORDER:'order'},
+   firebase:{firestore:{FieldValue:{arrayUnion}}},documentLink:(type,id,relation)=>({type,id,relation}),normalizedOrderStatus:()=> 'normal',
+   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,role==='sales',role)});
+  vm.runInContext(fs.readFileSync('src/services/order-creation.js','utf8'),c);
+  await seed('forecasts/'+id,{ownerUid:'sales1',salesCode:'S01',status:'active',updatedAt:'V',linkedDocuments:[]});
+  const data={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',status:'active',createdByUid:uid,createdByRole:role,createdByName:uid,createdAt:'T',
+   inventoryReservationStatus:'pending',sourceType:'forecast',sourceId:id,sourceDocumentSyncStatus:'completed'};
+  await assertSucceeds(c.commitOrderCreation(id,data,{linkForecast:true,expectedForecastUpdatedAt:'V'}));
+  const source=(await getDoc(doc(db('admin'),'forecasts/'+id))).data();assert.equal(source.linkedDocuments[0].id,id);
+  await assertSucceeds(c.commitOrderCreation(id,data,{linkForecast:true,expectedForecastUpdatedAt:'V'}));
+  assert.equal((await getDoc(doc(db('admin'),'forecasts/'+id))).data().linkedDocuments.length,1);
+ }
+});
 test('source sync completion requires the actual source backlink and quote closure in the same transaction',async()=>{
  const base={ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',sourceType:'quote',sourceId:'source-proof',
   sourceDocumentSyncStatus:'pending',items:[{itemId:'I',productId:'p-order',qty:3}]};

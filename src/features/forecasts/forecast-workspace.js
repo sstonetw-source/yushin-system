@@ -1113,6 +1113,9 @@ function forecastItemToOrderSource(forecast, item) {
 
 async function createForecastOrdersDirectly(forecast, items) {
     const synchronizationUid=currentUser?.uid;
+    const synchronizationRole=currentUserRole;
+    const assertCreationActor=()=>{if(!synchronizationUid||currentUser?.uid!==synchronizationUid||currentUserRole!==synchronizationRole)throw new Error('登入帳號或角色已變更，請以原身分確認 Forecast 轉單結果。');};
+    assertCreationActor();
     const now = new Date().toISOString();
     const orderDate = localDateString();
     const normalizedItems = items.map((item, index) => {
@@ -1129,7 +1132,12 @@ async function createForecastOrdersDirectly(forecast, items) {
 
     const firstItem=normalizedItems[0];
     const totalPrice=normalizedItems.reduce((sum,item)=>sum+Number(item.totalPrice||0),0);
-    const orderRef=db.collection('orders').doc();
+    const pendingKey=`${ORDER_DRAFT_STORAGE_PREFIX}:${synchronizationUid}:forecast:${forecast.id}:pending_order_id`;
+    let pendingId=localStorage.getItem(pendingKey);
+    if(!pendingId){
+        pendingId=db.collection('orders').doc().id;
+        localStorage.setItem(pendingKey,pendingId);
+    }
     const orderData={
         orderDate,
         createdAt:now,
@@ -1184,17 +1192,12 @@ async function createForecastOrdersDirectly(forecast, items) {
     };
     orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
 
-    const batch=db.batch();
-    batch.set(orderRef,orderData);
-    batch.set(db.collection('forecasts').doc(forecast.id),{
-        linkedDocuments:firebase.firestore.FieldValue.arrayUnion(
-            documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')
-        ),
-        updatedAt:now
-    },{merge:true});
-    await batch.commit();
-
-    const created=[{id:orderRef.id,data:orderData}];
+    const committed=await commitOrderCreation(pendingId,orderData,{
+        actorUid:synchronizationUid,actorRole:synchronizationRole,linkForecast:true,
+        expectedForecastUpdatedAt:forecast.updatedAt||''
+    });
+    assertCreationActor();
+    const created=[committed];
     const reservationResults = await Promise.all(created.map(async order => {
         try {
             await synchronizeOrderInventory(order.id, order.data, synchronizationUid);
@@ -1204,11 +1207,13 @@ async function createForecastOrdersDirectly(forecast, items) {
         }
     }));
 
+    assertCreationActor();
     ordersCache=[
         ...created.map(order=>({id:order.id,...order.data})),
         ...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))
     ].sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
 
+    if(!reservationResults.some(result=>result.status==='failed')&&localStorage.getItem(pendingKey)===committed.id)localStorage.removeItem(pendingKey);
     return {
         created,
         reservationFailures:reservationResults.filter(result=>result.status==='failed')
@@ -1216,11 +1221,14 @@ async function createForecastOrdersDirectly(forecast, items) {
 }
 
 window.createOrderFromForecast = async function(id) {
+    const requestedUid=currentUser?.uid,requestedRole=currentUserRole;
+    const assertConversionActor=()=>{if(requestedUid!==currentUser?.uid||requestedRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請重新開啟 Forecast。');};
     const forecast = forecastCache.find(item => item.id === id);
     if (!forecast) return;
 
     try {
         const items = await forecastOrderItems(forecast);
+        assertConversionActor();
         if (!items.length) {
             alert('此 Forecast 沒有可帶入訂單的品項。');
             return;
@@ -1234,6 +1242,7 @@ window.createOrderFromForecast = async function(id) {
 
         if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
         const result = await createForecastOrdersDirectly(forecast, items);
+        assertConversionActor();
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
