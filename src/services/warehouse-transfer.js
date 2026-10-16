@@ -94,7 +94,7 @@ function writeTransferLots(tx,transfer,inventory,now){
     tx.set(db.collection('inventoryLotCosts').doc(a.targetLotId),{lotId:a.targetLotId,productKey:transfer.productKey,warehouseId:transfer.toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costSourceLotId:a.costLotId,createdAt:now});
   }
 }
-async function commitWarehouseTransferReceipt(id){
+async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥收貨權限。');let saved;
   const actorUid=currentUser.uid,actorRole=currentUserRole,actor=deliveryActor(),now=new Date().toISOString();
   const assertActor=()=>{if(actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw Error('登入身分已變更，請重新開啟調撥收貨。');};
@@ -116,7 +116,7 @@ async function commitWarehouseTransferReceipt(id){
   if(!saved.orderId&&saved.status==='RECEIVED'&&saved.allocationCompleted===false){
     try{
       assertActor();
-      const result=await allocateFreeReceiptStockToShortages(saved.productKey,saved.toWarehouseId,Math.max(0,Number(saved.autoAllocationQty||0)-Number(saved.autoAllocatedQty||0)),actor,'',id,'stockTransfers',assertActor);
+      const result=await allocateFreeReceiptStockToShortages(saved.productKey,saved.toWarehouseId,Math.max(0,Number(saved.autoAllocationQty||0)-Number(saved.autoAllocatedQty||0)),actor,'',id,'stockTransfers',assertActor,onStockCommitted);
       assertActor();
       await runRoleTransaction(async tx=>{assertActor();const ref=db.collection('stockTransfers').doc(id);const snapshot=await tx.get(ref);if(!snapshot.exists||snapshot.data().status!=='RECEIVED')throw Error('調撥分配進度已變更。');tx.update(ref,{allocationCompleted:true,allocationUpdatedAt:new Date().toISOString()});});
       saved.affectedOrderIds=result.affectedOrderIds;

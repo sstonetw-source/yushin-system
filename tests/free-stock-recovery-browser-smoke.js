@@ -9,7 +9,7 @@ const resetDocs=()=>{docs.clear();docs.set('warehouseStocks/W__P',{productKey:'P
 const canReceiveInventoryCapability=()=>['admin','purchaser','warehouse'].includes(currentUserRole),canAccessPage=()=>true;
 const escapeHtml=x=>String(x||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),inlineJsValue=x=>"'"+String(x)+"'";
 const inventoryNumbers=d=>({available:Math.max(0,Number(d.onHand||0)-Number(d.reserved||0))}),warehouseStockDocId=(w,p)=>w+'__'+p;
-const firestoreReadWithTimeout=p=>p,showActionFeedback=()=>{},deliveryActor=()=> 'Receiver',markMainPageDirty=()=>{},invalidateProcurementDemandQueue=()=>{},refreshAffectedOrderCaches=async()=>{};
+const firestoreReadWithTimeout=p=>p,showActionFeedback=()=>{},deliveryActor=()=> 'Receiver',markMainPageDirty=()=>{},invalidateWarehouseStockCache=()=>{},invalidateProcurementDemandQueue=()=>{},refreshAffectedOrderCaches=async()=>{};
 const beginActionButton=b=>{const state={text:b.textContent};b.disabled=true;return state;},endActionButton=(b,s)=>{b.disabled=false;b.textContent=s.text;};
 const ref=path=>({path,id:path.split('/').at(-1)}),snap=path=>({id:path.split('/').at(-1),exists:docs.has(path),data:()=>structuredClone(docs.get(path))});
 const db={collection:name=>{let max=50,after='';return {doc:id=>ref(name+'/'+id),where(){return this;},limit(n){max=n;return this;},startAfter(s){after=s.id;return this;},get:async()=>{reads++;const rows=[...docs].filter(([path,d])=>path.startsWith(name+'/')&&d.allocationPending===true&&path.split('/').at(-1)>after).slice(0,max);return {docs:rows.map(([path])=>snap(path)),size:rows.length};}}}};

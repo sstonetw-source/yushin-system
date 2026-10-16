@@ -20,7 +20,7 @@ function allocationFixture({qty=5,incoming=0,fail=false,received=0}={}){
   warehouseStockDocId:(w,p)=>w+'__'+p,orderWorkIndexFields:()=>({}),inventoryMovementRecord:(type,qty,sourceId,productKey,actor,extra)=>({type,qty,sourceId,productKey,actorUid:'receiver',...extra}),invalidateWarehouseStockCache(){},
   runRoleTransaction:async fn=>{const writes=[];const result=await fn({get:async r=>{assert.equal(writes.length,0,'all reads precede writes');return snapshot(r.path);},update:(r,data)=>writes.push([r,data]),set:(r,data)=>writes.push([r,data])});if(fail)throw Error('permission-denied');for(const [r,data] of writes)docs.set(r.path,{...docs.get(r.path),...structuredClone(data)});return result;}});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
- vm.runInContext(section('async function allocateFreeReceiptStockToShortages(', 'async function refreshAffectedOrderCaches('),c);
+ vm.runInContext(section('async function allocateFreeReceiptStockToShortages(', 'async function receiveSupplyOrderRecord('),c);
  return {c,docs,demand:()=>docs.get('procurementDemands/SALES_ORDER%3AO%3AI')};
 }
 test('receipt allocation atomically clears stale procurement demand and retry cannot reserve twice',async()=>{
@@ -186,7 +186,7 @@ test('transaction retry that loses its allocation candidate cannot publish the a
 test('affected-order cache refresh rejects account or role change without populating the new session cache',async()=>{
  for(const change of [c=>{c.currentUser={uid:'NEW'};},c=>{c.currentUserRole='sales';}]){
   const c=vm.createContext({currentUser:{uid:'OLD'},currentUserRole:'warehouse',ordersCache:[],readDocumentsByIds:async()=>{change(c);return [{id:'PRIVATE'}];},syncOrderIntoPurchasingCaches(){throw Error('must not update cache');},writeAppDataCache(){throw Error('must not persist cache');}});
-  vm.runInContext(section('async function refreshAffectedOrderCaches(', 'async function receiveSupplyOrderRecord('),c);
+  vm.runInContext(section('async function refreshAffectedOrderCaches(', 'function canBusinessSelfOrder'),c);
   await assert.rejects(c.refreshAffectedOrderCaches(['PRIVATE']),/帳號或角色已變更/);assert.equal(c.ordersCache.length,0);
  }
 });

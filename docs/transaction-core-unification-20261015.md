@@ -114,3 +114,7 @@ cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 P
 以 main `d60da43` 為基準補強同一收貨 Service：缺來源或重複品項、產品／供貨／倉庫／別名不符、來源同步未完成、來源／既有需求未收承諾不足、公司／分倉在途不足、數量異常及 reservation 投影不一致均拒絕整筆，不以預設倉庫或 incoming 歸零掩蓋。沿用 Supply／Receiving 權威扣回量；保留獨立備庫、部分收貨、KEEP_STOCK、歷史未登記 incoming 及已提交 receiptId 的只讀重試。不新增讀取／查詢／Listener／Collection／Rules／Index，不修改正式資料。新增執行測試逐筆核對失敗後訂單、供應、需求、預留、庫存、批次及成本均未改動；正常分次收貨驗證實貨／預留／在途與重試。CI 結果另查，不以本機測試代替 Emulator／Preview，亦不宣稱所有 Rules 直接寫入均已封鎖。
 
 本批實際執行 1,280 項本機應用測試全數通過（含新增 16 項行為測試）；生成來源一致、全部 src／app 語法與空白檢查通過。尚待多倉、SERVICE、直接 Rules 對抗測試及 Preview 全流程驗收，不以本批取代其完成門檻。
+
+### 2026-10-16 架構收尾：收貨 Feature／Service 邊界
+
+以 main `dbf261a` 為基準，將收貨視窗、背景工作、sessionStorage 重試移回收貨 Feature，訂單快取刷新回到既有訂單 Feature；收貨 Service 僅保留原收貨及分配交易。用明確的同步提交後通知取代 Service 直接呼叫 UI 快取，接通收貨／調撥／自由庫存分配三入口，保留中途失敗、原身分與冪等契約。新增架構防回流及無 DOM 執行、通知時機與通知失敗續跑測試；1,288 項本機應用測試通過，CI Chrome／Emulator 另驗證。沒有改資料模型、Rules、索引、查詢、讀寫量或正式資料，無 Firebase 部署。尚未完成採購取消 UI 邊界、建單／轉單、盤點交易責任、多倉、SERVICE 及 Preview 完整驗收，不能據此宣稱全系統架構已收尾。

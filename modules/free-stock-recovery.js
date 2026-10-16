@@ -66,7 +66,7 @@
   const recover=async(stockId,who)=>{
     if(busy.has(stockId))return;busy.add(stockId);render();
     try{
-      const result=await recoverLocation({db,runTransaction:runRoleTransaction,allocate:allocateFreeReceiptStockToShortages,
+      const result=await recoverLocation({db,runTransaction:runRoleTransaction,allocate:(...args)=>allocateFreeReceiptStockToShortages(...args,invalidateWarehouseStockCache),
         normalize:inventoryNumbers,stockDocId:warehouseStockDocId,assertContext:guard(who),stockId,actor:deliveryActor()});
       guard(who)();errors.delete(stockId);
       if(result.completed)rows=rows.filter(s=>s.id!==stockId);

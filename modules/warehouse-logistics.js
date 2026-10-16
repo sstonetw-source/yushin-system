@@ -301,7 +301,7 @@
   root.receiveWarehouseTransfer=async function(id,button){
     if(!allowed()||pending.has(id))return;if(!confirm('已點收這筆調撥貨品，確認全部入庫？'))return;
     pending.add(id);const bs=beginActionButton(button,'入庫中…');
-    try{const result=await root.commitWarehouseTransferReceipt(id);await refreshRows(result.orderId);await refreshAffectedOrderCaches(result.affectedOrderIds||[]);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback(result.orderId?'調撥已入庫，原訂單預留已移到收貨倉庫。':'調撥已入庫，缺貨訂單分配與採購需求已同步。');}
+    try{const result=await root.commitWarehouseTransferReceipt(id,{onStockCommitted:invalidateWarehouseStockCache});await refreshRows(result.orderId);await refreshAffectedOrderCaches(result.affectedOrderIds||[]);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback(result.orderId?'調撥已入庫，原訂單預留已移到收貨倉庫。':'調撥已入庫，缺貨訂單分配與採購需求已同步。');}
     catch(err){showActionFeedback('調撥收貨未完成：'+err.message,'warning');}finally{pending.delete(id);endActionButton(button,bs);}
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

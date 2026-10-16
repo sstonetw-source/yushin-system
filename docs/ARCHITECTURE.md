@@ -54,7 +54,9 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 
 - `src/services/order-reservation.js`：建單逐品項預留及採購需求同步。
 - `src/services/supply-order.js`：採購／供應單登記與取消供應流程。
-- `src/services/receiving.js`：收貨、自由庫存再分配與重試協調。
+- `src/services/receiving.js`：收貨及自由庫存再分配的交易／checkpoint；不含 DOM、瀏覽器工作暫存及快取刷新。
+- `src/features/purchasing/receiving-workspace.js`：收貨視窗、背景工作／sessionStorage 重試與結果呈現。
+- `src/features/orders/order-workspace.js` 的 `refreshAffectedOrderCaches`：跨入口共用訂單快取刷新，仍為畫面責任，不在 Service 中。
 - `src/services/order-lifecycle-reservation.js`：取消／恢復的預留交易變更。
 - `src/services/delivery-stock.js`：送貨、退貨對庫存與批次的交易更新。
 - `src/features/inventory/inventory-workspace.js`：產品庫存顯示、盤點／調整操作 UI。
@@ -198,3 +200,13 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 正常來源的 reservation 必須對應同訂單／品項／產品／倉庫，且與品項預留、缺口及公司／分倉既有保留一致；取消且明確 KEEP_STOCK 仍可入自由庫存，不重新占回來源訂單。
 - 已提交的相同 receiptId 先辨識重試，不把後來的取消／來源刪除／在途變動當新收貨驗證。獨立備庫、未登記 incoming 的歷史供應及缺需求補建仍保留既有邊界；不宣稱所有歷史資料已驗收。
 - 沒有新增讀取、查詢、集合、索引或 Rules，無正式資料修改／部署。Service 防護不等於收緊所有可直接呼叫的 Firestore Rules，完整對抗測試與 Preview 驗收仍待完成。
+
+## 收貨畫面／服務邊界收尾（2026-10-16）
+
+收貨 Service 僅保留 `receiveSupplyOrderRecord` 與 `allocateFreeReceiptStockToShortages`；兩者的原交易、回傳及錯誤契約不變。視窗事件、背景工作、瀏覽器暫存移至收貨 Feature；共用訂單快取刷新回到既有訂單 Feature，沒有建立平行的交易核心。
+
+Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommitted(productKey,warehouseId)` 通知。僅於 transaction 提交且原身分檢查通過後通知；收貨 UI、自由庫存回補 UI 與調撥 UI 明確傳入既有快取失效函式。收貨 Service 將通知傳給共同分配；調撥 Service 僅轉交呼叫端的通知，不依賴 Feature 函式。通知失敗不回滾已提交資料，收貨保留 `receiptCommitted` 與 checkpoint，原識別碼仍可重試。
+
+`tests/domain-ownership.test.js` 防止收貨 Service 再引入 window／DOM／Storage／快取，以及防止收貨 Feature 另開交易。行為測試直接載入整個 Service，驗證無瀏覽器／快取全域仍能收貨，通知不在丟棄的 transaction callback 發出，收貨與分配後通知失敗也不重複扣帳。
+
+這是收貨範圍的責任分離；真實角色、Firestore adapter、部分既有純規則／actor 輔助仍透過 classic script 共用識別碼解析，未宣稱完整依賴注入或全系統解耦。採購取消 UI 仍混在 supply-order Service，建單／轉單及盤點仍有 Feature 交易，為後續架構收尾項目。

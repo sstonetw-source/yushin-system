@@ -57,9 +57,8 @@ function setup({direct=false,replay=false,afterRead,afterCommit,afterDiscard,fai
             }
         }
     });
-    vm.runInContext(source.slice(source.indexOf('async function allocateFreeReceiptStockToShortages('),source.indexOf('async function refreshAffectedOrderCaches(')),c);
-    vm.runInContext(source.slice(source.indexOf('async function receiveSupplyOrderRecord('),source.indexOf('window.openSupplyReceipt')),c);
-    return {c,records,writes,invalidated,attempts,receive:(qty=2,lot=direct?'':'LOT',expiry=direct?'':'2027-01-01',id='OP',options={})=>c.receiveSupplyOrderRecord('S',qty,lot,expiry,id,options)};
+    vm.runInContext(source,c);
+    return {c,records,writes,invalidated,attempts,receive:(qty=2,lot=direct?'':'LOT',expiry=direct?'':'2027-01-01',id='OP',options={})=>c.receiveSupplyOrderRecord('S',qty,lot,expiry,id,{onStockCommitted:c.invalidateWarehouseStockCache,...options})};
 }
 test('receipt callback replay and lost-response retry commit stock, lot, cost and history once',async()=>{
     const f=setup({replay:true});await f.receive();
@@ -253,4 +252,29 @@ test('direct shipment enforces source identity and never releases phantom compan
         if(kind==='commitment')f.records.get('orders/O').items[0].supplyOrderedQty=1;
         await refusesWithoutWrites(f,/產品|供貨|在途|承諾/);
     }
+});
+test('receipt service executes without browser window, document or cache globals',async()=>{
+    const f=setup();delete f.c.window;delete f.c.invalidateWarehouseStockCache;
+    const ids=await f.receive(2,'LOT','2027-01-01','OP',{onStockCommitted:null});
+    assert.deepEqual(Array.from(ids),['O']);assert.equal(f.records.get('inventory/P').onHand,2);assert.equal(f.invalidated.length,0);
+});
+test('postcommit notification runs once per committed stage, never per discarded callback',async()=>{
+    const f=setup({replay:true}),notifications=[];addWaiting(f);
+    await f.receive(2,'LOT','2027-01-01','OP',{onStockCommitted:(key,warehouse)=>{
+        assert.equal(f.records.has('receipts/OP'),true);
+        notifications.push([key,warehouse,f.records.get('inventory/P').reserved]);
+    }});
+    assert.deepEqual(notifications,[['P','W',0],['P','W',2]]);
+    const g=setup({failCommit:1});let called=false;
+    await assert.rejects(g.receive(2,'LOT','2027-01-01','OP',{onStockCommitted:()=>{called=true;}}));assert.equal(called,false);
+});
+test('notification failure after receipt preserves committed result and retries without double stock',async()=>{
+    const f=setup();await assert.rejects(f.receive(2,'LOT','2027-01-01','OP',{onStockCommitted:()=>{throw Error('view notification failed');}}),e=>e.receiptCommitted&&/view notification/.test(e.message));
+    assert.equal(f.records.get('inventory/P').onHand,2);await f.receive();assert.equal(f.records.get('inventory/P').onHand,2);
+});
+test('notification failure after allocation preserves checkpoint and retry cannot allocate twice',async()=>{
+    const f=setup();addWaiting(f);let stage=0;
+    await assert.rejects(f.receive(2,'LOT','2027-01-01','OP',{onStockCommitted:()=>{if(++stage===2)throw Error('view notification failed');}}),e=>e.receiptCommitted);
+    assert.equal(f.records.get('receipts/OP').autoAllocatedQty,2);await f.receive();
+    assert.equal(f.records.get('inventory/P').onHand,2);assert.equal(f.records.get('inventory/P').reserved,2);
 });

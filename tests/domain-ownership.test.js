@@ -9,6 +9,38 @@ const walk=dir=>fs.readdirSync(path.join(root,dir),{withFileTypes:true}).flatMap
   const full=path.posix.join(dir,entry.name);
   return entry.isDirectory()?walk(full):entry.name.endsWith('.js')?[full]:[];
 });
+test('receiving Service owns transactions, not DOM, browser task storage or UI caches',()=>{
+  const service=read('src/services/receiving.js');
+  assert.doesNotMatch(service,/\bwindow\b|\bdocument\b|\bsessionStorage\b|\blocalStorage\b|\balert\s*\(/);
+  assert.doesNotMatch(service,/\b\w*Cache\b|invalidateWarehouseStockCache|refreshAffectedOrderCaches|renderReceiptTasks|showActionFeedback/);
+  assert.match(service,/async function receiveSupplyOrderRecord\(/);
+  assert.match(service,/async function allocateFreeReceiptStockToShortages\(/);
+  assert.match(service,/options\.onStockCommitted\?\.\(/);
+  assert.match(service,/runRoleTransaction/);
+});
+test('receiving Feature owns task snapshots and presentation, without Firestore writes',()=>{
+  const feature=read('src/features/purchasing/receiving-workspace.js');
+  assert.match(feature,/window\.savePoReceiptBatch/);
+  assert.match(feature,/sessionStorage\.setItem/);
+  assert.match(read('src/features/orders/order-workspace.js'),/async function refreshAffectedOrderCaches/);
+  assert.match(feature,/await receiveSupplyOrderRecord\([\s\S]*onStockCommitted:invalidateWarehouseStockCache/);
+  assert.doesNotMatch(feature,/runRoleTransaction|db\.runTransaction|db\.batch|tx\.(?:set|update|delete)\(/);
+  assert.doesNotMatch(feature,/db\.collection\(/);
+});
+test('receipt APIs and task workspace each have one owner in the generated source manifest',()=>{
+  const sources=walk('src');
+  for(const name of ['receiveSupplyOrderRecord','allocateFreeReceiptStockToShortages']){
+    assert.deepEqual(sources.filter(file=>new RegExp('async function '+name+'\\(').test(read(file))),['src/services/receiving.js']);
+  }
+  assert.deepEqual(sources.filter(file=>/async function refreshAffectedOrderCaches\(/.test(read(file))),['src/features/orders/order-workspace.js']);
+  const manifest=JSON.parse(read('tools/build-app.cjs').match(/const parts = (\[[\s\S]*?\]);/)[1]);
+  assert.equal(manifest[manifest.indexOf('src/services/receiving.js')+1],'src/features/purchasing/receiving-workspace.js');
+});
+test('free-stock and transfer Features explicitly wire postcommit cache notifications',()=>{
+  assert.match(read('modules/free-stock-recovery.js'),/allocate:\(\.\.\.args\)=>allocateFreeReceiptStockToShortages\(\.\.\.args,invalidateWarehouseStockCache\)/);
+  assert.match(read('modules/warehouse-logistics.js'),/commitWarehouseTransferReceipt\(id,\{onStockCommitted:invalidateWarehouseStockCache\}\)/);
+  assert.match(read('src/services/warehouse-transfer.js'),/assertActor,onStockCommitted\)/);
+});
 test('one stock transaction wrapper is owned by Infrastructure',()=>{
   const sources=walk('src');
   const declarations=sources.filter(file=>/\basync\s+function\s+runRoleTransaction\s*\(/.test(read(file)));

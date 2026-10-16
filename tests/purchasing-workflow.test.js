@@ -560,9 +560,9 @@ test('purchase receiving queue calculates progress from supply orders only',()=>
 
 test('supply receipt synchronizes received quantity back to the source order item through receiving core',()=>{
     const start=app.indexOf('async function receiveSupplyOrderRecord');
-    const end=app.indexOf('window.openSupplyReceipt',start);
+    const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
-    assert.match(source,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
+    assert.match(source,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
     assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
     assert.match(source,/const next=receiptPlan\.item/);
     assert.match(source,/reserveQty=receiptPlan\.reservedDelta/);
@@ -574,7 +574,7 @@ test('supply receipt synchronizes received quantity back to the source order ite
 
 
 test('self-order receipt uses receiving core receivedQty without adding it twice',()=>{
-    assert.match(app,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
+    assert.match(app,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
     assert.match(app,/const next=receiptPlan\.item/);
     assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存預留紀錄/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
@@ -626,7 +626,7 @@ test('purchasing work cards use demand queue for ordering and orders for downstr
 
 test('shortage allocation requires both durable company and warehouse stock before reserving',()=>{
     const start=app.indexOf('async function allocateFreeReceiptStockToShortages');
-    const end=app.indexOf('\nasync function refreshAffectedOrderCaches',start);
+    const end=app.indexOf('\nasync function receiveSupplyOrderRecord',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/if\(!orderSnap\.exists\|\|!resSnap\.exists\|\|!whSnap\.exists\|\|!invSnap\.exists\)/);
@@ -869,7 +869,7 @@ test('cancelled source is excluded from the order-aligned receiving queue', () =
     assert.match(list,/來源訂單已取消，直送不可確認/);
 
     const start=app.indexOf('async function receiveSupplyOrderRecord');
-    const end=app.indexOf('window.openSupplyReceipt',start);
+    const end=app.indexOf('function receiptOperationStorageKey',start);
     assert.match(app.slice(start,end),/來源訂單已取消，不能繼續確認到貨/);
 });
 
@@ -887,7 +887,7 @@ test('direct-ship receipt writes the same authoritative delivery records used by
 
 test('cancelled warehouse source still receives into free stock while direct ship stays blocked', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
-    const end=app.indexOf('window.openSupplyReceipt',start);
+    const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
     const directStart=source.indexOf('if(directShip){');
     const warehouseStart=source.indexOf("const productKey=supply.productKey", directStart);
@@ -897,7 +897,7 @@ test('cancelled warehouse source still receives into free stock while direct shi
     const warehouseSource=source.slice(warehouseStart,registeredStart);
     assert.match(warehouseSource,/sourceOrderStatus=normalizedOrderStatus\(order\)/);
     assert.match(warehouseSource,/if\(sourceOrderStatus==='normal'\)\{/);
-    assert.match(warehouseSource,/const receiptPlan=window\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:0\},qty\)/);
+    assert.match(warehouseSource,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:0\},qty\)/);
     assert.match(warehouseSource,/items\[itemIndex\]=\{[\s\S]*?\.\.\.item,[\s\S]*?receivedQty:receiptPlan\.item\.receivedQty,[\s\S]*?receiptEvents:\[/);
     assert.match(warehouseSource,/sourceOrderStatus:'cancelled'/);
     assert.match(warehouseSource,/orderWorkIndexFields\(nextOrder\)/);
@@ -966,7 +966,7 @@ test('receiving queue keeps standalone stock and cancelled-order warehouse suppl
 
 test('supply receipt retries are idempotent by operation id', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
-    const end=app.indexOf('window.openSupplyReceipt',start);
+    const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/operationKey=String\(operationId\|\|''\)\.trim\(\)/);
@@ -983,7 +983,7 @@ test('supply receipt retries are idempotent by operation id', () => {
     const saveEnd=app.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
     const save=app.slice(saveStart,saveEnd);
     assert.match(save,/operationBase=poReceiptOperationId\|\|ensureReceiptOperationId\(supplyId\)/);
-    assert.match(save,/receiveSupplyOrderRecord\(supplyId,entry\.qty,entry\.lotNo,entry\.expiryDate,operationId,\{actorUid:job\.ownerUid,actorRole:job\.actorRole\}\)/);
+    assert.match(save,/receiveSupplyOrderRecord\(supplyId,entry\.qty,entry\.lotNo,entry\.expiryDate,operationId,\{actorUid:job\.ownerUid,actorRole:job\.actorRole,onStockCommitted:invalidateWarehouseStockCache\}\)/);
     assert.match(save,/clearReceiptOperationId\(supplyId,job\.operationBase,job\.ownerUid\)/);
 });
 
@@ -1320,7 +1320,7 @@ test('receipt modal close function exists and does not discard retry key', () =>
 
 test('direct-ship replacement receipts preserve cumulative gross delivery events', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
-    const end=app.indexOf('window.openSupplyReceipt',start);
+    const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/const delivered=Number\(item\.deliveredQty\|\|0\)\+qty/);
@@ -1330,7 +1330,7 @@ test('direct-ship replacement receipts preserve cumulative gross delivery events
 
 test('receiving persists immutable ERP receipt snapshots through receiving core', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
-    const end=app.indexOf('window.openSupplyReceipt',start);
+    const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
     assert.match(source,/YushinSupply\.normalize\(\{\.\.\.supply,id:supplyId\}\)/);
     assert.match(source,/YushinReceiving\.buildReceiptSnapshot/);
@@ -1339,7 +1339,7 @@ test('receiving persists immutable ERP receipt snapshots through receiving core'
 
 test('warehouse receiving no longer mutates purchase-order receipt state', () => {
     const start=app.indexOf('async function receiveSupplyOrderRecord');
-    const end=app.indexOf('window.openSupplyReceipt',start);
+    const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/(?:collection\('supplyOrders'\)|supplyOrdersCollection\(\))/);
@@ -1731,7 +1731,7 @@ test('acceptance flow keeps direct-ship procurement out of warehouse stock and h
     assert.equal(category({...afterReturn,supplyOrdered:12,received:12,grossDelivered:12}), 'complete');
 
     const receiptStart=app.indexOf('async function receiveSupplyOrderRecord');
-    const receiptEnd=app.indexOf('\nwindow.openSupplyReceipt',receiptStart);
+    const receiptEnd=app.indexOf('\nfunction receiptOperationStorageKey',receiptStart);
     const receiptSource=app.slice(receiptStart,receiptEnd);
     const directStart=receiptSource.indexOf("if(directShip){");
     const warehouseStart=receiptSource.indexOf("const productKey=",directStart);
