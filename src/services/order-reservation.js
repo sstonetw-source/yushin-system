@@ -74,7 +74,21 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
             stocks:Object.fromEntries(warehouseContexts.map(row=>[row.id,row.snapshot.exists?row.snapshot.data():{}])),
             currentWarehouseId:warehouseId,requestedQty:requested,aggregateAvailableQty:aggregateSnap?.exists?aggregate.available:0
           });
-          if(selection.requiresMultipleLocations)throw new Error('此品項有庫存分散在多倉；目前尚未完成多倉分配，已停止此品項預留與採購需求同步，避免將其他倉現貨誤列為待採購。');
+          if(selection.requiresMultipleLocations){
+            // Read-only diagnostic from the existing reservation Core. This plan is
+            // not a reservation ledger and must not mutate stock or demand.
+            const preview=globalThis.YushinReservation.planMultiWarehouseReservation({
+              warehouses:eligibleLocations.map(row=>row.master),
+              stocks:Object.fromEntries(eligibleLocations.map(row=>[row.id,row.snapshot.exists?row.snapshot.data():{}])),
+              currentWarehouseId:warehouseId,requestedQty:requested,
+              aggregateStock:aggregateSnap?.exists?aggregateSnap.data():{onHand:0,reserved:0}
+            });
+            const names=new Map(eligibleLocations.map(row=>[row.id,row.master.warehouseName||row.id]));
+            const detail=preview.allocations.map(row=>String(names.get(row.warehouseId)||row.warehouseId)+' '+row.qty).join('、');
+            throw new Error('此品項需要多倉分配：需求 '+requested+'、目前各倉可配置 '+preview.allocatedQty
+              +(detail?'（'+detail+'）':'')+'、仍缺 '+preview.shortageQty
+              +'。現行系統尚未啟用同一品項的多倉預留及分批出貨；請先核對並完成實體倉庫調撥後重試，未變更任何預留或採購需求。');
+          }
           warehouseId=selection.warehouseId;
         }
         const selected=warehouseContexts.find(row=>row.id===warehouseId);
