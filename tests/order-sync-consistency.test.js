@@ -214,11 +214,36 @@ test('stock stranded in a disabled warehouse cannot silently become a new purcha
  const before=JSON.stringify([...f.docs]);await assert.rejects(f.sync(),/核對分倉庫存/);
  assert.equal(JSON.stringify([...f.docs]),before);
 });
-test('multiple partial locations stop safely rather than creating false procurement shortage',async()=>{
+test('split-stock preflight explains authoritative per-warehouse quantities but never writes speculative demand',async()=>{
  for(const remote of [1,3,4]){
   const f=fixture({onHand:2});addWarehouse(f,'W2',remote);f.put('inventory/P',{productKey:'P',onHand:2+remote,reserved:0});const before=JSON.stringify([...f.docs]);
-  await assert.rejects(f.sync(),/多倉分配/);assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.demand('I'),undefined);
+  const expectedReserved=Math.min(5,2+remote),expectedRemote=Math.min(remote,3);
+  await assert.rejects(f.sync(),error=>{
+   assert.match(error.message,/多倉分配/);
+   assert.match(error.message,/需求 5/);
+   assert.ok(error.message.includes('目前各倉可配置 '+expectedReserved));
+   assert.ok(error.message.includes('W 2'));
+   assert.ok(error.message.includes('W2 '+expectedRemote));
+   assert.ok(error.message.includes('仍缺 '+(5-expectedReserved)));
+   return true;
+  });
+  assert.equal(JSON.stringify([...f.docs]),before,'partial location preview must not create a hold, stock movement or demand');
+  assert.equal(f.demand('I'),undefined);
  }
+});
+test('multi-location preview is capped by company availability, never treating incoming as real stock',async()=>{
+ const f=fixture({onHand:2});addWarehouse(f,'W2',4);
+ f.put('inventory/P',{productKey:'P',onHand:6,reserved:1,incoming:9,transferFreeInTransit:2});
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),error=>{
+  assert.match(error.message,/多倉分配/);
+  assert.ok(error.message.includes('目前各倉可配置 3'));
+  assert.ok(error.message.includes('W 2'));
+  assert.ok(error.message.includes('W2 1'));
+  assert.ok(error.message.includes('仍缺 2'));
+  return true;
+ });
+ assert.equal(JSON.stringify([...f.docs]),before);
 });
 test('master refresh failure or account change cannot publish a stale warehouse choice',async()=>{
  const f=fixture();f.c.loadWarehouseMaster=async()=>{f.c.warehouseMasterLoadPromise=null;};const before=JSON.stringify([...f.docs]);
