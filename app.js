@@ -3005,6 +3005,59 @@ function actionButtonFromEventOrSelector(selector = '') {
     return eventButton || (selector ? document.querySelector(selector) : null);
 }
 
+// One authoritative order document commit. Features own drafts, IDs and presentation;
+// inventory initialization and delayed quote/source synchronization remain checkpoints.
+async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actorRole=currentUserRole,linkForecast=false,expectedForecastUpdatedAt=''}={}) {
+    const assertActor=()=>{
+        if(!actorUid||actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請以原身分確認建單結果。');
+        if(!['admin','sales','engineer','purchaser'].includes(actorRole))throw new Error('目前沒有建立訂單權限。');
+    };
+    assertActor();
+    if(typeof orderId!=='string'||!orderId.trim()||orderId.includes('/'))throw new Error('缺少有效的建單識別碼。');
+    if(!data||data.createdByUid!==actorUid||data.status!==BUSINESS_STATUS.ACTIVE)throw new Error('建單身分或初始狀態不正確。');
+    const snapshot=JSON.parse(JSON.stringify(data));
+    if(linkForecast&&(snapshot.sourceType!==DOCUMENT_TYPES.FORECAST||!snapshot.sourceId||snapshot.sourceDocumentSyncStatus!=='completed'))
+        throw new Error('Forecast 建單來源與同步狀態不符。');
+    if(!linkForecast&&snapshot.sourceDocumentSyncStatus==='completed')throw new Error('來源同步完成必須具有同交易的來源連結。');
+    let savedData;
+    const ref=db.collection('orders').doc(orderId);
+    await runRoleTransaction(async tx=>{
+        assertActor();savedData=undefined;
+        const existing=await tx.get(ref);
+        assertActor();
+        if(existing.exists){
+            const live=existing.data();
+            if(live.createdByUid!==actorUid||live.status!==BUSINESS_STATUS.ACTIVE||['cancelled','voided'].includes(live.orderStatus))
+                throw new Error('待確認的訂單已由其他流程變更，請先檢查訂單清單。');
+            if(linkForecast&&(live.sourceType!==snapshot.sourceType||live.sourceId!==snapshot.sourceId))
+                throw new Error('建單識別碼已用於其他來源，請先核對原訂單。');
+            // Preserve the existing pending-ID contract: resume authoritative saved
+            // facts, not a modified/stale form, and never overwrite fulfillment progress.
+            savedData=live;return;
+        }
+        let forecastRef=null;
+        if(linkForecast){
+            if(!['sales','admin'].includes(actorRole))throw new Error('目前沒有 Forecast 轉單權限。');
+            forecastRef=db.collection('forecasts').doc(snapshot.sourceId);
+            const source=await tx.get(forecastRef);assertActor();
+            if(!source.exists)throw new Error('來源 Forecast 已不存在，不能建立未連結的訂單。');
+            const forecast=source.data();
+            if(normalizedOrderStatus(forecast)!=='normal')throw new Error('來源 Forecast 已取消／作廢，不能轉單。');
+            if((actorRole!=='admin'&&forecast.ownerUid&&forecast.ownerUid!==actorUid)
+                ||snapshot.ownerUid!==(forecast.ownerUid||actorUid))throw new Error('Forecast 與訂單負責人不符，請重新核對來源。');
+            if(expectedForecastUpdatedAt&&forecast.updatedAt!==expectedForecastUpdatedAt)throw new Error('Forecast 已變更，請重新整理後核對轉單內容。');
+        }
+        assertActor();
+        tx.set(ref,snapshot);
+        if(forecastRef)tx.update(forecastRef,{
+            linkedDocuments:firebase.firestore.FieldValue.arrayUnion(documentLink(DOCUMENT_TYPES.ORDER,orderId,'created')),
+            updatedAt:snapshot.createdAt
+        });
+        savedData=snapshot;
+    });
+    try{assertActor();}catch(err){err.orderCommitted=true;err.orderId=orderId;throw err;}
+    return {id:orderId,data:savedData};
+}
 let forecastLoading = false;
 let forecastSaveInProgress = false;
 let forecastProgressSaveInProgress = false;
@@ -4120,6 +4173,9 @@ function forecastItemToOrderSource(forecast, item) {
 
 async function createForecastOrdersDirectly(forecast, items) {
     const synchronizationUid=currentUser?.uid;
+    const synchronizationRole=currentUserRole;
+    const assertCreationActor=()=>{if(!synchronizationUid||currentUser?.uid!==synchronizationUid||currentUserRole!==synchronizationRole)throw new Error('登入帳號或角色已變更，請以原身分確認 Forecast 轉單結果。');};
+    assertCreationActor();
     const now = new Date().toISOString();
     const orderDate = localDateString();
     const normalizedItems = items.map((item, index) => {
@@ -4136,7 +4192,12 @@ async function createForecastOrdersDirectly(forecast, items) {
 
     const firstItem=normalizedItems[0];
     const totalPrice=normalizedItems.reduce((sum,item)=>sum+Number(item.totalPrice||0),0);
-    const orderRef=db.collection('orders').doc();
+    const pendingKey=`${ORDER_DRAFT_STORAGE_PREFIX}:${synchronizationUid}:forecast:${forecast.id}:pending_order_id`;
+    let pendingId=localStorage.getItem(pendingKey);
+    if(!pendingId){
+        pendingId=db.collection('orders').doc().id;
+        localStorage.setItem(pendingKey,pendingId);
+    }
     const orderData={
         orderDate,
         createdAt:now,
@@ -4191,17 +4252,12 @@ async function createForecastOrdersDirectly(forecast, items) {
     };
     orderData.searchTokens=buildFullHistorySearchTokens('order',orderData);
 
-    const batch=db.batch();
-    batch.set(orderRef,orderData);
-    batch.set(db.collection('forecasts').doc(forecast.id),{
-        linkedDocuments:firebase.firestore.FieldValue.arrayUnion(
-            documentLink(DOCUMENT_TYPES.ORDER,orderRef.id,'created')
-        ),
-        updatedAt:now
-    },{merge:true});
-    await batch.commit();
-
-    const created=[{id:orderRef.id,data:orderData}];
+    const committed=await commitOrderCreation(pendingId,orderData,{
+        actorUid:synchronizationUid,actorRole:synchronizationRole,linkForecast:true,
+        expectedForecastUpdatedAt:forecast.updatedAt||''
+    });
+    assertCreationActor();
+    const created=[committed];
     const reservationResults = await Promise.all(created.map(async order => {
         try {
             await synchronizeOrderInventory(order.id, order.data, synchronizationUid);
@@ -4211,11 +4267,13 @@ async function createForecastOrdersDirectly(forecast, items) {
         }
     }));
 
+    assertCreationActor();
     ordersCache=[
         ...created.map(order=>({id:order.id,...order.data})),
         ...ordersCache.filter(order=>!created.some(createdOrder=>createdOrder.id===order.id))
     ].sort((x,y)=>String(y.orderDate||'').localeCompare(String(x.orderDate||'')));
 
+    if(!reservationResults.some(result=>result.status==='failed')&&localStorage.getItem(pendingKey)===committed.id)localStorage.removeItem(pendingKey);
     return {
         created,
         reservationFailures:reservationResults.filter(result=>result.status==='failed')
@@ -4223,11 +4281,14 @@ async function createForecastOrdersDirectly(forecast, items) {
 }
 
 window.createOrderFromForecast = async function(id) {
+    const requestedUid=currentUser?.uid,requestedRole=currentUserRole;
+    const assertConversionActor=()=>{if(requestedUid!==currentUser?.uid||requestedRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請重新開啟 Forecast。');};
     const forecast = forecastCache.find(item => item.id === id);
     if (!forecast) return;
 
     try {
         const items = await forecastOrderItems(forecast);
+        assertConversionActor();
         if (!items.length) {
             alert('此 Forecast 沒有可帶入訂單的品項。');
             return;
@@ -4241,6 +4302,7 @@ window.createOrderFromForecast = async function(id) {
 
         if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
         const result = await createForecastOrdersDirectly(forecast, items);
+        assertConversionActor();
         writeAppDataCache('orders', ordersCache);
         renderOrdersList();
         if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
@@ -18806,20 +18868,7 @@ async function createOrResumeNewOrder(data) {
         // 記下編號後才寫入雲端；斷線後重試仍會指向同一張訂單。
         localStorage.setItem(key,orderId);
     }
-    const ref=db.collection('orders').doc(orderId);
-    let savedData;
-    await runRoleTransaction(async tx=>{
-        const snap=await tx.get(ref);
-        if(snap.exists){
-            savedData=snap.data();
-            if(savedData.createdByUid!==currentUser?.uid || savedData.status!==BUSINESS_STATUS.ACTIVE)
-                throw new Error('待確認的訂單已由其他流程變更，請先檢查訂單清單。');
-        }else{
-            tx.set(ref,data);
-            savedData=data;
-        }
-    });
-    return {id:orderId,data:savedData};
+    return commitOrderCreation(orderId,data,{actorUid:currentUser?.uid,actorRole:currentUserRole});
 }
 
 function orderDraftFieldValue(id) {

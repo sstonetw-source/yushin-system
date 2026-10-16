@@ -508,7 +508,7 @@ test('new order creation keeps one document ID across uncertain writes and retri
     const documents=new Map();
     let writes=0, uncertain=false;
     const context=vm.createContext({
-        ORDER_DRAFT_STORAGE_PREFIX:'order_draft_v2',currentUser:{uid:'USER-1'},
+        ORDER_DRAFT_STORAGE_PREFIX:'order_draft_v2',currentUser:{uid:'USER-1'},currentUserRole:'sales',
         BUSINESS_STATUS:{ACTIVE:'active'},
         localStorage:{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)},
         db:{collection:()=>({doc:id=>({id:id||'ORDER-1'})}),runTransaction:async callback=>{
@@ -520,6 +520,7 @@ test('new order creation keeps one document ID across uncertain writes and retri
         }}
     });
     context.runRoleTransaction ||= callback => context.db.runTransaction(callback);
+    vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/order-creation.js'),'utf8'),context);
     vm.runInContext(appSource.slice(start,end),context);
     uncertain=true;
     const order={createdByUid:'USER-1',status:'active',inventoryReservationStatus:'pending'};
@@ -1569,7 +1570,10 @@ test('forecast to order supports one-item prefill and one multi-item internal or
     const directSource=appSource.slice(directStart,directEnd);
     assert.match(directSource,/items:normalizedItems/);
     assert.match(directSource,/itemCount:normalizedItems\.length/);
-    assert.match(directSource,/const orderRef=db\.collection\('orders'\)\.doc\(\)/);
+    assert.match(directSource,/pendingId=db\.collection\('orders'\)\.doc\(\)\.id/);
+    assert.match(directSource,/localStorage\.setItem\(pendingKey,pendingId\)/);
+    assert.match(directSource,/commitOrderCreation\(pendingId,orderData/);
+    assert.doesNotMatch(directSource,/db\.batch\(|runRoleTransaction\(/);
     assert.doesNotMatch(directSource,/normalizedItems\.forEach\([^]*?db\.collection\('orders'\)\.doc\(\)/);
 });
 

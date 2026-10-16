@@ -76,3 +76,7 @@
 新 `receipts` 保存 `createdByUid`、`createdByRole` 作為操作識別碼重試的身分快照，沿用既有不可變 receipt facts；Rules 仍只允許修改分配進度欄位，不新增集合、索引或查詢。舊憑證缺此二欄時不補寫、不遷移，仍核對供應單／數量／批號／效期。瀏覽器背景到貨暫存新增 `actorRole`，不是 Firestore 的另一份交易事實。
 
 收貨來源驗證補強：`supplyOrders` 的來源與入庫倉庫不可由 UI 預設值猜測；`orders.items`、`inventoryReservations` 與公司／分倉投影不符時 Service 整筆拒絕，不能用新增收貨掩蓋差異。沿用原集合與欄位，無資料模型遷移；真正獨立備庫及舊版未登記 incoming 仍按既有收貨契約處理。
+
+## 建單共用提交（2026-10-16）
+
+沒有新增 Firestore 欄位、集合、Rules 或索引。Forecast 多品項沿用 `orders.sourceType/sourceId/sourceDocumentSyncStatus` 與 `forecasts.linkedDocuments`，由同一 transaction 提交。瀏覽器新增 `${ORDER_DRAFT_STORAGE_PREFIX}:${uid}:forecast:${forecastId}:pending_order_id` 暫存以接續未確認建單；它不是雲端交易事實，也不提供跨裝置去重。手動／估價轉單保留原 pending ID key。沒有正式資料遷移或刪除。
