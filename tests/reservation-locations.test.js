@@ -172,3 +172,16 @@ test('browser globals share inventory availability and fail clearly if its depen
  const unloaded=vm.createContext({});vm.runInContext(reservationSource,unloaded);
  assert.throws(()=>unloaded.YushinReservation.planLocationReservation(input()),/Inventory core/);
 });
+
+test('single-warehouse transaction boundary accepts legacy quantities but refuses any v2/unknown locations',()=>{
+ const validate=require('../modules/reservation-core').assertLegacyReservationLocation;
+ assert.equal(validate({orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',quantity:0.5},{warehouseId:'A',productKey:'P'}),0.5);
+ assert.equal(validate({},{}),0);
+ const base={productKey:'P',warehouseId:'A',quantity:2};
+ for(const extra of [{locationSchemaVersion:2,locations:[{warehouseId:'A',reservedQty:2}]},
+  {locationSchemaVersion:3},{locations:[]},{allocations:[]},{warehouseAllocations:[]}])
+  assert.throws(()=>validate({...base,...extra}),/多倉位置資料/);
+ assert.throws(()=>validate({...base,warehouseId:'B'},{warehouseId:'A'}),/操作倉庫不同/);
+ assert.throws(()=>validate({...base,productKey:'Q'},{productKey:'P'}),/產品與操作商品不同/);
+ for(const quantity of [NaN,Infinity,-1,'bad'])assert.throws(()=>validate({...base,quantity}),/數量不正確/);
+});
