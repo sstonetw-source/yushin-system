@@ -166,3 +166,11 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 原 UID／角色於 PDF prepare 前取得，服務及每次交易讀取後核對能力與身分。供應 actor／事件時間在 callback 外固定；直接服務呼叫亦核對必要數量／價格與單號。
 - 原單號已存在時，排除建立／輸出時間等非意圖欄位後比較原 PO 內容，核對固定供應連結、actor、來源、產品、數量、成本與供應商，僅回傳現況、不再寫入。不覆寫到貨進度、不重開取消單。衝突或缺供應紀錄拒絕，不視為新的 PO。
 - 正常建立無額外讀取；只有既存單號的重試路徑新增每列一筆已知 supply document read。無新 Collection／Rules／Index／Listener、無 Firebase 部署或資料刪除。Incoming 仍由既有 registerPurchaseIncoming 逐供應分段同步，並非與 PO 全部單交易；跨段身分固定、多倉拆量、SERVICE 與正式角色驗收仍待後續處理。
+
+## 正式 PO 在途 checkpoint 銜接（2026-10-16）
+
+- 建單／重試入口將 PDF prepare 前捕捉的 UID／角色傳入 registerPurchaseIncoming。整批同步固定 actor／時間，每品項開始、callback 重跑、讀取後及提交後核對能力／身分；切換後停止後續品項與快取變動。
+- 每供應交易重讀來源 PO，核對 supplyOrderIds、供應的 PURCHASING_PO 類型與 purchaseDocumentId，以最新原單／供應終止狀態為準。入庫倉庫必須來自供應快照，不再使用目前預設倉庫補缺漏。
+- 以 Receiving.normalizeSupply 為剩餘待到貨與已登記在途投影來源。供應／到貨／已登記／公司及分倉 incoming 拒絕負值、非有限數字、空值與布林；到貨量不可超過採購量。負 delta 必須在公司及分倉完整扣回，不能以歸零掩蓋不足；僅允許浮點誤差範圍內的零值收斂。
+- 公司與分倉存貨識別如有資料則必須相符；快取失效使用最後成功交易的產品／倉庫，移除從 supply ID 尾碼及舊畫面品項猜測的方式。每次 callback 清除暫存結果，movement reference 固定於 callback 外。
+- 每供應增加一筆已知 PO document read，無新查詢／Listener／Collection／Rules／Index。保留逐供應 checkpoint：後續品項失敗不回滾已成功品項，重試依 incomingRegisteredQty 接續，不代表整張 PO 與所有 incoming 已合為單交易。無 Firebase 部署或資料刪除；多倉拆量、SERVICE 與正式環境驗收仍待處理。
