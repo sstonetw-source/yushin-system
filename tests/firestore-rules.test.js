@@ -1214,6 +1214,23 @@ function compatDb(uid) {
     }))
   };
 }
+test('actual bounded lot readers expose operational batches and exact search for all five active roles without reading costs',async()=>{
+ await seed('inventoryLots/read-A',{productKey:'p-order',productId:'p-order',warehouseId:'W1',lotNo:'READ-B',expiryDate:'2027-01-01',remainingQty:3,receivedQty:3});
+ await seed('inventoryLots/read-Z',{productKey:'p-order',productId:'p-order',warehouseId:'W1',lotNo:'OLD',expiryDate:'2026-01-01',remainingQty:0,receivedQty:3});
+ await seed('inventory/p-order',{productKey:'p-order',productId:'p-order',onHand:3,reserved:0,incoming:0});
+ await seed('inventoryLotCosts/read-A',{unitCost:999,lotId:'read-A'});
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse'],['sales1','sales'],['eng1','engineer']]){
+  const used=[],client=compatDb(uid),nativeCollection=client.collection;client.collection=name=>{used.push(name);return nativeCollection(name);};
+  const c=vm.createContext({db:client,YushinInventory:require('../modules/inventory-core'),firestoreReadWithTimeout:p=>p});
+  vm.runInContext(fs.readFileSync('src/infrastructure/inventory-lot-read.js','utf8'),c);
+  const page=await assertSucceeds(c.readInventoryLotsForProducts(['p-order']));assert.equal(page.rows.length,1);assert.equal(page.rows[0].qty,3);assert.equal(page.hasMore,false);
+  const matched=await assertSucceeds(c.readInventoryLotMatches('READ-B'));assert.equal(matched.rows[0].id,'read-A');
+  const expiry=await assertSucceeds(c.readInventoryLotMatches('2027-01-01','expiryDate'));assert.equal(expiry.rows.length,1);
+  const items=await assertSucceeds(c.readInventoryForLotProducts(['p-order']));assert.equal(items[0].id,'p-order');
+  assert.equal(used.some(name=>name==='inventoryLotCosts'||name==='productCosts'),false);assert.equal(page.rows[0].unitCost,undefined);
+  if(['warehouse','sales','engineer'].includes(role))await assertFails(getDoc(doc(db(uid),'inventoryLotCosts/read-A')));
+ }
+});
 test('actual manual inventory service commits initial stock protected cost and targeted scrap for three operational roles',async()=>{
  for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
   const key='manual-'+uid,operationId='manual-op-'+uid,client=compatDb(uid),nativeRun=client.runTransaction,plain=x=>JSON.parse(JSON.stringify(x));

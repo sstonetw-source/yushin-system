@@ -63,6 +63,8 @@ jobs:
         run: node tests/free-stock-recovery-browser-smoke.js
       - name: Check reconciled product search and margin privacy in desktop and mobile Chrome
         run: node tests/pr-reconciliation-browser-smoke.js
+      - name: Check authoritative lot display and batch search in desktop and mobile Chrome
+        run: node tests/inventory-lot-browser-smoke.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase
       - name: Set up Java 21 for Firestore emulator

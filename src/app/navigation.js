@@ -132,6 +132,8 @@ function resetSessionData() {
     inventoryCache = [];
     inventoryCursor = null;
     inventoryHasMore = true;
+    window.resetInventoryLotView?.();
+    inventorySearchGeneration++;inventoryLotSearchState=null;inventorySearchLoading=false;inventorySearchActive=false;inventorySearchResults=[];
         pendingPurchaseCache = [];
     procurementDemandCache = [];
     procurementDemandCursor = null;

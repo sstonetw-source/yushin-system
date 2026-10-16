@@ -140,3 +140,11 @@ cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 P
 以 main `c8e345d` 為基準，將手動／Excel 新增、批號／效期增減、報廢移至 `commitManualInventoryAdjustment`。修正調整／報廢未同步權威 inventoryLots 的缺口；共用 `manualAdjustmentLots`，指定批次只扣符合來源，無指定沿用 FEFO。每列 stock／lot／初始 cost／movement 原子，整批逐列 checkpoint。保留固定 ID 與去成本 intent、原 actor／時間／快照，未知回覆或通知失敗只讀接續；UI 移除已確認列並保留未確認列 ID，防重入及跨角色污染。
 
 新增 19 項 Core／Service／批次行為測試，本機 1,348 項全過；實際 Rules 的三角色初始成本、重試、報廢與正調整另交 CI。每列增加 movement／產品／倉庫／固定 lot read，成本有權時另讀 cost；新增單產品 bounded lot query 與最多 200 筆 tx 重讀，超限拒絕。舊 inventory.lots 由實際批次投影，並非全系統鏡像刷新已統一。新增 movement intent／actor 及 row operationId，無新集合／Rules／composite index／Listener，無正式部署、遷移或刪除。尚待清單／設定等 Feature 寫入、舊列表投影、跨重載恢復、多倉、完整 SERVICE 及 Preview 全流程驗收。
+
+### 2026-10-16 庫存清單／批號搜尋讀模型
+
+以 main `2149789` 為基準，清單批號／效期改從 inventoryLots 的 bounded read adapter 讀取，白名單投影、FEFO 與零餘量排除共用 Core。正常 50 產品先做兩組最多 101 文件的 in 查詢，不自動掃完；lookahead／零餘量 cursor、部分／錯誤狀態、更多／重試、重入共享與 session／generation／群組失效均明確處理。
+
+商品索引搜尋後驗證不再讀舊批號鏡像；完整且區分大小寫的批號／YYYY-MM-DD 效期直接查 inventoryLots，每欄每次 51 讀，再用產品 key 批讀庫存，提供更多結果入口。舊 keyword／角色回覆不可污染新搜尋；分倉查詢亦補上原 actor／cache identity guard。新增 15 項應用測試，本機 1,363 項全通過；另加實際五角色 Rules 查詢與桌機／手機批次分頁、錯誤重試及搜尋控制測試，CI 另驗證。
+
+新增讀取及第六組 Chrome smoke，無新 Rules／composite index／Listener／集合／持久化欄位，無正式部署或資料修改。原商品 token 搜尋仍可能讀完全部候選；批號不保證模糊／片段命中。未完成：其他 Feature 寫入、舊持久化鏡像清理、超過 200 批寫入設計、跨重載恢復、多倉、完整 SERVICE 及 Preview 全流程驗收。

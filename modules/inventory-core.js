@@ -117,6 +117,16 @@
     return {delta,allocations,lots:reconciled.lots.map(lot=>({...lot,remainingQty:Number(lot.remainingQty??lot.qty??0)-(used.get(lot.id)||0)}))};
   }
 
+  function operationalLotRows(records=[]){
+    const rows=records.map(record=>{
+      const value=record.remainingQty??record.qty;
+      if(!['id','productKey','warehouseId'].every(field=>typeof record[field]==='string'&&record[field].trim())||!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0)throw new Error('批次識別或剩餘數量不正確');
+      const receivedAt=typeof record.receivedAt==='string'?record.receivedAt:typeof record.receivedAt?.toDate==='function'?record.receivedAt.toDate().toISOString():'';
+      return {id:record.id,productKey:record.productKey,warehouseId:record.warehouseId,lotNo:String(record.lotNo||''),expiryDate:String(record.expiryDate||''),receivedAt,remainingQty:Number(value),qty:Number(value)};
+    });
+    return sortLotsForIssue(rows);
+  }
+
   function reverseLotAllocations(records=[],qty=0){
     let remaining=n(qty);
     const allocations=[];
@@ -187,6 +197,7 @@
     reconcileStockLots,
     quantityAdjustmentLots,
     manualAdjustmentLots,
+    operationalLotRows,
     reverseLotAllocations,
     allocationsAfterReversal,
     availableReturnAllocations
