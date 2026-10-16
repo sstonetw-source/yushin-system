@@ -6,7 +6,7 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
+const { arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
 
 let env;
 
@@ -2539,5 +2539,68 @@ test('actual reservation sync refuses insufficient company and warehouse balance
    assert.deepEqual(after,before,uid+' must not erase the ledger discrepancy');
    await seed(path,original);
   }
+ }
+});
+
+async function actualShipmentFixture(uid,role){
+ const f=await orderInitializationFixture(uid,role,{onHand:5,ownerUid:['purchaser','warehouse'].includes(role)?'sales1':uid});
+ // Shipment is tested from an already initialized order. Warehouse users do
+ // not own order initialization; that separate service has its own role tests.
+ const saved=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...saved,inventoryReservationStatus:'completed',items:saved.items.map(i=>require('../modules/fulfillment-core').normalizeItem({...i,reservedQty:5,dispatchPreparedQty:5})),deliveryRecords:[]});
+ await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:5,incoming:0});
+ await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:5,incoming:0});
+ await seed('inventoryReservations/'+f.id+'__I',{orderId:f.id,itemId:'I',orderItemIndex:0,ownerUid:saved.ownerUid,salesCode:saved.salesCode,productKey:'init-product',warehouseId:'W1',quantity:5,shortageQty:0,status:'active'});
+ await seed('inventoryLots/issue-'+uid,{productKey:'init-product',productId:'init-product',warehouseId:'W1',remainingQty:5,qty:5,sourceType:'INITIAL_STOCK',sourceId:'issue-'+uid});
+ const rawClient=compatDb(uid),plain=x=>JSON.parse(JSON.stringify(x));
+ // Keep document references and transactions on one SDK instance.
+ f.client.collection=rawClient.collection;
+ const clean=data=>{const result=plain(data);if(result.deliveryHistory?.__arrayUnion)result.deliveryHistory=arrayUnion(...result.deliveryHistory.__arrayUnion);return result;};
+ f.client.runTransaction=callback=>rawClient.runTransaction(tx=>callback({...tx,
+  set:(r,data,o)=>o?tx.set(r,clean(data),o):tx.set(r,clean(data)),update:(r,data)=>tx.update(r,clean(data))}));
+ Object.assign(f.context,{YushinInventory:require('../modules/inventory-core'),
+  canReceiveInventoryCapability:()=>['admin','purchaser','warehouse'].includes(role),canAccessPage:()=>true,
+  warehouseMasterCache:[{id:'W1',active:true}],savedDeliveryRecords:o=>o.deliveryRecords||[],
+  savedReturnRecords:o=>o.returnRecords||[],deliveryActor:()=>uid,orderQuantity:o=>o.items.reduce((sum,i)=>sum+i.qty,0),
+  orderInventorySyncIncomplete:o=>o.inventoryReservationStatus!=='completed',
+  orderDeliveryProjection:o=>require('../modules/fulfillment-core').projectOrderDelivery({grossDeliveredQty:(o.deliveryRecords||[]).reduce((sum,r)=>sum+r.qty,0),returnedQty:0,returnRecords:[]}),
+  firebase:{firestore:{FieldValue:{arrayUnion:entry=>({__arrayUnion:[entry]})}}}});
+ const app=fs.readFileSync('app.js','utf8');
+ vm.runInContext(app.slice(app.indexOf('function inventoryReservationPayload('),app.indexOf('window.openInventoryReservationDetails =')),f.context);
+ vm.runInContext(fs.readFileSync('src/services/delivery-stock.js','utf8'),f.context);
+ vm.runInContext(fs.readFileSync('src/services/delivery-records.js','utf8'),f.context);
+ vm.runInContext(fs.readFileSync('src/services/warehouse-shipment.js','utf8'),f.context);
+ f.ship=(qty,operationId)=>f.context.commitInventoryShipment({orderId:f.id,itemId:'I',qty,date:'2026-10-17',operationId,expectedWarehouseId:'W1'});
+ return f;
+}
+test('actual shared issue planner commits partial warehouse shipment and repeat safely under real Rules',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualShipmentFixture(uid,role);
+  await assertSucceeds(f.ship(2,'partial-'+uid));await assertSucceeds(f.ship(2,'partial-'+uid));
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,3);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+  await assertSucceeds(f.ship(3,'remaining-'+uid));
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  assert.equal(order.deliveryRecords.length,2);assert.equal(order.deliveredQty,5);assert.equal(order.isDelivered,true);
+  for(const path of ['inventory/init-product','warehouseStocks/W1__init-product']){
+   const stock=(await getDoc(doc(db('admin'),path))).data();assert.equal(stock.onHand,0);assert.equal(stock.reserved,0);
+  }
+  assert.equal((await getDoc(doc(db('admin'),'inventoryLots/issue-'+uid))).data().remainingQty,0);
+ }
+});
+test('actual shared issue planner refuses inconsistent company balances without committing order stock lots or ledger',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualShipmentFixture(uid,role);
+  await seed('inventory/init-product',{productKey:'init-product',onHand:3,reserved:5,incoming:0});
+  const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product','inventoryReservations/'+f.id+'__I','inventoryLots/issue-'+uid];
+  const read=()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));
+  const before=await read();await assert.rejects(f.ship(2,'invalid-'+uid),/不足|異常|核對/);
+  assert.deepEqual(await read(),before);
+ }
+});
+test('commercial roles cannot use the warehouse issue service to bypass dispatch permissions',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer']]){
+  const f=await actualShipmentFixture(uid,role);await assert.rejects(f.ship(2,'blocked-'+uid),/無倉庫出貨權限/);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,5);
  }
 });

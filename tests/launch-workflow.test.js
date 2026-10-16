@@ -7,13 +7,13 @@ const inventory=require('../modules/inventory-core.js');
 function section(start,end){const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert.ok(a>=0&&b>a);return source.slice(a,b);}
 function deliveryContext(lotQuantities=[1,1]){
  const writes=[],reads=[];
- const data={inventory:{onHand:10,reserved:2,incoming:0},warehouse:{onHand:10,reserved:2,incoming:0},reservation:{quantity:2},'inventoryLots/A':{productKey:'P',warehouseId:'W',remainingQty:lotQuantities[0]},'inventoryLots/B':{productKey:'P',warehouseId:'W',remainingQty:lotQuantities[1]}};
+ const data={inventory:{onHand:10,reserved:2,incoming:0},warehouse:{onHand:10,reserved:2,incoming:0},reservation:{productKey:'P',warehouseId:'W',quantity:2},'inventoryLots/A':{productKey:'P',warehouseId:'W',remainingQty:lotQuantities[0]},'inventoryLots/B':{productKey:'P',warehouseId:'W',remainingQty:lotQuantities[1]}};
  const ref=path=>({path,id:path.split('/').at(-1)});
  const tx={get:async reference=>{assert.ok(reference.path,'transaction must receive a document, never a query');assert.equal(writes.length,0,'all reads precede all writes');reads.push(reference.path);return {id:reference.id,exists:!!data[reference.path],data:()=>data[reference.path]};},update:(reference,value)=>writes.push({path:reference.path,value}),set:(reference,value)=>writes.push({path:reference.path,value})};
  const query={get:async()=>({docs:[{ref:ref('inventoryLots/A')},{ref:ref('inventoryLots/B')}]})};
  query.where=()=>query;
  const db={collection:name=>({doc:id=>ref(name==='inventoryReservations'?'reservation':`${name}/${id||'generated'}`),where:()=>query})};
- const c=vm.createContext({db,window:{},console,Date,Promise,inventoryProductKey:()=> 'P',defaultWarehouse:()=>({id:'W'}),inventoryRefFor:()=>ref('inventory'),warehouseStockDocId:()=> 'stock',inventoryNumbers:x=>x,warehouseMasterCache:[],savedDeliveryRecords:o=>o.deliveryRecords||[],inventoryMovementRecord:()=>({}),inventoryReservationPayload:(_id,_order,quantity)=>({quantity}),YushinInventory:inventory});
+ const c=vm.createContext({db,window:{},console,Date,Promise,inventoryProductKey:()=> 'P',defaultWarehouse:()=>({id:'W'}),inventoryRefFor:()=>ref('inventory'),warehouseStockDocId:()=> 'stock',inventoryNumbers:x=>x,warehouseMasterCache:[],savedDeliveryRecords:o=>o.deliveryRecords||[],inventoryMovementRecord:()=>({}),inventoryReservationPayload:(_id,_order,quantity)=>({quantity}),YushinInventory:inventory,YushinReservation:require('../modules/reservation-core')});
  data['warehouseStocks/stock']=data.warehouse;
  vm.runInContext(section('async function applyInventoryDeliveryDeltaInTransaction','\nfunction applyInventoryDeliveryInTransaction'),c);
  return {c,tx,writes,reads,data};
@@ -83,4 +83,45 @@ test('inventory workspace shipment rejects inconsistent stock reservations befor
   await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W',requireStockReservation:true},2,'actor','O'));
   assert.equal(writes.length,0);
  }
+});
+
+test('shared delivery service validates raw stock and reservation identity before reading any lot or queuing writes',async()=>{
+ for(const mutate of [
+  data=>data.inventory.onHand=1,
+  data=>delete data.inventory,
+  data=>data.inventory.reserved=1,
+  data=>data.warehouse.reserved=1,
+  data=>data.reservation.productKey='OTHER',
+  data=>data.reservation.warehouseId='OTHER',
+  ...[null,NaN,Infinity,-1,'bad','',true].flatMap(value=>[
+   data=>data.reservation.quantity=value,
+   data=>data.inventory.reserved=value,
+   data=>data.warehouse.onHand=value
+  ])
+ ]){
+  const {c,tx,writes,reads,data}=deliveryContext();
+  mutate(data);const before=structuredClone(data);
+  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},2,'actor','O'),/不足|庫存|不一致|核對/);
+  assert.equal(writes.length,0);assert.equal(reads.some(path=>path.startsWith('inventoryLots/')),false);
+  assert.deepEqual(data,before);
+ }
+});
+test('legacy delivery cannot use another orders reserved stock or free stock travelling between warehouses',async()=>{
+ for(const stockKey of ['inventory','warehouse']){
+  const {c,tx,writes,data}=deliveryContext();
+  data.reservation.quantity=1;data[stockKey].reserved=10;
+  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},2,'actor','O'),/可出貨實貨不足/);
+  assert.equal(writes.length,0);
+  data[stockKey].reserved=2;data[stockKey].transferFreeInTransit=8;
+  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},2,'actor','O'),/調撥途中/);
+  assert.equal(writes.length,0);
+ }
+});
+test('legacy partially unreserved delivery deducts its own hold and genuine free stock without releasing others',async()=>{
+ const {c,tx,writes,data}=deliveryContext();data.reservation.quantity=1;
+ const result=await c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W',reservedQty:1},2,'actor','O');
+ assert.equal(result.reservedDelta,-1);assert.equal(result.newReservedQty,0);
+ assert.equal(writes.find(row=>row.path==='inventory').value.reserved,1);
+ assert.equal(writes.find(row=>row.path==='warehouseStocks/stock').value.reserved,1);
+ assert.equal(writes.find(row=>row.path==='inventory').value.onHand,8);
 });

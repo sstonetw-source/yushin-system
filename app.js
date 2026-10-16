@@ -18214,15 +18214,18 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     if (!whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
 
     const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {}), wh = inventoryNumbers(whSnap.data());
+    const issuePlan=deltaQty>0?globalThis.YushinReservation.planReservationIssue({
+        productKey,warehouseId,qty:deltaQty,reservation:reservationSnap.exists?reservationSnap.data():{},
+        aggregateStock:invSnap.exists?invSnap.data():undefined,warehouseStock:whSnap.data(),
+        requireReservation:order.requireStockReservation===true,itemReservedQty:order.reservedQty
+    }):null;
     const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
-    const newReservedRemaining=Math.max(0,currentReservation-deltaQty);
-    const reservedDelta=newReservedRemaining-currentReservation;
+    const newReservedRemaining=issuePlan?issuePlan.reservation.quantity:Math.max(0,currentReservation-deltaQty);
+    const reservedDelta=issuePlan?issuePlan.reservedDelta:newReservedRemaining-currentReservation;
     const now = new Date().toISOString();
     let lotAllocations=[],cogs=0;
 
     if (deltaQty > 0) {
-        if (order.requireStockReservation === true && (!invSnap.exists || inv.onHand < deltaQty || inv.reserved < deltaQty || wh.reserved < deltaQty || currentReservation < deltaQty)) throw new Error('庫存或訂單預留數量不足，請先確認庫存資料後再出貨。');
-        if (wh.onHand < deltaQty) throw new Error(`庫存不足：${warehouseMasterCache.find(w=>w.id===warehouseId)?.warehouseName || warehouseId} 現有 ${wh.onHand}，本次需出貨 ${deltaQty}。`);
         // Web Firestore transactions accept document references, not queries.
         // Discover IDs, then re-read every candidate in the transaction so concurrent
         // delivery/receipt changes force a retry before any stock is written.
@@ -18257,8 +18260,8 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         cogs=-reversal.totalCost;
     }
 
-    if (invSnap.exists) transaction.set(invRef,{onHand:Math.max(0,inv.onHand-deltaQty),reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
-    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand-deltaQty,reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
+    if (invSnap.exists) transaction.set(invRef,{onHand:issuePlan?issuePlan.aggregateStock.onHand:Math.max(0,inv.onHand-deltaQty),reserved:issuePlan?issuePlan.aggregateStock.reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:issuePlan?issuePlan.warehouseStock.onHand:wh.onHand-deltaQty,reserved:issuePlan?issuePlan.warehouseStock.reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
     const movementRef=db.collection('inventoryMovements').doc();
     transaction.set(movementRef,inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
         warehouseId,itemId:deliveryItemId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
@@ -18266,7 +18269,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     }));
 
-    transaction.set(deliveryReservationRef,{...inventoryReservationPayload(sourceId,order,newReservedRemaining,newReservedRemaining>0?'active':'fulfilled'),itemId:deliveryItemId,warehouseId},{merge:true});
+    transaction.set(deliveryReservationRef,{...(issuePlan?.reservation||{}),...inventoryReservationPayload(sourceId,order,newReservedRemaining,issuePlan?issuePlan.reservation.status:(newReservedRemaining>0?'active':'fulfilled')),itemId:deliveryItemId,warehouseId},{merge:true});
     return { reservedDelta,newReservedQty:newReservedRemaining,lotAllocations,cogs,movementId:movementRef.id };
 }
 function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
