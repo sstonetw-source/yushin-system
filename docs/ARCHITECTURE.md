@@ -141,3 +141,12 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 同一 request ID 相同內容重試不重複預留；CANCELLED／SHIPPED 仍保留原狀態，不重新建立。取消只允許 PENDING，重試 CANCELLED 不再釋放，已寄出不得取消。需求與公司／分倉兩筆預留在同交易提交；不修改實貨、批次或客戶訂單預留。
 - 交易成功後的清單刷新失敗，不再顯示成交易失敗；重試已取消需求也不誤報為新建立。actor、角色、時間在 callback 外固定，交易內重查能力與身分。
 - 同步更新 app、Reservation core 和主倉畫面資源版本。無新 Collection／Rules／Index／查詢／Listener，無 Firebase 部署、資料刪除；多倉拆量、SERVICE 商品、其餘分散寫入及正式環境角色驗收仍未完成。
+
+## 自行訂貨供應承諾共用交易（2026-10-16）
+
+- `src/services/self-order-supply.js` 的 `commitSelfOrderSupply` 為建單同步與手動自行訂貨的唯一交易實作。`registerInitialSelfOrderSupply` 為相容呼叫入口、回傳來源訂單；`registerInitialSelfOrders` 保留逐品項 checkpoint 與一次快取失效。舊 order-workspace 兩套重複交易已刪除。
+- 同交易讀取來源訂單／既有供應紀錄、以 ProcurementDemand 核心核對可訂貨量，驗證 Supply 資料後同步寫 supplyOrders、procurementDemands 與訂單品項、訂貨事件。核心未載入則停止，不跳過驗證。
+- 建單同步沿用 deterministic self-order ID，且保留建單同步期間與採購協助的既有權限；手動入口仍要求同步完成與訂單負責業務能力，不能把兩者權限混成一套寬鬆分支。跨品項同步固定原 UID／角色，切換後停止未完成品項。
+- 手動表單同內容失敗重試保留 operationId；在交易內讀到相同供應意圖就返回、不再追加承諾。識別碼撞到不同來源／品項／供應商／數量／成本／日期／備註則拒絕。actor、角色、時間與供應 reference 在 callback 外固定。
+- 手動防重增加每次交易一筆已知 supply document read，沒有新查詢／Listener／Collection／Rules／Index。表單識別碼只在本頁記憶體保留，重新開啟表單／重載或改內容會視為新意圖，不代表永久跨裝置 ledger。
+- 本批不變更到貨或現貨數量；直送承諾仍無公司倉庫。不代表正式 PO／快速採購全部已統一，多倉拆量、SERVICE 商品與正式環境驗收仍未完成。沒有 Firebase 部署或資料刪除。
