@@ -4,6 +4,12 @@
 
 ## 目標與現況
 
+### 多倉預留衝突的安全預覽（2026-10-17）
+
+- `reserveSingleOrderItem` 遇到單一倉無法覆蓋、但多倉合計仍有可配置實貨時，使用現有 Reservation Core 的 `planMultiWarehouseReservation` 在既有 Transaction 已讀快照上計算只讀分配預覽，回報各倉可配置量、合計及真正剩餘缺口。
+- 此路徑仍明確拒絕單倉 Service 的後續寫入，不建立預留、採購需求或出貨憑證；避免把散落於其他倉的庫存誤算為應採購。未新增查詢、Firestore 集合、Rules、索引或監聽。此非 v2 多倉 Ledger 實際交易，完整多倉分批履約仍待驗收。
+
+
 ### 採購需求併發控制（2026-10-16）
 
 - 正式採購單 commitFormalPurchaseOrder 對安全庫存補貨的每個確定性 procurementDemands/{demandId}，先在同一 Firestore Transaction 讀取存在／不存在的文件，再根據最新承諾數量檢查剩餘量並寫入 PO、supplyOrder 與 demand。兩張 PO 若同時讀取同一需求，Firestore 的衝突重試會重新驗證，不讓舊視窗覆寫新承諾。
