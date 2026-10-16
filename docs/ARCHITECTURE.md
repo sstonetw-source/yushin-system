@@ -4,6 +4,12 @@
 
 ## 目標與現況
 
+### 多倉遷移安全邊界（2026-10-17）
+
+- 現行 inventoryReservations 交易仍是單品項／單倉模式。Reservation Core 新增 assertLegacyReservationLocation，主要單倉寫入（建單預留、取消／恢復、出貨／退貨、訂單調撥／收貨）在交易內重讀預留後，先拒絕含 locationSchemaVersion／locations／舊別名的預留紀錄；也驗證已有預留的單倉位置、產品及數量。不得讓舊 Service 靜默覆寫規劃中的 v2 多倉位置帳。
+- 這是遷移前的保護措施，不是多倉拆量已實作。Rules 仍限制單倉來源形狀，尚未開啟 v2 寫入、跨倉分批出貨與退貨；後續須同步調整交易 Service、Rules 及測試，不得只從畫面放行多倉。
+
+
 ### 採購需求併發控制（2026-10-16）
 
 - 正式採購單 commitFormalPurchaseOrder 對安全庫存補貨的每個確定性 procurementDemands/{demandId}，先在同一 Firestore Transaction 讀取存在／不存在的文件，再根據最新承諾數量檢查剩餘量並寫入 PO、supplyOrder 與 demand。兩張 PO 若同時讀取同一需求，Firestore 的衝突重試會重新驗證，不讓舊視窗覆寫新承諾。
