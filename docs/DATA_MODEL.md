@@ -80,3 +80,9 @@
 ## 建單共用提交（2026-10-16）
 
 沒有新增 Firestore 欄位、集合、Rules 或索引。Forecast 多品項沿用 `orders.sourceType/sourceId/sourceDocumentSyncStatus` 與 `forecasts.linkedDocuments`，由同一 transaction 提交。瀏覽器新增 `${ORDER_DRAFT_STORAGE_PREFIX}:${uid}:forecast:${forecastId}:pending_order_id` 暫存以接續未確認建單；它不是雲端交易事實，也不提供跨裝置去重。手動／估價轉單保留原 pending ID key。沒有正式資料遷移或刪除。
+
+## 盤點操作憑證（2026-10-16）
+
+數量盤點改以 operationId 作為 `inventoryMovements` 文件 ID，沿用 `type:adjustment`、`sourceType:manual`、`sourceId:operationId`、`operation:quantity-editor`，新增 `countInventoryId`、`countTarget`、`actorUid`、`actorRole` 以核對同 ID 重試。備註仍使用 `note`。盤點無差量也保存 `qty:0` 的憑證，庫存／批次不變；盤盈未分批仍無成本文件，不把未知成本當成已確認零成本。
+
+既有 movement 不遷移，Rules 仍禁止 movement update；無新增集合、查詢、索引或 Rules。pending 作業僅保留於目前視窗記憶體，非可跨裝置恢復的佇列。新 Service 讀到既有同 ID 不符憑證時拒絕，不補寫舊格式資料。無正式資料修改／刪除或部署。

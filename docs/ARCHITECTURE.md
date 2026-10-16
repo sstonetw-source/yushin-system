@@ -227,3 +227,11 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 - Service 固定原 UID／角色與資料快照，入口、callback 重跑、讀取及提交後核對身分；已有 ID 回傳權威原單，不覆蓋進度。Forecast 同交易讀來源、核對有效狀態／負責人及提供的版本，再寫訂單和來源 backlink。失敗不留下半份連結；已提交後身分變更帶 `orderCommitted/orderId`。
 - 手動建單沿用一筆 order read；Forecast 從無讀取的 batch 改為一筆 order read 加一筆 Forecast read，新單仍兩筆寫入，重試已有 ID 僅讀 order。無新增查詢、Listener、資料模型、Rules 或索引。Forecast Feature 以每帳號／來源的瀏覽器 pending ID 接續不確定回覆及庫存失敗。
 - 此批只統一建單提交，不把庫存初始化與延後來源同步合併為單交易；共用 classic-global actor／Firestore／helper 尚未全面依賴注入。盤點與其他 Feature 寫入、多倉、SERVICE、跨裝置去重及 Preview 完整驗收仍未完成。前節的建單待辦由本節更新，不代表全系統架構完成。
+
+## 庫存數量盤點服務（2026-10-16）
+
+- `src/services/inventory-count.js` 的 `commitInventoryQuantity` 接手庫存卡片數量盤點。公司／分倉、批次與操作憑證同交易；核心仍是既有 `YushinInventory.quantityAdjustmentLots`。Service 不擁有 DOM、Storage、倉庫快取或畫面；呼叫端傳入明確單倉 fallback 與同步提交後 `onStockCommitted`。
+- Service 固定原 actor、輸入快照、時間及 movement／新批次引用；callback 重跑清空輸出，讀取後與提交後核對身分。原 movement 優先辨識重試，內容／actor 不同拒絕，相同則只讀回原差量，不碰後續庫存。非有限／負值／空字串等異常數量不交給 clamp 正規化掩蓋。
+- Feature 保留固定待確認 ID／內容、阻擋重入與變更後重送，視窗 generation 與身分 guard 防止舊非同步工作關閉新視窗或污染新帳號。提交後刷新失敗不誤報交易失敗；pending 記憶體不跨重載持久化。
+- 變更成本：每次交易增加一筆已知 movement read，既有同 ID 重試僅此一讀。非零盤點保留原 bounded lot query（最多 201，超過 200 拒絕）及逐批次交易重讀／寫入；零差量新增一筆 movement write，不動庫存／批次。保留單倉 fallback，非全面歷史資料對帳。無新查詢／Listener／集合／Rules／索引或正式部署。
+- 批次新增庫存、批號／效期異動、報廢及清單封存仍有 Feature 寫入；尚未將全部人工庫存入口統一。全域 actor／Firestore／純 helper 依賴、多倉、SERVICE 與 Preview 全流程驗收仍待收尾。

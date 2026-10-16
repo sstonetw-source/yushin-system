@@ -128,3 +128,9 @@ cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 P
 以 main `6e078fe` 為基準，手動／估價轉單及 Forecast 多品項改共用 `commitOrderCreation`；Feature 不再另開訂單文件交易，草稿與 pending ID 仍屬 Feature。Forecast 訂單／來源 backlink 同交易，新增來源存在／狀態／負責人／版本檢查，原 ID 重試不覆蓋已保存事實。新增每帳號／Forecast 的瀏覽器 pending ID，在回覆遺失及庫存失敗後可接續；不是跨裝置永久 ledger。Service 固定 actor／快照、重跑清空輸出、提交後切換身分標記已提交。
 
 新增 19 項應用測試，1,315 項本機全數通過；另加兩項實際 Rules Service 交易整合測試，由 CI 驗證。手動沿用一筆 order read；Forecast 新單從 batch 改為 order＋Forecast 兩筆已知 read、兩筆 write，已有 ID 重試只讀 order。無新查詢／Listener／Collection／Rules／Index，無部署或正式資料修改。庫存初始化、來源同步仍分段；盤點、多倉、SERVICE、全面依賴注入與 Preview 全流程驗收未完成。
+
+### 2026-10-16 架構收尾：庫存數量盤點
+
+以 main `484a01b` 為基準，將庫存卡片盤點交易移至 `commitInventoryQuantity`，沿用原批次純規則。固定視窗待確認 ID 與不可變 movement 憑證，核對產品／倉庫／目標／備註／actor 後只讀接續；回覆遺失後不覆蓋後續庫存。零差量也保存操作憑證，新增 movement 的 `countInventoryId/countTarget/actorUid/actorRole`，無成本臆測或資料遷移。Service 驗證原始數量／預留／識別，Feature 保留輸入、重入及 generation／session guard，透過明確通知失效快取。
+
+新增 14 項應用測試，本機 1,329 項全數通過，生成一致、src／app 語法與差異檢查通過。另加入實際 Rules 下 admin／purchaser／warehouse 的增加、減少、重試與憑證不可更新整合測試，CI 另行驗證。每交易增加一筆已知 movement read，重試只讀 movement；非零量保留原批次 bounded query，零差量多一筆 movement write。無新查詢／Listener／集合／Rules／索引、無正式部署或資料刪除。pending 不跨重載持久化；批次新增／報廢與其他 Feature 寫入、多倉、SERVICE、全面依賴注入和 Preview 驗收尚未完成。
