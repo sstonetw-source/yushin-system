@@ -23,6 +23,7 @@ const parts = [
   "src/features/purchasing/purchasing-workspace.js",
   "src/services/quick-purchase.js",
   "src/services/supply-order.js",
+  "src/services/formal-purchase-order.js",
   "src/services/receiving.js",
   "src/features/purchasing/purchase-order-editor.js",
   "src/features/quotations/next-quotation.js",

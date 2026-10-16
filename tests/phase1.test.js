@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const reservation = require('../modules/reservation-core.js');
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const formalService = fs.readFileSync(path.join(__dirname, '../src/services/formal-purchase-order.js'), 'utf8');
 const cssSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
 const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const rulesSource = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
@@ -1002,8 +1003,8 @@ test('phase 3 links quote to orders and orders to purchase orders in both direct
     const poEnd = appSource.indexOf("window.addEventListener('afterprint'", poStart);
     const po = appSource.slice(poStart, poEnd);
     assert.match(po, /linkedDocumentFields/);
-    assert.match(po, /DOCUMENT_TYPES\.PURCHASE_ORDER/);
-    assert.match(po, /linkedDocuments: normalizeDocumentLinks/);
+    assert.match(formalService, /DOCUMENT_TYPES\.PURCHASE_ORDER/);
+    assert.match(formalService, /linkedDocuments: normalizeDocumentLinks/);
 });
 
 test('phase 3 cancels generated orders instead of hard deleting them', () => {
@@ -2009,7 +2010,7 @@ test('new purchase documents do not persist receipt workflow state', () => {
     const source=appSource.slice(start,end);
     assert.doesNotMatch(source,/receiptStatus:/);
     assert.doesNotMatch(source,/receiptRecords:/);
-    assert.match(source,/poRecord\.supplyOrderIds=supplyOrderIds/);
+    assert.match(formalService,/poRecord\.supplyOrderIds=supplyOrderIds/);
 });
 
 test('formal purchase document derives ordered progress from supplyOrders only', () => {
@@ -2039,8 +2040,8 @@ test('stock replenishment always creates a valid warehouse supply path', () => {
     assert.match(source, /新增庫存採購單是公司庫存採購，不能設定為原廠直送/);
     assert.match(source, /新增庫存採購單必須指定入庫倉庫/);
     assert.match(source, /purchaseType: poItems\.every\(item => !item\.orderId\) \? 'stock' : 'order'/);
-    assert.match(source, /supplyOrdersCollection\(\)\.doc\(supplyId\)/);
-    assert.match(source, /warehouseId:\(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\?'':/);
+    assert.match(formalService, /supplyOrdersCollection\(\)\.doc\(supplyId\)/);
+    assert.match(formalService, /warehouseId:\(item\.fulfillmentType\|\|'WAREHOUSE'\)==='DIRECT_SHIP'\?'':/);
 });
 
 test('ordered action belongs to purchasing while the order list only shows progress', () => {
