@@ -70,6 +70,14 @@ function fixture({role='admin',held=3,qty=5,status='active'}={}){
  },'U',['sales','engineer'].includes(role),role);
  return {docs,reads,writes,run,c,db};
 }
+test('legacy cancellation cannot erase a multi-location reservation even when order is cancelled',async()=>{
+ const f=fixture(),saved=f.docs.get('inventoryReservations/O__I');
+ Object.assign(saved,{locationSchemaVersion:2,locations:[{warehouseId:'A',reservedQty:3}]});
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.run('cancelled'),/多倉位置資料/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.writes.length,0);
+});
 test('actual cancellation preserves other orders held stock and never changes onHand',async()=>{
  for(const role of ['admin','sales','engineer']){
   const f=fixture({role});f.docs.get('inventory/P').reserved=7;f.docs.get('warehouseStocks/A__P').reserved=6;
