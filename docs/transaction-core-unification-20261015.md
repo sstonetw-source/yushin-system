@@ -98,3 +98,7 @@ fulfillment-core 新增 deliveryQuantities，normalizeItem 與 dispatchState 共
 ### 2026-10-16 在途分段同步收斂
 
 registerPurchaseIncoming 固定建單／重試原 UID／角色跨 PDF 及逐品項接續，交易讀取後與提交後重新核對。每品項交易增加一筆已知 PO read，重查供應連結、原單終止狀態與供應歸屬。以 Receiving 投影計算剩餘在途，拒絕無效數量／超額到貨、公司或分倉不足以完整扣回、混用產品倉庫識別，移除預設倉庫猜測。快取採成功交易實際產品／倉庫，丟棄的 callback 結果不可外洩。測試涵蓋跨品項部分失敗續跑、帳號切換、舊畫面遇已取消原單、缺連結、數量異常、完整扣回及重跑不重複計入。保留逐供應 checkpoint，不宣稱整張 PO／incoming 已單交易；多倉拆量、SERVICE 及正式環境驗收尚待處理，無 Firebase 部署或資料刪除。
+
+### 2026-10-16 採購取消／結清
+
+cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 PO 連結驗證。缺來源文件、承諾量或公司／分倉 incoming 不足，均整筆拒絕，不以 clamp 掩蓋；保留已到貨及直送語意。整單停止移至 stopPurchaseOrderOutstanding，最後重讀原單及所有供應後 transaction 結清，移除 UI 直接 set；分段失敗與最後提交失敗都可接續，不重複扣回。成功後刷新失敗不誤報交易失敗。增加已知文件讀取：正式單列原 PO、整單啟動 PO 與最後 PO／各供應。無新查詢／Listener／Collection／Rules／Index，無部署或資料刪除；整張 PO 仍非單交易，多倉拆量、SERVICE 及正式環境驗收未完成。

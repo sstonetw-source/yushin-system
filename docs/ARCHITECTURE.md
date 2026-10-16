@@ -174,3 +174,11 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 以 Receiving.normalizeSupply 為剩餘待到貨與已登記在途投影來源。供應／到貨／已登記／公司及分倉 incoming 拒絕負值、非有限數字、空值與布林；到貨量不可超過採購量。負 delta 必須在公司及分倉完整扣回，不能以歸零掩蓋不足；僅允許浮點誤差範圍內的零值收斂。
 - 公司與分倉存貨識別如有資料則必須相符；快取失效使用最後成功交易的產品／倉庫，移除從 supply ID 尾碼及舊畫面品項猜測的方式。每次 callback 清除暫存結果，movement reference 固定於 callback 外。
 - 每供應增加一筆已知 PO document read，無新查詢／Listener／Collection／Rules／Index。保留逐供應 checkpoint：後續品項失敗不回滾已成功品項，重試依 incomingRegisteredQty 接續，不代表整張 PO 與所有 incoming 已合為單交易。無 Firebase 部署或資料刪除；多倉拆量、SERVICE 與正式環境驗收仍待處理。
+
+## 採購取消／結清服務（2026-10-16）
+
+- 單品項正式 PO／快速採購共用 cancelOutstandingSupplyRecord，維持自行訂貨不由此入口取消。服務直接驗證原因、原 UID／角色及採購取消能力；供應類型／文件歸屬不符、正式 PO 缺少原單連結均停止。讀取後及提交後核對身分，actor／時間／movement reference 固定於 callback 外。
+- 取消量採 Receiving 投影；已到貨不回沖，部分到貨 CLOSED、未到貨 CANCELLED。來源訂單／需求已存在參照卻缺文件、來源承諾量不足、公司／分倉 incoming 不足、無效數量、產品／倉庫識別不符、直送卻有公司 incoming 或終止數量不符，都拒絕整筆，不以歸零或最低已到貨量掩蓋差異。
+- stopPurchaseOrderOutstanding 接手整張 PO 逐供應取消與最後狀態寫入。最後 transaction 重讀 PO 及所有供應，驗證連結未變、各列已停止／全到貨且在途釋放，再依目前已到貨及停止量結清；UI 不再直接 set PO。最後結清失敗可重試，既有終止列不重扣，已完成到貨 PO 不產生取消寫入。
+- 仍是逐供應 checkpoint，不把整張 PO 宣稱為單交易；中途失敗已成功列保留。單品項正式 PO 取消增加一筆原 PO read；整單服務另有啟動 PO read 及最後 PO／所有供應 read，均為已知文件，無新查詢／Listener／Collection／Rules／Index。成功後快取／畫面失敗與未提交失敗分開回饋。
+- 測試覆蓋共同交易、callback 重跑、完整扣回、錯誤來源／缺資料、角色切換、跨列接續、最後 PO 提交失敗、連結競態與終止重試。無 Firebase 部署或資料刪除；多倉拆量、SERVICE、其他分散寫入及正式環境驗收未完成。
