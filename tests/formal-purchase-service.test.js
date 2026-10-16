@@ -103,12 +103,95 @@ test('formal service rejects oversubscription cancelled source and stale item id
         await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));assert.equal(x.writes.length,0);
     }
 });
-test('formal stock purchase has no source order and refuses ambiguous repeated demand',async()=>{
-    const x=setup({stock:true});const result=await x.c.commitFormalPurchaseOrder(x.po);
-    assert.equal(result.committedSourceOrders.length,0);assert.equal(result.committedSupplyOrders[0].sourceType,'STOCK_REPLENISHMENT');
+test('independent manual stock PO lines get unique demand IDs and replay the same identity',async()=>{
+    const x=setup({stock:true});
+    x.po.items.push({...x.po.items[0],qty:2});
+    const result=await x.c.commitFormalPurchaseOrder(x.po);
+    assert.equal(result.committedSourceOrders.length,0);
     assert.equal(result.committedSupplyOrders[0].warehouseId,'W');
-    const y=setup({stock:true});y.po.items.push({...y.po.items[0]});
-    await assert.rejects(y.c.commitFormalPurchaseOrder(y.po),/合併為單一採購列/);assert.equal(y.records.size,0);
+    assert.equal(result.committedSupplyOrders[0].sourceId,'MANUAL_PO:PO1:0');
+    assert.equal(result.committedSupplyOrders[1].sourceId,'MANUAL_PO:PO1:1');
+    assert.ok(x.records.has('procurementDemands/STOCK_REPLENISHMENT:MANUAL_PO:PO1:0'));
+    assert.ok(x.records.has('procurementDemands/STOCK_REPLENISHMENT:MANUAL_PO:PO1:1'));
+    const count=x.writes.length;
+    await x.c.commitFormalPurchaseOrder(x.po);
+    assert.equal(x.writes.length,count,'replay must not duplicate commitments');
+});
+test('same stock replenishment demand across different POs cannot be overcommitted by stale form',async()=>{
+    const x=setup({stock:true}),line=x.po.items[0];
+    Object.assign(line,{sourceId:'inventory-I1',demandId:'STOCK_REPLENISHMENT:inventory-I1',demandRequestedQty:2,demandOrderedQty:0});
+    await x.c.commitFormalPurchaseOrder(x.po);
+    assert.equal(x.records.get('procurementDemands/STOCK_REPLENISHMENT:inventory-I1').orderedQty,1);
+    const second={...structuredClone(x.po),poNo:'PO2',items:[{...line,qty:1}]};
+    await x.c.commitFormalPurchaseOrder(second);
+    const demand=x.records.get('procurementDemands/STOCK_REPLENISHMENT:inventory-I1');
+    assert.equal(demand.orderedQty,2);
+    assert.equal(demand.remainingToOrderQty,0);
+    const count=x.writes.length;
+    await assert.rejects(x.c.commitFormalPurchaseOrder({...second,poNo:'PO3'}),/採購需求數量已變更/);
+    assert.equal(x.records.has('purchaseOrders/PO3'),false);
+    assert.equal(x.writes.length,count);
+});
+test('stock replenishment rejects reused cancelled or unrelated demand identities without writes',async()=>{
+    for(const mutation of ['id','product','cancel','invalid']) {
+        const x=setup({stock:true});const line=x.po.items[0];
+        Object.assign(line,{sourceId:'I',demandId:'STOCK_REPLENISHMENT:I',demandRequestedQty:2});
+        if(mutation==='id')line.demandId='STOCK_REPLENISHMENT:other';
+        if(mutation==='invalid')line.demandRequestedQty=Infinity;
+        if(mutation==='product'||mutation==='cancel'){
+            x.records.set('procurementDemands/STOCK_REPLENISHMENT:I',{
+                demandId:'STOCK_REPLENISHMENT:I',sourceType:'STOCK_REPLENISHMENT',sourceId:'I',sourceItemId:'',
+                productKey:mutation==='product'?'other':'p',requestedQty:2,orderedQty:0,receivedQty:0,
+                status:mutation==='cancel'?'CANCELLED':'PENDING'
+            });
+        }
+        await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+        assert.equal(x.writes.length,0);
+    }
+});
+test('simultaneous POs for one stock demand conflict and retry on current committed quantity',async()=>{
+    const x=setup({stock:true});
+    Object.assign(x.po.items[0],{sourceId:'I1',demandId:'STOCK_REPLENISHMENT:I1',demandRequestedQty:1});
+    let arrival=0,release;
+    const bothPrepared=new Promise(resolve=>{release=resolve});
+    // The mock transaction simulates Firestore optimistic conflict detection,
+    // including a retry when another PO updated a read document.
+    x.c.runRoleTransaction=async callback=>{
+        for(let attempt=0;attempt<3;attempt++){
+            const reads=new Map(),pending=[];let writing=false;
+            await callback({
+                get:async ref=>{
+                    assert.equal(writing,false,'transaction must read before writing');
+                    const data=structuredClone(x.records.get(ref.key));
+                    reads.set(ref.key,JSON.stringify(data));
+                    return {id:ref.id,exists:data!==undefined,data:()=>structuredClone(data)};
+                },
+                set:(ref,data,opts)=>{writing=true;pending.push([ref.key,data,opts?.merge]);},
+                update:(ref,data)=>{writing=true;pending.push([ref.key,data,true]);}
+            });
+            if(attempt===0){arrival++;if(arrival===2)release();await bothPrepared;}
+            if([...reads].some(([key,before])=>before!==JSON.stringify(x.records.get(key))))continue;
+            for(const [key,data,merge] of pending){
+                x.records.set(key,structuredClone(merge?{...x.records.get(key),...data}:data));
+                x.writes.push(key);
+            }
+            return;
+        }
+        throw new Error('transaction conflict');
+    };
+    const a=structuredClone(x.po),b={...structuredClone(x.po),poNo:'PO2'};
+    const results=await Promise.allSettled([x.c.commitFormalPurchaseOrder(a),x.c.commitFormalPurchaseOrder(b)]);
+    assert.equal(results.filter(row=>row.status==='fulfilled').length,1);
+    assert.equal(results.filter(row=>row.status==='rejected').length,1);
+    assert.equal(x.records.get('procurementDemands/STOCK_REPLENISHMENT:I1').orderedQty,1);
+    assert.equal(x.writes.filter(key=>key.startsWith('purchaseOrders/')).length,1);
+});
+test('explicit repeated stock replenishment source within one PO is rejected',async()=>{
+    const x=setup({stock:true});
+    Object.assign(x.po.items[0],{sourceId:'I1',demandId:'STOCK_REPLENISHMENT:I1',demandRequestedQty:2});
+    x.po.items.push({...x.po.items[0]});
+    await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/合併為單一採購列/);
+    assert.equal(x.records.size,0);
 });
 test('formal boundary rejects invalid cost quantity and missing permission',async()=>{
     for(const patch of [{qty:0},{qty:-1},{qty:NaN},{unitPrice:null},{unitPrice:-1},{unitPrice:NaN}]) {

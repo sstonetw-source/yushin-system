@@ -1867,7 +1867,7 @@ test('V2 formal purchase documents create authoritative supply lines', () => {
     assert.match(appSource, /method:'PURCHASING_PO'/);
     assert.match(appSource, /const sourceType=item\.sourceType\|\|\(item\.orderId\?'SALES_ORDER':'STOCK_REPLENISHMENT'\)/);
     assert.match(appSource, /sourceType,/);
-    assert.match(appSource, /sourceId:item\.orderId\|\|item\.sourceId\|\|''/);
+    assert.match(appSource, /sourceId:sourceType==='STOCK_REPLENISHMENT'\?demandProjection\.sourceId/);
     assert.match(appSource, /sourceItemId:item\.itemId\|\|item\.sourceItemId\|\|''/);
     assert.match(appSource, /purchaseDocumentId:poDocumentId/);
     assert.match(appSource, /purchaseDocumentNo:poNo/);

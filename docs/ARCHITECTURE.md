@@ -4,6 +4,12 @@
 
 ## 目標與現況
 
+### 採購需求併發控制（2026-10-16）
+
+- 正式採購單 commitFormalPurchaseOrder 對安全庫存補貨的每個確定性 procurementDemands/{demandId}，先在同一 Firestore Transaction 讀取存在／不存在的文件，再根據最新承諾數量檢查剩餘量並寫入 PO、supplyOrder 與 demand。兩張 PO 若同時讀取同一需求，Firestore 的衝突重試會重新驗證，不讓舊視窗覆寫新承諾。
+- 直接手動備庫採購沒有共同安全庫存需求，使用 STOCK_REPLENISHMENT:MANUAL_PO:{poNo}:{lineIndex} 作為個別採購需求 ID，避免重複使用產品 ID 導致跨 PO 汙染；現有安全庫存入口繼續使用固定來源 inventory ID。
+- 這是「同一需求文件」的交易並發保護；不等於同步重新計算所有倉庫現貨或跨不同來源的全域採購預算上限。舊需求累計週期、取消／收貨後的動態重新補貨仍須專案驗收。
+
 ### 庫存設定／清單封存（2026-10-16）
 
 - `src/services/inventory-planning.js` 擁有 `commitInventoryPlanningSettings`／`commitInventoryListArchive` 的交易；Feature 只管理確認、固定待確認 ID、視窗 generation、快取與呈現。Core 共用策略列舉、舊值推導及安全庫存正規化。
