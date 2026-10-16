@@ -2544,9 +2544,13 @@ test('actual reservation sync refuses insufficient company and warehouse balance
 
 async function actualShipmentFixture(uid,role){
  const f=await orderInitializationFixture(uid,role,{onHand:5,ownerUid:['purchaser','warehouse'].includes(role)?'sales1':uid});
- await f.run();
+ // Shipment is tested from an already initialized order. Warehouse users do
+ // not own order initialization; that separate service has its own role tests.
  const saved=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
- await seed('orders/'+f.id,{...saved,inventoryReservationStatus:'completed',items:saved.items.map(i=>({...i,dispatchPreparedQty:5})),deliveryRecords:[]});
+ await seed('orders/'+f.id,{...saved,inventoryReservationStatus:'completed',items:saved.items.map(i=>require('../modules/fulfillment-core').normalizeItem({...i,reservedQty:5,dispatchPreparedQty:5})),deliveryRecords:[]});
+ await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:5,incoming:0});
+ await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:5,incoming:0});
+ await seed('inventoryReservations/'+f.id+'__I',{orderId:f.id,itemId:'I',orderItemIndex:0,ownerUid:saved.ownerUid,salesCode:saved.salesCode,productKey:'init-product',warehouseId:'W1',quantity:5,shortageQty:0,status:'active'});
  await seed('inventoryLots/issue-'+uid,{productKey:'init-product',productId:'init-product',warehouseId:'W1',remainingQty:5,qty:5,sourceType:'INITIAL_STOCK',sourceId:'issue-'+uid});
  const rawClient=compatDb(uid),plain=x=>JSON.parse(JSON.stringify(x));
  // Keep document references and transactions on one SDK instance.
