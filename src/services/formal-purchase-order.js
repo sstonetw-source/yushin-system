@@ -1,5 +1,11 @@
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
 async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
+        // Validate numbers before JSON snapshotting: JSON turns NaN/Infinity into null.
+        if(poRecord && Array.isArray(poRecord.items) && poRecord.items.some(item=>
+            ['demandRequestedQty','demandOrderedQty','demandReceivedQty'].some(key=>
+                item[key]!==undefined && item[key]!==null
+                && (!Number.isFinite(Number(item[key])) || Number(item[key])<0))))
+            throw new Error('採購需求數量不正確。');
         poRecord=JSON.parse(JSON.stringify(poRecord));
         if (!poRecord || typeof poRecord.poNo!=='string' || !poRecord.poNo.trim() || poRecord.poNo.includes('/')
             || !String(poRecord.vendorName||'').trim() || !Array.isArray(poRecord.items) || !poRecord.items.length)
