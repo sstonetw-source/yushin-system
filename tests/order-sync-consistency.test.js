@@ -335,3 +335,76 @@ test('locked reservations never initialize into a custody master regardless of i
   await assert.rejects(f.sync(),/啟用的庫存倉庫/);assert.deepEqual([...f.docs],before);
  }
 });
+
+test('reservation sync refuses raw corrupt or insufficient balances without clearing the ledger',async()=>{
+ const mutations=[
+  f=>f.docs.get('inventory/P').reserved=2,
+  f=>f.docs.get('warehouseStocks/W__P').reserved=2,
+  f=>f.docs.get('inventory/P').onHand=2,
+  f=>f.docs.get('warehouseStocks/W__P').onHand=2,
+  f=>f.docs.get('orders/O').items[0].reservedQty=2,
+  f=>f.docs.delete('inventory/P'),
+  f=>f.docs.delete('warehouseStocks/W__P'),
+  ...[null,NaN,Infinity,-1,'bad','',true].flatMap(value=>[
+   f=>f.docs.get('inventoryReservations/O__I').quantity=value,
+   f=>f.docs.get('inventory/P').reserved=value,
+   f=>f.docs.get('warehouseStocks/W__P').onHand=value,
+   f=>f.docs.get('orders/O').items[0].reservedQty=value
+  ])
+ ];
+ for(const mutate of mutations){
+  const f=fixture({onHand:3});await f.sync();
+  Object.assign(f.docs.get('orders/O').items[0],{qty:1,orderedQty:1});mutate(f);
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.sync(),/核對|稽核|不一致|不足|異常/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.controls.selfCalls,1);
+ }
+});
+test('reservation relocation cannot shrink a release against missing or insufficient old accounts',async()=>{
+ for(const mutate of [
+  f=>f.docs.get('inventory/P').reserved=2,
+  f=>f.docs.get('warehouseStocks/W__P').reserved=2,
+  f=>f.docs.delete('inventory/P'),
+  f=>f.docs.delete('warehouseStocks/W__P')
+ ]){
+  const f=fixture({onHand:3});await f.sync();addWarehouse(f,'W2',5);
+  f.docs.get('orders/O').items[0].warehouseId='W2';mutate(f);
+  const before=structuredClone([...f.docs]);await assert.rejects(f.sync(),/核對|稽核|不足|舊庫存/);
+  assert.deepEqual([...f.docs],before);
+ }
+});
+test('valid fractional release uses the common balance contract and remains idempotent',async()=>{
+ const f=fixture({onHand:3.5});await f.sync();
+ Object.assign(f.docs.get('orders/O').items[0],{qty:1.5,orderedQty:1.5});await f.sync();await f.sync();
+ assert.equal(f.docs.get('inventory/P').reserved,1.5);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,1.5);
+ assert.equal(f.docs.get('inventoryReservations/O__I').quantity,1.5);
+ assert.equal([...f.docs.values()].filter(row=>row.type==='release').length,1);
+});
+test('a conflict retry revalidates the raw reservation balance before publishing any result',async()=>{
+ const f=fixture({onHand:3});await f.sync();Object.assign(f.docs.get('orders/O').items[0],{qty:1,orderedQty:1});
+ f.controls.beforeCommit=()=>f.put('inventory/P',{...f.docs.get('inventory/P'),reserved:2});
+ await assert.rejects(f.sync(),/不足|核對/);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,3);
+ assert.equal(f.docs.get('inventoryReservations/O__I').quantity,3);
+ assert.equal(f.order().items[0].reservedQty,3);
+ assert.equal([...f.docs.values()].filter(row=>row.type==='release').length,0);
+});
+test('cross-product reconciliation validates and releases the full old company account',async()=>{
+ for(const corrupted of [false,true]){
+  const f=fixture({onHand:3});await f.sync();
+  f.put('inventory/Q',{productKey:'Q',onHand:5,reserved:0});
+  f.put('warehouseStocks/W__Q',{productKey:'Q',warehouseId:'W',onHand:5,reserved:0});
+  f.docs.get('orders/O').items[0].productId='Q';
+  if(corrupted)f.docs.get('inventory/P').reserved=2;
+  const before=structuredClone([...f.docs]);
+  if(corrupted){await assert.rejects(f.sync(),/不足|核對/);assert.deepEqual([...f.docs],before);}
+  else{
+   await f.sync();await f.sync();
+   assert.equal(f.docs.get('inventory/P').reserved,0);
+   assert.equal(f.docs.get('warehouseStocks/W__P').reserved,0);
+   assert.equal(f.docs.get('inventory/Q').reserved,5);
+   assert.equal(f.docs.get('inventoryReservations/O__I').productKey,'Q');
+  }
+ }
+});

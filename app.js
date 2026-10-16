@@ -10241,6 +10241,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
     let releasedStock=null;
 
     await runRoleTransaction(async tx=>{
+        result=undefined;stockToInvalidate=null;releasedStock=null;
         // Read the current source in every retry. Never publish a caller's full-item snapshot.
         const orderSnap=await tx.get(orderRef);
         if(currentUser?.uid!==syncUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
@@ -10326,7 +10327,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
         if(!selected?.master||!globalThis.YushinReservation.physicalWarehouse(selected.master))throw new Error('找不到啟用的庫存倉庫，請先確認倉庫主檔後重試。');
         const warehouseRef=selected.ref,warehouseSnap=selected.snapshot;
         const warehouse=inventoryNumbers(warehouseSnap.exists?warehouseSnap.data():{});
-        const existingQty=Math.max(0,Number(existing.quantity||0));
+        const existingQty=existing.quantity===undefined?0:existing.quantity;
         const oldProductKey=String(existing.productKey||'');
         const oldWarehouseId=String(existing.warehouseId||'');
         const sameStock=oldProductKey===productKey&&oldWarehouseId===warehouseId;
@@ -10363,24 +10364,37 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
             oldWarehouse=inventoryNumbers(oldWarehouseSnap.data());
         }
 
+        // Share the lifecycle balance contract; raw snapshots must be checked
+        // before any clamping or release can hide a corrupt reservation account.
+        if(!sameStock)globalThis.YushinReservation.validateReservationBalance({
+            existingQty:0,
+            aggregateStock:aggregateSnap?.exists?aggregateSnap.data():undefined,
+            warehouseStock:warehouseSnap.exists?warehouseSnap.data():undefined
+        });
+        globalThis.YushinReservation.validateReservationBalance({
+            existingQty,itemReservedQty:Object.hasOwn(item,'reservedQty')?item.reservedQty:existingQty,
+            aggregateStock:sameStock?(aggregateSnap?.exists?aggregateSnap.data():undefined):oldAggregateSnap?.data(),
+            warehouseStock:sameStock?(warehouseSnap.exists?warehouseSnap.data():undefined):oldWarehouseSnap?.data()
+        });
+
         if(aggregateRef&&aggregateSnap?.exists){
             let nextReserved=aggregate.reserved;
-            if(plan.releaseQty>0&&oldProductKey===productKey)nextReserved=Math.max(0,nextReserved-plan.releaseQty);
+            if(plan.releaseQty>0&&oldProductKey===productKey)nextReserved=nextReserved-plan.releaseQty;
             nextReserved+=plan.additionalReserveQty;
             if(nextReserved!==aggregate.reserved)tx.update(aggregateRef,{reserved:nextReserved,updatedAt:now});
         }
         if(plan.releaseQty>0&&oldProductKey&&oldProductKey!==productKey&&oldAggregateRef&&oldAggregateSnap?.exists){
-            tx.update(oldAggregateRef,{reserved:Math.max(0,oldAggregate.reserved-plan.releaseQty),updatedAt:now});
+            tx.update(oldAggregateRef,{reserved:oldAggregate.reserved-plan.releaseQty,updatedAt:now});
         }
 
         if(warehouseRef&&warehouseSnap?.exists){
             let nextReserved=warehouse.reserved;
-            if(plan.releaseQty>0&&sameStock)nextReserved=Math.max(0,nextReserved-plan.releaseQty);
+            if(plan.releaseQty>0&&sameStock)nextReserved=nextReserved-plan.releaseQty;
             nextReserved+=plan.additionalReserveQty;
             if(nextReserved!==warehouse.reserved)tx.update(warehouseRef,{reserved:nextReserved,updatedAt:now});
         }
         if(plan.releaseQty>0&&!sameStock&&oldWarehouseRef&&oldWarehouseSnap?.exists){
-            tx.update(oldWarehouseRef,{reserved:Math.max(0,oldWarehouse.reserved-plan.releaseQty),updatedAt:now});
+            tx.update(oldWarehouseRef,{reserved:oldWarehouse.reserved-plan.releaseQty,updatedAt:now});
             releasedStock={productKey:oldProductKey,warehouseId:oldWarehouseId};
         }
 

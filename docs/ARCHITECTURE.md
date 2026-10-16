@@ -4,6 +4,13 @@
 
 ## 目標與現況
 
+
+### 預留同步與生命週期的共同帳目驗證（2026-10-17）
+
+已實作：`reservation-core.validateReservationBalance` 共用於取消／恢復與一般訂單預留同步。在交易內驗證原始公司／分倉 onHand、reserved、transferFreeInTransit 與預留量；無效數量、預留不足及明確保存的品項 reservedQty 不符時整筆拒絕，不透過歸零縮量清帳。重新配置時亦驗證舊產品／倉庫帳；合法歷史小數與數字字串保留。缺少品項 reservedQty 的歷史資料沿用預留帳，不補寫或遷移正式資料。
+
+同步的釋放量使用完整差額；callback 重試重置本次回傳及快取通知目標，並重讀驗證帳目。本批不新增查詢、寫入、集合、Rules 或索引；這是 Service／Core 防護，不代表所有原生寫入的 Rules 已完成同等稽核。多倉 ledger、完整服務型訂單與 Preview 全流程仍未完成。
+
 ### 多倉預留衝突的安全預覽（2026-10-17）
 
 - `reserveSingleOrderItem` 遇到單一倉無法覆蓋、但多倉合計仍有可配置實貨時，使用現有 Reservation Core 的 `planMultiWarehouseReservation` 在既有 Transaction 已讀快照上計算只讀分配預覽，回報各倉可配置量、合計及真正剩餘缺口。
