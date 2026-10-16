@@ -42,14 +42,15 @@ test('both purchasing methods show cancellation only to admin or purchaser, neve
 test('formal receiving line cancellation targets just its supply, retaining another PO line',async()=>{
  const supply={id:'S1',type:'PURCHASING_PO',status:'ORDERED',qty:3,receivedQty:1,purchaseDocumentId:'PO1',purchaseDocumentNo:'PO-01',itemCode:'ABC'};
  const calls=[],alerts=[],prompts=[];
- const c=vm.createContext({window:{},canCreatePurchaseOrderCapability:()=>true,purchaseCancellationInProgress:new Set(),purchaseHistorySupplyCache:new Map(),supplyReceivingCache:[supply,{id:'S2',purchaseDocumentId:'PO1'}],
+ const c=vm.createContext({window:{},currentUser:{uid:'buyer'},currentUserRole:'purchaser',canCreatePurchaseOrderCapability:()=>true,purchaseCancellationInProgress:new Set(),purchaseHistorySupplyCache:new Map(),supplyReceivingCache:[supply,{id:'S2',purchaseDocumentId:'PO1'}],
   supplyOrdersCollection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>supply})})}),firestoreReadWithTimeout:p=>p,
   isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),prompt:message=>{prompts.push(message);return 'Supplier stopped shipment';},alert:message=>alerts.push(message),document:{getElementById:()=>null},
   cancelOutstandingSupplyRecord:async(...args)=>{calls.push(args);return {terminalStatus:'CLOSED',cancelledQty:2,receivedQty:1,orderId:''};},loadActiveReceivingSupplyCache:async()=>{},refreshAffectedOrderCaches:async()=>{},showActionFeedback:()=>{},console});
  const start=app.indexOf('window.cancelSupplyOutstanding = async function');
  vm.runInContext(app.slice(start,app.indexOf('\nwindow.cancelPurchaseOrderOutstanding',start)),c);
  await c.window.cancelSupplyOutstanding('S1');
- assert.deepEqual(calls,[['PO1','S1','Supplier stopped shipment']]);
+ assert.deepEqual(calls.map(args=>args.slice(0,3)),[['PO1','S1','Supplier stopped shipment']]);
+ assert.equal(calls[0][3].actorUid,'buyer');assert.equal(calls[0][3].actorRole,'purchaser');
  assert.deepEqual([...c.supplyReceivingCache].map(row=>row.id),['S2']);
  assert.equal(c.purchaseHistorySupplyCache.get('S1').status,'CLOSED');
  assert.match(prompts[0],/只取消此品項/);assert.equal(alerts.length,0);

@@ -1946,7 +1946,8 @@ test('quick manual cancellation reuses the same audited cancellation transaction
     const formalStart=app.indexOf('window.cancelPurchaseOrderOutstanding = async function');
     const formalEnd=app.indexOf('\nlet poReceiptTargetId',formalStart);
     const formalSource=app.slice(formalStart,formalEnd);
-    assert.match(formalSource,/cancelOutstandingSupplyRecord\(poId,supplyId,reason\)/);
+    assert.match(formalSource,/stopPurchaseOrderOutstanding\(poId,reason,\{actorUid,actorRole\}\)/);
+    assert.match(app,/cancelOutstandingSupplyRecord\(poId,supplyId,reason,actor\)/);
 });
 
 
@@ -1983,8 +1984,8 @@ test('ERP close semantics distinguish partial receipt from zero-receipt cancella
 
     const poStart=app.indexOf('window.cancelPurchaseOrderOutstanding = async function');
     const poEnd=app.indexOf('\nlet poReceiptTargetId',poStart);
-    const poSource=app.slice(poStart,poEnd);
-    assert.match(poSource,/let receivedQty=0/);
+    const poSource=fs.readFileSync(path.join(__dirname,'../src/services/supply-order.js'),'utf8');
+    assert.match(poSource,/receivedQty=0/);
     assert.match(poSource,/const documentStatus=receivedQty>0\?'CLOSED':'CANCELLED'/);
     assert.match(poSource,/status:documentStatus/);
     assert.match(app,/if\(status==='CLOSED'\)return '已結案'/);
