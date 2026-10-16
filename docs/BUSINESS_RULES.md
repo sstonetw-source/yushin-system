@@ -4,6 +4,11 @@
 
 ## 名詞與公式
 
+### 多倉位置帳導入前的單倉安全防線（2026-10-17）
+
+目前單倉訂單預留的交易不得接收含 locationSchemaVersion、locations、allocations 或 warehouseAllocations 的預留文件；即使數量為零也必須拒絕，以免新位置帳被既有 merge 寫入汙染。Core assertLegacyReservationLocation 同時核對非零舊預留的合法數量與操作倉庫／品項。多倉分批預留和交付仍待 Service、Rules、Emulator 完整啟用。
+
+
 ### 庫存策略與清單封存（2026-10-16）
 
 - 策略只接受 NO_STOCK／SAFETY_STOCK／ORDER_ONLY；安全庫存須有限正數，其餘策略將目標量設為零。只改規劃欄位，不取消既有需求／PO 或修改實貨。
