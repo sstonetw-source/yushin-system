@@ -10,7 +10,7 @@
 - 設定與 auditLogs 憑證同交易，無變更也留憑證；重試核對原 actor／意圖，回傳目前權威設定，不覆寫後來變更。封存同樣保留憑證；每次 callback 重新發現全部倉庫（含停用）與批次，各 limit(201)，超過 200 拒絕，逐文件交易重讀。拒絕異常或非零數量，包含自由調撥在途；不修改實體庫存。
 - 設定每次兩筆固定讀取，新增操作最多更新一筆 inventory 及新增一筆 audit；重試只讀。封存增加固定 audit read，仍使用既有兩個單欄查詢，最多各 201 文件及逐文件重讀，無新集合／索引／Listener。發現查詢不是交易鎖定的 predicate，不能宣稱防止所有併發新增；仍依賴合法庫存 writer 同步公司總量。
 - 本批 Rules 原始碼有變更：管理員／採購可 get 不存在的 audit ID，既有文件仍限管理員或本人；新 inventory_policy_set 憑證限制角色、欄位及同交易前後值。其他歷史 audit action 尚未全面強化，不能當成完整安全稽核。
-- 正式資料庫版別查核逾時，未建立、修改或部署正式 Firebase。新應用上線須同步審查／部署新 Rules；本批 Rules 為待正式複核原型，Emulator 不替代正式驗收。pending ID 僅記憶體內有效；補貨需求寫入、跨重載恢復、多倉／SERVICE 全流程與 Preview 驗收仍待處理。
+- 正式資料庫版別查核逾時，未建立、修改或部署正式 Firebase。新應用上線須同步審查／部署新 Rules；本批 Rules 為待正式複核原型，Emulator 不替代正式驗收。pending ID 僅記憶體內有效；庫存補貨入口僅建立採購草稿，採購需求與供應承諾統一由 `commitFormalPurchaseOrder` 在成功建立 PO 時同交易寫入，避免放棄視窗留下假需求；跨重載恢復、多倉／SERVICE 全流程與 Preview 驗收仍待處理。
 
 - 不引入新前端框架；Firebase Auth、Firestore、Cloud Functions 與原生 JavaScript 繼續沿用。
 - `src/` 是 **app.js 的唯一可編輯來源**；`node tools/build-app.cjs` 將原始碼依固定順序組成部署／舊測試使用的 `app.js`。修改來源後必須提交生成結果，CI 會檢查逐位元相同。
