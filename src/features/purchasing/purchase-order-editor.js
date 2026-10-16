@@ -836,7 +836,7 @@ window.printPurchaseOrder = async function() {
         poSaveInProgress = true;
         if (button) { button.disabled = true; button.innerText = '同步雲端後開啟列印…'; }
         try {
-            await registerPurchaseIncoming(savedPo.id, savedPo);
+            await registerPurchaseIncoming(savedPo.id, savedPo, {actorUid,actorRole});
             poIncomingSyncPending = false;
             updatePoSaveStatus(`採購單 ${savedPo.poNo} 已同步雲端，正在產生 PDF…`);
             await printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
@@ -1006,7 +1006,7 @@ window.printPurchaseOrder = async function() {
 
         // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立採購單。
-        registerPurchaseIncoming(poDocumentId, poRecord)
+        registerPurchaseIncoming(poDocumentId, poRecord, {actorUid,actorRole})
             .then(() => {
                 if(poEditingId===poDocumentId)poIncomingSyncPending = false;
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();

@@ -38,24 +38,53 @@ function updatePoSaveButton() {
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
-async function registerPurchaseIncoming(poId, poRecord) {
+async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
     if (isPurchaseTerminalStatus(poRecord?.status)) return;
-    const supplyIds = Array.isArray(poRecord?.supplyOrderIds) ? poRecord.supplyOrderIds : [];
+    const assertActor=()=>{
+        if (!actorUid || currentUser?.uid!==actorUid || currentUserRole!==actorRole) throw new Error('登入身份已變更，請以原帳號重試在途同步。');
+        if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) throw new Error('目前無採購作業權限。');
+    };
+    const quantity=(value,label,optional=false)=>{
+        if (value===undefined&&optional) return 0;
+        if ((typeof value!=='number'&&typeof value!=='string') || (typeof value==='string'&&!value.trim())
+            || !Number.isFinite(Number(value)) || Number(value)<0) throw new Error(`${label}數量異常，請先核對紀錄。`);
+        return Number(value);
+    };
+    assertActor();
+    if (!globalThis.YushinReceiving?.normalizeSupply) throw new Error('Receiving core 未載入，無法同步在途庫存。');
+    const supplyIds = [...new Set(Array.isArray(poRecord?.supplyOrderIds) ? poRecord.supplyOrderIds : [])];
+    const now=new Date().toISOString(), actorName=currentUserName||currentUser?.email||'';
     for (const supplyId of supplyIds) {
+        assertActor();
+        const movementRef=db.collection('inventoryMovements').doc();
+        let committedStock=null;
         await runRoleTransaction(async tx => {
+            assertActor();
+            committedStock=null;
             const supplyRef = supplyOrdersCollection().doc(supplyId);
-            const supplySnap = await tx.get(supplyRef);
+            const [poSnap,supplySnap] = await Promise.all([tx.get(db.collection('purchaseOrders').doc(poId)),tx.get(supplyRef)]);
+            assertActor();
+            if (!poSnap.exists) throw new Error('找不到來源採購單，請先核對同步結果。');
+            const livePo=poSnap.data();
+            if (!Array.isArray(livePo.supplyOrderIds)||!livePo.supplyOrderIds.includes(supplyId)) throw new Error('採購單供應連結已變更，請重新開啟原單。');
+            if (isPurchaseTerminalStatus(livePo.status)) return;
             if (!supplySnap.exists) throw new Error(`找不到供應紀錄 ${supplyId}`);
             const supply = supplySnap.data();
+            if (supply.type!=='PURCHASING_PO'||supply.purchaseDocumentId!==poId) throw new Error('供應紀錄不屬於這張採購單，請先核對原單。');
             if (isPurchaseTerminalStatus(supply.status)) return;
             if ((supply.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return;
 
             const key = String(supply.productKey || supply.productId || '').trim();
-            const warehouseId = String(supply.warehouseId || defaultWarehouse()?.id || '').trim();
+            const warehouseId = String(supply.warehouseId || '').trim();
             if (!key || !warehouseId) throw new Error(`供應紀錄 ${supplyId} 缺少產品或倉庫資料`);
 
-            const targetQty = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
-            const registeredQty = Math.max(0, Number(supply.incomingRegisteredQty || 0));
+            const orderedQty=quantity(supply.qty,'採購');
+            const receivedQty=quantity(supply.receivedQty,'到貨',true);
+            if (receivedQty>orderedQty) throw new Error('到貨量超過採購量，請先核對供應紀錄。');
+            quantity(supply.incomingRegisteredQty,'已登記在途',true);
+            const projection=globalThis.YushinReceiving.normalizeSupply(supply);
+            const targetQty = projection.remainingQty;
+            const registeredQty = projection.incomingRegisteredQty;
             const delta = targetQty - registeredQty;
             if (!delta) return;
 
@@ -63,9 +92,16 @@ async function registerPurchaseIncoming(poId, poRecord) {
             const whRef = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key));
             const invSnap = await tx.get(invRef);
             const whSnap = await tx.get(whRef);
+            assertActor();
+            if ((invSnap.exists&&invSnap.data().productKey&&invSnap.data().productKey!==key)
+                || (whSnap.exists&&((whSnap.data().productKey&&whSnap.data().productKey!==key)
+                    ||(whSnap.data().warehouseId&&whSnap.data().warehouseId!==warehouseId))))
+                throw new Error('公司或分倉庫存識別不符，請先核對紀錄。');
+            const companyIncoming=quantity(invSnap.exists?invSnap.data().incoming:undefined,'公司在途',true);
+            const warehouseIncoming=quantity(whSnap.exists?whSnap.data().incoming:undefined,'分倉在途',true);
+            if (companyIncoming+delta < -1e-9 || warehouseIncoming+delta < -1e-9) throw new Error('在途保留量不足，無法完整修正，請先核對公司與分倉庫存。');
             const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {});
             const wh = inventoryNumbers(whSnap.exists ? whSnap.data() : {});
-            const now = new Date().toISOString();
 
             if (invSnap.exists) {
                 tx.set(invRef,{
@@ -88,17 +124,16 @@ async function registerPurchaseIncoming(poId, poRecord) {
                 onHand:wh.onHand,reserved:wh.reserved,incoming:Math.max(0,wh.incoming+delta),updatedAt:now
             },{merge:true});
             tx.update(supplyRef,{incomingRegisteredQty:targetQty,incomingRegisteredAt:now,updatedAt:now});
-            tx.set(db.collection('inventoryMovements').doc(),{
+            tx.set(movementRef,{
                 type:'purchase_incoming',qty:delta,productKey:key,productId:supply.productId||'',warehouseId,
                 brand:resolveBrandName(supply.brand||''),brandId:supply.brandId||brandIdForName(supply.brand||''),
                 fulfillmentType:'WAREHOUSE',sourceType:'SUPPLY_ORDER',sourceId:supplyId,
-                purchaseDocumentId:poId,createdAt:now,createdBy:currentUserName||currentUser?.email||''
+                purchaseDocumentId:poId,createdAt:now,createdBy:actorName
             });
+            committedStock={key,warehouseId};
         });
-        const supply = poRecord.items?.[Number(String(supplyId).split('-').pop())];
-        const key = poIncomingKey(supply || {});
-        const warehouseId = supply?.warehouseId || defaultWarehouse()?.id || '';
-        if (key && warehouseId) invalidateWarehouseStockCache(key,warehouseId);
+        assertActor();
+        if (committedStock) invalidateWarehouseStockCache(committedStock.key,committedStock.warehouseId);
     }
 }
 

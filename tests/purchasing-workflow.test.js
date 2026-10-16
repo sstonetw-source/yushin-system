@@ -189,14 +189,16 @@ test('a fully received partial PO leaves the remaining shortage available for a 
 });
 
 test('repeating an incoming-stock update does not count the same supply twice', async () => {
-    const start = app.indexOf('async function registerPurchaseIncoming(poId, poRecord)');
+    const start = app.indexOf('async function registerPurchaseIncoming(poId, poRecord,');
     const end = app.indexOf('\nasync function cancelOutstandingSupplyRecord', start);
     assert.ok(start >= 0 && end > start);
     const source = app.slice(start, end);
     const docs = new Map([
+        ['purchaseOrders/PO1',{supplyOrderIds:['S1','S2']}],
         ['supplyOrders/S1',{productKey:'P1',productId:'P1',warehouseId:'W1',qty:3,incomingRegisteredQty:0,itemCode:'A',itemName:'產品',brand:'品牌',fulfillmentType:'WAREHOUSE'}],
         ['supplyOrders/S2',{productKey:'P2',productId:'P2',warehouseId:'W1',qty:2,incomingRegisteredQty:0,itemCode:'B',itemName:'產品二',brand:'品牌',fulfillmentType:'WAREHOUSE'}]
     ]);
+    for (const id of ['S1','S2']) Object.assign(docs.get(`supplyOrders/${id}`),{type:'PURCHASING_PO',purchaseDocumentId:'PO1'});
     const records = [];
     let failSecondItemOnce = true;
     let sequence = 0;
@@ -230,7 +232,8 @@ test('repeating an incoming-stock update does not count the same supply twice', 
         buildInventorySearchTokens:row=>[String(row.itemCode||'').toLowerCase()],
         poIncomingKey:item=>item.productId,
         isPurchaseTerminalStatus:status=>['CANCELLED','CLOSED'].includes(String(status||'').toUpperCase()),
-        currentUserName:'採購',currentUser:null
+        currentUserName:'採購',currentUser:{uid:'buyer'},currentUserRole:'purchaser',
+        canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,YushinReceiving:receiving
     });
     const po={supplyOrderIds:['S1','S2'],items:[
         {productId:'P1',warehouseId:'W1'},
@@ -1370,7 +1373,7 @@ test('PO core transaction commits before the print dialog opens', () => {
     const awaitIndex=source.indexOf('await commitPromise;');
     const printIndex=source.indexOf('printSavedPoDocument(poNo, vendorName);');
     assert.ok(awaitIndex>=0&&printIndex>awaitIndex,'core PO transaction must finish before print');
-    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord\)\s*\.then/);
+    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord, \{actorUid,actorRole\}\)\s*\.then/);
 });
 
 test('committed PO refreshes item quantities in order and purchasing views', () => {
