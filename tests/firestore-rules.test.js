@@ -1216,6 +1216,62 @@ function compatDb(uid) {
     }))
   };
 }
+test('audit receipt reads preserve ownership and limit missing-document lookup to admin and purchaser',async()=>{
+ for(const uid of ['admin','buyer1'])await assertSucceeds(getDoc(doc(db(uid),'auditLogs/new-operation')));
+ for(const uid of ['wh1','sales1','eng1','off1'])await assertFails(getDoc(doc(db(uid),'auditLogs/new-operation')));
+ await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),'auditLogs/new-operation')));
+ await seed('auditLogs/owned',{actorUid:'buyer1',action:'other',createdAt:'T'});
+ await assertSucceeds(getDoc(doc(db('buyer1'),'auditLogs/owned')));
+ for(const uid of ['wh1','sales1','eng1'])await assertFails(getDoc(doc(db(uid),'auditLogs/owned')));
+ await assertFails(getDocs(collection(db('buyer1'),'auditLogs')));
+ await assertSucceeds(getDocs(query(collection(db('buyer1'),'auditLogs'),where('actorUid','==','buyer1'),limit(10))));
+ await assertFails(updateDoc(doc(db('buyer1'),'auditLogs/owned'),{actorUid:'sales1'}));
+ await assertFails(deleteDoc(doc(db('buyer1'),'auditLogs/owned')));
+ await assertFails(setDoc(doc(db('buyer1'),'auditLogs/forged-owner'),{actorUid:'sales1'}));
+});
+test('new planning receipts enforce exact schema real role and same atomic inventory facts',async()=>{
+ const client=db('buyer1'),at='2026-10-16T00:00:00.000Z';
+ await seed('inventory/planning-proof',{productKey:'p-order',productId:'p-order',onHand:10,reserved:0,incoming:0,stockPolicy:'ORDER_ONLY',safetyStock:0});
+ const base={action:'inventory_policy_set',inventoryId:'planning-proof',actorUid:'buyer1',actorRole:'purchaser',stockPolicy:'SAFETY_STOCK',safetyStock:5,
+  previousStockPolicy:'ORDER_ONLY',previousSafetyStock:0,changed:true,createdAt:at};
+ await assertFails(setDoc(doc(client,'auditLogs/planning-orphan'),base));
+ for(const patch of [{actorUid:'sales1'},{actorRole:'admin'},{createdAt:'x'.repeat(1000)},{extra:'unexpected'},{previousSafetyStock:99},{changed:false},{stockPolicy:'OTHER'},{safetyStock:-1},{stockPolicy:'NO_STOCK',safetyStock:5}]){
+  const batch=writeBatch(client);batch.update(doc(client,'inventory/planning-proof'),{stockPolicy:'SAFETY_STOCK',safetyStock:5,updatedAt:at});
+  batch.set(doc(client,'auditLogs/planning-forged'),{...base,...patch});await assertFails(batch.commit());
+ }
+ const omitted={...base};delete omitted.actorRole;await assertFails(setDoc(doc(client,'auditLogs/planning-omitted'),omitted));
+ const stock=writeBatch(client);stock.update(doc(client,'inventory/planning-proof'),{stockPolicy:'SAFETY_STOCK',safetyStock:5,updatedAt:at,onHand:20});stock.set(doc(client,'auditLogs/planning-stock'),base);await assertFails(stock.commit());
+ for(const uid of ['sales1','eng1','wh1'])await assertFails(setDoc(doc(db(uid),'auditLogs/planning-role-'+uid),{...base,actorUid:uid}));
+ const valid=writeBatch(client);valid.update(doc(client,'inventory/planning-proof'),{stockPolicy:'SAFETY_STOCK',safetyStock:5,updatedAt:at});valid.set(doc(client,'auditLogs/planning-valid'),base);await assertSucceeds(valid.commit());
+});
+test('real planning service commits settings with receipts for admin purchaser and admin purchaser-view and safely replays',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['admin','purchaser']]){
+  const id='planning-'+uid+'-'+role,client=compatDb(uid),nativeRun=client.runTransaction,plain=x=>JSON.parse(JSON.stringify(x));
+  client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(r,d)=>tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+  await seed('inventory/'+id,{productKey:'p-order',productId:'p-order',onHand:10,reserved:2,incoming:0,stockPolicy:'ORDER_ONLY',safetyStock:0});
+  const c=vm.createContext({db:client,YushinInventory:require('../modules/inventory-core'),currentUser:{uid},currentUserRole:role,trueUserRole:uid==='admin'?'admin':role,
+   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,false,role)});vm.runInContext(fs.readFileSync('src/services/inventory-planning.js','utf8'),c);
+  const options={operationId:'policy-'+id};await assertSucceeds(c.commitInventoryPlanningSettings(id,'SAFETY_STOCK',5,options));
+  await assertSucceeds(updateDoc(doc(db('admin'),'inventory/'+id),{stockPolicy:'NO_STOCK',safetyStock:0}));
+  const replay=await assertSucceeds(c.commitInventoryPlanningSettings(id,'SAFETY_STOCK',5,options));assert.equal(replay.patch.stockPolicy,'NO_STOCK');assert.equal(replay.replayed,true);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/'+id))).data().onHand,10);
+  await assertSucceeds(c.commitInventoryPlanningSettings(id,'NO_STOCK',0,{operationId:'noop-'+id}));
+ }
+});
+test('real archive service checks live lots and warehouses then commits and restores with atomic audit',async()=>{
+ const client=compatDb('admin'),nativeRun=client.runTransaction,plain=x=>JSON.parse(JSON.stringify(x));
+ client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(r,d)=>tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ const c=vm.createContext({db:client,YushinInventory:require('../modules/inventory-core'),currentUser:{uid:'admin'},currentUserRole:'admin',trueUserRole:'admin',firestoreReadWithTimeout:p=>p,
+  runRoleTransaction:fn=>stockPermissions.run(client,fn,'admin',false,'admin')});vm.runInContext(fs.readFileSync('src/services/inventory-planning.js','utf8'),c);
+ await seed('inventory/planning-archive',{productKey:'p-order',productId:'p-order',onHand:0,reserved:0,incoming:0});
+ await seed('inventoryLots/archive-lot',{productKey:'p-order',warehouseId:'W1',remainingQty:1,receivedQty:1});
+ const input={inventoryId:'planning-archive',productKey:'p-order',archived:true,operationId:'archive-plan'};
+ await assert.rejects(c.commitInventoryListArchive(input),/批次/);assert.equal((await getDoc(doc(db('admin'),'auditLogs/archive-plan'))).exists(),false);
+ await seed('inventoryLots/archive-lot',{productKey:'p-order',warehouseId:'W1',remainingQty:0,receivedQty:1});
+ await assertSucceeds(c.commitInventoryListArchive(input));
+ await assertSucceeds(c.commitInventoryListArchive({...input,archived:false,operationId:'restore-plan'}));
+ const replay=await assertSucceeds(c.commitInventoryListArchive(input));assert.equal(replay.patch.listArchived,false);assert.equal(replay.replayed,true);
+});
 test('actual bounded lot readers expose operational batches and exact search for all five active roles without reading costs',async()=>{
  await seed('inventoryLots/read-A',{productKey:'p-order',productId:'p-order',warehouseId:'W1',lotNo:'READ-B',expiryDate:'2027-01-01',remainingQty:3,receivedQty:3});
  await seed('inventoryLots/read-Z',{productKey:'p-order',productId:'p-order',warehouseId:'W1',lotNo:'OLD',expiryDate:'2026-01-01',remainingQty:0,receivedQty:3});

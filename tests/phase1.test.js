@@ -380,13 +380,13 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     assert.match(indexSource,/<th>庫存策略<\/th>/);
     assert.match(indexSource,/由客戶訂單缺口進入既有採購需求流程/);
 
-    assert.match(appSource,/const INVENTORY_STOCK_POLICIES = Object\.freeze/);
-    assert.match(appSource,/NO_STOCK:'NO_STOCK'/);
-    assert.match(appSource,/SAFETY_STOCK:'SAFETY_STOCK'/);
-    assert.match(appSource,/ORDER_ONLY:'ORDER_ONLY'/);
+    assert.match(appSource,/const INVENTORY_STOCK_POLICIES = YushinInventory\.STOCK_POLICIES/);
+    assert.equal(require('../modules/inventory-core').STOCK_POLICIES.NO_STOCK,'NO_STOCK');
+    assert.equal(require('../modules/inventory-core').STOCK_POLICIES.SAFETY_STOCK,'SAFETY_STOCK');
+    assert.equal(require('../modules/inventory-core').STOCK_POLICIES.ORDER_ONLY,'ORDER_ONLY');
     assert.match(appSource,/window\.setInventoryStockPolicy=async function/);
     assert.match(appSource,/inventoryCache\.find\(x=>x\.id===inventoryId\)\|\|inventorySearchResults\.find\(x=>x\.id===inventoryId\)/);
-    assert.match(appSource,/stockPolicy:next/);
+    assert.match(appSource,/YushinInventory\.planningSettings\(policy,safetyStock\)/);
     assert.match(appSource,/function canManageInventoryStockPolicy\(\)[\s\S]*?currentUserRole === 'admin' \|\| currentUserRole === 'purchaser'/);
     assert.match(appSource,/function inventoryStockPolicyBadge\(item = \{\}\)/);
     assert.match(indexSource,/id="inventoryPolicyOverlay"/);
@@ -1933,7 +1933,7 @@ test('personnel screen omits duplicate dashboard while safety stock remains avai
     assert.doesNotMatch(indexSource, /adminDashboardCards/);
     assert.match(appSource, /limit\(100\)/);
     assert.match(appSource, /setInventorySafetyStock/);
-    assert.match(appSource, /safetyStock:normalizedSafety,updatedAt/);
+    assert.match(appSource, /await commitInventoryPlanningSettings/);
 });
 
 test('V2 generic order status toggler only permits reversible billing state', () => {
@@ -5302,8 +5302,8 @@ test('inventory actions use one adjustment entry point and returns keep their or
 test('inventory policy settings clear stale safety stock outside safety-stock mode', () => {
     assert.match(indexSource,/id="inventoryPolicyOverlay"/);
     assert.match(appSource,/function saveInventoryPlanningSettings/);
-    assert.match(appSource,/next===INVENTORY_STOCK_POLICIES\.SAFETY_STOCK\?Number\(safetyStock\|\|0\):0/);
-    assert.match(appSource,/safetyStock:normalizedSafety/);
+    assert.deepEqual(require('../modules/inventory-core').planningSettings('ORDER_ONLY',10),{stockPolicy:'ORDER_ONLY',safetyStock:0});
+    assert.match(appSource,/YushinInventory\.planningSettings\(policy,safetyStock\)/);
 });
 
 

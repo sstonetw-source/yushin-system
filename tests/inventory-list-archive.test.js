@@ -15,20 +15,21 @@ test('archive hides only empty stock and automatically shows new stock or reserv
 });
 function setup({live={},warehouses=[],role='admin',fail=false}={}){
  const item={id:'I1',productKey:'P1',onHand:0,reserved:0,incoming:0},events=[],storage={...item,...live};
- const auditRef={id:'audit1'},inventoryRef={id:'I1'};
+ const auditRef={id:'audit1'},inventoryRef={id:'I1'};let audit=null;
  let release;const gate=new Promise(resolve=>{release=resolve});
  const x=vm.createContext({window:{},YushinInventory:core,trueUserRole:'admin',currentUserRole:role,currentUser:{uid:'admin'},
-  inventoryItemById:()=>item,inventoryAggregateStock:()=>({onHand:0,reserved:0,incoming:0}),
+  inventoryItemById:()=>item,inventoryAggregateStock:()=>({onHand:0,reserved:0,incoming:0}),lifecycleRecordId:()=> 'audit1',
   confirm:()=>true,alert:message=>events.push(['alert',message]),beginActionButton:()=>({}),endActionButton(){},
   firestoreReadWithTimeout:p=>p,db:{collection:name=>({doc:()=>name==='inventory'?inventoryRef:auditRef,
    where:()=>({limit:()=>({get:async()=>({size:warehouses.length,docs:warehouses.map((data,i)=>({ref:{id:'W'+i,data}}))})})})}),
    runTransaction:async fn=>{events.push('transaction');await gate;if(fail)throw Error('offline');const writes=[];
-    const result=await fn({get:async ref=>({exists:true,data:()=>ref===inventoryRef?storage:ref.data}),
+    const result=await fn({get:async ref=>({exists:ref===auditRef?!!audit:true,data:()=>ref===auditRef?audit:ref===inventoryRef?storage:ref.data}),
      update:(ref,patch)=>writes.push(['update',patch]),set:(ref,data)=>writes.push(['audit',data])});
-    events.push(...writes);for(const [kind,patch]of writes)if(kind==='update')Object.assign(storage,patch);return result;}},
+    events.push(...writes);for(const [kind,patch]of writes)if(kind==='update')Object.assign(storage,patch);else audit=patch;return result;}},
   applyInventoryPlanningPatchToCaches:(id,patch)=>Object.assign(item,patch),loadInventory:async()=>events.push('refresh'),
   writeAppDataCache(){},inventoryCache:[],markMainPageDirty(){},renderInventoryList(){},renderInventoryReplenishmentCenter(){},showActionFeedback:message=>events.push(['success',message])});
  vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
+vm.runInContext(fs.readFileSync('src/services/inventory-planning.js','utf8'),x);
 vm.runInContext(code,x);return {x,events,item,storage,release,run:archived=>x.window.setInventoryListArchived('I1',archived,{})};
 }
 test('archive atomically records audit and suppresses double click',async()=>{
@@ -51,14 +52,15 @@ test('restore retains all stock and emits audit; purchaser cannot archive',async
  assert.equal(a.events.find(e=>e[0]==='audit')[1].action,'inventory_list_restore');
  const b=setup({role:'purchaser'});await b.run(true);assert.equal(b.events.includes('transaction'),false);
 });
-test('repeated archived request does not create duplicate audit',async()=>{
+test('already archived request records an explicit no-change receipt without stock writes',async()=>{
  const a=setup({live:{listArchived:true}}),p=a.run(true);a.release();await p;
- assert.equal(a.events.some(e=>e[0]==='audit'),false);
+ assert.equal(a.events.find(e=>e[0]==='audit')[1].changed,false);
+ assert.equal(a.events.some(e=>e[0]==='update'),false);
 });
 test('quantity validation, excessive warehouse rows and role change fail safely',async()=>{
  const a=setup();a.item.onHand=1;await a.run(true);assert.equal(a.events.includes('transaction'),false);
- const b=setup({warehouses:Array.from({length:201},()=>({onHand:0}))});await b.run(true);
- assert.equal(b.events.includes('transaction'),false);
+ const b=setup({warehouses:Array.from({length:201},()=>({onHand:0}))}),bp=b.run(true);b.release();await bp;
+ assert.equal(b.events.some(e=>e[0]==='audit'),false);
  const c=setup(),p=c.run(true);c.x.currentUserRole='sales';c.release();await p;
  assert.equal(c.events.some(e=>e[0]==='audit'),false);
 });

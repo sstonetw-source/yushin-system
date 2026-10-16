@@ -21,6 +21,7 @@ const parts = [
   "src/features/inventory/inventory-lot-view.js",
   "src/services/inventory-count.js",
   "src/services/manual-inventory.js",
+  "src/services/inventory-planning.js",
   "src/services/order-reservation.js",
   "src/services/dispatch-preparation.js",
   "src/services/self-order-supply.js",
