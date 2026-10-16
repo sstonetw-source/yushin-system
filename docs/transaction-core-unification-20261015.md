@@ -108,3 +108,9 @@ cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 P
 收貨保留原 UID／角色跨背景工作、transaction callback、提交後進度修復及缺貨分配；每次 callback 重置輸出，固定 actor／日期及批次／movement 引用。同 receiptId 核對供應單、數量、批號、效期與新 actor 快照，不同內容拒絕。新增有限數量驗證及已提交後錯誤標記，進度查詢失敗也保留原工作，不誤導重複入庫。共用分配 guard 貫穿候選分頁／交易／提交後；調撥也傳入 guard，保留原 movement 類型。修正業務／工程師自己的直送工作沒有重試入口。舊工作角色僅在原人明確重試時補存，舊 receipt 不遷移。1,264 項本機應用測試通過；CI Chrome／Emulator 另驗證，非正式環境驗收。無新增查詢、Listener、Collection、Rules 或 Index，無 Firebase 部署／資料刪除。
 
 尚待：收貨來源／預留／在途異常的全面一致性檢查、多倉拆量、SERVICE、其餘分散寫入與 Preview 完整流程驗收；本批不宣稱全部交易已統一。
+
+### 2026-10-16 收貨來源／預留／在途異常防護
+
+以 main `d60da43` 為基準補強同一收貨 Service：缺來源或重複品項、產品／供貨／倉庫／別名不符、來源同步未完成、來源／既有需求未收承諾不足、公司／分倉在途不足、數量異常及 reservation 投影不一致均拒絕整筆，不以預設倉庫或 incoming 歸零掩蓋。沿用 Supply／Receiving 權威扣回量；保留獨立備庫、部分收貨、KEEP_STOCK、歷史未登記 incoming 及已提交 receiptId 的只讀重試。不新增讀取／查詢／Listener／Collection／Rules／Index，不修改正式資料。新增執行測試逐筆核對失敗後訂單、供應、需求、預留、庫存、批次及成本均未改動；正常分次收貨驗證實貨／預留／在途與重試。CI 結果另查，不以本機測試代替 Emulator／Preview，亦不宣稱所有 Rules 直接寫入均已封鎖。
+
+本批實際執行 1,280 項本機應用測試全數通過（含新增 16 項行為測試）；生成來源一致、全部 src／app 語法與空白檢查通過。尚待多倉、SERVICE、直接 Rules 對抗測試及 Preview 全流程驗收，不以本批取代其完成門檻。

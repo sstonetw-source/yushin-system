@@ -1026,7 +1026,8 @@ async function directReceiptFixture(uid='sales1',role='sales',ownerUid=uid) {
   supplyOrdersCollection:()=>client.collection('supplyOrders'),procurementDemandRef:id=>client.collection('procurementDemands').doc(encodeURIComponent(id)),
   procurementDemandDocument:(d,c,m)=>demandCore.demandDocument({...d,...c},m),
   runRoleTransaction:callback=>stockPermissions.run(client,callback,uid,['sales','engineer'].includes(role),role),
-  isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),normalizedOrderItems:o=>o.items.map(i=>({...i})),
+  isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),inventoryProductKey:i=>i.productId,
+  orderInventorySyncIncomplete:()=>false,normalizedOrderItems:o=>o.items.map(i=>({...i})),
   normalizedOrderStatus:o=>[o.status,o.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
   savedDeliveryRecords:o=>o.deliveryRecords||[],returnedQuantity:()=>0,orderQuantity:o=>o.items.reduce((s,i)=>s+i.qty,0),orderWorkIndexFields:()=>({workCategories:['billing']})});
  const app=fs.readFileSync('app.js','utf8');
@@ -1122,7 +1123,7 @@ for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','wa
       procurementDemandRef:id=>id?client.collection('procurementDemands').doc(encodeURIComponent(id)):null,
       procurementDemandDocument:(d,c,m)=>demandCore.demandDocument({...d,...c},m),
       runRoleTransaction:callback=>stockPermissions.run(client,callback,uid,false,role),
-      isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),
+      isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(s),inventoryProductKey:i=>i.productId,orderInventorySyncIncomplete:()=>false,
       normalizedOrderItems:order=>order.items.map(i=>({...i})),normalizedOrderStatus:order=>
         [order.status,order.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
       inventoryNumbers:i=>({onHand:Number(i.onHand||0),reserved:Number(i.reserved||0),incoming:Number(i.incoming||0)}),

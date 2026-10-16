@@ -891,7 +891,7 @@ test('cancelled warehouse source still receives into free stock while direct shi
     const source=app.slice(start,end);
     const directStart=source.indexOf('if(directShip){');
     const warehouseStart=source.indexOf("const productKey=supply.productKey", directStart);
-    const registeredStart=source.indexOf('const registeredIncoming=', warehouseStart);
+    const registeredStart=source.indexOf('const embeddedLots=', warehouseStart);
     assert.ok(directStart>=0&&warehouseStart>directStart&&registeredStart>warehouseStart);
     assert.match(source.slice(directStart,warehouseStart),/來源訂單已取消，不能繼續確認到貨/);
     const warehouseSource=source.slice(warehouseStart,registeredStart);
