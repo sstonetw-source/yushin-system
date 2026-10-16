@@ -133,3 +133,11 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - 交易內重新讀到的候選批次必須仍屬於相同產品與來源倉庫，否則整筆拒絕；單筆交付業務也傳入倉庫／寄送資訊快照，與批次核對一致。actor／時間在 callback 外固定。
 - 自由庫存調撥點收與後續缺貨分配仍為 checkpoint 流程。點收後／分配前、分配返回後與完成標記交易內均核對原 UID／角色；若切換則保留已入庫與未完成分配狀態，回報 transferCommitted，可安全重試，不再入庫一次。這不代表多階段作業變成單一原子交易。
 - 主倉備貨需求建立／取消、寄送設定與其他殘留 UI 寫入仍待後續整理；多倉拆量、SERVICE 商品和正式環境五角色驗收未完成。沒有 Rules／Index／Collection／查詢／Listener 變更、Firebase 部署或資料清除。
+
+## 主倉備貨需求與預留核心（2026-10-16 後續批次）
+
+- `src/services/main-transfer-request.js` 擁有 `createMainTransferRequest` 和 `cancelMainTransferRequestRecord`；`modules/main-warehouse-transfers.js` 僅處理取消確認、忙碌鎖、讀取與畫面，舊 UI transaction 已移除。寄出／點收仍呼叫 warehouse-transfer Service。
+- `Reservation.planMainTransferHold` 為公司／分倉備貨預留增加及釋放的共同純規則。新增上限使用既有 `Inventory.normalizeStock` 可用量，排除預留與自由庫存調撥途中量；incoming 不作現貨。支援原有小數及有效數字字串，拒絕負數、NaN、空值／布林、預留子集不一致與不完整釋放。
+- 同一 request ID 相同內容重試不重複預留；CANCELLED／SHIPPED 仍保留原狀態，不重新建立。取消只允許 PENDING，重試 CANCELLED 不再釋放，已寄出不得取消。需求與公司／分倉兩筆預留在同交易提交；不修改實貨、批次或客戶訂單預留。
+- 交易成功後的清單刷新失敗，不再顯示成交易失敗；重試已取消需求也不誤報為新建立。actor、角色、時間在 callback 外固定，交易內重查能力與身分。
+- 同步更新 app、Reservation core 和主倉畫面資源版本。無新 Collection／Rules／Index／查詢／Listener，無 Firebase 部署、資料刪除；多倉拆量、SERVICE 商品、其餘分散寫入及正式環境角色驗收仍未完成。

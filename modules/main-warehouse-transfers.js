@@ -8,46 +8,14 @@
   const busy=new Set();
   root.resetMainTransferRequests=function(){pendingRequests=[];ready=false;error='';context='';loading=null;busy.clear();};
   function identity(){return currentUser?.uid+'|'+currentUserRole;}
-  root.createMainTransferRequest=async function({id,inventoryId,fromWarehouseId,qty}){
-    if(!purchasing())throw Error('只有採購或管理員可發起主倉備貨調撥。');
-    if(!id||id.length>128||!Number.isFinite(qty)||qty<=0||qty>1000000)throw Error('調回數量或識別碼不正確。');
-    const toWarehouseId=mainId(),actorUid=currentUser.uid,actorRole=currentUserRole;
-    if(!toWarehouseId||!fromWarehouseId||fromWarehouseId===toWarehouseId)throw Error('請選擇分倉作為來源，目的地固定為主倉。');
-    let saved;
-    await runRoleTransaction(async tx=>{
-      const ref=db.collection('stockTransferRequests').doc(id),prior=await tx.get(ref);
-      if(prior.exists){saved=prior.data();if(saved.inventoryId!==inventoryId||saved.fromWarehouseId!==fromWarehouseId||saved.toWarehouseId!==toWarehouseId||Number(saved.qty)!==qty)throw Error('調回操作識別碼衝突。');return;}
-      const invRef=db.collection('inventory').doc(inventoryId),invSnap=await tx.get(invRef);
-      if(!invSnap.exists)throw Error('找不到庫存。');const inv=invSnap.data(),key=inv.productKey||inv.productId;
-      if(!key)throw Error('庫存缺少產品識別。');
-      const stockRef=db.collection('warehouseStocks').doc(warehouseStockDocId(fromWarehouseId,key));
-      const stockSnap=await tx.get(stockRef),source=await tx.get(db.collection('warehouses').doc(fromWarehouseId)),target=await tx.get(db.collection('warehouses').doc(toWarehouseId));
-      if(!stockSnap.exists||!source.exists||source.data().active===false||source.data().systemCustody||!target.exists||target.data().active===false||!target.data().isDefault||target.data().systemCustody)throw Error('主倉或來源分倉設定不正確。');
-      const stock=stockSnap.data();
-      if(Number(stock.onHand||0)-Number(stock.reserved||0)<qty||Number(inv.onHand||0)-Number(inv.reserved||0)<qty)throw Error('分倉可用庫存不足，請勿調用已預留的貨品。');
-      if(actorUid!==currentUser.uid||actorRole!==currentUserRole)throw Error('登入身分已變更。');
-      const now=new Date().toISOString();
-      saved={id,inventoryId,productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||'',itemName:inv.itemName||'',brand:inv.brand||'',fromWarehouseId,toWarehouseId,fromStockId:stockRef.id,qty,status:'PENDING',createdByUid:actorUid,createdAt:now};
-      tx.set(ref,saved);
-      tx.update(stockRef,{reserved:Number(stock.reserved||0)+qty,transferReserved:Number(stock.transferReserved||0)+qty,updatedAt:now});
-      tx.update(invRef,{reserved:Number(inv.reserved||0)+qty,transferReserved:Number(inv.transferReserved||0)+qty,updatedAt:now});
-    });return saved;
-  };
   root.cancelMainTransferRequest=async function(id,button){
     if(!purchasing()||busy.has(id)||!confirm('取消這筆尚未寄出的備貨調回需求，並釋放保留庫存？'))return;
-    busy.add(id);const state=beginActionButton(button,'取消中…'),actorUid=currentUser.uid;
+    busy.add(id);const state=beginActionButton(button,'取消中…');
     try{
-      await runRoleTransaction(async tx=>{
-        const ref=db.collection('stockTransferRequests').doc(id),snapshot=await tx.get(ref);
-        if(!snapshot.exists)throw Error('調回需求不存在。');const r=snapshot.data();if(r.status==='CANCELLED')return;if(r.status!=='PENDING')throw Error('已寄出的調撥不能取消需求。');
-        const stockRef=db.collection('warehouseStocks').doc(r.fromStockId),invRef=db.collection('inventory').doc(r.inventoryId),stock=await tx.get(stockRef),inventory=await tx.get(invRef);
-        if(!stock.exists||!inventory.exists)throw Error('庫存不存在。');const wh=stock.data(),inv=inventory.data();
-        if([wh.reserved,wh.transferReserved,inv.reserved,inv.transferReserved].some(n=>Number(n||0)<r.qty))throw Error('保留庫存數量不一致。');
-        if(actorUid!==currentUser.uid||!purchasing())throw Error('登入身分已變更。');const now=new Date().toISOString();
-        tx.update(ref,{status:'CANCELLED',cancelledAt:now,cancelledByUid:actorUid});
-        tx.update(stockRef,{reserved:Number(wh.reserved)-r.qty,transferReserved:Number(wh.transferReserved)-r.qty,updatedAt:now});
-        tx.update(invRef,{reserved:Number(inv.reserved)-r.qty,transferReserved:Number(inv.transferReserved)-r.qty,updatedAt:now});
-      });await root.loadMainTransferRequests(true);await loadInventory(true);showActionFeedback('需求已取消，保留庫存已釋放。');
+      await cancelMainTransferRequestRecord(id);
+      try{await root.loadMainTransferRequests(true);await loadInventory(true);}
+      catch(err){showActionFeedback('需求已取消、保留庫存已釋放，但清單更新失敗；請重新開啟庫存頁。','warning');return;}
+      showActionFeedback('需求已取消，保留庫存已釋放。');
     }catch(err){showActionFeedback('取消未完成：'+err.message,'warning');}finally{busy.delete(id);endActionButton(button,state);}
   };
   root.dispatchMainTransferRequest=async function(id,button){

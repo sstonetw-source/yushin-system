@@ -78,3 +78,7 @@ fulfillment-core 新增 deliveryQuantities，normalizeItem 與 dispatchState 共
 ### 2026-10-16 調撥服務邊界
 
 調撥寄出、點收及批次搬移實作已移至 warehouse-transfer Service，保留客戶送貨／倉庫移轉／業務保管的事實差異。寄出與點收分屬不同交易；自由庫存點收後的缺貨分配繼續使用既有 checkpoint，補上原 UID／角色在分配前後及完成標記內的核對。另補交易內批次產品／來源倉庫一致性及單筆業務交付快照。新增交易重跑、跨階段身分切換、候選批次改變的測試，保留既有調撥途中／點收重試／公司總量／custody 測試。主倉需求建立與取消、其他 UI 寫入、多倉拆量及 SERVICE 流程仍未完成。
+
+### 2026-10-16 主倉備貨需求
+
+主倉需求建立／取消已移至 main-transfer-request Service；公司與分倉備貨預留由 Reservation.planMainTransferHold 統一規劃後同交易提交。修正主倉備貨可用量未扣自由庫存調撥途中量的缺口；取消保留量不足時整筆拒絕，不縮減釋放量。新增核心邊界、重試、CANCELLED 不重開、SHIPPED 不可取消、交易失敗無部分寫入，以及成功後刷新失敗／終止狀態的 UI 回饋測試。未完成範圍仍包括多倉拆量、SERVICE 商品、其他分散寫入與正式環境驗收。
