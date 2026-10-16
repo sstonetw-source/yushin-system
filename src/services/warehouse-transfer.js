@@ -39,6 +39,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       if(expectedWarehouseId&&fromWarehouseId!==expectedWarehouseId)throw Error('出貨倉庫已變更，請重新核對。');
       if(expectedPlan&&JSON.stringify(YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}))!==JSON.stringify(expectedPlan))throw Error('寄送資訊已變更，請重新核對。');
       reservationRef=db.collection('inventoryReservations').doc(orderId+'__'+itemId);const rs=await tx.get(reservationRef);if(!rs.exists)throw Error('找不到訂單預留。');reservation=rs.data();
+      YushinReservation.assertLegacyReservationLocation(reservation,{warehouseId:fromWarehouseId,productKey:inventoryProductKey(item)});
       if(Number(reservation.quantity)!==qty||reservation.warehouseId!==fromWarehouseId)throw Error('訂單預留已變更。');
     }else if(handoff)throw Error('業務交付必須有來源訂單。');
     if(!inventoryId||!fromWarehouseId||!toWarehouseId||fromWarehouseId===toWarehouseId)throw Error('請選擇不同的來源與目的倉庫。');
@@ -104,7 +105,7 @@ async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
     if(!invSnap.exists||!destWh.exists||destWh.data().active===false)throw Error('目的倉庫或庫存不存在。');const inv=invSnap.data(),wh=whSnap.exists?whSnap.data():{};
     if(Number(inv.transferInTransit||0)<t.qty||Number(inv.transferFreeInTransit||0)<t.qty-t.reservedQty)throw Error('調撥途中數量不一致。');
     let order=null,orderRef=null,resRef=null;
-    if(t.orderId){orderRef=db.collection('orders').doc(t.orderId);const os=await tx.get(orderRef);if(!os.exists)throw Error('來源訂單不存在。');order=os.data();const item=order.items[t.itemIndex];if(!item||item.itemId!==t.itemId||item.transferPendingId!==id||normalizedOrderStatus(order)!=='normal')throw Error('來源訂單或調撥關聯已變更。');resRef=db.collection('inventoryReservations').doc(t.orderId+'__'+t.itemId);const rs=await tx.get(resRef);if(!rs.exists||Number(rs.data().quantity)!==t.reservedQty)throw Error('來源訂單預留不一致。');}
+    if(t.orderId){orderRef=db.collection('orders').doc(t.orderId);const os=await tx.get(orderRef);if(!os.exists)throw Error('來源訂單不存在。');order=os.data();const item=order.items[t.itemIndex];if(!item||item.itemId!==t.itemId||item.transferPendingId!==id||normalizedOrderStatus(order)!=='normal')throw Error('來源訂單或調撥關聯已變更。');resRef=db.collection('inventoryReservations').doc(t.orderId+'__'+t.itemId);const rs=await tx.get(resRef);if(!rs.exists||Number(rs.data().quantity)!==t.reservedQty)throw Error('來源訂單預留不一致。');YushinReservation.assertLegacyReservationLocation(rs.data(),{warehouseId:t.fromWarehouseId,productKey:t.productKey});}
     assertActor();
     const allocation={autoAllocationQty:t.orderId?0:Math.max(0,t.qty-t.reservedQty),autoAllocatedQty:0,allocationCompleted:!!t.orderId||t.qty===t.reservedQty};
     tx.update(ref,{status:'RECEIVED',receivedAt:now,receivedByUid:actorUid,...allocation});saved={...t,status:'RECEIVED',...allocation};
