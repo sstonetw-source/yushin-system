@@ -1095,9 +1095,10 @@ test('phase 5 shipment consumes both aggregate and selected warehouse stock tran
     const s=appSource.slice(start,end);
     assert.match(s,/warehouseId/);
     assert.match(s,/warehouseStocks/);
-    assert.match(s,/onHand:\s*Math\.max\(0,inv\.onHand-deltaQty\)/);
-    assert.match(s,/onHand:\s*wh\.onHand\s*-\s*deltaQty/);
-    assert.match(s,/reserved:\s*Math\.max\(0,\s*inv\.reserved\s*\+\s*reservedDelta\)/);
+    assert.match(s,/YushinReservation\.planReservationIssue/);
+    assert.match(s,/issuePlan\.aggregateStock\.onHand/);
+    assert.match(s,/issuePlan\.warehouseStock\.onHand/);
+    assert.match(s,/issuePlan\.aggregateStock\.reserved/);
     assert.match(s,/'ship'/);
 });
 
