@@ -983,7 +983,7 @@ test('supply receipt retries are idempotent by operation id', () => {
     const saveEnd=app.indexOf('\nfunction purchaseItemsFromSavedPo',saveStart);
     const save=app.slice(saveStart,saveEnd);
     assert.match(save,/operationBase=poReceiptOperationId\|\|ensureReceiptOperationId\(supplyId\)/);
-    assert.match(save,/receiveSupplyOrderRecord\(supplyId,entry\.qty,entry\.lotNo,entry\.expiryDate,operationId\)/);
+    assert.match(save,/receiveSupplyOrderRecord\(supplyId,entry\.qty,entry\.lotNo,entry\.expiryDate,operationId,\{actorUid:job\.ownerUid,actorRole:job\.actorRole\}\)/);
     assert.match(save,/clearReceiptOperationId\(supplyId,job\.operationBase,job\.ownerUid\)/);
 });
 

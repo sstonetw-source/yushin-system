@@ -15016,8 +15016,8 @@ window.receiveSupplyOrder = function(supplyId) {
       <td>${escapeHtml(supply.itemName||'')}</td>
       <td>${Number(supply.qty||0)}</td><td>${Number(supply.receivedQty||0)}</td><td>${remaining}</td>
       <td><input type="number" class="po-receive-qty" min="0" max="${remaining}" step="any" value="${remaining}" style="width:85px;"></td>
-      <td><input type="text" class="po-receive-lot" placeholder="批號"></td>
-      <td><input type="date" class="po-receive-expiry"></td>
+      <td><input type="text" class="po-receive-lot" placeholder="批號" ${directShip ? 'disabled' : ''}></td>
+      <td><input type="date" class="po-receive-expiry" ${directShip ? 'disabled' : ''}></td>
     </tr>`;
     document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
 };
@@ -15043,6 +15043,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
                 let q=db.collection('inventoryReservations').where('productKey','==',productKey).where('status','==',status).limit(50);
                 if(cursor)q=q.startAfter(cursor);
                 const page=await firestoreReadWithTimeout(q.get(),'庫存預留候選');
+                allocationGuard?.();
                 for(const doc of page.docs){
                     const row={...doc.data(),id:doc.id};
                     if(row.orderId===excludeOrderId||row.warehouseId!==warehouseId||!(Number(row.shortageQty||0)>0)||skippedCandidateIds.has(row.id))continue;
@@ -15056,9 +15057,12 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             return candidate;
         };
         const candidates=await Promise.all([oldestCandidate('shortage'),oldestCandidate('active')]);
+        allocationGuard?.();
         const candidate=candidates.filter(Boolean).sort(compare)[0];
         if(!candidate){completionReason='no-demand';break;}
         let took=0,skipCandidate=false,stopAllocation=false;
+        const allocationTime=new Date().toISOString();
+        const movementRef=db.collection('inventoryMovements').doc();
         await runRoleTransaction(async tx=>{
             took=0;skipCandidate=false;stopAllocation=false;
             allocationGuard?.();
@@ -15100,7 +15104,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const take=Math.min(remaining,receiptRemaining,liveShortage,oldShortage,uncovered,Math.max(0,wh.available),Math.max(0,inv.available));
             if(take<=0){completionReason='exhausted';stopAllocation=true;return;}
             items[index]={...item,reservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take)};
-            const now=new Date().toISOString();
+            const now=allocationTime;
             const nextOrder={...order,items,updatedAt:now};
             tx.update(orderRef,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
             const demand=procurementDemandForOrderItem(nextOrder,items[index]);
@@ -15121,13 +15125,14 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
                     allocationUpdatedAt:now
                 });
             }
-            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(allocationGuard?'reserve_from_free_stock':'reserve_from_receipt',take,candidate.orderId,productKey,actor,{
-                warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE',
+            tx.set(movementRef,inventoryMovementRecord(allocationGuard&&!receiptId?'reserve_from_free_stock':'reserve_from_receipt',take,candidate.orderId,productKey,actor,{
+                warehouseId,itemId:reservation.itemId||'',fulfillmentType:'WAREHOUSE',createdAt:now,
                 ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',
                 ...(checkpointCollection==='receipts'?{receiptId:receiptId||''}:{transferId:receiptId||''})
             }));
             took=take;
         });
+        allocationGuard?.();
         if(took>0){invalidateWarehouseStockCache(productKey,warehouseId);allocatedQty+=took;remaining-=took;affectedOrderIds.add(candidate.orderId);continue;}
         if(skipCandidate){
             // 避免同一輪一直選到已取消／失效的舊 reservation；改看下一個候選。
@@ -15157,19 +15162,33 @@ async function refreshAffectedOrderCaches(orderIds = []) {
     if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
 }
 
-async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='') {
-    const now=new Date().toISOString(),actor=deliveryActor();
+async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
+    const actorUid=options.actorUid??currentUser?.uid,actorRole=options.actorRole??currentUserRole;
+    const assertActor=(supply=null)=>{
+        if(!actorUid||actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請以原身分重試到貨作業。');
+        if(!['admin','purchaser','warehouse','sales','engineer'].includes(actorRole)||(supply&&!canConfirmSupplyReceipt(supply)))throw new Error('目前沒有這筆到貨確認權限。');
+    };
+    assertActor();
+    if(!Number.isFinite(qty)||qty<=0)throw new Error('到貨數量必須是大於 0 的有效數字。');
+    if(typeof lotNo!=='string'||typeof expiryDate!=='string')throw new Error('到貨批號或效期格式不正確。');
+    const now=new Date().toISOString(),actor=deliveryActor(),receiptDate=localDateString();
     const operationKey=String(operationId||'').trim();
     if(!operationKey)throw new Error('缺少到貨操作識別碼，請重新開啟待到貨視窗後再試。');
     let receivedProductKey='',receivedWarehouseId='',sourceOrderId='',sourceOrderStatus='',reservedForSource=0,alreadyProcessed=false,processedReceipt=null;
     const affectedOrderIds = new Set();
+    const lotRef=db.collection('inventoryLots').doc(),movementRef=db.collection('inventoryMovements').doc();
+    let confirmedSupply=null;
     await runRoleTransaction(async tx=>{
+        assertActor();
+        receivedProductKey='';receivedWarehouseId='';sourceOrderId='';sourceOrderStatus='';reservedForSource=0;alreadyProcessed=false;processedReceipt=null;confirmedSupply=null;
+        affectedOrderIds.clear();
         const supplyRef=supplyOrdersCollection().doc(supplyId);
         const receiptRef=db.collection('receipts').doc(operationKey);
         const supplySnap=await tx.get(supplyRef);
         const receiptSnap=await tx.get(receiptRef);
         if(!supplySnap.exists)throw new Error('找不到供應紀錄。');
         const supply=supplySnap.data();
+        assertActor(supply);confirmedSupply=supply;
         if(!canConfirmSupplyReceipt(supply))throw new Error('原廠直送由該訂單負責業務確認；倉庫收貨僅限採購、倉管或管理員。');
         if (!globalThis.YushinSupply?.normalize || !globalThis.YushinReceiving?.buildReceiptSnapshot
             || !globalThis.YushinProcurementDemand?.applyReceipt) {
@@ -15177,6 +15196,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         }
         const demandRef=procurementDemandRef(supply.demandId||'');
         const demandSnap=demandRef?await tx.get(demandRef):null;
+        assertActor(supply);
         const procurement=globalThis.YushinSupply.normalize({...supply,id:supplyId});
         const updateDemandReceipt=(receiptQty)=>{
             if(!demandRef)return;
@@ -15227,17 +15247,20 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         };
         const buildReceipt=(event={})=>globalThis.YushinReceiving.buildReceiptSnapshot(procurement,{
             supplyOrderId:supplyId,
-            receiptDate:localDateString(),
+            receiptDate,
             createdAt:now,
             createdBy:actor,
-            ...event
+            ...event,
+            extra:{...event.extra,createdByUid:actorUid,createdByRole:actorRole}
         });
         if (supply.orderId) affectedOrderIds.add(supply.orderId);
         // 已成功提交過的同一 receiptId 必須先走冪等重試；即使之後取消了剩餘未到貨，
         // 也不能把已完成的到貨重試誤判成新的「取消後收貨」。
         if(receiptSnap.exists){
             const receipt=receiptSnap.data()||{};
-            if(String(receipt.supplyOrderId||'')!==String(supplyId))throw new Error('到貨操作識別碼衝突，請重新開啟待到貨視窗。');
+            if(String(receipt.supplyOrderId||'')!==String(supplyId)||Number(receipt.qty)!==qty
+                ||String(receipt.lotNo||'')!==lotNo||String(receipt.expiryDate||'')!==expiryDate
+                ||(receipt.createdByUid&&receipt.createdByUid!==actorUid)||(receipt.createdByRole&&receipt.createdByRole!==actorRole))throw new Error('到貨操作識別碼衝突，請重新開啟待到貨視窗。');
             alreadyProcessed=true;
             processedReceipt=receipt;
             if((receipt.fulfillmentType||supply.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
@@ -15253,13 +15276,17 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 : '此供應紀錄已取消，不能再確認到貨。');
         }
         const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
+        if(!Number.isFinite(Number(supply.qty))||!Number.isFinite(Number(supply.receivedQty??0))
+            ||Number(supply.receivedQty??0)<0||Number(supply.qty)<Number(supply.receivedQty??0))throw new Error('供應數量異常，請由採購核對後重試。');
         if(qty<=0||qty>remaining)throw new Error(`本次到貨數量不可超過 ${remaining}。`);
         const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
         if(directShip){
+            if(lotNo||expiryDate)throw new Error('原廠直送不登記公司庫存批號或效期。');
             if(!supply.orderId||!supply.itemId)throw new Error('原廠直送紀錄缺少來源訂單／品項。');
             const orderRef=db.collection('orders').doc(supply.orderId);
             const orderSnap=await tx.get(orderRef);
             if(!orderSnap.exists)throw new Error('找不到來源訂單。');
+            assertActor(supply);
             const order=orderSnap.data();
             if(currentUserRole!=='admin'&&order.ownerUid!==currentUser?.uid)throw new Error('只有此訂單負責業務可確認直送到貨。');
             if(normalizedOrderStatus(order)!=='normal')throw new Error('來源訂單已取消，不能繼續確認到貨；請先處理／恢復來源訂單。');
@@ -15278,11 +15305,11 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 directShipDeliveredQty:Number(item.directShipDeliveredQty||0)+qty,
                 receiptEvents:[
                     ...(item.receiptEvents||[]),
-                    {id:operationKey,at:now,date:localDateString(),qty,sourceId:supplyId,by:actor,fulfillmentType:'DIRECT_SHIP'}
+                    {id:operationKey,at:now,date:receiptDate,qty,sourceId:supplyId,by:actor,fulfillmentType:'DIRECT_SHIP'}
                 ]
             };
             const deliveryRecord={
-                id:`direct-${operationKey}`,receiptId:operationKey,itemId:supply.itemId,itemIndex,date:localDateString(),qty,
+                id:`direct-${operationKey}`,receiptId:operationKey,itemId:supply.itemId,itemIndex,date:receiptDate,qty,
                 notes:'原廠直送到貨確認',createdBy:actor,createdAt:now,sourceType:'DIRECT_SHIP_RECEIPT',sourceId:supplyId
             };
             const deliveryRecords=[...savedDeliveryRecords(order),deliveryRecord];
@@ -15331,6 +15358,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             const reservationRef=db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`);
             const orderSnap=await tx.get(orderRef);
             const reservationSnap=await tx.get(reservationRef);
+            assertActor(supply);
             if(orderSnap.exists){
                 order=orderSnap.data();
                 sourceOrderStatus=normalizedOrderStatus(order);
@@ -15353,7 +15381,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                             reservedQty:next.reservedQty,
                             receiptEvents:[
                                 ...(item.receiptEvents||[]),
-                                {id:operationKey,at:now,date:localDateString(),qty,sourceId:supplyId,by:actor,fulfillmentType:'WAREHOUSE'}
+                                {id:operationKey,at:now,date:receiptDate,qty,sourceId:supplyId,by:actor,fulfillmentType:'WAREHOUSE'}
                             ]
                         };
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
@@ -15374,7 +15402,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                             receivedQty:receiptPlan.item.receivedQty,
                             receiptEvents:[
                                 ...(item.receiptEvents||[]),
-                                {id:operationKey,at:now,date:localDateString(),qty,sourceId:supplyId,by:actor,fulfillmentType:'WAREHOUSE',sourceOrderStatus:'cancelled'}
+                                {id:operationKey,at:now,date:receiptDate,qty,sourceId:supplyId,by:actor,fulfillmentType:'WAREHOUSE',sourceOrderStatus:'cancelled'}
                             ]
                         };
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
@@ -15383,6 +15411,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 }
             }
         }
+        assertActor(supply);
         const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
         const registeredIncoming=Math.max(0,Number(supply.incomingRegisteredQty||0));
         const incomingRelease=receiptPlan.incomingReleaseQty;
@@ -15396,7 +15425,6 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
           tx.set(invRef,nextInventory,{merge:true});
         }
         if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:Math.max(0,wh.incoming-incomingRelease),updatedAt:now},{merge:true});
-        const lotRef=db.collection('inventoryLots').doc();
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,...(currentUserRole==='warehouse'&&permissionRulesReady?{costSourceSupplyId:supplyId}:{unitCost:Number(supply.unitCost||0)}),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
         const autoAllocationQty=Math.max(0,Number(qty||0)-reserveQty);
@@ -15418,7 +15446,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 expiryDate
             }
         }));
-        tx.set(db.collection('inventoryMovements').doc(),{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
+        tx.set(movementRef,{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
         updateDemandReceipt(qty);
         tx.update(supplyRef,{
             receivedQty:receiptPlan.record.receivedQty,
@@ -15427,61 +15455,67 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             updatedAt:now
         });
     });
-    if (receivedProductKey && receivedWarehouseId) invalidateWarehouseStockCache(receivedProductKey, receivedWarehouseId);
+    try {
+        assertActor(confirmedSupply);
+        if (receivedProductKey && receivedWarehouseId) invalidateWarehouseStockCache(receivedProductKey, receivedWarehouseId);
 
-    // Replenishment / excess receipt stock automatically serves oldest outstanding shortages.
-    // The physical receipt is already committed before this phase. If this follow-up is interrupted,
-    // the same immutable receiptId is reused to count prior allocations and only the remainder is retried.
-    let freeQty=receivedProductKey&&receivedWarehouseId?Math.max(0,Number(qty||0)-reservedForSource):0;
-    if(alreadyProcessed){
-        const allocationTarget=Math.max(0,Number(processedReceipt?.autoAllocationQty||0));
-        if(allocationTarget>0){
-            const priorMovements=await readQueryInBatches(
-                db.collection('inventoryMovements').where('receiptId','==',operationKey)
-            );
-            const alreadyAllocated=priorMovements
-                .filter(row=>row.type==='reserve_from_receipt')
-                .reduce((sum,row)=>sum+Math.max(0,Number(row.qty||0)),0);
-            let reconciledAllocated=alreadyAllocated;
-            await runRoleTransaction(async tx=>{
-                const receiptRef=db.collection('receipts').doc(operationKey);
-                const receiptSnap=await tx.get(receiptRef);
-                if(!receiptSnap.exists)return;
-                const receipt=receiptSnap.data()||{};
-                const currentAllocated=Math.max(0,Number(receipt.autoAllocatedQty||0));
-                reconciledAllocated=Math.max(currentAllocated,alreadyAllocated);
-                if(reconciledAllocated!==currentAllocated){
-                    tx.update(receiptRef,{
-                        autoAllocatedQty:reconciledAllocated,
-                        allocationCompleted:reconciledAllocated>=allocationTarget,
-                        allocationUpdatedAt:new Date().toISOString()
-                    });
-                }
-            });
-            freeQty=Math.max(0,allocationTarget-reconciledAllocated);
-        }else{
-            freeQty=0;
+        // Replenishment / excess receipt stock automatically serves oldest outstanding shortages.
+        // The physical receipt is already committed before this phase. If this follow-up is interrupted,
+        // the same immutable receiptId is reused to count prior allocations and only the remainder is retried.
+        let freeQty=receivedProductKey&&receivedWarehouseId?Math.max(0,Number(qty||0)-reservedForSource):0;
+        if(alreadyProcessed){
+            const allocationTarget=Math.max(0,Number(processedReceipt?.autoAllocationQty||0));
+            if(allocationTarget>0){
+                const priorMovements=await readQueryInBatches(
+                    db.collection('inventoryMovements').where('receiptId','==',operationKey)
+                );
+                assertActor(confirmedSupply);
+                const alreadyAllocated=priorMovements
+                    .filter(row=>row.type==='reserve_from_receipt')
+                    .reduce((sum,row)=>sum+Math.max(0,Number(row.qty||0)),0);
+                let reconciledAllocated=alreadyAllocated;
+                await runRoleTransaction(async tx=>{
+                    assertActor(confirmedSupply);
+                    const receiptRef=db.collection('receipts').doc(operationKey);
+                    const receiptSnap=await tx.get(receiptRef);
+                    assertActor(confirmedSupply);
+                    if(!receiptSnap.exists)throw new Error('找不到已提交的到貨分配進度。');
+                    const receipt=receiptSnap.data()||{};
+                    const currentAllocated=Math.max(0,Number(receipt.autoAllocatedQty||0));
+                    reconciledAllocated=Math.max(currentAllocated,alreadyAllocated);
+                    if(reconciledAllocated!==currentAllocated){
+                        tx.update(receiptRef,{
+                            autoAllocatedQty:reconciledAllocated,
+                            allocationCompleted:reconciledAllocated>=allocationTarget,
+                            allocationUpdatedAt:new Date().toISOString()
+                        });
+                    }
+                });
+                assertActor(confirmedSupply);
+                freeQty=Math.max(0,allocationTarget-reconciledAllocated);
+            }else{
+                freeQty=0;
+            }
         }
-    }
-    if(freeQty>0){
-        try{
+        if(freeQty>0){
             const allocation=await allocateFreeReceiptStockToShortages(
-                receivedProductKey,receivedWarehouseId,freeQty,actor,sourceOrderId,operationKey
+                receivedProductKey,receivedWarehouseId,freeQty,actor,sourceOrderId,operationKey,'receipts',()=>assertActor(confirmedSupply)
             );
             allocation.affectedOrderIds.forEach(id=>affectedOrderIds.add(id));
-        }catch(allocationErr){
-            const error=new Error(
-                '到貨已完成，但其他缺貨訂單的自動庫存分配尚未完成：'
-                +(allocationErr?.message||allocationErr)
-                +'。請再按一次「確認到貨」重試；系統不會重複入庫。'
-            );
-            error.code='receipt-allocation-pending';
-            error.receiptCommitted=true;
-            error.affectedOrderIds=[...affectedOrderIds];
-            throw error;
         }
+        assertActor(confirmedSupply);
+        return [...affectedOrderIds];
+    }catch(allocationErr){
+        const error=new Error(
+            '到貨已提交，但後續確認或庫存分配尚未完成：'
+            +(allocationErr?.message||allocationErr)
+            +'。請再按一次「確認到貨」重試；系統不會重複入庫。'
+        );
+        error.code='receipt-allocation-pending';
+        error.receiptCommitted=true;
+        error.affectedOrderIds=[...affectedOrderIds];
+        throw error;
     }
-    return [...affectedOrderIds];
 }
 
 window.openSupplyReceipt = function(supplyId) {
@@ -15549,7 +15583,7 @@ function renderReceiptTasks() {
     panel.hidden=!jobs.length;
     panel.innerHTML=jobs.map(job=>`<div class="receipt-task ${job.state==='error'?'receipt-task-error':''}">
         <span>${escapeHtml(job.label)}：${job.state==='error'?escapeHtml(job.error):'到貨處理中，可繼續其他操作；請保持頁面開啟。'}</span>
-        ${job.state==='error'&&canReceiveInventoryCapability()?`<button type="button" class="btn-small" onclick="retryReceiptTask(${inlineJsValue(job.supplyId)})">用原資料重試</button>`:''}
+        ${job.state==='error'&&(canReceiveInventoryCapability()||['sales','engineer'].includes(currentUserRole))?`<button type="button" class="btn-small" onclick="retryReceiptTask(${inlineJsValue(job.supplyId)})">用原資料重試</button>`:''}
     </div>`).join('');
     document.querySelectorAll('button[data-receipt-supply]').forEach(button=>{
         const job=receiptTaskJobs.get(receiptTaskKey(button.dataset.receiptSupply));
@@ -15566,9 +15600,11 @@ function receiptTaskBlocksSupply(supplyId) {
     return true;
 }
 window.retryReceiptTask = function(supplyId) {
-    if(!canReceiveInventoryCapability())return;
+    if(!canReceiveInventoryCapability()&&!['sales','engineer'].includes(currentUserRole))return;
     const job=receiptTaskJobs.get(receiptTaskKey(supplyId));
     if(!job||job.state!=='error')return;
+    // 舊暫存未含角色，只在本人明確重試時補上；新工作跨重試保留原角色。
+    if(!job.actorRole)job.actorRole=currentUserRole;
     return runReceiptTask(job);
 };
 window.addEventListener('beforeunload',event=>{
@@ -15577,12 +15613,14 @@ window.addEventListener('beforeunload',event=>{
     }
 });
 
-async function refreshReceiptTaskViews(affectedOrderIds) {
+async function refreshReceiptTaskViews(affectedOrderIds,contextGuard=null) {
+    contextGuard?.();
     markMainPageDirty('inventory','orders.list','orders.po','admin');
     const refreshes=[];
     // 已開始的查詢可能早於這次到貨；等它結束後再讀最新資料，避免合併成過期的刷新。
     const pendingReads=[purchasingReceivingLoadPromise,activeReceivingSupplyLoadPromise].filter(Boolean);
     if(pendingReads.length)await Promise.allSettled(pendingReads);
+    contextGuard?.();
     if(inventoryReceivingVisible&&document.getElementById('inventory-system')?.classList.contains('active'))refreshes.push(loadPurchasingReceivingQueue(true));
     else if(canAccessPage('inventory')&&document.getElementById('inventory-system')?.classList.contains('active'))refreshes.push(loadInventory(true));
     if(getDataScope('orders')!=='none')refreshes.push(refreshAffectedOrderCaches([...affectedOrderIds]));
@@ -15592,24 +15630,29 @@ async function refreshReceiptTaskViews(affectedOrderIds) {
 
 async function runReceiptTask(job) {
     if(job.state==='running'||job.ownerUid!==currentUser?.uid||(!canReceiveInventoryCapability()&&!['sales','engineer'].includes(currentUserRole)))return;
+    const assertJobActor=()=>{if(job.ownerUid!==currentUser?.uid||job.actorRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請以原身分確認到貨結果。');};
     job.state='running';job.error='';
     persistReceiptTasks(job.ownerUid);
     renderReceiptTasks();
     const affectedOrderIds=new Set();
     const supplyId=job.supplyId;
     try {
+        assertJobActor();
         for(const entry of job.entries){
+            assertJobActor();
             if(currentUser?.uid!==job.ownerUid||(!canReceiveInventoryCapability()&&!['sales','engineer'].includes(currentUserRole)))throw new Error('登入身份已變更，請以原帳號確認到貨結果。');
             const operationId=`${job.operationBase}-${entry.itemIndex}`;
-            const ids=await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate,operationId);
+            const ids=await receiveSupplyOrderRecord(supplyId,entry.qty,entry.lotNo,entry.expiryDate,operationId,{actorUid:job.ownerUid,actorRole:job.actorRole});
+            assertJobActor();
             ids.forEach(id=>affectedOrderIds.add(id));
         }
         // 核心資料已確認完成後才移除暫存。保留同一個 operationId 供網路中斷重試。
+        assertJobActor();
         clearReceiptOperationId(supplyId,job.operationBase,job.ownerUid);
         job.state='done';
         receiptTaskJobs.delete(receiptTaskKey(supplyId,job.ownerUid));
         persistReceiptTasks(job.ownerUid);
-        if(currentUser?.uid!==job.ownerUid)return;
+        if(currentUser?.uid!==job.ownerUid||currentUserRole!==job.actorRole)return;
         // 暫時移除這筆舊到貨列；部分到貨餘額由後續查詢帶回，不用舊快取推算數量。
         supplyReceivingCache=supplyReceivingCache.filter(row=>row.id!==supplyId);
         pendingSupplyCache=pendingSupplyCache.filter(row=>row.id!==supplyId);
@@ -15618,19 +15661,19 @@ async function runReceiptTask(job) {
         });
         renderReceiptTasks();
         showActionFeedback(`${job.label}：到貨已確認。`,'success');
-        await refreshReceiptTaskViews(affectedOrderIds);
+        await refreshReceiptTaskViews(affectedOrderIds,assertJobActor);
     } catch(err) {
         if(job.state==='done'){
-            if(currentUser?.uid===job.ownerUid)showActionFeedback('到貨已確認；畫面同步失敗，重新進入該頁會再載入。','warning');
+            if(currentUser?.uid===job.ownerUid&&currentUserRole===job.actorRole)showActionFeedback('到貨已確認；畫面同步失敗，重新進入該頁會再載入。','warning');
             return;
         }
         // 後續分配可能尚未完成；原收貨資料與識別碼必須保留，不能換成新的一筆。
         job.state='error';
         job.error=err?.code==='receipt-allocation-pending'&&err?.receiptCommitted
-            ? '已入庫，庫存分配尚未完成。請用原資料重試。'
+            ? '已確認到貨，後續處理尚未完成。請用原資料重試。'
             : `結果待確認：${err.message||err}。請用原資料重試。`;
         persistReceiptTasks(job.ownerUid);
-        if(currentUser?.uid===job.ownerUid)renderReceiptTasks();
+        if(currentUser?.uid===job.ownerUid&&currentUserRole===job.actorRole)renderReceiptTasks();
     }
 }
 
@@ -15648,7 +15691,7 @@ window.savePoReceiptBatch = async function() {
     const operationBase=poReceiptOperationId||ensureReceiptOperationId(supplyId);
     const supply=supplyReceivingCache.find(row=>row.id===supplyId)||pendingSupplyCache.find(row=>row.id===supplyId);
     if(!supply||!canConfirmSupplyReceipt(supply)){showActionFeedback('目前沒有這筆到貨確認權限，請重新開啟訂單。','warning');return;}
-    const job={supplyId,operationBase,entries,ownerUid:currentUser.uid,label:supply?.itemCode||supply?.itemName||supplyId,state:'queued',error:''};
+    const job={supplyId,operationBase,entries,ownerUid:currentUser.uid,actorRole:currentUserRole,label:supply?.itemCode||supply?.itemName||supplyId,state:'queued',error:''};
     receiptTaskJobs.set(receiptTaskKey(supplyId),job);
     persistReceiptTasks(job.ownerUid);
     // 關閉視窗前先保存獨立快照；後續開啟另一筆不會覆寫這筆的數量、批號或識別碼。
@@ -18109,7 +18152,7 @@ async function commitWarehouseTransferReceipt(id){
   if(!saved.orderId&&saved.status==='RECEIVED'&&saved.allocationCompleted===false){
     try{
       assertActor();
-      const result=await allocateFreeReceiptStockToShortages(saved.productKey,saved.toWarehouseId,Math.max(0,Number(saved.autoAllocationQty||0)-Number(saved.autoAllocatedQty||0)),actor,'',id,'stockTransfers');
+      const result=await allocateFreeReceiptStockToShortages(saved.productKey,saved.toWarehouseId,Math.max(0,Number(saved.autoAllocationQty||0)-Number(saved.autoAllocatedQty||0)),actor,'',id,'stockTransfers',assertActor);
       assertActor();
       await runRoleTransaction(async tx=>{assertActor();const ref=db.collection('stockTransfers').doc(id);const snapshot=await tx.get(ref);if(!snapshot.exists||snapshot.data().status!=='RECEIVED')throw Error('調撥分配進度已變更。');tx.update(ref,{allocationCompleted:true,allocationUpdatedAt:new Date().toISOString()});});
       saved.affectedOrderIds=result.affectedOrderIds;

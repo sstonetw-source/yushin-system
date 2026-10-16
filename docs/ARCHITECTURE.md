@@ -182,3 +182,11 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - stopPurchaseOrderOutstanding 接手整張 PO 逐供應取消與最後狀態寫入。最後 transaction 重讀 PO 及所有供應，驗證連結未變、各列已停止／全到貨且在途釋放，再依目前已到貨及停止量結清；UI 不再直接 set PO。最後結清失敗可重試，既有終止列不重扣，已完成到貨 PO 不產生取消寫入。
 - 仍是逐供應 checkpoint，不把整張 PO 宣稱為單交易；中途失敗已成功列保留。單品項正式 PO 取消增加一筆原 PO read；整單服務另有啟動 PO read 及最後 PO／所有供應 read，均為已知文件，無新查詢／Listener／Collection／Rules／Index。成功後快取／畫面失敗與未提交失敗分開回饋。
 - 測試覆蓋共同交易、callback 重跑、完整扣回、錯誤來源／缺資料、角色切換、跨列接續、最後 PO 提交失敗、連結競態與終止重試。無 Firebase 部署或資料刪除；多倉拆量、SERVICE、其他分散寫入及正式環境驗收未完成。
+
+## 收貨原身分與重試邊界（2026-10-16）
+
+- `receiveSupplyOrderRecord` 接收可選的原 `actorUid/actorRole`，背景工作在入列時保存並跨品項、重試和頁面重載沿用。Service 在入口、transaction 重跑、讀取後、收貨提交後及分配／進度修復中核對原身分；既有 `runRoleTransaction`／Rules 仍為安全邊界。
+- 收貨 transaction 每次 callback 清除暫存輸出；actor、日期、批次／movement 引用在 callback 外固定。同 receiptId 重試比對 supply、數量、批號、效期與已保存的原 actor；不同內容拒絕，不能當成成功。新 receipt 增加不可變的 `createdByUid/createdByRole`。
+- 共用自由庫存分配的 session guard 貫穿候選分頁、交易讀取及提交後。調撥收貨也傳入原身分 guard；新增 guard 不改變 receipt／transfer 分配 movement 的既有種類。
+- 物理收貨與後續缺貨分配仍為分段 checkpoint，並非整批原子；收貨後的身分變更、進度查詢／修復或分配失敗標記 `receiptCommitted`，保留原識別碼重試。業務／工程師可重試自己的直送工作，實際歸屬仍由 Service／Rules 檢查。
+- 舊 receipt 未含 actor 欄位時，只核對既有的供應與內容快照；舊 session 工作未含角色時，僅在原使用者明確點選重試時補存當前角色。沒有正式資料遷移。
