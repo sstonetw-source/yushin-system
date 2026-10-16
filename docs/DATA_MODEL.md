@@ -4,6 +4,12 @@
 
 ## Firestore 集合（規則中實際宣告）
 
+### 庫存設定操作憑證（2026-10-16）
+
+`auditLogs/{operationId}` 新增 action `inventory_policy_set`，欄位限定為 action、inventoryId、actorUid、actorRole、stockPolicy、safetyStock、previousStockPolicy、previousSafetyStock、changed、createdAt。Rules 核對原值、同交易後值及角色；不新增 inventory 欄位。既有清單 archive／restore audit 額外記 actorRole／changed，無變更也新增憑證但不更新 inventory。管理員仍有既有 audit 刪除權，不宣稱對管理員不可竄改。
+
+Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開放其他角色或全表 list。正式版別／已部署規則未確認；應用與這次 Rules 來源須成套上線，不能只部署新 bundle。沒有集合、索引或正式資料遷移。
+
 下表列出目前 Rules 中的所有資料集合，**包含歷史相容與支援集合**。歸類為維護責任，並不代表可互相直接讀寫或所有功能已完成驗收。
 
 | 集合 | 主要責任 |

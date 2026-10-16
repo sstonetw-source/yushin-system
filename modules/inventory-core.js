@@ -3,6 +3,18 @@
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinInventory=api;
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
+  const STOCK_POLICIES=Object.freeze({NO_STOCK:'NO_STOCK',SAFETY_STOCK:'SAFETY_STOCK',ORDER_ONLY:'ORDER_ONLY'});
+  function stockPolicyFor(record={}){
+    const explicit=String(record.stockPolicy||'').toUpperCase();
+    return Object.values(STOCK_POLICIES).includes(explicit)?explicit:Number(record.safetyStock||0)>0?STOCK_POLICIES.SAFETY_STOCK:STOCK_POLICIES.ORDER_ONLY;
+  }
+  function planningSettings(policy,safetyStock=0){
+    const stockPolicy=String(policy||'').trim().toUpperCase();
+    if(!Object.values(STOCK_POLICIES).includes(stockPolicy))throw new Error('庫存策略格式不正確。');
+    const value=stockPolicy===STOCK_POLICIES.SAFETY_STOCK?safetyStock:0;
+    if(!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value))||(Number(value)<0||Number(value)>Number.MAX_SAFE_INTEGER)||(stockPolicy===STOCK_POLICIES.SAFETY_STOCK&&Number(value)<=0))throw new Error('安全庫存必須是大於 0 的數字。');
+    return {stockPolicy,safetyStock:Number(value)};
+  }
   function n(value){
     const number=Number(value);
     return Number.isFinite(number)?Math.max(0,number):0;
@@ -18,7 +30,7 @@
   function stockIsEmpty(data={}){
     const zero=value=>(typeof value==='number'||(typeof value==='string'&&value.trim()!==''))
       && Number.isFinite(Number(value)) && Number(value)===0;
-    return ['onHand','reserved','incoming','transferInTransit'].every(key=>{
+    return ['onHand','reserved','incoming','transferInTransit','transferFreeInTransit'].every(key=>{
       return zero(data[key]===undefined?0:data[key]);
     }) && (data.lots===undefined||Array.isArray(data.lots)) && (data.lots||[]).every(lot=>{
       const value=lot.remainingQty??lot.qty??0;
@@ -189,6 +201,9 @@
   }
 
   return {
+    STOCK_POLICIES,
+    stockPolicyFor,
+    planningSettings,
     normalizeStock,
     stockIsEmpty,
     isListArchived,

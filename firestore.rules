@@ -2315,9 +2315,40 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Inventory planning receipt: prototype schema scoped to this new action.
+    // Settings and receipt must describe the same atomic operation; no stock change.
+    function validInventoryPlanningAudit(data) {
+      let before = get(/databases/$(database)/documents/inventory/$(data.inventoryId)).data;
+      let after = getAfter(/databases/$(database)/documents/inventory/$(data.inventoryId)).data;
+      return role() in ['admin','purchaser']
+        && data.keys().hasAll(['action','inventoryId','actorUid','actorRole','stockPolicy','safetyStock','previousStockPolicy','previousSafetyStock','changed','createdAt'])
+        && data.keys().hasOnly(['action','inventoryId','actorUid','actorRole','stockPolicy','safetyStock','previousStockPolicy','previousSafetyStock','changed','createdAt'])
+        && data.inventoryId is string && data.inventoryId.size() > 0 && data.inventoryId.size() <= 128
+        && data.inventoryId.matches('^[^/]+$')
+        && data.actorUid == request.auth.uid
+        && data.actorRole in ['admin','purchaser'] && (admin() || data.actorRole == 'purchaser')
+        && data.stockPolicy in ['NO_STOCK','SAFETY_STOCK','ORDER_ONLY']
+        && data.safetyStock is number && data.safetyStock >= 0 && data.safetyStock <= 9007199254740991
+        && (data.stockPolicy == 'SAFETY_STOCK' ? data.safetyStock > 0 : data.safetyStock == 0)
+        && data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 32
+        && data.previousStockPolicy == before.get('stockPolicy', null)
+        && data.previousSafetyStock == before.get('safetyStock', null)
+        && (data.previousStockPolicy == null || (data.previousStockPolicy is string && data.previousStockPolicy.size() <= 32))
+        && (data.previousSafetyStock == null || data.previousSafetyStock is number)
+        && data.changed is bool && data.changed == (before.get('stockPolicy', null) != data.stockPolicy || before.get('safetyStock', null) != data.safetyStock)
+        && after.stockPolicy == data.stockPolicy && after.safetyStock == data.safetyStock
+        && after.diff(before).affectedKeys().hasOnly(['stockPolicy','safetyStock','updatedAt'])
+        && (!data.changed || after.updatedAt == data.createdAt);
+    }
     match /auditLogs/{id} {
-      allow read: if admin() || (active() && resource.data.actorUid == request.auth.uid);
-      allow create: if active() && request.resource.data.actorUid == request.auth.uid;
+      // A transaction may test a new operation ID before creating its receipt.
+      // Missing documents carry no audit data; existing records remain owner-scoped.
+      allow get: if active() && (resource == null
+        ? role() in ['admin','purchaser']
+        : admin() || resource.data.actorUid == request.auth.uid);
+      allow list: if admin() || (active() && resource.data.actorUid == request.auth.uid);
+      allow create: if active() && request.resource.data.actorUid == request.auth.uid
+        && (request.resource.data.get('action', '') != 'inventory_policy_set' || validInventoryPlanningAudit(request.resource.data));
       allow update: if false;
       allow delete: if admin();
     }

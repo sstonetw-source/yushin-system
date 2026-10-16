@@ -4,6 +4,8 @@
 
 ## 實作規範
 
+- 庫存策略／安全庫存與清單封存必須經 inventory-planning Service，不得在 Feature 直接 update／另開交易。固定 pending 操作 ID 到回覆及 UI 同步確認；已提交後刷新失敗與未提交須區分，原身分／視窗 generation 不符不得更新新畫面。新策略 audit 必須與 inventory 同交易且通過精確 schema／前後值 Rules。此次需同步審查及部署 Rules，GitHub 合併不代表 Firebase 已部署。
+
 1. 先定位權威核心與既有 service；不要在頁面另寫交付、預留、在途、退貨、有效交付的第二套計算。
 2. 畫面僅處理使用者輸入、讀取、驗證回饋；狀態推導在 core，真正變更由受保護 transaction / 服務協調。
 3. 既有 `modules/` 是現行功能模組，**不得只為資料夾好看而複製一份到 src**。遷移需一次調整呼叫、文件、測試，並刪除舊實作。
