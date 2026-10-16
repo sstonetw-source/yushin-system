@@ -30,3 +30,4 @@
 - 收貨 Service 不得使用 window、document、Storage、UI 快取或呈現函式；Feature 不得自行重開收貨 transaction。提交後快取通知由呼叫端傳入同步 `onStockCommitted`，只在成功提交及身分檢查後執行，不得放在 transaction callback；通知失敗不能當成資料未提交。
 - supply-order Service 同樣不擁有採購編輯狀態、取消確認、清單或快取；Feature 用 `onStockCommitted`／`onDemandChanged` 接收同步提交後通知。整張停止中途通知失敗不得將前面已完成的供應視為回滾，也不得提前標示整張完成；必須保留原 checkpoint 續跑。
 - 正式建單文件提交一律呼叫 `commitOrderCreation`，包含手動、估價單帶入與 Forecast 多品項轉單。Feature 擁有草稿／待確認 ID／快取，Service 不依賴瀏覽器暫存或畫面。Forecast 訂單及來源 backlink 同交易提交；庫存初始化和延後來源同步仍各自保留 checkpoint，不能宣稱整條流程原子化。
+- 庫存卡片的數量盤點一律呼叫 `commitInventoryQuantity`；Feature 不得另開盤點交易。操作 ID 在視窗待確認期間固定，重試核對原 movement／目標量／產品／倉庫／身分；不得換 ID 掩蓋不確定回覆。零差量也保存操作憑證。Service 透過同步 `onStockCommitted` 通知快取失效，不直接依賴 UI／Storage／快取；盤點已提交後的刷新失敗須明確區分。

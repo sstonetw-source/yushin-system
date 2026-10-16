@@ -1214,6 +1214,28 @@ function compatDb(uid) {
     }))
   };
 }
+test('actual count service keeps stock lots and immutable operation aligned for admin purchaser and warehouse',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const key='count-'+uid,client=compatDb(uid),nativeRun=client.runTransaction,plain=x=>JSON.parse(JSON.stringify(x));
+  client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+  await seed('inventory/'+key,{productKey:key,productId:key,onHand:10,reserved:2,incoming:0});
+  await seed('warehouseStocks/W1__'+key,{productKey:key,productId:key,warehouseId:'W1',onHand:10,reserved:2,incoming:0});
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,currentUserName:uid,YushinInventory:require('../modules/inventory-core'),
+   warehouseStockDocId:(w,p)=>w+'__'+p,firestoreReadWithTimeout:p=>p,resolveBrandName:b=>b,brandIdForName:()=>'',buildInventorySearchTokens:()=>[],
+   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,false,role)});
+  vm.runInContext(fs.readFileSync('src/services/inventory-count.js','utf8'),c);
+  const request={item:{id:key,productKey:key,productId:key},warehouseId:'W1',target:15,note:'actual Rules',operationId:'count-op-'+uid};
+  await assertSucceeds(c.commitInventoryQuantity(request));
+  assert.equal((await getDoc(doc(db(uid),'inventory/'+key))).data().onHand,15);
+  assert.equal((await getDoc(doc(db(uid),'inventoryLots/'+request.operationId+'-added'))).data().remainingQty,5);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryLotCosts/'+request.operationId+'-added'))).exists(),false);
+  await assertSucceeds(c.commitInventoryQuantity(request));
+  const movement=(await getDoc(doc(db(uid),'inventoryMovements/'+request.operationId))).data();assert.equal(movement.countTarget,15);assert.equal(movement.actorUid,uid);
+  await assertFails(updateDoc(doc(db(uid),'inventoryMovements/'+request.operationId),{countTarget:100}));
+  const reduced={...request,target:7,operationId:'count-reduce-'+uid};await assertSucceeds(c.commitInventoryQuantity(reduced));
+  assert.equal((await getDoc(doc(db(uid),'warehouseStocks/W1__'+key))).data().onHand,7);
+ }
+});
 async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,ownerUid=uid}={}){
  const id='init-'+uid,productKey='init-product',warehouseId=direct?'':'W1';
  await seed('orders/'+id,{ownerUid,salesCode:ownerUid==='eng1'?'E01':'S01',status:'active',inventoryReservationStatus:'pending',
