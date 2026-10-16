@@ -86,3 +86,11 @@
 數量盤點改以 operationId 作為 `inventoryMovements` 文件 ID，沿用 `type:adjustment`、`sourceType:manual`、`sourceId:operationId`、`operation:quantity-editor`，新增 `countInventoryId`、`countTarget`、`actorUid`、`actorRole` 以核對同 ID 重試。備註仍使用 `note`。盤點無差量也保存 `qty:0` 的憑證，庫存／批次不變；盤盈未分批仍無成本文件，不把未知成本當成已確認零成本。
 
 既有 movement 不遷移，Rules 仍禁止 movement update；無新增集合、查詢、索引或 Rules。pending 作業僅保留於目前視窗記憶體，非可跨裝置恢復的佇列。新 Service 讀到既有同 ID 不符憑證時拒絕，不補寫舊格式資料。無正式資料修改／刪除或部署。
+
+## 人工庫存操作憑證與批次投影（2026-10-16）
+
+新增／調整／報廢的 movement 使用 operationId 作為文件 ID，`operation:manual-adjustment`、`sourceType:manual`、`sourceId:operationId`、`actorUid/actorRole`，以及不含成本的 `adjustmentIntent:{type,productKey,warehouseId,delta,lotNo,expiryDate}`；保留 `type/qty/lotId`，扣減另存 `lotAllocations`。新 lot ID 固定為 `${operationId}-added`，必要歷史未分批餘額為 `${operationId}-balance`，沿用 INITIAL_STOCK／MANUAL_ADJUSTMENT／MANUAL_STOCK_BALANCE 類型。
+
+初始成本沿用 `inventoryLotCosts`，有成本權角色寫 unitCost，倉管寫 costPending；重試核對不將成本放入公開 movement。`inventory.lots` 於人工異動入口由產品各倉已讀的權威 lot 投影成 `{warehouseId,lotNo,expiryDate,qty}`，不再直接加減；其他既有入口的列表鏡像刷新尚待統一，不能將鏡像當成庫存對帳依據。
+
+新增每產品 bounded lot 查詢（最多 201 筆，超過 200 拒絕），使用既有單欄索引；無新集合／Rules／composite index／Listener。瀏覽器列新增 operationId 以接續同視窗重試，無資料遷移或正式資料更動。

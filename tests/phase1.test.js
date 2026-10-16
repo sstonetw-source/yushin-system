@@ -198,7 +198,9 @@ test('canonical brand identity continues through purchasing supply and inventory
     assert.match(appSource, /brandId:item\.brandId\|\|brandIdForName\(item\.brand\|\|'\'\)/);
     assert.match(appSource, /brandId:supply\.brandId\|\|brandIdForName\(supply\.brand\|\|'\'\)/);
     assert.match(appSource, /findPriceItemByCodeValue\(row\.itemCode, row\.brand\)/);
-    assert.match(appSource, /productId:key,warehouseId:row\.warehouseId/);
+    const manualService=fs.readFileSync(path.join(__dirname,'../src/services/manual-inventory.js'),'utf8');
+    assert.match(manualService, /productKey:key,productId:key,itemCode:product\.manufacturerPartNo/);
+    assert.match(manualService, /brandId:product\.brandId\|\|brandIdForName\(brand\)/);
     assert.match(appSource, /findProductByCode\(requestedCode, preferredBrand\)/);
 });
 
@@ -1875,7 +1877,9 @@ test('V2 formal purchase documents create authoritative supply lines', () => {
 test('V2 initial stock separates operational lot from protected cost', () => {
     assert.match(indexSource, /實際單位成本/);
     assert.match(appSource, /sourceType:'INITIAL_STOCK'/);
-    assert.match(appSource, /remainingQty:delta,sourceType:'INITIAL_STOCK'/);
+    const manualService=fs.readFileSync(path.join(__dirname,'../src/services/manual-inventory.js'),'utf8');
+    assert.match(manualService, /remainingQty:lot\.remainingQty/);
+    assert.match(manualService, /type==='initial'\?'INITIAL_STOCK':'MANUAL_ADJUSTMENT'/);
     assert.match(appSource, /inventoryLotCosts/);
     assert.match(appSource, /unitCost:Number\(row\.unitCost/);
 });

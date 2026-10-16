@@ -104,6 +104,19 @@
     return {lots:next,allocations,delta};
   }
 
+  function manualAdjustmentLots(lots=[],current=0,delta=0,reserved=0,{lotNo='',expiryDate='',balanceId='',addedId=''}={}){
+    if(!Number.isFinite(delta)||delta===0||!Number.isFinite(current)||current<0||!Number.isFinite(reserved)||reserved<0||reserved>current||!Number.isFinite(current+delta)||current+delta<reserved)throw new Error('庫存異動數量不正確或不足以支撐已預留數量');
+    if(delta>0||(!lotNo&&!expiryDate)){
+      const result=quantityAdjustmentLots(lots,current,current+delta,reserved,balanceId,addedId);
+      return {...result,lots:result.lots.map(lot=>lot.id===addedId?{...lot,lotNo,expiryDate,unbatched:!lotNo&&!expiryDate}:lot)};
+    }
+    const reconciled=reconcileStockLots(lots,current,balanceId);
+    const eligible=reconciled.lots.filter(lot=>(!lotNo||(lot.lotNo||'')===lotNo)&&(!expiryDate||(lot.expiryDate||'')===expiryDate));
+    const allocations=allocateLots(eligible,-delta).allocations;
+    const used=new Map(allocations.map(row=>[row.lotId,row.qty]));
+    return {delta,allocations,lots:reconciled.lots.map(lot=>({...lot,remainingQty:Number(lot.remainingQty??lot.qty??0)-(used.get(lot.id)||0)}))};
+  }
+
   function reverseLotAllocations(records=[],qty=0){
     let remaining=n(qty);
     const allocations=[];
@@ -173,6 +186,7 @@
     allocateLots,
     reconcileStockLots,
     quantityAdjustmentLots,
+    manualAdjustmentLots,
     reverseLotAllocations,
     allocationsAfterReversal,
     availableReturnAllocations

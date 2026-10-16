@@ -134,3 +134,9 @@ cancelOutstandingSupplyRecord 補上原因／原身分／供應歸屬與正式 P
 以 main `484a01b` 為基準，將庫存卡片盤點交易移至 `commitInventoryQuantity`，沿用原批次純規則。固定視窗待確認 ID 與不可變 movement 憑證，核對產品／倉庫／目標／備註／actor 後只讀接續；回覆遺失後不覆蓋後續庫存。零差量也保存操作憑證，新增 movement 的 `countInventoryId/countTarget/actorUid/actorRole`，無成本臆測或資料遷移。Service 驗證原始數量／預留／識別，Feature 保留輸入、重入及 generation／session guard，透過明確通知失效快取。
 
 新增 14 項應用測試，本機 1,329 項全數通過，生成一致、src／app 語法與差異檢查通過。另加入實際 Rules 下 admin／purchaser／warehouse 的增加、減少、重試與憑證不可更新整合測試，CI 另行驗證。每交易增加一筆已知 movement read，重試只讀 movement；非零量保留原批次 bounded query，零差量多一筆 movement write。無新查詢／Listener／集合／Rules／索引、無正式部署或資料刪除。pending 不跨重載持久化；批次新增／報廢與其他 Feature 寫入、多倉、SERVICE、全面依賴注入和 Preview 驗收尚未完成。
+
+### 2026-10-16 架構收尾：人工庫存逐列交易
+
+以 main `c8e345d` 為基準，將手動／Excel 新增、批號／效期增減、報廢移至 `commitManualInventoryAdjustment`。修正調整／報廢未同步權威 inventoryLots 的缺口；共用 `manualAdjustmentLots`，指定批次只扣符合來源，無指定沿用 FEFO。每列 stock／lot／初始 cost／movement 原子，整批逐列 checkpoint。保留固定 ID 與去成本 intent、原 actor／時間／快照，未知回覆或通知失敗只讀接續；UI 移除已確認列並保留未確認列 ID，防重入及跨角色污染。
+
+新增 19 項 Core／Service／批次行為測試，本機 1,348 項全過；實際 Rules 的三角色初始成本、重試、報廢與正調整另交 CI。每列增加 movement／產品／倉庫／固定 lot read，成本有權時另讀 cost；新增單產品 bounded lot query 與最多 200 筆 tx 重讀，超限拒絕。舊 inventory.lots 由實際批次投影，並非全系統鏡像刷新已統一。新增 movement intent／actor 及 row operationId，無新集合／Rules／composite index／Listener，無正式部署、遷移或刪除。尚待清單／設定等 Feature 寫入、舊列表投影、跨重載恢復、多倉、完整 SERVICE 及 Preview 全流程驗收。

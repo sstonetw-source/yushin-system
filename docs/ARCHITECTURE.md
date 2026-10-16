@@ -1,6 +1,6 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
-版本：2026-10-15｜以 main 與 PR #92 為重整基礎。**這是實際第一階段結果；不代表交易核心或資料模型已完成全面驗收。**
+版本：2026-10-16｜以 PR #92 為重整起點，持續依已實作的 Service 邊界更新。**不代表交易核心或資料模型已完成全面驗收。**
 
 ## 目標與現況
 
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | App | `src/app/bootstrap.js`, `navigation.js` | Firebase 初始化、登入、角色、頁面狀態、導航。初始化檔仍含共享狀態與輔助函式，後續應再抽。 |
 | Features | `src/features/products/`, `forecasts/`, `quotations/`, `orders/`, `purchasing/`, `inventory/`, `equipment/`, `administration/` | 使用者介面、查詢、表單、顯示。部分業務計算仍混雜，尚需透過 service 抽離。 |
-| Services（過渡區） | `src/services/order-reservation.js`, `supply-order.js`, `receiving.js`, `order-lifecycle-reservation.js`, `delivery-stock.js` | **實際交易操作已從大段中抽至各個維護位置**，但仍依賴跨檔全域資料，尚未形成獨立注入的服務；後續須收斂寫入入口與冪等契約。 |
+| Services | `src/services/`：建單、預留、採購、收貨、生命週期、交付／退貨、盤點與人工庫存異動等 | 多個主要交易已有共同入口、原身分及重試契約；仍依賴 classic-global actor／Firestore／純 helper，尚未全面依賴注入，其他分散寫入仍需稽核。 |
 | Core | `modules/workflow-core.js`, `fulfillment-core.js`, `inventory-core.js`, `reservation-core.js`, `procurement-demand-core.js`, `receiving-core.js`, `supply-core.js`, `order-entry-core.js` | 驗證、純數量投影、供貨／預留演算法。不可在 feature 另造權威公式。 |
 | Shared transaction infrastructure | `modules/stock-permissions.js`, app 的 `runRoleTransaction` | 以 Firestore Transaction 執行、附加庫存變更證明。**所有寫入未必已經走同一路徑，待持續稽核。** |
 | Workspace / 既有 UI 模組 | `modules/inventory-workspace.js`, `warehouse-logistics.js`, `customer-cancellations.js`, `delivery-settings.js`, `order-entry-ui.js` 等 | 含 UI 與流程呼叫；重複業務規則應逐步改呼叫共同核心。 |
@@ -32,7 +32,7 @@
 
 ## 已知重要未完項目
 
-1. `app.js` 原始碼已依功能切分，但全域資料與某些 UI/業務/寫入耦合仍在；下一批才拆成可獨立測試的 services。
+1. 主要交易已有可直接載入測試的 Service；全域依賴、其他 Feature 寫入與庫存清單／搜尋的舊批次投影仍待收斂，不能把拆檔當成全面解耦。
 2. 新訂單同品項**真正多倉拆量**、跨倉分批交付仍未完成；`inventoryReservations` 單地點與規劃中的 locations ledger 不可混讀。
 3. 原廠直送與一般收貨應各自維持相同的權威事件、不重複累計；`SERVICE` 商品型態須先確立不入庫的契約與測試。
 4. `deliveryRecords`、`returnRecords`、`orders.items`、`inventoryReservations` 與 `warehouseStocks` 的權威邊界，參見 `BUSINESS_RULES.md`。
@@ -61,6 +61,9 @@ node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.
 - `src/features/orders/order-workspace.js` 的 `refreshAffectedOrderCaches`：跨入口共用訂單快取刷新，仍為畫面責任，不在 Service 中。
 - `src/services/order-lifecycle-reservation.js`：取消／恢復的預留交易變更。
 - `src/services/delivery-stock.js`：送貨、退貨對庫存與批次的交易更新。
+- `src/services/order-creation.js`：共用建單提交與 Forecast 原子來源連結。
+- `src/services/inventory-count.js`：數量盤點、批次與操作憑證的共同交易。
+- `src/services/manual-inventory.js`：手動／Excel 新增、批號／效期調整與報廢的逐列交易。
 - `src/features/inventory/inventory-workspace.js`：產品庫存顯示、盤點／調整操作 UI。
 - `src/features/purchasing/purchase-order-editor.js`：採購單表單、PDF 與列印。
 - `src/features/orders/{order-progress,lifecycle-workspace,delivery-actions,order-creation}.js`：訂單畫面及操作（仍含交易呼叫，待 service 化）。
@@ -235,3 +238,12 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 - Feature 保留固定待確認 ID／內容、阻擋重入與變更後重送，視窗 generation 與身分 guard 防止舊非同步工作關閉新視窗或污染新帳號。提交後刷新失敗不誤報交易失敗；pending 記憶體不跨重載持久化。
 - 變更成本：每次交易增加一筆已知 movement read，既有同 ID 重試僅此一讀。非零盤點保留原 bounded lot query（最多 201，超過 200 拒絕）及逐批次交易重讀／寫入；零差量新增一筆 movement write，不動庫存／批次。保留單倉 fallback，非全面歷史資料對帳。無新查詢／Listener／集合／Rules／索引或正式部署。
 - 批次新增庫存、批號／效期異動、報廢及清單封存仍有 Feature 寫入；尚未將全部人工庫存入口統一。全域 actor／Firestore／純 helper 依賴、多倉、SERVICE 與 Preview 全流程驗收仍待收尾。
+
+## 人工庫存異動服務（2026-10-16）
+
+- `commitManualInventoryAdjustment` 接手手動／Excel 初始庫存、批號／效期增減與報廢；Feature 僅管理列、固定操作 ID、結果與同步快取通知。每列公司總量、分倉、批次、初始成本及 movement 同交易；整批仍為逐列 checkpoint，非整批原子。
+- `YushinInventory.manualAdjustmentLots` 共用既有 count／reconcile／FEFO 分配核心。正數新增獨立批次，不修改原 receipt 身分；指定批號／效期減量只扣符合批次，不足拒絕，未指定則 FEFO。批次權威為 `inventoryLots`；舊 `inventory.lots` 於這個入口改由全部已讀批次投影，不再獨立加減。
+- 每列 movement ID 與新增批次／成本 ID 固定，存去成本 `adjustmentIntent` 與原 actor。同 ID 重試先讀 movement；有實際初始成本的角色再讀受保護成本核對，倉管不讀成本。回覆遺失、通知失敗或後續庫存異動不會重複入／扣帳。Feature 保留未確認列 ID，防止重入及跨身分／視窗污染。
+- 新交易讀產品及倉庫主檔，檢查存在、停用、產品識別、必填批號／效期與實體倉庫；拒絕明確 Service 型別。讀原始庫存／批次時拒絕無效數量與不足的預留，缺批次量以明確未知成本的未分批來源補齊；指定批號減量不把未分批量冒充指定批號。
+- 成本：相較原每列兩筆 stock read，新增 movement、產品、倉庫及兩筆固定 lot ID read；成本有權角色另讀成本 ID。新增每產品一次 `inventoryLots.where(productKey).limit(201)` 查詢與逐文件 tx 重讀，超過 200 批拒絕。查所有倉庫批次是為重建舊列表鏡像；僅寫目標倉批次，無新索引／Listener／Rules／集合。盤盈／缺批次可能多寫 balance lot。初始真實成本與倉管 costPending 仍分離。
+- 本節更新前節的批次異動待辦。清單封存／庫存設定等 Feature 寫入、其他入口的舊批次列表投影、超過 200 批的分頁設計、跨重載恢復、多倉、完整 SERVICE 與 Preview 驗收仍未完成。無正式部署、遷移或資料刪除。

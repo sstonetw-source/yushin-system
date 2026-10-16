@@ -2,6 +2,28 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const inventory=require('../modules/inventory-core.js');
 
+test('manual lot additions preserve existing identities and create the specified new batch',()=>{
+ const input=[{id:'A',lotNo:'old',remainingQty:3}];
+ const result=inventory.manualAdjustmentLots(input,5,4,1,{lotNo:'B',expiryDate:'2027-01-01',balanceId:'balance',addedId:'new'});
+ assert.equal(result.lots.reduce((s,l)=>s+l.remainingQty,0),9);
+ assert.equal(result.lots.find(l=>l.id==='new').lotNo,'B');assert.equal(result.lots.find(l=>l.id==='balance').remainingQty,2);
+ assert.equal(input[0].remainingQty,3);
+});
+test('targeted manual reductions select only matching batches and preserve other receipts',()=>{
+ const lots=[{id:'A',lotNo:'A',expiryDate:'2027-01-01',remainingQty:5},{id:'B',lotNo:'B',expiryDate:'2028-01-01',remainingQty:5}];
+ const result=inventory.manualAdjustmentLots(lots,10,-3,4,{lotNo:'B',balanceId:'balance',addedId:'new'});
+ assert.deepEqual(result.allocations.map(a=>[a.lotId,a.qty]),[['B',3]]);assert.equal(result.lots[0].remainingQty,5);assert.equal(result.lots[1].remainingQty,2);
+ assert.throws(()=>inventory.manualAdjustmentLots(lots,10,-6,0,{lotNo:'B',balanceId:'balance'}),/不足/);
+ assert.throws(()=>inventory.manualAdjustmentLots([],10,-1,0,{lotNo:'B',balanceId:'balance'}),/不足/);
+});
+test('unselected manual reductions share count FEFO and never consume reserved stock',()=>{
+ const lots=[{id:'A',expiryDate:'2028-01-01',remainingQty:5},{id:'B',expiryDate:'2027-01-01',remainingQty:5}];
+ const result=inventory.manualAdjustmentLots(lots,10,-3,4,{balanceId:'balance',addedId:'new'});
+ assert.equal(result.allocations[0].lotId,'B');
+ for(const [current,delta,reserved] of [[10,-7,4],[10,NaN,0],[10,0,0],[2,1,3],[10,-1,-1],[Infinity,1,0]])
+  assert.throws(()=>inventory.manualAdjustmentLots(lots,current,delta,reserved,{balanceId:'balance',addedId:'new'}));
+});
+
 test('stock projection derives available quantity from on-hand and reserved',()=>{
   assert.deepEqual(inventory.normalizeStock({onHand:12,reserved:5,incoming:7}),{
     onHand:12,reserved:5,available:7,incoming:7
