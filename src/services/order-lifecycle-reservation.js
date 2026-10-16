@@ -40,6 +40,8 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         const demandRef=syncLinkedDemands?procurementDemandRef(globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId})):null;
         const demandSnap=demandRef?await transaction.get(demandRef):null;
         const reservationData=reservationSnap.exists?reservationSnap.data():{};
+        // Cancellation/restoration still writes one location. Reject future v2 records.
+        globalThis.YushinReservation.assertLegacyReservationLocation(reservationData);
         if(nextStatus==='normal'&&!directShip&&productKey){
             if(!warehouseId||String(warehouseId).startsWith('custody-'))
                 throw new Error('原訂單倉庫不是可用的實體倉庫；請由管理員先核對倉庫與貨品位置，再恢復訂單。');
