@@ -347,3 +347,7 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 試點僅接受同一訂單 2–5 個**不同**品項，同產品、剛好兩個固定來源倉、無原預留／採購／出貨／退貨進度、合法整數的情況。前端利用既有 Reservation Core 產生意圖，伺服端重新讀取與驗證。Callable 回傳有效結果後仍逐項沿用既有 Service 完成採購需求投影與工作狀態，不自行宣告整筆完成。身分或回覆不明確時停止，不在當次錯誤中退回單品項重複寫入；原同步的 checkpoint/retry 負責恢復。暫不支援 v2 同一品項多位置、歷史非標準 inventory ID、售後／收貨／出貨全流程。
 
 伺服端另增來源同步嘗試識別碼 `syncAttemptId`，只有訂單 `inventoryReservationStatus='pending'` 且目前的 `inventoryReservationAttemptId` 相同時可建立新的雙倉預留交易；已存在相同操作憑證才可冪等重試，防止較舊初始同步在較新工作後繼續提交。無部署、正式資料操作及 Rules 寫入放寬。
+
+### 2026-10-17 Preview Auth + Callable Emulator 驗收
+
+新增 Firebase Authentication + Functions Callable + Firestore Admin SDK 三套 Emulator 連動測試，明確使用 `demo-yushin` 專案與模擬帳號，驗證持有登入憑證的採購可成功、無憑證拒絕、業務越權拒絕、停用後拒絕、竄改角色拒絕、重送意圖不重複、舊同步 ID 拒絕及交易一致性；CI 環境額外啟用 `ENABLE_GROUPED_RESERVATION=true`，不部署至 Firebase。正式專案 `yu-shing-company` 即使配置同名環境旗標也不得啟用這個試點 Callable。只有 `preview-20135` 在額外設定旗標時才允許（仍須 Preview 實際部署、人工驗收）；這些 Emulator 通過不表示正式切換已完成。

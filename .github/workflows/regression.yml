@@ -75,5 +75,11 @@ jobs:
           java-version: '21'
       - name: Emulator Admin SDK grouped reservation integration
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-grouped-reservation.cjs"
+      - name: Install Functions runtime for real callable emulator
+        run: npm install --prefix functions --no-save --no-package-lock
+      - name: Preview Callable Auth + Functions + Firestore Emulator integration
+        env:
+          ENABLE_GROUPED_RESERVATION: "true"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test tests/emulator-grouped-reservation-callable.cjs"
       - name: Compile and test Firestore rules
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/firestore-rules.test.js"

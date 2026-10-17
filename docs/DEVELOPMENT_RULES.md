@@ -45,3 +45,5 @@
 - 來源收貨與自由庫存分配共用 `planReservationReceipt`；需求分別由 Receiving／Workflow 與採購投影提供，不另造需求公式。只變更收貨倉預留，既有 receipt／transfer checkpoint、FIFO 與重試身分保護不能略過。
 
 - 後端分組預留僅 Preview 選擇性開啟，必須檢查實際後端 `ENABLE_GROUPED_RESERVATION=true` 並使用相同來源同步 `syncAttemptId`；正式環境、前端未開啟或不符合初始雙倉條件時不呼叫 Functions。勿在未知回覆後盲目用另一 attemptId 重做；維持原訂單來源同步及採購需求 checkpoint。正式切換前須先完成 Functions Callable 模擬真實 Auth/role、正常/拒絕/併發、收貨/打單/出貨、取消／退貨與服務品項完整 E2E。
+
+- 後端雙倉 Callable 的執行閘門必須同時核對 `ENABLE_GROUPED_RESERVATION=true` 和實際專案 ID 為 `preview-20135`；僅完整的 Auth + Firestore Emulator 下允許 `demo-yushin`。不可把示範開關或來源 JS 旗標當成正式部署授權。重大角色／身份改動須跑 `tests/emulator-grouped-reservation-callable.cjs` 的真實登入 SDK 測試。
