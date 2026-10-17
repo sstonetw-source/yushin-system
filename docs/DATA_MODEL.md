@@ -181,3 +181,5 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ### 雙倉自由庫存自動分配 checkpoint（2026-10-18）
 
 `reservationOperationReceipts/single-v2-free-batch-{runId}` 新增 Emulator-only 協調進度文件。它是工作執行 checkpoint，**不是實體庫存權威**；欄位包含 action、actorUid、actorRole、intentHash、productKey、warehouseId、maxQty、allocatedQty、processedSteps、pending、status、createdAt、updatedAt 及完成原因。pending 保存 orderId、itemId、syncAttemptId、quantity、固定 operationId。每步真正變更由既有 `inventoryMovements/single-v2-free-{operationId}` 證明；相同 operationId 重送不重扣，job 進度在獨立 checkpoint transaction 內做單次累加。沒有新增 collection、Rules 或索引；全部 Admin SDK 寫入嚴格限制 `demo-yushin` Emulator。待 Preview 正式啟用前需處理大型候選索引、checkpoint 清理政策與完整身分入口。
+
+原 v2 初始提交 Service 在相同 `inventoryReservations/{orderId}__{itemId}` 內保留 canonical `lifecycleWarehouseIds`（排序後兩個真實候選倉）；即使 quantity=0、locations=[] 也能在後續缺貨自由庫存分配時驗證位置授權。此欄不是第二套庫存 ledger，也不會增加 inventory 或 reserved 數量；舊資料不補寫。
