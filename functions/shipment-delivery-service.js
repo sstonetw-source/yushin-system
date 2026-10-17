@@ -41,7 +41,7 @@ async function readShipmentActorOrder(tx,db,uid,orderId,roles=['admin','sales','
   if(order.deliveryHistory!==undefined&&!Array.isArray(order.deliveryHistory))fault('送達歷史格式不正確');
   return {actorRole,orderRef,order};
 }
-function shipmentDeliveryContext(order,intent) {
+function shipmentDeliveryContext(order,intent,{allowReturns=false}={}) {
  const {orderId,itemId,syncAttemptId}=intent;
   if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
    fault('庫存同步未完成或來源同步識別碼已變更');
@@ -54,16 +54,20 @@ function shipmentDeliveryContext(order,intent) {
    ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
    ||item.transferPendingId||item.custodyTransferId||(order.logisticsTransfersPending??0)!==0)
    fault('品項不是可確認的實體倉出貨');
-  if(!Array.isArray(order.returnRecords)||order.returnRecords.length||(item.returnedQty??0)!==0)
+  if(!Array.isArray(order.returnRecords)||(!allowReturns&&(order.returnRecords.length||(item.returnedQty??0)!==0)))
    fault('退貨或補送流程尚未開放');
   const projection=core.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
    shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords});
   if(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)
    fault('訂購數量投影不一致');
+  const returnProjection=allowReturns?core.projectShipmentReturns({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
+   shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords,returns:order.returnRecords}):projection;
   if(item.warehouseShippedQty!==projection.shippedQty||order.deliveredQty!==projection.confirmedQty
-   ||(item.deliveredQty??0)!==projection.confirmedQty||order.isDelivered!==projection.isDelivered)
+   ||(item.deliveredQty??0)!==projection.confirmedQty||order.isDelivered!==returnProjection.isDelivered
+   ||(allowReturns&&((item.returnedQty??0)!==returnProjection.returnedQty
+    ||(order.returnedQty??0)!==returnProjection.returnedQty)))
    fault('出貨或客戶送達投影不一致');
-  return {item,productKey,projection};
+  return {item,productKey,projection,returnProjection};
 }
 async function readShipmentProof(tx,db,order,intent,productKey) {
  const {orderId,itemId,shipmentId,syncAttemptId}=intent;

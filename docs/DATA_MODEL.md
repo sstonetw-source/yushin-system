@@ -133,3 +133,6 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 ## Emulator-only 送達撤銷識別與批次追溯（2026-10-17）
 
 deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本次撤銷、recordId指向原確認，保存before／原因／actorUid／actorRole／intentHash／原結果；確認紀錄移除後仍能阻擋舊ID恢復。只改orders送達投影，warehouseShipmentRecords／實貨／預留／批次不變。退貨追溯不保存新資料，只讀原出貨movement及明確inventoryLots，回傳canCommit=false的lotRestorationPreview；沒有新collection、query、index或正式資料遷移。
+
+### v2實物退貨事件（2026-10-17，Emulator）
+`orders.returnRecords[]` 新增 sourceType=WAREHOUSE_CUSTOMER_RETURN，包含原 shipmentId、原 warehouseId、明確 lotAllocations、qty、date、reason、condition=RESTOCKABLE、settlement、actor UID／role、intentHash 及固定 movementId。`inventoryMovements/location-return-{operationId}` 保存完整 returnRecord／原 result；returnHistory 保存新增快照。同交易還原 inventory／warehouseStocks.onHand、inventoryLots.remainingQty，REPLACE 才增加原倉 v2 reservation.locations 與公司／原倉 reserved。returnedQty 是累計實物退回；deliveredQty／warehouseShippedQty 保持歷史累計，isDelivered 由 `projectShipmentReturns` 判斷 CLOSE／REPLACE 後有效履約。未改成本集合、Rules／Index 或正式資料。

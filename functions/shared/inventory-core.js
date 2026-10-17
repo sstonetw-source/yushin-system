@@ -242,7 +242,7 @@
 
   // The actual returned batch is selected explicitly. A partial customer
   // acknowledgement does not establish which batch in a mixed parcel arrived.
-  function planExplicitShipmentReturn({shipment,confirmedQty,selections=[]}={}){
+  function planExplicitShipmentReturn({shipment,confirmedQty,selections=[],priorReturns=[]}={}){
     const qty=value=>{
       if(!Number.isSafeInteger(value)||value<0)throw Error('退貨追溯數量必須為非負整數');
       return value;
@@ -263,6 +263,20 @@
       lots.set(row.lotId,row);sourceQty=qty(sourceQty+row.qty);
     }
     if(sourceQty!==shipment.qty)throw Error('原出貨量與實際批次合計不一致');
+    if(!Array.isArray(priorReturns)||priorReturns.length>200)throw Error('先前退貨明細不正確');
+    let priorQty=0;
+    for(const record of priorReturns){
+      if(!Array.isArray(record?.lotAllocations)||!record.lotAllocations.length||record.lotAllocations.length>200)
+        throw Error('先前退貨批次不正確');
+      let total=0;const used=new Set();
+      for(const row of record.lotAllocations){
+        const source=lots.get(ident(row?.lotId));qty(row.qty);
+        if(!source||!row.qty||used.has(row.lotId)||row.qty>source.qty)throw Error('先前退貨超過原批次額度');
+        used.add(row.lotId);total=qty(total+row.qty);lots.set(row.lotId,{...source,qty:source.qty-row.qty});
+      }
+      if(total!==qty(record.qty))throw Error('先前退貨量與批次不一致');
+      priorQty=qty(priorQty+total);
+    }
     const seen=new Set(),allocations=[];
     for(const row of selections){
       ident(row?.lotId);qty(row.qty);const source=lots.get(row.lotId);
@@ -272,7 +286,7 @@
       allocations.push({lotId:row.lotId,lotNo:source.lotNo||'',expiryDate:source.expiryDate||'',
         qty:row.qty,unitCost:0,cost:0});
     }
-    if(returnQty>confirmedQty)throw Error('退貨追溯總量超過該筆出貨已確認送達量');
+    if(qty(returnQty+priorQty)>confirmedQty)throw Error('退貨追溯總量超過該筆出貨已確認送達量');
     return {returnQty,allocations};
   }
 
