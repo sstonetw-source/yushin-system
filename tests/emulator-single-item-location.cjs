@@ -270,9 +270,10 @@ test('v2 restore only re-reserves the remaining free physical stock after a comp
  assert.equal((await x.read('warehouseStocks','V2-B__'+x.productKey)).reserved,8);
 });
 test('v2 lifecycle rejects unauthorized actor, stale sync, logistics, altered candidate and source projection',async()=>{
- const outsider=await readyLifecycle('outsider',{owner:'elsewhere'});
+ const outsider=await readyLifecycle('outsider');
+ await db.collection('users').doc('v2-nonowner').set({role:'sales',active:true});
  const baseline=await snapshot(outsider);
- await assert.rejects(outsider.lifecycle('cancelled'),/其他業務/);
+ await assert.rejects(outsider.lifecycle('cancelled',undefined,'v2-nonowner'),/其他業務/);
  assert.deepEqual(await snapshot(outsider),baseline);
  const noRole=await readyLifecycle('role',{role:'warehouse'});
  await assert.rejects(noRole.lifecycle('cancelled'),/權限|不能取消/);
