@@ -5,6 +5,7 @@ const {createHash}=require('node:crypto');
 const core=require('./shared/reservation-core');
 const demandCore=require('./shared/procurement-demand-core');
 const workflowCore=require('./shared/workflow-core');
+const receivingCore=require('./shared/receiving-core');
 const fulfillmentCore=require('./shared/fulfillment-core');
 const {readShipmentProof}=require('./shipment-delivery-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
@@ -87,10 +88,9 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   const ordered=number(item.qty??item.orderedQty,'訂購量');
   if(!ordered||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)
    ||number(item.returnedQty??0,'退貨量')!==0
-   ||number(item.receivedQty??0,'已收貨量')!==0
    ||order.isDelivered===true
    ||(order.returnRecords??[]).length>0||(order.returnHistory??[]).length>0)
-   fault('已收貨、全部送達或退貨的訂單不在此取消試點範圍');
+   fault('全部送達或退貨的訂單不在此取消試點範圍');
   if(!Array.isArray(order.warehouseShipmentRecords??[])||!Array.isArray(order.deliveryRecords??[])
     ||!Array.isArray(order.returnRecords??[])||!Array.isArray(order.orderLifecycleHistory??[])
     ||!Array.isArray(order.warehouseShipmentHistory??[])||!Array.isArray(order.deliveryHistory??[])
@@ -141,10 +141,10 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    const pendingReceipt=number(previousDemand.remainingToReceiveQty,'待收貨');
    const normalized=demandCore.normalizeDemand({...previousDemand,cancelled:current==='cancelled',
     status:current==='cancelled'?'CANCELLED':''});
-   if(receivedDemand||requested<orderedDemand||previousDemand.status!==normalized.status
+   if(receivedDemand>orderedDemand||requested<orderedDemand||previousDemand.status!==normalized.status
     ||pendingDemand!==normalized.remainingToOrderQty||pendingReceipt!==normalized.remainingToReceiveQty
     ||(current==='normal'&&previousDemand.cancelled===true))
-    fault('採購需求具有收貨、錯誤狀態或異常投影，請先稽核');
+    fault('採購需求具有錯誤狀態或異常投影，請先稽核');
   }
   // Lock both source identities: neither a wrong demand link nor a wrong order
   // link may hide a supplier commitment. Each single-field query is bounded.
@@ -167,11 +167,12 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     fault('供應紀錄與採購需求、產品、倉庫或所有權不一致');
    const qty=number(supply.qty,'供應訂購'),received=number(supply.receivedQty??0,'供應收貨');
    const registered=number(supply.incomingRegisteredQty??0,'已登記採購在途');
-   if(!qty||received||!['ORDERED','CANCELLED','CLOSED'].includes(supply.status))
-    fault('此流程只支援尚未收貨的有效或已停止供應紀錄');
-   const terminal=supply.status!=='ORDERED';
-   if((terminal&&(registered!==0||number(supply.closedQty??supply.cancelledQty,'已停止供應')!==qty))
-    ||(!terminal&&registered>qty))fault('供應停止數量或已登記在途投影不一致');
+   const normalizedSupply=receivingCore.normalizeSupply(supply);
+   if(!qty||received>qty||supply.status!==normalizedSupply.status)
+    fault('供應收貨數量或狀態異常');
+   const terminal=['CANCELLED','CLOSED'].includes(supply.status);
+   if((terminal&&(registered!==0||number(supply.closedQty??supply.cancelledQty,'已停止供應')!==qty-received))
+    ||(!terminal&&registered>normalizedSupply.remainingQty))fault('供應停止數量或已登記在途投影不一致');
    registeredByWarehouse.set(supply.warehouseId,
     number((registeredByWarehouse.get(supply.warehouseId)||0)+registered,'分倉採購在途合計'));
    if(supply.type==='PURCHASING_PO'){
@@ -186,16 +187,72 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
      ||line.orderId!==orderId||line.itemId!==itemId||line.productId!==productId
      ||line.qty!==qty||line.warehouseId!==supply.warehouseId
      ||(line.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
-     ||(!terminal&&['CANCELLED','CLOSED'].includes(String(po.status||'').toUpperCase())))
+     ||(normalizedSupply.remainingQty>0&&['CANCELLED','CLOSED'].includes(String(po.status||'').toUpperCase())))
      fault('供應紀錄與來源採購單明細或停止進度不一致');
    }
   }
+  // Receipt facts, rather than caches on the order or supplier, prove physical
+  // arrival. Lock both source identities; only the existing v2 receipt writer
+  // creates this bounded contract. These are read-only evidence checks.
+  const receipts=new Map();
+  for(const [field,value] of [['orderId',orderId],['demandId',demandId]]){
+   const page=await tx.get(db.collection('receipts').where(field,'==',value).limit(51));
+   if(page.size>50)fault('收貨憑證超過此試點 50 筆安全上限');
+   for(const doc of page.docs)receipts.set(doc.id,{...doc.data(),id:doc.id});
+  }
+  if(receipts.size>50)fault('收貨憑證超過此試點 50 筆安全上限');
+  const receiptsBySupply=new Map(),seenReceiptLots=new Set();
+  for(const receipt of receipts.values()){
+   const supply=supplyRows.get(receipt.supplyOrderId),receiptQty=number(receipt.qty,'收貨憑證');
+   if(!supply||!receiptQty||receipt.receiptId!==receipt.id||receipt.operationId!==receipt.id
+    ||receipt.reservationLocationSchemaVersion!==2||receipt.documentSourceType!=='SUPPLY_ORDER'
+    ||receipt.orderId!==orderId||receipt.itemId!==itemId||receipt.demandId!==demandId
+    ||receipt.demandSourceType!=='SALES_ORDER'||receipt.sourceId!==orderId||receipt.sourceItemId!==itemId
+    ||receipt.productKey!==productKey||receipt.productId!==productId||receipt.fulfillmentType!=='WAREHOUSE'
+    ||receipt.warehouseId!==supply.warehouseId||receipt.ownerUid!==order.ownerUid||receipt.salesCode!==order.salesCode
+    ||receipt.method!==supply.type||receipt.purchaseDocumentId!==(supply.purchaseDocumentId||''))
+    fault('收貨憑證與供應、訂單或倉庫來源不一致');
+   const cumulative=number(receipt.cumulativeReceivedQty,'累計收貨憑證');
+   const receiptOrdered=number(receipt.orderedQty,'收貨時供應量');
+   if(cumulative<receiptQty||cumulative>receiptOrdered||receiptOrdered>supply.qty)
+    fault('收貨憑證累計數量異常');
+   const movements=await tx.get(db.collection('inventoryMovements')
+    .where('receiptId','==',receipt.id).where('type','==','receipt').limit(2));
+   const movement=movements.size===1?movements.docs[0].data():null;
+   if(!movement||movement.receiptId!==receipt.id||movement.qty!==receiptQty
+    ||movement.sourceType!=='SUPPLY_ORDER'||movement.sourceId!==receipt.supplyOrderId
+    ||movement.productKey!==productKey||movement.warehouseId!==receipt.warehouseId
+    ||movement.lotNo!==receipt.lotNo||movement.expiryDate!==receipt.expiryDate
+    ||movement.ownerUid!==order.ownerUid||movement.salesCode!==order.salesCode)
+    fault('收貨憑證缺少唯一有效的實際入庫 movement');
+   const lotId=ident(receipt.lotId,'收貨批次');
+   if(seenReceiptLots.has(lotId))fault('不同收貨憑證不能重用同一入庫批次');
+   seenReceiptLots.add(lotId);
+   const lot=await tx.get(ref('inventoryLots',lotId));
+   if(!lot.exists||lot.data().productKey!==productKey||lot.data().productId!==productId
+    ||lot.data().warehouseId!==receipt.warehouseId||lot.data().sourceType!=='SUPPLY_ORDER'
+    ||lot.data().sourceId!==receipt.supplyOrderId||lot.data().lotNo!==receipt.lotNo
+    ||lot.data().expiryDate!==receipt.expiryDate||lot.data().receivedQty!==receiptQty
+    ||number(lot.data().remainingQty,'批次剩餘量')>receiptQty)
+    fault('收貨憑證與原入庫批次不一致');
+   const rows=receiptsBySupply.get(receipt.supplyOrderId)||[];
+   rows.push(receipt);receiptsBySupply.set(receipt.supplyOrderId,rows);
+  }
+  for(const supply of supplies){
+   const rows=(receiptsBySupply.get(supply.id)||[]).sort((a,b)=>a.cumulativeReceivedQty-b.cumulativeReceivedQty);
+   let received=0;
+   for(const row of rows){received=number(received+row.qty,'供應實收合計');
+    if(row.cumulativeReceivedQty!==received)fault('供應收貨憑證累計重複或不連續');}
+   if(received!==(supply.receivedQty??0))fault('供應收貨摘要與實際入庫憑證不一致');
+  }
   const supplied=demandCore.reconcileLinkedSupplies({demandId},supplies);
   const orderedSupply=number(item.supplyOrderedQty??0,'訂單供應量');
-  if(supplied.orderedQty!==orderedSupply||supplied.receivedQty!==0
-   ||(previousDemand&&(previousDemand.orderedQty!==orderedSupply||previousDemand.receivedQty!==0))
-   ||(orderedSupply>0&&!previousDemand))
-   fault('訂單、採購需求與實際供應承諾不一致');
+  const receivedSupply=number(item.receivedQty??0,'訂單收貨量');
+  if(receivedSupply>orderedSupply||supplied.orderedQty!==orderedSupply||supplied.receivedQty!==receivedSupply
+   ||(previousDemand&&(previousDemand.orderedQty!==orderedSupply||previousDemand.receivedQty!==receivedSupply))
+   ||((orderedSupply>0||receivedSupply>0)&&!previousDemand))
+   fault('訂單、採購需求與實際供應承諾／收貨不一致');
+  const incomingSupply=workflowCore.procurementQuantities({supplyOrderedQty:orderedSupply,receivedQty:receivedSupply}).inTransitQty;
   const reservationRef=ref('inventoryReservations',orderId+'__'+itemId),ledgerSnap=await tx.get(reservationRef);
   if(!ledgerSnap.exists)fault('缺少 v2 權威預留');
   const original=ledgerSnap.data();
@@ -208,7 +265,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     ||(current==='normal'&&oldQty+oldShortage!==outstanding)
     ||(current==='cancelled'&&(oldQty!==0||oldShortage!==0||original.status!=='released')))
    fault('訂單與 v2 預留投影不一致');
-  if(current==='normal'&&oldQty+Math.min(outstanding,orderedSupply)>outstanding)
+  if(current==='normal'&&oldQty+Math.min(outstanding,incomingSupply)>outstanding)
    fault('現貨預留與供應在途重複涵蓋需求');
   const existing=core.reservationLocations(original);
   if(existing.some(row=>!warehouseIds.includes(row.warehouseId)))
@@ -242,7 +299,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     fault('分倉採購在途不足以涵蓋供應紀錄');
   }
   const plan=core.planLocationReservation({productKey,warehouses,stocks,
-   aggregateStock:invSnap.data(),reservation:original,requestedQty:outstanding,inTransitQty:orderedSupply,
+   aggregateStock:invSnap.data(),reservation:original,requestedQty:outstanding,inTransitQty:incomingSupply,
    currentWarehouseId:hint,nextStatus,itemReservedQty:oldQty});
   if(plan.companyReservedDelta!==plan.warehouseDeltas.reduce((sum,row)=>sum+row.reservedDelta,0))
    fault('公司及分倉預留差額不守恆');
@@ -266,7 +323,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   // order-lifecycle service, never derive requestedQty from page state.
   const demandProjection=workflowCore.procurementQuantities({
    orderedQty:ordered,fulfillmentType:'WAREHOUSE',reservedQty:nextItem.reservedQty,
-   shortageQty:nextItem.shortageQty,supplyOrderedQty:orderedSupply,receivedQty:0,
+   shortageQty:nextItem.shortageQty,supplyOrderedQty:orderedSupply,receivedQty:receivedSupply,
    deliveredQty:fulfillment.confirmedQty,effectiveDeliveredQty:fulfillment.confirmedQty,returnedQty:0
   });
   const baseDemand=nextStatus==='cancelled'
@@ -274,7 +331,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    :demandCore.fromSalesOrder({sourceId:orderId,sourceItemId:itemId,sourceItemIndex:0,
      fulfillmentType:'WAREHOUSE',shortageQty:demandProjection.requiredSupplyQty,
      requiredSupplyQty:demandProjection.requiredSupplyQty,
-     inTransitQty:demandProjection.inTransitQty,supplyOrderedQty:orderedSupply,receivedQty:0});
+     inTransitQty:demandProjection.inTransitQty,supplyOrderedQty:orderedSupply,receivedQty:receivedSupply});
   const nextDemand=baseDemand?demandCore.demandDocument({
    ...(previousDemand||{}),...baseDemand,
    cancelled:nextStatus==='cancelled',

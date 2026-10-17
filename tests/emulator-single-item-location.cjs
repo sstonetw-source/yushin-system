@@ -697,3 +697,122 @@ test('v2 receiving uses three real operational roles and warehouse cost linkage,
  await db.collection('inventoryReservations').doc(x.orderId+'__I1').delete();
  const before=await receiptSnapshot(x);await assert.rejects(x.receive(),/缺少庫存預留/);assert.deepEqual(await receiptSnapshot(x),before);
 });
+
+test('partial receipt cancellation retains physical goods and remaining supplier obligation, then restores only uncovered demand',async()=>{
+ const x=await receiptLifecycle('post-receipt-partial');await x.receive();
+ const before=await receiptSnapshot(x),supply=await x.read('supplyOrders',x.supplyId);
+ const stopped=await x.lifecycle('cancelled');assert.equal(stopped.companyReservedDelta,-8);
+ let state=await receiptSnapshot(x);
+ assert.equal(state.state.base.documents[1].onHand,8);assert.equal(state.state.base.documents[1].reserved,0);
+ assert.equal(state.state.base.documents[1].incoming,2);
+ for(const collection of ['inventoryLots','inventoryLotCosts','receipts'])assert.deepEqual(state.documents[collection],before.documents[collection]);
+ assert.deepEqual(await x.read('supplyOrders',x.supplyId),supply);
+ assert.equal(state.state.demand.status,'CANCELLED');assert.equal(state.state.demand.receivedQty,1);
+ assert.equal(state.state.demand.remainingToReceiveQty,2);assert.equal(state.state.demand.remainingToOrderQty,0);
+ const first=await receiptSnapshot(x);await x.lifecycle('cancelled');assert.deepEqual(await receiptSnapshot(x),first);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,8);assert.equal(restored.shortageQty,2);
+ state=await receiptSnapshot(x);assert.equal(state.state.demand.requestedQty,3);
+ assert.equal(state.state.demand.orderedQty,3);assert.equal(state.state.demand.receivedQty,1);
+ assert.equal(state.state.demand.remainingToOrderQty,0);assert.equal(state.state.demand.remainingToReceiveQty,2);
+ await x.receive(2,'receipt_after_restore_partial');
+ assert.equal((await x.read('orders',x.orderId)).items[0].reservedQty,10);
+ assert.equal((await x.read('inventory',x.productKey)).onHand,10);
+});
+test('full receipt cancellation and restoration never recreate procurement or incoming, including a closed PO with fully received supply',async()=>{
+ const x=await receiptLifecycle('post-receipt-full');await x.receive(3);
+ await db.collection('purchaseOrders').doc(x.po.poNo).update({status:'CLOSED'});
+ const before=await receiptSnapshot(x);await x.lifecycle('cancelled');
+ const cancelled=await receiptSnapshot(x);assert.equal(cancelled.state.base.documents[1].onHand,10);
+ assert.equal(cancelled.state.base.documents[1].reserved,0);assert.equal(cancelled.state.base.documents[1].incoming,0);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,10);assert.equal(restored.shortageQty,0);
+ const after=await receiptSnapshot(x);assert.equal(after.state.demand.status,'RECEIVED');
+ assert.equal(after.state.demand.requestedQty,3);assert.equal(after.state.demand.orderedQty,3);assert.equal(after.state.demand.receivedQty,3);
+ assert.equal(after.state.demand.remainingToOrderQty,0);assert.equal(after.state.demand.remainingToReceiveQty,0);
+ for(const collection of ['inventoryLots','inventoryLotCosts','receipts'])assert.deepEqual(after.documents[collection],before.documents[collection]);
+ assert.deepEqual(after.state.supplies,before.state.supplies);assert.deepEqual(after.state.po,before.state.po);
+});
+test('receipt during customer cancellation can later restore against actual physical stock without duplicating remaining incoming',async()=>{
+ const x=await receiptLifecycle('post-cancel-receipt');await x.lifecycle('cancelled');await keepReceiptAsStock(x);
+ await x.receive();
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,8);assert.equal(restored.shortageQty,2);
+ const demand=(await x.demandRef.get()).data();assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,2);
+ assert.equal((await x.read('inventory',x.productKey)).incoming,2);
+});
+test('partially received supplier cancellation preserves receipt history and restoration creates only the new actual shortage',async()=>{
+ const x=await receiptLifecycle('post-receipt-supplier-stop');await x.receive();await x.lifecycle('cancelled');
+ const before=await receiptSnapshot(x);
+ const result=await x.c.cancelOutstandingSupplyRecord(x.po.poNo,x.supplyId,'供應商取消未到貨餘量');
+ assert.equal(result.cancelledQty,2);assert.equal(result.terminalStatus,'CLOSED');
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,8);assert.equal(restored.shortageQty,2);
+ const state=await receiptSnapshot(x);
+ assert.equal(state.state.demand.orderedQty,1);assert.equal(state.state.demand.receivedQty,1);
+ assert.equal(state.state.demand.requestedQty,3);assert.equal(state.state.demand.remainingToOrderQty,2);
+ assert.equal(state.state.demand.remainingToReceiveQty,0);assert.equal(state.state.base.documents[1].incoming,0);
+ for(const collection of ['inventoryLots','inventoryLotCosts','receipts'])assert.deepEqual(state.documents[collection],before.documents[collection]);
+});
+test('post-receipt lifecycle rejects missing, forged or duplicated receipt evidence without releasing or creating reservations',async()=>{
+ const cases=[
+  ['missing-receipt',async x=>{const r=await db.collection('receipts').where('orderId','==',x.orderId).get();await r.docs[0].ref.delete();}],
+  ['receipt-owner',async x=>{const r=await db.collection('receipts').where('orderId','==',x.orderId).get();await r.docs[0].ref.update({ownerUid:'other'});}],
+  ['receipt-source',async x=>{const r=await db.collection('receipts').where('orderId','==',x.orderId).get();await r.docs[0].ref.update({orderId:'other-order'});}],
+  ['receipt-counter',async x=>{const r=await db.collection('receipts').where('orderId','==',x.orderId).get();await r.docs[0].ref.update({cumulativeReceivedQty:2});}],
+  ['missing-movement',async x=>{const r=await db.collection('inventoryMovements').where('sourceId','==',x.supplyId).where('type','==','receipt').get();await r.docs[0].ref.delete();}],
+  ['wrong-movement',async x=>{const r=await db.collection('inventoryMovements').where('sourceId','==',x.supplyId).where('type','==','receipt').get();await r.docs[0].ref.update({qty:2});}],
+  ['wrong-lot',async x=>{const r=await db.collection('inventoryLots').where('sourceId','==',x.supplyId).get();await r.docs[0].ref.update({warehouseId:'V2-B'});}],
+  ['duplicate-receipt',async x=>{const r=await db.collection('receipts').where('orderId','==',x.orderId).get(),id='duplicate_'+r.docs[0].id;
+   await db.collection('receipts').doc(id).set({...r.docs[0].data(),receiptId:id,operationId:id,cumulativeReceivedQty:2});
+   const movement=await db.collection('inventoryMovements').where('receiptId','==',r.docs[0].id).where('type','==','receipt').get();
+   await db.collection('inventoryMovements').doc(id).set({...movement.docs[0].data(),receiptId:id});}],
+ ];
+ for(const [name,mutate] of cases){const x=await receiptLifecycle('proof-'+name);await x.receive();await mutate(x);
+  const before=await receiptSnapshot(x);await assert.rejects(x.lifecycle('cancelled'),undefined,name);
+  assert.deepEqual(await receiptSnapshot(x),before,name);}
+});
+test('post-receipt cancellation is atomic under a competing receipt and late write collision',async()=>{
+ const x=await receiptLifecycle('post-receipt-race');await x.receive();
+ // Either receipt finishes before cancellation, or it safely refuses because
+ // purchasing has not approved KEEP_STOCK. A receipt may never partially post.
+ const results=await Promise.allSettled([x.receive(1,'post_receipt_competing'),x.lifecycle('cancelled')]);
+ assert.equal(results[1].status,'fulfilled');
+ const order=await x.read('orders',x.orderId),stock=await x.read('inventory',x.productKey);
+ assert.equal(order.status,'cancelled');assert.equal(stock.reserved,0);
+ const received=order.items[0].receivedQty;assert.ok(received===1||received===2);
+ assert.equal(stock.onHand,7+received);assert.equal(stock.incoming,3-received);
+ assert.equal((await x.demandRef.get()).data().remainingToReceiveQty,3-received);
+ const y=await receiptLifecycle('post-receipt-failure');await y.receive();
+ const collision=db.collection('inventoryMovements').doc('post-receipt-lifecycle-collision');await collision.set({marker:true});
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({
+  get:r=>tx.get(r),update:(...a)=>tx.update(...a),set:(...a)=>tx.set(...a),
+  create:(...a)=>{tx.create(collision,{marker:false});return tx.create(...a);}}))};
+ const before=await receiptSnapshot(y);await assert.rejects(commitSingleItemLocationLifecycle(guarded,y.uid,y.intent('cancelled')));
+ assert.deepEqual(await receiptSnapshot(y),before);assert.equal((await y.lifecycle('cancelled')).status,'applied');
+});
+test('received lot may be consumed by a confirmed partial shipment before cancelling the unfulfilled remainder',async()=>{
+ const x=await receiptLifecycle('post-receipt-shipped');
+ // Complete baseline physical lot fixtures; newly purchased goods then follow
+ // the real receipt, preparation, shipment and acknowledgement Services.
+ await db.collection('warehouseStocks').doc('V2-B__'+x.productKey).update({onHand:3});
+ for(const [wh,qty] of [['V2-A',4],['V2-B',3]])await db.collection('inventoryLots').doc(x.productKey+'-baseline-'+wh).set({
+  productKey:x.productKey,productId:x.productKey,warehouseId:wh,receivedQty:qty,remainingQty:qty,
+  lotNo:'BASE',expiryDate:'2028-10-17',receivedAt:'2026-10-01T00:00:00Z'});
+ await x.receive();
+ const order=await x.read('orders',x.orderId),plan={mode:'CUSTOMER_SHIP',contact:'客戶',phone:'02-12345678',address:'台北市測試地址'};
+ order.items[0].deliveryPlan=plan;await db.collection('orders').doc(x.orderId).update({items:order.items,
+  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false});
+ const uid='post-receipt-shipping-operator';await db.collection('users').doc(uid).set({role:'warehouse',active:true});
+ await require('../functions/location-dispatch-service').commitLocationDispatchPreparation(db,uid,{
+  orderId:x.orderId,itemId:'I1',quantity:1,operationId:'prepare_post_receipt_shipment',syncAttemptId:'v2_123456789'});
+ await require('../functions/location-shipment-service').commitLocationShipment(db,uid,{
+  orderId:x.orderId,itemId:'I1',warehouseId:'V2-A',quantity:1,operationId:'ship_post_receipt_shipment',
+  syncAttemptId:'v2_123456789',date:'2026-10-17',expectedPlan:plan});
+ await require('../functions/shipment-delivery-service').commitShipmentDelivery(db,x.uid,{
+  orderId:x.orderId,itemId:'I1',shipmentId:'ship_post_receipt_shipment',quantity:1,
+  operationId:'deliver_post_receipt_shipment',syncAttemptId:'v2_123456789',date:'2026-10-17'});
+ const before=await receiptSnapshot(x);assert.equal(before.documents.inventoryLots.find(l=>l.sourceId===x.supplyId).remainingQty,0);
+ await x.lifecycle('cancelled');const restored=await x.lifecycle('normal');
+ assert.equal(restored.reservedQty,7);assert.equal(restored.shortageQty,2);
+ const after=await receiptSnapshot(x);assert.equal(after.state.base.documents[0].deliveredQty,1);
+ assert.equal(after.state.base.documents[1].onHand,7);assert.equal(after.state.base.documents[1].incoming,2);
+ assert.equal(after.state.demand.remainingToOrderQty,0);assert.equal(after.state.demand.remainingToReceiveQty,2);
+ for(const collection of ['inventoryLots','inventoryLotCosts','receipts'])assert.deepEqual(after.documents[collection],before.documents[collection]);
+});
