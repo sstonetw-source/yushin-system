@@ -86,8 +86,15 @@
             (crossWarehouse?r.data.warehouseId===after.warehouseId:
               (!r.data.warehouseId||r.data.warehouseId===after.warehouseId||r.data.warehouseId===before.warehouseId)));
           if(!movement)throw Error('庫存預留異動缺少同筆交易的庫存紀錄。');
+          // Each product has one immutable movement that proves its company
+          // total. Other warehouse movements are linked by fresh document ID.
+          const companyMovement=crossWarehouse?writes.find(r=>r.ref.path.startsWith('inventoryMovements/')
+            && r.data.productKey===after.productKey
+            && held.some(h=>({...reads.get(h.ref.path)?.data,...h.data}).warehouseId===r.data.warehouseId)):null;
+          if(crossWarehouse&&!companyMovement)throw Error('跨倉預留缺少公司總帳的原始異動憑證。');
           const evidence={inventoryId:inv.id,warehouseStockId:wh.id,previousWarehouseStockId:oldWh.id,
             movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id),...(crossWarehouse?{crossWarehouse:true,
+              companyMovementId:companyMovement.ref.id,
               warehouseReservationIds:siblings.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId===after.warehouseId).map(r=>r.ref.id)}:{})};
           if(movement.data.reservationStockEvidence&&JSON.stringify(movement.data.reservationStockEvidence)!==JSON.stringify(evidence))
             throw Error('不同倉庫的庫存預留必須分別記錄，請由管理員檢查此筆交易。');

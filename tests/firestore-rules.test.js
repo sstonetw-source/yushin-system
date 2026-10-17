@@ -2820,6 +2820,7 @@ test('actual cross-warehouse wrapper retains authorized five-role access with on
   assert.equal(company.onHand,40);assert.equal(a.onHand,20);
   if(['purchaser','warehouse'].includes(role))for(const r of reservations){
    assert.equal(r.stockEvidence.crossWarehouse,true);
+   assert.equal(r.stockEvidence.companyMovementId,f.id+'-1-A');
    const representative=(await getDoc(doc(db('admin'),'inventoryReservations/'+r.stockEvidence.reservationIds[0]))).data();
    assert.equal(representative.warehouseId,r.warehouseId);
   }
@@ -2854,7 +2855,8 @@ test('native corruption of company warehouse or proof metadata cannot bypass cro
   (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:'true'}}:data;},
   (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:false}}:data;},
   (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],warehouseReservationIds:[]}}:data;},
-  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],warehouseReservationIds:[...data[key].reservationIds]}}:data;}
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],warehouseReservationIds:[...data[key].reservationIds]}}:data;},
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],companyMovementId:'nonexistent-primary'}}:data;}
  ];
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])for(const mutate of mutations){
   const f=await crossWarehouseEvidenceFixture(uid,role,2,{mutate}),before=await f.snapshot();

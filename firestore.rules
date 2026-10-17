@@ -844,6 +844,23 @@ service cloud.firestore {
         && afterInv.reserved - beforeInv.get('reserved', 0) == delta
         && afterWh.reserved - beforeWh.get('reserved', 0) == delta;
     }
+    // Only one fresh warehouse movement evaluates the full company delta.
+    // All other warehouse movements must link that validated primary movement.
+    function linkedCompanyReservationProof(e, productKey, warehouseId) {
+      let path = /databases/$(database)/documents/inventoryMovements/$(e.companyMovementId);
+      let primary = getAfter(path).data;
+      let proof = primary.get('reservationStockEvidence', {});
+      return !exists(path)
+        && primary.get('productKey', '') == productKey
+        && primary.get('sourceId', '') == request.resource.data.get('sourceId', '')
+        && primary.get('warehouseId', '') != warehouseId
+        && proof.get('crossWarehouse', false) == true
+        && proof.get('movementId', '') == e.companyMovementId
+        && proof.get('companyMovementId', '') == e.companyMovementId
+        && proof.get('inventoryId', '') == e.inventoryId
+        && proof.get('reservationIds', []).size() == e.reservationIds.size()
+        && proof.get('reservationIds', []).hasAll(e.reservationIds);
+    }
     function crossWarehouseReservationStocks(e, productKey, warehouseId) {
       let local = {'reservationIds': e.warehouseReservationIds};
       let delta = sameWarehouseReservationDelta(local, 0, productKey, warehouseId)
@@ -851,11 +868,14 @@ service cloud.firestore {
         + sameWarehouseReservationDelta(local, 2, productKey, warehouseId)
         + sameWarehouseReservationDelta(local, 3, productKey, warehouseId)
         + sameWarehouseReservationDelta(local, 4, productKey, warehouseId);
-      return e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
+      return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
+        && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
         && e.warehouseReservationIds.size() <= e.reservationIds.size()
         && e.warehouseReservationIds.toSet().size() == e.warehouseReservationIds.size()
         && e.reservationIds.hasAll(e.warehouseReservationIds)
-        && operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, productKey, ''), productKey, '')
+        && (e.companyMovementId == e.movementId
+          ? operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, productKey, ''), productKey, '')
+          : linkedCompanyReservationProof(e, productKey, warehouseId))
         && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), delta, productKey, warehouseId);
     }
     function operationalReservationStockEvidence(id) {
