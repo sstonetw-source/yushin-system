@@ -281,6 +281,9 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
     }
     if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+    // Preview-only grouped initial reservation; all existing per-item demand
+    // reconciliation still runs using fresh snapshots and original checkpoints.
+    await commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid);
     for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i,actorUid);
     // Each item transaction has already published stock, reservation, order and demand atomically.
     // Read the result for self-order processing and UI; never overwrite the source with reservedItems.
