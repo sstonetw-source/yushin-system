@@ -55,6 +55,7 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 | `pendingInventoryItems` | 暫待處理的庫存項目 |
 | `inventoryMovements` | 庫存異動明細／來源憑證 |
 | `stockOperations` | 安全交易的操作證明（Rules 檢查） |
+| `reservationOperationReceipts` | 僅後端 Cloud Functions 可建立與讀取的雙倉預留原子操作憑證／冪等 checkpoint；尚未啟用 |
 | `auditLogs` | 系統稽核記錄 |
 | `equipment` | 儀器、保養與維修管理 |
 
