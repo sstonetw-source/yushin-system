@@ -395,3 +395,9 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ### v2 取消／恢復的未到貨供應承諾（2026-10-17，僅 Emulator）
 
 本節更新前述「有供應承諾一律拒絕」限制。沿用 `commitSingleItemLocationLifecycle`；同一 Admin SDK Transaction 用既有 supplyOrders 的 orderId 與 demandId 兩種來源各查最多 51 筆，合併後最多接受 50 筆，逐筆驗證所有權、產品、實體倉、來源及零收貨狀態，正式 PO 額外重讀 purchaseOrders 與對應供應明細。承諾量由現有 `ProcurementDemand.reconcileLinkedSupplies` 計算，須等於訂單／採購需求投影；已登記 incoming 須由公司／分倉帳足量涵蓋。取消保留 supplyOrders、purchaseOrders 及 incoming；恢復將尚未到貨供應承諾交給現有 Reservation／Workflow／Demand Core，避免現貨與採購重複涵蓋。供應商同意取消仍使用既有採購 Service，客戶取消沒有供應商取消權。無新 Service／Core／Collection／Rules／索引；尚無 Callable／UI／Preview 或正式部署。
+
+### 既有收貨 Service 的 v2 雙倉接線（2026-10-17，僅 Emulator）
+
+`src/services/receiving.js::receiveSupplyOrderRecord` 延用同一個收貨寫入流程與既有 Receiving／Supply／Reservation Core；未另建平行收貨 Service。新增交易內 `validateV2ReceiptSource`，對位置版本 2 重讀真實 users 角色、原候選倉／分倉、PO 與需求來源；只准 `demo-yushin` Admin Firestore Emulator（process.env.FIRESTORE_EMULATOR_HOST + db.projectId），瀏覽器入口仍拒絕，StockPermissions／Rules 未放寬。正常來源只將本次到貨的實貨及預留加到供應紀錄指定倉，保留其他 locations，不回填單倉 warehouseId。取消來源須有原採購 KEEP_STOCK 決策，增加實貨及來源 receivedQty、減少採購 incoming，原 released ledger 完全不寫、不占回庫存。
+
+同筆收貨的原 receipt、lot、protected lot cost／warehouse costSourceSupplyId、movement、supply、demand、order 及庫存維持原交易；新增 receipt 位置版本標記讓重送同樣重讀真實角色。原 src 建置產生 app.js，未只改生成檔。此試點只支援尚未出貨／退貨的單品項雙倉來源與分次收貨；非來源自由庫存對其他 v2 缺貨的自動分配、收貨後 v2 取消／恢復、Callable／前端／Preview 尚未整合。

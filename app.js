@@ -15771,6 +15771,118 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
     return {allocatedQty,unallocatedQty:remaining,affectedOrderIds:[...affectedOrderIds],completionReason};
 }
 
+// Reuse this receiving Service for the v2 trial; never create another receipt
+// writer. The browser path stays closed until its backend/Rules adapters exist.
+async function assertV2ReceiptActor(transaction, actorUid, actorRole) {
+    if(typeof process==='undefined'||!process.env?.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+        throw new Error('多倉收貨目前僅允許 demo-yushin Emulator，尚未開放正式入口。');
+    const actor=await transaction.get(db.collection('users').doc(actorUid));
+    if(!actor.exists||actor.data().active===false||actor.data().disabled===true
+        ||actor.data().role!==actorRole||!['admin','purchaser','warehouse'].includes(actorRole))
+        throw new Error('真實登入角色無此多倉收貨權限。');
+}
+async function validateV2ReceiptSource(transaction, {order,supply,reservation,item,inventory,warehouseStock,demand,actorUid,actorRole,qty}) {
+    await assertV2ReceiptActor(transaction,actorUid,actorRole);
+    const integer=(value,label)=>{
+        if(!Number.isSafeInteger(value)||value<0)throw new Error(label+'必須是非負整數。');
+        return value;
+    };
+    const id=value=>{
+        if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
+            throw new Error('多倉收貨來源識別不正確。');
+        return value;
+    };
+    const orderId=id(supply.orderId),itemId=id(supply.itemId),productKey=id(supply.productKey),warehouseId=id(supply.warehouseId);
+    const status=normalizedOrderStatus(order),cancelled=status==='cancelled';
+    if(!Array.isArray(order.items)||order.items.length!==1||order.items[0].itemId!==itemId
+        ||!order.ownerUid||!order.salesCode||!['normal','cancelled'].includes(status)
+        ||(cancelled?order.status!=='cancelled':!['active','normal'].includes(order.status))
+        ||!['normal','active','cancelled','',undefined].includes(order.orderStatus)
+        ||order.returnPending===true||item.transferPendingId||item.custodyTransferId
+        ||integer(order.logisticsTransfersPending??0,'調撥途中')!==0)
+        throw new Error('多倉收貨只支援來源完整且無調撥的單品項訂單。');
+    for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory']){
+        if(!Array.isArray(order[field]??[]))throw new Error('多倉收貨履約紀錄格式不正確。');
+    }
+    if(integer(item.deliveredQty??0,'交付量')||integer(item.warehouseShippedQty??0,'出貨量')
+        ||integer(order.deliveredQty??0,'訂單交付量')||integer(item.returnedQty??0,'退貨量')
+        ||order.isDelivered===true||(order.warehouseShipmentRecords??[]).length
+        ||(order.deliveryRecords??[]).length||(order.returnRecords??[]).length
+        ||(order.returnHistory??[]).length)
+        throw new Error('已出貨或退貨後的多倉收貨尚未整合。');
+    const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
+    if(supply.sourceType!=='SALES_ORDER'||supply.sourceId!==orderId||supply.sourceItemId!==itemId
+        ||supply.demandId!==demandId||supply.ownerUid!==order.ownerUid||supply.salesCode!==order.salesCode
+        ||supply.productId!==item.productId||supply.fulfillmentType!=='WAREHOUSE'
+        ||(supply.method!==undefined&&supply.method!==supply.type)
+        ||!demand||demand.demandId!==demandId||demand.sourceType!=='SALES_ORDER'
+        ||demand.sourceId!==orderId||demand.sourceItemId!==itemId||demand.productKey!==productKey
+        ||demand.productId!==item.productId||demand.ownerUid!==order.ownerUid||demand.salesCode!==order.salesCode
+        ||demand.fulfillmentType!=='WAREHOUSE'
+        ||reservation.orderId!==orderId||reservation.itemId!==itemId||reservation.productKey!==productKey
+        ||reservation.ownerUid!==order.ownerUid||reservation.salesCode!==order.salesCode
+        ||reservation.warehouseId!==undefined)
+        throw new Error('多倉收貨的訂單、需求或預留來源不一致。');
+    integer(qty,'本次收貨');
+    const held=integer(reservation.quantity,'預留'),shortage=integer(reservation.shortageQty,'缺口');
+    const ordered=integer(item.qty??item.orderedQty,'訂購量');
+    const supplied=integer(item.supplyOrderedQty??0,'供應量'),received=integer(item.receivedQty??0,'收貨量');
+    const supplyQty=integer(supply.qty,'來源採購量'),supplyReceived=integer(supply.receivedQty??0,'來源收貨量');
+    const registered=integer(supply.incomingRegisteredQty??0,'來源在途');
+    if(supplyQty>supplied||supplyReceived>received||supplyReceived>supplyQty||registered>supplyQty-supplyReceived
+        ||supply.originalFulfillmentType==='DIRECT_SHIP')throw new Error('供應承諾或原供貨方式與多倉來源不一致。');
+    if(cancelled&&(supply.customerCancellationDisposition!=='KEEP_STOCK'
+        ||!supply.customerCancellationResolvedAt||!supply.customerCancellationResolvedBy))
+        throw new Error('取消訂單尚無採購保留入庫的完整決策。');
+    const demandQty=integer(demand.requestedQty,'採購需求');
+    integer(demand.orderedQty,'需求供應量');integer(demand.receivedQty,'需求收貨量');
+    const normalizedDemand=globalThis.YushinProcurementDemand.normalizeDemand({...demand,
+        status:cancelled?'CANCELLED':'',cancelled});
+    if((item.orderedQty!==undefined&&item.orderedQty!==ordered)||item.reservedQty!==held||item.shortageQty!==shortage
+        ||demand.orderedQty!==supplied||demand.receivedQty!==received||demandQty<supplied
+        ||demand.status!==normalizedDemand.status||demand.remainingToOrderQty!==normalizedDemand.remainingToOrderQty
+        ||demand.remainingToReceiveQty!==normalizedDemand.remainingToReceiveQty
+        ||(!cancelled&&demand.cancelled===true)
+        ||(cancelled?(held!==0||shortage!==0||reservation.status!=='released'):held+shortage!==ordered))
+        throw new Error('多倉收貨數量與來源投影不一致。');
+    const rows=globalThis.YushinReservation.reservationLocations(reservation);
+    const candidates=new Set([warehouseId,id(item.warehouseId||order.warehouseId),...rows.map(row=>row.warehouseId)]);
+    if(reservation.lifecycleWarehouseIds!==undefined){
+        if(!Array.isArray(reservation.lifecycleWarehouseIds)||reservation.lifecycleWarehouseIds.length!==2
+            ||new Set(reservation.lifecycleWarehouseIds).size!==2)throw new Error('原候選倉資料不正確。');
+        reservation.lifecycleWarehouseIds.forEach(id);
+        if([...candidates].some(w=>!reservation.lifecycleWarehouseIds.includes(w)))throw new Error('收貨倉不在原候選倉。');
+        reservation.lifecycleWarehouseIds.forEach(w=>candidates.add(w));
+    }
+    if(candidates.size>2)throw new Error('此收貨試點最多支援兩個實體倉。');
+    for(const wh of candidates){
+        const master=await transaction.get(db.collection('warehouses').doc(wh));
+        if(!master.exists||master.data().systemCustody||master.data().warehouseType==='CUSTODY'
+            ||wh.startsWith('custody-')||(wh===warehouseId&&master.data().active===false))
+            throw new Error('收貨倉或原預留倉不是可用的實體倉。');
+        const stock=wh===warehouseId?warehouseStock:(await transaction.get(db.collection('warehouseStocks').doc(warehouseStockDocId(wh,productKey)))).data();
+        const own=rows.find(row=>row.warehouseId===wh)?.qty||0;
+        if(!stock||stock.productKey!==productKey||stock.warehouseId!==wh
+            ||integer(stock.reserved,'分倉預留')<own
+            ||stock.reserved+integer(stock.transferFreeInTransit??0,'分倉途中')>integer(stock.onHand,'分倉實貨'))
+            throw new Error('原分倉預留或實貨帳異常，不能部分收貨。');
+    }
+    if(!inventory||inventory.productKey!==productKey||integer(inventory.reserved,'公司預留')<held
+        ||inventory.reserved+integer(inventory.transferFreeInTransit??0,'公司途中')>integer(inventory.onHand,'公司實貨'))
+        throw new Error('公司多倉庫存帳異常。');
+    if(supply.type==='PURCHASING_PO'){
+        const po=await transaction.get(db.collection('purchaseOrders').doc(id(supply.purchaseDocumentId)));
+        const record=po.exists?po.data():{},links=record.supplyOrderIds;
+        // Match the actual immutable PO-line link, not a supplied array index.
+        const index=Array.isArray(links)?links.indexOf(supply.id):-1;
+        const line=Array.isArray(record.items)?record.items[index]:null;
+        if(index<0||links.filter(key=>key===supply.id).length!==1||!line
+            ||line.orderId!==orderId||line.itemId!==itemId||line.productId!==item.productId
+            ||Number(line.qty)!==supply.qty||line.warehouseId!==warehouseId
+            ||isPurchaseTerminalStatus(record.status))throw new Error('多倉收貨缺少有效供應商採購單憑證。');
+    }else if(!['PURCHASING_MANUAL','SALES_SELF_ORDER'].includes(supply.type))throw new Error('不支援的多倉供應來源。');
+}
+
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
     const actorUid=options.actorUid??currentUser?.uid,actorRole=options.actorRole??currentUserRole;
     const assertActor=(supply=null)=>{
@@ -15802,7 +15914,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const supplySnap=await tx.get(supplyRef);
         const receiptSnap=await tx.get(receiptRef);
         if(!supplySnap.exists)throw new Error('找不到供應紀錄。');
-        const supply=supplySnap.data();
+        const supply={...supplySnap.data(),id:supplyId};
         assertActor(supply);confirmedSupply=supply;
         if(!canConfirmSupplyReceipt(supply))throw new Error('原廠直送由該訂單負責業務確認；倉庫收貨僅限採購、倉管或管理員。');
         if (!globalThis.YushinSupply?.normalize || !globalThis.YushinReceiving?.buildReceiptSnapshot
@@ -15883,6 +15995,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         // 也不能把已完成的到貨重試誤判成新的「取消後收貨」。
         if(receiptSnap.exists){
             const receipt=receiptSnap.data()||{};
+            if(receipt.reservationLocationSchemaVersion===2)await assertV2ReceiptActor(tx,actorUid,actorRole);
             if(String(receipt.supplyOrderId||'')!==String(supplyId)||Number(receipt.qty)!==qty
                 ||String(receipt.lotNo||'')!==lotNo||String(receipt.expiryDate||'')!==expiryDate
                 ||(receipt.createdByUid&&receipt.createdByUid!==actorUid)||(receipt.createdByRole&&receipt.createdByRole!==actorRole))throw new Error('到貨操作識別碼衝突，請重新開啟待到貨視窗。');
@@ -16006,7 +16119,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
         const incomingRelease=receiptPlan.incomingReleaseQty;
         if(inv.incoming<incomingRelease||wh.incoming<incomingRelease)throw new Error('公司或分倉在途保留量不足，無法完整收貨扣回。');
-        let order=null,items=[],itemIndex=-1,reserveQty=0,sourceStockPlan=null;
+        let order=null,items=[],itemIndex=-1,reserveQty=0,sourceStockPlan=null,sourceReservationV2=false;
         if(supply.orderId){
             const orderRef=db.collection('orders').doc(supply.orderId);
             const reservationRef=db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`);
@@ -16023,16 +16136,25 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 items=normalizedOrderItems(order);itemIndex=validateSourceItem(order,items);
                 if(itemIndex>=0){
                     const item=items[itemIndex];
+                    if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存預留紀錄，無法安全入庫。');
+                    const savedReservation=reservationSnap.data();
+                    if(savedReservation.locationSchemaVersion!==undefined||savedReservation.locations!==undefined)
+                        globalThis.YushinReservation.reservationLocations(savedReservation);
+                    sourceReservationV2=savedReservation.locationSchemaVersion===2;
+                    if(sourceReservationV2)await validateV2ReceiptSource(tx,{order,supply,reservation:reservationSnap.data(),item,
+                        inventory:invSnap.exists?invSnap.data():null,warehouseStock:whSnap?.exists?whSnap.data():null,
+                        demand:demandSnap?.exists?demandSnap.data():null,actorUid,actorRole,qty});
                     if(sourceOrderStatus==='normal'){
                         if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存預留紀錄，無法安全入庫。');
                         const reservation=reservationSnap.data();
                         if(reservation.orderId!==supply.orderId||reservation.itemId!==supply.itemId||reservation.productKey!==productKey
-                            ||reservation.warehouseId!==warehouseId||item.warehouseId!==warehouseId||item.transferPendingId)
+                            ||(!sourceReservationV2&&(reservation.warehouseId!==warehouseId||item.warehouseId!==warehouseId))||item.transferPendingId)
                             throw new Error('來源預留的產品、倉庫或訂單關聯不符，無法安全入庫。');
                         const rawReserved=quantity(order.items[itemIndex].reservedQty,'來源預留',true);
                         const ledgerReserved=quantity(reservation.quantity,'預留帳'),ledgerShortage=quantity(reservation.shortageQty,'缺貨帳',true);
+                        const localReserved=sourceReservationV2?(globalThis.YushinReservation.reservationLocations(reservation).find(row=>row.warehouseId===warehouseId)?.qty||0):ledgerReserved;
                         if(rawReserved!==ledgerReserved||Math.abs(Number(item.reservedQty||0)-ledgerReserved)>1e-9
-                            ||Math.abs(Number(item.shortageQty||0)-ledgerShortage)>1e-9||inv.reserved<ledgerReserved||wh.reserved<ledgerReserved)
+                            ||Math.abs(Number(item.shortageQty||0)-ledgerShortage)>1e-9||inv.reserved<ledgerReserved||wh.reserved<localReserved)
                             throw new Error('來源訂單與公司／分倉預留數量不一致，請先核對紀錄。');
                         const currentReserved=Math.max(0,Number(reservation.quantity||0));
                         const receiptPlan=globalThis.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:currentReserved},qty);
@@ -16059,9 +16181,11 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                             productKey,itemCode:supply.itemCode||'',itemName:supply.itemName||'',customerName:order.customerName||'',
                             ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',salesName:order.salesName||'',orderDate:order.orderDate||'',
                             quantity:Number(next.reservedQty||0),shortageQty:Number(next.shortageQty||0),
-                            status:Number(next.reservedQty||0)>0?'active':'shortage',warehouseId,updatedAt:now
+                            status:Number(next.reservedQty||0)>0?'active':'shortage',...(!sourceReservationV2?{warehouseId}:{}),updatedAt:now
                         },{merge:true});
                     }else{
+                        if(sourceReservationV2)sourceStockPlan=globalThis.YushinReservation.planReservationReceipt({productKey,warehouseId,qty,requestedReserveQty:0,
+                            reservation:reservationSnap.data(),aggregateStock:invSnap.data(),warehouseStock:whSnap.data(),itemReservedQty:0});
                         // 取消中的來源訂單不重新占庫存，但仍同步實際到貨摘要。
                         // 這樣日後恢復訂單時，不會把已經到倉的數量再次誤判成在途採購。
                         const receiptPlan=globalThis.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:0},qty);
@@ -16103,6 +16227,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
             fulfillmentType:'WAREHOUSE',
             extra:{
                 sourceOrderStatus,
+                ...(sourceReservationV2?{reservationLocationSchemaVersion:2}:{}),
                 autoAllocationQty,
                 autoAllocatedQty:0,
                 allocationCompleted:autoAllocationQty===0,

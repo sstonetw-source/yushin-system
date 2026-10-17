@@ -40,3 +40,11 @@
 Emulator harness 實際呼叫原 `commitFormalPurchaseOrder`、`registerPurchaseIncoming`、`cancelOutstandingSupplyRecord`，用 Admin Firestore Transaction 驗證銜接；harness 僅提供頁面／session adapter，不代表前端登入與權限已完成 E2E。案例包含 10 訂購／預留 7／採購 3 的取消恢復、供應商另取消後再恢復、未完成 incoming 登記、恢復與供應取消併發、來源／PO／在途錯帳拒絕、50／51 筆來源上限及後段 create 衝突原子回滾。測試結果以實際本機及 CI 為準。
 
 尚未完成：供應實際收貨後的 v2 分倉入庫／再配置、途中貨及剩餘打單取消、多品項、完整初始化與前端、Preview 五角色全流程。無正式部署或資料遷移。
+
+## 既有收貨 Service 連接雙倉來源（2026-10-17，Emulator-only）
+
+本批直接擴充 `receiveSupplyOrderRecord`，不新增平行收貨服務。正常、取消來源均使用原 Receiving／Supply／Reservation Core：正常收貨只在供應指定實體倉增加實貨／預留，其餘倉保持；取消來源須原採購 KEEP_STOCK 決策，實收入自由庫存，原 released ledger 保持不變。缺少來源 reservation 一律拒絕（含取消來源），避免漏帳時繞過驗證。v2 交易限 demo-yushin Emulator，重讀 users、公司／其他倉、PO／需求及來源；receipt 位置版本標記讓重送同樣拒絕停用或變更角色。
+
+Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `keepCancelledPurchaseAsStock` handler（UI adapter 由測試提供）。新增分次 1+2 收貨、取消後實收自由庫存、錯帳／錯 PO／缺失或混合 ledger 拒絕、相同與不同 ID 併發、disabled replay、後段 receipt 衝突全回滾、正式入口阻擋及 admin／purchaser／warehouse 成本憑證與 sales／engineer 拒絕。測試結果以本機及完整 CI 實際結果為準。
+
+尚未完成：來源出貨或退貨後的 v2 收貨、收貨後的 v2 取消／恢復、自由庫存對其他 v2 缺貨的重新分配、多品項／完整初始化與 Callable／前端／Preview 全流程。沒有 Firebase 正式部署或資料遷移。

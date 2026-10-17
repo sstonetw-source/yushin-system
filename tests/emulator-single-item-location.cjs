@@ -562,3 +562,138 @@ test('split supplier POs retain the uncancelled commitment when only one PO line
  assert.equal((await x.read('inventory',x.productKey)).incoming,2);
  assert.deepEqual(await x.read('supplyOrders',second.committedSupplyOrders[0].id),liveSecond);
 });
+
+function receivingHarness(c,uid='emulator-purchaser',role='purchaser'){
+ c.currentUser={uid};c.currentUserRole=role;c.permissionRulesReady=true;
+ c.process=process;c.window=c;c.YushinSupply=require('../modules/supply-core');
+ c.YushinFulfillment=require('../modules/fulfillment-core');c.YushinReservation=require('../modules/reservation-core');
+ c.canConfirmSupplyReceipt=()=>['admin','purchaser','warehouse'].includes(c.currentUserRole);
+ c.deliveryActor=()=>c.currentUser.uid;c.localDateString=()=> '2026-10-17';
+ c.firestoreReadWithTimeout=p=>p;c.readQueryInBatches=async q=>(await q.get()).docs.map(d=>({id:d.id,...d.data()}));
+ c.inventoryMovementRecord=(type,qty,sourceId,productKey,createdBy,extra)=>({type,qty,sourceId,productKey,createdBy,...extra});
+ vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),c);
+ return c;
+}
+async function receiptLifecycle(name,opts={}){
+ const x=await purchasedLifecycle('receipt-'+name,opts),c=receivingHarness(x.c);
+ await db.collection('users').doc('emulator-purchaser').set({role:'purchaser',active:true});
+ const receive=(qty=1,operationId='v2_receipt_'+name)=>c.receiveSupplyOrderRecord(x.supplyId,qty,'LOT-'+name,'2027-10-17',operationId);
+ return {...x,c,receive};
+}
+async function receiptSnapshot(x){
+ const state=await supplierSnapshot(x),documents={};
+ for(const collection of ['inventoryLots','inventoryLotCosts','receipts','inventoryMovements']){
+  const rows=await db.collection(collection).where('productKey','==',x.productKey).get();
+  documents[collection]=rows.docs.map(d=>({id:d.id,...d.data()}));
+ }
+ return {state,documents};
+}
+async function keepReceiptAsStock(x){
+ // Use the established purchasing decision handler, with UI adapters only.
+ Object.assign(x.c,{supplyReceivingCache:[{id:x.supplyId,...await x.read('supplyOrders',x.supplyId)}],
+  loadWarehouseMaster:async()=>{},confirm:()=>true,loadActiveReceivingSupplyCache:async()=>{},renderPurchasingView:()=>{},
+  showActionFeedback:()=>{},markMainPageDirty:()=>{},renderOrderLifecycleModal:()=>{},alert:message=>{throw Error(message);},
+  actionFailureMessage:(_label,error)=>error.message});
+ vm.runInContext(fs.readFileSync('modules/customer-cancellations.js','utf8'),x.c);
+ await x.c.keepCancelledPurchaseAsStock(x.supplyId);
+}
+test('existing receiving Service atomically posts successive partial receipts to the actual v2 warehouse and preserves the other location',async()=>{
+ const x=await receiptLifecycle('partial'),beforeB=await x.read('warehouseStocks','V2-B__'+x.productKey);
+ await x.receive();
+ let order=await x.read('orders',x.orderId),ledger=await x.read('inventoryReservations',x.orderId+'__I1');
+ assert.equal(order.items[0].reservedQty,8);assert.equal(order.items[0].shortageQty,2);assert.equal(order.items[0].receivedQty,1);
+ assert.equal(ledger.locationSchemaVersion,2);assert.equal(ledger.warehouseId,undefined);
+ assert.deepEqual(ledger.locations,[{warehouseId:'V2-A',reservedQty:5},{warehouseId:'V2-B',reservedQty:3}]);
+ assert.deepEqual(await x.read('warehouseStocks','V2-B__'+x.productKey),beforeB);
+ let company=await x.read('inventory',x.productKey);assert.equal(company.onHand,8);assert.equal(company.reserved,8);assert.equal(company.incoming,2);
+ const first=await receiptSnapshot(x);await x.receive();assert.deepEqual(await receiptSnapshot(x),first);
+ await x.receive(2,'v2_receipt_partial_final');
+ order=await x.read('orders',x.orderId);ledger=await x.read('inventoryReservations',x.orderId+'__I1');
+ assert.equal(order.items[0].reservedQty,10);assert.equal(order.items[0].shortageQty,0);assert.equal(order.items[0].receivedQty,3);
+ assert.equal(ledger.quantity,10);assert.equal(ledger.locations[0].reservedQty,7);assert.equal(ledger.locations[1].reservedQty,3);
+ company=await x.read('inventory',x.productKey);assert.equal(company.onHand,10);assert.equal(company.reserved,10);assert.equal(company.incoming,0);
+ assert.equal((await x.read('supplyOrders',x.supplyId)).status,'RECEIVED');
+ const demand=(await x.demandRef.get()).data();assert.equal(demand.status,'RECEIVED');assert.equal(demand.receivedQty,3);
+ assert.equal(demand.remainingToReceiveQty,0);
+});
+test('cancelled v2 source requires purchasing KEEP_STOCK and receives free stock without reactivating either reservation',async()=>{
+ const x=await receiptLifecycle('cancelled');await x.lifecycle('cancelled');
+ const blocked=await receiptSnapshot(x);await assert.rejects(x.receive(),/採購確認/);assert.deepEqual(await receiptSnapshot(x),blocked);
+ await keepReceiptAsStock(x);
+ const ledger=await x.read('inventoryReservations',x.orderId+'__I1'),b=await x.read('warehouseStocks','V2-B__'+x.productKey);
+ await x.receive(2);
+ assert.deepEqual(await x.read('inventoryReservations',x.orderId+'__I1'),ledger);
+ assert.deepEqual(await x.read('warehouseStocks','V2-B__'+x.productKey),b);
+ const order=await x.read('orders',x.orderId),stock=await x.read('inventory',x.productKey);
+ assert.equal(order.status,'cancelled');assert.equal(order.items[0].reservedQty,0);assert.equal(order.items[0].shortageQty,0);
+ assert.equal(order.items[0].receivedQty,2);assert.equal(stock.onHand,9);assert.equal(stock.reserved,0);assert.equal(stock.incoming,1);
+ const demand=(await x.demandRef.get()).data();assert.equal(demand.status,'CANCELLED');assert.equal(demand.receivedQty,2);
+ assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,1);
+ const before=await receiptSnapshot(x);await x.receive(2);assert.deepEqual(await receiptSnapshot(x),before);
+});
+test('v2 receiving re-reads real roles, other warehouse balances, PO and demand identities before posting any stock',async()=>{
+ const cases=[
+  ['disabled',x=>db.collection('users').doc('emulator-purchaser').update({active:false})],
+  ['spoofed-role',x=>db.collection('users').doc('emulator-purchaser').update({role:'sales'})],
+  ['other-stock',x=>db.collection('warehouseStocks').doc('V2-B__'+x.productKey).update({reserved:2})],
+  ['inactive',x=>db.collection('warehouses').doc('V2-A').update({active:false})],
+  ['po',x=>db.collection('purchaseOrders').doc(x.po.poNo).update({supplyOrderIds:[]})],
+  ['missing-ledger',x=>db.collection('inventoryReservations').doc(x.orderId+'__I1').delete()],
+  ['mixed-ledger',x=>db.collection('inventoryReservations').doc(x.orderId+'__I1').update({warehouseId:'V2-A'})],
+  ['supply-method',x=>db.collection('supplyOrders').doc(x.supplyId).update({method:'SALES_SELF_ORDER'})],
+  ['demand',x=>x.demandRef.update({ownerUid:'other'})],
+  ['projection',async x=>{const o=await x.read('orders',x.orderId);o.items[0].shortageQty=4;
+   await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+ ];
+ for(const [name,mutate] of cases){
+  const x=await receiptLifecycle('reject-'+name);await mutate(x);const before=await receiptSnapshot(x);
+  await assert.rejects(x.receive(),undefined,name);assert.deepEqual(await receiptSnapshot(x),before,name);
+ }
+});
+test('v2 receiving concurrent same operation posts one receipt, and changed request or disabled replay cannot reuse it',async()=>{
+ const x=await receiptLifecycle('concurrent');await Promise.all([x.receive(),x.receive()]);
+ const state=await receiptSnapshot(x);assert.equal(state.documents.receipts.length,1);
+ assert.equal(state.documents.inventoryLots.length,1);assert.equal(state.documents.inventoryLotCosts.length,1);
+ assert.equal(state.state.base.documents[1].onHand,8);
+ await assert.rejects(x.receive(2),/識別碼衝突/);assert.deepEqual(await receiptSnapshot(x),state);
+ await db.collection('users').doc('emulator-purchaser').update({disabled:true});
+ await assert.rejects(x.receive(),/真實登入/);assert.deepEqual(await receiptSnapshot(x),state);
+});
+test('v2 receipt over-consumption races and late failures never leave partial stock, lots, costs or source progress',async()=>{
+ const race=await receiptLifecycle('distinct-race');
+ const results=await Promise.allSettled([race.receive(2,'receipt_race_A'),race.receive(2,'receipt_race_B')]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const state=await receiptSnapshot(race);assert.equal(state.documents.receipts.length,1);
+ assert.equal(state.state.base.documents[1].onHand,9);assert.equal(state.state.demand.receivedQty,2);
+ const x=await receiptLifecycle('late-failure'),collision=db.collection('inventoryMovements').doc('receipt-collision');
+ await collision.set({marker:true});
+ x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn({get:r=>tx.get(r),update:(...a)=>tx.update(...a),
+  set:(ref,...args)=>{if(ref.parent.id==='receipts')tx.create(collision,{marker:false});return tx.set(ref,...args);}}));
+ const before=await receiptSnapshot(x);await assert.rejects(x.receive());assert.deepEqual(await receiptSnapshot(x),before);
+ x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn(tx));
+ await x.receive();assert.equal((await x.read('inventory',x.productKey)).onHand,8);
+ const guarded=await receiptLifecycle('environment');delete guarded.c.process;
+ const original=await receiptSnapshot(guarded);await assert.rejects(guarded.receive(),/僅允許 demo-yushin/);
+ assert.deepEqual(await receiptSnapshot(guarded),original);
+});
+test('v2 receiving uses three real operational roles and warehouse cost linkage, and denies both business roles',async()=>{
+ for(const role of ['admin','warehouse','sales','engineer']){
+  const x=await receiptLifecycle('actual-role-'+role),uid='receipt-actor-'+role;
+  await db.collection('users').doc(uid).set({role,active:true});
+  x.c.currentUser={uid};x.c.currentUserRole=role;
+  const before=await receiptSnapshot(x);
+  if(['sales','engineer'].includes(role)){
+   await assert.rejects(x.receive(),/權限/);assert.deepEqual(await receiptSnapshot(x),before);
+  }else{
+   await x.receive();const after=await receiptSnapshot(x);
+   assert.equal(after.state.base.documents[1].onHand,8);
+   assert.equal(after.documents.receipts[0].createdByRole,role);
+   const cost=after.documents.inventoryLotCosts[0];
+   if(role==='warehouse'){assert.equal(cost.unitCost,undefined);assert.equal(cost.costSourceSupplyId,x.supplyId);}
+   else assert.equal(cost.unitCost,100);
+  }
+ }
+ const x=await receiptLifecycle('cancelled-missing-ledger');await x.lifecycle('cancelled');await keepReceiptAsStock(x);
+ await db.collection('inventoryReservations').doc(x.orderId+'__I1').delete();
+ const before=await receiptSnapshot(x);await assert.rejects(x.receive(),/缺少庫存預留/);assert.deepEqual(await receiptSnapshot(x),before);
+});
