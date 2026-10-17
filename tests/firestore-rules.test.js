@@ -2750,13 +2750,14 @@ test('actual receiving-location allocation refuses corrupt transit before updati
  }
 });
 
-test('actual lifecycle refuses impossible transit balances atomically and permits corrected retries for admin sales and engineer',async()=>{
- for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']])for(const status of ['cancelled','normal']){
-  const f=await orderInitializationFixture(uid,role);await f.run();
+for(const status of ['cancelled','normal'])test('actual '+status+' refuses impossible transit balances atomically and permits corrected retries for admin sales and engineer',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  const checked=async(phase,fn)=>{try{return await fn();}catch(error){throw new Error(uid+' '+status+' '+phase+': '+error.message,{cause:error});}};
+  const f=await orderInitializationFixture(uid,role);await checked('initialize',()=>f.run());
   const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   await seed('orders/'+f.id,{...order,inventoryReservationStatus:'completed'});
   const run=loadActualLifecycle(f);
-  if(status==='normal')await assertSucceeds(run('cancelled'));
+  if(status==='normal')await checked('initial cancellation',()=>assertSucceeds(run('cancelled')));
   const reserved=status==='normal'?0:3;
   const company={productKey:'init-product',onHand:3,reserved,incoming:0,transferFreeInTransit:0};
   const warehouse={...company,warehouseId:'W1'};
@@ -2771,9 +2772,9 @@ test('actual lifecycle refuses impossible transit balances atomically and permit
    assert.deepEqual(await snapshots(),before);
   }
   await seed(paths[1],company);await seed(paths[2],warehouse);
-  await assertSucceeds(run(status));
+  await checked('corrected retry',()=>assertSucceeds(run(status)));
   assert.equal((await getDoc(doc(db('admin'),paths[3]))).data().quantity,status==='normal'?3:0);
-  await assertSucceeds(run(status));
+  await checked('repeated retry',()=>assertSucceeds(run(status)));
   assert.equal((await getDoc(doc(db('admin'),paths[1]))).data().reserved,status==='normal'?3:0);
  }
 });
