@@ -159,3 +159,9 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ### 未到貨供應的 v2 生命週期核對（2026-10-17，Emulator-only）
 
 供應承諾權威沿用 supplyOrders（非 receivingSupplyOrders 查閱投影）；以 orderId／canonical demandId 的單欄條件查詢各 limit(51)，聯集合併 doc.id、最多接受 50 筆，不接受呼叫端自行提供供應清單。與 orders.items[].supplyOrderedQty、零 receivedQty 及 procurementDemands.orderedQty／receivedQty 核對；正式採購逐筆驗證 purchaseOrders.supplyOrderIds 對應 items 的訂單、品項、產品、入庫倉及數量，讀同一 PO 時共用快照。使用現有 supplyContribution／reconcileLinkedSupplies 排除已停止供應的未到貨部分。已登記 incoming 加總只核對不改帳；不把採購在途當實貨。取消／恢復仍僅更改原訂單、預留／movement／receipt 與採購需求投影，保留供應及 PO 原貌。未新增欄位、集合或索引，未遷移正式資料。
+
+### v2 來源收貨文件（2026-10-17，僅 Emulator）
+
+正常收貨仍使用單一 `inventoryReservations/{orderId}__{itemId}`：保留 locationSchemaVersion=2、locations（其他倉原量不變），quantity／shortageQty 由同一 Core 更新，不新增 warehouseId。取消中收貨不改 reservation。公司及實際收貨倉 onHand／reserved／incoming、orders.items[].receivedQty／reservedQty／shortageQty／receiptEvents、supplyOrders 收貨進度、procurementDemands 收貨投影、原 receipts／inventoryLots／inventoryLotCosts／inventoryMovements 同交易提交；其他倉僅讀取驗證，無寫入。
+
+原 receipts 新增 `reservationLocationSchemaVersion:2`（只有 v2 收貨寫入），供冪等重送使用相同 Emulator／真角色閘門；lotId、批號、效期、actor 與固定 receipt operationId 沿用原欄位。倉管成本仍只寫 costSourceSupplyId，不由前端產生採購單價。無新增 collection／index／Rules。自由庫存後續分配仍使用既有 receipt checkpoint；未宣稱 v2 對其他缺貨訂單的第二階段分配已完成。

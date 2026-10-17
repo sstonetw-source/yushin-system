@@ -69,3 +69,5 @@
 - v2 部分出貨後的取消／恢復沿用 `commitSingleItemLocationLifecycle`，必須經 `projectShipmentDelivery` 核對送達並經 `readShipmentProof` 驗證實際出貨扣帳。僅已出貨全部送達、無剩餘打單、退貨、供應承諾／收貨的單品項雙倉可進入。不得用原 qty 直接恢復全量：傳入既有預留 Core 的目標須為 qty 減已確認交付。Emulator 須覆蓋取消→恢復→剩餘打單／出貨／送達、競爭庫存引起缺口與需求同步、重試／角色、出貨憑證錯誤與後段失敗原子回滾。仍禁止直接接正式 Callable／UI。
 
 - v2 客戶取消可涵蓋未到貨供應，但必須同交易查核 supplyOrders 的訂單及需求兩種來源並限制最多 50 筆，再由既有 Procurement Demand Core 重建供應承諾。正式 PO 來源與停止進度、產品／倉庫／所有權、訂單／需求承諾及已登記 incoming 均需一致。取消不可擅自更新 supplyOrders／purchaseOrders／incoming 或替採購填入 KEEP_STOCK。恢復將真實未取消承諾傳給原 Reservation Core，不可重複預留現貨；已停止 supply 不得重新啟用。測試使用原正式採購、在途登記與供應取消 Service 搭配真 Firestore Emulator，區分交易驗證與尚未完成的 Auth／UI／Preview E2E；須覆蓋恢復與供應取消併發、後段失敗全回滾及 50／51 筆邊界。
+
+- v2 實收來源接線修改原 `src/services/receiving.js`，禁止再建第二套 receipt writer。使用原 planReservationReceipt 與 applyReceiptToOrderItem，v2 分倉不足額檢查應比對本倉 ownQty，不得拿全公司 reservation.quantity 當成本倉持有量。保留其他 locations 並避免寫 warehouseId；取消 KEEP_STOCK 收貨不寫 released ledger。新 helper 必須在首次寫入前驗證 Emulator、真實 users 角色、來源／需求／PO、公司與其他預留倉，重送同樣核對角色，不能只信 session 按鈕。修 src 後重建 app.js。Emulator 須覆蓋分次到貨、原 KEEP_STOCK handler、三操作角色／兩業務角色、批次成本憑證、併發超收、固定 ID 重送、環境拒絕與後段寫入失敗全回滾；不把 VM session adapter 當作正式 Auth／UI E2E。
