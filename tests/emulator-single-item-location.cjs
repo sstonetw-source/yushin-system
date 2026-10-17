@@ -1043,6 +1043,8 @@ test('FIFO automated checkpoint allocates two v2 orders in bounded resumable ste
  await newerLedger.update({orderDate:'2026-10-02'});
  assert.equal((await older.read('orders',older.orderId)).items[0].shortageQty,2);
  assert.equal((await newer.read('orders',newer.orderId)).items[0].shortageQty,5);
+ // Zero-hold target still has exactly the two proven warehouse candidates.
+ assert.deepEqual((await newer.read('inventoryReservations',newer.orderId+'__I1')).lifecycleWarehouseIds,['V2-A','V2-B']);
  const firstDemand=await seedLifecycleDemand(older);
  const secondDemand=await seedLifecycleDemand(newer);
  await source.lifecycle('cancelled');
