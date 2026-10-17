@@ -139,3 +139,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 
 ### 退貨後一般重新下單（2026-10-17）
 新 orders 可含 `returnReorderSource:{orderId}` 單向查核關聯；不設定 quote／forecast 的 sourceType／sourceId 或來源同步完成，也不自動寫原單 backlink。新單金額／品項重新輸入，庫存預留與收款採正常新單初始值，不能複製原單履約／收款欄位。commitOrderCreation 驗證同客戶、可讀所有權及來源存在已實收CLOSE，且 pending ID 重送不可換來源。來源備註可編輯，結構化關聯獨立保存。
+
+## v2 打單準備憑證（2026-10-17；僅 Emulator）
+
+使用現存 `dispatchRecords` Collection，不新增集合與索引：`dispatchRecords/v2-{operationId}` 只保留打單事件 `action=location_dispatch_prepared`、`orderId`／`itemId`／`productKey`、`qty`、`actorUid`／`actorRole`、`ownerUid`／`salesCode`、`syncAttemptId`、`intentHash`、`createdAt`、`result`，權威累計仍為原訂單品項的 `dispatchPreparedQty`。來源訂單品項更新與憑證同一 Admin SDK Transaction；庫存與保留位置及客戶送達均不寫入。固定 ID 重送只回原結果、不消耗新的打單預算。此資料結構未接既有 UI、Cloud Callable、正式 Firestore Rules 或工作清單；不可對正式資料進行混用。
