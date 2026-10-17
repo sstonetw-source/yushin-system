@@ -43,3 +43,5 @@
 - 撤銷／退貨的公司與分倉數量一律交 `planReservationReturn`；先驗證原始帳與完整差額，再還原原批次。CLOSE、REPLACE 及取消狀態不可由 Feature／Service 另寫 clamp 公式。
 
 - 來源收貨與自由庫存分配共用 `planReservationReceipt`；需求分別由 Receiving／Workflow 與採購投影提供，不另造需求公式。只變更收貨倉預留，既有 receipt／transfer checkpoint、FIFO 與重試身分保護不能略過。
+
+- 後端分組預留僅 Preview 選擇性開啟，必須檢查實際後端 `ENABLE_GROUPED_RESERVATION=true` 並使用相同來源同步 `syncAttemptId`；正式環境、前端未開啟或不符合初始雙倉條件時不呼叫 Functions。勿在未知回覆後盲目用另一 attemptId 重做；維持原訂單來源同步及採購需求 checkpoint。正式切換前須先完成 Functions Callable 模擬真實 Auth/role、正常/拒絕/併發、收貨/打單/出貨、取消／退貨與服務品項完整 E2E。

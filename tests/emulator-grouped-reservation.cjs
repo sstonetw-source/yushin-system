@@ -19,7 +19,8 @@ async function seed(id,{role='purchaser',owner='sales1'}={}){
   const batch=db.batch();
   const set=(path,data)=>batch.set(db.doc(path),data);
   set('users/'+uid,{active:true,role,salesCode:'S01'});
-  set('orders/'+orderId,{ownerUid:owner==='actor'?uid:owner,salesCode:'S01',status:'active',items:[
+  set('orders/'+orderId,{ownerUid:owner==='actor'?uid:owner,salesCode:'S01',status:'active',
+    inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+id+'_123456789',items:[
     {itemId:itemId1,productId:productKey,warehouseId:'A',qty:5,reservedQty:0},
     {itemId:itemId2,productId:productKey,warehouseId:'B',qty:5,reservedQty:0}
   ]});
@@ -30,7 +31,8 @@ async function seed(id,{role='purchaser',owner='sales1'}={}){
     set('warehouseStocks/'+wh+'__'+productKey,{productKey,warehouseId:wh,onHand:10,reserved:0,transferFreeInTransit:0});
   }
   await batch.commit();
-  const intent=(a,b,attempt='attempt_'+id+'_123456789')=>({orderId,attemptId:attempt,items:[
+  const intent=(a,b,attempt='attempt_'+id+'_123456789')=>({orderId,attemptId:attempt,
+    syncAttemptId:'sync_'+id+'_123456789',items:[
     {itemId:itemId1,quantity:a},{itemId:itemId2,quantity:b}
   ]});
   const doc=async path=>(await db.doc(path).get()).data();
@@ -80,4 +82,12 @@ test('Emulator rejects insufficient physical stock atomically',async()=>{
   assert.equal((await f.doc('inventory/'+f.productKey)).reserved,0);
   assert.equal((await f.doc('warehouseStocks/B__'+f.productKey)).reserved,0);
   assert.equal((await db.doc('reservationOperationReceipts/grouped-attempt_shortage_123456789').get()).exists,false);
+});
+
+test('Admin transaction refuses a stale initial-sync attempt without changing stock',async()=>{
+ const f=await seed('stale');
+ await db.doc('orders/'+f.orderId).update({inventoryReservationAttemptId:'newer_attempt'});
+ await assert.rejects(f.call(f.intent(2,3)),/同步狀態已變更/);
+ assert.equal((await f.doc('inventory/'+f.productKey)).reserved,0);
+ assert.equal((await db.doc('reservationOperationReceipts/grouped-attempt_stale_123456789').get()).exists,false);
 });
