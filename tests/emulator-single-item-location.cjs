@@ -1159,6 +1159,7 @@ test('FIFO pagination scans past 50 reservations and chooses the truly oldest da
  const source=await readyLifecycle('auto-paged',{role:'admin'});
  const newer=await autoFreeTarget(source,'a-newer',4,'2026-10-12');
  const older=await autoFreeTarget(source,'z-older',4,'2026-09-25');
+ const newerShortageBefore=(await newer.read('orders',newer.orderId)).items[0].shortageQty;
  await source.lifecycle('cancelled');
  // These rows sort between the two actual reservation IDs by document name,
  // ensuring the oldest candidate falls strictly after the first query page.
@@ -1177,7 +1178,7 @@ test('FIFO pagination scans past 50 reservations and chooses the truly oldest da
  assert.equal(result.lastOrderId,older.orderId);
  assert.equal(result.lastAllocatedQty,2);
  assert.equal((await older.read('orders',older.orderId)).items[0].shortageQty,2);
- assert.equal((await newer.read('orders',newer.orderId)).items[0].shortageQty,4);
+ assert.equal((await newer.read('orders',newer.orderId)).items[0].shortageQty,newerShortageBefore);
  const replay=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
  assert.equal(replay.allocatedQty,2);
 });
