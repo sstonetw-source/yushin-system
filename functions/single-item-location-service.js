@@ -56,6 +56,13 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
   const role=profile.data().role;
   if(!['admin','purchaser','warehouse','sales','engineer'].includes(role))
     reject('角色不可檢視預留','permission-denied');
+  // Re-read the current owner even when returning an already-applied receipt.
+  // A former sales/engineer owner must not inspect a result after reassignment.
+  const orderRef=ref('orders',orderId),snap=await tx.get(orderRef);
+  if(!snap.exists)reject('訂單不存在','not-found');
+  const order=snap.data();
+  if(['sales','engineer'].includes(role)&&order.ownerUid!==uid)
+    reject('非負責業務不得檢視庫存配置','permission-denied');
   if(operation){
    const applied=await tx.get(receiptRef);
    if(applied.exists){
@@ -66,14 +73,9 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
     return {...receipt.result,status:'already-applied',receiptId:receiptRef.id};
    }
   }
-  const orderRef=ref('orders',orderId),snap=await tx.get(orderRef);
-  if(!snap.exists)reject('訂單不存在','not-found');
-  const order=snap.data();
   if(operation&&(!order.ownerUid||!order.salesCode||order.inventoryReservationStatus!=='pending'
     ||order.inventoryReservationAttemptId!==operation.syncAttemptId))
     reject('來源訂單同步狀態或所有權已變更，請重新讀取');
-  if(['sales','engineer'].includes(role)&&order.ownerUid!==uid)
-    reject('非負責業務不得檢視庫存配置','permission-denied');
   if(['cancelled','canceled','void','voided','deleted','closed','completed','已取消','作廢','已完成','結案'].some(x=>
       [order.status,order.orderStatus].some(v=>String(v||'').toLowerCase()===x)))
     reject('已取消或結案訂單不可建立預留');
