@@ -173,3 +173,7 @@ Callable API 不接受使用者提供的角色、庫存總量或指定倉庫；�
 - `commitLocationDispatchPreparation`（Emulator-only）以目前的單品項預留、累計寄出及已打單量呼叫權威 `warehouseShipmentState`，只增加 `dispatchPreparedQty` 並建立相同交易的 `dispatchRecords` 憑證。不能重複打單超過待打單額度，不能以已寄出卻尚未送達的量重印同一次出貨。錯誤來源同步、退貨／REPLACE、倉位預留總和錯誤、非法角色與取消單皆拒絕；不同操作 ID 併發仍由同一訂單 Firestore Transaction 序列化。
 - `commitLocationShipment` 仍是唯一 v2 寄出扣帳者；`commitShipmentDelivery` 只確認送達。現在 Emulator 的 v2 寄送測試使用真正打單 Service 取代原本直接覆寫 `dispatchPreparedQty` 的測試捷徑；首次預留完成 checkpoint 尚未真正接到整體訂單生命週期。
 - 此路徑不表示既有前端打單頁／`dispatchRecords` 查詢及 Rules 已能支援 v2；不得將僅 Emulator 的後端記為上線。
+
+### 單品項 v2 初始取消與恢復（2026-10-17，Emulator-only）
+
+僅允許尚無供應、收貨、打單、寄送、送達及退貨歷史，並且沒有 `procurementDemands` 來源文件的單品項雙倉預留。取消一次釋放 v2 `locations` 全部原預留，保留產品、來源識別及兩個候選倉，訂單狀態／公司 reserved／兩倉 reserved／明細／movement／receipt 原子提交；不扣或新增 `onHand`。恢復根據交易當下的公司與各倉實際自由庫存**重新規劃**，別單占用或倉庫停用不得偷挪，缺口保留為 shortage，採購在途不能當作實貨。固定 operationId 驗證原意圖與 UID／角色並返回原結果，不能重複釋放或重新預留。已有打單、履約、採購需求、供應及歷史更正的完整取消／恢復仍由現行既有 Service 負責，v2 尚未接線，不得用本試點繞過其他程序。
