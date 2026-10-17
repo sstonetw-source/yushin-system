@@ -68,3 +68,11 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 ## 操作憑證重送的即時所有權檢查（2026-10-17）
 
 單品項雙倉初始預留與取消／恢復的固定操作 ID，即使交易已完成，也會在同一 Firestore Transaction 重新讀取實際 orders 文件。sales／engineer 已被移轉訂單所有權時，原持有人不能再用歷史操作 ID 取回原結果；admin 維持原權限。重新檢查不要求目前物流狀態仍等於首次執行，因此合法的同一持有人仍可於訂單進度變更後取得冪等回覆，不會再次扣帳。缺少來源訂單則拒絕；角色停用及意圖碰撞的原檢查保留。本批沒有新增讀取於首次正常操作（僅將既有訂單讀取移到憑證判斷之前）；對已完成重送增加單筆 orders 讀取，不修改 Rules／集合／索引，也不代表 v2 正式啟用。
+
+## 已釋放自由庫存跨 v2 訂單再分配（2026-10-18，Emulator-only）
+
+新增在既有 `functions/single-item-location-service.js` 的 `commitSingleItemFreeStockAllocation`，同一個單品項雙倉預留 Service 使用 `Reservation.planReservationReceipt({addsStock:false})`，在一筆 Admin SDK Transaction 內，將真實公司及來源倉的自由實貨分配給另一張未採購／未打單／未出貨的 v2 缺貨訂單。僅增加公司、來源分倉 reserved 與既有單筆 v2 ledger；不變動 onHand／其他倉預留，也不將採購在途當現貨。
+
+交易重讀有效角色（admin／purchaser／warehouse）、訂單同步、產品／實體倉、來源／數量投影及 canonical demand；有界查詢供應紀錄，任何已記錄的來源供應均拒絕此無採購試點。既有需求在同交易減少至真實剩餘缺口，不建立重複需求；沒有需求且全數分配時不額外建立零量文件。固定 operationId + intentHash 寫不可重用 movement，同 ID 重送不重扣；不同 ID 並發由 Firestore Transaction 衝突重試序列化。未有庫存或已無缺口時回覆零分配、不寫入憑證，允許後續重新嘗試。
+
+實際 Emulator 測試涵蓋：A/B 取消釋放後由另一 v2 訂單分別接收、公司／來源倉差額、既有 demand 同步、冪等重送、角色／供應／取消與錯誤投影拒絕，以及同倉併發、操作 ID 衝突。此為**指定目標訂單的交易能力**，尚未實作 FIFO 自動挑選全產品缺貨清單／完整 checkpoint 續傳，也不開放 Callable、正式瀏覽器與 Preview。無 Firebase 正式部署、資料遷移或新增 Rules／索引。
