@@ -315,3 +315,34 @@ test('v2 lifecycle concurrent cancellations and receipt conflicts are atomic',as
  await db.collection('inventoryMovements').doc('single-v2-life-'+collidingId+'-V2-B').delete();
  assert.equal((await y.lifecycle('cancelled',collidingId)).status,'applied');
 });
+
+test('v2 restore rejects inactive source additions and reassigns only actual free warehouse stock',async()=>{
+ const x=await readyLifecycle('inactive-restore');
+ await x.lifecycle('cancelled');
+ await db.collection('warehouses').doc('V2-A').update({active:false});
+ const result=await x.lifecycle('normal');
+ assert.deepEqual(result.locations,[{warehouseId:'V2-B',reservedQty:8}]);
+ assert.equal(result.reservedQty,8);assert.equal(result.shortageQty,2);
+ assert.equal((await x.read('warehouseStocks','V2-A__'+x.productKey)).reserved,0);
+ assert.equal((await x.read('warehouseStocks','V2-B__'+x.productKey)).reserved,8);
+ await x.lifecycle('cancelled','lifecycle_recancel_inactive_123456');
+ assert.equal((await x.read('inventory',x.productKey)).reserved,0);
+});
+test('v2 initial lifecycle refuses purchase demands, inconsistent source status, or released-ledger corruption',async()=>{
+ const demand=await readyLifecycle('has-demand');
+ await db.collection('procurementDemands').doc('SALES_ORDER:'+demand.orderId+':I1').set({
+  sourceType:'SALES_ORDER',sourceId:demand.orderId,sourceItemId:'I1',status:'PENDING'});
+ const before=await snapshot(demand);
+ await assert.rejects(demand.lifecycle('cancelled'),/採購需求/);
+ assert.deepEqual(await snapshot(demand),before);
+ const status=await readyLifecycle('bad-status');
+ await db.collection('orders').doc(status.orderId).update({orderStatus:'cancelled'});
+ await assert.rejects(status.lifecycle('cancelled'),/狀態不一致/);
+ const ledger=await readyLifecycle('bad-release');
+ await ledger.lifecycle('cancelled');
+ const snapshotBefore=await snapshot(ledger);
+ await db.collection('inventoryReservations').doc(ledger.orderId+'__I1').update({shortageQty:1});
+ await assert.rejects(ledger.lifecycle('normal'),/投影不一致/);
+ assert.equal((await ledger.read('inventory',ledger.productKey)).reserved,0);
+ assert.notDeepEqual(await snapshot(ledger),snapshotBefore);
+});
