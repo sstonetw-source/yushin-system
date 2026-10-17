@@ -278,3 +278,19 @@ test('notification failure after allocation preserves checkpoint and retry canno
     assert.equal(f.records.get('receipts/OP').autoAllocatedQty,2);await f.receive();
     assert.equal(f.records.get('inventory/P').onHand,2);assert.equal(f.records.get('inventory/P').reserved,2);
 });
+
+test('source receipt adds only at its receiving location and preserves another warehouse holds',async()=>{
+ const f=setup();f.records.set('warehouseStocks/OTHER__P',{productKey:'P',warehouseId:'OTHER',onHand:8,reserved:4});
+ f.records.set('inventory/P',{productKey:'P',onHand:8,reserved:4,incoming:5});
+ const before=structuredClone(f.records.get('warehouseStocks/OTHER__P'));
+ await f.receive();await f.receive();
+ assert.equal(f.records.get('inventory/P').onHand,10);assert.equal(f.records.get('inventory/P').reserved,6);
+ assert.equal(f.records.get('warehouseStocks/W__P').onHand,2);assert.equal(f.records.get('warehouseStocks/W__P').reserved,2);
+ assert.deepEqual(f.records.get('warehouseStocks/OTHER__P'),before);
+});
+test('source receipt rejects corrupt free-transit balances before creating receipt lots or supply progress',async()=>{
+ for(const value of [NaN,-1,'bad']){
+  const f=setup();f.records.get('inventory/P').transferFreeInTransit=value;const before=structuredClone([...f.records]);
+  await assert.rejects(f.receive(),/數量不正確|核對/);assert.deepEqual([...f.records],before);
+ }
+});

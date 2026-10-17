@@ -64,7 +64,6 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
             const order={id:orderSnap.id,...orderSnap.data()};
             if(normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order)||liveShortage<=0){skipCandidate=true;return;}
-            const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}),wh=inventoryNumbers(whSnap.data());
             const receipt=receiptSnap?.exists?(receiptSnap.data()||{}):null;
             const receiptTarget=receiptRef?Math.max(0,Number(receipt?.autoAllocationQty||0)):remaining;
             const receiptAllocated=receiptRef?Math.max(0,Number(receipt?.autoAllocatedQty||0)):0;
@@ -79,9 +78,12 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             if(Math.abs(oldReserved-Number(reservation.quantity||0))>1e-9||Math.abs(oldShortage-liveShortage)>1e-9)throw new Error('訂單與庫存預留數量不一致，請由管理員檢查後重試。');
             const uncovered=remainingProcurementQty(order,item);
             if(uncovered<=0){skipCandidate=true;return;}
-            const take=Math.min(remaining,receiptRemaining,liveShortage,oldShortage,uncovered,Math.max(0,wh.available),Math.max(0,inv.available));
+            const stockPlan=globalThis.YushinReservation.planReservationReceipt({productKey,warehouseId,
+                qty:Math.min(remaining,receiptRemaining),requestedReserveQty:uncovered,addsStock:false,
+                reservation,aggregateStock:invSnap.data(),warehouseStock:whSnap.data(),itemReservedQty:order.items[index].reservedQty});
+            const take=stockPlan.allocatedQty;
             if(take<=0){completionReason='exhausted';stopAllocation=true;return;}
-            items[index]={...item,reservedQty:oldReserved+take,shortageQty:Math.max(0,oldShortage-take)};
+            items[index]={...item,reservedQty:stockPlan.reservation.quantity,shortageQty:stockPlan.reservation.shortageQty};
             const now=allocationTime;
             const nextOrder={...order,items,updatedAt:now};
             tx.update(orderRef,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
@@ -92,9 +94,9 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
                 fulfillmentType:'WAREHOUSE',warehouseId,ownerUid:order.ownerUid||'',
                 salesCode:order.salesCode||'',salesName:order.salesName||''
             },{createdAt:demandSnap.exists?demandSnap.data().createdAt:order.createdAt||now,updatedAt:now}),{merge:true});
-            tx.update(reservationRef,{quantity:Number(reservation.quantity||0)+take,shortageQty:Math.max(0,liveShortage-take),status:'active',updatedAt:now});
-            if(invSnap.exists)tx.update(invRef,{reserved:inv.reserved+take,updatedAt:now});
-            tx.update(whRef,{reserved:wh.reserved+take,updatedAt:now});
+            tx.update(reservationRef,{...stockPlan.reservation,updatedAt:now});
+            if(invSnap.exists)tx.update(invRef,{reserved:stockPlan.aggregateStock.reserved,updatedAt:now});
+            tx.update(whRef,{reserved:stockPlan.warehouseStock.reserved,updatedAt:now});
             if(receiptRef){
                 const nextAllocated=receiptAllocated+take;
                 tx.update(receiptRef,{
@@ -358,7 +360,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         const receiptPlan=globalThis.YushinSupply.applyReceipt(procurement,qty);
         const incomingRelease=receiptPlan.incomingReleaseQty;
         if(inv.incoming<incomingRelease||wh.incoming<incomingRelease)throw new Error('公司或分倉在途保留量不足，無法完整收貨扣回。');
-        let order=null,items=[],itemIndex=-1,reserveQty=0;
+        let order=null,items=[],itemIndex=-1,reserveQty=0,sourceStockPlan=null;
         if(supply.orderId){
             const orderRef=db.collection('orders').doc(supply.orderId);
             const reservationRef=db.collection('inventoryReservations').doc(`${supply.orderId}__${supply.itemId}`);
@@ -389,7 +391,12 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                         const currentReserved=Math.max(0,Number(reservation.quantity||0));
                         const receiptPlan=globalThis.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:currentReserved},qty);
                         const next=receiptPlan.item;
-                        reserveQty=receiptPlan.reservedDelta;
+                        sourceStockPlan=globalThis.YushinReservation.planReservationReceipt({productKey,warehouseId,qty,
+                            requestedReserveQty:receiptPlan.reservedDelta,reservation,
+                            aggregateStock:invSnap.exists?invSnap.data():{},warehouseStock:whSnap?.exists?whSnap.data():{},
+                            itemReservedQty:order.items[itemIndex].reservedQty});
+                        if(Math.abs(sourceStockPlan.allocatedQty-receiptPlan.reservedDelta)>1e-9)throw new Error('收貨預留與來源需求不一致，請先核對公司與分倉庫存。');
+                        reserveQty=sourceStockPlan.allocatedQty;
                         reservedForSource=reserveQty;
                         items[itemIndex]={
                             ...next,
@@ -402,7 +409,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                         const nextOrder={...order,items,itemCount:items.length,orderSchemaVersion:2,updatedAt:now};
                         tx.update(orderRef,{items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now});
                         tx.set(reservationRef,{
-                            orderId:supply.orderId,itemId:supply.itemId,orderNo:order.orderNo||order.quoteNo||supply.orderId,
+                            ...sourceStockPlan.reservation,orderId:supply.orderId,itemId:supply.itemId,orderNo:order.orderNo||order.quoteNo||supply.orderId,
                             productKey,itemCode:supply.itemCode||'',itemName:supply.itemName||'',customerName:order.customerName||'',
                             ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',salesName:order.salesName||'',orderDate:order.orderDate||'',
                             quantity:Number(next.reservedQty||0),shortageQty:Number(next.shortageQty||0),
@@ -432,11 +439,11 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
         if(embeddedIndex>=0)embeddedLots[embeddedIndex]={...embeddedLots[embeddedIndex],qty:Number(embeddedLots[embeddedIndex].qty||0)+qty};
         else embeddedLots.push({lotNo,expiryDate,qty,receivedAt:now,sourceSupplyId:supplyId});
         {
-          const nextInventory={...(invSnap.exists?invSnap.data():{}),productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:inv.onHand+qty,reserved:inv.reserved+reserveQty,incoming:inv.incoming-incomingRelease,lots:embeddedLots,updatedAt:now};
+          const nextInventory={...(invSnap.exists?invSnap.data():{}),productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:sourceStockPlan?sourceStockPlan.aggregateStock.onHand:inv.onHand+qty,reserved:sourceStockPlan?sourceStockPlan.aggregateStock.reserved:inv.reserved+reserveQty,incoming:inv.incoming-incomingRelease,lots:embeddedLots,updatedAt:now};
           nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
           tx.set(invRef,nextInventory,{merge:true});
         }
-        if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:wh.onHand+qty,reserved:wh.reserved+reserveQty,incoming:wh.incoming-incomingRelease,updatedAt:now},{merge:true});
+        if(whRef)tx.set(whRef,{warehouseId,productKey,productId:supply.productId||'',itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',onHand:sourceStockPlan?sourceStockPlan.warehouseStock.onHand:wh.onHand+qty,reserved:sourceStockPlan?sourceStockPlan.warehouseStock.reserved:wh.reserved+reserveQty,incoming:wh.incoming-incomingRelease,updatedAt:now},{merge:true});
         tx.set(lotRef,{productKey,productId:supply.productId||'',warehouseId,lotNo,expiryDate,receivedQty:qty,remainingQty:qty,supplier:supply.supplier||'',sourceType:'SUPPLY_ORDER',sourceId:supplyId,receivedAt:now});
         tx.set(db.collection('inventoryLotCosts').doc(lotRef.id),{lotId:lotRef.id,productKey,productId:supply.productId||'',warehouseId,...(currentUserRole==='warehouse'&&permissionRulesReady?{costSourceSupplyId:supplyId}:{unitCost:Number(supply.unitCost||0)}),sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
         const autoAllocationQty=Math.max(0,Number(qty||0)-reserveQty);

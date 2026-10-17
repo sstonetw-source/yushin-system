@@ -190,3 +190,27 @@ test('affected-order cache refresh rejects account or role change without popula
   await assert.rejects(c.refreshAffectedOrderCaches(['PRIVATE']),/帳號或角色已變更/);assert.equal(c.ordersCache.length,0);
  }
 });
+
+test('free receipt allocation validates raw company and warehouse accounts without concealing another hold',async()=>{
+ for(const mutate of [
+  f=>f.docs.get('inventory/P').onHand=NaN,
+  f=>Object.assign(f.docs.get('inventory/P'),{reserved:6}),
+  f=>Object.assign(f.docs.get('warehouseStocks/W__P'),{reserved:6}),
+  f=>f.docs.get('warehouseStocks/W__P').transferFreeInTransit=-1,
+  f=>f.docs.get('orders/O').items[0].reservedQty=null
+ ]){
+  const f=allocationFixture();mutate(f);const before=structuredClone([...f.docs]);
+  await assert.rejects(f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester'),/數量不正確|異常|不一致/);
+  assert.deepEqual([...f.docs],before);
+ }
+});
+test('same product receipt allocation leaves another warehouse stock and reservations unchanged',async()=>{
+ const f=allocationFixture();
+ f.docs.set('warehouseStocks/OTHER__P',{productKey:'P',warehouseId:'OTHER',onHand:8,reserved:4});
+ f.docs.set('inventory/P',{productKey:'P',onHand:13,reserved:4});
+ f.docs.set('inventoryReservations/OTHER',{orderId:'OTHER',itemId:'J',productKey:'P',warehouseId:'OTHER',quantity:4,shortageQty:0,status:'active'});
+ const before=structuredClone([f.docs.get('warehouseStocks/OTHER__P'),f.docs.get('inventoryReservations/OTHER')]);
+ await f.c.allocateFreeReceiptStockToShortages('P','W',3,'Tester');
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,3);assert.equal(f.docs.get('inventory/P').reserved,7);
+ assert.deepEqual([f.docs.get('warehouseStocks/OTHER__P'),f.docs.get('inventoryReservations/OTHER')],before);
+});

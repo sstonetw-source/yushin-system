@@ -3364,7 +3364,8 @@ test('receipt allocation counter prevents concurrent retry over-allocation', () 
     const source=appSource.slice(allocateStart,allocateEnd);
     assert.match(source,/const receiptRef=receiptId\?db\.collection\(checkpointCollection\)\.doc\(receiptId\):null/);
     assert.match(source,/receiptRemaining=receiptRef\?Math\.max\(0,receiptTarget-receiptAllocated\):remaining/);
-    assert.match(source,/const take=Math\.min\(remaining,receiptRemaining,liveShortage/);
+    assert.match(source,/qty:Math\.min\(remaining,receiptRemaining\),requestedReserveQty:uncovered,addsStock:false/);
+    assert.match(source,/const take=stockPlan\.allocatedQty/);
     assert.match(source,/autoAllocatedQty:nextAllocated/);
     assert.match(source,/allocationCompleted:nextAllocated>=receiptTarget/);
 

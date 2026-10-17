@@ -565,7 +565,8 @@ test('supply receipt synchronizes received quantity back to the source order ite
     assert.match(source,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
     assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
     assert.match(source,/const next=receiptPlan\.item/);
-    assert.match(source,/reserveQty=receiptPlan\.reservedDelta/);
+    assert.match(source,/reserveQty=sourceStockPlan\.allocatedQty/);
+    assert.match(source,/requestedReserveQty:receiptPlan\.reservedDelta/);
     assert.match(source,/items\[itemIndex\]=\{[\s\S]*?\.\.\.next,[\s\S]*?reservedQty:next\.reservedQty,[\s\S]*?receiptEvents:\[/);
     assert.match(source,/orderWorkIndexFields\(nextOrder\)/);
     assert.match(source,/globalThis\.YushinSupply\.applyReceipt\(procurement,qty\)/);
@@ -630,8 +631,8 @@ test('shortage allocation requires both durable company and warehouse stock befo
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/if\(!orderSnap\.exists\|\|!resSnap\.exists\|\|!whSnap\.exists\|\|!invSnap\.exists\)/);
-    assert.match(source,/Math\.max\(0,inv\.available\)/);
-    assert.match(source,/inventoryNumbers\(invSnap\.exists\?invSnap\.data\(\):\{\}\)/);
+    assert.match(source,/YushinReservation\.planReservationReceipt/);
+    assert.match(source,/aggregateStock:invSnap\.data\(\)/);
     assert.match(source,/if\(invSnap\.exists\)tx\.update\(invRef/);
 });
 
