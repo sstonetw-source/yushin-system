@@ -1019,13 +1019,14 @@ test('free redistribution concurrent requests and movement collisions cannot dou
  assert.equal((await target.read('inventory',target.productKey)).onHand,12);
 });
 
-async function autoFreeTarget(source,suffix,qty){
+async function autoFreeTarget(source,suffix,qty,orderDate=''){
  const orderId=source.orderId+'-auto-'+suffix,existing=await source.read('orders',source.orderId);
  await db.collection('orders').doc(orderId).set({...existing,status:'active',orderStatus:'normal',
   inventoryReservationStatus:'pending',
+  ...(orderDate?{orderDate}:{}),
   items:[{...existing.items[0],qty,orderedQty:qty,reservedQty:0,shortageQty:0}]});
  await commitSingleItemTwoWarehouse(db,source.uid,{orderId,itemId:'I1',
-  warehouseIds:['V2-A','V2-B'],attemptId:'auto_initial_'+suffix+'_123456789',
+  warehouseIds:['V2-A','V2-B'],attemptId:'auto_initial_'+source.orderId+'_'+suffix+'_123456789',
   syncAttemptId:'v2_123456789'});
  await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
  return {...source,orderId,request:{...source.request,orderId}};
@@ -1035,12 +1036,12 @@ function autoFreeRequest(source,runId,maxQty=6){
 }
 test('FIFO automated checkpoint allocates two v2 orders in bounded resumable steps',async()=>{
  const source=await readyLifecycle('auto-fifo',{role:'admin'});
- const older=await autoFreeTarget(source,'older',4);
- const newer=await autoFreeTarget(source,'newer',5);
+ const older=await autoFreeTarget(source,'z-older',4,'2026-10-01');
+ const newer=await autoFreeTarget(source,'a-newer',5,'2026-10-02');
  const olderLedger=db.collection('inventoryReservations').doc(older.orderId+'__I1');
  const newerLedger=db.collection('inventoryReservations').doc(newer.orderId+'__I1');
- await olderLedger.update({orderDate:'2026-10-01'});
- await newerLedger.update({orderDate:'2026-10-02'});
+ assert.equal((await olderLedger.get()).data().orderDate,'2026-10-01');
+ assert.equal((await newerLedger.get()).data().orderDate,'2026-10-02');
  assert.equal((await older.read('orders',older.orderId)).items[0].shortageQty,2);
  assert.equal((await newer.read('orders',newer.orderId)).items[0].shortageQty,5);
  // Zero-hold target still has exactly the two proven warehouse candidates.
@@ -1115,16 +1116,20 @@ test('automatic FIFO fails closed on excessive candidates, missing role and mism
  const input=autoFreeRequest(source,'batch_safety_limits_123456');
  await db.collection('users').doc('unprivileged-auto').set({active:true,role:'sales'});
  await assert.rejects(advanceAutomaticFreeStockAllocation(db,'unprivileged-auto',input),/權限/);
- const batch=db.batch();
- for(let i=0;i<51;i++){
-  const id='fifo-overflow-'+String(i).padStart(3,'0');
-  batch.set(db.collection('inventoryReservations').doc(id+'__I1'),{
-   orderId:id,itemId:'I1',productKey:source.productKey,locationSchemaVersion:2,
-   locations:[],quantity:0,shortageQty:1,status:'shortage',orderDate:'2026-01-01'});
+ // More than 500 indexed candidate rows must fail closed instead of selecting
+ // a possibly non-FIFO target. Two batches keep writes below Firestore limits.
+ for(let offset=0;offset<501;offset+=250){
+  const batch=db.batch();
+  for(let i=offset;i<Math.min(501,offset+250);i++){
+   const id='fifo-overflow-'+String(i).padStart(3,'0');
+   batch.set(db.collection('inventoryReservations').doc(id+'__I1'),{
+    orderId:id,itemId:'I1',productKey:source.productKey,locationSchemaVersion:2,
+    locations:[],quantity:0,shortageQty:1,status:'shortage',orderDate:'2026-01-01'});
+  }
+  await batch.commit();
  }
- await batch.commit();
  const before=await snapshot(target);
- await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,input),/50 筆/);
+ await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,input),/500 筆/);
  assert.deepEqual(await snapshot(target),before);
  const checkpoint=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
  assert.equal(checkpoint.allocatedQty,0);assert.equal(checkpoint.pending,null);
@@ -1148,4 +1153,32 @@ test('concurrent batch continuation uses one durable pending operation and respe
  const movements=await db.collection('inventoryMovements')
   .where('sourceId','==',target.orderId).get();
  assert.equal(movements.docs.filter(x=>x.data().action==='single_v2_free_stock_allocation').length,1);
+});
+
+test('FIFO pagination scans past 50 reservations and chooses the truly oldest dated order',async()=>{
+ const source=await readyLifecycle('auto-paged',{role:'admin'});
+ const newer=await autoFreeTarget(source,'a-newer',4,'2026-10-12');
+ const older=await autoFreeTarget(source,'z-older',4,'2026-09-25');
+ const newerShortageBefore=(await newer.read('orders',newer.orderId)).items[0].shortageQty;
+ await source.lifecycle('cancelled');
+ // These rows sort between the two actual reservation IDs by document name,
+ // ensuring the oldest candidate falls strictly after the first query page.
+ const batch=db.batch();
+ for(let i=0;i<65;i++){
+  const id=source.orderId+'-auto-m-padding-'+String(i).padStart(3,'0');
+  batch.set(db.collection('inventoryReservations').doc(id+'__I1'),{
+   orderId:id,itemId:'I1',productKey:source.productKey,
+   warehouseId:'V2-A',quantity:0,shortageQty:1,status:'shortage'
+  });
+ }
+ await batch.commit();
+ const input=autoFreeRequest(source,'batch_paged_fifo_12345678',2);
+ const result=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(result.status,'completed');
+ assert.equal(result.lastOrderId,older.orderId);
+ assert.equal(result.lastAllocatedQty,2);
+ assert.equal((await older.read('orders',older.orderId)).items[0].shortageQty,2);
+ assert.equal((await newer.read('orders',newer.orderId)).items[0].shortageQty,newerShortageBefore);
+ const replay=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(replay.allocatedQty,2);
 });

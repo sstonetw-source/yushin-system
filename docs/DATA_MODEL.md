@@ -183,3 +183,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 `reservationOperationReceipts/single-v2-free-batch-{runId}` 新增 Emulator-only 協調進度文件。它是工作執行 checkpoint，**不是實體庫存權威**；欄位包含 action、actorUid、actorRole、intentHash、productKey、warehouseId、maxQty、allocatedQty、processedSteps、pending、status、createdAt、updatedAt 及完成原因。pending 保存 orderId、itemId、syncAttemptId、quantity、固定 operationId。每步真正變更由既有 `inventoryMovements/single-v2-free-{operationId}` 證明；相同 operationId 重送不重扣，job 進度在獨立 checkpoint transaction 內做單次累加。沒有新增 collection、Rules 或索引；全部 Admin SDK 寫入嚴格限制 `demo-yushin` Emulator。待 Preview 正式啟用前需處理大型候選索引、checkpoint 清理政策與完整身分入口。
 
 原 v2 初始提交 Service 在相同 `inventoryReservations/{orderId}__{itemId}` 內保留 canonical `lifecycleWarehouseIds`（排序後兩個真實候選倉）；即使 quantity=0、locations=[] 也能在後續缺貨自由庫存分配時驗證位置授權。此欄不是第二套庫存 ledger，也不會增加 inventory 或 reserved 數量；舊資料不補寫。
+
+### v2 reservation FIFO 日期來源（2026-10-18）
+
+既有 `inventoryReservations/{orderId}__{itemId}` 在初始 v2 單品項預留時，可依實際來源 `orders` 的有效 orderDate、date 或 createdAt 儲存 `orderDate: YYYY-MM-DD`；已存在的有效優先順序日期在相同 Ledger 重送時保留，無日期不偽造。此為排序快照而非第二份權威訂單日期。現有 productKey＋status 索引查詢透過 DocumentSnapshot 游標分頁，不新增 Collection、Index 或 Rules；>500 個候選的自動分配仍需後續索引式高流量策略。

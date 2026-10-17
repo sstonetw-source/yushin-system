@@ -154,8 +154,16 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
    if(reserved+stock.transferFreeInTransit>stock.onHand)reject('分倉庫存不足');
    return {...row,reserved};
   });
+  // Stable priority comes from the persisted source order, never the caller.
+  // Older v2 ledgers without a valid source date keep their legacy fallback.
+  const sourceDate=String(order.orderDate||order.date||order.createdAt||'').slice(0,10);
+  const priorityDate=/^\d{4}-\d{2}-\d{2}$/.test(sourceDate)
+    &&Number.isFinite(Date.parse(sourceDate+'T00:00:00Z'))
+    &&new Date(sourceDate+'T00:00:00Z').toISOString().slice(0,10)===sourceDate
+    ?sourceDate:'';
   const next={...previous,...plan.reservation,orderId,itemId,productKey,
    ownerUid:order.ownerUid,salesCode:order.salesCode,lifecycleWarehouseIds:warehouseIds,
+   ...(priorityDate?{orderDate:previous.orderDate||priorityDate}:{}),
    orderItemIndex:matches[0].index,updatedAt:now};
   // The legacy warehouseId is a hint on the order, never a v2 quantity authority.
   delete next.warehouseId;
@@ -437,21 +445,35 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
   return present(state);
  }
  if(!state.pending){
-  // Existing product/status queries are index-compatible with receiving.js.
-  // No unbounded scan or unsound "oldest" result if either list exceeds 50.
-  const candidates=[];
+  // Query/index contract matches the existing receiving Service. Visit every
+  // candidate before declaring the oldest. Bounded by a hard read ceiling to
+  // avoid surprise full-table scans or silently incorrect partial FIFO.
+  const candidates=[],pageSize=50,maxScannedDocuments=500;
+  let scanned=0;
   for(const status of ['active','shortage']){
-   const page=await db.collection('inventoryReservations').where('productKey','==',productKey)
-    .where('status','==',status).limit(51).get();
-   if(page.size>50)reject('缺貨候選超過每狀態 50 筆，此試點不得猜測 FIFO 最舊訂單');
-   for(const doc of page.docs){
-    const item={...doc.data(),id:doc.id};
-    if(item.locationSchemaVersion!==2||item.warehouseId!==undefined
-      ||item.status!==status||!Number.isSafeInteger(item.shortageQty)||item.shortageQty<=0
-      ||!Number.isSafeInteger(item.quantity)||item.quantity<0
-      ||!item.orderId||!item.itemId||doc.id!==item.orderId+'__'+item.itemId)
-     continue;
-    candidates.push(item);
+   let cursor=null;
+   while(true){
+    let query=db.collection('inventoryReservations').where('productKey','==',productKey)
+     .where('status','==',status).limit(pageSize);
+    if(cursor)query=query.startAfter(cursor);
+    const page=await query.get();
+    scanned+=page.size;
+    if(scanned>maxScannedDocuments)
+     reject('單次 FIFO 缺貨候選超過 500 筆安全讀取上限，需改用索引式候選隊列');
+    for(const doc of page.docs){
+     const item={...doc.data(),id:doc.id};
+     if(item.locationSchemaVersion!==2||item.warehouseId!==undefined
+       ||item.status!==status||!Number.isSafeInteger(item.shortageQty)||item.shortageQty<=0
+       ||!Number.isSafeInteger(item.quantity)||item.quantity<0
+       ||!item.orderId||!item.itemId||doc.id!==item.orderId+'__'+item.itemId)
+      continue;
+     candidates.push(item);
+    }
+    if(page.size<pageSize)break;
+    const last=page.docs[page.docs.length-1];
+    if(!last||last.id===cursor?.id)
+     reject('缺貨候選分頁游標未前進，不可繼續 FIFO 配置');
+    cursor=last;
    }
   }
   candidates.sort(core.compareReservationPriority);
