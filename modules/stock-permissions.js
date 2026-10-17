@@ -63,22 +63,39 @@
           const delta=reservationDeltas(before,after);
           if(!delta.companyReservedDelta&&!delta.warehouseDeltas.length)continue;
           const siblings=rows.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).productKey===after.productKey);
-          const representative=siblings.find(r=>{const old=reads.get(r.ref.path)?.data||{},next={...old,...r.data};return number(next.quantity)||number(old.quantity);});
+          const held=siblings.filter(r=>{const old=reads.get(r.ref.path)?.data||{},next={...old,...r.data};return number(next.quantity)||number(old.quantity);});
+          const crossWarehouse=new Set(held.map(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId)).size>1;
+          // A grouped reserve/release is not a warehouse transfer. Keep transfer
+          // responsibility in its existing dedicated departure/arrival workflow.
+          if(crossWarehouse&&held.some(r=>{const old=reads.get(r.ref.path)?.data||{},next={...old,...r.data};return number(old.quantity)>0&&old.warehouseId!==next.warehouseId;}))
+            throw Error('跨倉合併預留不能同時搬動既有位置，請使用原調撥流程。');
+          const representative=held.find(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId===after.warehouseId);
           if(representative){siblings.splice(siblings.indexOf(representative),1);siblings.unshift(representative);}
           if(siblings.length>5)throw Error('同一產品一次最多處理 5 筆庫存預留，請分批操作。');
           const stockRef=(collection,warehouseId)=>{
             const match=writes.find(r=>r.ref.path.startsWith(collection+'/')&&
               (r.data.productKey||reads.get(r.ref.path)?.data.productKey)===after.productKey&&
               (collection==='inventory'||(r.data.warehouseId||reads.get(r.ref.path)?.data.warehouseId)===warehouseId));
-            return match?.ref||db.collection(collection).doc(collection==='inventory'?encodeURIComponent(after.productKey):encodeURIComponent(warehouseId)+'__'+encodeURIComponent(after.productKey));
+            const read=[...reads.values()].find(r=>r.ref.path.startsWith(collection+'/')&&r.data.productKey===after.productKey&&
+              (collection==='inventory'||r.data.warehouseId===warehouseId));
+            return match?.ref||read?.ref||db.collection(collection).doc(collection==='inventory'?encodeURIComponent(after.productKey):encodeURIComponent(warehouseId)+'__'+encodeURIComponent(after.productKey));
           };
           const inv=stockRef('inventory',''),wh=stockRef('warehouseStocks',after.warehouseId||''),oldWh=stockRef('warehouseStocks',before.warehouseId||after.warehouseId||'');
           for(const ref of [inv,wh,oldWh])if(!reads.has(ref.path))await proxy.get(ref);
           const movement=writes.find(r=>r.ref.path.startsWith('inventoryMovements/')&&r.data.productKey===after.productKey&&
-            (!r.data.warehouseId||r.data.warehouseId===after.warehouseId||r.data.warehouseId===before.warehouseId));
+            (crossWarehouse?r.data.warehouseId===after.warehouseId:
+              (!r.data.warehouseId||r.data.warehouseId===after.warehouseId||r.data.warehouseId===before.warehouseId)));
           if(!movement)throw Error('庫存預留異動缺少同筆交易的庫存紀錄。');
+          // Each product has one immutable movement that proves its company
+          // total. Other warehouse movements are linked by fresh document ID.
+          const companyMovement=crossWarehouse?writes.find(r=>r.ref.path.startsWith('inventoryMovements/')
+            && r.data.productKey===after.productKey
+            && held.some(h=>({...reads.get(h.ref.path)?.data,...h.data}).warehouseId===r.data.warehouseId)):null;
+          if(crossWarehouse&&!companyMovement)throw Error('跨倉預留缺少公司總帳的原始異動憑證。');
           const evidence={inventoryId:inv.id,warehouseStockId:wh.id,previousWarehouseStockId:oldWh.id,
-            movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id)};
+            movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id),...(crossWarehouse?{crossWarehouse:true,
+              companyMovementId:companyMovement.ref.id,
+              warehouseReservationIds:siblings.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId===after.warehouseId).map(r=>r.ref.id)}:{})};
           if(movement.data.reservationStockEvidence&&JSON.stringify(movement.data.reservationStockEvidence)!==JSON.stringify(evidence))
             throw Error('不同倉庫的庫存預留必須分別記錄，請由管理員檢查此筆交易。');
           movement.data={...movement.data,reservationStockEvidence:evidence};

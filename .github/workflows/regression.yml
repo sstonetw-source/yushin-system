@@ -72,5 +72,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      # Scoped profiler: reproduce the failing batch in isolation while the
+      # Emulator is running. The diagnostic probe must not mask regression status.
+      - name: Profile five-reservation rule evaluation
+        if: github.head_ref == 'feat/cross-warehouse-reservation-evidence-20261017'
+        run: |
+          npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin 'node --test --test-name-pattern="five operational reservations across two warehouses" tests/firestore-rules.test.js; node tools/firestore-rule-coverage.cjs'
       - name: Compile and test Firestore rules
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/firestore-rules.test.js"
