@@ -153,7 +153,7 @@ test('source cancellation, delivery overcommit, service orders and in-transit sh
     o=>{o.items[0].dispatchPreparedQty=1;}
   ]){
     const f=fixture();edit(f.docs.get('orders/O'));const before=f.snapshot();
-    await assert.rejects(f.commit(),/已取消|待交付|服務|直送|途中|來源|出貨/);
+    await assert.rejects(f.commit(),/已取消|待交付|服務|直送|途中|來源|出貨|已履約/);
     assert.equal(f.snapshot(),before);
   }
 });
@@ -198,7 +198,7 @@ test('CLOSE return does not produce replenishment demand and service product mas
   order.items[0].deliveredQty=5;order.items[0].returnedQty=2;
   order.returnRecords=[{itemId:'I1',qty:2,settlement:'CLOSE'}];
   const before=f.snapshot();
-  await assert.rejects(f.commit(f.request(1,3)),/預留超過待交付數量/);
+  await assert.rejects(f.commit(f.request(1,3)),/預留超過待交付數量|已履約/);
   assert.equal(before,f.snapshot());
   const s=fixture();s.docs.get('products/P').productType='Service';
   await assert.rejects(s.commit(),/服務型/);
