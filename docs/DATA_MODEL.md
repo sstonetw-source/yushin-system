@@ -191,3 +191,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ### v2 取消／CLOSE 退貨的自由庫存來源欄位（2026-10-18）
 
 沿用原 `inventoryMovements`：單品項雙倉取消的原 `single-v2-life-...` release movement（signed qty<0），在同一 transaction 記錄 `v2FreeStockSource:'CANCELLED_ORDER_RELEASE'` 與 `freeAllocationQty:-qty`；RESTOCKABLE 且 CLOSE 的原 `location-return-...` receipt movement（qty>0）記錄 `v2FreeStockSource:'CLOSED_CUSTOMER_RETURN'` 與 `freeAllocationQty:qty`。REPLACE 和恢復不標記。不額外維護實體數量；不同來源 movement 的進度透過既有 deterministic runId + `reservationOperationReceipts/single-v2-free-batch-...` 保存。歷史資料不回填；正式庫存未遷移。
+
+### v2 到貨配貨來源使用現有原子證據（2026-10-18）
+
+v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receiptId}` 的 `reservationLocationSchemaVersion=2`、`autoAllocationQty`、`sourceOrderStatus`、`lotId`，與原 `inventoryMovements` 中 `sourceType=SUPPLY_ORDER`、`type=receipt`、`receiptId`、實體 `inventoryLots/{lotId}` 的來源及數量一致，組成可稽核的唯一收貨配貨來源。Cancellation KEEP_STOCK 需原 supplyOrders 核定證據。以原 movementId 推導既有 deterministic `reservationOperationReceipts` 分配進度，不新增快取持有權威實貨，無 Firestore Rules／索引更動或正式部署。
