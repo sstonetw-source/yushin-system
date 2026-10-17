@@ -59,3 +59,5 @@
 - v2實物原倉退貨一律走 `commitLocationReturn`（僅demo-yushin Emulator），共用 `projectShipmentReturns`／`planExplicitShipmentReturn`／`planReservationReturn`／`planLotRestoration`。不得直接提交唯讀追溯結果；須同交易重讀原出貨、先前入庫憑證、全部來源倉批次及原始帳。CLOSE／REPLACE 不可覆蓋他倉預留。已有退貨後的新打單／出貨／送達仍須獨立整合，不得解除現行入口阻擋來宣稱補送已完成。修改須跑 emulator-location-shipment 的分次、五角色、重送、競爭與末端失敗回滾。
 
 - 訂錯貨以退貨CLOSE＋一般重新下單為主要流程；不能為此開放未完成的原單補送。新入口呼叫既有空白 openOrderModal／commitOrderCreation，只帶客戶及 returnReorderSource，禁止複製錯誤商品、價格、舊預留或收款。來源關聯需納入草稿及固定 pending ID，首次同交易驗證實收CLOSE／客戶／所有權，重送不能更換來源。現行前端CLOSE不重做，後端僅新請求未指定 settlement 時預設CLOSE；勿批次重寫舊REPLACE或改變其重試hash。
+
+- v2 `dispatchPreparedQty` 的交易寫入新增內部 `commitLocationDispatchPreparation`（僅 demo-yushin Emulator），必須驗證 role、syncAttemptId、單品項 v2 ledger、已寄出投影及預留合計，使用 `Fulfillment.warehouseShipmentState` 計算可打單額度。前端 `prepareOrderDispatch` 尚不可直接操作 v2；不可只因打單時不扣實貨便繞過 Firestore 權限。重送需以固定 `dispatchRecords/v2-{operationId}` 連結原始意圖，禁止使用新 ID 重新消耗相同額度。測試須覆蓋先打單部分→寄出→再打單→第二倉寄出與同步併發及權限拒絕；此能力沒有 Callable／Preview／正式部署。
