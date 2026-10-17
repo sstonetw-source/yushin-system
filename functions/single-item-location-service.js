@@ -265,9 +265,17 @@ async function commitSingleItemFreeStockAllocation(db,uid,input){
     ||ledger.status!==(held?'active':'shortage'))
    reject('訂單與 v2 預留投影不一致');
   const locations=core.reservationLocations(ledger);
-  if(ledger.lifecycleWarehouseIds!==undefined
-    &&(!Array.isArray(ledger.lifecycleWarehouseIds)||!ledger.lifecycleWarehouseIds.includes(warehouseId)))
-   reject('自由庫存來源倉不在已核定候選位置');
+  if(ledger.lifecycleWarehouseIds!==undefined&&
+    (!Array.isArray(ledger.lifecycleWarehouseIds)
+     ||ledger.lifecycleWarehouseIds.length!==2
+     ||ledger.lifecycleWarehouseIds.some(w=>typeof w!=='string'||!w)))
+   reject('自由庫存候選倉格式不正確');
+  // The initial v2 writer only persists positive locations. Restrict this
+  // pilot to the source hint and proven ledger positions, or to the two
+  // persisted lifecycle candidates. Do not silently introduce a third site.
+  const allowed=new Set(ledger.lifecycleWarehouseIds||[hint,...locations.map(row=>row.warehouseId)]);
+  if(!allowed.has(warehouseId))
+   reject('自由庫存來源倉不在原候選位置');
   if(!shortage)return {orderId,itemId,warehouseId,allocatedQty:0,status:'no-shortage'};
   // Do not trust a potentially stale order summary to imply zero supplier
   // commitments. This limited pilot refuses any recorded supply, even closed.
