@@ -18,3 +18,7 @@
 ## Emulator-only 單品項雙倉取消／恢復原子交易（2026-10-17）
 
 新增 `functions/single-item-location-lifecycle-service.js`：`commitSingleItemLocationLifecycle` 僅允許 `demo-yushin` Emulator；獲授權的管理員／本人業務或工程師，在尚未採購、到貨、打單、寄出、送達、退貨且無採購需求文件時，使用共同 `planLocationReservation` 在一個 Admin SDK Transaction 同時釋放 A/B 預留與訂單狀態，並在恢復時按即時空閒實貨重新分配。先讀後寫、來源與投影精確比對；原倉停用不影響釋放但禁止新增。單一 `inventoryReservations` ledger 保存 `lifecycleWarehouseIds`，操作憑證與所有 movement 和總／分倉改帳一同提交；重送不重扣，異常及寫入衝突整筆回滾。完整 Emulator 案例包含競爭訂單、兩倉差額守恆、停用倉改配、五角色邊界（admin／本人 sales／engineer 操作）、來源錯誤、重送與碰撞。**部分出貨取消、已有採購需求、其他品項及全角色 Preview 尚未整合**；本流程無 Callable／UI，不能上線。
+
+## v2 採購需求同交易同步（2026-10-17，Emulator-only 接續）
+
+既有正式 `procurementDemandRef` 採 `encodeURIComponent` 編碼整段 `SALES_ORDER:orderId:itemId`；內部 Service 已修正與相同 ID 對接。具有待採購需求但從未實際下 PO、收貨的 v2 初始取消，現在能同交易將既有 demand 改為 CANCELLED；恢復按當下兩倉可預留量，由 `Workflow.procurementQuantities`、`ProcurementDemand.fromSalesOrder/demandDocument` 統一計算並重新開啟或建立需求。若原 demand 的來源身份、角色、產品、倉庫、狀態或數量投影異常，或有任何 supplier commitment，整批回滾；仍不開放部分出貨、收貨、打單、退貨及正式前端流程。為 Functions 共用的 Workflow／Demand 模組由 `modules/` 複製生成並在 CI 驗證一致性；完整 Preview 尚未驗收。
