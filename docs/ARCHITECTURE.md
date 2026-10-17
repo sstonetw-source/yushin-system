@@ -413,3 +413,9 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 既有 Fulfillment Core 的 `projectShipmentDelivery` 增加 `unshippedQty`；Workflow 的明確 `warehouseShipmentContext` 由同一投影區分客戶尚未收到的 outstandingQty 與倉庫尚未寄出的 stockOutstandingQty。Receiving.applyReceiptToOrderItem 接受此第三參數，採購需求 helper 也提供來源紀錄，因此途中貨不再產生重複預留／採購缺口。沒有 context 的舊呼叫維持原行為。
 
 原 receiving Service 仍為唯一收貨 writer。v2 先保留原始 order item、同交易驗證出貨／送達快取與全部出貨 movement，再交 Core 計算；避免展示 normalizer 用待送達量覆蓋實際 v2 缺口。共用 `Fulfillment.validateShipmentMovement` 核對扣帳身份、倉別、數量與批次配置；原 shipment acknowledgement adapter 仍額外核對完整 normalized intent hash，未減少驗證。無新 Service／Callable／UI／Rules；僅 demo-yushin Emulator。
+
+### 單品項 v2 自由庫存 FIFO 協調器（2026-10-18）
+
+沿用現有 `functions/single-item-location-service.js`；新 `advanceAutomaticFreeStockAllocation` 僅負責在至多 50 筆／狀態的安全候選範圍內依原 Reservation Core 優先順序選擇下一個目標、保存 resumable checkpoint，並呼叫同檔既有 `commitSingleItemFreeStockAllocation`。不建立第二個 stock writer、需求計算或 ledger；每個目標本身仍由既有 Admin SDK Transaction 交易內重讀、守恆並建立不可重用 movement。
+
+job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending 固定操作 ID 協助崩潰後續傳及同 ID 重送。批次有最大量與累計上限、同角色／意圖驗證，但不是跨所有訂單的原子交易。僅 demo-yushin Emulator；正式頁面沒有接線、自動觸發尚未實作、候選 >50 安全拒絕，需後續完成索引／分頁及 Preview 驗收後才可評估開放正式使用。

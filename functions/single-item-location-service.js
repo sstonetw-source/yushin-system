@@ -119,6 +119,10 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
   if(previous.itemId&&previous.itemId!==itemId)reject('既有預留品項不符');
   for(const [field,expected] of Object.entries({ownerUid:order.ownerUid,salesCode:order.salesCode}))
    if(previous[field]!==undefined&&previous[field]!==expected)reject('既有預留所有權不符');
+  if(previous.lifecycleWarehouseIds!==undefined
+    &&(!Array.isArray(previous.lifecycleWarehouseIds)
+      ||JSON.stringify([...previous.lifecycleWarehouseIds].sort())!==JSON.stringify(warehouseIds)))
+    reject('初始預留來源的原候選倉不得任意替換');
   const returned=integer(item.returnedQty??0,'退貨量'),delivered=integer(item.deliveredQty??0,'已交付量');
   if(returned>delivered)reject('累計交付與退貨數量不符');
   // Initial-only safe preview: no goods have moved; supply commitments are
@@ -151,7 +155,8 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
    return {...row,reserved};
   });
   const next={...previous,...plan.reservation,orderId,itemId,productKey,
-   ownerUid:order.ownerUid,salesCode:order.salesCode,orderItemIndex:matches[0].index,updatedAt:now};
+   ownerUid:order.ownerUid,salesCode:order.salesCode,lifecycleWarehouseIds:warehouseIds,
+   orderItemIndex:matches[0].index,updatedAt:now};
   // The legacy warehouseId is a hint on the order, never a v2 quantity authority.
   delete next.warehouseId;
   const nextItems=order.items.map((row,index)=>index===matches[0].index
@@ -358,4 +363,182 @@ async function commitSingleItemFreeStockAllocation(db,uid,input){
  });
 }
 
-module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation};
+
+// Bounded, resumable coordinator only: existing free-stock Service commits
+// every quantity, stock movement and demand update. This never writes stock.
+function normalizeAutomaticFreeStockIntent(input){
+ const allowed=['productKey','warehouseId','maxQty','runId'];
+ if(!input||typeof input!=='object'||Array.isArray(input)
+   ||Object.keys(input).some(k=>!allowed.includes(k)))
+  reject('自動分配請求含未授權欄位','invalid-argument');
+ const productKey=ident(input.productKey,'庫存產品'),warehouseId=ident(input.warehouseId,'來源倉');
+ const runId=ident(input.runId,'批次 ID'),maxQty=integer(input.maxQty,'批次最大數量');
+ if(!/^[A-Za-z0-9_-]{12,80}$/.test(runId)||maxQty<=0||maxQty>1000)
+  reject('批次識別碼或最大數量不正確','invalid-argument');
+ const intent={productKey,warehouseId,maxQty,runId};
+ return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
+}
+async function advanceAutomaticFreeStockAllocation(db,uid,input){
+ if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+  reject('自動自由庫存分配僅允許 demo-yushin Emulator');
+ ident(uid,'登入者');
+ const intent=normalizeAutomaticFreeStockIntent(input);
+ const {productKey,warehouseId,runId}=intent;
+ const jobRef=db.collection('reservationOperationReceipts').doc('single-v2-free-batch-'+runId);
+ const actorRef=db.collection('users').doc(uid);
+ const authorized=async tx=>{
+  const snap=await tx.get(actorRef),user=snap.exists?snap.data():{};
+  if(!snap.exists||user.active===false||user.disabled===true
+    ||!['admin','purchaser','warehouse'].includes(user.role))
+   reject('登入者沒有自由庫存分配權限','permission-denied');
+  return user.role;
+ };
+ const readJob=async tx=>{
+  const role=await authorized(tx);
+  const snap=await tx.get(jobRef);
+  if(!snap.exists)return {role,job:null};
+  const job=snap.data();
+  if(job.action!=='single_v2_free_stock_batch'||job.actorUid!==uid
+    ||job.actorRole!==role||job.intentHash!==intent.hash
+    ||job.productKey!==productKey||job.warehouseId!==warehouseId
+    ||job.maxQty!==intent.maxQty)
+   reject('批次 ID 已用於不同交易或不同登入者','already-exists');
+  return {role,job};
+ };
+ const present=(job,status=job.status)=>({
+  status,runId,productKey,warehouseId,
+  maxQty:job.maxQty,allocatedQty:job.allocatedQty,processedSteps:job.processedSteps,
+  ...(job.pending?{pendingOrderId:job.pending.orderId}:{})
+ });
+ let state=await db.runTransaction(async tx=>{
+  const {role,job}=await readJob(tx);
+  if(job)return job;
+  const now=new Date().toISOString();
+  const created={action:'single_v2_free_stock_batch',actorUid:uid,actorRole:role,
+   intentHash:intent.hash,productKey,warehouseId,maxQty:intent.maxQty,
+   allocatedQty:0,processedSteps:0,pending:null,status:'active',
+   createdAt:now,updatedAt:now};
+  tx.create(jobRef,created);
+  return created;
+ });
+ if(state.status==='completed')return present(state);
+ if(state.status!=='active'||!Number.isSafeInteger(state.allocatedQty)
+   ||!Number.isSafeInteger(state.processedSteps)||state.allocatedQty<0
+   ||state.allocatedQty>intent.maxQty||state.processedSteps<0||state.processedSteps>1000)
+  reject('自動分配進度異常，請先核對 checkpoint');
+ if(state.allocatedQty===intent.maxQty){
+  state=await db.runTransaction(async tx=>{
+   const {job}=await readJob(tx);
+   if(job.status==='active'&&!job.pending&&job.allocatedQty===intent.maxQty)
+    tx.update(jobRef,{status:'completed',completionReason:'quantity-reached',
+     updatedAt:new Date().toISOString()});
+   return {...job,status:job.pending?job.status:'completed'};
+  });
+  return present(state);
+ }
+ if(!state.pending){
+  // Existing product/status queries are index-compatible with receiving.js.
+  // No unbounded scan or unsound "oldest" result if either list exceeds 50.
+  const candidates=[];
+  for(const status of ['active','shortage']){
+   const page=await db.collection('inventoryReservations').where('productKey','==',productKey)
+    .where('status','==',status).limit(51).get();
+   if(page.size>50)reject('缺貨候選超過每狀態 50 筆，此試點不得猜測 FIFO 最舊訂單');
+   for(const doc of page.docs){
+    const item={...doc.data(),id:doc.id};
+    if(item.locationSchemaVersion!==2||item.warehouseId!==undefined
+      ||item.status!==status||!Number.isSafeInteger(item.shortageQty)||item.shortageQty<=0
+      ||!Number.isSafeInteger(item.quantity)||item.quantity<0
+      ||!item.orderId||!item.itemId||doc.id!==item.orderId+'__'+item.itemId)
+     continue;
+    candidates.push(item);
+   }
+  }
+  candidates.sort(core.compareReservationPriority);
+  let selected=null;
+  for(const candidate of candidates){
+   const known=new Set([...(candidate.lifecycleWarehouseIds||[]),
+    ...(candidate.locations||[]).map(row=>row.warehouseId)]);
+   if(known.has(warehouseId)){
+    const order=await db.collection('orders').doc(candidate.orderId).get();
+    if(!order.exists||!['active','normal'].includes(order.data().status))continue;
+    const item=order.data().items?.find(i=>i.itemId===candidate.itemId);
+    if(!item||item.productId===undefined||order.data().inventoryReservationStatus!=='completed')
+     continue;
+    selected={candidate,order:order.data()};
+    break;
+   }
+   // Original location hint may not be saved on a zero-hold v2 ledger.
+   const order=await db.collection('orders').doc(candidate.orderId).get();
+   if(!order.exists||!['active','normal'].includes(order.data().status))continue;
+   const item=order.data().items?.find(i=>i.itemId===candidate.itemId);
+   if(!item||(item.warehouseId||order.data().warehouseId)!==warehouseId)continue;
+   if(order.data().inventoryReservationStatus!=='completed')continue;
+   selected={candidate,order:order.data()};
+   break;
+  }
+  if(!selected){
+   state=await db.runTransaction(async tx=>{
+    const {job}=await readJob(tx);
+    if(job.status!=='active'||job.pending)return job;
+    tx.update(jobRef,{status:'completed',completionReason:'no-eligible-demand',
+     updatedAt:new Date().toISOString()});
+    return {...job,status:'completed'};
+   });
+   if(state.status==='completed')return present(state);
+  }else{
+   state=await db.runTransaction(async tx=>{
+    const {job}=await readJob(tx);
+    if(job.status!=='active'||job.pending)return job;
+    const rowRef=db.collection('inventoryReservations').doc(selected.candidate.id);
+    const orderRef=db.collection('orders').doc(selected.candidate.orderId);
+    const [rowSnap,orderSnap]=await Promise.all([tx.get(rowRef),tx.get(orderRef)]);
+    if(!rowSnap.exists||!orderSnap.exists)
+     reject('FIFO 候選來源已變更，請使用相同批次 ID 重試');
+    const row=rowSnap.data(),order=orderSnap.data();
+    if(row.productKey!==productKey||row.locationSchemaVersion!==2
+      ||row.status!==selected.candidate.status||row.shortageQty<=0
+      ||row.orderId!==selected.candidate.orderId||row.itemId!==selected.candidate.itemId
+      ||order.status!=='active'&&order.status!=='normal'
+      ||order.inventoryReservationStatus!=='completed'
+      ||!order.inventoryReservationAttemptId)
+     reject('FIFO 候選已改變，請使用相同批次 ID 重試');
+    const quantity=Math.min(intent.maxQty-job.allocatedQty,row.shortageQty);
+    const operationId='auto_v2_'+createHash('sha256')
+     .update(runId+'|'+job.processedSteps+'|'+row.orderId+'|'+row.itemId)
+     .digest('hex').slice(0,42);
+    const pending={orderId:row.orderId,itemId:row.itemId,
+     syncAttemptId:order.inventoryReservationAttemptId,quantity,operationId};
+    tx.update(jobRef,{pending,updatedAt:new Date().toISOString()});
+    return {...job,pending};
+   });
+  }
+ }
+ if(state.status==='completed')return present(state);
+ if(!state.pending)return present(state,'retry');
+ const pending=state.pending;
+ const applied=await commitSingleItemFreeStockAllocation(db,uid,{
+  orderId:pending.orderId,itemId:pending.itemId,warehouseId,
+  syncAttemptId:pending.syncAttemptId,quantity:pending.quantity,operationId:pending.operationId});
+ // If the movement was committed but checkpoint update failed, this replay
+ // returns its ORIGINAL quantity, which is counted exactly once below.
+ state=await db.runTransaction(async tx=>{
+  const {job}=await readJob(tx);
+  if(job.status==='completed'||!job.pending)return job;
+  if(job.pending.operationId!==pending.operationId)
+   reject('批次進度已前進，請重新讀取','failed-precondition');
+  const newly=integer(applied.allocatedQty,'已分配數量');
+  if(newly>pending.quantity||job.allocatedQty+newly>intent.maxQty)
+   reject('批次實際分配量超過原定上限');
+  const total=job.allocatedQty+newly,steps=job.processedSteps+1;
+  const completed=total>=intent.maxQty||applied.status==='no-free-stock';
+  tx.update(jobRef,{allocatedQty:total,processedSteps:steps,pending:null,
+   status:completed?'completed':'active',
+   ...(completed?{completionReason:total>=intent.maxQty?'quantity-reached':'no-free-stock'}:{}),
+   updatedAt:new Date().toISOString()});
+  return {...job,allocatedQty:total,processedSteps:steps,pending:null,status:completed?'completed':'active'};
+ });
+ return {...present(state),lastOrderId:pending.orderId,lastAllocatedQty:applied.allocatedQty};
+}
+
+module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,advanceAutomaticFreeStockAllocation};
