@@ -816,3 +816,83 @@ test('received lot may be consumed by a confirmed partial shipment before cancel
  assert.equal(after.state.demand.remainingToOrderQty,0);assert.equal(after.state.demand.remainingToReceiveQty,2);
  for(const collection of ['inventoryLots','inventoryLotCosts','receipts'])assert.deepEqual(after.documents[collection],before.documents[collection]);
 });
+
+async function receiptShipmentLifecycle(name){
+ const x=await receiptLifecycle('ship-receive-'+name);
+ // Use the real presentation normalizer too; its legacy shortage projection
+ // must never overwrite the v2 ledger inside the receipt transaction.
+ x.c.brandIdentityForRecord=i=>({brand:i.brand||'',brandId:i.brandId||''});
+ x.c.normalizeHistoryItemCode=v=>v;x.c.parseMoney=v=>Number(v||0);
+ const workspace=fs.readFileSync('src/features/orders/order-workspace.js','utf8');
+ vm.runInContext(workspace.slice(0,workspace.indexOf('function ensureOrderItemCompatibility(')),x.c);
+ await db.collection('warehouseStocks').doc('V2-B__'+x.productKey).update({onHand:3});
+ for(const [wh,qty] of [['V2-A',4],['V2-B',3]])await db.collection('inventoryLots').doc(x.productKey+'-baseline-'+wh).set({
+  productKey:x.productKey,productId:x.productKey,warehouseId:wh,receivedQty:qty,remainingQty:qty,
+  lotNo:'BASE',expiryDate:'2028-10-17',receivedAt:'2026-10-01T00:00:00Z'});
+ const order=await x.read('orders',x.orderId),plan={mode:'CUSTOMER_SHIP',contact:'客戶',phone:'02-12345678',address:'台北市測試地址'};
+ order.items[0].deliveryPlan=plan;await db.collection('orders').doc(x.orderId).update({items:order.items,
+  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false});
+ const uid='receipt-shipment-operator';await db.collection('users').doc(uid).set({role:'warehouse',active:true});
+ const prepare=(quantity,tag)=>require('../functions/location-dispatch-service').commitLocationDispatchPreparation(db,uid,{
+  orderId:x.orderId,itemId:'I1',quantity,operationId:'prepare_'+name+'_'+tag,syncAttemptId:'v2_123456789'});
+ const ship=(quantity,tag,warehouseId='V2-A')=>require('../functions/location-shipment-service').commitLocationShipment(db,uid,{
+  orderId:x.orderId,itemId:'I1',warehouseId,quantity,operationId:'shipment_'+name+'_'+tag,
+  syncAttemptId:'v2_123456789',date:'2026-10-17',expectedPlan:plan});
+ const confirm=(quantity,tag,deliveryTag=tag)=>require('../functions/shipment-delivery-service').commitShipmentDelivery(db,x.uid,{
+  orderId:x.orderId,itemId:'I1',shipmentId:'shipment_'+name+'_'+tag,quantity,operationId:'delivery_'+name+'_'+deliveryTag,
+  syncAttemptId:'v2_123456789',date:'2026-10-17'});
+ return {...x,prepare,ship,confirm};
+}
+test('additional receipts after pending, partly confirmed or confirmed shipment reserve only unshipped demand',async()=>{
+ for(const confirmed of [0,1,2]){
+  const x=await receiptShipmentLifecycle('ack'+confirmed);await x.receive(1,'receipt_before_ack'+confirmed);
+  await x.prepare(2,'first');await x.ship(2,'first');if(confirmed)await x.confirm(confirmed,'first');
+  const before=await receiptSnapshot(x),result=await x.receive(1,'receipt_after_ack'+confirmed);
+  const after=await receiptSnapshot(x),order=await x.read('orders',x.orderId),item=order.items[0];
+  assert.equal(item.reservedQty,7);assert.equal(item.shortageQty,1);assert.equal(item.warehouseShippedQty,2);
+  assert.equal(item.deliveredQty,confirmed);assert.equal(order.deliveredQty,confirmed);assert.equal(order.isDelivered,false);
+  assert.equal(after.state.base.documents[1].onHand,7);assert.equal(after.state.base.documents[1].reserved,7);
+  assert.equal(after.state.base.documents[1].incoming,1);assert.equal(after.state.demand.remainingToOrderQty,0);
+  assert.equal(after.state.demand.remainingToReceiveQty,1);
+  assert.deepEqual(order.warehouseShipmentRecords,before.state.base.documents[0].warehouseShipmentRecords);
+  assert.deepEqual(order.deliveryRecords,before.state.base.documents[0].deliveryRecords);
+  const committed=await receiptSnapshot(x);await x.receive(1,'receipt_after_ack'+confirmed);
+  assert.deepEqual(await receiptSnapshot(x),committed);assert.ok(result);
+ }
+});
+test('real receipt preparation shipment and final acknowledgement cycle consumes exactly ten units',async()=>{
+ const x=await receiptShipmentLifecycle('complete');
+ await x.prepare(4,'a');await x.ship(4,'a');await x.receive(1,'cycle_receipt_one');
+ await x.prepare(1,'b');await x.ship(1,'b');await x.confirm(4,'a');
+ await x.receive(2,'cycle_receipt_two');await x.prepare(5,'last');
+ await x.ship(2,'c');await x.ship(3,'d','V2-B');
+ let order=await x.read('orders',x.orderId);assert.equal(order.items[0].warehouseShippedQty,10);
+ assert.equal(order.items[0].reservedQty,0);assert.equal(order.items[0].shortageQty,0);assert.equal(order.isDelivered,false);
+ await x.confirm(1,'b');await x.confirm(2,'c');await x.confirm(3,'d');
+ order=await x.read('orders',x.orderId);assert.equal(order.isDelivered,true);assert.equal(order.deliveredQty,10);
+ const after=await receiptSnapshot(x);assert.equal(after.state.base.documents[1].onHand,0);
+ assert.equal(after.state.base.documents[1].reserved,0);assert.equal(after.state.base.documents[1].incoming,0);
+ assert.equal(after.state.demand.remainingToOrderQty,0);assert.equal(after.state.demand.remainingToReceiveQty,0);
+ assert.ok(after.documents.inventoryLots.every(lot=>lot.remainingQty===0));
+});
+test('receipt after shipment rejects missing or altered debit and stale caches without any partial writes',async()=>{
+ const cases=[
+  ['missing',async(x,s)=>db.collection('inventoryMovements').doc(s.movementId).delete()],
+  ['quantity',async(x,s)=>db.collection('inventoryMovements').doc(s.movementId).update({qty:-2})],
+  ['warehouse',async(x,s)=>db.collection('inventoryMovements').doc(s.movementId).update({warehouseId:'V2-B'})],
+  ['allocation',async(x,s)=>db.collection('inventoryMovements').doc(s.movementId).update({lotAllocations:[]})],
+  ['cache',async x=>{const o=await x.read('orders',x.orderId);o.items[0].warehouseShippedQty=0;await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['delivery',async x=>db.collection('orders').doc(x.orderId).update({deliveredQty:1})],
+ ];
+ for(const [name,mutate] of cases){const x=await receiptShipmentLifecycle('bad'+name);await x.prepare(1,'a');await x.ship(1,'a');
+  const order=await x.read('orders',x.orderId);await mutate(x,order.warehouseShipmentRecords[0]);
+  const before=await receiptSnapshot(x);await assert.rejects(x.receive(1,'bad_receipt_'+name));
+  assert.deepEqual(await receiptSnapshot(x),before,name);}
+});
+test('competing receipt and physical shipment serialize without re-reserving the shipped unit',async()=>{
+ const x=await receiptShipmentLifecycle('race');await x.prepare(2,'a');await x.ship(1,'a');
+ await Promise.all([x.receive(1,'race_after_shipment_receipt'),x.ship(1,'b')]);
+ const order=await x.read('orders',x.orderId),item=order.items[0],stock=await x.read('inventory',x.productKey);
+ assert.equal(item.warehouseShippedQty,2);assert.equal(item.deliveredQty,0);assert.equal(item.reservedQty,6);
+ assert.equal(item.shortageQty,2);assert.equal(stock.onHand,6);assert.equal(stock.reserved,6);assert.equal(stock.incoming,2);
+});

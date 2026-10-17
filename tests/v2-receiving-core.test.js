@@ -138,3 +138,14 @@ test('receipt reservation uses canonical workflow outstanding and shortage proje
   assert.equal(next.item.receivedQty,13);
   assert.equal(receiving.applyReceiptToOrderItem({...item,reservedQty:2},2).reservedDelta,0);
 });
+
+test('partial receipt reserves only unshipped demand while goods await customer acknowledgement',()=>{
+ const context={orderId:'O',itemId:'I',productKey:'P',shipments:[{id:'S',orderId:'O',itemId:'I',productKey:'P',
+  warehouseId:'A',date:'2026-10-17',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],deliveries:[]};
+ const item={qty:10,receivedQty:1,reservedQty:4,shortageQty:2,deliveredQty:0,warehouseShippedQty:4};
+ const before=structuredClone(item),receipt=receiving.applyReceiptToOrderItem(item,3,context);
+ assert.deepEqual(item,before);assert.equal(receipt.reservedDelta,2);assert.equal(receipt.item.reservedQty,6);
+ assert.equal(receipt.item.shortageQty,0);assert.equal(receipt.item.receivedQty,4);
+ assert.equal(receipt.item.deliveredQty,0);assert.equal(receipt.item.warehouseShippedQty,4);
+ assert.equal(Object.hasOwn(receipt.item,'warehouseShipmentContext'),false);
+});

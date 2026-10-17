@@ -235,3 +235,23 @@ test('workflow projection reopens demand after a return and clears it after repl
   assert.equal(replaced.remainingToOrderQty,0);
   assert.equal(replaced.workCategory,'delivery');
 });
+test('pending warehouse shipment never becomes procurement demand before acknowledgement',()=>{
+ const workflow=require('../modules/workflow-core');
+ const context={orderId:'O',itemId:'I',productKey:'P',shipments:[{id:'S',orderId:'O',itemId:'I',productKey:'P',
+  warehouseId:'A',date:'2026-10-17',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],deliveries:[]};
+ for(const confirmed of [0,2,4]){
+  context.deliveries=confirmed?[{id:'D',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',
+   date:'2026-10-17',qty:confirmed,sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}]:[];
+  const p=workflow.projectItem({qty:10,reservedQty:4,shortageQty:2,supplyOrderedQty:3,receivedQty:1,
+   deliveredQty:confirmed,warehouseShippedQty:4,warehouseShipmentContext:context});
+  assert.equal(p.outstandingQty,10-confirmed);assert.equal(p.stockOutstandingQty,6);
+  assert.equal(p.pendingDeliveryQty,4-confirmed);assert.equal(p.shortageQty,2);
+  assert.equal(p.remainingToOrderQty,0);assert.equal(p.workCategory,'arrival');
+ }
+});
+test('warehouse shipment context rejects stale projections and unsupported returns or direct shipments',()=>{
+ const workflow=require('../modules/workflow-core');
+ const input={qty:10,reservedQty:10,shortageQty:0,warehouseShipmentContext:{orderId:'O',itemId:'I',productKey:'P',shipments:[],deliveries:[]}};
+ for(const patch of [{reservedQty:11},{deliveredQty:1},{warehouseShippedQty:1},
+  {returnedQty:1},{fulfillmentType:'DIRECT_SHIP'},{qty:10.5}])assert.throws(()=>workflow.projectItem({...input,...patch}));
+});

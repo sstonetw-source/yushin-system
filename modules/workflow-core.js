@@ -55,15 +55,28 @@
       : hasNumber(input.grossDeliveredQty)?delivery.effectiveDeliveredQty:n(input.deliveredQty));
     const outstandingQty=Math.max(0,orderedQty-effectiveDeliveredQty);
 
+    const shipmentContext=input.warehouseShipmentContext;
+    const shipment=shipmentContext===undefined?null:fulfillment.projectShipmentDelivery({
+      ...shipmentContext,orderedQty:input.orderedQty??input.qty
+    });
+    if(shipment&&(fulfillmentType!=='WAREHOUSE'||returnedQty!==0
+      ||grossDeliveredQty!==shipment.confirmedQty||effectiveDeliveredQty!==shipment.confirmedQty
+      ||(input.warehouseShippedQty!==undefined&&input.warehouseShippedQty!==shipment.shippedQty)))
+      throw Error('倉庫出貨與履約投影不一致，或退貨流程尚未整合。');
+    // Customer acknowledgement and remaining physical shipment are separate.
+    const stockOutstandingQty=shipment?shipment.unshippedQty:outstandingQty;
     let reservedQty=0;
     let shortageQty=0;
     if(hasNumber(input.reservedQty)){
-      reservedQty=Math.min(outstandingQty,n(input.reservedQty));
-      shortageQty=Math.max(0,outstandingQty-reservedQty);
+      reservedQty=Math.min(stockOutstandingQty,n(input.reservedQty));
+      shortageQty=Math.max(0,stockOutstandingQty-reservedQty);
     }else if(hasNumber(input.shortageQty)){
-      shortageQty=Math.min(outstandingQty,n(input.shortageQty));
-      reservedQty=Math.max(0,outstandingQty-shortageQty);
+      shortageQty=Math.min(stockOutstandingQty,n(input.shortageQty));
+      reservedQty=Math.max(0,stockOutstandingQty-shortageQty);
     }
+    if(shipment&&((input.reservedQty!==undefined&&(!Number.isSafeInteger(input.reservedQty)||input.reservedQty!==reservedQty))
+      ||(!hasNumber(input.reservedQty)&&input.shortageQty!==undefined&&(!Number.isSafeInteger(input.shortageQty)||input.shortageQty!==shortageQty))))
+      throw Error('倉庫尚未出貨量與預留或缺口不一致。');
 
     const supplyOrderedQty=n(input.supplyOrderedQty);
     const receivedQty=n(input.receivedQty);
@@ -97,6 +110,7 @@
       returnedQty,
       effectiveDeliveredQty,
       outstandingQty,
+      ...(shipment?{stockOutstandingQty,pendingDeliveryQty:shipment.pendingDeliveryQty}:{}),
       reservedQty,
       shortageQty,
       supplyOrderedQty,

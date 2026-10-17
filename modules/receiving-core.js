@@ -54,16 +54,16 @@
     return {appliedQty,incomingReleaseQty,record:next};
   }
 
-  function applyReceiptToOrderItem(item={},receiptQty=0){
+  function applyReceiptToOrderItem(item={},receiptQty=0,warehouseShipmentContext=undefined){
     // One authority for outstanding quantity and reservation across receipt, return and orders.
     const workflow=typeof module==='object'&&module.exports
       ? require('./workflow-core.js') : root?.YushinWorkflow;
     if(!workflow?.projectItem)throw new Error('Workflow core 未載入，無法更新收貨預留。');
     const projection=workflow.projectItem({
-      ...item,grossDeliveredQty:item.deliveredQty??0,effectiveDeliveredQty:undefined
+      ...item,grossDeliveredQty:item.deliveredQty??0,effectiveDeliveredQty:undefined,warehouseShipmentContext
     });
     const orderedQty=projection.orderedQty;
-    const outstandingQty=projection.outstandingQty;
+    const outstandingQty=projection.stockOutstandingQty??projection.outstandingQty;
     const currentReservedQty=projection.reservedQty;
     const appliedQty=n(receiptQty);
     const reservedDelta=Math.min(appliedQty,projection.shortageQty);
