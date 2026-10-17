@@ -239,7 +239,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     requestedQty:nextDemand.requestedQty,remainingToOrderQty:nextDemand.remainingToOrderQty,
     remainingToReceiveQty:nextDemand.remainingToReceiveQty,
     perOrdered:nextDemand.perOrdered,perReceived:nextDemand.perReceived,
-    status:nextDemand.status,sourceItemIndex:0,updatedAt:now
+    cancelled:nextStatus==='cancelled',status:nextDemand.status,sourceItemIndex:0,updatedAt:now
    });
    else tx.create(demandRef,nextDemand);
   }
