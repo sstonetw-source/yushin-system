@@ -91,3 +91,66 @@ test('Admin transaction refuses a stale initial-sync attempt without changing st
  assert.equal((await f.doc('inventory/'+f.productKey)).reserved,0);
  assert.equal((await db.doc('reservationOperationReceipts/grouped-attempt_stale_123456789').get()).exists,false);
 });
+
+
+async function fiveLineFixture(id){
+  const f=await seed(id);
+  const items=['A','A','A','B','B'].map((warehouseId,index)=>({
+    itemId:'I'+(index+1),productId:f.productKey,warehouseId,qty:5,reservedQty:0
+  }));
+  await db.doc('orders/'+f.orderId).update({items});
+  await db.doc('inventory/'+f.productKey).update({onHand:40});
+  for(const warehouseId of ['A','B'])
+    await db.doc('warehouseStocks/'+warehouseId+'__'+f.productKey).update({onHand:20});
+  const intent=(values,attemptId='attempt_'+id+'_123456789')=>{
+    assert.equal(values.length,5);
+    return {orderId:f.orderId,attemptId,syncAttemptId:'sync_'+id+'_123456789',
+      items:items.map((item,index)=>({itemId:item.itemId,quantity:values[index]}))};
+  };
+  const balances=async()=>{
+    const company=await f.doc('inventory/'+f.productKey);
+    const a=await f.doc('warehouseStocks/A__'+f.productKey);
+    const b=await f.doc('warehouseStocks/B__'+f.productKey);
+    const order=await f.doc('orders/'+f.orderId);
+    const reservations=await Promise.all(items.map(item=>
+      f.doc('inventoryReservations/'+f.orderId+'__'+item.itemId)));
+    return {company:company.reserved,a:a.reserved,b:b.reserved,
+      order:order.items.map(item=>item.reservedQty),
+      reservations:reservations.map(item=>item.quantity)};
+  };
+  return {...f,intent,balances};
+}
+
+test('five order lines over two warehouses commit, rebalance and release atomically via Admin SDK',async()=>{
+  const f=await fiveLineFixture('five-lines');
+  const first=f.intent([2,3,1,4,2],'attempt_five_lines_123456789');
+  assert.equal((await f.call(first)).status,'applied');
+  assert.deepEqual(await f.balances(),{company:12,a:6,b:6,
+    order:[2,3,1,4,2],reservations:[2,3,1,4,2]});
+
+  const exchange=f.intent([1,4,2,3,2],'attempt_five_lines_exchange_123456789');
+  const exchanged=await f.call(exchange);
+  assert.equal(exchanged.companyReservedDelta,0);
+  assert.deepEqual(await f.balances(),{company:12,a:7,b:5,
+    order:[1,4,2,3,2],reservations:[1,4,2,3,2]});
+
+  const release=f.intent([0,0,0,0,0],'attempt_five_lines_release_123456789');
+  assert.equal((await f.call(release)).companyReservedDelta,-12);
+  const zero={company:0,a:0,b:0,order:[0,0,0,0,0],reservations:[0,0,0,0,0]};
+  assert.deepEqual(await f.balances(),zero);
+  assert.equal((await f.call(first)).status,'already-applied');
+  assert.equal((await f.call(exchange)).status,'already-applied');
+  assert.deepEqual(await f.balances(),zero,'an old receipt replay must not restore a released hold');
+  assert.equal((await f.doc('reservationOperationReceipts/grouped-'+release.attemptId)).companyReservedDelta,-12);
+});
+
+test('five-line multiwarehouse insufficiency rejects the whole transaction and creates no receipt',async()=>{
+  const f=await fiveLineFixture('five-fail');
+  await db.doc('warehouseStocks/A__'+f.productKey).update({onHand:5});
+  const before=await f.balances();
+  const request=f.intent([2,3,1,4,2],'attempt_five_fail_123456789');
+  await assert.rejects(f.call(request),/庫存不足/);
+  assert.deepEqual(await f.balances(),before);
+  assert.equal((await db.doc('reservationOperationReceipts/grouped-'+request.attemptId).get()).exists,false);
+  assert.equal((await db.doc('inventoryMovements/grouped-'+request.attemptId+'-B').get()).exists,false);
+});
