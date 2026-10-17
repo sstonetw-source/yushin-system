@@ -335,3 +335,5 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 - 用同一份 `modules/reservation-core.js` 的 `reservationStockDeltas` 計算權威差額。由 `tools/build-functions-core.cjs` 產生 `functions/shared` 交付副本（含 inventory core），CI 比對來源完全一致；不得另維護一套商業公式。將訂單品項投影、inventory 公司 reserved、warehouseStocks 分倉 reserved、inventoryReservations 與 inventoryMovements 在**同一個 Admin SDK Transaction** 更新；採購在途不得算作實貨，調撥途中與服務型／直送路徑拒絕。
 - `reservationOperationReceipts/grouped-{attemptId}` 保存固定意圖雜湊、真實操作者與最終總帳差額；重複提交相同 ID 直接讀取憑證，換意圖或換人冒用被拒。Firestore Rules 對此集合完全禁止客戶端存取。沒有建立新索引或讀取監聽，也沒有正式資料 migration。
 - `functions/index.js` 的 Callable `commitGroupedWarehouseReservation` **預設回傳尚未啟用**（須明確 `ENABLE_GROUPED_RESERVATION=true`），因為目前沒有把前端工作流程接到新後端，也未完成 Preview 的 Firebase Functions Emulator / 真實 SDK 同步驗收。此批不能解決 PR #131 的 Rules CI，也沒有解除 v2 位置欄位阻擋。僅本批 Node mock 的單交易與冪等測試屬已驗證；完整 E2E、不同角色實際 SDK 與並發及與歷史非標準 inventory ID 的相容性仍待驗收。
+
+備註：後端剩餘交付需求採用與瀏覽器相同的 `fulfillment-core.projectOrderDelivery`（含 CLOSE 結案退貨處理），函式部署的產生副本與原始模組逐位元一致；來源產品主檔辨識為 Service 時必須拒絕實貨預留，並不把已結案退貨算為重新補送需求。

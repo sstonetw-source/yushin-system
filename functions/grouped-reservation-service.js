@@ -6,6 +6,7 @@
 // caller and makes every business read inside the Firestore transaction.
 const {createHash}=require('node:crypto');
 const reservationCore=require('./shared/reservation-core.js');
+const fulfillmentCore=require('./shared/fulfillment-core.js');
 
 function fault(code,message){const error=new Error(message);error.code=code;throw error;}
 function id(value,label,max=128){
@@ -60,16 +61,25 @@ function validateSourceItem(item,order,actorRole,uid){
   const ordered=qty(item.qty??item.orderedQty,'訂購量');
   const delivered=qty(item.deliveredQty??0,'已交付量');
   const returned=qty(item.returnedQty??0,'退貨量');
-  if(returned>delivered||delivered>ordered)fault('failed-precondition','訂單交付或退貨累計異常');
+  if(returned>delivered)fault('failed-precondition','訂單交付或退貨累計異常');
   if(item.transferPendingId||item.custodyTransferId||item.dispatchPreparedQty>0)
     fault('failed-precondition','調撥或出貨途中品項不可重新配置預留');
   if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
     ||item.productType==='Service'||item.productType==='SERVICE')
     fault('failed-precondition','服務型及原廠直送訂單不得建立實貨預留');
-  if(['admin','purchaser','warehouse'].includes(actorRole))return ordered-delivered+returned;
-  if(!['sales','engineer'].includes(actorRole)||order.ownerUid!==uid)
+  if(!['admin','purchaser','warehouse'].includes(actorRole)
+    && (!['sales','engineer'].includes(actorRole)||order.ownerUid!==uid))
     fault('permission-denied','此帳號不能操作該筆訂單');
-  return ordered-delivered+returned;
+  // CLOSE returns do not reopen demand. Gross delivery legitimately may
+  // exceed ordered quantity when replacement shipments have occurred.
+  const itemId=String(item.itemId||'');
+  const linkedReturns=(Array.isArray(order.returnRecords)?order.returnRecords:[])
+    .filter(r=>r.itemId===itemId||(!r.itemId&&order.items.length===1));
+  const effective=fulfillmentCore.projectOrderDelivery({
+    grossDeliveredQty:delivered,returnedQty:returned,returnRecords:linkedReturns
+  }).effectiveDelivered;
+  if(effective>ordered)fault('failed-precondition','有效交付已超過訂購量');
+  return ordered-effective;
 }
 function projectAfter(stock,delta,label){
   const next=stock.reserved+delta;
@@ -102,8 +112,8 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef);
     if(!orderSnap.exists)fault('not-found','來源訂單不存在');
     const order=orderSnap.data();
-    const status=String(order.status||order.orderStatus||'active').toLowerCase();
-    if(['cancelled','canceled','void','voided','deleted','completed','closed'].includes(status))
+    const blocked=new Set(['cancelled','canceled','void','voided','deleted','completed','closed','已取消','作廢','已完成','結案']);
+    if([order.status,order.orderStatus].some(value=>blocked.has(String(value||'').toLowerCase())))
       fault('failed-precondition','已取消或結案訂單不可重新預留');
     if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items))
       fault('failed-precondition','訂單缺少必要的所有權或品項資料');
@@ -130,6 +140,13 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     if(keys.size!==1||warehouses.size!==2)
       fault('failed-precondition','此交易限同一產品、剛好兩個實體倉庫');
     const productKey=[...keys][0];
+    const masterIds=[...new Set(selections.map(s=>s.item.productId).filter(Boolean))];
+    for(const masterId of masterIds){
+      const productSnap=await tx.get(ref('products',id(masterId,'產品主檔 ID',1500)));
+      if(!productSnap.exists)fault('failed-precondition','來源品項缺少產品主檔');
+      const product=productSnap.data(),type=String(product.productType||product.type||'').toUpperCase();
+      if(type==='SERVICE')fault('failed-precondition','服務型訂單不得預留實體庫存');
+    }
     const inventoryRef=ref('inventory',encodeURIComponent(productKey));
     const inventorySnap=await tx.get(inventoryRef);
     if(!inventorySnap.exists||inventorySnap.data().productKey!==productKey)

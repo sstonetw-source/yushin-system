@@ -51,6 +51,7 @@ function fixture({role='purchaser',owner='sales1'}={}){
     {itemId:'I2',productId:'P',warehouseId:'B',qty:5,reservedQty:0}
   ]});
   f.set('inventory/P',{productKey:'P',onHand:20,reserved:0,transferFreeInTransit:0});
+  f.set('products/P',{productId:'P',productType:'Goods',active:true});
   for(const wh of ['A','B']){
     f.set('warehouses/'+wh,{active:true,systemCustody:false});
     f.set('warehouseStocks/'+wh+'__P',{productKey:'P',warehouseId:wh,onHand:10,reserved:0,transferFreeInTransit:0});
@@ -179,6 +180,30 @@ test('receipt is server-only and no direct client stock write was enabled',()=>{
   assert.match(rules,/match \/reservationOperationReceipts\/\{id\} \{\s+allow read, write: if false;/);
   const source=fs.readFileSync('functions/index.js','utf8');
   assert.match(source,/ENABLE_GROUPED_RESERVATION.*!==.*true/);
-  for(const name of ['inventory-core.js','reservation-core.js'])
+  for(const name of ['inventory-core.js','reservation-core.js','fulfillment-core.js'])
     assert.equal(fs.readFileSync('modules/'+name,'utf8'),fs.readFileSync('functions/shared/'+name,'utf8'));
+});
+
+test('gross delivery above ordered can still reserve replacement demand after returned goods',async()=>{
+  const f=fixture();
+  f.docs.get('orders/O').items[0].deliveredQty=6;
+  f.docs.get('orders/O').items[0].returnedQty=2;
+  const result=await f.commit(f.request(1,3));
+  assert.equal(result.status,'applied');
+  assert.equal(f.docs.get('orders/O').items[0].shortageQty,0);
+  assert.equal(f.docs.get('inventory/P').reserved,4);
+});
+test('CLOSE return does not produce replenishment demand and service product master is authoritative',async()=>{
+  const f=fixture(),order=f.docs.get('orders/O');
+  order.items[0].deliveredQty=5;order.items[0].returnedQty=2;
+  order.returnRecords=[{itemId:'I1',qty:2,settlement:'CLOSE'}];
+  const before=f.snapshot();
+  await assert.rejects(f.commit(f.request(1,3)),/預留超過待交付數量/);
+  assert.equal(before,f.snapshot());
+  const s=fixture();s.docs.get('products/P').productType='Service';
+  await assert.rejects(s.commit(),/服務型/);
+});
+test('orders with inconsistent cancellation fields cannot reopen reservations',async()=>{
+  const f=fixture();f.docs.get('orders/O').orderStatus='cancelled';
+  await assert.rejects(f.commit(),/已取消/);
 });
