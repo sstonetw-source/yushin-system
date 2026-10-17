@@ -87,7 +87,8 @@
               (!r.data.warehouseId||r.data.warehouseId===after.warehouseId||r.data.warehouseId===before.warehouseId)));
           if(!movement)throw Error('庫存預留異動缺少同筆交易的庫存紀錄。');
           const evidence={inventoryId:inv.id,warehouseStockId:wh.id,previousWarehouseStockId:oldWh.id,
-            movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id),...(crossWarehouse?{crossWarehouse:true}:{})};
+            movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id),...(crossWarehouse?{crossWarehouse:true,
+              warehouseReservationIds:siblings.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId===after.warehouseId).map(r=>r.ref.id)}:{})};
           if(movement.data.reservationStockEvidence&&JSON.stringify(movement.data.reservationStockEvidence)!==JSON.stringify(evidence))
             throw Error('不同倉庫的庫存預留必須分別記錄，請由管理員檢查此筆交易。');
           movement.data={...movement.data,reservationStockEvidence:evidence};

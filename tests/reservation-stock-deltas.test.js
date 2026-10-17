@@ -167,6 +167,8 @@ test('operational cross-warehouse groups prove company totals and use a represen
   for(let i=0;i<5;i++){
    const r=f.docs.get('inventoryReservations/O__I'+i),e=r.stockEvidence;
    assert.equal(e.crossWarehouse,true);assert.equal(e.reservationIds.length,5);
+   assert.ok(e.warehouseReservationIds.includes('O__I'+i));
+   for(const id of e.warehouseReservationIds)assert.equal(f.docs.get('inventoryReservations/'+id).warehouseId,r.warehouseId);
    assert.equal(f.docs.get('inventoryReservations/'+e.reservationIds[0]).warehouseId,r.warehouseId);
    assert.deepEqual(f.docs.get('inventoryMovements/'+e.movementId).reservationStockEvidence,e);
   }

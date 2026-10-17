@@ -2852,7 +2852,9 @@ test('native corruption of company warehouse or proof metadata cannot bypass cro
   (path,data)=>path.startsWith('warehouseStocks/B__')?null:data,
   (path,data)=>path.startsWith('inventoryMovements/')&&path.endsWith('-B')?null:data,
   (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:'true'}}:data;},
-  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:false}}:data;}
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:false}}:data;},
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],warehouseReservationIds:[]}}:data;},
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],warehouseReservationIds:[...data[key].reservationIds]}}:data;}
  ];
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])for(const mutate of mutations){
   const f=await crossWarehouseEvidenceFixture(uid,role,2,{mutate}),before=await f.snapshot();
@@ -2872,7 +2874,7 @@ test('native grouped proofs cannot conceal a nonrepresentative reservation move 
   for(const warehouseId of ['A','B']){
    const ids=warehouseId==='A'?[0,1,2]:[2,0,1];
    evidence[warehouseId]={inventoryId:'P',warehouseStockId:warehouseId+'__P',previousWarehouseStockId:warehouseId+'__P',movementId:'hidden-'+warehouseId,
-    reservationIds:ids.map(i=>'hidden-move__I'+i),crossWarehouse:true};
+    reservationIds:ids.map(i=>'hidden-move__I'+i),crossWarehouse:true,warehouseReservationIds:(warehouseId==='A'?[0,1]:[2]).map(i=>'hidden-move__I'+i)};
    b.update(doc(client,'warehouseStocks/'+warehouseId+'__P'),{reserved:warehouseId==='A'?2:1});
    b.set(doc(client,'inventoryMovements/hidden-'+warehouseId),{productKey:'P',warehouseId,sourceId:'hidden-move',type:'reserve',qty:1,reservationStockEvidence:evidence[warehouseId]});
   }
@@ -2901,7 +2903,7 @@ test('cross-warehouse proof rejects unrelated product ids instead of treating a 
   await seed('warehouseStocks/W1__p-order',{productKey:'p-order',warehouseId:'W1',onHand:1000000020,reserved:0,incoming:0});
   await seed('inventoryReservations/unrelated-product',{productKey:'OTHER',warehouseId:'W1',quantity:1});
   const client=db(uid),b=writeBatch(client),e={inventoryId:'p-order',warehouseStockId:'W1__p-order',previousWarehouseStockId:'W1__p-order',
-   movementId:'RESERVE-EVIDENCE',reservationIds:['evidence__I0','unrelated-product'],crossWarehouse:true};
+   movementId:'RESERVE-EVIDENCE',reservationIds:['evidence__I0','unrelated-product'],crossWarehouse:true,warehouseReservationIds:['evidence__I0']};
   b.update(doc(client,'inventory/p-order'),{reserved:1000000000});
   b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:1000000000});
   b.set(doc(client,'inventoryReservations/evidence__I0'),{orderId:'evidence',itemId:'I0',orderItemIndex:0,productKey:'p-order',warehouseId:'W1',
