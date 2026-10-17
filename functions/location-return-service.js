@@ -133,7 +133,10 @@ async function commitLocationReturn(db,uid,data){
   tx.create(movementRef,{action:'location_customer_return',type:'return',qty:plan.returnQty,
    sourceType:'order',sourceId:orderId,itemId,productKey,warehouseId,actorUid:uid,actorRole,
    ownerUid:order.ownerUid,salesCode:order.salesCode,createdAt:now,reservedDelta:stockPlan.reservedDelta,
-   lotAllocations:plan.allocations,costPending:true,intentHash:intent.hash,returnRecord:record,result});
+   lotAllocations:plan.allocations,costPending:true,intentHash:intent.hash,returnRecord:record,result,
+   // CLOSE creates free stock; REPLACE reserves a customer replacement.
+   ...(intent.settlement==='CLOSE'?{v2FreeStockSource:'CLOSED_CUSTOMER_RETURN',
+     freeAllocationQty:plan.returnQty}:{} )});
   return {...result,status:'applied',movementId:movementRef.id};
  });
 }
