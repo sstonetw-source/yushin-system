@@ -327,3 +327,11 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 已實作：`selectSingleWarehouse` 沿用 `locationWarehouses` 的啟用實體倉篩選與排序，並使用 `inventory-core.normalizeStock` 計算分倉可用量；不再自行計算 onHand − reserved 而漏扣 transferFreeInTransit。`reserveSingleOrderItem` 的公司／分倉可用量檢查與最後選定倉驗證共用 `reservation-core.physicalWarehouse`，包含 warehouseType:CUSTODY、systemCustody 及 custody- 前綴。已有供應進度而鎖定位置的品項也不能繞過最終實體倉驗證。
 
 無新寫入、查詢、索引、Rules 或資料遷移；本批未開放多倉位置 ledger。實際 Service 模擬交易涵蓋途中量、部分現貨、衝突後重新選倉、保管倉及重試；新增四個授權角色的 Emulator 情境，結果依當批 CI 判定。Preview 多倉拆量、分批出貨與服務型訂單全流程仍未驗收。
+
+## 後端分批預留交易（2026-10-17，**已實作但預設關閉／尚未驗收上線**）
+
+- 新增 `functions/grouped-reservation-service.js`，僅處理**同張訂單、同產品、2–5 個不同訂單品項、分布剛好兩個既有實體倉庫**的預留增減。這不是「同一個品項拆成兩個倉」的 v2 `locations` ledger，也不處理出貨、收貨、調撥或取消。保留現行所有瀏覽器端交易入口與 Rules，避免一半遷移造成交易漏洞。
+- 後端使用 Firebase Callable 的已驗證 UID，**每筆新交易**在 Firestore Transaction 內讀取 `users/{uid}` 的角色與停用狀態、來源訂單與品項、公司／分倉庫存、倉庫主檔、各筆預留和操作憑證。業務與工程師只能操作自己所屬的訂單；採購、倉管、管理員按角色操作。不得信任前端傳入的身分、庫存或倉庫名稱。
+- 用同一份 `modules/reservation-core.js` 的 `reservationStockDeltas` 計算權威差額。由 `tools/build-functions-core.cjs` 產生 `functions/shared` 交付副本（含 inventory core），CI 比對來源完全一致；不得另維護一套商業公式。將訂單品項投影、inventory 公司 reserved、warehouseStocks 分倉 reserved、inventoryReservations 與 inventoryMovements 在**同一個 Admin SDK Transaction** 更新；採購在途不得算作實貨，調撥途中與服務型／直送路徑拒絕。
+- `reservationOperationReceipts/grouped-{attemptId}` 保存固定意圖雜湊、真實操作者與最終總帳差額；重複提交相同 ID 直接讀取憑證，換意圖或換人冒用被拒。Firestore Rules 對此集合完全禁止客戶端存取。沒有建立新索引或讀取監聽，也沒有正式資料 migration。
+- `functions/index.js` 的 Callable `commitGroupedWarehouseReservation` **預設回傳尚未啟用**（須明確 `ENABLE_GROUPED_RESERVATION=true`），因為目前沒有把前端工作流程接到新後端，也未完成 Preview 的 Firebase Functions Emulator / 真實 SDK 同步驗收。此批不能解決 PR #131 的 Rules CI，也沒有解除 v2 位置欄位阻擋。僅本批 Node mock 的單交易與冪等測試屬已驗證；完整 E2E、不同角色實際 SDK 與並發及與歷史非標準 inventory ID 的相容性仍待驗收。
