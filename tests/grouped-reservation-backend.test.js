@@ -46,7 +46,8 @@ function fixture({role='purchaser',owner='sales1'}={}){
   f.set('users/actor',{role,active:true});
   f.set('users/sales1',{role:'sales',active:true});
   f.set('users/off',{role:'purchaser',active:false});
-  f.set('orders/O',{ownerUid:owner,salesCode:'S01',status:'active',items:[
+  f.set('orders/O',{ownerUid:owner,salesCode:'S01',status:'active',
+    inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_1234567890',items:[
     {itemId:'I1',productId:'P',warehouseId:'A',qty:5,reservedQty:0},
     {itemId:'I2',productId:'P',warehouseId:'B',qty:5,reservedQty:0}
   ]});
@@ -56,7 +57,7 @@ function fixture({role='purchaser',owner='sales1'}={}){
     f.set('warehouses/'+wh,{active:true,systemCustody:false});
     f.set('warehouseStocks/'+wh+'__P',{productKey:'P',warehouseId:wh,onHand:10,reserved:0,transferFreeInTransit:0});
   }
-  const request=(a=2,b=3,attemptId='attempt_123456789')=>({orderId:'O',attemptId,items:[
+  const request=(a=2,b=3,attemptId='attempt_123456789')=>({orderId:'O',attemptId,syncAttemptId:'sync_1234567890',items:[
     {itemId:'I1',quantity:a},{itemId:'I2',quantity:b}
   ]});
   return {...f,request,commit:(data=request(),uid='actor')=>
@@ -166,9 +167,9 @@ test('existing reservation mismatches, disabled warehouses and third warehouse f
 });
 test('operation limit, intent quantities and unknown location ledger are rejected',async()=>{
   for(const input of [
-    {orderId:'O',attemptId:'short',items:[{itemId:'I1',quantity:1},{itemId:'I2',quantity:2}]},
-    {orderId:'O',attemptId:'attempt_123456789',items:[{itemId:'I1',quantity:1.3},{itemId:'I2',quantity:2}]},
-    {orderId:'O',attemptId:'attempt_123456789',items:[{itemId:'I1',quantity:1},{itemId:'I1',quantity:2}]}
+    {orderId:'O',attemptId:'short',syncAttemptId:'sync_1234567890',items:[{itemId:'I1',quantity:1},{itemId:'I2',quantity:2}]},
+    {orderId:'O',attemptId:'attempt_123456789',syncAttemptId:'sync_1234567890',items:[{itemId:'I1',quantity:1.3},{itemId:'I2',quantity:2}]},
+    {orderId:'O',attemptId:'attempt_123456789',syncAttemptId:'sync_1234567890',items:[{itemId:'I1',quantity:1},{itemId:'I1',quantity:2}]}
   ])assert.throws(()=>normalizeIntent(input),/不正確|整數|重複/);
   const f=fixture();f.set('inventoryReservations/O__I1',{orderId:'O',itemId:'I1',productKey:'P',
     warehouseId:'A',ownerUid:'sales1',salesCode:'S01',quantity:0,locationSchemaVersion:2,locations:[]});
@@ -184,14 +185,13 @@ test('receipt is server-only and no direct client stock write was enabled',()=>{
     assert.equal(fs.readFileSync('modules/'+name,'utf8'),fs.readFileSync('functions/shared/'+name,'utf8'));
 });
 
-test('gross delivery above ordered can still reserve replacement demand after returned goods',async()=>{
+test('initial grouped sync refuses fulfilled items; standard return workflows retain authority',async()=>{
   const f=fixture();
   f.docs.get('orders/O').items[0].deliveredQty=6;
   f.docs.get('orders/O').items[0].returnedQty=2;
-  const result=await f.commit(f.request(1,3));
-  assert.equal(result.status,'applied');
-  assert.equal(f.docs.get('orders/O').items[0].shortageQty,0);
-  assert.equal(f.docs.get('inventory/P').reserved,4);
+  const before=f.snapshot();
+  await assert.rejects(f.commit(f.request(1,3)),/已履約/);
+  assert.equal(f.snapshot(),before);
 });
 test('CLOSE return does not produce replenishment demand and service product master is authoritative',async()=>{
   const f=fixture(),order=f.docs.get('orders/O');
@@ -206,4 +206,22 @@ test('CLOSE return does not produce replenishment demand and service product mas
 test('orders with inconsistent cancellation fields cannot reopen reservations',async()=>{
   const f=fixture();f.docs.get('orders/O').orderStatus='cancelled';
   await assert.rejects(f.commit(),/已取消/);
+});
+
+test('stale or completed order sync attempt cannot mutate stock, including newer attempt replay',async()=>{
+ const f=fixture();
+ for(const change of [
+   o=>o.inventoryReservationAttemptId='newer_attempt_12345',
+   o=>o.inventoryReservationStatus='completed',
+   o=>o.inventoryReservationStatus='failed'
+ ]){
+   const old=f.snapshot(),order=f.docs.get('orders/O');change(order);
+   const before=f.snapshot();
+   await assert.rejects(f.commit(f.request()),/同步狀態已變更/);
+   assert.equal(f.snapshot(),before);
+   f.docs.clear();for(const [k,v] of JSON.parse(old))f.docs.set(k,v);
+ }
+ await f.commit();
+ f.docs.get('orders/O').inventoryReservationStatus='completed';
+ assert.equal((await f.commit()).status,'already-applied');
 });

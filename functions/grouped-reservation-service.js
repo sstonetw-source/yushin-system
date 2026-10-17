@@ -41,6 +41,7 @@ function fingerprint(orderId,rows){
 function normalizeIntent(data){
   if(!data||typeof data!=='object'||Array.isArray(data))fault('invalid-argument','缺少交易內容');
   const orderId=id(data.orderId,'訂單 ID');
+  const syncAttemptId=id(data.syncAttemptId,'來源同步識別碼',96);
   const attemptId=id(data.attemptId,'操作識別碼',96);
   if(!/^[a-zA-Z0-9_-]{12,96}$/.test(attemptId))fault('invalid-argument','操作識別碼格式不正確');
   if(!Array.isArray(data.items)||data.items.length<2||data.items.length>5)
@@ -51,17 +52,20 @@ function normalizeIntent(data){
   })).sort((a,b)=>a.itemId.localeCompare(b.itemId));
   if(new Set(rows.map(x=>x.itemId)).size!==rows.length)fault('invalid-argument','重複訂單品項 ID');
   // Prevent callers from injecting a proposed stock balance, role, or warehouse.
-  if(Object.keys(data).some(k=>!['orderId','attemptId','items'].includes(k)))
+  if(Object.keys(data).some(k=>!['orderId','attemptId','syncAttemptId','items'].includes(k)))
     fault('invalid-argument','請求含未授權的欄位');
   if(data.items.some(x=>!x||Object.keys(x).some(k=>!['itemId','quantity'].includes(k))))
     fault('invalid-argument','品項請求含未授權的欄位');
-  return {orderId,attemptId,rows,hash:fingerprint(orderId,rows)};
+  return {orderId,attemptId,syncAttemptId,rows,hash:fingerprint(orderId,[syncAttemptId,...rows])};
 }
 function validateSourceItem(item,order,actorRole,uid){
   const ordered=qty(item.qty??item.orderedQty,'訂購量');
   const delivered=qty(item.deliveredQty??0,'已交付量');
   const returned=qty(item.returnedQty??0,'退貨量');
   if(returned>delivered)fault('failed-precondition','訂單交付或退貨累計異常');
+  if(delivered>0||returned>0||Number(item.supplyOrderedQty||0)!==0
+    ||Number(item.receivedQty||0)!==0)
+    fault('failed-precondition','已履約或有供應進度的品項不可用初始雙倉預留');
   if(item.transferPendingId||item.custodyTransferId||item.dispatchPreparedQty>0)
     fault('failed-precondition','調撥或出貨途中品項不可重新配置預留');
   if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
@@ -90,7 +94,7 @@ function projectAfter(stock,delta,label){
 
 async function commitGroupedWarehouseReservation(db,uid,data){
   id(uid,'登入 UID');
-  const {orderId,attemptId,rows,hash}=normalizeIntent(data);
+  const {orderId,attemptId,syncAttemptId,rows,hash}=normalizeIntent(data);
   const ref=(name,key)=>db.collection(name).doc(key);
   const receiptRef=ref('reservationOperationReceipts','grouped-'+attemptId);
   const now=new Date().toISOString();
@@ -118,6 +122,11 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       fault('failed-precondition','已取消或結案訂單不可重新預留');
     if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items))
       fault('failed-precondition','訂單缺少必要的所有權或品項資料');
+    // Prevent stale initial-sync attempts from committing after cancellation,
+    // a newer sync attempt, or completion. Receipt replays were handled above.
+    if(order.inventoryReservationStatus!=='pending'
+      ||order.inventoryReservationAttemptId!==syncAttemptId)
+      fault('failed-precondition','來源訂單同步狀態已變更，請重新讀取');
     if(['sales','engineer'].includes(actorRole)&&order.ownerUid!==uid)
       fault('permission-denied','只能操作自己的訂單');
     const lookup=new Map();
@@ -240,7 +249,7 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     if(changes.some(c=>c.before.quantity!==c.quantity))
       tx.update(orderRef,{items:nextItems,updatedAt:now});
     tx.create(receiptRef,{action:'grouped_reservation',orderId,productKey,
-      actorUid:uid,actorRole,intentHash:hash,companyReservedDelta:companyDelta,
+      actorUid:uid,actorRole,syncAttemptId,intentHash:hash,companyReservedDelta:companyDelta,
       warehouseIds:[...warehouses].sort(),reservationIds:changes.map(c=>c.ref.id),
       createdAt:now,status:'applied'});
     return {status:'applied',receiptId:receiptRef.id,productKey,companyReservedDelta:companyDelta};
