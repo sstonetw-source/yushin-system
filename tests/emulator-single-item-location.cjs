@@ -1253,8 +1253,8 @@ test('cancelled KEEP_STOCK receipt publishes exactly the physical free v2 remain
  const sources=movementRows.docs.filter(d=>d.data().type==='receipt');
  assert.equal(sources.length,1);
  const movementId=sources[0].id,proof=sources[0].data();
- assert.equal(proof.v2FreeStockSource,'V2_WAREHOUSE_RECEIPT');
- assert.equal(proof.freeAllocationQty,2);
+ assert.equal(proof.v2FreeStockSource,undefined,'existing receiving writer is unchanged');
+ assert.equal(proof.freeAllocationQty,undefined,'derive the amount from the real receipt');
  const baseline=await receiptSnapshot(x);
  const first=await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId});
  assert.equal(first.sourceMovementId,movementId);
@@ -1290,7 +1290,7 @@ test('v2 cancelled purchase receipt stock redistributes to a separate waiting or
  const receiptId='v2_receipt_release-reassign-receipt';
  await x.receive(2);
  const movementRows=await db.collection('inventoryMovements').where('receiptId','==',receiptId).get();
- const receiptProof=movementRows.docs.find(d=>d.data().v2FreeStockSource==='V2_WAREHOUSE_RECEIPT');
+ const receiptProof=movementRows.docs.find(d=>d.data().type==='receipt');
  assert.ok(receiptProof);
  const first=await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId:receiptProof.id});
  assert.equal(first.lastOrderId,competitorId);assert.equal(first.lastAllocatedQty,2);
@@ -1317,5 +1317,5 @@ test('v2 source receiving that reserves its whole receipt must never publish a f
  assert.ok(receiptProof);
  assert.equal(receiptProof.data().v2FreeStockSource,undefined);
  await assert.rejects(advanceReleasedV2FreeStock(db,'emulator-purchaser',{
-  movementId:receiptProof.id}),/不會釋放/);
+  movementId:receiptProof.id}),/receipt 憑證/);
 });
