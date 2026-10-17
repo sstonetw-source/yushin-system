@@ -85,22 +85,19 @@ async function commitLocationShipment(db,uid,data){
    fault('服務或停用商品不可出貨');
   const ordered=quantity(item.qty??item.orderedQty,'訂購量');
   if(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)fault('訂購量投影不一致');
-  if(!Array.isArray(order.deliveryRecords)||order.deliveryRecords.length||!Array.isArray(order.returnRecords)||order.returnRecords.length
-   ||quantity(item.returnedQty??0,'退貨量')||quantity(item.deliveredQty??0,'已送達量')
-   ||quantity(order.deliveredQty??0,'訂單已送達量')||order.isDelivered===true)fault('此試點須有明確交付紀錄且尚未退貨');
+  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords)||order.returnRecords.length
+   ||quantity(item.returnedQty??0,'退貨量'))fault('退貨或補送流程尚未開放');
   const records=order.warehouseShipmentRecords??[];
-  if(!Array.isArray(records))fault('倉庫出貨紀錄格式不正確');
-  const seen=new Set();let gross=0;
-  for(const row of records){
-   id(row.id,'歷史出貨識別碼');
-   if(seen.has(row.id)||row.itemId!==itemId||row.sourceType!=='WAREHOUSE_CUSTOMER_SHIPMENT'
-    ||row.productKey!==productKey||quantity(row.qty,'歷史出貨量')===0)
-    fault('歷史出貨紀錄不一致');
-   seen.add(row.id);gross=quantity(gross+row.qty,'累計出貨量');
-  }
-  if(seen.has(operationId)||(order.warehouseShipmentHistory||[]).some(row=>row.recordId===operationId))
+  const deliveryProjection=fulfillmentCore.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:ordered,
+   shipments:records,deliveries:order.deliveryRecords});
+  const gross=deliveryProjection.shippedQty;
+  if(records.some(row=>row.id===operationId)||(order.warehouseShipmentHistory||[]).some(row=>row.recordId===operationId))
    fault('此出貨識別碼已有歷史紀錄，不可重新扣帳');
-  if(quantity(item.warehouseShippedQty??gross,'品項累計出貨量')!==gross)fault('品項出貨與權威出貨紀錄不一致');
+  if(quantity(item.warehouseShippedQty??gross,'品項累計出貨量')!==gross
+   ||quantity(item.deliveredQty??0,'品項送達量')!==deliveryProjection.confirmedQty
+   ||quantity(order.deliveredQty??0,'訂單送達量')!==deliveryProjection.confirmedQty
+   ||(order.isDelivered??false)!==deliveryProjection.isDelivered)
+   fault('出貨或客戶送達投影不一致');
   const prepared=quantity(item.dispatchPreparedQty??0,'打單量');
   const held=quantity(item.reservedQty,'品項預留');
   const state=fulfillmentCore.warehouseShipmentState({warehouseShippedQty:gross,
@@ -146,6 +143,8 @@ async function commitLocationShipment(db,uid,data){
    qty:intent.quantity,notes:intent.notes,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT',deliveryPlan:sourcePlan,
    createdBy:uid,createdByUid:uid,createdAt:now,movementId:movementRef.id,lotAllocations:allocation.allocations,cogs:0};
   const nextRecords=[...records,record];
+  fulfillmentCore.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:ordered,
+   shipments:nextRecords,deliveries:order.deliveryRecords});
   const nextLedger={...stockPlan.reservation,updatedAt:now};delete nextLedger.warehouseId;
   tx.update(inventoryRef,{...stockPlan.aggregateStock,updatedAt:now});
   tx.update(stockRef,{...stockPlan.warehouseStock,updatedAt:now});

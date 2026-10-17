@@ -4,7 +4,7 @@
 
 ## 責任與事件
 
-`functions/location-shipment-service.js` 的 `commitLocationShipment` 限 `demo-yushin` Firestore Emulator。僅處理有完整所有權、已完成庫存同步、單品項、無退貨／送達／保管／調撥進度的 v2 訂單；必須為 CUSTOMER_SHIP 且收件資訊與操作人確認的快照完全相同。
+`functions/location-shipment-service.js` 的 `commitLocationShipment` 限 `demo-yushin` Firestore Emulator。僅處理有完整所有權、已完成庫存同步、單品項、無退貨／保管／調撥進度，已送達部分必須來自新版出貨確認事件的 v2 訂單；必須為 CUSTOMER_SHIP 且收件資訊與操作人確認的快照完全相同。
 
 - 原 `modules/reservation-core.js` 的 `planReservationIssue` 決定公司／指定倉實貨與預留差額，保留其他倉預留。
 - 原 `modules/inventory-core.js` 的 `allocateLots`／FEFO 決定實際批次；`reconcileStockLots` 僅驗證現有批次不超過實貨，不寫入它產生的未分批提案，不猜測成本。
@@ -38,7 +38,7 @@
 待完成：
 
 - 新 warehouseShipmentRecords 尚未接入所有前端、workCategories、採購需求及訂單顯示投影；既有前端 INVENTORY_SHIPMENT 的交付記帳不能與此新事件混用。
-- 客戶簽收／送達須採用已寄出事件確認且不再次扣庫存；此服務尚未提供確認入口。
+- 後續已新增 Emulator-only 客戶送達確認及交錯寄送，詳見 shipment-delivery-confirmation-emulator-20261017.md；仍無 UI／Callable／Preview 入口。
 - 多品項、退貨／補送、撤銷、取消／恢復、收貨、保管與調撥仍須整合共同位置契約。
 - 必須完成所有讀寫入口與 Preview 全流程後才可開放；現行 StockPermissions／Rules 的 v2 寫入阻擋完整保留。
 

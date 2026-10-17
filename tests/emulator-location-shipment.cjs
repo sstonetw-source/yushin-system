@@ -169,3 +169,123 @@ test('late transaction create failure rolls back stock, lots, ledger, order and 
  await assert.rejects(commitLocationShipment(wrapper,x.uid,x.request()));assert.deepEqual(await snapshot(x),before);
  assert.equal((await x.call()).status,'applied');
 });
+
+// The next stage confirms customer receipt of an already-debited shipment.
+const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
+async function acknowledgementFixture(name,{role='sales',shipQty=2}={}){
+ const x=await seed('confirm-'+name,{role});
+ const shippingUid='shipping-operator-'+name;
+ await db.collection('users').doc(shippingUid).set({role:'warehouse',active:true});
+ const shipmentRequest=x.request(A,shipQty,'shipment_confirm_'+name);
+ if(shipQty)await x.call(shipmentRequest,shippingUid);
+ const request=(quantity=1,operationId='delivery_confirm_'+name,shipmentId=shipmentRequest.operationId)=>({
+  orderId:x.orderId,itemId:'I',shipmentId,quantity,operationId,syncAttemptId:'sync_ship_12345',date:'2026-10-18'});
+ return {...x,shippingUid,shipmentRequest,deliveryRequest:request,
+  confirm:(data=request(),actor=x.uid,connection=db)=>commitShipmentDelivery(connection,actor,data),
+  ship:(wh,qty,operationId)=>x.call(x.request(wh,qty,operationId),shippingUid)};
+}
+async function physicalSnapshot(x){const state=await snapshot(x);return {docs:state.docs.slice(1),movements:state.movements};}
+async function confirmWithoutStockChange(x,request){
+ const before=await physicalSnapshot(x),result=await x.confirm(request);
+ assert.deepEqual(await physicalSnapshot(x),before);return result;
+}
+test('real reserve -> A shipment -> partial delivery -> B shipment -> final A shipment debits physical stock only on shipment',async()=>{
+ const x=await acknowledgementFixture('interleave');
+ let r=await confirmWithoutStockChange(x,x.deliveryRequest());assert.equal(r.confirmedQty,1);assert.equal(r.isDelivered,false);
+ await x.ship(B,6,'shipment_interleave_B');
+ r=await confirmWithoutStockChange(x,x.deliveryRequest(6,'delivery_interleave_B','shipment_interleave_B'));
+ assert.equal(r.confirmedQty,7);assert.equal(r.pendingDeliveryQty,1);assert.equal(r.isDelivered,false);
+ r=await confirmWithoutStockChange(x,x.deliveryRequest(1,'delivery_interleave_A_rest'));
+ assert.equal(r.confirmedQty,8);assert.equal(r.pendingDeliveryQty,0);assert.equal(r.isDelivered,false);
+ await x.ship(A,2,'shipment_interleave_A_last');
+ r=await confirmWithoutStockChange(x,x.deliveryRequest(2,'delivery_interleave_last','shipment_interleave_A_last'));
+ assert.equal(r.confirmedQty,10);assert.equal(r.pendingDeliveryQty,0);assert.equal(r.isDelivered,true);
+ const order=await x.read('orders',x.orderId);
+ assert.equal(order.warehouseShipmentRecords.length,3);assert.equal(order.deliveryRecords.length,4);
+ assert.equal(order.deliveredQty,10);assert.equal(order.items[0].deliveredQty,10);
+ assert.equal(order.items[0].warehouseShippedQty,10);assert.equal(order.items[0].reservedQty,0);
+ assert.equal((await x.read('inventory',x.key)).onHand,6);assert.equal((await x.read('inventory',x.key)).reserved,2);
+});
+test('customer acknowledgement reads only actor, order and immutable shipment movement; writes only order',async()=>{
+ const x=await acknowledgementFixture('bounded');let reads=0,writes=0;
+ const guarded={projectId:db.projectId,collection:name=>{
+  assert.ok(['users','orders','inventoryMovements'].includes(name),'unexpected stock/cost read '+name);
+  return db.collection(name);
+ },runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>{reads++;return tx.get(r);},
+  update:(r,v)=>{assert.ok(r.path.startsWith('orders/'));writes++;return tx.update(r,v);}
+ }))};
+ const before=await physicalSnapshot(x);assert.equal((await x.confirm(x.deliveryRequest(),x.uid,guarded)).status,'applied');
+ assert.equal(reads,3);assert.equal(writes,1);assert.deepEqual(await physicalSnapshot(x),before);
+});
+test('acknowledgement replay preserves original result and rejects modified intent or a different actor',async()=>{
+ const x=await acknowledgementFixture('replay');await x.confirm();const first=await snapshot(x);
+ assert.equal((await x.confirm()).status,'already-applied');assert.deepEqual(await snapshot(x),first);
+ for(const patch of [{quantity:2},{shipmentId:'other'},{date:'2026-10-19'},{notes:'changed'},{syncAttemptId:'new-sync'}])
+  await assert.rejects(x.confirm({...x.deliveryRequest(),...patch}),/其他交易/);
+ await db.collection('users').doc('other-confirm-admin').set({role:'admin',active:true});
+ await assert.rejects(x.confirm(x.deliveryRequest(),'other-confirm-admin'),/其他交易/);
+ await db.collection('orders').doc(x.orderId).update({status:'cancelled'});
+ assert.equal((await x.confirm()).status,'already-applied');
+ await db.collection('users').doc(x.uid).update({active:false});await assert.rejects(x.confirm(),/權限/);
+});
+test('five-role acknowledgement contract permits admin or owner sales/engineer, not purchasing/warehouse or strangers',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const x=await acknowledgementFixture('role-'+role,{role});
+  if(['purchaser','warehouse'].includes(role)){
+   const before=await snapshot(x);await assert.rejects(x.confirm(),/權限/);assert.deepEqual(await snapshot(x),before);
+  }else assert.equal((await x.confirm()).status,'applied');
+ }
+ const x=await acknowledgementFixture('stranger');
+ for(const role of ['sales','engineer']){
+  const uid='stranger-confirm-'+role;await db.collection('users').doc(uid).set({role,active:true});
+  await assert.rejects(x.confirm(x.deliveryRequest(),uid),/自己訂單/);
+ }
+});
+test('simultaneous identical acknowledgements create exactly one record and no new movement',async()=>{
+ const x=await acknowledgementFixture('same-concurrent'),before=await physicalSnapshot(x);
+ const results=await Promise.all([x.confirm(),x.confirm()]);
+ assert.deepEqual(results.map(r=>r.status).sort(),['already-applied','applied']);
+ const order=await x.read('orders',x.orderId);assert.equal(order.deliveryRecords.length,1);assert.equal(order.deliveredQty,1);
+ assert.deepEqual(await physicalSnapshot(x),before);
+});
+test('simultaneous different acknowledgements cannot exceed one source shipment',async()=>{
+ const x=await acknowledgementFixture('different-concurrent'),before=await physicalSnapshot(x);
+ const results=await Promise.allSettled([x.confirm(x.deliveryRequest(2,'delivery_compete_A')),
+  x.confirm(x.deliveryRequest(2,'delivery_compete_B'))]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal((await x.read('orders',x.orderId)).deliveredQty,2);assert.deepEqual(await physicalSnapshot(x),before);
+});
+test('unshipped, over-confirmed, backdated and mismatched proof operations fail atomically',async()=>{
+ const empty=await acknowledgementFixture('empty',{shipQty:0}),baseline=await snapshot(empty);
+ await assert.rejects(empty.confirm());assert.deepEqual(await snapshot(empty),baseline);
+ const x=await acknowledgementFixture('limits'),before=await snapshot(x);
+ await assert.rejects(x.confirm(x.deliveryRequest(3)),/超過/);
+ await assert.rejects(x.confirm({...x.deliveryRequest(),date:'2026-10-16'}),/日期/);
+ await assert.rejects(x.confirm({...x.deliveryRequest(),shipmentId:'unshipped'}),/不存在/);
+ assert.deepEqual(await snapshot(x),before);
+ const cases=[
+  ['cancel',y=>db.collection('orders').doc(y.orderId).update({orderStatus:'cancelled'})],
+  ['sync',y=>db.collection('orders').doc(y.orderId).update({inventoryReservationAttemptId:'other-sync'})],
+  ['pending',y=>db.collection('orders').doc(y.orderId).update({inventoryReservationStatus:'pending'})],
+  ['return',y=>db.collection('orders').doc(y.orderId).update({returnRecords:[{qty:1}]})],
+  ['projection',y=>db.collection('orders').doc(y.orderId).update({deliveredQty:1})],
+  ['missing-proof',y=>db.collection('inventoryMovements').doc('location-ship-'+y.shipmentRequest.operationId).delete()],
+  ['wrong-proof',y=>db.collection('inventoryMovements').doc('location-ship-'+y.shipmentRequest.operationId).update({qty:-99})],
+  ['recipient',async y=>{const order=await y.read('orders',y.orderId);order.warehouseShipmentRecords[0].deliveryPlan.address='forged';
+   return db.collection('orders').doc(y.orderId).update({warehouseShipmentRecords:order.warehouseShipmentRecords});}],
+  ['legacy',y=>db.collection('orders').doc(y.orderId).update({deliveryRecords:[{id:'legacy',qty:1,sourceType:'INVENTORY_SHIPMENT'}]})],
+ ];
+ for(const [name,mutate] of cases){const y=await acknowledgementFixture('reject-'+name);await mutate(y);
+  const snapshotBefore=await snapshot(y);await assert.rejects(y.confirm(),undefined,name);
+  assert.deepEqual(await snapshot(y),snapshotBefore,name);}
+});
+test('late acknowledgement write failure rolls back the event and retains same-ID retry without touching stock',async()=>{
+ const x=await acknowledgementFixture('late-failure'),collision=db.collection('inventoryMovements').doc('confirm-forced-collision');
+ await collision.set({marker:true});
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),update:(...args)=>{tx.update(...args);tx.create(collision,{marker:false});}
+ }))};
+ const before=await snapshot(x);await assert.rejects(x.confirm(x.deliveryRequest(),x.uid,wrapper));
+ assert.deepEqual(await snapshot(x),before);assert.equal((await x.confirm()).status,'applied');
+});

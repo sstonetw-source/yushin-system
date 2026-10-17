@@ -92,6 +92,57 @@
       preparedOutstanding: state.preparedOutstanding, shippable: state.shippable, pending: state.pending };
   }
 
+  // Canonical v2 shipment/acknowledgement projection. Legacy deliveries and
+  // returns must not be mixed into this explicitly bounded migration contract.
+  function projectShipmentDelivery({orderId,itemId,productKey,orderedQty,shipments=[],deliveries=[]} = {}) {
+    const ident=value=>{
+      if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
+        throw Error('出貨或送達識別資料不正確。');
+      return value;
+    };
+    const qty=value=>{
+      if(!Number.isSafeInteger(value)||value<0)throw Error('出貨或送達數量必須為非負整數。');
+      return value;
+    };
+    const date=value=>{
+      if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value)
+        ||!Number.isFinite(Date.parse(value+'T00:00:00Z'))
+        ||new Date(value+'T00:00:00Z').toISOString().slice(0,10)!==value)
+        throw Error('出貨或送達日期不正確。');
+      return value;
+    };
+    [orderId,itemId,productKey].forEach(ident);qty(orderedQty);
+    if(!Array.isArray(shipments)||!Array.isArray(deliveries)||shipments.length>200||deliveries.length>200)
+      throw Error('出貨或送達紀錄格式不正確或超過安全上限。');
+    const source=new Map();let shippedQty=0,confirmedQty=0;
+    for(const row of shipments){
+      ident(row?.id);ident(row.warehouseId);date(row.date);
+      if(source.has(row.id)||row.orderId!==orderId||row.itemId!==itemId||row.productKey!==productKey
+        ||row.sourceType!=='WAREHOUSE_CUSTOMER_SHIPMENT'||qty(row.qty)===0)
+        throw Error('倉庫出貨紀錄來源不一致或重複。');
+      shippedQty=qty(shippedQty+row.qty);
+      if(shippedQty>orderedQty)throw Error('倉庫出貨總量超過訂購量。');
+      source.set(row.id,{shipment:row,confirmedQty:0});
+    }
+    const seen=new Set();
+    for(const row of deliveries){
+      ident(row?.id);ident(row.shipmentId);date(row.date);
+      const target=source.get(row.shipmentId);
+      if(seen.has(row.id)||!target||row.orderId!==orderId||row.itemId!==itemId||row.productKey!==productKey
+        ||row.warehouseId!==target.shipment.warehouseId||row.sourceType!=='WAREHOUSE_SHIPMENT_CONFIRMATION'
+        ||qty(row.qty)===0||row.date<target.shipment.date)
+        throw Error('客戶送達未對應有效出貨紀錄或日期不一致。');
+      seen.add(row.id);target.confirmedQty=qty(target.confirmedQty+row.qty);
+      if(target.confirmedQty>target.shipment.qty)throw Error('送達量超過該筆倉庫出貨量。');
+      confirmedQty=qty(confirmedQty+row.qty);
+    }
+    const delivery=projectOrderDelivery({grossDeliveredQty:confirmedQty});
+    return {shippedQty,confirmedQty:delivery.effectiveDelivered,pendingDeliveryQty:shippedQty-delivery.effectiveDelivered,
+      isDelivered:orderedQty>0&&delivery.effectiveDelivered===orderedQty,
+      shipments:[...source].map(([shipmentId,row])=>({shipmentId,shippedQty:row.shipment.qty,
+        confirmedQty:row.confirmedQty,pendingQty:row.shipment.qty-row.confirmedQty}))};
+  }
+
   function pendingDispatchQty(item) {
     return dispatchState(item).pending;
   }
@@ -128,6 +179,7 @@
     normalizeItem,
     dispatchState,
     warehouseShipmentState,
+    projectShipmentDelivery,
     pendingDispatchQty,
     shippableQty,
     prepareDispatch,

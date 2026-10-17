@@ -125,3 +125,7 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 ## Emulator-only v2 倉庫寄出事件（2026-10-17）
 
 新 `orders.warehouseShipmentRecords[]` 是實際寄出權威，包含 operationId、warehouseId、qty、lotAllocations、收件快照、actor／movement；items.warehouseShippedQty 是其加總投影，交易需核對。沿用 inventoryMovements 的固定 location-ship-{operationId} 文件保存扣帳與重送意圖／原結果，不新增集合。公司／指定倉 onHand與reserved、原v2預留、真實批次及寄出事件一起提交。客戶 deliveryRecords／deliveredQty／isDelivered 不變，未提供簽收入口。此資料只允許 demo-yushin Emulator，workCategories及現行前端／需求尚未讀取新事件，不可部署或混寫正式資料。
+
+## Emulator-only 送達確認的出貨來源（2026-10-17）
+
+`deliveryRecords[].sourceType=WAREHOUSE_SHIPMENT_CONFIRMATION` 新增 shipmentId／shipmentMovementId，對應原 warehouseShipmentRecords 與真實扣帳 movement；qty為本次確認量，不是再出庫量。原UID／角色、意圖hash與結果同 deliveryRecord 保存，無新憑證集合。訂單與品項 deliveredQty、isDelivered 是確認事件的投影，warehouseShippedQty仍只來自出貨事件。每類事件最多200筆，跨倉／部分確認使用同一核心投影核對，禁止混用舊交付事件。確認只更新orders，不觸碰實貨、預留、批次或成本；部分送達的退貨批次歸屬仍需後續完成，不把整筆原出貨的lotAllocations錯複製到每筆部分確認。
