@@ -4,7 +4,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
 const demandCore=require('../modules/procurement-demand-core');
-const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitSingleItemFreeStockAllocation}=require('../functions/single-item-location-service');
+const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitSingleItemFreeStockAllocation,advanceAutomaticFreeStockAllocation}=require('../functions/single-item-location-service');
 const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
 let app,db;
 test.before(()=>{
@@ -1017,4 +1017,133 @@ test('free redistribution concurrent requests and movement collisions cannot dou
  assert.equal((await target.read('inventoryReservations',target.orderId+'__I1')).quantity,8);
  assert.equal((await target.read('warehouseStocks','V2-B__'+target.productKey)).reserved,8);
  assert.equal((await target.read('inventory',target.productKey)).onHand,12);
+});
+
+async function autoFreeTarget(source,suffix,qty){
+ const orderId=source.orderId+'-auto-'+suffix,existing=await source.read('orders',source.orderId);
+ await db.collection('orders').doc(orderId).set({...existing,status:'active',orderStatus:'normal',
+  inventoryReservationStatus:'pending',
+  items:[{...existing.items[0],qty,orderedQty:qty,reservedQty:0,shortageQty:0}]});
+ await commitSingleItemTwoWarehouse(db,source.uid,{orderId,itemId:'I1',
+  warehouseIds:['V2-A','V2-B'],attemptId:'auto_initial_'+suffix+'_123456789',
+  syncAttemptId:'v2_123456789'});
+ await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
+ return {...source,orderId,request:{...source.request,orderId}};
+}
+function autoFreeRequest(source,runId,maxQty=6){
+ return {productKey:source.productKey,warehouseId:'V2-B',maxQty,runId};
+}
+test('FIFO automated checkpoint allocates two v2 orders in bounded resumable steps',async()=>{
+ const source=await readyLifecycle('auto-fifo',{role:'admin'});
+ const older=await autoFreeTarget(source,'older',4);
+ const newer=await autoFreeTarget(source,'newer',5);
+ const olderLedger=db.collection('inventoryReservations').doc(older.orderId+'__I1');
+ const newerLedger=db.collection('inventoryReservations').doc(newer.orderId+'__I1');
+ await olderLedger.update({orderDate:'2026-10-01'});
+ await newerLedger.update({orderDate:'2026-10-02'});
+ assert.equal((await older.read('orders',older.orderId)).items[0].shortageQty,2);
+ assert.equal((await newer.read('orders',newer.orderId)).items[0].shortageQty,5);
+ const firstDemand=await seedLifecycleDemand(older);
+ const secondDemand=await seedLifecycleDemand(newer);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_fifo_success_123456');
+ const first=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(first.status,'active');
+ assert.equal(first.lastOrderId,older.orderId);
+ assert.equal(first.lastAllocatedQty,2);
+ assert.equal(first.allocatedQty,2);
+ assert.equal(first.processedSteps,1);
+ assert.equal((await firstDemand.read()).requestedQty,0);
+ const second=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(second.status,'completed');
+ assert.equal(second.lastOrderId,newer.orderId);
+ assert.equal(second.lastAllocatedQty,4);
+ assert.equal(second.allocatedQty,6);
+ assert.equal(second.processedSteps,2);
+ assert.equal((await secondDemand.read()).requestedQty,1);
+ assert.equal((await source.read('inventory',source.productKey)).onHand,12);
+ assert.equal((await source.read('inventory',source.productKey)).reserved,8);
+ assert.equal((await source.read('warehouseStocks','V2-B__'+source.productKey)).reserved,8);
+ const checkpoint=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
+ assert.equal(checkpoint.status,'completed');assert.equal(checkpoint.allocatedQty,6);
+ assert.equal(checkpoint.pending,null);
+ const baseline=await snapshot(newer);
+ assert.equal((await advanceAutomaticFreeStockAllocation(db,source.uid,input)).status,'completed');
+ assert.deepEqual(await snapshot(newer),baseline);
+ await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,{...input,maxQty:7}),/不同交易/);
+});
+test('FIFO progress survives committed movement with failed checkpoint update',async()=>{
+ const source=await readyLifecycle('auto-recovery',{role:'admin'});
+ const target=await autoFreeTarget(source,'recovery',10);
+ await seedLifecycleDemand(target);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_recovery_durable_1234');
+ let injected=false;
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),
+  runTransaction:fn=>db.runTransaction(tx=>fn({
+   get:x=>tx.get(x),create:(...args)=>tx.create(...args),set:(...args)=>tx.set(...args),
+   update:(ref,patch)=>{
+    if(!injected&&ref.path==='reservationOperationReceipts/single-v2-free-batch-'+input.runId
+      &&patch.processedSteps===1){
+     injected=true;throw Error('simulated checkpoint interruption');
+    }
+    return tx.update(ref,patch);
+   }
+  }))};
+ await assert.rejects(advanceAutomaticFreeStockAllocation(wrapper,source.uid,input),/checkpoint interruption/);
+ assert.equal(injected,true);
+ let checkpoint=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
+ assert.equal(checkpoint.allocatedQty,0);assert.equal(checkpoint.pending?.orderId,target.orderId);
+ const afterMovement=await snapshot(target);
+ assert.equal(afterMovement.documents[1].reserved,8);
+ const resumed=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(resumed.allocatedQty,6);
+ checkpoint=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
+ assert.equal(checkpoint.pending,null);assert.equal(checkpoint.processedSteps,1);
+ assert.deepEqual(await snapshot(target),afterMovement);
+ const final=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(final.status,'completed');
+ assert.equal(final.allocatedQty,6);
+ assert.equal(final.processedSteps,1);
+});
+test('automatic FIFO fails closed on excessive candidates, missing role and mismatched batch intent',async()=>{
+ const source=await readyLifecycle('auto-safety',{role:'admin'});
+ const target=await autoFreeTarget(source,'limited',4);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_safety_limits_123456');
+ await db.collection('users').doc('unprivileged-auto').set({active:true,role:'sales'});
+ await assert.rejects(advanceAutomaticFreeStockAllocation(db,'unprivileged-auto',input),/權限/);
+ const batch=db.batch();
+ for(let i=0;i<51;i++){
+  const id='fifo-overflow-'+String(i).padStart(3,'0');
+  batch.set(db.collection('inventoryReservations').doc(id+'__I1'),{
+   orderId:id,itemId:'I1',productKey:source.productKey,locationSchemaVersion:2,
+   locations:[],quantity:0,shortageQty:1,status:'shortage',orderDate:'2026-01-01'});
+ }
+ await batch.commit();
+ const before=await snapshot(target);
+ await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,input),/50 筆/);
+ assert.deepEqual(await snapshot(target),before);
+ const checkpoint=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
+ assert.equal(checkpoint.allocatedQty,0);assert.equal(checkpoint.pending,null);
+});
+test('concurrent batch continuation uses one durable pending operation and respects budget',async()=>{
+ const source=await readyLifecycle('auto-concurrent',{role:'admin'});
+ const target=await autoFreeTarget(source,'race',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_compete_123456789');
+ await Promise.all([advanceAutomaticFreeStockAllocation(db,source.uid,input),
+  advanceAutomaticFreeStockAllocation(db,source.uid,input)]);
+ let checkpoint=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
+ for(let i=0;i<3&&checkpoint.status!=='completed';i++){
+  await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+  checkpoint=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
+ }
+ assert.equal(checkpoint.status,'completed');
+ assert.equal(checkpoint.allocatedQty,6);
+ assert.equal((await target.read('inventoryReservations',target.orderId+'__I1')).quantity,8);
+ assert.equal((await target.read('inventory',target.productKey)).onHand,12);
+ const movements=await db.collection('inventoryMovements')
+  .where('sourceId','==',target.orderId).get();
+ assert.equal(movements.docs.filter(x=>x.data().action==='single_v2_free_stock_allocation').length,1);
 });
