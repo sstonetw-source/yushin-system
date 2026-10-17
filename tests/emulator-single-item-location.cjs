@@ -3,7 +3,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
-const {planSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
+const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
 let app,db;
 test.before(()=>{
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Never use live Firestore');
@@ -19,16 +19,16 @@ async function seed(id,{role='sales',owner='actor',a=4,b=8,company=12,inTransit=
  set('products',productKey,{productType:'Goods'});
  set('orders',orderId,{ownerUid:owner==='actor'?uid:owner,salesCode:'V2',status:'active',
   inventoryReservationStatus:'pending',inventoryReservationAttemptId:'v2_123456789',
-  items:[{itemId:'I1',productId:productKey,qty:10,warehouseId:'A',
+  items:[{itemId:'I1',productId:productKey,qty:10,warehouseId:'V2-A',
     deliveredQty:0,returnedQty:0,supplyOrderedQty:inTransit,receivedQty:0,reservedQty:0}]});
  set('inventory',productKey,{productKey,onHand:company,reserved:0,transferFreeInTransit:0});
- for(const [warehouseId,onHand] of [['A',a],['B',b]]){
+ for(const [warehouseId,onHand] of [['V2-A',a],['V2-B',b]]){
    set('warehouses',warehouseId,{active:true});
    set('warehouseStocks',warehouseId+'__'+productKey,{productKey,warehouseId,
      onHand,reserved:0,transferFreeInTransit:0});
  }
  await batch.commit();
- const request={orderId,itemId:'I1',warehouseIds:['A','B']};
+ const request={orderId,itemId:'I1',warehouseIds:['V2-A','V2-B']};
  return {orderId,productKey,uid,request,
    plan:()=>planSingleItemTwoWarehouse(db,uid,request),
    read:async(name,id)=>(await db.collection(name).doc(id).get()).data()};
@@ -37,11 +37,11 @@ test('read-only two-warehouse plan splits 10 into 4 and 6 with no stock writes',
  const x=await seed('split');
  const before=await x.read('inventory',x.productKey);
  const result=await x.plan();
- assert.deepEqual(result.locations,[{warehouseId:'A',reservedQty:4},{warehouseId:'B',reservedQty:6}]);
+ assert.deepEqual(result.locations,[{warehouseId:'V2-A',reservedQty:4},{warehouseId:'V2-B',reservedQty:6}]);
  assert.equal(result.reservedQty,10);assert.equal(result.companyReservedDelta,10);
  assert.equal(result.shortageQty,0);
  assert.deepEqual(await x.read('inventory',x.productKey),before);
- assert.equal((await x.read('warehouseStocks','A__'+x.productKey)).reserved,0);
+ assert.equal((await x.read('warehouseStocks','V2-A__'+x.productKey)).reserved,0);
  assert.equal((await db.collection('inventoryReservations').doc(x.orderId+'__I1').get()).exists,false);
 });
 test('company stock caps allocations; incoming stock never enters onHand',async()=>{
@@ -64,10 +64,10 @@ test('business owner, disabled role, and invalid warehouses are refused without 
  await db.collection('users').doc(off.uid).update({active:false});
  await assert.rejects(off.plan(),/停用/);
  const custody=await seed('custody',{role:'admin'});
- await db.collection('warehouses').doc('B').update({systemCustody:true});
+ await db.collection('warehouses').doc('V2-B').update({systemCustody:true});
  await assert.rejects(custody.plan(),/實體倉/);
  const invalid=await seed('bad-stock',{role:'admin',a:1});
- await db.collection('warehouseStocks').doc('A__'+invalid.productKey).update({reserved:2});
+ await db.collection('warehouseStocks').doc('V2-A__'+invalid.productKey).update({reserved:2});
  await assert.rejects(invalid.plan(),/庫存與途中帳不一致/);
 });
 test('cancelled and mismatched existing reservation refuse v2 preview',async()=>{
@@ -79,4 +79,138 @@ test('cancelled and mismatched existing reservation refuse v2 preview',async()=>
   orderId:wrong.orderId,itemId:'I1',productKey:'different',quantity:0
  });
  await assert.rejects(wrong.plan(),/產品不符/);
+});
+
+function commit(x,changes={},uid=x.uid){
+ return commitSingleItemTwoWarehouse(db,uid,{...x.request,attemptId:'commit_'+x.orderId,
+   syncAttemptId:'v2_123456789',...changes});
+}
+async function snapshot(x){
+ const documents=[['orders',x.orderId],['inventory',x.productKey],
+  ['warehouseStocks','V2-A__'+x.productKey],['warehouseStocks','V2-B__'+x.productKey],
+  ['inventoryReservations',x.orderId+'__I1']];
+ const result=[];
+ for(const [name,id] of documents)result.push(await x.read(name,id));
+ const movements=await db.collection('inventoryMovements').where('sourceId','==',x.orderId).get();
+ const receipts=await db.collection('reservationOperationReceipts').where('orderId','==',x.orderId).get();
+ return {documents:result,movements:movements.docs.map(d=>d.data()),receipts:receipts.docs.map(d=>d.data())};
+}
+test('atomic v2 split updates authority, projections and audit once for all five roles',async()=>{
+ for(const role of ['admin','purchaser','warehouse','sales','engineer']){
+  const x=await seed('commit-'+role,{role});
+  const result=await commit(x);
+  assert.equal(result.status,'applied');assert.equal(result.reservedQty,10);
+  assert.equal((await x.read('inventory',x.productKey)).reserved,10);
+  assert.equal((await x.read('inventory',x.productKey)).onHand,12);
+  for(const [wh,reserved] of [['V2-A',4],['V2-B',6]])
+   assert.equal((await x.read('warehouseStocks',wh+'__'+x.productKey)).reserved,reserved);
+  const ledger=await x.read('inventoryReservations',x.orderId+'__I1');
+  assert.equal(ledger.locationSchemaVersion,2);assert.equal(ledger.quantity,10);
+  assert.deepEqual(ledger.locations,result.locations);assert.equal(ledger.warehouseId,undefined);
+  assert.equal((await x.read('orders',x.orderId)).items[0].reservedQty,10);
+  const first=await snapshot(x);
+  assert.equal(first.movements.length,2);assert.equal(first.receipts.length,1);
+  assert.equal(first.receipts[0].actorUid,x.uid);assert.equal(first.receipts[0].actorRole,role);
+  assert.equal((await commit(x,{warehouseIds:['V2-B','V2-A']})).status,'already-applied');
+  assert.deepEqual(await snapshot(x),first);
+  // Different attempt also replans from the authoritative ledger; no double hold.
+  const second=await commit(x,{attemptId:'second_'+x.orderId});
+  assert.equal(second.companyReservedDelta,0);
+  assert.equal((await x.read('inventory',x.productKey)).reserved,10);
+  assert.equal((await snapshot(x)).movements.length,2);
+ }
+});
+test('concurrent same and different attempts never overreserve',async()=>{
+ for(const same of [true,false]){
+  const x=await seed('concurrent-'+same);
+  const results=await Promise.all([commit(x),commit(x,same?{}:{attemptId:'other_'+x.orderId})]);
+  assert.equal(results.filter(r=>r.status==='applied').length,same?1:2);
+  assert.equal((await x.read('inventory',x.productKey)).reserved,10);
+  assert.equal((await snapshot(x)).movements.length,2);
+ }
+});
+test('v2 commit caps company stock and records zero-stock shortage without fictional inventory',async()=>{
+ for(const company of [0,7]){
+  const x=await seed('commit-cap-'+company,{company});
+  const result=await commit(x);
+  assert.equal(result.reservedQty,company);assert.equal(result.shortageQty,10-company);
+  assert.equal((await x.read('inventory',x.productKey)).onHand,company);
+  assert.equal((await x.read('inventoryReservations',x.orderId+'__I1')).quantity,company);
+  assert.equal((await x.read('orders',x.orderId)).items[0].shortageQty,10-company);
+ }
+});
+test('replay preserves completed result but rejects changed intent, changed actor or disabled user',async()=>{
+ const x=await seed('commit-replay');await commit(x);
+ const baseline=await snapshot(x);
+ await assert.rejects(commit(x,{syncAttemptId:'different-sync'}),/其他交易/);
+ await db.collection('users').doc('other-commit-actor').set({role:'admin',active:true});
+ await assert.rejects(commit(x,{},'other-commit-actor'),/其他交易/);
+ await db.collection('orders').doc(x.orderId).update({status:'cancelled',inventoryReservationAttemptId:'new-sync'});
+ assert.equal((await commit(x)).status,'already-applied');
+ assert.deepEqual((await snapshot(x)).movements,baseline.movements);
+ await db.collection('users').doc(x.uid).update({active:false});
+ await assert.rejects(commit(x),/停用/);
+});
+test('stale sync, privilege bypass, service, logistics and bad balances fail with zero partial writes',async()=>{
+ const cases=[
+  ['stale',async x=>db.collection('orders').doc(x.orderId).update({inventoryReservationAttemptId:'new-sync'})],
+  ['complete-sync',async x=>db.collection('orders').doc(x.orderId).update({inventoryReservationStatus:'completed'})],
+  ['cancel',async x=>db.collection('orders').doc(x.orderId).update({status:'結案'})],
+  ['owner',async x=>db.collection('orders').doc(x.orderId).update({ownerUid:'stranger'})],
+  ['service',async x=>db.collection('products').doc(x.productKey).set({type:'SERVICE'})],
+  ['warehouse',async x=>db.collection('warehouses').doc('V2-B').update({active:false})],
+  ['balance',async x=>db.collection('warehouseStocks').doc('V2-A__'+x.productKey).update({reserved:5})],
+  ['prepared',async x=>{const o=await x.read('orders',x.orderId);o.items[0].dispatchPreparedQty=1;
+    return db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['received',async x=>{const o=await x.read('orders',x.orderId);o.items[0].receivedQty=1;
+    return db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['projection',async x=>{const o=await x.read('orders',x.orderId);o.items[0].reservedQty=2;
+    return db.collection('orders').doc(x.orderId).update({items:o.items});}],
+ ];
+ for(const [name,mutate] of cases){
+  const x=await seed('reject-'+name);await mutate(x);const baseline=await snapshot(x);
+  await assert.rejects(commit(x),undefined,name);assert.deepEqual(await snapshot(x),baseline,name);
+ }
+});
+test('v1 migration preserves existing holds and rejects inconsistent ownership or missing positions',async()=>{
+ const x=await seed('migrate');
+ const reservation=db.collection('inventoryReservations').doc(x.orderId+'__I1');
+ await reservation.set({orderId:x.orderId,itemId:'I1',productKey:x.productKey,warehouseId:'V2-A',quantity:2,
+  ownerUid:'stranger',salesCode:'V2'});
+ const order=await x.read('orders',x.orderId);order.items[0].reservedQty=2;
+ await db.collection('orders').doc(x.orderId).update({items:order.items});
+ await db.collection('inventory').doc(x.productKey).update({reserved:2});
+ await db.collection('warehouseStocks').doc('V2-A__'+x.productKey).update({reserved:2});
+ const baseline=await snapshot(x);await assert.rejects(commit(x),/所有權/);
+ assert.deepEqual(await snapshot(x),baseline);
+ await reservation.update({ownerUid:x.uid});
+ const result=await commit(x);assert.equal(result.companyReservedDelta,8);
+ assert.equal((await x.read('warehouseStocks','V2-A__'+x.productKey)).reserved,4);
+ assert.equal((await x.read('warehouseStocks','V2-B__'+x.productKey)).reserved,6);
+ const after=await snapshot(x);
+ await assert.rejects(commit(x,{warehouseIds:['V2-A','V2-C'],attemptId:'missing_position_attempt'}));
+ assert.deepEqual(await snapshot(x),after);
+});
+
+test('competing orders share company and warehouse ceilings under transaction retries',async()=>{
+ const x=await seed('competing');
+ const otherId=x.orderId+'-other',order=await x.read('orders',x.orderId);
+ await db.collection('orders').doc(otherId).set(order);
+ const y={...x,orderId:otherId,request:{...x.request,orderId:otherId}};
+ const results=await Promise.all([commit(x),commit(y)]);
+ assert.equal(results.reduce((sum,r)=>sum+r.reservedQty,0),12);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,12);
+ assert.equal((await x.read('warehouseStocks','V2-A__'+x.productKey)).reserved,4);
+ assert.equal((await x.read('warehouseStocks','V2-B__'+x.productKey)).reserved,8);
+});
+test('late movement create collision rolls back stock, ledger, order and receipt writes',async()=>{
+ const x=await seed('rollback');
+ const movementId='single-v2-commit_'+x.orderId+'-V2-B';
+ await db.collection('inventoryMovements').doc(movementId).set({sourceId:x.orderId,marker:'collision'});
+ const baseline=await snapshot(x);
+ await assert.rejects(commit(x));
+ assert.deepEqual(await snapshot(x),baseline);
+ await db.collection('inventoryMovements').doc(movementId).delete();
+ assert.equal((await commit(x)).status,'applied');
+ assert.equal((await x.read('inventory',x.productKey)).reserved,10);
 });

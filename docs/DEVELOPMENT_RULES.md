@@ -47,3 +47,5 @@
 - 後端分組預留僅 Preview 選擇性開啟，必須檢查實際後端 `ENABLE_GROUPED_RESERVATION=true` 並使用相同來源同步 `syncAttemptId`；正式環境、前端未開啟或不符合初始雙倉條件時不呼叫 Functions。勿在未知回覆後盲目用另一 attemptId 重做；維持原訂單來源同步及採購需求 checkpoint。正式切換前須先完成 Functions Callable 模擬真實 Auth/role、正常/拒絕/併發、收貨/打單/出貨、取消／退貨與服務品項完整 E2E。
 
 - 後端雙倉 Callable 的執行閘門必須同時核對 `ENABLE_GROUPED_RESERVATION=true` 和實際專案 ID 為 `preview-20135`；僅完整的 Auth + Firestore Emulator 下允許 `demo-yushin`。不可把示範開關或來源 JS 旗標當成正式部署授權。重大角色／身份改動須跑 `tests/emulator-grouped-reservation-callable.cjs` 的真實登入 SDK 測試。
+
+- 單品項雙倉 v2 提交目前僅供 demo-yushin Firestore Emulator，`commitSingleItemTwoWarehouse` 不可匯出 Callable 或接線前端。先完成所有履約寫入與位置讀取的相容契約及 Preview 驗收，才可另案修改執行閘門。變更須跑 `tests/emulator-single-item-location.cjs` 的五角色、併發、回滾與重送測試；不得以 Node 靜態檢查取代實際交易驗證。

@@ -22,7 +22,8 @@ test('service is read-only and keeps the authoritative shared v2 plan',()=>{
  const source=fs.readFileSync('functions/single-item-location-service.js','utf8');
  const entry=fs.readFileSync('functions/index.js','utf8');
  assert.match(source,/core\.planLocationReservation\(/);
- assert.doesNotMatch(source,/tx\.(set|update|create|delete)\(/);
+ assert.match(source,/if\(!operation\)return result/);
+ assert.doesNotMatch(entry,/commitSingleItemTwoWarehouse/);
  assert.doesNotMatch(entry,/planSingleItemTwoWarehouse/);
  const plan=core.planLocationReservation({
    productKey:'P',requestedQty:10,currentWarehouseId:'A',
@@ -34,4 +35,23 @@ test('service is read-only and keeps the authoritative shared v2 plan',()=>{
  assert.deepEqual(plan.reservation.locations,[{warehouseId:'A',reservedQty:4},{warehouseId:'B',reservedQty:6}]);
  assert.equal(plan.companyReservedDelta,10);
  assert.equal(plan.reservation.shortageQty,0);
+});
+
+test('single-item commit rejects injected fields and binds canonical intent to source attempt',()=>{
+ const {normalizeCommitIntent}=require('../functions/single-item-location-service');
+ const data={orderId:'O',itemId:'I1',warehouseIds:['A','B'],attemptId:'attempt_123456789',syncAttemptId:'sync_123456789'};
+ const first=normalizeCommitIntent(data);
+ assert.equal(first.hash,normalizeCommitIntent({...data,warehouseIds:['B','A']}).hash);
+ assert.notEqual(first.hash,normalizeCommitIntent({...data,syncAttemptId:'new_sync'}).hash);
+ for(const bad of [{...data,actorRole:'admin'},{...data,quantity:99},{...data,attemptId:'bad'},
+   {...data,syncAttemptId:''},{...data,warehouseIds:['A','A']}])assert.throws(()=>normalizeCommitIntent(bad));
+});
+test('internal v2 writer refuses non-emulator and non-demo projects before database access',async()=>{
+ const {commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
+ await assert.rejects(commitSingleItemTwoWarehouse({projectId:'production'},'actor',{}),/僅允許/);
+ const host=process.env.FIRESTORE_EMULATOR_HOST;
+ try{
+  delete process.env.FIRESTORE_EMULATOR_HOST;
+  await assert.rejects(commitSingleItemTwoWarehouse({projectId:'demo-yushin'},'actor',{}),/僅允許/);
+ }finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
 });

@@ -71,7 +71,7 @@
 - `src/` 是 **app.js 的唯一可編輯來源**；`node tools/build-app.cjs` 將原始碼依固定順序組成部署／舊測試使用的 `app.js`。修改來源後必須提交生成結果，CI 會檢查逐位元相同。
 - 目前維持 classic script 的全域識別碼行為，避免大規模轉 ES modules 造成 HTML inline handler、載入順序、Firebase 相依及測試破壞。分割來源**不代表全域依賴已消除**。
 - 既有可直接 `require()` 的純商業核心仍保留於 `modules/`；第一階段不複製、重寫第二套 core。後續經測試才調整實際模組路徑。
-- `functions/` 目前主要有供應商採購郵件相關的雲端函式，不是所有交易的中央服務層；不可聲稱所有庫存交易都在 Cloud Functions。
+- `functions/` 包含停用的供應商郵件相容入口、受 Preview 閘門保護的分組雙倉預留，以及僅 Emulator 可提交的單品項雙倉 Service；多數既有庫存交易仍由前端 Service 執行，不可聲稱已全部移到 Cloud Functions。
 
 ## 責任清單
 
@@ -353,3 +353,7 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 新增 Firebase Authentication + Functions Callable + Firestore Admin SDK 三套 Emulator 連動測試，明確使用 `demo-yushin` 專案與模擬帳號，驗證持有登入憑證的採購可成功、無憑證拒絕、業務越權拒絕、停用後拒絕、竄改角色拒絕、重送意圖不重複、舊同步 ID 拒絕及交易一致性；CI 環境額外啟用 `ENABLE_GROUPED_RESERVATION=true`，不部署至 Firebase。正式專案 `yu-shing-company` 即使配置同名環境旗標也不得啟用這個試點 Callable。只有 `preview-20135` 在額外設定旗標時才允許（仍須 Preview 實際部署、人工驗收）；這些 Emulator 通過不表示正式切換已完成。
 
 Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、`firestore:8080`、`functions:5001` 以免 CLI 因 Auth 未初始化而略過模擬登入；Functions 初始化採 `firebase-admin/app` 的 `getApps()/initializeApp()`，避免新版 Admin SDK 不再提供 `admin.apps` 所造成的模組載入失敗。以上僅為 Emulator 設定與程式初始化，不是正式 Firebase 部署。
+
+## 單品項雙倉內部提交（2026-10-17）
+
+`functions/single-item-location-service.js` 由唯讀規劃與 Emulator-only 原子提交共用交易讀取與 Reservation Core。提交更新同一預留 ledger、公司／分倉投影、訂單品項及操作憑證，不建立平行 Core。僅允許 demo-yushin Emulator；無 Callable／UI／Preview／正式入口。後續各履約 Service 尚未接入 v2，不能啟用多倉功能。詳見 `single-item-two-warehouse-readonly-20261017.md`。

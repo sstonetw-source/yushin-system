@@ -117,3 +117,7 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 ## 後端預留操作憑證（待 Preview 驗收）
 
 `reservationOperationReceipts/{grouped-attemptId}`：Cloud Functions Admin SDK 管理的交易冪等 checkpoint，保存來源訂單、actorUid／actorRole、意圖雜湊、產品、公司 reserved 差額、各倉及預留 ID。Rules 明確拒絕所有客戶端讀寫；不新增集合索引。此端點預設停用，正式資料不存在遷移及資料填補。新端點限同產品不同品項分兩倉，未實作單品項 v2 多位置 ledger。
+
+## Emulator-only 單品項雙倉 v2 提交（2026-10-17）
+
+沿用 `inventoryReservations/{orderId}__{itemId}`：locationSchemaVersion=2、locations 為各倉正整數 reservedQty、quantity 為總量，舊 warehouseId 從 v2 預留文件移除。訂單品項只保存 reservedQty／shortageQty 投影，warehouseId 保留為來源提示。公司與分倉 reserved、ledger、品項、movement 及 `reservationOperationReceipts/single-v2-{attemptId}` 一起提交；receipt 保存 UID、角色、來源同步 ID、意圖 hash 與原結果。無新集合或索引，不變更 onHand／批次／供應。僅 demo-yushin Emulator 可執行，未遷移任何正式資料或開放 v2 客戶端寫入。
