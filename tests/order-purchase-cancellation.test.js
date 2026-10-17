@@ -78,7 +78,7 @@ test('cancelled delivered order opens requested return form only for authorized 
 function returnFixture(cancelled=false){
  const docs=new Map([
   ['inventory/P1',{onHand:1,reserved:cancelled?0:1,incoming:0}],['warehouseStocks/W1-P1',{onHand:1,reserved:cancelled?0:1,incoming:0}],
-  ['inventoryReservations/O1__I1',{quantity:cancelled?0:1}],['inventoryLots/A',{remainingQty:0}],['inventoryLots/B',{remainingQty:1}]
+  ['inventoryReservations/O1__I1',{quantity:cancelled?0:1}],['inventoryLots/A',{productKey:'P1',warehouseId:'W1',remainingQty:0}],['inventoryLots/B',{productKey:'P1',warehouseId:'W1',remainingQty:1}]
  ]);
  let id=0;const db={collection:name=>({doc:key=>({path:name+'/'+(key||'movement-'+(++id))})})};
  const tx={get:async ref=>({exists:docs.has(ref.path),data:()=>({...docs.get(ref.path)})}),update:(ref,data)=>docs.set(ref.path,{...docs.get(ref.path),...data}),set:(ref,data)=>docs.set(ref.path,{...docs.get(ref.path),...data})};
@@ -156,4 +156,28 @@ test('fulfilled warehouse orders show completion while a partial delivery remain
  assert.equal(c.fulfillmentProgressInfo(order).state,'pending');
  order.items[0].fulfillmentType='DIRECT_SHIP';
  assert.equal(c.fulfillmentProgressInfo(order).state,'direct');
+});
+
+test('customer return combines repeated allocations of one original lot into a single full increase',async()=>{
+ const {c,tx,docs,order}=returnFixture();order.qty=3;
+ order.deliveryRecords=[{qty:3,lotAllocations:[{lotId:'B',qty:1},{lotId:'B',qty:2}]}];
+ const result=await c.applyInventoryReturnDeltaInTransaction(tx,order,3,'Receiver','O1',null);
+ assert.equal(docs.get('inventoryLots/B').remainingQty,4);assert.equal(docs.get('inventory/P1').onHand,4);
+ assert.equal(result.newReservedQty,4);
+});
+test('customer return correction refuses cumulative over-removal from one original lot without any writes',async()=>{
+ const {c,tx,docs,order}=returnFixture();
+ for(const key of ['inventory/P1','warehouseStocks/W1-P1'])Object.assign(docs.get(key),{onHand:3,reserved:3});
+ const previous={qty:2,lotAllocations:[{lotId:'B',qty:1},{lotId:'B',qty:1}]};
+ const before=structuredClone([...docs]);
+ await assert.rejects(c.applyInventoryReturnDeltaInTransaction(tx,order,-2,'Receiver','O1',previous),/庫存不足/);
+ assert.deepEqual([...docs],before);
+});
+test('both customer return directions reject original batches belonging to another product or warehouse',async()=>{
+ for(const delta of [1,-1])for(const change of [{productKey:'OTHER'},{warehouseId:'OTHER'},{remainingQty:NaN}]){
+  const {c,tx,docs,prior,order}=returnFixture();Object.assign(docs.get('inventoryLots/B'),change);
+  const before=structuredClone([...docs]);
+  await assert.rejects(c.applyInventoryReturnDeltaInTransaction(tx,order,delta,'Receiver','O1',delta<0?prior:null),/原出貨批次/);
+  assert.deepEqual([...docs],before);
+ }
 });

@@ -2604,3 +2604,55 @@ test('commercial roles cannot use the warehouse issue service to bypass dispatch
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,5);
  }
 });
+
+test('actual original-lot restoration keeps delivery reversal return and return correction aligned atomically',async()=>{
+ const f=await actualShipmentFixture('admin','admin');
+ f.context.DOCUMENT_TYPES={ORDER:'order'};
+ await f.ship(2,'restore-source');
+ await f.context.runRoleTransaction(async tx=>{
+  const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref),order=snap.data();
+  const item={...order,...order.items[0]};
+  const result=await f.context.applyInventoryDeliveryDeltaInTransaction(tx,item,-2,'admin',f.id,order.deliveryRecords);
+  tx.update(ref,{items:[{...order.items[0],reservedQty:result.newReservedQty}],deliveryRecords:[],deliveredQty:0,isDelivered:false});
+ });
+ assert.equal((await getDoc(doc(db('admin'),'inventoryLots/issue-admin'))).data().remainingQty,5);
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,5);
+ await f.ship(2,'return-source');
+ let previous;
+ await f.context.runRoleTransaction(async tx=>{
+  const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref),order=snap.data();
+  const result=await f.context.applyInventoryReturnDeltaInTransaction(tx,{...order,...order.items[0],customerReturnSettlement:'CLOSE'},1,'admin',f.id,null);
+  previous={id:'R',qty:1,lotAllocations:result.lotAllocations};
+  tx.update(ref,{returnRecords:[previous],returnedQty:1});
+ });
+ assert.equal((await getDoc(doc(db('admin'),'inventoryLots/issue-admin'))).data().remainingQty,4);
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+ await f.context.runRoleTransaction(async tx=>{
+  const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref),order=snap.data();
+  await f.context.applyInventoryReturnDeltaInTransaction(tx,{...order,...order.items[0],customerReturnSettlement:'CLOSE'},-1,'admin',f.id,previous);
+  tx.update(ref,{returnRecords:[],returnedQty:0});
+ });
+ for(const path of ['inventory/init-product','warehouseStocks/W1__init-product']){
+  const stock=(await getDoc(doc(db('admin'),path))).data();assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
+ }
+ assert.equal((await getDoc(doc(db('admin'),'inventoryLots/issue-admin'))).data().remainingQty,3);
+});
+test('actual protected reversal and return stop on a foreign batch before queuing stock changes for receiver roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualShipmentFixture(uid,role);f.context.DOCUMENT_TYPES={ORDER:'order'};
+  await f.ship(2,'foreign-source-'+uid);
+  const lotPath='inventoryLots/issue-'+uid,lot=(await getDoc(doc(db('admin'),lotPath))).data();
+  await seed(lotPath,{...lot,warehouseId:'OTHER'});
+  const paths=['orders/'+f.id,lotPath,'inventory/init-product','warehouseStocks/W1__init-product','inventoryReservations/'+f.id+'__I'];
+  const read=()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));
+  const before=await read();
+  for(const kind of ['reversal','return']){
+   await assert.rejects(f.context.runRoleTransaction(async tx=>{
+    const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref),order=snap.data(),item={...order,...order.items[0]};
+    if(kind==='reversal')await f.context.applyInventoryDeliveryDeltaInTransaction(tx,item,-1,uid,f.id,order.deliveryRecords);
+    else await f.context.applyInventoryReturnDeltaInTransaction(tx,item,1,uid,f.id,null);
+   }),/原出貨批次.*倉庫不一致/);
+   assert.deepEqual(await read(),before);
+  }
+ }
+});
