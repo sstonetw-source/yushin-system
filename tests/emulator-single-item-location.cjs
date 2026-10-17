@@ -1229,8 +1229,10 @@ test('release-event proof, roles, and restore movements refuse illicit redistrib
  const old=await proofRef.get(),proof=old.data();
  await proofRef.update({result:{...proof.result,warehouseDeltas:[]}});
  await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId}),/憑證/);
- assert.deepEqual(await snapshot(x),baseline);
+ // The deliberately tampered proof is part of snapshot(); restore the fixture
+ // first, then verify that the rejected attempt altered no stock or order.
  await proofRef.update({result:proof.result});
+ assert.deepEqual(await snapshot(x),baseline);
  await x.lifecycle('normal','release_security_restore_123456789');
  await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{
   movementId:'single-v2-life-release_security_restore_123456789-V2-B'}),/釋放|憑證/);
