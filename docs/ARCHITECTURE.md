@@ -379,3 +379,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ### v2 打單準備的內部交易（2026-10-17；僅 Emulator）
 
 `functions/location-dispatch-service.js` 新增 `commitLocationDispatchPreparation`，沿用 `Fulfillment.projectShipmentDelivery` 與 `warehouseShipmentState`，只處理單品項 v2 的待打單量、累計打單量及操作憑證；不另造打單核心、不扣庫存、批次或更新送達。真實使用者／角色、來源同步 ID、原單與 v2 預留帳在 Admin SDK Firestore Transaction 中重讀；`dispatchRecords/v2-{operationId}` 固定操作 ID 與訂單更新同交易。既有前端 `prepareOrderDispatch`／Rules 尚未切換，Emulator fixture 原本直接改品項打單量的操作已改成呼叫真正 Service；仍以手動 checkpoint 模擬初始同步完成，不可視為完整 Preview 驗收。僅 `demo-yushin` Emulator，無 Callable、UI、正式部署；涉及 REPLACE 退貨及完整待打單工作清單的適配尚未完成。
+
+### 單品項 v2 預留取消／恢復（2026-10-17，僅 Emulator）
+
+`functions/single-item-location-lifecycle-service.js` 使用既有 Reservation Core `planLocationReservation` 與 `reservationStockDeltas`，在同一 Firebase Admin SDK Transaction 核對 users／orders／products／inventoryReservations／inventory／兩個 warehouses 與 warehouseStocks／採購需求，完成單筆訂單品項的兩倉預留釋放及重新分配；額外保存原候選倉清單於既有 v2 ledger，避免取消後遺失來源位置。固定 `reservationOperationReceipts/single-v2-lifecycle-{operationId}`、逐倉 inventoryMovements、訂單狀態及公司／分倉帳同交易更新，失敗整筆回滾。嚴格限制**尚未採購、收貨、打單、出貨、送達或退貨**的單品項；有 procurementDemands 文件直接拒絕，避免錯誤跳過需求同步。admin 與本人 sales／engineer 可操作，warehouse／purchaser 不可。沒有新 Core、獨立庫存 ledger、索引或 Rules；沒有 Cloud Callable／前端入口、Preview／正式部署，現行 `setOrderLifecycleStatus` 仍不接 v2。
