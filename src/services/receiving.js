@@ -603,7 +603,12 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 expiryDate
             }
         }));
-        tx.set(movementRef,{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||''});
+        tx.set(movementRef,{type:'receipt',qty,productKey,warehouseId,lotNo,expiryDate,sourceType:'SUPPLY_ORDER',sourceId:supplyId,receiptId:operationKey,createdAt:now,createdBy:actor,ownerUid:supply.ownerUid||'',salesCode:supply.salesCode||'',
+            // Durable source proof is created WITH the physical receipt and
+            // its receipt/lot documents; never from an uncommitted UI callback.
+            ...(sourceReservationV2&&autoAllocationQty>0
+                ?{v2FreeStockSource:'V2_WAREHOUSE_RECEIPT',freeAllocationQty:autoAllocationQty}: {})
+        });
         updateDemandReceipt(qty);
         tx.update(supplyRef,{
             receivedQty:receiptPlan.record.receivedQty,
