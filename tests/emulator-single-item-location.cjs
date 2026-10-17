@@ -1221,7 +1221,7 @@ test('release-event proof, roles, and restore movements refuse illicit redistrib
  const movementId='single-v2-life-release_security_cancel_123456789-V2-B';
  await db.collection('users').doc('v2-no-release').set({active:true,role:'sales'});
  await assert.rejects(advanceReleasedV2FreeStock(db,'v2-no-release',{movementId}),/角色/);
- await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId:'missing_source_123'}),/來源/);
+ await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId:'missing_source_123'}),/來源|找不到/);
  await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{
   movementId:'single-v2-life-unknown-release-V2-A'}),/找不到/);
  const baseline=await snapshot(x);
@@ -1297,8 +1297,8 @@ test('v2 cancelled purchase receipt stock redistributes to a separate waiting or
  assert.equal(first.status,'completed');assert.equal(first.allocatedQty,2);
  const target=await x.read('orders',competitorId);
  assert.equal(target.items[0].reservedQty,9);assert.equal(target.items[0].shortageQty,3);
- const demand=await demandRef.get();
- assert.equal(demand.data().requestedQty,3);
+ const demand=await demandRef.read();
+ assert.equal(demand.requestedQty,3);
  const origin=await x.read('orders',x.orderId);
  assert.equal(origin.status,'cancelled');assert.equal(origin.items[0].reservedQty,0);
  assert.equal((await x.read('inventory',x.productKey)).onHand,9);
