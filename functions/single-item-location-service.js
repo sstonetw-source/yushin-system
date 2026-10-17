@@ -627,6 +627,7 @@ async function advanceReleasedV2FreeStock(db,uid,input){
      ||receipt.productKey!==event.productKey||receipt.warehouseId!==event.warehouseId
      ||receipt.qty!==event.qty||!Number.isSafeInteger(amount)||amount<=0||amount>event.qty
      ||!['normal','cancelled'].includes(receipt.sourceOrderStatus)
+     ||(receipt.sourceOrderStatus==='cancelled'&&amount!==receipt.qty)
      ||receipt.lotNo!==event.lotNo||receipt.expiryDate!==event.expiryDate
      ||typeof receipt.lotId!=='string'||!receipt.lotId)
     reject('v2 到貨釋放與原始 receipt 憑證不一致');
@@ -639,12 +640,20 @@ async function advanceReleasedV2FreeStock(db,uid,input){
      ||lot.lotNo!==event.lotNo||lot.expiryDate!==event.expiryDate
      ||lot.receivedQty!==event.qty)
     reject('v2 自由庫存到貨缺少相符的實貨批次');
+   // Re-read the actual supplier commitment even for normal source orders.
+   // A receipt cannot borrow a lot linked to another item or another PO.
+   const supplySnap=await tx.get(db.collection('supplyOrders').doc(event.sourceId));
+   const supply=supplySnap.exists?supplySnap.data():null;
+   if(!supply||supply.orderId!==receipt.orderId
+     ||supply.itemId!==receipt.itemId
+     ||supply.productKey!==event.productKey||supply.warehouseId!==event.warehouseId
+     ||supply.fulfillmentType!=='WAREHOUSE'
+     ||!Number.isSafeInteger(supply.receivedQty)||supply.receivedQty<event.qty
+     ||!Number.isSafeInteger(supply.qty)||supply.qty<supply.receivedQty)
+    reject('v2 到貨來源供應與實體收貨憑證不一致');
    if(receipt.sourceOrderStatus==='cancelled'){
-    const supplySnap=await tx.get(db.collection('supplyOrders').doc(event.sourceId));
-    const supply=supplySnap.exists?supplySnap.data():null;
-    if(!supply||supply.customerCancellationDisposition!=='KEEP_STOCK'
-      ||!supply.customerCancellationResolvedAt||!supply.customerCancellationResolvedBy
-      ||supply.orderId!==receipt.orderId)
+    if(supply.customerCancellationDisposition!=='KEEP_STOCK'
+      ||!supply.customerCancellationResolvedAt||!supply.customerCancellationResolvedBy)
      reject('取消訂單到貨沒有已確認的 KEEP_STOCK 來源');
    }
   }else reject('這筆 movement 不會釋放可分配的 v2 自由實貨');
