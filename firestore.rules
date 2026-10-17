@@ -797,7 +797,7 @@ service cloud.firestore {
         ? [qty - oldQty,
           (after.get('warehouseId', '') == warehouseId ? qty : 0)
             - (before.get('warehouseId', '') == warehouseId ? oldQty : 0)]
-        : [999999999, 999999999];
+        : [null, null];
     }
     function operationalStockDeltas(e, productKey, warehouseId) {
       // Read/project each reservation once for both company and local totals.

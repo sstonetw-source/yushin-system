@@ -2894,3 +2894,21 @@ test('zero-company exchanges use the actual noncanonical inventory document with
   assert.equal((await getDoc(doc(db('admin'),'inventory/'+f.productKey))).exists(),false);
  }
 });
+test('cross-warehouse proof rejects unrelated product ids instead of treating a sentinel as a valid large stock delta',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  await seedOperationalReserve();
+  await seed('inventory/p-order',{productKey:'p-order',onHand:1000000020,reserved:0,incoming:0});
+  await seed('warehouseStocks/W1__p-order',{productKey:'p-order',warehouseId:'W1',onHand:1000000020,reserved:0,incoming:0});
+  await seed('inventoryReservations/unrelated-product',{productKey:'OTHER',warehouseId:'W1',quantity:1});
+  const client=db(uid),b=writeBatch(client),e={inventoryId:'p-order',warehouseStockId:'W1__p-order',previousWarehouseStockId:'W1__p-order',
+   movementId:'RESERVE-EVIDENCE',reservationIds:['evidence__I0','unrelated-product'],crossWarehouse:true};
+  b.update(doc(client,'inventory/p-order'),{reserved:1000000000});
+  b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:1000000000});
+  b.set(doc(client,'inventoryReservations/evidence__I0'),{orderId:'evidence',itemId:'I0',orderItemIndex:0,productKey:'p-order',warehouseId:'W1',
+   ownerUid:'sales1',salesCode:'S01',quantity:1,shortageQty:4,stockEvidence:e});
+  b.set(doc(client,'inventoryMovements/RESERVE-EVIDENCE'),{productKey:'p-order',warehouseId:'W1',sourceId:'evidence',type:'reserve',qty:1,reservationStockEvidence:e});
+  await assertFails(b.commit());
+  assert.equal((await getDoc(doc(db('admin'),'inventory/p-order'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/evidence__I0'))).exists(),false);
+ }
+});
