@@ -1118,7 +1118,7 @@ for (const [uid, role] of [['admin','admin'], ['buyer1','purchaser'], ['wh1','wa
       update:(ref,data)=>tx.update(ref,plain(data))}));
     const context=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,permissionRulesReady:true,
       deliveryActor:()=>uid,localDateString:()=> '2026-10-12',YushinSupply:supplyCore,YushinReceiving:receivingCore,canConfirmSupplyReceipt:()=>true,
-      YushinProcurementDemand:demandCore,window:{YushinReceiving:receivingCore},
+      YushinProcurementDemand:demandCore,YushinReservation:require('../modules/reservation-core'),window:{YushinReceiving:receivingCore},
       supplyOrdersCollection:()=>client.collection(role==='warehouse'?'receivingSupplyOrders':'supplyOrders'),
       procurementDemandRef:id=>id?client.collection('procurementDemands').doc(encodeURIComponent(id)):null,
       procurementDemandDocument:(d,c,m)=>demandCore.demandDocument({...d,...c},m),
