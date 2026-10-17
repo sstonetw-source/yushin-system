@@ -13,7 +13,7 @@ const {getFirestore}=require('firebase-admin/firestore');
 const {commitGroupedWarehouseReservation}=require('./grouped-reservation-service');
 const {allowGroupedReservation}=require('./grouped-reservation-gate');
 exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async request=>{
-  if(!allowGroupedReservation()
+  if(!allowGroupedReservation())
     throw new HttpsError('failed-precondition','跨倉後端交易尚未完成 Preview 驗收');
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
   try{return await commitGroupedWarehouseReservation(getFirestore(),request.auth.uid,request.data);}
