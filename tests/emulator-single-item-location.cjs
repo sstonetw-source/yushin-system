@@ -4,7 +4,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
 const demandCore=require('../modules/procurement-demand-core');
-const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
+const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitSingleItemFreeStockAllocation}=require('../functions/single-item-location-service');
 const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
 let app,db;
 test.before(()=>{
@@ -919,4 +919,98 @@ test('v2 idempotent receipts re-check current order owner after reassignment',as
   const before=await snapshot(adminCase);
   assert.equal((await adminCase.lifecycle('cancelled')).status,'already-applied');
   assert.deepEqual(await snapshot(adminCase),before);
+});
+
+async function competingFreeStockOrder(source,suffix){
+ const orderId=source.orderId+'-free-'+suffix,old=await source.read('orders',source.orderId);
+ await db.collection('orders').doc(orderId).set({...old,status:'active',
+  orderStatus:'normal',inventoryReservationStatus:'pending',
+  items:[{...old.items[0],reservedQty:0,shortageQty:0}]});
+ await commitSingleItemTwoWarehouse(db,source.uid,{
+  orderId,itemId:'I1',warehouseIds:['V2-A','V2-B'],
+  attemptId:'free_reserve_'+suffix+'_123456789',
+  syncAttemptId:'v2_123456789'});
+ await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
+ return {...source,orderId,request:{...source.request,orderId}};
+}
+function redistributeFree(x,warehouseId,qty=10,operationId='free_location_'+x.orderId+'_'+warehouseId){
+ return commitSingleItemFreeStockAllocation(db,x.uid,{
+  orderId:x.orderId,itemId:'I1',warehouseId,quantity:qty,
+  operationId,syncAttemptId:'v2_123456789'});
+}
+test('released A/B stock reallocates to a separate waiting v2 order without inventing onHand',async()=>{
+ const source=await readyLifecycle('free-distribution',{role:'admin'});
+ const target=await competingFreeStockOrder(source,'target');
+ const before=await target.read('inventory',target.productKey);
+ assert.equal((await target.read('orders',target.orderId)).items[0].shortageQty,8);
+ const demand=await seedLifecycleDemand(target);
+ assert.equal((await demand.read()).requestedQty,8);
+ await source.lifecycle('cancelled');
+ const sourceAfter=await snapshot(source);
+ const first=await redistributeFree(target,'V2-B');
+ assert.equal(first.allocatedQty,6);
+ assert.equal(first.reservedQty,8);assert.equal(first.shortageQty,2);
+ assert.equal((await demand.read()).requestedQty,2);
+ const afterFirst=await snapshot(target);
+ assert.equal((await redistributeFree(target,'V2-B')).status,'already-applied');
+ assert.deepEqual(await snapshot(target),afterFirst);
+ const second=await redistributeFree(target,'V2-A');
+ assert.equal(second.allocatedQty,2);assert.equal(second.shortageQty,0);
+ const inv=await target.read('inventory',target.productKey);
+ assert.equal(inv.onHand,before.onHand);assert.equal(inv.reserved,10);
+ assert.equal((await target.read('warehouseStocks','V2-B__'+target.productKey)).reserved,8);
+ assert.equal((await target.read('warehouseStocks','V2-A__'+target.productKey)).reserved,2);
+ const ledger=await target.read('inventoryReservations',target.orderId+'__I1');
+ assert.deepEqual(ledger.locations,[{warehouseId:'V2-A',reservedQty:2},{warehouseId:'V2-B',reservedQty:8}]);
+ assert.equal((await demand.read()).requestedQty,0);
+ assert.equal((await demand.read()).remainingToOrderQty,0);
+ assert.deepEqual(await snapshot(source),sourceAfter);
+});
+test('free redistribution is gated by role, live demand, warehouse, supply and sync',async()=>{
+ const source=await readyLifecycle('free-rejections',{role:'admin'});
+ const target=await competingFreeStockOrder(source,'reject');
+ await seedLifecycleDemand(target);
+ await source.lifecycle('cancelled');
+ await db.collection('users').doc('v2-free-sales').set({role:'sales',active:true});
+ const before=await snapshot(target);
+ await assert.rejects(redistributeFree(target,'V2-A',10,'sales_denied_12345678'),/角色|權限/);
+ await assert.rejects(commitSingleItemFreeStockAllocation(db,'v2-free-sales',{
+  orderId:target.orderId,itemId:'I1',warehouseId:'V2-A',quantity:10,
+  operationId:'sales_denied_123456789',syncAttemptId:'v2_123456789'}),/角色|權限/);
+ assert.deepEqual(await snapshot(target),before);
+ await target.demandRef?.get();
+ const key='SALES_ORDER:'+target.orderId+':I1';
+ const demandRef=db.collection('procurementDemands').doc(encodeURIComponent(key));
+ await demandRef.update({orderedQty:1,status:'PARTIALLY_ORDERED'});
+ await assert.rejects(redistributeFree(target,'V2-A'),/採購需求/);
+ await demandRef.update({orderedQty:0,status:'PENDING'});
+ await db.collection('supplyOrders').doc('free-source-obligation-'+target.orderId).set({
+  orderId:target.orderId,demandId:key});
+ await assert.rejects(redistributeFree(target,'V2-A'),/供應商承諾/);
+ await db.collection('supplyOrders').doc('free-source-obligation-'+target.orderId).delete();
+ await db.collection('warehouses').doc('V2-A').update({active:false});
+ await assert.rejects(redistributeFree(target,'V2-A'),/實體倉/);
+ await db.collection('warehouses').doc('V2-A').update({active:true});
+ await db.collection('orders').doc(target.orderId).update({inventoryReservationAttemptId:'stale'});
+ await assert.rejects(redistributeFree(target,'V2-A'),/來源訂單/);
+ const noWrite=await snapshot(target);
+ assert.equal(noWrite.movements.length,before.movements.length);
+});
+test('free redistribution concurrent requests and movement collisions cannot double-reserve',async()=>{
+ const source=await readyLifecycle('free-competition',{role:'admin'});
+ const target=await competingFreeStockOrder(source,'races');
+ await source.lifecycle('cancelled');
+ const collision='free_collision_lock_12345';
+ await db.collection('inventoryMovements').doc('single-v2-free-'+collision).set({marker:true});
+ const before=await snapshot(target);
+ await assert.rejects(redistributeFree(target,'V2-B',6,collision),/操作 ID/);
+ assert.deepEqual(await snapshot(target),before);
+ const [a,b]=await Promise.all([
+  redistributeFree(target,'V2-B',6,'concurrent_free_B_first_123'),
+  redistributeFree(target,'V2-B',6,'concurrent_free_B_second_123')
+ ]);
+ assert.equal(a.allocatedQty+b.allocatedQty,6);
+ assert.equal((await target.read('inventoryReservations',target.orderId+'__I1')).quantity,8);
+ assert.equal((await target.read('warehouseStocks','V2-B__'+target.productKey)).reserved,8);
+ assert.equal((await target.read('inventory',target.productKey)).onHand,12);
 });
